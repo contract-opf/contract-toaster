@@ -1,0 +1,106 @@
+# Bedrock Knowledge Base + S3 Vectors structural gate (issue #60)
+#
+# Runs on every PR or push that touches the data/pipeline/network CDK stacks,
+# the model policy, or ARCHITECTURE.md so the retrieval-store acceptance
+# criteria stay green.
+#
+# Assertions (see tests/test_infra_bedrock_kb.py for full docs):
+#   A – Bedrock Knowledge Base + S3 Vectors store defined in data-stack.ts
+#       (vector bucket, vector index, knowledge base, dedicated KB service
+#       role distinct from pipelineReviewRole).
+#   B – Ingestion wiring: a Bedrock DataSource (S3) targets the corpus bucket;
+#       draft/staging snapshots are not review-queryable.
+#   C – Corrected metadata model: compact IDs/filter fields only, no clause
+#       text/rationale/summaries; documents the ~1KB / 35-key limit.
+#   D – Positive/negative separation: document_type + corpus_polarity keep
+#       rejected drafts out of the positive top-K context.
+#   E – Curation fields: reusable_precedent, negotiation_context,
+#       superseded_by, approved_use_scope.
+#   F – Corpus versioning / activation / ingestion interlock still documented
+#       in ARCHITECTURE.md (issue #20 regression guard).
+#   G – Reconciled least-privilege invariant (issue #59 × #60): the dedicated
+#       corpusKnowledgeBaseRole holds bedrock:InvokeModel scoped ONLY to the
+#       embedding-model ARN; pipelineReviewRole remains the sole holder of
+#       bedrock:InvokeModel on the primary/critic model ARNs and of the
+#       Knowledge Base query actions. tests/test_pipeline_stack.py Check G is
+#       restated to match (no permanent CI contradiction between the two
+#       issues' gates).
+#   H – Private access only: never public; VPC interface endpoint for Bedrock
+#       wired in network-stack.ts.
+#   I – cdk synth exits 0 with the KB + S3 Vectors resources present; the
+#       empty-corpus / empty-result-set query path is documented.
+#   J – Idle cost sanity: no OpenSearch Serverless / OCU-minimum resource
+#       anywhere in infra/ (S3 Vectors has no idle floor).
+
+name: bedrock-kb-gate
+
+on:
+  pull_request:
+    paths:
+      - 'infra/lib/nested/data-stack.ts'
+      - 'infra/lib/nested/pipeline-stack.ts'
+      - 'infra/lib/nested/network-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'infra/package.json'
+      - 'infra/tsconfig.json'
+      - 'model-policy/**'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_infra_bedrock_kb.py'
+      - 'tests/test_pipeline_stack.py'
+      - '.github/workflows/bedrock-kb-gate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/lib/nested/data-stack.ts'
+      - 'infra/lib/nested/pipeline-stack.ts'
+      - 'infra/lib/nested/network-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'model-policy/**'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_infra_bedrock_kb.py'
+      - 'tests/test_pipeline_stack.py'
+
+jobs:
+  bedrock-kb-gate:
+    name: Bedrock Knowledge Base + S3 Vectors structural gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        run: npm install
+        working-directory: infra
+
+      - name: Run Bedrock KB + S3 Vectors structural gate
+        run: python3 tests/test_infra_bedrock_kb.py
+        # Verifies all issue #60 acceptance criteria (KB + S3 Vectors store,
+        # ingestion wiring, corrected metadata model, positive/negative
+        # separation, curation fields, corpus versioning docs, reconciled
+        # least-privilege invariant, private-only access, cdk synth, idle
+        # cost sanity). See tests/test_infra_bedrock_kb.py for full spec.
+        # See: https://github.com/contract-opf/contract-toaster/issues/60
+
+      - name: Run async review pipeline structural gate (regression guard)
+        run: python3 tests/test_pipeline_stack.py
+        # Re-runs issue #59's gate in the same job: Check G was reworded here
+        # to the ARN-scoped invariant reconciled with issue #60, so both
+        # gates must stay green together, not just independently.
+        # See: https://github.com/contract-opf/contract-toaster/issues/59

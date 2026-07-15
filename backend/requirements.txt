@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-jose[cryptography]==3.3.0
+httpx==0.28.1
+pydantic==2.10.6
+boto3==1.43.44
+python-multipart==0.0.32
+# jsonschema: runtime dependency of src.reviews's active-bundle resolver
+# (issue #266, scripts/playbook_validation.py) -- validates the active
+# playbook against playbooks/schema.json before it can resolve as active.
+# Also already a transitive runtime dependency of the real pipeline chain
+# (src.pipeline_runner -> scripts/review_spine.py ->
+# scripts/primary_review_pass.py), pinned identically to
+# requirements-dev.txt.
+jsonschema==4.26.0

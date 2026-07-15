@@ -1,0 +1,58 @@
+# CODEOWNERS for contract-toaster
+#
+# Lines are evaluated bottom-up. The last matching pattern takes precedence.
+# Owners listed here are required reviewers on pull requests touching the
+# matching paths.
+#
+# Replace @exos-legal/gc and @exos-legal/engineering with actual GitHub
+# handles or team slugs once the org is configured.
+#
+# NOTE — branch protection enforcement (issue #10 AC #3, deferred to Phase 0 #1):
+#   The "Require review from Code Owners" branch protection setting is tracked
+#   in Phase 0 issue #1 (repo bootstrap).  Enabling it requires GitHub Pro for
+#   private repos and real team handles (not the placeholder slugs above).
+#   CODEOWNERS path coverage is complete (this file); the branch-protection
+#   enforcement layer is deferred to issue #1 pending org/billing readiness.
+
+# Default — engineering reviews anything not otherwise specified
+*                                       @exos-legal/engineering
+
+# Legal-owned content. Any change to the playbook, schema, prompt overlay,
+# model policy, standard form, corpus-governance contract, evaluation gate,
+# or architecture issue register requires GC approval. Engineering co-reviews
+# for technical correctness.
+/playbooks/                             @exos-legal/gc @exos-legal/engineering
+/prompts/                               @exos-legal/gc @exos-legal/engineering
+/model-policy/                          @exos-legal/gc @exos-legal/engineering
+/standard-forms/                        @exos-legal/gc @exos-legal/engineering
+/docs/evaluation.md                     @exos-legal/gc @exos-legal/engineering
+/docs/data-handling.md                  @exos-legal/gc @exos-legal/engineering
+/docs/threat-model.md                   @exos-legal/gc @exos-legal/engineering
+/docs/design-notes.md                   @exos-legal/gc @exos-legal/engineering
+/docs/architecture-issue-spotting-*.md  @exos-legal/gc @exos-legal/engineering
+/docs/playbook-governance.md            @exos-legal/gc @exos-legal/engineering
+/docs/output-contract.md                @exos-legal/gc @exos-legal/engineering
+/docs/audit-queries.md                  @exos-legal/gc @exos-legal/engineering
+/tests/gold-fixtures/                   @exos-legal/gc @exos-legal/engineering
+
+# Gold fixtures — legal review required for any fixture with provenance=production
+# (de-identification sign-off must be present; see docs/evaluation.md § De-identification standard)
+/tests/gold-fixtures/                   @exos-legal/gc @exos-legal/engineering
+
+# Evaluation harness — GC sign-off required before any eval fixture or gate
+# change can merge (architecture-review reconciliation #10, issue #49).
+# eval/ is a future directory; the rule is pre-registered so no content can
+# land there without GC approval.
+/eval/**                                @exos-legal/gc @exos-legal/engineering
+
+# Architecture and runbook changes — both
+/ARCHITECTURE.md                        @exos-legal/gc @exos-legal/engineering
+/RUNBOOK.md                             @exos-legal/gc @exos-legal/engineering
+
+# Licence and confidentiality posture — GC only
+/LICENSE                                @exos-legal/gc
+
+# Infrastructure that affects data residency, encryption, or access
+# control — both should sign off
+/infra/lib/data-stack.ts                @exos-legal/gc @exos-legal/engineering
+/infra/lib/auth-stack.ts                @exos-legal/gc @exos-legal/engineering

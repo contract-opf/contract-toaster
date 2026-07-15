@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-excess-insurance-levels",
+  "description": "D2 planted case: counterparty inserts required minimum coverage levels exceeding Exos's standard program. Must fire no-excess-insurance-levels and result in REQUEST_CHANGE. Verifies the narrowed rule still catches genuine violations.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "insurance",
+      "section_ref": "[absent] Insurance",
+      "is_hard_rejection": true,
+      "rule_id": "no-excess-insurance-levels"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "insurance",
+    "inserted_hunk": "Exos shall maintain commercial general liability insurance with minimum coverage of Five Million Dollars ($5,000,000) per occurrence, and all coverage levels must be evidenced by certificates of insurance naming Institution as a certificate holder.",
+    "notes": "Specific minimum coverage and coverage levels requirements exceeding Exos's standard program. Must fire no-excess-insurance-levels on 'minimum coverage' and 'coverage levels'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-excess-insurance-levels",
+    "expected_result": "fire",
+    "rationale": "Inserted minimum-coverage and coverage-levels requirements fire the narrowed no-excess-insurance-levels rule. The removed 'additional insured' trigger does not affect this case."
+  }
+}

@@ -1,0 +1,66 @@
+# Prompt-manifest invariants CI gate (issue #29)
+#
+# Asserts that the per-pass prompt manifest in ARCHITECTURE.md and
+# docs/design-notes.md satisfies six invariants introduced by issue #29:
+#
+#   1 – A "Per-pass prompt manifest" heading/label exists in the LLM section
+#       of ARCHITECTURE.md
+#   2 – The primary manifest names: standard-form diff, anchored clause text,
+#       retrieved precedent clauses, and a size threshold that gates full-doc
+#       inclusion (full-doc is NOT unconditional)
+#   3 – The critic manifest names: standard-form diff, anchored clause text,
+#       primary reviewer output; and the critic does NOT receive the raw doc
+#       unconditionally
+#   4 – The assembled prompt size is asserted against max_input_tokens per pass
+#   5 – docs/design-notes.md contains a rationale section explaining why the
+#       critic omits the raw counterparty document, with an efficacy argument
+#   6 – Manifest changes are stated as release-bundle gated (same as prompt
+#       changes)
+#
+# Runs on every PR or push to main that touches the relevant files so that
+# a prompt-change PR cannot silently regress the manifest definition.
+# No model invocation, no AWS credentials required.
+
+name: Prompt-manifest lint
+
+on:
+  pull_request:
+    paths:
+      - 'ARCHITECTURE.md'
+      - 'docs/design-notes.md'
+      - 'tests/test_prompt_manifest.py'
+      - '.github/workflows/prompt-manifest-lint.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'ARCHITECTURE.md'
+      - 'docs/design-notes.md'
+      - 'tests/test_prompt_manifest.py'
+      - '.github/workflows/prompt-manifest-lint.yml'
+
+jobs:
+  prompt-manifest-lint:
+    name: Prompt-manifest invariants (per-pass blocks / critic input / size cap)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run prompt-manifest invariant checks
+        run: python3 tests/test_prompt_manifest.py
+        # Fails if any of the six prompt-manifest invariants are violated:
+        #   - Per-pass manifest heading absent from ARCHITECTURE.md LLM section
+        #   - Primary manifest missing required blocks or full-doc not threshold-gated
+        #   - Critic manifest missing diff / anchored clauses / primary output, or
+        #     still describes critic receiving the raw doc unconditionally
+        #   - Assembled-size assertion against max_input_tokens not documented
+        #   - design-notes.md missing critic-input rationale with efficacy argument
+        #   - Manifest changes not stated as release-bundle gated
+        # See tests/test_prompt_manifest.py for full documentation.

@@ -1,0 +1,30 @@
+{
+  "case_id": "accept-governing-law-home-state-litigation-venue",
+  "description": "Counterparty proposes its home-state law and litigation venue (courts, not arbitration). This is a listed acceptable_variation in the governing-law-and-venue topic (negotiable per playbook rationale) and must ACCEPT without triggering 'no-counterparty-home-arbitration', which only targets mandatory/binding *arbitration* clauses, not ordinary court venue selection.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "governing-law-and-venue",
+      "rule_id": "no-counterparty-home-arbitration",
+      "reason": "Court-venue selection language is a listed acceptable_variation and contains neither 'mandatory arbitration' nor 'binding arbitration'; must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "governing-law-and-venue",
+    "inserted_hunk": "This Agreement shall be governed by the laws of the Institution's home state, and venue for any dispute shall lie in the state or federal courts located in that state.",
+    "notes": "Matches acceptable_variation 'institution's home state law and venue'; ordinary court-venue language, not arbitration."
+  },
+  "detector_expectation": {
+    "rule_id": "no-counterparty-home-arbitration",
+    "expected_result": "no_fire",
+    "rationale": "Hunk contains neither trigger_term 'mandatory arbitration' nor 'binding arbitration'."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

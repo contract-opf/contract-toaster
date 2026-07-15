@@ -1,0 +1,9 @@
+{
+  "description": "Draft matches the standard form verbatim except the counterparty has rewritten sec-8 (Limitation on Liability) to delete the $150,000 mutual aggregate liability cap and the consequential-damages waiver, replacing it with an uncapped liability clause. This exercises an on_remove_or_alter detector (preserve-liability-cap, preserve-consequential-damages-waiver) and must produce a deleted/modified hunk anchored to sec-8 carrying a source_text_hash for the redline-patching path (issue #17).",
+  "draft": [
+    {
+      "heading": "Limitation on Liability",
+      "text": "EACH PARTY'S LIABILITY UNDER THIS AGREEMENT SHALL BE UNCAPPED AND UNLIMITED, AND NEITHER PARTY WAIVES ANY CLAIM FOR CONSEQUENTIAL, SPECIAL, PUNITIVE, INCIDENTAL, OR INDIRECT DAMAGES."
+    }
+  ]
+}

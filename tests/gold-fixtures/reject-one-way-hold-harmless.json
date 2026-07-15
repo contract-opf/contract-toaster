@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-one-way-hold-harmless",
+  "description": "D2 planted case: counterparty inserts a one-way hold-harmless obligation requiring Exos to hold Institution harmless. Must fire no-exos-indemnity and result in REQUEST_CHANGE. Verifies the narrowed no-exos-indemnity rule still catches genuine violations.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "indemnification",
+      "section_ref": "[absent] Indemnification",
+      "is_hard_rejection": true,
+      "rule_id": "no-exos-indemnity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "indemnification",
+    "inserted_hunk": "Exos shall defend, indemnify, and hold harmless Institution, its officers, directors, employees, and agents from and against any and all claims, damages, losses, costs, and expenses (including reasonable attorneys' fees) arising out of or related to Exos's performance under this Agreement.",
+    "notes": "One-way Exos hold-harmless obligation. Must fire no-exos-indemnity on 'hold harmless'. Is NOT exempted because 'hold harmless the other party' and 'mutual hold harmless' do not appear."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exos-indemnity",
+    "expected_result": "fire",
+    "rationale": "One-way hold-harmless obligation on Exos must fire the narrowed no-exos-indemnity rule. The exempt terms 'mutual hold harmless' and 'hold harmless the other party' are absent, so the trigger fires."
+  }
+}

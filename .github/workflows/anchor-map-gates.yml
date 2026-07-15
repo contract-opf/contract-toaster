@@ -1,0 +1,99 @@
+# Anchor-map CI gates (deterministic; no model invocation, no AWS credentials).
+#
+# Issue #3: content-addressed anchors and form-coverage check.
+# Issue #75: the anchor-map builder's own fixture contract.
+#
+# Three mandatory gates:
+#
+#   A1  heading-hash drift gate     (test_heading_hash_drift.py)
+#       Fails if standard-forms/ is missing, no anchor map artifact exists,
+#       or the drift-detection mechanism is broken (regression fixture).
+#
+#   A2  form-coverage gate          (test_form_coverage.py)
+#       Fails if any anchor in the bundled anchor map has no corresponding
+#       playbook topic and no reviewed coverage_exempt_anchors entry,
+#       or if any coverage_exempt_anchors entry is stale (anchor no longer
+#       in the form).
+#
+#   A3  anchor-map builder fixture tests (test_anchor_map_builder.py)
+#       Fails if the synthetic SECTION_CONFIG fixture output is wrong (missing
+#       sec-10 sub-clause splits or bad parent_section), if heading_hash is not
+#       stable across builds, or if the builder's written artifact is not
+#       byte-identical across two runs on identical input (issue #75
+#       acceptance criterion). Docx-mode resolution is exercised only when
+#       python-docx is installed (optional dependency; skip is not a failure).
+#
+# These gates run on every change to standard-forms/ or playbooks/, ensuring
+# that a standard-form revision without a playbook update is caught in CI before
+# merge, and that coverage cannot silently degrade.
+#
+# See:
+#   ARCHITECTURE.md § "Section-anchor map (deterministic detector scoping)"
+#   docs/playbook-governance.md § "Coverage" and § "Anchor resolution"
+#   RUNBOOK.md § "Revising the standard form"
+
+name: Anchor-map gates
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "standard-forms/**"
+      - "playbooks/**"
+      - "scripts/build_anchor_map.py"
+      - "tests/anchor/**"
+      - ".github/workflows/anchor-map-gates.yml"
+  pull_request:
+    paths:
+      - "standard-forms/**"
+      - "playbooks/**"
+      - "scripts/build_anchor_map.py"
+      - "tests/anchor/**"
+      - ".github/workflows/anchor-map-gates.yml"
+
+jobs:
+  anchor-map-gates:
+    name: Anchor-map gates (drift + coverage + builder fixtures)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed — the tests use only the stdlib.
+
+      - name: A1 / heading-hash drift gate
+        # Fails if:
+        #   - standard-forms/ does not exist or has no anchor map artifact
+        #   - the drift-detection mechanism is broken (renumbered-form fixture)
+        #   - the playbook has no 'anchor_migrations' schema support
+        # See: RUNBOOK.md § "Revising the standard form" for how to author
+        # migration records when the standard form heading text changes.
+        run: python3 tests/anchor/test_heading_hash_drift.py
+
+      - name: A2 / form-coverage gate
+        # Fails if:
+        #   - standard-forms/ does not exist or has no anchor map artifact
+        #   - any anchor in the anchor map has no playbook topic and no
+        #     reviewed entry in coverage_exempt_anchors
+        #   - any coverage_exempt_anchors entry is stale (anchor not in map)
+        # See: docs/playbook-governance.md § "Coverage" for the authoring rule.
+        run: python3 tests/anchor/test_form_coverage.py
+
+      - name: A3 / anchor-map builder fixture tests
+        # Fails if:
+        #   - the synthetic SECTION_CONFIG fixture output is wrong (missing
+        #     sec-10 sub-clause splits, wrong parent_section)
+        #   - heading_hash is not stable across two builds of the same config
+        #   - the builder's written artifact is not byte-identical across two
+        #     runs on identical input (issue #75: "same input -> byte-identical
+        #     map"). Docx-mode resolution is SKIPPED (not failed) here since
+        #     python-docx is an optional dependency, consistent with every
+        #     other stdlib-only gate in this repo.
+        run: python3 tests/anchor/test_anchor_map_builder.py

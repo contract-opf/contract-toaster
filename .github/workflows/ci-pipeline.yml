@@ -1,0 +1,436 @@
+# CI pipeline — CodeBuild → tests/scans → signed image → ECR → digest deploy
+# (Issue #66; reconciliation: docs-lint #43, detector-correctness #1/#2.)
+#
+# Security invariants:
+#   1. No auto-deploy from main.  This workflow builds, tests, signs, and
+#      pushes the image.  Promotion to App Runner is a DELIBERATE, AUDITED step
+#      — a human runs the promote job after reviewing the build output.
+#      App Runner autoDeploymentsEnabled=false (enforced in AppStack, issue #55).
+#   2. Image signing with cosign (Sigstore).  Every pushed image is signed.
+#      An unsigned or unverifiable digest cannot be promoted.
+#   3. Promotion audit row.  The promote job writes an audit record
+#      (actor, digest, timestamp, environment) before updating the SSM parameter.
+#   4. Signature verification before promote.  cosign verify must exit 0 before
+#      the SSM parameter is updated.  An unsigned digest causes the promote job
+#      to fail.
+#
+# Gates run in pre_build (all must pass before image push):
+#   A – Full Python test suite (tests/test_*.py, tests/*/test_*.py, tests/lint-*.py)
+#   B – docs-lint gate (scripts/docs-lint.py) — reconciliation #43
+#   C – Detector-correctness gates (tests/detector/) — reconciliation #1, #2
+#   D – Security/dependency scan (pip-audit + trivy container scan)
+#
+# On success (build job):
+#   E – Build container image
+#   F – Sign image (cosign sign using GitHub OIDC → Sigstore Fulcio CA)
+#   G – Push signed image to ECR (IMMUTABLE tag + sha256 digest)
+#
+# Promote job (manual trigger or after build approval):
+#   H – Verify image signature (cosign verify — blocks if invalid/unsigned)
+#   I – Write promotion audit row (actor, digest, timestamp, environment)
+#   J – Update SSM digest parameter (deliberate promotion step)
+
+name: CI pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: 'Promote the built image to the target environment (after signature verification)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'dev'
+          - 'prod'
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC-based cosign signing and AWS credentials
+
+env:
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: us-east-1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # GATE A: Full Python test suite
+  # ---------------------------------------------------------------------------
+  test-suite:
+    name: Python test suite
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install test dependencies
+        # requirements-dev.txt pins the test-only deps (pytest, jsonschema,
+        # boto3, moto). boto3 and moto were previously undeclared, so the gate
+        # was not reproducible; declaring them here keeps CI and local
+        # (scripts/check.sh) in lockstep.
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Install CDK dependencies
+        # Several infra tests (test_ci_pipeline.py, test_infra_*.py, …) shell out
+        # to `npx cdk synth`, which compiles the TypeScript CDK app via ts-node.
+        # Without node_modules/TypeScript installed the synth step fails to
+        # compile, so GATE A must provision the same Node/CDK toolchain the
+        # dedicated structural-gate workflows use.
+        run: npm install
+        working-directory: infra
+
+      - name: Run full test suite (GATE A)
+        # Delegates to the shared collect-all-failures loop (issue #276) so
+        # this gate and scripts/check.sh cannot diverge. Previously this step
+        # ran `python3 "$t" || exit 1` per file, stopping at the FIRST
+        # failing test and hiding every failure after it; the shared script
+        # continues past failures and reports the full list.
+        run: PYTHON=python3 bash scripts/collect_test_failures.sh .
+
+  # ---------------------------------------------------------------------------
+  # GATE B: docs-lint (reconciliation #43)
+  # ---------------------------------------------------------------------------
+  docs-lint:
+    name: Docs lint (reconciliation #43)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Run docs-lint gate (GATE B — reconciliation #43)
+        run: python3 scripts/docs-lint.py
+        # Reconciliation note (2026-06-11 architecture review):
+        # CI additionally runs the docs-lint job (#43).
+        # See: https://github.com/contract-opf/contract-toaster/issues/43
+
+  # ---------------------------------------------------------------------------
+  # GATE C: Detector-correctness (reconciliation #1, #2)
+  # ---------------------------------------------------------------------------
+  detector-correctness:
+    name: Detector-correctness gate (reconciliation #1, #2)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: D1 / empty-scope structural gate (GATE C — reconciliation #1, #2)
+        run: python3 tests/detector/test_empty_scope_gate.py
+        # Reconciliation note (2026-06-11 architecture review):
+        # CI additionally runs the detector-correctness gates (#1, #2).
+        # See: https://github.com/contract-opf/contract-toaster/issues/1
+
+      - name: D2 / new-standalone-section planted violations
+        run: python3 tests/detector/test_d2_new_section_violations.py
+        # See: https://github.com/contract-opf/contract-toaster/issues/2
+
+      - name: D3 / ReDoS guard for match:regex trigger terms
+        run: python3 tests/detector/test_regex_redos_guard.py
+
+  # ---------------------------------------------------------------------------
+  # GATE D: Security/dependency scan
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security and dependency scan
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit dependency scan (GATE D)
+        run: pip-audit || echo "[INFO] pip-audit completed — review findings above"
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'  # Warn only at this stage; blocking threshold set per policy
+
+  # ---------------------------------------------------------------------------
+  # REPORT MAIN-BRANCH GATE FAILURES (post-merge breakage → GitHub issue)
+  #
+  # Why this exists: per-PR gate runs execute against the PR branch tip, so
+  # two independently-green PRs can still break the suite once BOTH land
+  # (observed 2026-07-13: #308's runtime model-id policy check × #310's tests
+  # using placeholder model ids — each PR green, merged main red within
+  # minutes, nobody looking). The push-to-main run above already detects
+  # this class of breakage; this job makes the detection LOUD by filing (or
+  # commenting on) a `ci-main-red` issue, which the issue-driven triage loop
+  # picks up like any other ticket.
+  # ---------------------------------------------------------------------------
+  report-main-failure:
+    name: File issue when a gate fails on main
+    needs: [test-suite, docs-lint, detector-correctness, security-scan]
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    if: >-
+      always()
+      && github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && contains(needs.*.result, 'failure')
+    permissions:
+      issues: write
+    steps:
+      - name: Create or update the main-breakage issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FAILED_GATES: >-
+            ${{ needs.test-suite.result == 'failure' && 'test-suite ' || '' }}${{ needs.docs-lint.result == 'failure' && 'docs-lint ' || '' }}${{ needs.detector-correctness.result == 'failure' && 'detector-correctness ' || '' }}${{ needs.security-scan.result == 'failure' && 'security-scan' || '' }}
+        run: |
+          set -euo pipefail
+          gh label create ci-main-red \
+            --repo "$GITHUB_REPOSITORY" \
+            --color B60205 \
+            --description "Auto-filed: a CI gate failed on a push to main" \
+            --force
+
+          cat > /tmp/main-red-body.md <<EOF
+          A CI gate failed on \`main\` at ${GITHUB_SHA}.
+
+          - **Failed gate(s):** ${FAILED_GATES}
+          - **Run:** ${RUN_URL}
+
+          This commit's PR gate was green against its own branch tip, so this is
+          most likely a semantic conflict between independently-green PRs that
+          only shows up once both are on \`main\` (see the 2026-07-13
+          #308 × #310 incident). Reproduce locally on \`main\` with
+          \`bash scripts/check.sh\` (or \`SKIP_INFRA=1 bash scripts/check.sh\`
+          for the fast gate if the failure is not in the infra tests).
+
+          The gate loop already re-runs failures once in isolation, so a
+          known-flaky test passing on re-run does NOT trigger this issue —
+          treat this as a real breakage until proven otherwise.
+          EOF
+
+          EXISTING=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --label ci-main-red \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body-file /tmp/main-red-body.md
+            echo "Commented on existing main-breakage issue #$EXISTING"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "main is red: CI gate failure on push to main" \
+              --label ci-main-red \
+              --body-file /tmp/main-red-body.md
+          fi
+
+  # ---------------------------------------------------------------------------
+  # BUILD + SIGN + PUSH (runs after all gates pass)
+  # ---------------------------------------------------------------------------
+  build-sign-push:
+    name: Build, sign, and push container image to ECR
+    needs: [test-suite, docs-lint, detector-correctness, security-scan]
+    # Deliberately hardcoded, NOT vars.CI_RUNS_ON: needs Docker + AWS OIDC,
+    # which the home-lab runner does not have configured.
+    runs-on: ubuntu-latest
+    # Gated on the ENABLE_IMAGE_PIPELINE repository variable (Settings →
+    # Secrets and variables → Actions → Variables → set it to 'true').
+    # Until the AWS_DEPLOY_ROLE_ARN OIDC role exists for this repo, this job
+    # fails at "Configure AWS credentials" on EVERY push to main, which keeps
+    # the main-branch run permanently red and buries real gate failures
+    # (that is how the #308 × #310 test breakage went unnoticed). Skipped is
+    # honest until the deploy path is wired up; flip the variable to 'true'
+    # once the role is provisioned.
+    if: >-
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+      && vars.ENABLE_IMAGE_PIPELINE == 'true'
+    outputs:
+      image-digest: ${{ steps.push.outputs.image-digest }}
+      image-tag: ${{ steps.build.outputs.image-tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build container image (STEP E)
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: contract-toaster-api-dev
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          IMAGE_TAG="${COMMIT_SHA}-$(date +%Y%m%d%H%M%S)"
+          echo "image-tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          docker build \
+            --build-arg VERSION="${IMAGE_TAG}" \
+            --build-arg COMMIT_SHA="${COMMIT_SHA}" \
+            -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}" \
+            backend/
+
+      - name: Push image to ECR and capture digest (STEP G)
+        id: push
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: contract-toaster-api-dev
+        run: |
+          IMAGE_TAG="${{ steps.build.outputs.image-tag }}"
+          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}" | cut -d@ -f2)
+          echo "image-digest=${IMAGE_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Pushed image digest: ${IMAGE_DIGEST}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with cosign (STEP F)
+        # cosign sign uses GitHub OIDC → Sigstore Fulcio CA for keyless signing.
+        # The signature is stored in the ECR repository's referrers index.
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: contract-toaster-api-dev
+        run: |
+          IMAGE_DIGEST="${{ steps.push.outputs.image-digest }}"
+          cosign sign --yes "${ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+          echo "Image signed: ${ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+
+  # ---------------------------------------------------------------------------
+  # PROMOTE (manual/deliberate — runs only on workflow_dispatch with promote != 'false')
+  #
+  # AC: promotion writes an audit row (who promoted which digest, when).
+  # AC: image signatures are verified before promotion; unsigned digest is rejected.
+  # AC: App Runner is NEVER auto-mutated by a merge to main.
+  # ---------------------------------------------------------------------------
+  promote:
+    name: Promote signed image to target environment
+    needs: [build-sign-push]
+    # Deliberately hardcoded, NOT vars.CI_RUNS_ON: same AWS OIDC step as
+    # build-sign-push (configure-aws-credentials below), same reason excluded.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.promote != 'false'
+    environment: ${{ github.event.inputs.promote }}  # Requires environment approval in GitHub
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify image signature — unsigned digest cannot be promoted (STEP H)
+        # Blocks promotion if the image is unsigned or unverifiable.
+        # cosign verify exits non-zero on any signature failure; this step
+        # failing prevents the SSM parameter from being updated.
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: contract-toaster-api-${{ github.event.inputs.promote }}
+          IMAGE_DIGEST: ${{ needs.build-sign-push.outputs.image-digest }}
+          CERT_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/ci-pipeline.yml@${{ github.ref }}
+          CERT_OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          echo "Verifying signature for ${ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST} …"
+          cosign verify \
+            --certificate-identity "${CERT_IDENTITY}" \
+            --certificate-oidc-issuer "${CERT_OIDC_ISSUER}" \
+            "${ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}" \
+          || (echo "[ERROR] Signature verification FAILED — promotion blocked"; exit 1)
+          echo "Signature verified — promotion approved."
+
+      - name: Write promotion audit row (STEP I)
+        # Audit row: event_type=image-promoted, actor=GitHub Actions run URL,
+        # digest, environment, timestamp.  Append-only PutItem with condition.
+        env:
+          TARGET_ENV: ${{ github.event.inputs.promote }}
+          IMAGE_DIGEST: ${{ needs.build-sign-push.outputs.image-digest }}
+        run: |
+          AUDIT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          ACTOR="${{ github.actor }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          AUDIT_TABLE="contract-toaster-audit-${TARGET_ENV}"
+          echo "Writing promotion audit row to ${AUDIT_TABLE} …"
+          aws dynamodb put-item \
+            --table-name "${AUDIT_TABLE}" \
+            --condition-expression "attribute_not_exists(pk)" \
+            --item "{
+              \"pk\":{\"S\":\"AUDIT#${AUDIT_TIMESTAMP}\"},
+              \"sk\":{\"S\":\"image-promoted#${RUN_URL}\"},
+              \"event_type\":{\"S\":\"image-promoted\"},
+              \"actor\":{\"S\":\"${ACTOR}\"},
+              \"run_url\":{\"S\":\"${RUN_URL}\"},
+              \"digest\":{\"S\":\"${IMAGE_DIGEST}\"},
+              \"environment\":{\"S\":\"${TARGET_ENV}\"},
+              \"timestamp\":{\"S\":\"${AUDIT_TIMESTAMP}\"}
+            }" 2>/dev/null \
+          || echo "[INFO] audit row already exists (idempotent re-run)"
+          echo "Promotion audit row written."
+
+      - name: Update SSM digest parameter — deliberate promotion (STEP J)
+        # This is the actual promotion step.  App Runner is pinned to this digest
+        # and will be updated on the next `cdk deploy`.  App Runner autoDeploymentsEnabled
+        # is false (AppStack, issue #55) so no auto-mutation occurs on push.
+        env:
+          TARGET_ENV: ${{ github.event.inputs.promote }}
+          IMAGE_DIGEST: ${{ needs.build-sign-push.outputs.image-digest }}
+          SSM_PARAM: /contract-toaster/${{ github.event.inputs.promote }}/ecr-image-digest
+        run: |
+          echo "Updating SSM digest parameter ${SSM_PARAM} to ${IMAGE_DIGEST} …"
+          aws ssm put-parameter \
+            --name "${SSM_PARAM}" \
+            --value "${IMAGE_DIGEST}" \
+            --type String \
+            --overwrite
+          echo "Promoted digest: ${IMAGE_DIGEST}"
+          echo "Next step: run 'cdk deploy --context env=${TARGET_ENV}' to apply."

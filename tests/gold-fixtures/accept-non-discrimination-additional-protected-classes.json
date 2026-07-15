@@ -1,0 +1,19 @@
+{
+  "case_id": "accept-non-discrimination-additional-protected-classes",
+  "description": "Counterparty references its own institutional non-discrimination policy without imposing obligations beyond applicable law. This is a listed acceptable_variation in the non-discrimination topic; no hard_rejection rule applies to this topic today, so there is no detector to hook, but this exercises the ACCEPT / acceptable_variation gold-case category per issue #183.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "non-discrimination",
+    "inserted_hunk": "Each party shall comply with its own institutional non-discrimination policy to the extent it does not impose obligations on the other party beyond those required by applicable law.",
+    "notes": "Matches acceptable_variation 'Counterparty references its own non-discrimination policy' -> 'compliance with institutional policy where it doesn't impose obligations beyond legal requirements'."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

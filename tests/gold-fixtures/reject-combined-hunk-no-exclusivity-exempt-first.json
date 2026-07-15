@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-combined-hunk-no-exclusivity-exempt-first",
+  "description": "Issue #212 adversarial planted case (verbatim from the issue repro): a single inserted hunk co-locates the exempt phrase 'non-exclusive' (order: FIRST) with a separate, non-exempt 'exclusive' violation in 'Institution shall be the exclusive provider' (order: SECOND). Under the old hunk-wide _is_exempted logic, 'non-exclusive' anywhere in the hunk suppressed ALL 'exclusive' trigger fires, including the unrelated exclusivity grab -- a detector bypass. Must still fire no-exclusivity via SPAN-level exemption: only the 'exclusive' occurrence inside the word 'non-exclusive' is suppressed; the separate 'exclusive provider' occurrence is not.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "exclusivity",
+      "section_ref": "Counterparty introduces exclusivity in either direction.",
+      "is_hard_rejection": true,
+      "rule_id": "no-exclusivity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "exclusivity",
+    "inserted_hunk": "This Agreement is non-exclusive as to placements in Arizona. Institution shall be the exclusive provider of interns to Exos nationwide.",
+    "notes": "Issue #212 repro (order: exempt phrase first, violation second), verbatim from the issue's reproduction. 'non-exclusive' matches exempt_terms and correctly suppresses the 'exclusive' trigger_term occurrence contained within that word. The separate 'exclusive provider' trigger match is a different span entirely and must still fire."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exclusivity",
+    "expected_result": "fire",
+    "rationale": "Span-level exemption: 'non-exclusive' exempts only the 'exclusive' match spatially inside it. 'the exclusive provider of interns to Exos nationwide' is a separate, non-exempt span and must fire no-exclusivity via the 'exclusive' trigger_term."
+  }
+}

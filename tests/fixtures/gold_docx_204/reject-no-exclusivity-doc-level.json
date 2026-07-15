@@ -1,0 +1,29 @@
+{
+  "authorship_note": "AFK-drafted per issue #204 (owner-approved mocked-model scope, 2026-07-10): fully synthetic, standard-form-derived draft docx, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves.",
+  "case_id": "reject-no-exclusivity-doc-level",
+  "case_type": "document_level",
+  "description": "Document-level gold case (issue #204): a SYNTHETIC counterparty draft .docx built from the canonical standard form (synthetic mode) with one planted hard-rejection insertion ('sole provider', rule no-exclusivity) in the 'Miscellaneous: Non-Exclusive' section, run through the actual extract -> normalize -> diff -> detector chain (scripts/extraction_normalization_stage.py -> scripts/diff_standard_form.py -> scripts/detector_common.py) -- NOT a per-fixture text snippet like the pre-#204 gold set.",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "is_hard_rejection": true,
+      "playbook_topic_id": "exclusivity",
+      "rule_id": "no-exclusivity",
+      "section_ref": "10 Miscellaneous ('non-exclusive')"
+    }
+  ],
+  "fp_tolerance": 0,
+  "gc_signoff": "pending",
+  "input_docx": "tests/fixtures/gold_docx_204/reject-no-exclusivity-doc-level.docx",
+  "input_docx_sha256": "sha256:8e3fcb94649164b1f26cb507bd51c1cee5fd00dad667e5a8b7172ca8db20ccad",
+  "must_not_flag": [],
+  "playbook_version": "1.0.0",
+  "provenance": "synthetic",
+  "redline_checks": [
+    {
+      "anchor": "sec-10-non-exclusive",
+      "source_text_hash": "sha256:bfe91b6d4022b52332e45bdf4c790852bdfc581b86a533631a18acf149d5c206"
+    }
+  ],
+  "synthetic": true
+}

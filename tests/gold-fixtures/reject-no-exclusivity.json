@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-no-exclusivity",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'no-exclusivity': counterparty inserts language containing the trigger term 'sole provider' into the 'exclusivity' topic. Must fire no-exclusivity and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "exclusivity",
+      "section_ref": "10 Miscellaneous ('non-exclusive')",
+      "is_hard_rejection": true,
+      "rule_id": "no-exclusivity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "exclusivity",
+    "inserted_hunk": "The parties agree to add the following clause language to this section of the Agreement: 'sole provider'.",
+    "notes": "Mechanically generated: contains trigger_term 'sole provider' (match=word_boundary) for rule 'no-exclusivity'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exclusivity",
+    "expected_result": "fire",
+    "rationale": "Inserted hunk contains trigger_term 'sole provider', which is not in ['non-exclusive']; must fire 'no-exclusivity'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

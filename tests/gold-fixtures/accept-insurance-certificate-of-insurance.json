@@ -1,0 +1,30 @@
+{
+  "case_id": "accept-insurance-certificate-of-insurance",
+  "description": "Counterparty requests a standard Certificate of Insurance evidencing commercial general liability and workers' compensation coverage currently in force. This is a listed acceptable_variation in the insurance topic and must ACCEPT without triggering 'no-excess-insurance-levels', which targets language that raises required coverage minimums, not a routine COI request.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "insurance",
+      "rule_id": "no-excess-insurance-levels",
+      "reason": "A routine Certificate of Insurance request is a listed acceptable_variation and contains none of 'minimum coverage'/'coverage levels'/'insurance limits'; must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "insurance",
+    "inserted_hunk": "Upon written request, the Company shall furnish a Certificate of Insurance evidencing its commercial general liability and workers' compensation coverage then currently in force.",
+    "notes": "Matches acceptable_variation 'Certificate of Insurance evidencing standard coverage'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-excess-insurance-levels",
+    "expected_result": "no_fire",
+    "rationale": "Hunk contains none of trigger_terms ['minimum coverage', 'coverage levels', 'insurance limits']."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

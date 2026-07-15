@@ -1,0 +1,9 @@
+{
+  "description": "Draft matches the standard form verbatim, plus a wholly new standalone 'Indemnification' article that does not correspond to any existing standard-form section (the standard form has no indemnification section at all -- indemnification is a not_in_standard: true topic per playbooks/eiaa-v1.0.0.json). This exercises the sec-_new reserved pseudo-anchor (issue #1 / ARCHITECTURE.md 'Reserved pseudo-anchor sec-_new') so the no-exos-indemnity on_insert rule has a non-empty scope to fire against.",
+  "draft": [
+    {
+      "heading": "Indemnification",
+      "text": "ARTICLE 14. INDEMNIFICATION. Exos shall indemnify, defend, and hold harmless the Institution and its officers, employees, and agents from and against any and all claims, damages, losses, and expenses arising out of or resulting from the acts or omissions of Exos or the students placed by Exos at the Institution's facilities."
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "description": "STILL-FAIL-CLOSED (issue #199): a pending (unresolved) tracked-change revision occurs INSIDE a field code -- e.g. a cross-reference field whose displayed result is itself under a live counterparty edit. Which literal field result is operative is ambiguous independent of the accept-all rule for ordinary pending revisions. Must fail closed to reason=unnormalizable_input.",
+  "paragraphs": [
+    {
+      "heading": "Governing Law",
+      "text": "This Agreement shall be governed by the laws of Delaware.",
+      "revisions": [
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "counterparty",
+          "inside_field_code": true,
+          "original_text": "Delaware",
+          "resulting_text": "New York"
+        }
+      ]
+    }
+  ]
+}

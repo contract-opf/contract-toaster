@@ -1,0 +1,27 @@
+{
+  "case_id": "accept-vicarious-liability-additional-insured",
+  "description": "Counterparty asks Exos to name the institution as additional insured on Exos's CGL, limited to vicarious liability for Exos operations. This is an explicit acceptable_variation in the insurance topic and must ACCEPT without triggering no-excess-insurance-levels.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "insurance",
+      "rule_id": "no-excess-insurance-levels",
+      "reason": "Additional insured status mutually granted and limited to vicarious liability for Exos operations is listed as an acceptable_variation; the no-excess-insurance-levels rule must not fire on this insertion."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "insurance",
+    "variation_index": 1,
+    "inserted_hunk": "Upon written request, Exos shall name the Institution as an additional insured on Exos's commercial general liability policy solely with respect to vicarious liability arising from Exos operations at the Facility, subject to mutual grant of the same status by the Institution.",
+    "notes": "Additional insured status granted mutually, limited to vicarious liability. Matches acceptable_variation 'additional insured status if mutually granted and limited to vicarious liability for Exos operations'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-excess-insurance-levels",
+    "expected_result": "no_fire",
+    "rationale": "The no-excess-insurance-levels rule fires on required insurance levels exceeding Exos's standard. A mutually-granted additional-insured limited to vicarious liability is an accepted variation; the rule must not fire on it after the fix."
+  }
+}

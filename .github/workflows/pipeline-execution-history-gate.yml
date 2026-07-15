@@ -1,0 +1,81 @@
+# Review pipeline execution-history substance-scan gate (issue #166,
+# deferred #59 acceptance criterion).
+#
+# Runs on every PR or push to main that touches the pipeline Lambda handlers
+# or the state machine definition, so the "no document text/prompt text/
+# model output in Step Functions execution history" invariant stays enforced
+# by a REAL runtime check, not only the static source-regex in
+# tests/test_pipeline_stack.py check_b_stage_skeleton_mock_task.
+#
+# See tests/test_pipeline_execution_history_scan.py for the full mechanism:
+# it actually executes the pipeline's stage chain (real
+# infra/lambda/mock_review/handler.py, same pass-through stub behavior as
+# the other stages), builds a GetExecutionHistory-shaped list of
+# TaskStateEntered/TaskStateExited events carrying the real JSON that flowed
+# between stages, and scans every recorded input/output value for anything
+# that is not a pointer, hash, enum, or short fixed string.
+#
+# See: https://github.com/contract-opf/contract-toaster/issues/166
+# See: https://github.com/contract-opf/contract-toaster/issues/59
+
+name: pipeline-execution-history-gate
+
+on:
+  pull_request:
+    paths:
+      - 'infra/lambda/**'
+      - 'infra/lib/nested/pipeline-stack.ts'
+      - 'tests/test_pipeline_execution_history_scan.py'
+      - '.github/workflows/pipeline-execution-history-gate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/lambda/**'
+      - 'infra/lib/nested/pipeline-stack.ts'
+      - 'tests/test_pipeline_execution_history_scan.py'
+
+jobs:
+  pipeline-execution-history-gate:
+    name: Review pipeline execution-history substance scan (real runtime check)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # test_pipeline_stack.py (Check K) shells out to `npm install` + `npx cdk
+      # synth`, so Node/npm must be present. GitHub-hosted runners preinstall
+      # npm; the self-hosted runner does not, so set it up explicitly (matches
+      # bedrock-kb-gate.yml and the other cdk-synth gates).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        run: npm install
+        working-directory: infra
+
+      - name: Run execution-history substance scan (runtime check)
+        run: python3 tests/test_pipeline_execution_history_scan.py
+        # Executes the real mock_review Lambda handler plus the other
+        # stages' pass-through stub behavior end-to-end, and asserts no
+        # recorded state input/output JSON contains document text, prompt
+        # text, retrieved-precedent text, or model output -- only pointers,
+        # hashes, enums, and short fixed strings. See
+        # tests/test_pipeline_execution_history_scan.py for full spec.
+        # See: https://github.com/contract-opf/contract-toaster/issues/166
+
+      - name: Run async review pipeline structural gate (regression guard)
+        run: python3 tests/test_pipeline_stack.py
+        # The existing static regex check (issue #59) is not weakened or
+        # removed by this gate -- it runs alongside the real runtime scan
+        # above so both stay green together.
+        # See: https://github.com/contract-opf/contract-toaster/issues/59

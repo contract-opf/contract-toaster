@@ -1,0 +1,91 @@
+# CI pipeline structural gate (issue #66)
+#
+# Runs on every PR or push that touches the CICD stack, the CI workflow,
+# the test, or ARCHITECTURE.md so the CI pipeline acceptance criteria stay green.
+#
+# Reconciliation (2026-06-11 architecture review):
+#   CI additionally runs the docs-lint job (#43) and the detector-correctness
+#   gates (#1, #2).
+#
+# Assertions (see tests/test_ci_pipeline.py for full docs):
+#   A – infra/lib/nested/cicd-stack.ts exists and defines:
+#         ECR repository with IMMUTABLE tags, image scanning on push.
+#         CodeBuild project that runs tests, docs-lint, and detector-correctness.
+#         Image signing (cosign / ECR signer) so unsigned digest cannot be promoted.
+#         Digest-promotion mechanism (SSM parameter).
+#         Promotion audit row (who promoted which digest, when).
+#   B – .github/workflows/ci-pipeline.yml exists and runs:
+#         Full Python test suite (GATE A).
+#         docs-lint gate (GATE B — reconciliation #43).
+#         detector-correctness gates (GATE C — reconciliation #1, #2).
+#         Security/dependency scan (GATE D).
+#         Build, sign, and push container image to ECR.
+#         Promotion audit row write before SSM update.
+#         Signature verification before promotion (unsigned digest rejected).
+#   C – ARCHITECTURE.md documents docs-lint and detector-correctness as CI
+#       gates, promotion audit row, and signature verification requirement.
+#   D – ContractToasterStack wires CicdStack as a nested stack.
+#   E – cdk synth exits 0 with the CICD stack included.
+
+name: ci-pipeline-gate
+
+on:
+  pull_request:
+    paths:
+      - 'infra/lib/nested/cicd-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'infra/package.json'
+      - 'infra/tsconfig.json'
+      - '.github/workflows/ci-pipeline.yml'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_ci_pipeline.py'
+      - '.github/workflows/ci-pipeline-gate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/lib/nested/cicd-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - '.github/workflows/ci-pipeline.yml'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_ci_pipeline.py'
+      - '.github/workflows/ci-pipeline-gate.yml'
+
+jobs:
+  ci-pipeline-gate:
+    name: CI pipeline structural gate (CodeBuild + ECR + signed image + digest deploy)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install CDK dependencies
+        run: npm install
+        working-directory: infra
+
+      - name: Run CI pipeline structural gate
+        run: python3 tests/test_ci_pipeline.py
+        # Verifies all issue #66 acceptance criteria (including reconciliation):
+        #   A – cicd-stack.ts: ECR IMMUTABLE, CodeBuild, signing, verify, promote, audit
+        #   B – ci-pipeline.yml: tests, docs-lint (#43), detector-correctness (#1,#2),
+        #       security scan, build/sign/push, audit row, signature verify before promote
+        #   C – ARCHITECTURE.md: docs-lint + detector-correctness as CI gates,
+        #       promotion audit, unsigned-cannot-be-promoted constraint
+        #   D – ContractToasterStack wires CicdStack
+        #   E – cdk synth exits 0
+        # See: https://github.com/contract-opf/contract-toaster/issues/66

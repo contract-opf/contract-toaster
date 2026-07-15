@@ -1,0 +1,130 @@
+name: Playbook lint
+
+on:
+  push:
+    paths:
+      - "playbooks/**"
+      - "tests/lint-*.py"
+      - "tests/test_schema_hardening.py"
+      - "tests/test_canonicalize.py"
+      - "tests/test_eval_harness_62.py"
+      - "tests/gold-fixtures/**"
+      - "scripts/canonicalize.py"
+      - "scripts/eval_harness.py"
+      - "scripts/eval_budget.py"
+      - "scripts/generate_gold_fixtures.py"
+      - "tests/test_schema_versioning_policy.py"
+      - "docs/playbook-governance.md"
+      - "docs/evaluation.md"
+      - ".github/workflows/playbook-lint.yml"
+  pull_request:
+    paths:
+      - "playbooks/**"
+      - "tests/lint-*.py"
+      - "tests/test_schema_hardening.py"
+      - "tests/test_canonicalize.py"
+      - "tests/test_eval_harness_62.py"
+      - "tests/gold-fixtures/**"
+      - "scripts/canonicalize.py"
+      - "scripts/eval_harness.py"
+      - "scripts/eval_budget.py"
+      - "scripts/generate_gold_fixtures.py"
+      - "tests/test_schema_versioning_policy.py"
+      - "docs/playbook-governance.md"
+      - "docs/evaluation.md"
+      - ".github/workflows/playbook-lint.yml"
+
+jobs:
+  acceptable-variations-lint:
+    name: Acceptable-variations produce zero detector fires
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          pip install jsonschema
+        # check_f_validator_rejects_hostile_fixtures in test_schema_hardening.py is
+        # FAIL-CLOSED: it exits 1 (not skip) when jsonschema is absent.  This step
+        # must precede the schema hardening gate so the validator-based AC1 guard
+        # is live in CI.
+
+      - name: Schema hardening — hostile fixture rejection and structural invariants
+        run: |
+          python3 tests/test_schema_hardening.py
+        # Enforces six structural invariants from issue #6 (check_f requires jsonschema):
+        #   (a) hard_rejections.items has additionalProperties:false — camelCase typo
+        #       like `exemptTerms` is a validation error, not a silent no-op.
+        #   (b) on_remove_or_alter rules cannot carry on_insert-only fields
+        #       (exempt_terms, match, match_surface).
+        #   (c) present-section topics must have section_anchors minItems:1.
+        #   (d) not_in_standard:true topics must have section_anchors == ['sec-_new'].
+        #   (e) applies_to_topics referential integrity: every id must exist in topics[].
+        # See: docs/playbook-governance.md § "Structural validation (CI)"
+
+      - name: Lint — acceptable variations must not fire hard-rejection rules
+        run: |
+          python3 tests/lint-acceptable-variations.py
+        # Every acceptable_variations[].if/to text in the playbook is rendered
+        # through the full on_insert detector pass. Zero fires required.
+        # Failure means a playbook acceptable variation contradicts a hard-rejection
+        # rule — see docs/playbook-governance.md § "Acceptable-variations lint".
+
+      - name: Lint — gold fixture detector expectations
+        run: |
+          python3 tests/lint-gold-fixtures.py
+        # For each gold fixture with a detector_expectation field, simulate the
+        # detector (on_insert via inserted_hunk, on_remove_or_alter via
+        # altered_hunk / required_tokens — issue #62) and assert the expected
+        # result (fire or no_fire). This enforces:
+        #   - ACCEPT gold cases with no_fire expectations stay green
+        #   - D2 planted-violation cases with fire expectations stay green
+        # Failure means either an acceptable-variation gold case fires a rule it
+        # should not, or a D2 planted violation no longer fires its expected rule.
+
+      - name: Evaluation harness — model-free runner/scorer + gold-set rule coverage
+        run: |
+          python3 scripts/eval_harness.py
+          python3 tests/test_eval_harness_62.py
+        # Issue #62 (BLOCKING GATE): the model-free harness skeleton scores every
+        # gold-set fixture against its detector_expectation and reports per-rule
+        # coverage; test_eval_harness_62.py additionally pins the runner/scorer
+        # API surface, on_remove_or_alter simulation correctness, synthetic-only
+        # fixture provenance, and CI eval budget fail-loud behavior (scripts/
+        # eval_budget.py) at the documented $200/run and $1,000/month ceilings.
+        # Failure means a hard_rejection rule lost gold-case coverage, a gold
+        # fixture regressed, or the CI eval budget plumbing no longer fails
+        # loudly when a run would exceed the documented ceiling.
+
+      - name: Canonicalization — golden-hash fixture and stability tests
+        run: |
+          python3 tests/test_canonicalize.py
+        # Issue #5: fixes self-referential content_hash and dual status authority.
+        # Four checks:
+        #   1. canonicalize() is stable under release-block population/mutation.
+        #   2. canonicalize() is stable under status flips (draft/active/retired).
+        #   3. content_hash() is reproducible across independent serializations
+        #      (key order, whitespace).
+        #   4. Golden-hash fixture: eiaa-v1.0.0.json must hash to the value
+        #      recorded in tests/gold-fixtures/canonicalize-golden-hash.json.
+        #      If the hash drifts, this gate fails and implementers must run
+        #      `python3 scripts/canonicalize.py --record` to update the fixture.
+        # See: docs/playbook-governance.md § "Canonicalization and content_hash"
+
+      - name: Schema versioning policy — fail-closed and non-retired playbook checks
+        run: |
+          python3 tests/test_schema_versioning_policy.py
+        # Five checks (issue #8):
+        #   A: '## Schema versioning' section exists in docs/playbook-governance.md
+        #   B: Required rule text (supported-versions, fail-closed, major-bump migration,
+        #      rollback re-validation, GC-gated path) present in section
+        #   C: Engine rejects uploads declaring an unsupported $schema (fail-closed)
+        #   D: Rollback re-validation succeeds for the current v1 schema
+        #   E: All non-retired playbooks declare a supported schema version
+        # Failure means the schema-versioning policy section is missing or incomplete,
+        # or a non-retired playbook declares an unsupported $schema.

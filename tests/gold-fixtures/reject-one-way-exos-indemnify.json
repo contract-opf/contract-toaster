@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-one-way-exos-indemnify",
+  "description": "D2 planted case: counterparty inserts a one-way uncapped indemnification obligation on Exos using 'Exos shall indemnify Institution' with no 'hold harmless' or 'duty to defend' language. Must fire no-exos-indemnity and result in REQUEST_CHANGE. Verifies the narrowed no-exos-indemnity rule catches bare one-way indemnify insertions — the violation class that was silently escaping the detector after the original Green fix deleted both 'indemnify' triggers.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "indemnification",
+      "section_ref": "[absent] Indemnification",
+      "is_hard_rejection": true,
+      "rule_id": "no-exos-indemnity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "indemnification",
+    "inserted_hunk": "Exos shall indemnify Institution, its officers, directors, employees, and agents from and against any and all claims, damages, losses, costs, and expenses (including reasonable attorneys' fees) arising out of or related to Exos's performance under this Agreement, with no cap on liability.",
+    "notes": "One-way uncapped Exos indemnification. No 'hold harmless' or 'duty to defend' language — this is the violation class that escapes detection when only 'hold harmless' and 'duty to defend' are trigger terms. Must fire no-exos-indemnity on 'exos shall indemnif' regex trigger."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exos-indemnity",
+    "expected_result": "fire",
+    "rationale": "One-way uncapped Exos indemnification phrased as 'Exos shall indemnify Institution ... with no cap on liability' must fire the no-exos-indemnity rule via the 'exos shall indemnif' regex trigger. The exempt terms 'mutual hold harmless' and 'hold harmless the other party' are absent, and this is not a mutual/capped formulation."
+  }
+}

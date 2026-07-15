@@ -1,0 +1,76 @@
+# FrontendStack structural gate (issue #54)
+#
+# Runs on every PR or push that touches the frontend/ SPA, the frontend CDK
+# stack, or its test so the Amplify Hosting acceptance criteria stay green.
+#
+# Assertions (see tests/test_infra_frontend_stack.py for full docs):
+#   A – frontend/ scaffolded with Vite + React + TypeScript
+#   B – AWS Amplify libraries integrated (aws-amplify, @aws-amplify/ui-react)
+#   C – Amplify Auth configured; Authenticator component used
+#   D – Header shows the signed-in user's email
+#   E – Footer shows version from the authenticated /version endpoint
+#   F – infra/lib/nested/frontend-stack.ts defines Amplify Hosting app (not placeholder)
+#   G – DEV auto-build/auto-publish allowed; PROD requires deliberate promotion
+#   H – CI build script produces the frontend artifact (npm run build)
+#   I – cdk synth exits 0 with the updated Amplify Hosting frontend stack
+
+name: frontend-stack-gate
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'infra/lib/nested/frontend-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'infra/package.json'
+      - 'infra/tsconfig.json'
+      - 'tests/test_infra_frontend_stack.py'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'infra/lib/nested/frontend-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'tests/test_infra_frontend_stack.py'
+
+jobs:
+  frontend-stack-gate:
+    name: FrontendStack structural gate (Amplify Hosting + React SPA)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        run: npm install
+        working-directory: infra
+
+      - name: Run FrontendStack structural gate
+        run: python3 tests/test_infra_frontend_stack.py
+        # Verifies all issue #54 acceptance criteria:
+        # - frontend/ scaffolded (Vite + React + TypeScript)
+        # - AWS Amplify libraries integrated (aws-amplify, @aws-amplify/ui-react)
+        # - Authenticator component used; Amplify.configure wired
+        # - Header shows signed-in user's email; footer shows /version
+        # - FrontendStack defines Amplify Hosting CfnApp (not a stub placeholder)
+        # - DEV auto-build enabled; PROD requires deliberate artifact promotion
+        # - build script (npm run build / vite build) present
+        # - cdk synth --context env=dev exits 0 with the Amplify stack
+        # See: https://github.com/contract-opf/contract-toaster/issues/54

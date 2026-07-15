@@ -1,0 +1,1328 @@
+{
+  "$schema": "https://teamexos.com/playbooks/schema/v1.json",
+  "playbook": {
+    "id": "eiaa",
+    "version": "1.0.0",
+    "agreement_type": "Educational Institution Affiliate Agreement",
+    "agreement_aliases": [
+      "EIAA",
+      "Affiliate Agreement",
+      "Educational Affiliation Agreement",
+      "Student Internship Agreement"
+    ],
+    "exos_party": "Exos Human Capital, LLC",
+    "counterparty_type": "Educational Institution",
+    "created_at": "2026-05-26T00:00:00Z",
+    "created_by": "playbook-mockup",
+    "based_on_corpus": [
+      "form-04.22.24-updated-2026-01-05"
+    ],
+    "metadata": {
+      "primary_model_id": "anthropic.claude-opus-4-8",
+      "critic_model_id": "anthropic.claude-sonnet-4-6",
+      "embedding_model_id": "amazon.titan-embed-text-v2:0",
+      "model_region": "us-east-1",
+      "request_contract": "opus-4.8-bedrock-runtime-single-region-native-id-no-sampling-adaptive-thinking",
+      "decision_mode": "binary"
+    },
+    "status": "draft",
+    "legal_approval": {
+      "issue": "https://github.com/contract-opf/contract-toaster/issues/213",
+      "scope": "Reconciled the on_remove_or_alter class of hard-rejection/acceptable-variation self-contradiction (issue #213, the on_remove_or_alter counterpart of issue #2/#212's on_insert fix). tests/lint-acceptable-variations.py now also simulates on_remove_or_alter Floor rules against each topic's acceptable_variations[].to text (via the shared scripts/detector_common.check_on_remove_or_alter_rule_fires, issue #213 also unifying scripts/eval_harness.py and tests/lint-gold-fixtures.py onto the same implementation). Four acceptable_variations across limitation-of-liability (the $500,000 mutual cap raise; the gross-negligence/willful-misconduct carve-out) and exos-discretion-and-authority (joint admission criteria with Exos final-decision right preserved; reasonable pre-expulsion notice) mechanically fire a preserve-* Floor rule and are now marked acceptable_variations[].requires_attorney_override: true (new optional schema field) rather than silently passing CI as if they were zero-fire.",
+      "approved_by": "Marc Mandel, General Counsel",
+      "approved_at": "2026-07-09T00:00:00Z",
+      "note": "GC sign-off recorded for the issue #213 reconciliation. Lever judgment: schema.json's hard_rejections[].protects description is explicit that numeric-threshold and similar judgment calls ('is the new figure/phrasing still acceptable') are deliberately NOT decided by the on_remove_or_alter detector -- that stays with attorney review, not the lexical layer -- so adding a numeric guard to preserve-liability-cap (option 1 in issue #213) would contradict that documented design and was rejected. Fully demoting preserve-liability-cap to reject_if_proposed (lever 3 of the docs/playbook-governance.md authoring rule) was also rejected: it is not redundant with no-uncapped-liability (an on_insert rule that only catches explicit 'uncapped'/'unlimited liability' phrasing), so removing it would silently lose deterministic coverage of a cap clause deleted or reworded without those exact words -- a real regression in Floor strength issue #213 does not ask for and this approval does not authorize. Instead: the Floor rules (preserve-liability-cap, preserve-consequential-damages-waiver, preserve-admission-discretion, preserve-clinical-authority) are UNCHANGED and keep full strength; the four affected acceptable_variations are marked requires_attorney_override so the lint records the fire as an intentional, documented outcome (REQUEST_CHANGE resolved by attorney disposition per backend/src/disposition.py, never a model auto-accept) instead of silently passing over a contradiction. Bundle may be promoted from draft to active once all CI gates pass."
+    }
+  },
+  "general_principles": [
+    "Educational Institution Affiliate Agreements are generally low-risk. Default toward ACCEPT.",
+    "Push back only when a counterparty change creates a new risk, obligation, or liability on Exos beyond what we normally accept under this agreement type, AND the change is not de minimis.",
+    "Be decisive. Every change made by counterparty results in either ACCEPT (apply the change) or REQUEST_CHANGE (counter with specific replacement text and a one- or two-sentence footnote rationale). Never 'flag for review'.",
+    "If two reasonable formulations of the same Exos-standard concept exist, accept the counterparty's wording rather than insist on ours.",
+    "Use corpus precedent as internal evidence only. Do not quote counterparty names, deal dates, or precedent language in external-facing footnotes or redlines.",
+    "Identify each issue by section number and title from the proposed document.",
+    "Never invent obligations on Exos that aren't in this playbook. Never accept obligations on Exos that aren't in this playbook unless they are de minimis."
+  ],
+  "decision_rubric": {
+    "accept_when": [
+      "Change is clerical, stylistic, or grammatical without legal impact.",
+      "Change updates counterparty's own legal name, address, contact info, signatory, or notice recipient.",
+      "Change matches a position already accepted in a prior executed Exos affiliation agreement (record any supporting precedent internally).",
+      "Change clarifies an existing right or obligation without expanding either party's exposure.",
+      "Change is within an explicit acceptable_variations range defined in this playbook for the relevant topic.",
+      "Change falls inside any de_minimis_categories entry below.",
+      "Change is mutual and symmetric (e.g., adding a clarification that applies to both parties)."
+    ],
+    "request_change_when": [
+      "Change imposes a new obligation on Exos not present in the Exos standard form.",
+      "Change creates new liability, risk, or expense for Exos.",
+      "Change removes a protection Exos relies on (limitation of liability, sole discretion, final authority, etc.).",
+      "Change matches an entry on the hard_rejections list.",
+      "Change is one-sided in counterparty's favor where the Exos standard is mutual.",
+      "Change introduces ambiguity that could be construed against Exos."
+    ]
+  },
+  "topics": [
+    {
+      "id": "term-length",
+      "section_ref": "2.1 Term",
+      "section_anchors": [
+        "sec-2.1"
+      ],
+      "exos_standard": "5-year initial term; automatic 1-year renewals; 60 days written notice for non-renewal; clinical experience preserved through end of student's program even on non-renewal.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty shortens initial term",
+          "to": "1 to 7 years",
+          "rationale": "School calendar accommodations are common and pose no Exos risk."
+        },
+        {
+          "if": "Counterparty changes renewal cycle",
+          "to": "1, 2, or 3 year renewals",
+          "rationale": "Within Exos comfort range."
+        },
+        {
+          "if": "Counterparty extends non-renewal notice",
+          "to": "up to 180 days",
+          "rationale": "Allows institution planning; doesn't bind Exos beyond reason."
+        },
+        {
+          "if": "Counterparty requires definite end date with no auto-renewal",
+          "to": "single named term up to 7 years with right to renegotiate",
+          "rationale": "Some institutions require this structure."
+        }
+      ],
+      "must_preserve": [
+        "Either-party right to non-renew with notice.",
+        "Students-in-progress preservation language.",
+        "Mutuality of renewal mechanics."
+      ],
+      "reject_if_proposed": [
+        "Term shorter than 1 year with no renewal mechanism.",
+        "Auto-renewal with no opt-out for either party.",
+        "Renewal term locked at more than 3 years.",
+        "Removal of Exos right to non-renew."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "termination-for-cause",
+      "section_ref": "2.2.2 For Cause",
+      "section_anchors": [
+        "sec-2.2.2"
+      ],
+      "exos_standard": "Mutual right to terminate for breach with 30 days notice and cure opportunity; immediate termination right on accreditation loss.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty extends cure period",
+          "to": "30 to 90 days",
+          "rationale": "Reasonable accommodation, doesn't materially prejudice Exos."
+        }
+      ],
+      "must_preserve": [
+        "Mutual right to terminate for cause.",
+        "Cure mechanism.",
+        "Right to terminate immediately on accreditation loss."
+      ],
+      "reject_if_proposed": [
+        "One-sided termination right (counterparty can terminate for cause, Exos cannot).",
+        "Cure period shorter than 14 days.",
+        "Counterparty termination for convenience without giving Exos same right.",
+        "Removal of accreditation-based termination."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "limitation-of-liability",
+      "section_ref": "8 Limitation on Liability",
+      "section_anchors": [
+        "sec-8"
+      ],
+      "exos_standard": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes a higher cap",
+          "to": "up to $500,000, only if mutual and only if specifically negotiated",
+          "rationale": "Acceptable when raised mutually for a particularly large placement program. Issue #213: replacing the $150,000 figure necessarily deletes/alters the required_token preserve-liability-cap protects, so this deterministically fires the Floor and forces REQUEST_CHANGE -- that is correct and by design (a numeric-threshold judgment like this is deliberately left to attorney review, not the lexical detector, per hard_rejections[].protects in schema.json). Acceptable only via the attorney's disposition of that REQUEST_CHANGE, never a silent auto-accept.",
+          "requires_attorney_override": true
+        },
+        {
+          "if": "Counterparty proposes carve-outs from the cap for gross negligence or willful misconduct",
+          "to": "narrow carve-out applying mutually to proven gross negligence or willful misconduct of party's employees",
+          "rationale": "Standard carve-out, mutually applied. Issue #213: as a short delta description this text does not itself restate the preserved $150,000/aggregate-liability cap or the consequential-damages waiver, so the lint's mechanical simulation (which checks the literal 'to' text) shows this variation firing preserve-liability-cap and preserve-consequential-damages-waiver too. A real redline implementing this carve-out leaves the cap and waiver language in place; still, the detector reads real diff text, not this summary, so treat any real fire the same way: REQUEST_CHANGE resolved by attorney disposition.",
+          "requires_attorney_override": true
+        }
+      ],
+      "must_preserve": [
+        "Mutual cap structure.",
+        "Mutual consequential damages waiver.",
+        "Mutual no-implied-warranties statement."
+      ],
+      "reject_if_proposed": [
+        "One-sided cap (only Exos limited).",
+        "Removal or weakening of consequential damages waiver.",
+        "Cap below $50,000.",
+        "Any indemnification of counterparty by Exos beyond the narrow exceptions in the indemnification topic.",
+        "Exposure to punitive damages.",
+        "Removal of no-implied-warranty language.",
+        "Uncapped liability for any reason.",
+        "'Unlimited liability for breach of confidentiality' or similar carve-outs that swallow the cap."
+      ],
+      "hard_rejection_refs": [
+        "no-exos-indemnity",
+        "preserve-liability-cap",
+        "preserve-consequential-damages-waiver",
+        "no-joint-several-liability",
+        "no-uncapped-liability"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "exos-discretion-and-authority",
+      "section_ref": "1.2 Admitting Students; 1.4 Expulsion; 1.7 Final Authority",
+      "section_anchors": [
+        "sec-1.2",
+        "sec-1.4",
+        "sec-1.7"
+      ],
+      "exos_standard": "Exos has sole discretion to admit students; reserves the right to expel based on its reasonable and final determination; retains final authority over all aspects of Exos operations and clinical care.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes joint admission criteria with Exos retaining final decision",
+          "to": "joint criteria with Exos's final-decision right preserved",
+          "rationale": "Institutional input is fine so long as Exos decides. Issue #213: as a short delta description this text does not itself restate 'sole discretion', 'final authority', or 'clinical care', so the lint's mechanical simulation (which checks the literal 'to' text) shows this variation firing preserve-admission-discretion and preserve-clinical-authority too. A real redline implementing this still preserves Exos's final-decision right in the actual contract text; still, the detector reads real diff text, not this summary, so treat any real fire the same way: REQUEST_CHANGE resolved by attorney disposition.",
+          "requires_attorney_override": true
+        },
+        {
+          "if": "Counterparty asks for prior notice before expulsion absent emergency",
+          "to": "reasonable notice when not safety-related",
+          "rationale": "Doesn't restrict Exos's underlying right. Issue #213: as a short delta description this text does not itself restate 'sole discretion', 'final authority', or 'clinical care', so the lint's mechanical simulation (which checks the literal 'to' text) shows this variation firing preserve-admission-discretion and preserve-clinical-authority too. A real redline implementing this notice provision does not touch Exos's admission/clinical-authority language; still, the detector reads real diff text, not this summary, so treat any real fire the same way: REQUEST_CHANGE resolved by attorney disposition.",
+          "requires_attorney_override": true
+        }
+      ],
+      "must_preserve": [
+        "Exos sole discretion over student admission.",
+        "Exos right to expel.",
+        "Exos final authority over clinical care."
+      ],
+      "reject_if_proposed": [
+        "Joint-decision requirement for admissions (Exos must have the final call).",
+        "Institution veto over Exos staffing.",
+        "Mandatory acceptance of any student.",
+        "Institution control over any clinical-care decision.",
+        "Removal of Exos's reasonable-and-final-determination language for expulsion."
+      ],
+      "hard_rejection_refs": [
+        "preserve-admission-discretion",
+        "preserve-clinical-authority"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "payment-and-remuneration",
+      "section_ref": "1.5 No Remuneration",
+      "section_anchors": [
+        "sec-1.5"
+      ],
+      "exos_standard": "No payment between parties; no student remuneration.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty wants to clarify that students may receive academic credit",
+          "to": "academic credit clarification permitted",
+          "rationale": "Doesn't impose obligation on Exos."
+        }
+      ],
+      "must_preserve": [
+        "No payment obligation by Exos to the institution.",
+        "No student wages or stipends from Exos."
+      ],
+      "reject_if_proposed": [
+        "Institution charges Exos any fee, including placement, oversight, or facility-use fees.",
+        "Required stipend or wages to students from Exos.",
+        "Required tuition or program-fee payment by Exos.",
+        "Reimbursement of institution administrative costs."
+      ],
+      "hard_rejection_refs": [
+        "no-student-employment-status"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "student-status-and-benefits",
+      "section_ref": "1.6 No Insurance/Benefits",
+      "section_anchors": [
+        "sec-1.6"
+      ],
+      "exos_standard": "Students are not Exos employees and receive no benefits; students are covered by workers' compensation as volunteers only.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty adds clarifying language reaffirming students are not Exos employees",
+          "to": "redundant non-employee clarifications permitted",
+          "rationale": "Comfort language, no Exos exposure."
+        }
+      ],
+      "must_preserve": [
+        "Students-are-not-Exos-employees language.",
+        "No-benefits provision.",
+        "Workers' comp limited to volunteer coverage only."
+      ],
+      "reject_if_proposed": [
+        "Joint employment or co-employer language.",
+        "Required employee benefits for students.",
+        "Required individual health insurance for students paid by Exos.",
+        "Treatment of students as Exos agents for any purpose beyond the supervised clinical role.",
+        "Required disability or unemployment coverage for students."
+      ],
+      "hard_rejection_refs": [
+        "no-student-employment-status"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "confidentiality",
+      "section_ref": "7 Confidentiality",
+      "section_anchors": [
+        "sec-7"
+      ],
+      "exos_standard": "Mutual confidentiality with reasonable-care standard; standard exceptions (public/prior/independent/third-party); compelled-disclosure carve-out with prior notice; destruction on request other than backup copies not readily accessible.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty adds non-exhaustive examples of Confidential Information",
+          "to": "non-exhaustive examples permitted",
+          "rationale": "Clarifying, doesn't expand obligation."
+        },
+        {
+          "if": "Counterparty specifies a destruction timeline",
+          "to": "30 to 90 days after termination",
+          "rationale": "Reasonable."
+        },
+        {
+          "if": "Counterparty proposes a duration on confidentiality obligations post-termination",
+          "to": "3 to 5 years post-termination for general Confidential Information, indefinite for trade secrets",
+          "rationale": "Within market range."
+        }
+      ],
+      "must_preserve": [
+        "Mutual obligation (both directions).",
+        "Public / prior-possession / independent-development / third-party exceptions.",
+        "Compelled-disclosure carve-out with notice opportunity.",
+        "Treatment of PHI from Exos as Exos Confidential Information.",
+        "Backup-copy carve-out from destruction."
+      ],
+      "reject_if_proposed": [
+        "One-way confidentiality favoring the institution.",
+        "Heightened care standard above 'reasonable' (e.g., 'utmost', 'highest').",
+        "Removal of standard exceptions.",
+        "Liquidated damages or specified injunctive relief amounts.",
+        "Removal of the compelled-disclosure carve-out.",
+        "Indefinite confidentiality of all information (vs. trade-secret duration).",
+        "Loss of the backup-copy carve-out."
+      ],
+      "hard_rejection_refs": [
+        "no-uncapped-liability"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "assignment",
+      "section_ref": "9 Assignment to Operating Entity",
+      "section_anchors": [
+        "sec-9"
+      ],
+      "exos_standard": "Automatic assignment to the Exos affiliate operating the Facility where a Student is placed; named affiliate list and catch-all for future affiliates.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty requests written notice of any actual assignment",
+          "to": "notice within reasonable time",
+          "rationale": "Procedural only."
+        }
+      ],
+      "must_preserve": [
+        "Auto-assignment mechanism.",
+        "Exos's right to assign to current and future affiliates.",
+        "Affiliate's deemed acceptance of the assignment."
+      ],
+      "reject_if_proposed": [
+        "Institution consent required for assignment to any Exos affiliate.",
+        "Bilateral consent for any assignment.",
+        "Limitation of the catch-all to currently-named affiliates only."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "indemnification",
+      "section_ref": "[absent] Indemnification",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "exos_standard": "Exos does not provide indemnification under affiliation agreements. Liability is allocated solely by Section 8 (Limitation on Liability).",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes narrow mutual IP indemnification",
+          "to": "mutual third-party IP-infringement indemnification, capped by Section 8",
+          "rationale": "Narrow and mutual, capped."
+        },
+        {
+          "if": "Counterparty proposes mutual indemnification limited to gross negligence or willful misconduct of party's employees",
+          "to": "narrow mutual gross-negligence/willful-misconduct indemnification, capped by Section 8",
+          "rationale": "Narrow, mutual, capped — acceptable in negotiation."
+        }
+      ],
+      "must_preserve": [
+        "No general or unconditional Exos indemnification.",
+        "Mutuality of any indemnification accepted.",
+        "Cap by Section 8 of any indemnification accepted."
+      ],
+      "reject_if_proposed": [
+        "Any one-way indemnification by Exos.",
+        "Uncapped indemnification (carve-out from Section 8).",
+        "Indemnification of institution for institution's own negligence.",
+        "Indemnification for student conduct (this is what workers' comp and operating-entity insurance is for).",
+        "Indemnification for third-party clinical-care claims.",
+        "Defense obligation independent of indemnity scope.",
+        "First-dollar defense or 'duty to defend on tender' language."
+      ],
+      "hard_rejection_refs": [
+        "no-exos-indemnity",
+        "no-joint-several-liability"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "insurance",
+      "section_ref": "[absent] Insurance",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "exos_standard": "Not specified in the standard form. Exos maintains insurance appropriate to its operations. Exos provides a Certificate of Insurance evidencing standard coverage on request.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty asks for a Certificate of Insurance evidencing standard Exos coverage",
+          "to": "COI showing commercial general liability and workers' compensation",
+          "rationale": "Standard institutional request."
+        },
+        {
+          "if": "Counterparty asks Exos to name the institution as additional insured on Exos's CGL",
+          "to": "additional insured status if mutually granted and limited to vicarious liability for Exos operations",
+          "rationale": "Common request; review with broker before agreeing."
+        }
+      ],
+      "must_preserve": [],
+      "reject_if_proposed": [
+        "Specific minimum coverage levels exceeding Exos's standard program.",
+        "Required umbrella or excess coverage beyond Exos standard.",
+        "Required waiver of subrogation as a one-sided requirement on Exos.",
+        "Required professional liability beyond Exos standard.",
+        "Cyber liability requirements with material limits.",
+        "Required maintenance of any specific carrier or AM Best rating not currently held."
+      ],
+      "hard_rejection_refs": [
+        "no-excess-insurance-levels"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "governing-law-and-venue",
+      "section_ref": "[absent] Governing Law and Venue",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "exos_standard": "Not specified in the standard form. Default preference is Arizona law and venue when an explicit clause is requested.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes its home-state law and venue",
+          "to": "institution's home state if it is a large public institution or has significant leverage, otherwise propose Arizona",
+          "rationale": "Negotiable; not worth dying over for routine placements."
+        }
+      ],
+      "must_preserve": [],
+      "reject_if_proposed": [
+        "Mandatory jury trial — push for jury waiver if forum allows.",
+        "Foreign-jurisdiction law or venue (outside the U.S.).",
+        "Mandatory arbitration in counterparty's home venue with counterparty-selected arbitrator.",
+        "Mandatory class-arbitration."
+      ],
+      "hard_rejection_refs": [
+        "no-counterparty-home-arbitration"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "non-discrimination",
+      "section_ref": "4 Non-Discrimination",
+      "section_anchors": [
+        "sec-4"
+      ],
+      "exos_standard": "Mutual non-discrimination across enumerated protected classes, compliance with applicable anti-discrimination laws and institutional policies.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty adds additional protected classes",
+          "to": "any class protected under applicable law or institutional policy",
+          "rationale": "Always acceptable."
+        },
+        {
+          "if": "Counterparty references its own non-discrimination policy",
+          "to": "compliance with institutional policy where it doesn't impose Exos obligations beyond legal requirements",
+          "rationale": "Standard."
+        }
+      ],
+      "must_preserve": [
+        "Mutuality of the obligation."
+      ],
+      "reject_if_proposed": [
+        "One-sided non-discrimination obligation (Exos only)."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "ferpa",
+      "section_ref": "5 Student Records",
+      "section_anchors": [
+        "sec-5"
+      ],
+      "exos_standard": "FERPA acknowledged; student consent required before releasing specific data to anyone other than the institution.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes more detailed FERPA compliance language",
+          "to": "additional FERPA acknowledgment language permitted, provided it limits obligations to the institution and does not impose FERPA duties directly on Exos or characterize Exos as an agent of the institution for student-records purposes",
+          "rationale": "FERPA applies to the institution; we acknowledge but don't assume."
+        }
+      ],
+      "must_preserve": [],
+      "reject_if_proposed": [
+        "Designation of Exos as a 'school official' under FERPA without specific opt-in.",
+        "Direct contractual obligation that Exos comply with FERPA (FERPA binds the institution, not us)."
+      ],
+      "hard_rejection_refs": [
+        "no-ferpa-school-official"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "hipaa",
+      "section_ref": "6 HIPAA",
+      "section_anchors": [
+        "sec-6"
+      ],
+      "exos_standard": "Neither party is a Business Associate of the other; students are subject to Exos policies and may use PHI only for legitimate authorized purposes under supervision.",
+      "acceptable_variations": [],
+      "must_preserve": [
+        "Mutual non-BA status.",
+        "Restrictions on student PHI use."
+      ],
+      "reject_if_proposed": [
+        "Required Business Associate Agreement.",
+        "Designation of Exos as BA of the institution.",
+        "Designation of the institution as BA of Exos.",
+        "HIPAA training requirements imposed on Exos beyond standard student onboarding."
+      ],
+      "hard_rejection_refs": [
+        "no-business-associate-agreement",
+        "preserve-hipaa-non-ba"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "notices",
+      "section_ref": "10 Miscellaneous (Notices)",
+      "section_anchors": [
+        "sec-10-notices"
+      ],
+      "exos_standard": "Email notices effective upon reply acknowledgment (auto-responses excluded); postal notices via certified mail or overnight courier, effective one day after receipt.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes a deemed-receipt rule for email",
+          "to": "3 business days deemed receipt",
+          "rationale": "Acceptable and common."
+        },
+        {
+          "if": "Counterparty adds named recipient roles",
+          "to": "additional role/title notices permitted",
+          "rationale": "Procedural."
+        }
+      ],
+      "must_preserve": [],
+      "reject_if_proposed": [
+        "Notice only via physical mail (impractical in 2026).",
+        "Loss of email-notice option."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "exclusivity",
+      "section_ref": "10 Miscellaneous ('non-exclusive')",
+      "section_anchors": [
+        "sec-10-non-exclusive"
+      ],
+      "exos_standard": "Non-exclusive in both directions. Either party may engage other counterparties.",
+      "acceptable_variations": [],
+      "must_preserve": [
+        "Non-exclusive nature of the relationship."
+      ],
+      "reject_if_proposed": [
+        "Any exclusivity.",
+        "Right of first refusal for institution.",
+        "Restriction on Exos partnering with competing institutions.",
+        "Restriction on the institution placing students at other employers.",
+        "Most-favored-nation or most-favored-institution provisions."
+      ],
+      "hard_rejection_refs": [
+        "no-exclusivity"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "entire-agreement-and-amendment",
+      "section_ref": "10 Miscellaneous (Entire Agreement; Amendment)",
+      "section_anchors": [
+        "sec-10-merger"
+      ],
+      "exos_standard": "Entire agreement; only written amendment signed by both parties (manually or via e-sign).",
+      "acceptable_variations": [],
+      "must_preserve": [
+        "Written-amendment requirement.",
+        "Entire-agreement / merger clause."
+      ],
+      "reject_if_proposed": [
+        "Oral amendment.",
+        "Unilateral amendment by counterparty.",
+        "Course of dealing or course of performance modifying terms.",
+        "Subordination to other agreements not specifically identified."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "order-of-precedence",
+      "section_ref": "Front-page footnote on Additional Terms; 10 Miscellaneous (conflict)",
+      "section_anchors": [
+        "sec-10-precedence"
+      ],
+      "exos_standard": "Sections 7–10 of the Terms (Confidentiality, Limitation on Liability, Assignment, Miscellaneous) prevail over conflicting Additional Terms; conflicting Additional Terms are void.",
+      "acceptable_variations": [],
+      "must_preserve": [
+        "Order of precedence favoring Sections 7–10 of the Terms."
+      ],
+      "reject_if_proposed": [
+        "Order of precedence favoring Additional Terms over Sections 7–10.",
+        "Removal of the conflict-resolution mechanism."
+      ],
+      "hard_rejection_refs": [
+        "preserve-exos-precedence"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "inspections",
+      "section_ref": "1.3 Inspections",
+      "section_anchors": [
+        "sec-1.3"
+      ],
+      "exos_standard": "Institution may inspect any Facility where a Student is placed, upon reasonable request.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes specific reasonable advance notice",
+          "to": "24–72 business hours' notice",
+          "rationale": "Helps operations plan; reasonable."
+        },
+        {
+          "if": "Counterparty proposes accompanied inspection",
+          "to": "accompanied by an Exos representative",
+          "rationale": "Standard."
+        }
+      ],
+      "must_preserve": [
+        "Reasonable-request standard (not unlimited access)."
+      ],
+      "reject_if_proposed": [
+        "Unannounced inspection rights.",
+        "Inspection of non-Facility Exos premises.",
+        "Inspection of Exos records beyond the immediate placement context.",
+        "Document-production rights tied to inspection."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "survival",
+      "section_ref": "2.3 Effect of Termination",
+      "section_anchors": [
+        "sec-2.3"
+      ],
+      "exos_standard": "Survival is limited to: Confidentiality, Limitation on Liability, Assignment to Operating Entity, and Miscellaneous.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty proposes additional survival of FERPA, HIPAA, or Non-Discrimination",
+          "to": "narrow survival of compliance obligations actually triggered during the term",
+          "rationale": "Acceptable; doesn't create new obligations."
+        }
+      ],
+      "must_preserve": [
+        "Limited and enumerated survival list."
+      ],
+      "reject_if_proposed": [
+        "Survival of all provisions.",
+        "Survival of indemnification obligations Exos hasn't agreed to.",
+        "Indefinite-duration survival of any provision without scope."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    },
+    {
+      "id": "compliance",
+      "section_ref": "3 Compliance",
+      "section_anchors": [
+        "sec-3"
+      ],
+      "exos_standard": "Each party complies with all relevant federal and state laws and regulations applicable to its role, including Federal Health Care Program requirements.",
+      "acceptable_variations": [
+        {
+          "if": "Counterparty references additional named statutes that already apply",
+          "to": "additional named statutes permitted if they already apply by their own terms",
+          "rationale": "Restating existing law is not a new obligation."
+        }
+      ],
+      "must_preserve": [],
+      "reject_if_proposed": [
+        "Direct contractual obligation to comply with statutes that don't otherwise apply to Exos.",
+        "Required certifications, attestations, or audits beyond Exos's normal compliance program.",
+        "Audit rights granted to the institution over Exos compliance."
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 1200,
+        "must_not_introduce": [
+          "indemnify",
+          "hold harmless",
+          "duty to defend",
+          "uncapped",
+          "unlimited liability",
+          "consequential damages",
+          "exclusive",
+          "business associate",
+          "school official"
+        ]
+      }
+    }
+  ],
+  "hard_rejections": [
+    {
+      "id": "no-exos-indemnity",
+      "description": "Counterparty introduces general or one-way indemnification by Exos. Narrow mutual IP or gross-negligence/willful-misconduct indemnification capped by Section 8 is an acceptable variation (see indemnification topic) and must not fire this rule. Trigger 'exos\\s+(shall|will|must|agrees?\\s+to)\\b[^.]{0,40}indemnif' (regex, in regex_trigger_terms) catches one-way Exos indemnification across common modal/volitional phrasings without firing on mutual or each-party formulations. Issue #220: this regex trigger lives in regex_trigger_terms, not trigger_terms, so the plain phrases 'hold harmless' and 'duty to defend' are matched as word-boundary phrases, not compiled as regex.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "hold harmless",
+        "duty to defend"
+      ],
+      "match": "word_boundary",
+      "regex_trigger_terms": [
+        "exos\\s+(shall|will|must|agrees?\\s+to)\\b[^.]{0,40}indemnif"
+      ],
+      "match_surface": "inserted_or_modified",
+      "exempt_terms": [
+        "mutual hold harmless",
+        "hold harmless the other party"
+      ],
+      "applies_to_topics": [
+        "indemnification",
+        "limitation-of-liability"
+      ]
+    },
+    {
+      "id": "preserve-liability-cap",
+      "description": "Counterparty removes or alters the mutual $150,000 aggregate liability cap.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-8",
+        "required_tokens": [
+          "$150,000",
+          "aggregate liability"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "limitation-of-liability"
+      ]
+    },
+    {
+      "id": "preserve-consequential-damages-waiver",
+      "description": "Counterparty removes or alters the mutual consequential-damages waiver.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-8",
+        "required_tokens": [
+          "consequential damages"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "limitation-of-liability"
+      ]
+    },
+    {
+      "id": "no-student-employment-status",
+      "description": "Counterparty introduces employment / co-employment status for students.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "co-employment",
+        "co-employer",
+        "joint employer",
+        "joint employment"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "student-status-and-benefits",
+        "payment-and-remuneration"
+      ]
+    },
+    {
+      "id": "no-joint-several-liability",
+      "description": "Counterparty introduces joint and several liability.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "joint and several",
+        "jointly and severally"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "limitation-of-liability",
+        "indemnification"
+      ]
+    },
+    {
+      "id": "no-uncapped-liability",
+      "description": "Counterparty introduces uncapped/unlimited liability.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "uncapped",
+        "unlimited liability",
+        "no cap on liability",
+        "shall not be limited",
+        "without limit"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "limitation-of-liability",
+        "confidentiality"
+      ]
+    },
+    {
+      "id": "preserve-admission-discretion",
+      "description": "Counterparty removes or alters Exos's sole discretion over student admission.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-1.2",
+        "required_tokens": [
+          "sole discretion"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "exos-discretion-and-authority"
+      ]
+    },
+    {
+      "id": "preserve-clinical-authority",
+      "description": "Counterparty removes or alters Exos's final authority over clinical care.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-1.7",
+        "required_tokens": [
+          "final authority",
+          "clinical care"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "exos-discretion-and-authority"
+      ]
+    },
+    {
+      "id": "no-counterparty-home-arbitration",
+      "description": "Counterparty introduces mandatory/binding arbitration in its home venue.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "mandatory arbitration",
+        "binding arbitration"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "governing-law-and-venue"
+      ]
+    },
+    {
+      "id": "no-excess-insurance-levels",
+      "description": "Counterparty introduces required insurance levels exceeding Exos's standard coverage program. Additional-insured requests limited to vicarious liability and mutually granted are an acceptable variation (see insurance topic); bare 'additional insured' is too broad a trigger and has been removed.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "minimum coverage",
+        "coverage levels",
+        "insurance limits"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "insurance"
+      ]
+    },
+    {
+      "id": "no-exclusivity",
+      "description": "Counterparty introduces exclusivity in either direction.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "exclusive",
+        "exclusivity",
+        "sole provider"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "exempt_terms": [
+        "non-exclusive"
+      ],
+      "applies_to_topics": [
+        "exclusivity"
+      ]
+    },
+    {
+      "id": "no-business-associate-agreement",
+      "description": "Counterparty introduces a Business Associate Agreement requirement under HIPAA.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "business associate agreement",
+        "baa"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "hipaa"
+      ]
+    },
+    {
+      "id": "preserve-hipaa-non-ba",
+      "description": "Counterparty removes or alters the standard mutual non-Business-Associate position.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-6",
+        "required_tokens": [
+          "business associate"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "hipaa"
+      ]
+    },
+    {
+      "id": "no-ferpa-school-official",
+      "description": "Counterparty introduces a designation of Exos as a FERPA 'school official' or a direct FERPA obligation on Exos.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "school official"
+      ],
+      "match": "word_boundary",
+      "match_surface": "inserted_or_modified",
+      "applies_to_topics": [
+        "ferpa"
+      ]
+    },
+    {
+      "id": "preserve-exos-precedence",
+      "description": "Counterparty removes or alters the order-of-precedence clause under which Sections 7-10 prevail over conflicting Additional Terms.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-10-precedence",
+        "required_tokens": [
+          "prevail"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "order-of-precedence"
+      ]
+    }
+  ],
+  "de_minimis_categories": [
+    "Counterparty's own legal name, address, email, or signatory updates.",
+    "Typo and grammar corrections.",
+    "Reformatting changes (font, spacing, capitalization, defined-term capitalization).",
+    "Section renumbering without substantive change.",
+    "Adding clarifying recitals that don't impose new obligations.",
+    "Restating existing obligations in different words.",
+    "Filling in dated or blank fields.",
+    "Adding the counterparty's standard non-discrimination policy reference (when it doesn't impose Exos obligations beyond legal requirements).",
+    "Adding redundant language that reaffirms an existing Exos position (e.g., reiterating that students are not employees)."
+  ],
+  "output_format": {
+    "decision_field": "ACCEPT | REQUEST_CHANGE",
+    "every_issue_includes": [
+      "section_ref",
+      "section_title",
+      "counterparty_change_summary",
+      "decision",
+      "external_rationale_for_footnote",
+      "proposed_replacement_text",
+      "playbook_topic_id",
+      "internal_precedent_citation"
+    ],
+    "footnote_phrasing_rules": [
+      "One or two sentences per footnote. No more.",
+      "Name the specific risk created (e.g., 'creates a new indemnification obligation') rather than generic phrases like 'not standard'.",
+      "Plain English. Avoid legalese where a plain word does the job.",
+      "State the position. Don't hedge with 'we generally prefer' or 'our usual practice is'.",
+      "Never apologize for declining. Decline politely and propose an alternative when one exists in the playbook."
+    ],
+    "citation_rules": {
+      "external_footnotes_cite": "contract_position_only",
+      "precedent_citations": "internal_only",
+      "forbid_in_external_output": [
+        "counterparty_name",
+        "precedent_deal_date",
+        "verbatim_precedent_text",
+        "system_prompt_fragment",
+        "internal_playbook_id",
+        "internal_strategy"
+      ]
+    },
+    "system_status": {
+      "states": [
+        "OK",
+        "LOW_CONFIDENCE",
+        "MANUAL_REVIEW_REQUIRED",
+        "ERROR_MANUAL_REVIEW_REQUIRED"
+      ],
+      "confidence_field": "confidence_state",
+      "manual_review_routing": "Manual-review states are operational statuses and never external legal decisions."
+    }
+  },
+  "footnote_templates": {
+    "new_obligation": "This language imposes a new obligation on Exos beyond our standard form. We propose the alternative below, which addresses the institution's underlying concern without expanding Exos's commitments.",
+    "indemnification_decline": "Exos does not provide indemnification under affiliation agreements. Liability allocation is governed by Section 8 (Limitation on Liability), which is mutual and capped.",
+    "insurance_decline": "Exos maintains insurance appropriate to its operations and does not specify coverage levels by contract. We can provide a Certificate of Insurance evidencing standard commercial general liability and workers' compensation coverage.",
+    "discretion_preserved": "Exos must retain sole discretion over the matters described in Section 1. This is fundamental to Exos's operating model and we cannot accept a joint-decision or veto structure here.",
+    "exclusivity_decline": "Exos's affiliation agreements are non-exclusive. Exclusivity is incompatible with the nationwide structure of our internship program.",
+    "one_way_to_mutual": "We propose making this provision mutual. As drafted it imposes obligations on Exos that aren't reciprocated by the Institution.",
+    "cap_preserved": "The $150,000 mutual liability cap in Section 8 is a standard term in Exos affiliation agreements. We cannot raise, remove, or carve out exceptions from it beyond the narrow mutual gross-negligence carve-out our playbook permits.",
+    "ba_decline": "Per Section 6, neither party is a Business Associate of the other under HIPAA. Adding BAA obligations is inconsistent with the structure of this Agreement, which does not involve PHI sharing between the parties as covered entities.",
+    "contract_position_only": "This change conflicts with Exos's standard position for the cited section. We propose the alternative below to preserve that position without disclosing internal precedent or negotiation strategy."
+  },
+  "anchor_migrations": [
+    {
+      "anchor": "sec-8",
+      "from_heading_hash": "sha256:21b7370ff0bc04b228b9a082c43349c283187b70e2a608c0a9eaa4a59994b453",
+      "to_heading_hash": "sha256:e1575714708ac339d4673450f15b44005651c0a77c7a070ac997e0dcb9a1ed1e",
+      "from_standard_form_hash": "sha256:9db9f9e043016c1eb52fbe076fe773fd54384dda25d7ea9d786a80836f65fc5e",
+      "to_standard_form_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "reason": "CI drift-gate fixture: simulates §8/§9 renumbering. sec-8 heading changes from 'Limitation on Liability' to 'Assignment to Operating Entity (renumbered)' in the test fixture to verify the drift gate fires on uncovered drift and passes when migration records are present.",
+      "approved_by": "Marc Mandel, General Counsel",
+      "approved_at": "2026-06-12T00:00:00Z"
+    },
+    {
+      "anchor": "sec-9",
+      "from_heading_hash": "sha256:19055f301ecb9814f83a1697fd7808979dace51e83228087319040ecbc9aba52",
+      "to_heading_hash": "sha256:8cbe5c06ab20a5d0b330ba6431f02f2853c177d4ddfd54b227ee5aae95c2129c",
+      "from_standard_form_hash": "sha256:9db9f9e043016c1eb52fbe076fe773fd54384dda25d7ea9d786a80836f65fc5e",
+      "to_standard_form_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "reason": "CI drift-gate fixture: simulates §8/§9 renumbering. sec-9 heading changes from 'Assignment to Operating Entity' to 'Limitation on Liability (renumbered)' in the test fixture.",
+      "approved_by": "Marc Mandel, General Counsel",
+      "approved_at": "2026-06-12T00:00:00Z"
+    }
+  ]
+}

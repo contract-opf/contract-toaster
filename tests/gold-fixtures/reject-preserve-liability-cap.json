@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-preserve-liability-cap",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'preserve-liability-cap': counterparty removes/alters the protected clause in 'sec-8', deleting all of required_tokens ['$150,000', 'aggregate liability']. Must fire preserve-liability-cap and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "limitation-of-liability",
+      "section_ref": "sec-8",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-liability-cap"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "limitation-of-liability",
+    "altered_hunk": "The parties will address this subject in accordance with the terms otherwise set forth in this Agreement. This section otherwise continues to state: consequential damages.",
+    "notes": "Mechanically generated: replacement text omits all of required_tokens ['$150,000', 'aggregate liability'] for rule 'preserve-liability-cap' (token_policy='any') while verbatim-preserving sibling required_tokens ['consequential damages'] so no other rule sharing this topic is unintentionally tripped."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-liability-cap",
+    "expected_result": "fire",
+    "rationale": "Replacement text contains none of required_tokens ['$150,000', 'aggregate liability']; must fire 'preserve-liability-cap' under token_policy='any'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

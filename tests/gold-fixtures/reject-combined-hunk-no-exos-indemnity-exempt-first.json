@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-combined-hunk-no-exos-indemnity-exempt-first",
+  "description": "Issue #212 adversarial planted case: a single inserted hunk co-locates the exempt phrase 'hold harmless the other party' (mutual-sounding, order: FIRST) with a separate, non-exempt one-way 'Exos shall indemnify Institution' violation (order: SECOND). Under the old hunk-wide _is_exempted logic, the exempt phrase's presence anywhere in the hunk suppressed ALL trigger fires, including the unrelated one-way indemnity clause -- a detector bypass. Must still fire no-exos-indemnity via SPAN-level exemption: only the 'hold harmless' occurrence that falls inside the exempt phrase's own span is suppressed; the separate 'Exos shall indemnify' occurrence is not.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "indemnification",
+      "section_ref": "[absent] Indemnification",
+      "is_hard_rejection": true,
+      "rule_id": "no-exos-indemnity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "indemnification",
+    "inserted_hunk": "Each party shall hold harmless the other party from ordinary third-party claims arising in the normal course of business. In addition, Exos shall indemnify Institution for any and all claims, damages, and losses, without limit.",
+    "notes": "Issue #212 repro (order: exempt phrase first, violation second). 'hold harmless the other party' matches exempt_terms verbatim and correctly suppresses the co-located 'hold harmless' trigger_term. The separate 'exos shall indemnify' regex trigger match is a different span entirely and must still fire -- it is not itself inside any exempt-phrase span."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exos-indemnity",
+    "expected_result": "fire",
+    "rationale": "Span-level exemption: 'hold harmless the other party' exempts only the trigger match spatially inside it. 'Exos shall indemnify Institution' is a separate, non-exempt span and must fire no-exos-indemnity via the 'exos shall indemnif' regex trigger."
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-preserve-clinical-authority",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'preserve-clinical-authority': counterparty removes/alters the protected clause in 'sec-1.7', deleting all of required_tokens ['final authority', 'clinical care']. Must fire preserve-clinical-authority and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "exos-discretion-and-authority",
+      "section_ref": "sec-1.7",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-clinical-authority"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "exos-discretion-and-authority",
+    "altered_hunk": "The parties will address this subject in accordance with the terms otherwise set forth in this Agreement. This section otherwise continues to state: sole discretion.",
+    "notes": "Mechanically generated: replacement text omits all of required_tokens ['final authority', 'clinical care'] for rule 'preserve-clinical-authority' (token_policy='any') while verbatim-preserving sibling required_tokens ['sole discretion'] so no other rule sharing this topic is unintentionally tripped."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-clinical-authority",
+    "expected_result": "fire",
+    "rationale": "Replacement text contains none of required_tokens ['final authority', 'clinical care']; must fire 'preserve-clinical-authority' under token_policy='any'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

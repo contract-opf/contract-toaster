@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-combined-hunk-no-exos-indemnity-violation-first",
+  "description": "Issue #212 adversarial planted case: same combined-hunk bypass as reject-combined-hunk-no-exos-indemnity-exempt-first, with the order reversed -- the non-exempt one-way 'Exos shall indemnify Institution' violation comes FIRST, and the exempt phrase 'hold harmless the other party' comes SECOND in the same hunk. Verifies span-level exemption is order-independent: the violation must fire regardless of where in the hunk the exempt phrase sits.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "indemnification",
+      "section_ref": "[absent] Indemnification",
+      "is_hard_rejection": true,
+      "rule_id": "no-exos-indemnity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "indemnification",
+    "inserted_hunk": "Exos shall indemnify Institution for any and all claims, damages, and losses, without limit. In addition, each party shall hold harmless the other party from ordinary third-party claims arising in the normal course of business.",
+    "notes": "Issue #212 repro (order: violation first, exempt phrase second). Confirms the fix is order-independent -- the 'exos shall indemnify' span is not inside the 'hold harmless the other party' exempt span regardless of which sentence comes first in the hunk."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exos-indemnity",
+    "expected_result": "fire",
+    "rationale": "Span-level exemption is order-independent: 'Exos shall indemnify Institution' is a separate, non-exempt span from 'hold harmless the other party' regardless of sentence order, and must fire no-exos-indemnity via the 'exos shall indemnif' regex trigger."
+  }
+}

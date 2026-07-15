@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-no-joint-several-liability",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'no-joint-several-liability': counterparty inserts language containing the trigger term 'jointly and severally' into the 'limitation-of-liability' topic. Must fire no-joint-several-liability and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "limitation-of-liability",
+      "section_ref": "8 Limitation on Liability",
+      "is_hard_rejection": true,
+      "rule_id": "no-joint-several-liability"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "limitation-of-liability",
+    "inserted_hunk": "The parties agree to add the following clause language to this section of the Agreement: 'jointly and severally'.",
+    "notes": "Mechanically generated: contains trigger_term 'jointly and severally' (match=word_boundary) for rule 'no-joint-several-liability'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-joint-several-liability",
+    "expected_result": "fire",
+    "rationale": "Inserted hunk contains trigger_term 'jointly and severally', which is not in []; must fire 'no-joint-several-liability'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

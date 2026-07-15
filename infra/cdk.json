@@ -1,0 +1,34 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/contract-toaster.ts",
+  "watch": {
+    "include": ["**"],
+    "exclude": [
+      "README.md",
+      "cdk*.json",
+      "**/*.d.ts",
+      "**/*.js",
+      "tsconfig.json",
+      "package*.json",
+      ".npmignore",
+      "yarn.lock",
+      "node_modules",
+      "test"
+    ]
+  },
+  "context": {
+    "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true,
+    "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+    "@aws-cdk/aws-rds:lowercaseDbIdentifier": true,
+    "@aws-cdk/core:stackRelativeExports": true,
+    "dev": {
+      "account": "111111111111",
+      "region": "us-east-1",
+      "stackName": "contract-toaster-dev"
+    },
+    "prod": {
+      "account": "222222222222",
+      "region": "us-east-1",
+      "stackName": "contract-toaster-prod"
+    }
+  }
+}

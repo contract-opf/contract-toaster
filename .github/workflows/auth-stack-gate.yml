@@ -1,0 +1,87 @@
+# AuthStack structural gate (issue #53)
+#
+# Runs on every PR or push that touches the auth CDK stack, its test, or the
+# CDK infrastructure so the Cognito + Google IdP acceptance criteria stay green.
+#
+# Assertions (see tests/test_infra_auth_stack.py for full docs):
+#   A – Cognito UserPool defined with username = email
+#   B – Google OAuth credentials from Secrets Manager (dynamic reference only)
+#   C – Google IdP attribute mapping: email, name, sub
+#   D – UserPoolClient with callback and logout URLs (Amplify + localhost)
+#   E – Hosted UI domain prefix defined
+#   F – App client does NOT enable USER_PASSWORD_AUTH (Google IdP only)
+#   G – Hosted-domain enforcement in TWO layers (hd= + Lambda)
+#   H – Pre-token Lambda: group check, JIT-create active row, fail-closed
+#   I – Directory API service-account credentials in Secrets Manager
+#   J – Break-glass IAM role defined (SSO+MFA-assumable)
+#   K – admin_bootstrap seed row (email-keyed, CDK writes)
+#   L – RUNBOOK.md documents break-glass procedure
+#   M – cdk synth exits 0 with auth resources present
+
+name: auth-stack-gate
+
+on:
+  pull_request:
+    paths:
+      - 'infra/lib/nested/auth-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'infra/package.json'
+      - 'infra/tsconfig.json'
+      - 'RUNBOOK.md'
+      - 'tests/test_infra_auth_stack.py'
+      - 'tests/test_pre_token_lambda_deny_paths.py'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/lib/nested/auth-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'RUNBOOK.md'
+      - 'tests/test_infra_auth_stack.py'
+      - 'tests/test_pre_token_lambda_deny_paths.py'
+
+jobs:
+  auth-stack-gate:
+    name: AuthStack structural gate (Cognito + Google IdP)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install CDK dependencies
+        run: npm install
+        working-directory: infra
+
+      - name: Run AuthStack structural gate
+        run: python3 tests/test_infra_auth_stack.py
+        # Verifies all issue #53 acceptance criteria:
+        # - Cognito user pool (username = email), Google IdP, two-layer domain
+        #   enforcement, pre-token Lambda (fail-closed, JIT-create, group check),
+        #   break-glass IAM role, admin_bootstrap seed, cdk synth clean.
+        # See: https://github.com/contract-opf/contract-toaster/issues/53
+
+      - name: Run pre-token Lambda behavioral gate (fail-closed deny paths)
+        run: python3 tests/test_pre_token_lambda_deny_paths.py
+        # Exercises the ACTUAL Lambda handler extracted from auth-stack.ts and
+        # asserts it denies tokens for all four required deny paths:
+        #   1. Domain mismatch (not @teamexos.com)
+        #   2. Non-allowlisted user (not in legal-admin@example.com group)
+        #   3. Directory API unavailable → fail-closed (deny, not allow)
+        #   4. Unverified email
+        # A fail-open regression in the handler would cause this step to exit
+        # non-zero and block merge before it reaches main.
+        # See: https://github.com/contract-opf/contract-toaster/issues/53

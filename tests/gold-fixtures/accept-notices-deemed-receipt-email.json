@@ -1,0 +1,19 @@
+{
+  "case_id": "accept-notices-deemed-receipt-email",
+  "description": "Counterparty proposes a deemed-receipt rule for email notice. This is a listed acceptable_variation in the notices topic ('3 business days deemed receipt'); no hard_rejection rule applies to the notices topic today, so there is no detector to hook, but this exercises the ACCEPT / acceptable_variation gold-case category per issue #183.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "notices",
+    "inserted_hunk": "Notice given by email shall be deemed received 3 business days after transmission, provided no bounce-back or delivery-failure notification is received by the sender.",
+    "notes": "Matches acceptable_variation 'Counterparty proposes a deemed-receipt rule for email' -> '3 business days deemed receipt'."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

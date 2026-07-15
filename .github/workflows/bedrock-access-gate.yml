@@ -1,0 +1,69 @@
+# Bedrock access CI gate (issue #56)
+#
+# Asserts that the model-policy artifact and architecture documentation satisfy
+# the Bedrock access acceptance criteria from issue #56:
+#
+#   AC1 – Model-policy artifact is complete: primary/critic/embedding model IDs
+#          and roles, region, request_contract (omit_sampling_params +
+#          extended_thinking), and cost assumptions all present.
+#   AC2 – No prefixed inference-profile model IDs in config: every model_id is
+#          single-region native (no global. / us. / eu. / apac. prefix);
+#          every model entry declares inference_type=single-region-native.
+#   AC3 – ARCHITECTURE.md documents the inference-profile prohibition, states
+#          that a config check rejects prefixed IDs, and documents embedding-model
+#          change governance (admin/GC approval + new corpus_snapshot_version).
+#   AC4 – Artifact is deterministically hashable (SHA-256 stable across loads);
+#          ARCHITECTURE.md references model_policy_hash as a release-bundle
+#          component.
+#   AC5 – Artifact carries a 'recertification' block with gold_set_run_id
+#          (the eval gate required by the issue AC).
+#
+# No model invocation, no AWS credentials required — static analysis only.
+# Runs on every PR or push to main that touches the relevant files.
+
+name: Bedrock access gate
+
+on:
+  pull_request:
+    paths:
+      - 'model-policy/**'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_bedrock_access.py'
+      - '.github/workflows/bedrock-access-gate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'model-policy/**'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_bedrock_access.py'
+      - '.github/workflows/bedrock-access-gate.yml'
+
+jobs:
+  bedrock-access-gate:
+    name: Bedrock access model-policy gate (inference-profile prohibition + eval gate)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Bedrock access model-policy checks
+        run: python3 tests/test_bedrock_access.py
+        # Fails if any of the five model-policy invariants are violated:
+        #   AC1 – required fields missing from model-policy artifact
+        #   AC2 – a model_id uses a prohibited cross-region inference-profile prefix
+        #          (global. / us. / eu. / apac.) or inference_type is not
+        #          single-region-native
+        #   AC3 – ARCHITECTURE.md missing inference-profile prohibition documentation
+        #          or embedding-model change governance
+        #   AC4 – artifact not deterministically hashable, or model_policy_hash absent
+        #          from ARCHITECTURE.md release-bundle documentation
+        #   AC5 – recertification block missing or lacks gold_set_run_id eval gate
+        # See tests/test_bedrock_access.py for full specification.
+        # See: https://github.com/contract-opf/contract-toaster/issues/56

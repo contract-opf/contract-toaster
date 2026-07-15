@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-preserved-consequential-damages-waiver",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty reformats Section 8 but KEEPS the 'consequential damages' waiver verbatim (and, as a sibling, keeps '$150,000'/'aggregate liability' intact too, so this fixture does not accidentally trip 'preserve-liability-cap'). Must ACCEPT with zero fires on 'preserve-consequential-damages-waiver'.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "limitation-of-liability",
+      "rule_id": "preserve-consequential-damages-waiver",
+      "reason": "A cosmetic reformat that verbatim-preserves 'consequential damages' must not fire the token-removal Floor rule."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "limitation-of-liability",
+    "altered_hunk": "Section 8 is reformatted for readability: neither party shall be liable to the other for any indirect, incidental, special, or consequential damages arising out of this Agreement, and each party's aggregate liability shall not exceed $150,000.",
+    "notes": "Near-miss: cosmetic reformat; retains required_token 'consequential damages' and the sibling tokens '$150,000'/'aggregate liability'."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-consequential-damages-waiver",
+    "expected_result": "no_fire",
+    "rationale": "Altered hunk retains required_token 'consequential damages'; token_policy='any' does not fire when nothing required is missing."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

@@ -1,0 +1,18 @@
+{
+  "description": "The counterparty's own tracked changes are already ACCEPTED (w:ins/w:del artifacts remain in the OOXML as history but every revision has accepted=true). Documented rule: accept the counterparty's own accepted changes -- the resulting clause text is unambiguous, so this normalizes cleanly.",
+  "paragraphs": [
+    {
+      "heading": "Limitation on Liability",
+      "text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+      "revisions": [
+        {
+          "type": "tracked_change",
+          "status": "accepted",
+          "author": "counterparty",
+          "original_text": "Each party's aggregate liability under this Agreement shall not exceed $100,000.",
+          "resulting_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "description": "Structurally irreconcilable input: a tracked-change deletion with no matching resolution and a malformed revision record (missing resulting_text), simulating corrupt OOXML revision structure that cannot be normalized to an unambiguous body. Must fail closed to reason=unnormalizable_input.",
+  "paragraphs": [
+    {
+      "heading": "Limitation on Liability",
+      "text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+      "revisions": [
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "unknown",
+          "original_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+        },
+        {
+          "type": "comment",
+          "status": "open",
+          "content": "Is this cap still correct? -- unresolved reviewer comment on operative clause text"
+        }
+      ]
+    }
+  ]
+}

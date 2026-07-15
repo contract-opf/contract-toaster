@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-including-without-limitation",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty uses common boilerplate 'including without limitation', which superficially resembles 'no-uncapped-liability's trigger phrase 'without limit' but does not match it under word_boundary matching ('limitation' != 'limit' at a word boundary). Must ACCEPT with zero fires.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "confidentiality",
+      "rule_id": "no-uncapped-liability",
+      "reason": "'including without limitation' does not contain the word-bounded phrase 'without limit'; standard boilerplate, must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "confidentiality",
+    "inserted_hunk": "Confidential Information obligations survive termination, and the non-breaching party may pursue all remedies available at law or in equity, including without limitation injunctive relief.",
+    "notes": "Near-miss: 'without limitation' does not satisfy the word-boundary match for trigger_term 'without limit' ('limit' is not followed by a word boundary inside 'limitation')."
+  },
+  "detector_expectation": {
+    "rule_id": "no-uncapped-liability",
+    "expected_result": "no_fire",
+    "rationale": "None of trigger_terms ['uncapped', 'unlimited liability', 'no cap on liability', 'shall not be limited', 'without limit'] match; 'without limitation' fails the word-boundary check for 'without limit'."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

@@ -1,0 +1,81 @@
+# Split API role + scoped download auth + WAF structural gate (issue #71)
+#
+# Runs on every PR or push that touches the app stack, WAF stack, root stack,
+# or related docs so the security AC for issue #71 stay green.
+#
+# Assertions (see tests/test_split_api_role_waf_download_auth.py for full docs):
+#   AC1 – Split API role: distinct policy SIDs per capability (upload, review-start,
+#          read-status, download); KMS encryption-context checks referenced in CDK
+#          sources and ARCHITECTURE.md.
+#   AC2 – Download authorization: presigned URL generated only after owner/admin
+#          check; Cache-Control: no-store; review IDs high-entropy and non-enumerable.
+#   AC3 – Document access audit: non-substantive audit rows for review-detail reads,
+#          download attempts, presigned URL issuance, stream completion, and denials.
+#   AC4 – WAF + abuse limits: WAF (wafv2 WebACL) in CDK infra; request-size caps;
+#          rate limits on upload and polling endpoints; per-user concurrency/daily limits
+#          in docs/threat-model.md and ARCHITECTURE.md.
+#   AC5 – Test scenarios documented: non-owner download rejection, expired presigned
+#          URL failure, per-user limit rejection.
+
+name: split-api-role-waf-gate
+
+on:
+  pull_request:
+    paths:
+      - 'infra/lib/nested/app-stack.ts'
+      - 'infra/lib/nested/waf-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'infra/package.json'
+      - 'infra/tsconfig.json'
+      - 'ARCHITECTURE.md'
+      - 'docs/threat-model.md'
+      - 'docs/phase-0-issues.md'
+      - 'tests/test_split_api_role_waf_download_auth.py'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/lib/nested/app-stack.ts'
+      - 'infra/lib/nested/waf-stack.ts'
+      - 'infra/lib/contract-toaster-stack.ts'
+      - 'infra/bin/contract-toaster.ts'
+      - 'infra/cdk.json'
+      - 'ARCHITECTURE.md'
+      - 'docs/threat-model.md'
+      - 'docs/phase-0-issues.md'
+      - 'tests/test_split_api_role_waf_download_auth.py'
+
+jobs:
+  split-api-role-waf-gate:
+    name: Split API role + WAF structural gate (issue #71)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install CDK dependencies
+        run: npm install
+        working-directory: infra
+
+      - name: Run split API role + WAF structural gate
+        run: python3 tests/test_split_api_role_waf_download_auth.py
+        # Verifies all issue #71 acceptance criteria:
+        # - Split API role: distinct policy SIDs, KMS encryption-context in CDK and docs.
+        # - Download authorization: presigned URL + owner/admin check + Cache-Control +
+        #   non-enumerable review IDs.
+        # - Document access audit: non-substantive rows, no doc/model substance.
+        # - WAF + abuse limits: wafv2 WebACL in CDK infra, rate limits, per-user limits.
+        # - Test scenarios: non-owner rejection, expired URL, limit exceeded.
+        # See: https://github.com/contract-opf/contract-toaster/issues/71

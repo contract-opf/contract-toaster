@@ -1,0 +1,112 @@
+# DTS deployment (Docker Compose) — the parallel, non-AWS target.
+#
+# Storage:  S3 -> MinIO, DynamoDB -> DynamoDB-Local (both durable via volumes).
+# Model:    OpenRouter (direct API key). Phase 1 runs the MOCK pipeline, so the
+#           key is not exercised until Phase 2 wires the real chain.
+# Auth:     username/password (demo mode). Seeded admin/admin, user/user.
+# Pipeline: in-process (PIPELINE_RUNNER=inprocess), no Step Functions.
+#
+# Bring up:  docker compose -f deploy/dts/docker-compose.yml --env-file deploy/dts/.env up --build
+# See deploy/dts/README.md#downloads-presigned-urls--no-host-setup-required
+# (downloads are presigned against S3_PUBLIC_ENDPOINT_URL below; zero
+# /etc/hosts edits required — no host-file setup for downloads).
+
+x-aws-emulator-env: &aws-emulator-env
+  AWS_REGION: us-east-1
+  # MinIO/DDB-Local accept any non-empty credentials; these must match MinIO's
+  # root user/password below. Present in env, so config.boto3_client_kwargs uses
+  # them (not its dummy fallback).
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: localsecret
+  S3_ENDPOINT_URL: http://minio:9000
+  DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
+
+x-resource-names: &resource-names
+  USERS_TABLE: contract-toaster-users-dts
+  REVIEWS_TABLE: contract-toaster-reviews-dts
+  REVIEW_SUBMISSIONS_TABLE: contract-toaster-review-submissions-dts
+  DAILY_SPEND_TABLE: contract-toaster-daily-spend-dts
+  AUDIT_TABLE: contract-toaster-audit-dts
+  AUTH_SETTINGS_TABLE: contract-toaster-auth-settings-dts
+  PLAYBOOKS_TABLE: contract-toaster-playbooks-dts
+  PLAYBOOK_VERSIONS_TABLE: contract-toaster-playbook-versions-dts
+  RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
+  SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
+  UPLOADS_BUCKET: contract-toaster-uploads-dts
+  OUTPUTS_BUCKET: contract-toaster-outputs-dts
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.5.2
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/data"]
+    working_dir: /home/dynamodblocal
+    volumes:
+      - ddb-data:/data
+    ports:
+      - "8000:8000"
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: local
+      MINIO_ROOT_PASSWORD: localsecret
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # S3 API (browser must reach this for presigned downloads)
+      - "9001:9001"   # console
+
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/dts/backend.Dockerfile
+    command: ["python3", "/app/deploy/dts/bootstrap.py"]
+    working_dir: /app
+    environment:
+      <<: [*aws-emulator-env, *resource-names]
+    depends_on:
+      dynamodb-local:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: "no"
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/dts/backend.Dockerfile
+    environment:
+      <<: [*aws-emulator-env, *resource-names]
+      DEPLOY_TARGET: dts
+      MODEL_PROVIDER: openrouter
+      AUTH_MODE: password
+      PIPELINE_RUNNER: inprocess
+      STATE_MACHINE_ARN: "inprocess:contract-toaster-dts"
+      # Presigned download URLs are host-bound (issue #273): the backend's
+      # other S3 calls use S3_ENDPOINT_URL (the compose-internal `minio`
+      # DNS name, unresolvable from a browser on the host), but downloads
+      # must be signed for a host-reachable endpoint instead. Port 9000 is
+      # published to the host above, so localhost:9000 reaches the same
+      # MinIO. Zero /etc/hosts edits required.
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      DEMO_TOKEN_SECRET: ${DEMO_TOKEN_SECRET:?set DEMO_TOKEN_SECRET in deploy/dts/.env}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deploy/dts/frontend.Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8081:8080"
+
+volumes:
+  ddb-data:
+  minio-data:

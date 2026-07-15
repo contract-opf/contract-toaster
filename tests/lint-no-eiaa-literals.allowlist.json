@@ -1,0 +1,7 @@
+{
+  "scripts/gen_mock_eiaa_redline_fixture.py": "Fixture generator (data tooling) that writes the eiaa mock-output docx the DTS mock pipeline copies as its canned redline; the literal names the artifact being generated, not a playbook_id resolution/comparison.",
+  "scripts/generate_gold_fixtures.py": "Fixture generator; its only 'eiaa' mention is in the module docstring (already exempt as a docstring) -- listed here defensively per issue #289's ticket text.",
+  "scripts/generate_synthetic_standard_form.py": "Fixture generator (data tooling) that synthesizes the placeholder eiaa standard-form .docx (issue #200); the literal names the specific artifact/output file, not a playbook_id comparison.",
+  "scripts/canonicalize.py": "Golden-hash fixture recorder (--record flag, _record_golden_hash()): the 'eiaa playbook' description text and playbook_path key describe which artifact was hashed in the recorded fixture, not a resolution-path literal. Not one of issue #289's five spots.",
+  "scripts/docs-lint.py": "Standalone docs-consistency checker hardcoded to audit the eiaa playbook's claims against ARCHITECTURE.md/docs/*; a doc-audit tool over one fixed target file, not part of the reviewable-playbook resolution path. Not one of issue #289's five spots."
+}

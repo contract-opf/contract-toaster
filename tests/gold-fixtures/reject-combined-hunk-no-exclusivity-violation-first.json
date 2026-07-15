@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-combined-hunk-no-exclusivity-violation-first",
+  "description": "Issue #212 adversarial planted case: same combined-hunk bypass as reject-combined-hunk-no-exclusivity-exempt-first, with the order reversed -- the non-exempt 'Institution shall be the exclusive provider' violation comes FIRST, and the exempt phrase 'non-exclusive' comes SECOND in the same hunk. Verifies span-level exemption is order-independent.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "exclusivity",
+      "section_ref": "Counterparty introduces exclusivity in either direction.",
+      "is_hard_rejection": true,
+      "rule_id": "no-exclusivity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "exclusivity",
+    "inserted_hunk": "Institution shall be the exclusive provider of interns to Exos nationwide. This Agreement is non-exclusive as to placements in Arizona.",
+    "notes": "Issue #212 repro (order: violation first, exempt phrase second). Confirms the fix is order-independent -- 'the exclusive provider' span is not inside the 'non-exclusive' exempt span regardless of which sentence comes first in the hunk."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exclusivity",
+    "expected_result": "fire",
+    "rationale": "Span-level exemption is order-independent: 'the exclusive provider of interns to Exos nationwide' is a separate, non-exempt span from 'non-exclusive' regardless of sentence order, and must fire no-exclusivity via the 'exclusive' trigger_term."
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "_comment": [
+    "Model-policy artifact for the DTS (Docker Compose) deployment target.",
+    "",
+    "The DTS deployment calls a direct model provider (OpenRouter, an",
+    "OpenAI-compatible API) instead of AWS Bedrock. This file is the DTS",
+    "counterpart of bedrock-us-east-1.json: it pins the model matrix and the",
+    "per-token pricing used by the spend model. It is NOT scanned by the",
+    "Bedrock-access CI gate (that gate targets bedrock-us-east-1.json only) —",
+    "OpenRouter model IDs use the provider/model form (e.g. anthropic/...)",
+    "and the single-region-native-inference residency check does not apply.",
+    "",
+    "There is no AWS regional pricing premium here: OpenRouter pricing is",
+    "flat/all-in per token.",
+    "",
+    "Model matrix parity (issue #269): this file's primary/critic model_ids",
+    "must agree with model-policy/bedrock-us-east-1.json on role structure",
+    "and model family/generation per role (Opus-class primary, Sonnet-class",
+    "critic — see README.md's pinned matrix), allowing only provider-specific",
+    "ID syntax to differ (e.g. \"anthropic.claude-opus-4-8\" vs",
+    "\"anthropic/claude-opus-4.8\"). tests/lint-model-policy-consistency.py",
+    "is the CI gate that enforces this; keep both files in lockstep.",
+    "",
+    "SOURCE NOTE (issue #269, verified 2026-07-13 against",
+    "https://openrouter.ai/anthropic/claude-opus-4.8 and",
+    "https://openrouter.ai/anthropic/claude-sonnet-4.6): model_id values and",
+    "cost_per_million_* rates below reflect OpenRouter's current listing for",
+    "Claude Opus 4.8 ($5.00 / $25.00 per million input/output tokens) and",
+    "Claude Sonnet 4.6 ($3.00 / $15.00 per million input/output tokens).",
+    "Re-verify against https://openrouter.ai/models before production use if",
+    "this file has aged past the pinned matrix's last update.",
+    "The model IDs may also be overridden per-deployment via the env vars",
+    "OPENROUTER_PRIMARY_MODEL_ID / OPENROUTER_CRITIC_MODEL_ID — an override",
+    "is honored by OpenRouterModelClient.invoke() but logged as an explicit",
+    "override (backend/src/model_client.py::enforce_openrouter_policy_model_id)."
+  ],
+  "schema_version": "1",
+  "provider": "openrouter",
+  "base_url": "https://openrouter.ai/api/v1",
+  "models": {
+    "primary": {
+      "role": "primary_reviewer",
+      "model_id": "anthropic/claude-opus-4.8",
+      "approx_tokens_per_review_input": 60000,
+      "approx_tokens_per_review_output": 8000,
+      "cost_per_million_input_usd": 5.00,
+      "cost_per_million_output_usd": 25.00,
+      "request_contract": {
+        "omit_sampling_params": ["temperature", "top_p", "top_k"]
+      }
+    },
+    "critic": {
+      "role": "adversarial_critic",
+      "model_id": "anthropic/claude-sonnet-4.6",
+      "approx_tokens_per_review_input": 70000,
+      "approx_tokens_per_review_output": 5000,
+      "cost_per_million_input_usd": 3.00,
+      "cost_per_million_output_usd": 15.00,
+      "request_contract": {
+        "omit_sampling_params": ["temperature", "top_p", "top_k"]
+      }
+    }
+  }
+}

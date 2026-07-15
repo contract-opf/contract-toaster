@@ -1,0 +1,30 @@
+{
+  "case_id": "accept-confidentiality-destruction-timeline",
+  "description": "Counterparty specifies a destruction timeline for Confidential Information. This is a listed acceptable_variation in the confidentiality topic ('30 to 90 days after termination'); this hunk also intentionally avoids no-uncapped-liability's trigger vocabulary since that rule also applies to the confidentiality topic.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "confidentiality",
+      "rule_id": "no-uncapped-liability",
+      "reason": "A destruction-timeline clause contains none of no-uncapped-liability's trigger vocabulary even though the rule also applies to this topic; must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "confidentiality",
+    "inserted_hunk": "Confidential Information shall be destroyed or returned within 60 days following termination of this Agreement, upon the disclosing party's written request.",
+    "notes": "Matches acceptable_variation 'Counterparty specifies a destruction timeline' -> '30 to 90 days after termination'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-uncapped-liability",
+    "expected_result": "no_fire",
+    "rationale": "Hunk contains none of trigger_terms ['uncapped', 'unlimited liability', 'no cap on liability', 'shall not be limited', 'without limit']."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

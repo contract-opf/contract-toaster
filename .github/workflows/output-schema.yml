@@ -1,0 +1,102 @@
+# Output-contract schema gate (issue #4, extended by issues #35 and #36)
+#
+# Enforces checks on every change to the output schema, playbooks, or related docs:
+#
+#   1. SUBSET CHECK: output_format.every_issue_includes ⊆ properties of
+#      playbooks/output-schema-v1.json issues[]. Prevents the validator from
+#      drifting from the playbook's declared output contract.
+#
+#   2. BUNDLE-COMPOSITION CHECK: playbooks/schema.json release block requires
+#      output_contract_hash. Ensures the output schema is content-addressed in
+#      every release bundle, so a response-shape change is governed by the same
+#      legal-approval gate as a prompt or playbook change.
+#
+#   3. VALIDATOR UNIT TESTS: valid/invalid model-response fixtures are tested
+#      against output-schema-v1.json. Guards against schema regressions.
+#
+#   4. PROVENANCE AND CONFIDENCE-BAND GATE (issue #35): every Issue in the schema
+#      carries a required `provenance` field (model | critic-added | detector:<rule_id>)
+#      and the root carries an optional `confidence_band` field; both are framed as
+#      system metadata (never a legal category). Invalid provenance values are rejected.
+#
+#   5. CRITIC-DELTA PRESENTATION GATE (issue #36): docs/output-contract.md carries a
+#      normative 'Critic-delta presentation' section specifying per-issue badges for
+#      contested replacements, side-by-side alternatives, critic-added attribution, and
+#      the download gate rule. ARCHITECTURE.md frontend section references the surface.
+#      CriticDelta schema has both contested_replacements and added_issues with
+#      critic_objection for badge text.
+#
+# No model invocation, no AWS credentials required.
+# See docs/output-contract.md for the coupling rules.
+
+name: Output-contract schema gate
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "playbooks/**"
+      - "docs/output-contract.md"
+      - "ARCHITECTURE.md"
+      - "tests/test_output_schema.py"
+      - "tests/test_provenance_confidence_band.py"
+      - "tests/test_critic_delta_presentation.py"
+      - ".github/workflows/output-schema.yml"
+  pull_request:
+    paths:
+      - "playbooks/**"
+      - "docs/output-contract.md"
+      - "ARCHITECTURE.md"
+      - "tests/test_output_schema.py"
+      - "tests/test_provenance_confidence_band.py"
+      - "tests/test_critic_delta_presentation.py"
+      - ".github/workflows/output-schema.yml"
+
+jobs:
+  output-schema-gate:
+    name: Output-contract schema gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed — the tests use only the stdlib.
+
+      - name: Output-contract schema checks
+        # Fails if any of:
+        #   - playbooks/output-schema-v1.json does not exist
+        #   - every_issue_includes fields are not all properties of issues[] in the schema
+        #   - output_contract_hash is not in the release block's required fields
+        #   - valid model-response fixture fails schema validation
+        #   - invalid model-response fixture passes schema validation
+        # A failed check blocks merge.
+        run: python3 tests/test_output_schema.py
+
+      - name: Provenance and confidence-band schema gate (issue #35)
+        # Fails if any of:
+        #   - 'provenance' is not a required field in Issue in output-schema-v1.json
+        #   - 'confidence_band' is not present as a top-level property
+        #   - provenance or confidence_band description lacks system-metadata framing
+        #   - fixtures with valid provenance values fail validation
+        #   - fixtures with invalid provenance values (empty, unknown, detector:) pass
+        # A failed check blocks merge.
+        run: python3 tests/test_provenance_confidence_band.py
+
+      - name: Critic-delta presentation surface gate (issue #36)
+        # Fails if any of:
+        #   - docs/output-contract.md does not contain a normative
+        #     'Critic-delta presentation' section
+        #   - the section omits the per-issue badge spec, side-by-side alternatives,
+        #     critic-added attribution, or the download gate rule
+        #   - ARCHITECTURE.md frontend section does not reference critic-delta presentation
+        #   - CriticDelta in output-schema-v1.json is missing contested_replacements,
+        #     added_issues, or critic_objection on contested_replacements items
+        # A failed check blocks merge.
+        run: python3 tests/test_critic_delta_presentation.py

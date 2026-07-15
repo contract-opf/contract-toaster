@@ -1,0 +1,27 @@
+{
+  "case_id": "reject-one-way-exos-will-indemnify",
+  "description": "D2 planted case: counterparty inserts a one-way indemnification obligation on Exos using 'Exos will indemnify Institution' — a variant that escaped the prior 'exos shall indemnif' regex trigger. Must fire no-exos-indemnity and result in REQUEST_CHANGE. Verifies the broadened trigger covers 'will/must/agrees to indemnify' phrasings.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "indemnification",
+      "section_ref": "[absent] Indemnification",
+      "is_hard_rejection": true,
+      "rule_id": "no-exos-indemnity"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "indemnification",
+    "inserted_hunk": "Exos will indemnify, defend, and hold harmless Institution from and against any and all claims, damages, losses, and expenses arising out of or related to the services provided by Exos personnel under this Agreement.",
+    "notes": "One-way Exos indemnification using 'will indemnify' phrasing. This variant escaped the prior 'exos shall indemnif' regex trigger. The broadened trigger 'exos\\s+(shall|will|must|agrees?\\s+to)\\b[^.]{0,40}indemnif' must fire here."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exos-indemnity",
+    "expected_result": "fire",
+    "rationale": "One-way Exos indemnification phrased as 'Exos will indemnify ... Institution' must fire the no-exos-indemnity rule via the broadened regex trigger covering 'will indemnify' variants. The exempt terms 'mutual hold harmless' and 'hold harmless the other party' are absent, and this is not a mutual/capped formulation."
+  }
+}

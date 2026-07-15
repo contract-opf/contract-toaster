@@ -1,0 +1,77 @@
+# Standard-form diff gate (deterministic; no model invocation, no AWS credentials).
+#
+# Issue #64 (BLOCKING GATE): "Standard-form storage + deterministic diff".
+#
+# The review cannot soundly judge a draft without comparing it to the canonical
+# Exos standard form. This gate proves scripts/diff_standard_form.py exists,
+# produces the SAME diff for the SAME inputs (determinism), and anchors every
+# hunk correctly:
+#   - unchanged/modified/deleted hunks resolve to a real standard-form section
+#     anchor and carry a source_text_hash the redline-patching path (issue #17)
+#     can rely on.
+#   - a wholly new inserted section (no matching standard-form heading) is
+#     anchored to the reserved pseudo-anchor sec-_new (issue #1), never to a
+#     deleted/unmodified hunk.
+#
+# This is also picked up by the full Python test suite in ci-pipeline.yml
+# (tests/*/test_*.py glob); this dedicated workflow exists so a BLOCKING GATE
+# issue gets its own clearly-labeled, independently-runnable check, matching
+# the anchor-map-gates.yml / detector-correctness.yml convention for the other
+# blocking-gate issues (#1, #3, #18).
+#
+# See:
+#   ARCHITECTURE.md § "Standard-form comparison"
+#   docs/phase-0-issues.md item 16
+
+name: Standard-form diff gate
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "scripts/diff_standard_form.py"
+      - "scripts/build_anchor_map.py"
+      - "standard-forms/**"
+      - "playbooks/**"
+      - "tests/diff/**"
+      - ".github/workflows/standard-form-diff-gate.yml"
+  pull_request:
+    paths:
+      - "scripts/diff_standard_form.py"
+      - "scripts/build_anchor_map.py"
+      - "standard-forms/**"
+      - "playbooks/**"
+      - "tests/diff/**"
+      - ".github/workflows/standard-form-diff-gate.yml"
+
+jobs:
+  standard-form-diff-gate:
+    name: Deterministic standard-form diff gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed — synthetic mode uses only the stdlib.
+      # (Real .docx mode requires python-docx; not exercised by this gate.)
+
+      - name: Deterministic diff generator gate
+        # Fails if:
+        #   - scripts/diff_standard_form.py is missing or fails to import
+        #   - a verbatim draft does not diff to all-"unchanged" hunks
+        #   - a sec-8 modification does not produce a deleted/modified hunk
+        #     carrying a source_text_hash
+        #   - a wholly new inserted section is not anchored to sec-_new
+        #   - sec-_new is assigned to a deleted/unchanged hunk
+        #   - running the diff twice on identical inputs produces different
+        #     serialized output or a different diff_hash
+        #   - any hunk anchor fails to resolve to a real standard-form section
+        #     (other than the sec-_new pseudo-anchor)
+        run: python3 tests/diff/test_deterministic_diff.py

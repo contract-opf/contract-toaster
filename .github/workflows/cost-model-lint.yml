@@ -1,0 +1,61 @@
+# Cost-model invariants CI gate (issue #14)
+#
+# Asserts that the cost model in ARCHITECTURE.md Cost shape and
+# docs/design-notes.md satisfies six invariants introduced by issue #14:
+#
+#   1 – max_input_tokens, max_output_tokens, max_retries_per_pass are named
+#       in ARCHITECTURE.md Cost shape
+#   2 – The reservation formula is retry-inclusive (references max_retries_per_pass)
+#   3 – A unit-economics table is present (worst-case $/review, max reviews/day,
+#       typical $/review, dev idle with fixed costs, prod monthly target)
+#   4 – The leakage-scan mechanism is stated (deterministic or model-based)
+#   5 – The pricing contradiction in design-notes.md is resolved
+#   6 – A cap-lockout runbook entry exists in RUNBOOK.md
+#
+# Runs on every PR or push to main that touches the relevant files.
+# No model invocation, no AWS credentials required.
+
+name: Cost-model lint
+
+on:
+  pull_request:
+    paths:
+      - 'ARCHITECTURE.md'
+      - 'docs/design-notes.md'
+      - 'RUNBOOK.md'
+      - 'tests/test_cost_model_invariants.py'
+      - '.github/workflows/cost-model-lint.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'ARCHITECTURE.md'
+      - 'docs/design-notes.md'
+      - 'RUNBOOK.md'
+      - 'tests/test_cost_model_invariants.py'
+      - '.github/workflows/cost-model-lint.yml'
+
+jobs:
+  cost-model-lint:
+    name: Cost-model invariants (token caps / reservation / unit economics)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run cost-model invariant checks
+        run: python3 tests/test_cost_model_invariants.py
+        # Fails if any of the six cost-model invariants are violated:
+        #   - Token caps absent from Cost shape
+        #   - Reservation formula not retry-inclusive
+        #   - Unit-economics table missing required elements
+        #   - Leakage-scan mechanism undocumented
+        #   - Pricing contradiction present in design-notes.md
+        #   - Cap-lockout runbook entry absent
+        # See tests/test_cost_model_invariants.py for full documentation.

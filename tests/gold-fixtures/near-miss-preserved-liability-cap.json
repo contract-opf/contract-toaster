@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-preserved-liability-cap",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty reformats/renumbers Section 8 but KEEPS the '$150,000' cap and 'aggregate liability' language verbatim (and, as a sibling, keeps 'consequential damages' intact too, so this fixture does not accidentally trip 'preserve-consequential-damages-waiver'). Must ACCEPT with zero fires on 'preserve-liability-cap'.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "limitation-of-liability",
+      "rule_id": "preserve-liability-cap",
+      "reason": "A cosmetic renumber/restate that verbatim-preserves '$150,000' and 'aggregate liability' must not fire the token-removal Floor rule."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "limitation-of-liability",
+    "altered_hunk": "Section 8 is restated for clarity and renumbered as Section 8.1: each party's aggregate liability under this Agreement shall not exceed $150,000 in the aggregate, and neither party shall be liable for consequential damages of any kind.",
+    "notes": "Near-miss: cosmetic renumber/restate; retains both required_tokens ['$150,000', 'aggregate liability'] and the sibling token 'consequential damages'."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-liability-cap",
+    "expected_result": "no_fire",
+    "rationale": "Altered hunk retains all of required_tokens ['$150,000', 'aggregate liability']; token_policy='any' does not fire when nothing required is missing."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

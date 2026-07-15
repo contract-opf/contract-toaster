@@ -1,0 +1,113 @@
+# Labels for contract-toaster
+#
+# Apply via `gh label create` or a labeler action. This file is the source of
+# truth; reconcile periodically. Keep the set small and opinionated.
+
+# ---------- Phase ----------
+- name: "phase:0-foundation"
+  color: "0E8A16"
+  description: "Phase 0 — repo, CDK skeleton, auth, smoke test"
+
+- name: "phase:1-playbook"
+  color: "0E8A16"
+  description: "Phase 1 — playbook CRUD, versioning, diff, revert"
+
+- name: "phase:2-review-path"
+  color: "0E8A16"
+  description: "Phase 2 — single-file upload/review/download"
+
+- name: "phase:3-rag"
+  color: "0E8A16"
+  description: "Phase 3 — corpus ingestion and retrieval"
+
+- name: "phase:4-admin"
+  color: "0E8A16"
+  description: "Phase 4 — admin dashboards, audit UI, cost rollup"
+
+- name: "phase:5-cutover"
+  color: "0E8A16"
+  description: "Phase 5 — custom domain, runbook, production readiness"
+
+# ---------- Area ----------
+- name: "area:infra"
+  color: "1D76DB"
+  description: "AWS CDK, IAM, networking, deploy"
+
+- name: "area:backend"
+  color: "1D76DB"
+  description: "App Runner service, FastAPI, Python"
+
+- name: "area:frontend"
+  color: "1D76DB"
+  description: "React SPA on Amplify"
+
+- name: "area:playbook"
+  color: "1D76DB"
+  description: "Playbook content, schema, version management"
+
+- name: "area:llm"
+  color: "1D76DB"
+  description: "Bedrock, prompts, model interaction"
+
+- name: "area:rag"
+  color: "1D76DB"
+  description: "Corpus ingestion, embeddings, retrieval"
+
+- name: "area:audit"
+  color: "1D76DB"
+  description: "Audit log, CloudTrail, compliance posture"
+
+- name: "area:docs"
+  color: "1D76DB"
+  description: "README, architecture, runbook, design notes"
+
+# ---------- Type ----------
+- name: "type:feature"
+  color: "A2EEEF"
+  description: "New capability"
+
+- name: "type:bug"
+  color: "D93F0B"
+  description: "Something is wrong"
+
+- name: "type:chore"
+  color: "FBCA04"
+  description: "Maintenance, dependencies, cleanup"
+
+- name: "type:spike"
+  color: "5319E7"
+  description: "Time-boxed investigation; output is a write-up, not code"
+
+- name: "type:security"
+  color: "B60205"
+  description: "Security-relevant change"
+
+# ---------- Priority ----------
+- name: "priority:p0"
+  color: "B60205"
+  description: "Drop everything"
+
+- name: "priority:p1"
+  color: "D93F0B"
+  description: "Do this sprint"
+
+- name: "priority:p2"
+  color: "FBCA04"
+  description: "Backlog"
+
+# ---------- Process ----------
+- name: "legal-review-required"
+  color: "5319E7"
+  description: "Touches playbook, schema, prompt, or legal-facing logic"
+
+- name: "blocked"
+  color: "000000"
+  description: "Blocked on something external"
+
+- name: "good-first-issue"
+  color: "7057FF"
+  description: "Reasonable entry point for a new contributor"
+
+- name: "needs-discussion"
+  color: "CCCCCC"
+  description: "Not ready to start; design discussion needed first"

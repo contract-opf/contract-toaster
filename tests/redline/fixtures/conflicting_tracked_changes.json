@@ -1,0 +1,25 @@
+{
+  "description": "STILL-FAIL-CLOSED (issue #199): the paragraph carries TWO pending (unresolved) tracked-change revisions from two DIFFERENT authors -- multiple revision authors interleaved on the same clause text. This is one of the genuinely-ambiguous structures issue #199 reserves fail-closed for: the pipeline cannot silently decide which author's pending edit (or what composition/order of both) is operative, unlike the single-pending-revision accept-all case. Must fail closed to reason=unnormalizable_input.",
+  "paragraphs": [
+    {
+      "heading": "Limitation on Liability",
+      "text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+      "revisions": [
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "counterparty",
+          "original_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+          "resulting_text": "Each party's liability under this Agreement shall be uncapped."
+        },
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "counterparty_second_reviewer",
+          "original_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+          "resulting_text": "Each party's aggregate liability under this Agreement shall not exceed $250,000."
+        }
+      ]
+    }
+  ]
+}

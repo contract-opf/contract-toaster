@@ -1,0 +1,50 @@
+# CODEOWNERS coverage gate (issue #10)
+#
+# Asserts that every legal-behavior file/path-set is protected by an
+# @exos-legal/gc rule in .github/CODEOWNERS.  Runs on every PR and on
+# every push to main so future additions cannot silently fall to the
+# engineering-only default rule.
+#
+# Covered path-sets:
+#   docs/playbook-governance.md  — rules for playbook activation
+#   docs/output-contract.md      — external framing and citation rules
+#   docs/audit-queries.md        — audit semantics
+#   tests/gold-fixtures/**       — gold fixtures (expected_decision / expected_issues)
+#
+# To add a new legal-behavior path: add the pattern to .github/CODEOWNERS
+# under the @exos-legal/gc block AND update the REQUIRED_GC_PATHS list in
+# tests/test_codeowners_coverage.py.
+
+name: codeowners-coverage
+
+on:
+  pull_request:
+    paths:
+      - '.github/CODEOWNERS'
+      - 'tests/test_codeowners_coverage.py'
+      - 'docs/**'
+      - 'tests/gold-fixtures/**'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/CODEOWNERS'
+      - 'tests/test_codeowners_coverage.py'
+      - 'docs/**'
+      - 'tests/gold-fixtures/**'
+
+jobs:
+  codeowners-coverage:
+    name: CODEOWNERS GC coverage assertion
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Assert GC coverage of legal-behavior paths
+        run: python3 tests/test_codeowners_coverage.py

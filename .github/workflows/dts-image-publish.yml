@@ -1,0 +1,66 @@
+# Publish the two DTS deploy images to GHCR.
+#
+# Manual-dispatch ONLY (workflow_dispatch, no push/PR trigger) — matches this
+# repo's "no auto-deploy; a human runs it deliberately" convention. Builds the
+# backend and frontend images from the deploy/dts/ Dockerfiles (repo-root
+# context) and pushes each as :latest and :<short-sha> to
+# ghcr.io/contract-opf/contract-toaster-dts-{backend,frontend}.
+#
+# Auth uses the built-in GITHUB_TOKEN (packages: write) — no extra secret. The
+# packages are created PRIVATE by default; flipping them to Public is a separate
+# deliberate step done outside this workflow.
+#
+# Runs on the self-hosted runner (vars.CI_RUNS_ON) while GitHub-hosted Actions
+# is unavailable; falls back to ubuntu-latest if the variable is unset. Uses the
+# plain docker CLI (no buildx/QEMU) to keep runner requirements minimal.
+
+name: Publish DTS images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build and push
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            dockerfile: deploy/dts/backend.Dockerfile
+          - component: frontend
+            dockerfile: deploy/dts/frontend.Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute image ref and short SHA
+        id: meta
+        run: |
+          echo "image=ghcr.io/contract-opf/contract-toaster-dts-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        run: |
+          docker build \
+            -f "${{ matrix.dockerfile }}" \
+            -t "${{ steps.meta.outputs.image }}:latest" \
+            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
+            .
+
+      - name: Push image (:latest and :<short-sha>)
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:latest"
+          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}"

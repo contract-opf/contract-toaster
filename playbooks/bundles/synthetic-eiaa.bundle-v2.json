@@ -1,0 +1,160 @@
+{
+  "activation": {
+    "approved_at": "2026-07-12T00:00:00Z",
+    "approved_by": "synthetic-fixture-author"
+  },
+  "bundle_schema_version": 2,
+  "lineage": {
+    "opf_content_hash": "sha256:e47269ad0f0dcf73ba0dd57c08223357704d00ae22c54cab22faf1e9e336af36",
+    "opf_section_digests": {
+      "evidence": "sha256:2fc639e2ab936a51f0234068aac1629ae4626afabd308d4bda45403065e70256",
+      "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd",
+      "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842"
+    }
+  },
+  "model_policy": {
+    "hash": "sha256:0088b2cb171949675bfcf3cfed2bc5f51f4c62869a7d2fd8d41b14ddf7418472",
+    "path": "model-policy/openrouter.json"
+  },
+  "opf": {
+    "agreement_type": {
+      "aliases": [
+        "eiaa"
+      ],
+      "description": "Synthetic fixture for issue #283 -- freshly authored, not copied from any engine example.",
+      "id": "educational-internship-affiliation",
+      "name": "Synthetic Educational Internship & Affiliation Agreement"
+    },
+    "baseline": {
+      "has_canonical_template": false
+    },
+    "compiler": {
+      "generated_at": "2026-07-12T00:00:00Z",
+      "name": "synthetic-fixture-author",
+      "version": "0.0.1"
+    },
+    "corpus": {
+      "documents": [
+        {
+          "document_id": "synthetic-doc-001",
+          "in_scope": true,
+          "provenance": "our_paper",
+          "title": "Synthetic Fixture Document 1"
+        },
+        {
+          "document_id": "synthetic-doc-002",
+          "in_scope": true,
+          "provenance": "counterparty_paper",
+          "title": "Synthetic Fixture Document 2"
+        }
+      ],
+      "stats": {
+        "document_count": 2
+      }
+    },
+    "evidence": {
+      "clauses": [
+        {
+          "id": "clause-liability-cap",
+          "observed_positions": [
+            {
+              "deviation": "none",
+              "example_ref": {
+                "clause_path": "5.2",
+                "document_id": "synthetic-doc-001",
+                "version": 1
+              },
+              "outcome": "signed",
+              "provenance": "our_paper",
+              "risk_delta": {
+                "direction": "neutral",
+                "magnitude": "none"
+              },
+              "text_summary": "Synthetic observation: liability capped at a fixed dollar amount stated in the agreement."
+            }
+          ],
+          "summary": {
+            "confidence": {
+              "score": 0.8
+            },
+            "historical_stance": "consistently_held"
+          },
+          "taxonomy_id": "liability_cap",
+          "title": "Liability Cap"
+        },
+        {
+          "id": "clause-termination",
+          "observed_positions": [
+            {
+              "deviation": "reworded_equivalent",
+              "example_ref": {
+                "clause_path": "9.1",
+                "document_id": "synthetic-doc-002",
+                "version": 1
+              },
+              "outcome": "signed",
+              "provenance": "counterparty_paper",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "minor"
+              },
+              "text_summary": "Synthetic observation: counterparty proposed a shortened notice period, later settled at 30 days."
+            }
+          ],
+          "summary": {
+            "confidence": {
+              "score": 0.5
+            },
+            "historical_stance": "mixed"
+          },
+          "taxonomy_id": "termination",
+          "title": "Termination for Convenience"
+        }
+      ]
+    },
+    "floor": {
+      "invariants": [
+        {
+          "id": "floor-no-uncapped-liability",
+          "rationale": "Synthetic placeholder rationale for demonstrating Floor invariant structure; not legal advice.",
+          "statement": "Our maximum liability under this agreement is a fixed dollar cap stated in the agreement; it is never unlimited or tied solely to a multiplier of fees paid."
+        },
+        {
+          "id": "floor-termination-notice",
+          "rationale": "Synthetic placeholder rationale for demonstrating Floor invariant structure; not legal advice.",
+          "statement": "Either party may terminate for convenience only with at least 30 days written notice."
+        }
+      ]
+    },
+    "identity": {
+      "content_hash": "sha256:e47269ad0f0dcf73ba0dd57c08223357704d00ae22c54cab22faf1e9e336af36",
+      "section_digests": {
+        "evidence": "sha256:2fc639e2ab936a51f0234068aac1629ae4626afabd308d4bda45403065e70256",
+        "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd",
+        "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842"
+      }
+    },
+    "opf_version": "0.2",
+    "posture": {
+      "system_prompt": "This is a synthetic posture for a fictional educational internship and affiliation agreement, authored only for test fixtures. It expresses no real party's negotiation intent. Treat all monetary and party details in this document as placeholders."
+    },
+    "taxonomy": {
+      "entries": [
+        {
+          "id": "liability_cap",
+          "label": "Liability Cap",
+          "status": "active"
+        },
+        {
+          "id": "termination",
+          "label": "Termination for Convenience",
+          "status": "active"
+        }
+      ],
+      "source": "synthetic-fixture"
+    }
+  },
+  "output_contract_version": "output-schema-v1",
+  "playbook_id": "eiaa",
+  "profile": "knowledge"
+}

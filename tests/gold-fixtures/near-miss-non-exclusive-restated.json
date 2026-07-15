@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-non-exclusive-restated",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty restates the relationship as 'non-exclusive', the exact exempt_terms phrase for hard_rejection rule 'no-exclusivity'. Must ACCEPT with zero fires -- proves the span-level exempt_terms match suppresses the 'exclusive' substring inside 'non-exclusive' without over-firing.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "exclusivity",
+      "rule_id": "no-exclusivity",
+      "reason": "'non-exclusive' is the rule's own exempt_terms entry; the 'exclusive' trigger occurrence inside that word must be suppressed via span-level exemption, not a hunk-wide one (issue #212)."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "exclusivity",
+    "inserted_hunk": "This Agreement is non-exclusive as to the placement services described herein, and either party may enter into similar arrangements with other counterparties.",
+    "notes": "Near-miss: contains only the exempt phrase 'non-exclusive', no separate unexempted 'exclusive'/'exclusivity'/'sole provider' occurrence."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exclusivity",
+    "expected_result": "no_fire",
+    "rationale": "The only 'exclusive' span in the hunk falls inside the exempt phrase 'non-exclusive'; no unexempted trigger span exists."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

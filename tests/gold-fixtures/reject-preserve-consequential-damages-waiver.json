@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-preserve-consequential-damages-waiver",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'preserve-consequential-damages-waiver': counterparty removes/alters the protected clause in 'sec-8', deleting all of required_tokens ['consequential damages']. Must fire preserve-consequential-damages-waiver and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "limitation-of-liability",
+      "section_ref": "sec-8",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-consequential-damages-waiver"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "limitation-of-liability",
+    "altered_hunk": "The parties will address this subject in accordance with the terms otherwise set forth in this Agreement. This section otherwise continues to state: $150,000; aggregate liability.",
+    "notes": "Mechanically generated: replacement text omits all of required_tokens ['consequential damages'] for rule 'preserve-consequential-damages-waiver' (token_policy='any') while verbatim-preserving sibling required_tokens ['$150,000', 'aggregate liability'] so no other rule sharing this topic is unintentionally tripped."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-consequential-damages-waiver",
+    "expected_result": "fire",
+    "rationale": "Replacement text contains none of required_tokens ['consequential damages']; must fire 'preserve-consequential-damages-waiver' under token_policy='any'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

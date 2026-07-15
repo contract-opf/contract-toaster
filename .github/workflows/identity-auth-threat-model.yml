@@ -1,0 +1,50 @@
+# Identity / authorization threat-model guard (issue #11)
+#
+# Runs on every PR or push that touches the threat model, data-handling,
+# ARCHITECTURE.md, or phase-0-issues.md to ensure the identity/authorization
+# and malicious-admin sections remain present with non-placeholder content,
+# deprovisioning numbers stay pinned, and the data-handling.md cross-reference
+# continues to resolve.
+#
+# Assertions (see tests/test_identity_auth_threat_model.py for full docs):
+#   1 – threat-model.md has ## Identity and authorization (non-placeholder, ≥ 50 words)
+#   2 – threat-model.md has ## Malicious or compromised admin (non-placeholder, ≥ 50 words)
+#   3 – data-handling.md hold-threat cross-reference resolves to real content
+#   4+5 – ARCHITECTURE.md Deprovisioning section pins sync cadence (≤ 1h) and TTL (≤ 15–60 min)
+#   6+7 – docs/phase-0-issues.md #5 ACs contain pinned sync cadence and TTL numbers
+
+name: identity-auth-threat-model
+
+on:
+  pull_request:
+    paths:
+      - 'docs/threat-model.md'
+      - 'docs/data-handling.md'
+      - 'docs/phase-0-issues.md'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_identity_auth_threat_model.py'
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/threat-model.md'
+      - 'docs/data-handling.md'
+      - 'docs/phase-0-issues.md'
+      - 'ARCHITECTURE.md'
+      - 'tests/test_identity_auth_threat_model.py'
+
+jobs:
+  identity-auth-threat-model:
+    name: Identity/auth threat model guard
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run identity/auth threat-model gate
+        run: python3 tests/test_identity_auth_threat_model.py

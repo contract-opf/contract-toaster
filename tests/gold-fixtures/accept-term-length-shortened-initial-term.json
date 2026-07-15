@@ -1,0 +1,19 @@
+{
+  "case_id": "accept-term-length-shortened-initial-term",
+  "description": "Counterparty shortens the initial term to accommodate a school-year calendar. This is a listed acceptable_variation in the term-length topic ('1 to 7 years'); no hard_rejection rule applies to the term-length topic today, so there is no detector to hook, but this exercises the ACCEPT / acceptable_variation gold-case category per issue #183.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "term-length",
+    "inserted_hunk": "The initial term of this Agreement shall be 3 years from the Effective Date, subject to renewal as set forth in Section 2.",
+    "notes": "Matches acceptable_variation 'Counterparty shortens initial term' -> '1 to 7 years'."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

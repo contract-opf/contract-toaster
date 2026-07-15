@@ -1,0 +1,20 @@
+{
+  "schema_version": "output-schema-v1",
+  "decision": "REQUEST_CHANGE",
+  "confidence_state": "OK",
+  "confidence_band": null,
+  "issues": [],
+  "critic_delta": {
+    "added_issues": [],
+    "contested_replacements": [
+      {
+        "section_ref": "8",
+        "primary_replacement_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+        "critic_objection": "The primary's replacement drops the mutual carve-out for gross negligence that the playbook requires alongside the cap.",
+        "critic_suggested_replacement": "Each party's aggregate liability under this Agreement shall not exceed $150,000, except in cases of gross negligence or willful misconduct."
+      }
+    ],
+    "rationale_objections": []
+  },
+  "verdict_summary": null
+}
