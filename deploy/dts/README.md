@@ -13,13 +13,22 @@ path is unchanged when these are unset.
 | Pipeline | Step Functions | **in-process worker** (`PIPELINE_RUNNER=inprocess`) |
 | Model | Bedrock | **OpenRouter** (`MODEL_PROVIDER=openrouter`) |
 
-## Phase status
+## Pipeline: real vs. mock
 
-- **Phase 1 (this):** runs the **mock** pipeline in-process end-to-end
-  (upload → PENDING→RUNNING→DONE → download), proving the deployment
-  abstraction. The OpenRouter key is not exercised yet.
-- **Phase 2:** swap the in-process runner's body for the real `scripts/` chain
-  driven by `OpenRouterModelClient` (the deferred #80–#83 "real brain" epic).
+The review pipeline the runner executes is selected by `MODEL_PROVIDER`
+(`backend/src/config.py` → `pipeline_runner.run_pipeline`):
+
+- **`MODEL_PROVIDER=openrouter` (the default in both compose files): the REAL
+  pipeline runs** — `run_real_pipeline` drives the `scripts/` review chain
+  against a live `OpenRouterModelClient`. **`OPENROUTER_API_KEY` is required in
+  this mode:** the client rejects an empty key, so with it unset/wrong every
+  review fails to `ERROR` / `MANUAL_REVIEW_REQUIRED` (it does **not** fall back
+  to the mock). Reviews are billed to your OpenRouter account per
+  `model-policy/openrouter.json`.
+- **Any other `MODEL_PROVIDER` value (or unset): the mock pipeline runs** —
+  `run_mock_pipeline` returns the canned fixture
+  (`"Mock review: canned REQUEST_CHANGE result."`) with no model call. This is
+  the fully-offline path; no key needed.
 
 ## Run it
 
