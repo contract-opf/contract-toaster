@@ -19,8 +19,12 @@
 #
 # Required environment variables (set in the deploy host's UI, never in git):
 #   DEMO_TOKEN_SECRET       - session-signing secret for demo password auth.
-#   OPENROUTER_API_KEY      - real key; if unset/wrong the app silently falls
-#                             back to the Phase 1 MOCK pipeline (canned output).
+#   OPENROUTER_API_KEY      - real key. REQUIRED: MODEL_PROVIDER=openrouter (set
+#                             below) runs the real review pipeline, which rejects
+#                             an empty key, so an unset/wrong key makes every
+#                             review fail (ERROR / MANUAL_REVIEW_REQUIRED) — it does
+#                             NOT fall back to the mock. Reviews are billed per
+#                             model-policy/openrouter.json.
 #   S3_PUBLIC_ENDPOINT_URL  - public https URL of the minio service's domain,
 #                             e.g. https://<your-minio-subdomain>.
 
@@ -90,7 +94,7 @@ services:
       # `minio` DNS name. Set this to the minio service's public domain.
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL}
       DEMO_TOKEN_SECRET: ${DEMO_TOKEN_SECRET:?set DEMO_TOKEN_SECRET}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY — required because MODEL_PROVIDER=openrouter runs real reviews}
     depends_on:
       bootstrap:
         condition: service_completed_successfully
