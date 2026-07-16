@@ -1,0 +1,31 @@
+{
+  "case_id": "reject-preserve-sample-liability-cap-removed",
+  "description": "Issue #343 public SAMPLE playbook gold fixture: counterparty rewords the Limitation on Liability section so both required tokens ('$10,000' and 'aggregate liability') are gone. Must fire preserve-sample-liability-cap.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "sample-liability-cap",
+      "section_ref": "8 Limitation on Liability",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-sample-liability-cap"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "sample-liability-cap",
+    "altered_hunk": "Neither party shall be liable to the other for any indirect damages arising from a sample.",
+    "notes": "Altered hunk omits both required_tokens ('$10,000' and 'aggregate liability') protected by preserve-sample-liability-cap."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-sample-liability-cap",
+    "expected_result": "fire",
+    "rationale": "altered_hunk is missing required_tokens ['$10,000', 'aggregate liability']."
+  },
+  "synthetic": true,
+  "gc_signoff": "not_applicable",
+  "provenance": "synthetic",
+  "authorship_note": "Authored fresh for issue #343's public SAMPLE playbook -- fully invented fictional 'Sample Agreement' content, no real-world contract text, no de-identification required."
+}

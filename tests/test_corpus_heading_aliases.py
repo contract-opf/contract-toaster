@@ -42,9 +42,14 @@ if str(BACKEND_SRC) not in sys.path:
 
 import corpus  # noqa: E402
 
+# Explicit "eiaa" (issue #343 repointed the registry default to the public
+# "sample-agreement" sample playbook) -- this gate's composite/keyword
+# section_ref splitting fixtures are all eiaa-specific.
+_EIAA_PLAYBOOK_PATH = REPO_ROOT / "playbooks" / "eiaa-v1.0.0.json"
+
 
 def _load_real_playbook() -> dict:
-    return corpus._load_playbook()
+    return corpus._load_playbook(_EIAA_PLAYBOOK_PATH)
 
 
 class TestCompositeSectionRefSplitsPerRealSection(unittest.TestCase):

@@ -119,7 +119,7 @@ def main():
     # Part A -- real diff, stub model output carrying ONLY `anchor` (no hash)
     # =========================================================================
 
-    standard = diff_standard_form.load_standard_form_paragraphs()
+    standard = diff_standard_form.load_standard_form_paragraphs(playbook_id="eiaa")
 
     with open(DIFF_FIXTURES_DIR / "modify-liability-cap.json") as f:
         modify_case = json.load(f)

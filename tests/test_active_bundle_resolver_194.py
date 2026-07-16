@@ -66,7 +66,11 @@ import playbook_registry  # noqa: E402
 import seed_active_bundle  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
 
-PLAYBOOK_ID = playbook_registry.DEFAULT_PLAYBOOK_ID  # "eiaa"
+# Pinned to "eiaa" explicitly (not playbook_registry.DEFAULT_PLAYBOOK_ID --
+# issue #343 repointed the registry default to the public "sample-agreement"
+# sample playbook) because this file's golden-hash cross-check
+# (real_eiaa_content_hash()) and seeded-bundle fixtures are all eiaa-specific.
+PLAYBOOK_ID = "eiaa"
 
 
 class ExecutionAlreadyExists(Exception):

@@ -47,11 +47,19 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from eval_harness import (  # noqa: E402
-    FIXTURES_PATH,
-    PLAYBOOK_PATH,
     load_playbook,
     missing_rule_coverage,
 )
+import playbook_registry  # noqa: E402
+
+# Pinned to "eiaa" explicitly (not eval_harness.PLAYBOOK_PATH/FIXTURES_PATH,
+# which follow playbook_registry.DEFAULT_PLAYBOOK_ID -- issue #343 repointed
+# the registry default to the public "sample-agreement" sample playbook)
+# because this script's whole purpose, per its own module docstring, is
+# deriving fixtures for playbooks/eiaa-v1.0.0.json's hard_rejection rules.
+_EIAA_ENTRY = playbook_registry.resolve_playbook("eiaa")
+PLAYBOOK_PATH = _EIAA_ENTRY.playbook_path
+FIXTURES_PATH = _EIAA_ENTRY.fixtures_dir
 
 # Innocuous replacement boilerplate used when generating an on_remove_or_alter
 # violation: it must NOT contain any other rule's trigger_terms/required_tokens,

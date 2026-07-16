@@ -39,7 +39,7 @@ The real canonical `.docx` per playbook version is not committed yet (see
 standard-forms/README.md -- it is "to be committed when the real .docx is
 ready"). Until then, `load_standard_form_paragraphs()` derives a **synthetic**
 standard-form body -- one paragraph per section-anchor map entry (issue #3),
-using each playbook topic's `exos_standard` field (the playbook's own prose
+using each playbook topic's `our_standard` field (the playbook's own prose
 description of the standard-form position for that section) as the paragraph
 text. This keeps the synthetic body-text in lockstep with the playbook instead
 of inventing parallel prose, and guarantees the `on_remove_or_alter` rules'
@@ -236,7 +236,7 @@ def _load_synthetic_text_supplements(
     Load the per-playbook `synthetic_text_supplements` map from the
     playbook's section config, resolved via the registry (issue #289).
 
-    A playbook's `exos_standard` prose is written for human readability,
+    A playbook's `our_standard` prose is written for human readability,
     not as a token-exact transcript of a (possibly not-yet-committed)
     canonical .docx -- e.g. it may say "exclusion of consequential,
     special, punitive, ... damages" (a shared-modifier list), never
@@ -262,7 +262,7 @@ def _load_synthetic_text_supplements(
 
 def _topic_text_by_anchor(playbook: dict, synthetic_text_supplements: dict = None) -> dict:
     """
-    Map section_anchor -> exos_standard prose, for anchors covered by a topic.
+    Map section_anchor -> our_standard prose, for anchors covered by a topic.
     A topic can cover multiple anchors (e.g. exos-discretion-and-authority);
     each covered anchor gets the same topic prose as its synthetic paragraph
     text -- this is a simplification appropriate for a synthetic stand-in body
@@ -274,7 +274,7 @@ def _topic_text_by_anchor(playbook: dict, synthetic_text_supplements: dict = Non
     playbook-derived text, e.g. tests exercising this function directly).
 
     Issue #266: a covering topic (not_in_standard false/absent, with at
-    least one real section anchor) that has no `exos_standard` text is a
+    least one real section anchor) that has no `our_standard` text is a
     hard, structural error (`playbook_validation.PlaybookValidationError`)
     -- previously this silently substituted an empty string here (the
     paragraph-building loop in load_standard_form_paragraphs() then either
@@ -290,7 +290,7 @@ def _topic_text_by_anchor(playbook: dict, synthetic_text_supplements: dict = Non
             raise playbook_validation.PlaybookValidationError(
                 playbook_validation.describe_missing_standard_text(topic)
             )
-        standard_text = topic.get("exos_standard", "")
+        standard_text = topic.get("our_standard", "")
         for anchor in topic.get("section_anchors", []):
             if anchor == SEC_NEW:
                 continue
@@ -315,7 +315,7 @@ def load_standard_form_paragraphs(
     SECTION_CONFIG) so paragraph order is deterministic and stable across runs.
 
     Synthetic mode (docx_path=None): paragraph text comes from the covering
-    topic's `exos_standard` field (see _topic_text_by_anchor). Sections with no
+    topic's `our_standard` field (see _topic_text_by_anchor). Sections with no
     covering topic (structural headings / reviewed exemptions) get their
     heading text as a placeholder paragraph -- there is no reviewable clause
     to diff there, but the anchor still needs a paragraph so a counterparty

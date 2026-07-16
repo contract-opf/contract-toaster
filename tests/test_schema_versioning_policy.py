@@ -95,7 +95,7 @@ REQUIRED_RULE_PATTERNS = [
 # The governance doc must define the supported list in a machine-parseable line:
 #   Supported schema versions: v1
 # or a Markdown list under the section, each line like:
-#   - `https://teamexos.com/playbooks/schema/v1.json`
+#   - `https://contract-opf.github.io/playbooks/schema/v1.json`
 # We accept any of those forms. If the section is absent we return None.
 # ---------------------------------------------------------------------------
 
@@ -103,7 +103,7 @@ SUPPORTED_VERSIONS_LINE_RE = re.compile(
     r"supported\s+schema\s+versions?[:\s]+(.+)", re.IGNORECASE
 )
 SUPPORTED_VERSIONS_LIST_RE = re.compile(
-    r"-\s+`?(https://teamexos\.com/playbooks/schema/v\d+\.json)`?", re.IGNORECASE
+    r"-\s+`?(https://contract-opf\.github\.io/playbooks/schema/v\d+\.json)`?", re.IGNORECASE
 )
 
 
@@ -135,7 +135,7 @@ def extract_supported_versions(section_text: str) -> list[str] | None:
         # Parse "v1" or "v1, v2" etc. and expand to full URIs
         tags = [t.strip().strip("`") for t in raw.split(",")]
         return [
-            f"https://teamexos.com/playbooks/schema/{t}.json"
+            f"https://contract-opf.github.io/playbooks/schema/{t}.json"
             for t in tags
             if re.match(r"v\d+", t)
         ]
@@ -186,7 +186,7 @@ def check_fail_closed_behavior(supported: list[str] | None) -> list[str]:
             "(e.g. 'Supported schema versions: v1' or a bulleted list of URIs)."
         ]
 
-    unsupported_id = "https://teamexos.com/playbooks/schema/v999.json"
+    unsupported_id = "https://contract-opf.github.io/playbooks/schema/v999.json"
     if is_schema_supported(unsupported_id, supported):
         return [
             f"  FAIL: unsupported schema '{unsupported_id}' was not rejected.\n"
@@ -205,7 +205,7 @@ def check_rollback_revalidation(supported: list[str] | None) -> list[str]:
         ]
 
     # v1.json is the one schema version that exists today — it must be supported
-    v1_id = "https://teamexos.com/playbooks/schema/v1.json"
+    v1_id = "https://contract-opf.github.io/playbooks/schema/v1.json"
     if not is_schema_supported(v1_id, supported):
         return [
             f"  FAIL: rollback re-validation check: v1 schema '{v1_id}' is not "

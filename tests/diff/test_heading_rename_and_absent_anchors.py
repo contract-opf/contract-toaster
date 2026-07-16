@@ -360,7 +360,11 @@ def main():
         print(f"[G0] {err}")
         sys.exit(1)
 
-    standard = mod.load_standard_form_paragraphs()
+    # Explicit "eiaa" (issue #343 repointed the registry default to the
+    # public "sample-agreement" sample playbook) -- this gate exercises
+    # eiaa-specific anchors (sec-2.2.1 absent-from-form, sec-preamble/
+    # sec-signature structural, sec-8 renamed).
+    standard = mod.load_standard_form_paragraphs(playbook_id="eiaa")
 
     all_failures = []
     all_failures += check_heading_rename_similarity_fallback(mod, standard)

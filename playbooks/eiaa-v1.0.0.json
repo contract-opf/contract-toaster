@@ -1,5 +1,5 @@
 {
-  "$schema": "https://teamexos.com/playbooks/schema/v1.json",
+  "$schema": "https://contract-opf.github.io/playbooks/schema/v1.json",
   "playbook": {
     "id": "eiaa",
     "version": "1.0.0",
@@ -10,7 +10,7 @@
       "Educational Affiliation Agreement",
       "Student Internship Agreement"
     ],
-    "exos_party": "Exos Human Capital, LLC",
+    "exos_party": "Your Organization, LLC",
     "counterparty_type": "Educational Institution",
     "created_at": "2026-05-26T00:00:00Z",
     "created_by": "playbook-mockup",
@@ -69,7 +69,7 @@
       "section_anchors": [
         "sec-2.1"
       ],
-      "exos_standard": "5-year initial term; automatic 1-year renewals; 60 days written notice for non-renewal; clinical experience preserved through end of student's program even on non-renewal.",
+      "our_standard": "5-year initial term; automatic 1-year renewals; 60 days written notice for non-renewal; clinical experience preserved through end of student's program even on non-renewal.",
       "acceptable_variations": [
         {
           "if": "Counterparty shortens initial term",
@@ -126,7 +126,7 @@
       "section_anchors": [
         "sec-2.2.2"
       ],
-      "exos_standard": "Mutual right to terminate for breach with 30 days notice and cure opportunity; immediate termination right on accreditation loss.",
+      "our_standard": "Mutual right to terminate for breach with 30 days notice and cure opportunity; immediate termination right on accreditation loss.",
       "acceptable_variations": [
         {
           "if": "Counterparty extends cure period",
@@ -168,7 +168,7 @@
       "section_anchors": [
         "sec-8"
       ],
-      "exos_standard": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+      "our_standard": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes a higher cap",
@@ -228,7 +228,7 @@
         "sec-1.4",
         "sec-1.7"
       ],
-      "exos_standard": "Exos has sole discretion to admit students; reserves the right to expel based on its reasonable and final determination; retains final authority over all aspects of Exos operations and clinical care.",
+      "our_standard": "Exos has sole discretion to admit students; reserves the right to expel based on its reasonable and final determination; retains final authority over all aspects of Exos operations and clinical care.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes joint admission criteria with Exos retaining final decision",
@@ -281,7 +281,7 @@
       "section_anchors": [
         "sec-1.5"
       ],
-      "exos_standard": "No payment between parties; no student remuneration.",
+      "our_standard": "No payment between parties; no student remuneration.",
       "acceptable_variations": [
         {
           "if": "Counterparty wants to clarify that students may receive academic credit",
@@ -324,7 +324,7 @@
       "section_anchors": [
         "sec-1.6"
       ],
-      "exos_standard": "Students are not Exos employees and receive no benefits; students are covered by workers' compensation as volunteers only.",
+      "our_standard": "Students are not Exos employees and receive no benefits; students are covered by workers' compensation as volunteers only.",
       "acceptable_variations": [
         {
           "if": "Counterparty adds clarifying language reaffirming students are not Exos employees",
@@ -369,7 +369,7 @@
       "section_anchors": [
         "sec-7"
       ],
-      "exos_standard": "Mutual confidentiality with reasonable-care standard; standard exceptions (public/prior/independent/third-party); compelled-disclosure carve-out with prior notice; destruction on request other than backup copies not readily accessible.",
+      "our_standard": "Mutual confidentiality with reasonable-care standard; standard exceptions (public/prior/independent/third-party); compelled-disclosure carve-out with prior notice; destruction on request other than backup copies not readily accessible.",
       "acceptable_variations": [
         {
           "if": "Counterparty adds non-exhaustive examples of Confidential Information",
@@ -428,7 +428,7 @@
       "section_anchors": [
         "sec-9"
       ],
-      "exos_standard": "Automatic assignment to the Exos affiliate operating the Facility where a Student is placed; named affiliate list and catch-all for future affiliates.",
+      "our_standard": "Automatic assignment to the Exos affiliate operating the Facility where a Student is placed; named affiliate list and catch-all for future affiliates.",
       "acceptable_variations": [
         {
           "if": "Counterparty requests written notice of any actual assignment",
@@ -470,7 +470,7 @@
       "section_anchors": [
         "sec-_new"
       ],
-      "exos_standard": "Exos does not provide indemnification under affiliation agreements. Liability is allocated solely by Section 8 (Limitation on Liability).",
+      "our_standard": "Exos does not provide indemnification under affiliation agreements. Liability is allocated solely by Section 8 (Limitation on Liability).",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes narrow mutual IP indemnification",
@@ -524,7 +524,7 @@
       "section_anchors": [
         "sec-_new"
       ],
-      "exos_standard": "Not specified in the standard form. Exos maintains insurance appropriate to its operations. Exos provides a Certificate of Insurance evidencing standard coverage on request.",
+      "our_standard": "Not specified in the standard form. Exos maintains insurance appropriate to its operations. Exos provides a Certificate of Insurance evidencing standard coverage on request.",
       "acceptable_variations": [
         {
           "if": "Counterparty asks for a Certificate of Insurance evidencing standard Exos coverage",
@@ -572,7 +572,7 @@
       "section_anchors": [
         "sec-_new"
       ],
-      "exos_standard": "Not specified in the standard form. Default preference is Arizona law and venue when an explicit clause is requested.",
+      "our_standard": "Not specified in the standard form. Default preference is Arizona law and venue when an explicit clause is requested.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes its home-state law and venue",
@@ -612,7 +612,7 @@
       "section_anchors": [
         "sec-4"
       ],
-      "exos_standard": "Mutual non-discrimination across enumerated protected classes, compliance with applicable anti-discrimination laws and institutional policies.",
+      "our_standard": "Mutual non-discrimination across enumerated protected classes, compliance with applicable anti-discrimination laws and institutional policies.",
       "acceptable_variations": [
         {
           "if": "Counterparty adds additional protected classes",
@@ -654,7 +654,7 @@
       "section_anchors": [
         "sec-5"
       ],
-      "exos_standard": "FERPA acknowledged; student consent required before releasing specific data to anyone other than the institution.",
+      "our_standard": "FERPA acknowledged; student consent required before releasing specific data to anyone other than the institution.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes more detailed FERPA compliance language",
@@ -692,7 +692,7 @@
       "section_anchors": [
         "sec-6"
       ],
-      "exos_standard": "Neither party is a Business Associate of the other; students are subject to Exos policies and may use PHI only for legitimate authorized purposes under supervision.",
+      "our_standard": "Neither party is a Business Associate of the other; students are subject to Exos policies and may use PHI only for legitimate authorized purposes under supervision.",
       "acceptable_variations": [],
       "must_preserve": [
         "Mutual non-BA status.",
@@ -730,7 +730,7 @@
       "section_anchors": [
         "sec-10-notices"
       ],
-      "exos_standard": "Email notices effective upon reply acknowledgment (auto-responses excluded); postal notices via certified mail or overnight courier, effective one day after receipt.",
+      "our_standard": "Email notices effective upon reply acknowledgment (auto-responses excluded); postal notices via certified mail or overnight courier, effective one day after receipt.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes a deemed-receipt rule for email",
@@ -771,7 +771,7 @@
       "section_anchors": [
         "sec-10-non-exclusive"
       ],
-      "exos_standard": "Non-exclusive in both directions. Either party may engage other counterparties.",
+      "our_standard": "Non-exclusive in both directions. Either party may engage other counterparties.",
       "acceptable_variations": [],
       "must_preserve": [
         "Non-exclusive nature of the relationship."
@@ -808,7 +808,7 @@
       "section_anchors": [
         "sec-10-merger"
       ],
-      "exos_standard": "Entire agreement; only written amendment signed by both parties (manually or via e-sign).",
+      "our_standard": "Entire agreement; only written amendment signed by both parties (manually or via e-sign).",
       "acceptable_variations": [],
       "must_preserve": [
         "Written-amendment requirement.",
@@ -843,7 +843,7 @@
       "section_anchors": [
         "sec-10-precedence"
       ],
-      "exos_standard": "Sections 7–10 of the Terms (Confidentiality, Limitation on Liability, Assignment, Miscellaneous) prevail over conflicting Additional Terms; conflicting Additional Terms are void.",
+      "our_standard": "Sections 7–10 of the Terms (Confidentiality, Limitation on Liability, Assignment, Miscellaneous) prevail over conflicting Additional Terms; conflicting Additional Terms are void.",
       "acceptable_variations": [],
       "must_preserve": [
         "Order of precedence favoring Sections 7–10 of the Terms."
@@ -877,7 +877,7 @@
       "section_anchors": [
         "sec-1.3"
       ],
-      "exos_standard": "Institution may inspect any Facility where a Student is placed, upon reasonable request.",
+      "our_standard": "Institution may inspect any Facility where a Student is placed, upon reasonable request.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes specific reasonable advance notice",
@@ -922,7 +922,7 @@
       "section_anchors": [
         "sec-2.3"
       ],
-      "exos_standard": "Survival is limited to: Confidentiality, Limitation on Liability, Assignment to Operating Entity, and Miscellaneous.",
+      "our_standard": "Survival is limited to: Confidentiality, Limitation on Liability, Assignment to Operating Entity, and Miscellaneous.",
       "acceptable_variations": [
         {
           "if": "Counterparty proposes additional survival of FERPA, HIPAA, or Non-Discrimination",
@@ -961,7 +961,7 @@
       "section_anchors": [
         "sec-3"
       ],
-      "exos_standard": "Each party complies with all relevant federal and state laws and regulations applicable to its role, including Federal Health Care Program requirements.",
+      "our_standard": "Each party complies with all relevant federal and state laws and regulations applicable to its role, including Federal Health Care Program requirements.",
       "acceptable_variations": [
         {
           "if": "Counterparty references additional named statutes that already apply",

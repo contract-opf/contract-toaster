@@ -10,7 +10,7 @@ in infra/lib/nested/auth-stack.ts.  They are NOT regex/doc-consistency tests
 Required deny paths (AC):
   1. Domain mismatch: email not ending in @teamexos.com → deny.
   2. Non-allowlisted user: email is @teamexos.com but NOT in the
-     legal-admin@example.com Google group → deny.
+     legal-admin@teamexos.com Google group → deny.
   3. Directory unavailable: Directory API returns an error → deny (fail-closed).
   4. Unverified email: email_verified != 'true' → deny.
 
@@ -44,6 +44,17 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AUTH_STACK_PATH = REPO_ROOT / "infra" / "lib" / "nested" / "auth-stack.ts"
+
+# ALLOWED_DOMAIN / LEGAL_ADMIN_GROUP are no longer module-level constants in
+# the extracted Lambda source (issue #349) -- they are read from the
+# environment inside handler() at call time, exactly like DIRECTORY_SECRET_ARN
+# / USERS_TABLE_NAME already were. These tests inject them via env, the same
+# way. The domain chosen here is this test file's own arbitrary fixture value
+# (matching the "user@teamexos.com"-style emails already used throughout this
+# file) -- it exercises handler LOGIC given injected config and is unrelated
+# to any real deploy default.
+TEST_ALLOWED_DOMAIN = "@teamexos.com"
+TEST_LEGAL_ADMIN_GROUP = "legal-admin@teamexos.com"
 
 # ---------------------------------------------------------------------------
 # Load the inline Lambda handler from auth-stack.ts
@@ -138,6 +149,8 @@ def _authz_env_and_boto3_patches(module):
             {
                 "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
                 "USERS_TABLE_NAME": "contract-toaster-users-test",
+                "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+                "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
             },
         )
         jit_patch = unittest.mock.patch.object(
@@ -160,7 +173,13 @@ def test_domain_mismatch_deny() -> list[str]:
     module = _load_handler()
     # Patch _check_group_membership so it would return True if the domain
     # check is absent — the test must fail due to domain, not group check.
-    with unittest.mock.patch.object(module, "_check_group_membership", return_value=True):
+    # ALLOWED_DOMAIN is read from the environment (issue #349), so it must be
+    # set explicitly here for the domain check to exercise real logic.
+    env_patch = unittest.mock.patch.dict(
+        module.os.environ,  # type: ignore[attr-defined]
+        {"ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN},
+    )
+    with env_patch, unittest.mock.patch.object(module, "_check_group_membership", return_value=True):
         for bad_email in ["attacker@evil.com", "user@gmail.com", "test@other.com"]:
             event = _make_event(bad_email)
             raised = False
@@ -202,7 +221,7 @@ def test_domain_mismatch_deny() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def test_non_allowlisted_deny() -> list[str]:
-    print("\nTest 2: Non-allowlisted deny (not in legal-admin@example.com group) …")
+    print("\nTest 2: Non-allowlisted deny (not in legal-admin@teamexos.com group) …")
     failures: list[str] = []
 
     module = _load_handler()
@@ -244,7 +263,7 @@ def test_non_allowlisted_deny() -> list[str]:
                 False,
                 "handler raises Exception for @teamexos.com user NOT in legal-admin group",
                 "Per AC: the Lambda must deny a @teamexos.com user who is not a member of\n"
-                "         legal-admin@example.com.  The handler returned normally instead of raising.",
+                "         legal-admin@teamexos.com.  The handler returned normally instead of raising.",
             )
 
     return failures
@@ -321,7 +340,13 @@ def test_unverified_email_deny() -> list[str]:
     failures: list[str] = []
 
     module = _load_handler()
-    with unittest.mock.patch.object(module, "_check_group_membership", return_value=True):
+    # ALLOWED_DOMAIN must be set so the (earlier) domain check passes and
+    # execution actually reaches the email_verified check under test.
+    env_patch = unittest.mock.patch.dict(
+        module.os.environ,  # type: ignore[attr-defined]
+        {"ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN},
+    )
+    with env_patch, unittest.mock.patch.object(module, "_check_group_membership", return_value=True):
         event = _make_event("user@teamexos.com", email_verified="false")
         raised = False
         try:
@@ -367,7 +392,9 @@ def test_happy_path_no_deny() -> list[str]:
     env_patch = unittest.mock.patch.dict(
         module.os.environ,  # type: ignore[attr-defined]
         {"DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
-         "USERS_TABLE_NAME": "contract-toaster-users-test"},
+         "USERS_TABLE_NAME": "contract-toaster-users-test",
+         "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+         "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP},
     )
     with env_patch, \
          unittest.mock.patch.object(module, "_check_group_membership", return_value=True), \
@@ -488,6 +515,8 @@ def _make_directory_fail_open_module() -> types.ModuleType:
             {
                 "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
                 "USERS_TABLE_NAME": "contract-toaster-users-test",
+                "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+                "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
             },
         ), unittest.mock.patch.object(
             mut_module, "_check_group_membership",
@@ -524,6 +553,8 @@ def test_tdd_red_state_verification() -> list[str]:
         {
             "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
             "USERS_TABLE_NAME": "contract-toaster-users-test",
+            "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+            "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
         },
     )
     with env_patch_a:
@@ -570,6 +601,8 @@ def test_tdd_red_state_verification() -> list[str]:
         {
             "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
             "USERS_TABLE_NAME": "contract-toaster-users-test",
+            "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+            "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
         },
     )
     with env_patch_b:
@@ -611,6 +644,8 @@ def test_tdd_red_state_verification() -> list[str]:
         {
             "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
             "USERS_TABLE_NAME": "contract-toaster-users-test",
+            "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+            "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
         },
     )
     with env_patch_c, unittest.mock.patch.object(
@@ -638,6 +673,8 @@ def test_tdd_red_state_verification() -> list[str]:
         {
             "DIRECTORY_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:test",
             "USERS_TABLE_NAME": "contract-toaster-users-test",
+            "ALLOWED_DOMAIN": TEST_ALLOWED_DOMAIN,
+            "LEGAL_ADMIN_GROUP": TEST_LEGAL_ADMIN_GROUP,
         },
     )
     dir_error = ConnectionError("simulated Directory API unavailable")

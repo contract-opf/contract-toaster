@@ -8,8 +8,8 @@ Operating procedures for `contract-toaster`. Architecture lives in [ARCHITECTURE
   - Dev account: `123456789012`
   - Prod account: `<prod-account-id>` (separate; never holds dev credentials and never reachable from a developer laptop)
 - Region: `us-east-1`
-- Google Workspace domain: `teamexos.com`
-- Production URL: `https://contract-toaster.teamexos.com` (planned; defaults to the service-assigned URL until DNS is wired)
+- Google Workspace domain: `company.com`
+- Production URL: `https://contract-toaster.company.com` (planned; defaults to the service-assigned URL until DNS is wired)
 - Repo: `github.com/contract-opf/contract-toaster`
 - Container registry: ECR, per account. Production is pinned to an **immutable image digest** — never a `latest` tag and never an auto-mutating branch hook.
 
@@ -44,14 +44,14 @@ The first deploy of an environment requires steps that won't be needed again.
 
 2. **Confirm Google OAuth client.** Cognito needs Google OAuth client credentials (client ID + secret). These come from Google Cloud Console → APIs & Services → Credentials → an OAuth 2.0 client of type "Web application", with authorized redirect URI matching the Cognito hosted-UI domain. The client ID and secret are stored in AWS Secrets Manager under `contract-toaster/cognito/google-oauth`; CDK reads from there.
 
-3. **Reserve the DNS name.** If using `contract-toaster.teamexos.com`, ensure the parent zone exists in Route 53 (or wherever Exos manages DNS) and that a delegation or CNAME can be added later. Not required for first deploy.
+3. **Reserve the DNS name.** If using `contract-toaster.company.com`, ensure the parent zone exists in Route 53 (or wherever your organization manages DNS) and that a delegation or CNAME can be added later. Not required for first deploy.
 
 4. **Bootstrap CDK.** From `infra/`:
     ```bash
     cdk bootstrap aws://<account-id>/us-east-1
     ```
 
-5. **Set stack parameters.** Edit `infra/cdk.context.json` with the initial admin email (the GC's `@teamexos.com` address), then commit.
+5. **Set stack parameters.** Edit `infra/cdk.context.json` with the initial admin email (the GC's `@company.com` address), then commit.
 
 6. **First deploy.** Provision infrastructure first, then promote an image (the two are separate concerns now — infra is CDK, the running image is a pinned digest):
     ```bash
@@ -62,13 +62,13 @@ The first deploy of an environment requires steps that won't be needed again.
 
 7. **Verify health.** Visit the App Runner URL `/health` (public) and confirm liveness. For the deployed version, commit SHA, and serving **image digest**, call the **allowlisted `/version`** endpoint with a valid token (build details are not exposed unauthenticated). App Runner deployment metadata also shows the serving digest.
 
-8. **Verify Cognito.** Visit the Amplify URL, sign in with a `@teamexos.com` Google account, confirm successful sign-in and that a row exists in DynamoDB `users`.
+8. **Verify Cognito.** Visit the Amplify URL, sign in with a `@company.com` Google account, confirm successful sign-in and that a row exists in DynamoDB `users`.
 
 9. **Seed the first playbook.** From the admin UI, upload `playbooks/eiaa-v1.0.0.json` as a **draft** version 1.0.0 of the `eiaa` playbook. It is not active until the release bundle is activated: playbook hash, prompt hash, canonical standard-form hash, anchor-map hash, model-policy hash, corpus snapshot, evaluation run ID, and Legal approval. (Once we have a corpus, seed it as a draft corpus snapshot and activate only after curation and retrieval regression checks pass.)
 
 10. **Verify alarm delivery (bootstrap acceptance — required before declaring prod operable).** An unconfirmed SNS email subscription receives no alarm mail — silent monitoring failure is the exact defect this step closes. Two sub-steps, both required:
 
-    a. **Confirm the SNS email subscription.** After CDK deploys the SNS topic and its email subscription targeting `legal-eng@example.com`, AWS sends a confirmation email to that address. Open the email and click **Confirm subscription**. Verify in the AWS Console (SNS → Topics → `contract-toaster-alarms` → Subscriptions) that the subscription status shows **Confirmed**, not **PendingConfirmation**. Do not proceed to sub-step (b) until status is **Confirmed** — an unconfirmed subscription will silently drop every alarm notification.
+    a. **Confirm the SNS email subscription.** After CDK deploys the SNS topic and its email subscription targeting `legal-eng@company.com`, AWS sends a confirmation email to that address. Open the email and click **Confirm subscription**. Verify in the AWS Console (SNS → Topics → `contract-toaster-alarms` → Subscriptions) that the subscription status shows **Confirmed**, not **PendingConfirmation**. Do not proceed to sub-step (b) until status is **Confirmed** — an unconfirmed subscription will silently drop every alarm notification.
 
     b. **Send a test alarm and confirm receipt.** Force one alarm into ALARM state to prove end-to-end delivery:
        ```bash
@@ -79,7 +79,7 @@ The first deploy of an environment requires steps that won't be needed again.
          --state-reason "Bootstrap acceptance test — verifying SNS→email delivery" \
          --region us-east-1
        ```
-       Wait up to 5 minutes. Confirm that an alarm notification email arrives at `legal-eng@example.com`. After confirming receipt, restore the alarm:
+       Wait up to 5 minutes. Confirm that an alarm notification email arrives at `legal-eng@company.com`. After confirming receipt, restore the alarm:
        ```bash
        aws cloudwatch set-alarm-state \
          --alarm-name contract-toaster-app-runner-5xx-<env> \
@@ -161,7 +161,7 @@ the playbook.  A revision to the form must go through this procedure — an info
 edit breaks the content-address guarantee and will fail the heading-hash drift and
 form-coverage CI gates.
 
-**When to use this procedure:** any time the canonical Exos EIAA standard form
+**When to use this procedure:** any time your canonical EIAA standard form
 `.docx` changes — including wording edits, renumbering, adding or removing sections,
 or restructuring §10 sub-clauses.
 
@@ -301,11 +301,11 @@ Use this procedure when you need to take the tool out of service entirely — fo
 
 ### Onboarding a reviewer
 
-This is the canonical admission path (see [ARCHITECTURE.md](ARCHITECTURE.md) → Authentication). A reviewer is anyone with access to submit documents for review; they are not admins. The pre-token Lambda checks `legal-admin@example.com` group membership and JIT-creates the active `users` row on first sign-in — there is no other non-bootstrap admission path.
+This is the canonical admission path (see [ARCHITECTURE.md](ARCHITECTURE.md) → Authentication). A reviewer is anyone with access to submit documents for review; they are not admins. The pre-token Lambda checks `legal-admin@company.com` group membership and JIT-creates the active `users` row on first sign-in — there is no other non-bootstrap admission path.
 
-> **Group-naming note:** The group `legal-admin@example.com` is a **misnomer** — it covers all ContractToaster users, not only admins. Non-admin reviewers must be in this group. The `is_admin` flag in the DynamoDB `users` row is the sole admin-privilege gate; group membership is only the access allowlist. See [ARCHITECTURE.md → Authentication](ARCHITECTURE.md#authentication--cognito-federated-to-google) for the authoritative note.
+> **Group-naming note:** The group `legal-admin@company.com` is a **misnomer** — it covers all ContractToaster users, not only admins. Non-admin reviewers must be in this group. The `is_admin` flag in the DynamoDB `users` row is the sole admin-privilege gate; group membership is only the access allowlist. See [ARCHITECTURE.md → Authentication](ARCHITECTURE.md#authentication--cognito-federated-to-google) for the authoritative note.
 
-1. **Add to the Google group.** In Google Workspace admin console, add the user's `@teamexos.com` account to the `legal-admin@example.com` group. The user must be in the group **before** they sign in; the pre-token Lambda will deny sign-in for a user not yet in the group.
+1. **Add to the Google group.** In Google Workspace admin console, add the user's `@company.com` account to the `legal-admin@company.com` group. The user must be in the group **before** they sign in; the pre-token Lambda will deny sign-in for a user not yet in the group.
 2. **User signs in.** The user visits the Amplify URL and signs in via Google SSO. On successful sign-in, the pre-token Lambda confirms group membership and creates an `active` row in DynamoDB `users`.
 3. **Verify the row.** Admin UI → Users → confirm the new user appears with `status=active`. The user can now submit documents for review.
 
@@ -315,9 +315,9 @@ To revoke reviewer access, see "Deprovisioning a user" below or wait for the nex
 
 ### Adding a new admin
 
-The admission path for a new admin is identical to onboarding a reviewer (above): the user must be in the `legal-admin@example.com` group before signing in. After sign-in creates their `active` row, an existing admin elevates them.
+The admission path for a new admin is identical to onboarding a reviewer (above): the user must be in the `legal-admin@company.com` group before signing in. After sign-in creates their `active` row, an existing admin elevates them.
 
-1. **Add to the Google group.** In Google Workspace admin console, add the user's `@teamexos.com` account to the `legal-admin@example.com` group. This step must happen before sign-in — the pre-token Lambda checks group membership and will deny sign-in for a user not yet in the group.
+1. **Add to the Google group.** In Google Workspace admin console, add the user's `@company.com` account to the `legal-admin@company.com` group. This step must happen before sign-in — the pre-token Lambda checks group membership and will deny sign-in for a user not yet in the group.
 2. **User signs in once via Google SSO.** The pre-token Lambda confirms group membership and creates their `users` row with `is_admin=false`.
 3. **Existing admin elevates them.** Admin UI → Users → find the new user → toggle **Admin**.
 4. The change is logged in `audit`.
@@ -445,7 +445,7 @@ This is the recommended path. A `.docx` sourced directly from the school retains
 **Fallback — PDF-to-.docx conversion (use with caution).**
 If the school cannot or will not provide the `.docx` original, a PDF can be converted to `.docx` using Word (File → Open → select the PDF) or Adobe Acrobat (Export → Microsoft Word). **Important caveats before submitting a converted file:**
 
-- **Tracked changes are not preserved through PDF conversion.** A PDF is a flat rendered representation; it does not carry the `.docx` revision history. A converted `.docx` will show the school's changes as plain text, not as tracked-change marks. The review tool will still diff against the Exos standard form and flag deviations, but the attorney should be aware that the revision history visible in a native `.docx` is absent.
+- **Tracked changes are not preserved through PDF conversion.** A PDF is a flat rendered representation; it does not carry the `.docx` revision history. A converted `.docx` will show the school's changes as plain text, not as tracked-change marks. The review tool will still diff against your standard form and flag deviations, but the attorney should be aware that the revision history visible in a native `.docx` is absent.
 - **Conversion fidelity varies.** Complex tables, special characters, footnotes, and non-standard fonts can convert imperfectly. Review the converted document for obvious formatting errors before submitting.
 - **Scanned PDFs (image-only) require OCR.** A scanned PDF contains no machine-readable text; Word's PDF import will attempt OCR, but accuracy varies. Prefer the `.docx` original if the school can provide it.
 
@@ -487,7 +487,7 @@ The redundant placement is intentional misuse friction: a routine accept-all-cha
 - Do not edit the `.docx` while in tracked-changes mode if you can avoid it: stray tracked changes in the header/footer can leave the marker visible in some views even after deletion. Accept all changes first, then remove the marker.
 - Do not rely on the counterparty to not notice the marker and ignore it: the marker is prominent by design. If the document reaches the counterparty with the marker still present, the attorney must clarify that it was sent in error and resend a clean copy.
 
-**If you cannot locate the header/footer marker.** The document may have been generated by a version of the tool that placed the marker differently (e.g., only as a cover page with no header/footer). In that case, remove the cover page per step 3, run the Find check per step 5, and confirm visually that no marker text appears in any page header or footer. If you are uncertain whether the document has been fully de-marked, contact `legal-eng@example.com` before sending.
+**If you cannot locate the header/footer marker.** The document may have been generated by a version of the tool that placed the marker differently (e.g., only as a cover page with no header/footer). In that case, remove the cover page per step 3, run the Find check per step 5, and confirm visually that no marker text appears in any page header or footer. If you are uncertain whether the document has been fully de-marked, contact `legal-eng@company.com` before sending.
 
 See [docs/output-contract.md → Attorney-approval framing and export marker](docs/output-contract.md#attorney-approval-framing-a-misuse-prevention-control-not-cosmetic) for the policy rationale and [docs/threat-model.md → External-communication guardrail](docs/threat-model.md#external-communication-guardrail) for the threat framing.
 
@@ -572,7 +572,7 @@ Before any `.docx` is generated, model output is scanned for prompt leakage, int
 3. Triage the cause:
    - **Injection via the uploaded document or a corpus precedent** — hostile text instructed the model to reveal its prompt. Treat retrieved precedent as untrusted too: if a corpus document is the source, quarantine the corpus snapshot and re-run affected reviews after a clean snapshot is active (see "Rolling back a bad playbook or prompt" for the quarantine-and-re-run pattern).
    - **Prompt/playbook regression** — a recent release bundle is over-quoting policy. Roll it back (see "Rolling back a bad playbook or prompt").
-4. Log the incident in `audit` with the review ID, the rule that fired, and the disposition. If a leak was actually delivered to a user before the scanner caught a sibling case, escalate via the standard Exos security path.
+4. Log the incident in `audit` with the review ID, the rule that fired, and the disposition. If a leak was actually delivered to a user before the scanner caught a sibling case, escalate via your organization's standard security path.
 
 ### Audit-table denied-mutation alarm
 
@@ -600,7 +600,7 @@ If a **promotion** fails (the `cdk deploy --context imageDigest=...` step), the 
 If the service is down and no admin is available:
 
 1. Anyone with AWS console access can pause the App Runner service to prevent further damage.
-2. Reach the on-call engineer via `legal-eng@example.com` (owned by Marc Mandel, General Counsel; backup: the Exos IT operations contact on-call). For after-hours P0 outages, send a direct message to the GC and to the Exos IT on-call lead.
+2. Reach the on-call engineer via `legal-eng@company.com` (owned by Marc Mandel, General Counsel; backup: your IT operations contact on-call). For after-hours P0 outages, send a direct message to the GC and to your IT on-call lead.
 3. If no admin can sign in (lost seed admin, non-active account, Cognito problem), use the **break-glass procedure** below. Do not hand-edit the `users` table with ad-hoc credentials.
 
 ### Break-glass: restoring admin access
@@ -626,21 +626,21 @@ There is no separate "backup" job; the configured retention is the backup.
 ## Observability
 
 - **CloudWatch dashboard.** `contract-toaster-prod` and `contract-toaster-dev`. Tiles: deployed version, request rate, error rate (4xx and 5xx separately), p99 latency, Bedrock invocations per day, cost-to-date, Step Functions stage failures, stale `PENDING`/`RUNNING` reviews, semaphore saturation, abandoned spend reservations, purge deleted/skipped counts, audit-archive stream lag, **count of reviews currently in `MANUAL_REVIEW_REQUIRED` state**, and **count of reviews currently in `ERROR_MANUAL_REVIEW_REQUIRED` state**. The admin UI exposes a **manual-review filter** view that lists all reviews in either manual-review state so the legal admin can triage them without querying DynamoDB directly.
-- **Alarms.** Configured to email `legal-eng@example.com` (owner: Marc Mandel, General Counsel; subscribers: legal-eng team; cadence: immediate SNS → email on alarm state change) on: App Runner 5xx > 5% for 5 min; Bedrock errors > 0; Cognito sign-in failures spike; cost-to-date exceeds budget threshold; stale review status (PENDING/RUNNING beyond threshold); **any review entering `MANUAL_REVIEW_REQUIRED` or `ERROR_MANUAL_REVIEW_REQUIRED` that remains unacknowledged for more than 24 hours** (the `contract-toaster-manual-review-stale` alarm — fires if the manual-review filter count is > 0 and the oldest unacknowledged entry exceeds 24 hours, so a 4:55 PM failure does not silently wait overnight); failed/timed-out pipeline stage; abandoned reservation; purge worker error; audit stream lag; denied audit-table mutation; break-glass role assumption; governance retention bypass attempt.
+- **Alarms.** Configured to email `legal-eng@company.com` (owner: Marc Mandel, General Counsel; subscribers: legal-eng team; cadence: immediate SNS → email on alarm state change) on: App Runner 5xx > 5% for 5 min; Bedrock errors > 0; Cognito sign-in failures spike; cost-to-date exceeds budget threshold; stale review status (PENDING/RUNNING beyond threshold); **any review entering `MANUAL_REVIEW_REQUIRED` or `ERROR_MANUAL_REVIEW_REQUIRED` that remains unacknowledged for more than 24 hours** (the `contract-toaster-manual-review-stale` alarm — fires if the manual-review filter count is > 0 and the oldest unacknowledged entry exceeds 24 hours, so a 4:55 PM failure does not silently wait overnight); failed/timed-out pipeline stage; abandoned reservation; purge worker error; audit stream lag; denied audit-table mutation; break-glass role assumption; governance retention bypass attempt.
 
 ### Bootstrap alarm acceptance test
 
 Bootstrap step 10 (see "Day-one bootstrap" above) is the **required** one-time proof that alarm delivery is live. It must be completed — and its outcome recorded — before the environment is declared prod-operable. The test covers two failure modes that configuration alone cannot rule out:
 
 1. **Unconfirmed SNS subscription** — AWS does not deliver alarm mail to a `PendingConfirmation` subscription; the alarm fires silently. Confirming the subscription in the AWS Console (SNS → Topics → `contract-toaster-alarms` → Subscriptions) closes this gap.
-2. **End-to-end delivery failure** — SMTP relay, spam filter, or alias misconfiguration can silently drop messages after the subscription is confirmed. Forcing a test alarm state via `aws cloudwatch set-alarm-state` and waiting for the notification email at `legal-eng@example.com` proves the full delivery path.
+2. **End-to-end delivery failure** — SMTP relay, spam filter, or alias misconfiguration can silently drop messages after the subscription is confirmed. Forcing a test alarm state via `aws cloudwatch set-alarm-state` and waiting for the notification email at `legal-eng@company.com` proves the full delivery path.
 
-The test is documented here so operators who stand up a new environment know it is mandatory, not optional hygiene. The bootstrap log (or deployment PR/issue) must record: the date, the alarm name tested, and the name of the person who confirmed receipt at `legal-eng@example.com`. Absence of that record means the environment has not satisfied acceptance criterion 2 ("Alarm alias real, tested, with named owner").
+The test is documented here so operators who stand up a new environment know it is mandatory, not optional hygiene. The bootstrap log (or deployment PR/issue) must record: the date, the alarm name tested, and the name of the person who confirmed receipt at `legal-eng@company.com`. Absence of that record means the environment has not satisfied acceptance criterion 2 ("Alarm alias real, tested, with named owner").
 
 ### Manual-review filter: owner and SLA
 
 **Owner.** The legal admin (General Counsel or their delegate) is responsible for checking the manual-review filter in the admin UI **daily** — ideally first thing each morning. The filter lists all reviews in `MANUAL_REVIEW_REQUIRED` and `ERROR_MANUAL_REVIEW_REQUIRED` states. For each entry the legal admin determines whether the review needs to be re-run (after the underlying cause is fixed), escalated to engineering, or simply acknowledged and the uploader notified.
 
-**SLA.** The target is acknowledgement within one business day of the review entering a manual-review state. The `contract-toaster-manual-review-stale` alarm provides the backstop: it fires if any review remains in a manual-review state without acknowledgement for more than 24 hours, alerting `legal-eng@example.com` (engineering can then ping the legal admin if the filter has not been checked). The 24-hour window is intentionally longer than a single working session to accommodate end-of-day submissions.
+**SLA.** The target is acknowledgement within one business day of the review entering a manual-review state. The `contract-toaster-manual-review-stale` alarm provides the backstop: it fires if any review remains in a manual-review state without acknowledgement for more than 24 hours, alerting `legal-eng@company.com` (engineering can then ping the legal admin if the filter has not been checked). The 24-hour window is intentionally longer than a single working session to accommodate end-of-day submissions.
 - **CloudTrail.** All **management** API calls logged to `audit-archive` bucket. Console queryable via Athena. Note that AWS currently logs Bedrock `InvokeModel`, `InvokeModelWithResponseStream`, `Converse`, and `ConverseStream` as **management** events — so these give us a control-plane audit signal (who invoked the model, when) without enabling data events. That signal does **not** capture prompt or output content, by design; the per-review facts come from the application `audit` table, and raw prompts/outputs are never written to CloudWatch (see [docs/threat-model.md](docs/threat-model.md) → Logging). Per-object **S3 data events** remain off by default for cost; to enable them for a specific bucket during an investigation, update the trail's event selectors in CDK and `cdk deploy`, then disable again when the investigation closes.
 - **Step Functions console inspection — what you will and will not see (issue #19).** When you open an execution in the Step Functions console to diagnose a stuck or failed review, execution-history event inputs and outputs will contain **S3 object references, content hashes, review identifiers, status values, and token/cost facts — not document text, prompts, or model output**. This is intentional and enforced by the pointer-only payload rule (see [docs/threat-model.md](docs/threat-model.md) → Step Functions execution history and [docs/data-handling.md](docs/data-handling.md) → Step Functions execution-history classification). Substantive content travels via the encrypted `uploads`/`outputs` S3 buckets; you must retrieve the relevant S3 object directly (with appropriate authorization) if you need to inspect the document or model output for a specific review. Do not expect to recover document text from execution history — if a payload looks sparse, that is the correct behavior, not a missing-field bug.

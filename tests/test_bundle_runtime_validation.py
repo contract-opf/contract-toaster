@@ -13,7 +13,7 @@ a playbook document trusted it blindly:
   - `scripts/diff_standard_form.py`'s `_topic_text_by_anchor` silently
     substituted an empty string (or, for a genuinely uncovered anchor, the
     heading text) for a topic's standard-form paragraph whenever
-    `exos_standard` was missing/blank -- corrupting the deterministic diff
+    `our_standard` was missing/blank -- corrupting the deterministic diff
     with no error at all.
 
 This test proves:
@@ -23,7 +23,7 @@ This test proves:
      no-active-bundle refusal (`HTTPException(503, "no active playbook")`,
      issue #214) used when there is genuinely no active bundle at all --
      never a partial/invalid load.
-  2. A covering topic missing `exos_standard` is a hard, structural error
+  2. A covering topic missing `our_standard` is a hard, structural error
      -- both at the bundle-resolution seam (same 503 fail-closed refusal)
      AND at `diff_standard_form._topic_text_by_anchor` (raises
      `playbook_validation.PlaybookValidationError` naming the offending
@@ -88,7 +88,11 @@ import playbook_registry  # noqa: E402
 import playbook_validation  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
 
-REAL_PLAYBOOK_ID = playbook_registry.DEFAULT_PLAYBOOK_ID  # "eiaa"
+# Pinned to "eiaa" explicitly (not playbook_registry.DEFAULT_PLAYBOOK_ID --
+# issue #343 repointed the registry default to the public "sample-agreement"
+# sample playbook) because this file's fixtures below assert eiaa-specific
+# anchors (e.g. "sec-2.1", the term-length topic's anchor).
+REAL_PLAYBOOK_ID = "eiaa"
 REAL_PLAYBOOK_PATH = playbook_registry.resolve_playbook(REAL_PLAYBOOK_ID).playbook_path
 
 
@@ -99,7 +103,7 @@ def _load_real_eiaa_doc() -> dict[str, Any]:
 
 def _find_covering_topic_id(doc: dict[str, Any]) -> str:
     """The id of a real topic that covers a real section anchor -- used to
-    build the missing-exos_standard fixture below."""
+    build the missing-our_standard fixture below."""
     for topic in doc["topics"]:
         if not topic.get("not_in_standard", False) and topic.get("section_anchors"):
             return topic["id"]
@@ -172,12 +176,12 @@ class _FakeDynamoDBResource:
 
 class SyntheticRegistryTestBase(unittest.TestCase):
     """Registers two synthetic playbook_ids -- a schema-invalid one and a
-    missing-exos_standard one -- in a temp registry, so
+    missing-our_standard one -- in a temp registry, so
     resolve_active_release_bundle_hash can be exercised against each
     without touching the real eiaa fixture on disk."""
 
     BAD_SCHEMA_ID = "bad-schema-266"
-    MISSING_STANDARD_ID = "missing-exos-standard-266"
+    MISSING_STANDARD_ID = "missing-our-standard-266"
 
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -192,7 +196,7 @@ class SyntheticRegistryTestBase(unittest.TestCase):
         covering_id = _find_covering_topic_id(missing_standard_doc)
         for topic in missing_standard_doc["topics"]:
             if topic["id"] == covering_id:
-                topic["exos_standard"] = ""
+                topic["our_standard"] = ""
         self.missing_standard_topic_id = covering_id
 
         _register_synthetic_playbook(root, self.BAD_SCHEMA_ID, invalid_schema_doc)
@@ -242,9 +246,9 @@ class TestInvalidSchemaBundleFailsClosed(SyntheticRegistryTestBase):
         self.assertEqual(ctx.exception.detail, "no active playbook")
 
 
-# -- (2) AC2: missing exos_standard on a covering topic is a hard error ----
+# -- (2) AC2: missing our_standard on a covering topic is a hard error ----
 
-class TestMissingExosStandardFailsClosed(SyntheticRegistryTestBase):
+class TestMissingOurStandardFailsClosed(SyntheticRegistryTestBase):
     def test_resolve_refuses_when_covering_topic_has_no_standard_text(self):
         self.playbooks_table.put_item(
             Item={
@@ -338,7 +342,7 @@ def main() -> int:
     suite = unittest.TestSuite()
     for test_case in (
         TestInvalidSchemaBundleFailsClosed,
-        TestMissingExosStandardFailsClosed,
+        TestMissingOurStandardFailsClosed,
         TestValidBundleUnaffected,
         TestDiffStandardFormStaysStdlibImportable,
     ):

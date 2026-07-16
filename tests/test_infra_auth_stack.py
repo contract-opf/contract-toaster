@@ -25,7 +25,7 @@ Verifies that all acceptance criteria for issue #53 are satisfied:
        (b) a pre-sign-up or pre-token-generation Lambda rejects non-@teamexos.com.
 
   H. Pre-token-generation Lambda:
-       - checks legal-admin@example.com group membership via Directory API
+       - checks legal-admin@teamexos.com group membership via Directory API
        - JIT-creates an active users row in DynamoDB on first sign-in
        - fails closed (denies on Directory API error)
 
@@ -59,7 +59,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from infra_synth_helper import NEUTRAL_CDK_CONTEXT
+from infra_synth_helper import NEUTRAL_CDK_CONTEXT, NEUTRAL_HOSTED_DOMAIN
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INFRA = REPO_ROOT / "infra"
@@ -505,14 +505,14 @@ def check_g_two_layer_domain_enforcement() -> list[str]:
     if template is None:
         failures += _assert(
             False,
-            "hd=teamexos.com present in synthesized ProviderDetails (layer a — wired behavior)",
+            f"hd={NEUTRAL_HOSTED_DOMAIN} present in synthesized ProviderDetails (layer a — wired behavior)",
             "No synthesized template available for Check G.\n"
             "         check_m_cdk_synth() must run BEFORE check_g_two_layer_domain_enforcement()\n"
             "         and must succeed so that _synth_template_cache is populated.\n"
             "         The WARN fallback has been removed: a source-text regex is insufficient\n"
             "         because a comment can satisfy it without any wired behavior.\n"
-            "         Per AC layer (a): 'the Google OAuth request pins hd=teamexos.com'.\n"
-            "         Use cfnIdp.addPropertyOverride('ProviderDetails.hd', 'teamexos.com')\n"
+            "         Per AC layer (a): 'the Google OAuth request pins hd={hostedDomain}'.\n"
+            "         Use cfnIdp.addPropertyOverride('ProviderDetails.hd', hostedDomain)\n"
             "         to inject hd into the synthesized ProviderDetails.",
         )
     else:
@@ -528,14 +528,16 @@ def check_g_two_layer_domain_enforcement() -> list[str]:
             provider_details = idp_resource.get("Properties", {}).get("ProviderDetails", {})
             hd_value = provider_details.get("hd", "")
             failures += _assert(
-                hd_value == "teamexos.com",
-                "hd=teamexos.com present in synthesized ProviderDetails (layer a — wired behavior)",
-                f"Per AC: 'the Google OAuth request pins hd=teamexos.com (layer a)'.\n"
-                f"         Synthesized ProviderDetails.hd={hd_value!r} — expected 'teamexos.com'.\n"
+                hd_value == NEUTRAL_HOSTED_DOMAIN,
+                f"hd={NEUTRAL_HOSTED_DOMAIN} present in synthesized ProviderDetails (layer a — wired behavior; "
+                "issue #349: hostedDomain is required CDK context, no internal tenant-domain default)",
+                f"Per AC: 'the Google OAuth request pins hd={{hostedDomain}} (layer a)'.\n"
+                f"         Synthesized ProviderDetails.hd={hd_value!r} — expected {NEUTRAL_HOSTED_DOMAIN!r}\n"
+                f"         (from NEUTRAL_CDK_CONTEXT's --context hostedDomain={NEUTRAL_HOSTED_DOMAIN}).\n"
                 f"         Source comments are insufficient; the hd field must appear in the\n"
                 f"         synthesized CloudFormation template.  Use the CDK escape hatch:\n"
                 f"         const cfnIdp = googleIdp.node.findChild('Resource');\n"
-                f"         (cfnIdp as cdk.CfnResource).addPropertyOverride('ProviderDetails.hd', 'teamexos.com');",
+                f"         (cfnIdp as cdk.CfnResource).addPropertyOverride('ProviderDetails.hd', hostedDomain);",
             )
 
     # --- Layer (b): pre-sign-up or pre-token-generation Lambda (source check) ---
@@ -600,8 +602,8 @@ def check_h_pre_token_lambda_behavior() -> list[str]:
     )
     failures += _assert(
         has_group_check,
-        "Pre-token Lambda references legal-admin@example.com group check / Directory API",
-        "Per AC: 'the pre-token Lambda checks legal-admin@example.com group membership "
+        "Pre-token Lambda references legal-admin@teamexos.com group check / Directory API",
+        "Per AC: 'the pre-token Lambda checks legal-admin@teamexos.com group membership "
         "via the Directory API'.",
     )
 

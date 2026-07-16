@@ -88,36 +88,45 @@ export class ContractToasterStack extends cdk.Stack {
     const { envName } = props;
 
     // -----------------------------------------------------------------------
-    // Resource-name / identity context (issue #233, #316).
+    // Resource-name / identity context (issue #233, #316, #349).
     //
     // These read from CDK context so a NEW deployment (open-source adopter,
     // the eventual prod account) can pick its own app name, GitHub source,
-    // alarm destination, and callback domain without touching source.
+    // alarm destination, callback domain, admin identity, and Cognito
+    // hosted-domain enforcement without touching source.
     //
-    // `githubOwner`, `alarmsEmail`, and `appDomain` have NO internal default
-    // (issue #316) — a context-less `cdk synth`/`cdk deploy` must not wire a
-    // stranger's stack to this project's own GitHub source, alarm inbox, or
-    // domain. Synth fails closed, naming every missing key, until the caller
-    // supplies all three explicitly. `appName` and `githubRepo` keep
-    // defaulting to 'contract-toaster' — they're just a resource-name prefix
-    // and repo name, not another tenant's identity.
+    // `githubOwner`, `alarmsEmail`, `appDomain`, `adminEmail`, and
+    // `hostedDomain` have NO internal default (issues #316, #349) — a
+    // context-less `cdk synth`/`cdk deploy` must not wire a stranger's stack
+    // to this project's own GitHub source, alarm inbox, domain, admin
+    // identity, or sign-in enforcement domain. Synth fails closed, naming
+    // every missing key, until the caller supplies all five explicitly.
+    // `appName` and `githubRepo` keep defaulting to 'contract-toaster' —
+    // they're just a resource-name prefix and repo name, not another
+    // tenant's identity.
     //   --context appName=acmecorp        (default: 'contract-toaster')
     //   --context githubOwner=…           (REQUIRED — no default)
     //   --context githubRepo=…            (default: 'contract-toaster')
     //   --context alarmsEmail=…           (REQUIRED — no default)
     //   --context appDomain=…             (REQUIRED — no default)
+    //   --context adminEmail=…            (REQUIRED — no default)
+    //   --context hostedDomain=…          (REQUIRED — no default)
     // -----------------------------------------------------------------------
     const appName = (this.node.tryGetContext('appName') as string | undefined) ?? 'contract-toaster';
     const githubRepo = (this.node.tryGetContext('githubRepo') as string | undefined) ?? 'contract-toaster';
     const githubOwner = this.node.tryGetContext('githubOwner') as string | undefined;
     const alarmsEmail = this.node.tryGetContext('alarmsEmail') as string | undefined;
     const appDomain = this.node.tryGetContext('appDomain') as string | undefined;
+    const adminEmail = this.node.tryGetContext('adminEmail') as string | undefined;
+    const hostedDomain = this.node.tryGetContext('hostedDomain') as string | undefined;
 
     const missingIdentityContext = (
       [
         ['githubOwner', githubOwner],
         ['alarmsEmail', alarmsEmail],
         ['appDomain', appDomain],
+        ['adminEmail', adminEmail],
+        ['hostedDomain', hostedDomain],
       ] as const
     )
       .filter(([, value]) => !value)
@@ -127,7 +136,8 @@ export class ContractToasterStack extends cdk.Stack {
         `Missing required CDK context: ${missingIdentityContext.join(', ')}. ` +
           "Supply them explicitly, e.g. --context githubOwner=<owner> " +
           '--context alarmsEmail=<email> --context appDomain=<domain> ' +
-          '(see infra/lib/contract-toaster-stack.ts, issue #316).',
+          '--context adminEmail=<email> --context hostedDomain=<domain> ' +
+          '(see infra/lib/contract-toaster-stack.ts, issues #316, #349).',
       );
     }
 
@@ -222,8 +232,14 @@ export class ContractToasterStack extends cdk.Stack {
     });
 
     // Non-null assertions below: the throw guard above already verified
-    // githubOwner/alarmsEmail/appDomain are all present.
-    this.authStack = new AuthStack(this, 'Auth', { envName, appName, appDomain: appDomain! });
+    // githubOwner/alarmsEmail/appDomain/adminEmail/hostedDomain are all present.
+    this.authStack = new AuthStack(this, 'Auth', {
+      envName,
+      appName,
+      appDomain: appDomain!,
+      adminEmail: adminEmail!,
+      hostedDomain: hostedDomain!,
+    });
 
     // PipelineStack: Step Functions review pipeline skeleton with a mock
     // review Lambda (issue #59, mock-first MVP scope per epic #123). Created

@@ -452,11 +452,11 @@ to restore contract language (`proposed_replacement_text`,
 
 | Corpus category | Rule ids / internal descriptions (`playbook_ngrams`) | Standard-clause text (`standard_clause_ngrams`) | Counterparty-precedent grams (`counterparty_names`, `internal_precedent_ids`, `precedent_verbatim_spans`) |
 |---|---|---|---|
-| Checked against `is_replacement_text` fields? | Yes — confidential internal reasoning stays blocked everywhere, including replacement text; word-boundary matching (above) prevents an unrelated word from accidentally embedding the rule id/fragment. | No — allowlisted; the standard clause is the externally-facing position Exos is openly asking for, so a faithful restoration must not self-block. | Yes — a precedent counterparty's name, an internal precedent id, or a long verbatim precedent span is never a legitimate part of a faithful restoration of Exos's own standard position, so these remain checked unconditionally. |
+| Checked against `is_replacement_text` fields? | Yes — confidential internal reasoning stays blocked everywhere, including replacement text; word-boundary matching (above) prevents an unrelated word from accidentally embedding the rule id/fragment. | No — allowlisted; the standard clause is the externally-facing position you are openly asking for, so a faithful restoration must not self-block. | Yes — a precedent counterparty's name, an internal precedent id, or a long verbatim precedent span is never a legitimate part of a faithful restoration of your own standard position, so these remain checked unconditionally. |
 
 ## Citation rules (enforced by the leakage scan)
 
-External-facing footnotes **cite the contract position only** — the section reference and the Exos
+External-facing footnotes **cite the contract position only** — the section reference and your
 standard. They must **never** disclose:
 
 - counterparty names or precedent deal dates,

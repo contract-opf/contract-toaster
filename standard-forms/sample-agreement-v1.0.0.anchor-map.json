@@ -1,0 +1,45 @@
+{
+  "schema_version": "1",
+  "playbook_version": "1.0.0",
+  "standard_form_hash": "sha256:f0a46b86fd9c61c23f2bc657886a49238568fd687c7fbfa290e2823b0a0075c4",
+  "anchor_map_hash": "sha256:35251c923331a820ae18ce60ac63d1340ea7b333cbb40c70bdc49a200c971e8c",
+  "coverage_exempt_anchors": [
+    "sec-preamble",
+    "sec-9"
+  ],
+  "coverage_exempt_rationales": {
+    "sec-preamble": "Preamble identifies the parties and agreement purpose. It carries no reviewable legal clause -- counterparty changes here are de minimis (name/address/date corrections). No topic is needed.",
+    "sec-9": "Section 9 ('Assignment') is intentionally left uncovered in this small sample playbook -- it is registered so the anchor exists (and so the CI drift-gate fixture, which always references sec-8/sec-9, has a real anchor to describe) but carries no standing playbook position for this deliberately minimal example."
+  },
+  "sub_clause_splits": {},
+  "anchors": {
+    "sec-preamble": {
+      "heading": "Preamble",
+      "heading_hash": "sha256:59e371c5cac498cc5ae8361dafb8f60b4023665a8fb606860a289dc3d399a8dc",
+      "sub_clause_split": false,
+      "absent_from_form": false,
+      "structural": true
+    },
+    "sec-1": {
+      "heading": "Delivery of Samples",
+      "heading_hash": "sha256:3b4de03c5200ea0374b52f8eb680891148f0475180810c129bc620d98ec4b8ae",
+      "sub_clause_split": false,
+      "absent_from_form": false,
+      "structural": false
+    },
+    "sec-8": {
+      "heading": "Limitation on Liability",
+      "heading_hash": "sha256:21b7370ff0bc04b228b9a082c43349c283187b70e2a608c0a9eaa4a59994b453",
+      "sub_clause_split": false,
+      "absent_from_form": false,
+      "structural": false
+    },
+    "sec-9": {
+      "heading": "Assignment",
+      "heading_hash": "sha256:153cdaaec56103da0c71f1ff5a0786849d190d369ece1e63940081d8b3ecbd8d",
+      "sub_clause_split": false,
+      "absent_from_form": false,
+      "structural": false
+    }
+  }
+}

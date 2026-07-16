@@ -12,9 +12,9 @@ callers with no check that the ON-DISK playbook body for that hash's
 `playbook_id` was even schema-valid; `scripts/diff_standard_form.py` (and,
 transitively, `scripts/build_anchor_map.py`) fell back to substituting an
 empty string (or, for a genuinely uncovered anchor, the heading text) for a
-topic's standard-form paragraph whenever `exos_standard` was missing/blank
+topic's standard-form paragraph whenever `our_standard` was missing/blank
 -- corrupting the deterministic diff with no error at all. A schema
-violation alone does not catch the second failure mode: `exos_standard` is
+violation alone does not catch the second failure mode: `our_standard` is
 schema-required but carries no `minLength`, so an empty string satisfies the
 schema while still corrupting the diff.
 
@@ -25,7 +25,7 @@ This module is the single place both failure modes are checked, reused by:
     exactly like "no active bundle at all" (the documented 503 "no active
     playbook" fail-closed refusal, issue #214), never a partial load.
   - `scripts/diff_standard_form.py`'s `_topic_text_by_anchor`: a covering
-    topic missing `exos_standard` now raises `PlaybookValidationError`
+    topic missing `our_standard` now raises `PlaybookValidationError`
     instead of silently substituting.
 
 ## What "covering" means here
@@ -34,7 +34,7 @@ A topic "covers" a real standard-form anchor when `not_in_standard` is
 false/absent AND it lists at least one `section_anchors` entry other than
 the reserved pseudo-anchor `sec-_new` (which `not_in_standard: true` topics
 use exclusively -- see playbooks/schema.json's topic-level description).
-Only covering topics are required to carry non-blank `exos_standard` text;
+Only covering topics are required to carry non-blank `our_standard` text;
 `not_in_standard` topics (and topics with no anchors at all) have no
 standard-form paragraph to substitute in the first place, so they are
 exempt -- same semantics `scripts/diff_standard_form.py` already documented.
@@ -86,7 +86,7 @@ _SCHEMA_CACHE: dict[str, Any] | None = None
 
 class PlaybookValidationError(Exception):
     """Raised when a playbook document fails runtime validation -- either
-    `playbooks/schema.json` structural validation, or the exos_standard
+    `playbooks/schema.json` structural validation, or the our_standard
     covering-topic invariant schema.json cannot express (an empty string
     satisfies `type: string` + `required`). Callers treat this as a hard,
     fail-closed error -- never a partial load or silent substitution."""
@@ -102,7 +102,7 @@ def load_playbook_schema(path: Path = SCHEMA_PATH) -> dict[str, Any]:
 
 def topic_missing_standard_text(topic: dict[str, Any]) -> bool:
     """True when `topic` covers at least one real standard-form anchor but
-    its `exos_standard` position text is missing or blank -- the exact
+    its `our_standard` position text is missing or blank -- the exact
     condition that used to silently substitute an empty string (or the
     heading text, for a genuinely uncovered anchor) in
     `scripts/diff_standard_form.py`. Pure stdlib -- no jsonschema needed."""
@@ -111,14 +111,14 @@ def topic_missing_standard_text(topic: dict[str, Any]) -> bool:
     real_anchors = [a for a in (topic.get("section_anchors") or []) if a != SEC_NEW]
     if not real_anchors:
         return False
-    return not (topic.get("exos_standard") or "").strip()
+    return not (topic.get("our_standard") or "").strip()
 
 
 def describe_missing_standard_text(topic: dict[str, Any]) -> str:
     real_anchors = [a for a in (topic.get("section_anchors") or []) if a != SEC_NEW]
     return (
         f"topic {topic.get('id')!r} ({topic.get('section_ref')!r}) covers "
-        f"{real_anchors!r} but has no standard position text (exos_standard) "
+        f"{real_anchors!r} but has no standard position text (our_standard) "
         "-- refusing to silently substitute the heading text or an empty "
         "paragraph."
     )
@@ -126,7 +126,7 @@ def describe_missing_standard_text(topic: dict[str, Any]) -> str:
 
 def validate_playbook_document(doc: dict[str, Any], playbook_id: str | None = None) -> None:
     """Validate `doc` (a parsed playbook JSON body) against
-    `playbooks/schema.json`, then enforce the exos_standard covering-topic
+    `playbooks/schema.json`, then enforce the our_standard covering-topic
     invariant the schema alone cannot express. Raises
     `PlaybookValidationError` on either failure, with a clear message
     naming the offending playbook_id / topic. Never returns a partial /

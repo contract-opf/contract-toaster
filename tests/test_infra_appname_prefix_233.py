@@ -27,18 +27,19 @@ Verifies (per the issue's "Required verification" section):
          acme-org/acme-toaster (cicd-stack.ts:382-390 — was hard-coded to
          contract-opf/contract-toaster);
        - the alarms SNS topic subscription endpoint resolves to
-         alerts@acme.example (observability-stack.ts:120 — was hard-coded
-         to legal-eng@example.com);
+         alerts@acme.example (observability-stack.ts — was hard-coded
+         to an internal tenant mailbox);
        - the Cognito UserPoolClient callback/logout URLs resolve to the
          acmecorp.acme.example domain (auth-stack.ts:540-553 — was
-         hard-coded to contract-toaster.teamexos.com).
+         hard-coded to an internal tenant subdomain).
 
-  C. Security-invariant regression guard: the two-layer teamexos.com
+  C. Security-invariant regression guard (issue #349): the two-layer
      hosted-domain enforcement (Google OAuth `hd=` parameter AND the
-     pre-token Lambda's ALLOWED_DOMAIN check) is untouched by appDomain —
-     it must still read 'teamexos.com' even when a custom appDomain is
-     supplied for the callback/logout URLs. appDomain is a naming knob
-     for the SPA's own hosting domain, NOT an authorization control.
+     pre-token Lambda's ALLOWED_DOMAIN check) tracks the dedicated
+     `--context hostedDomain`, NOT `--context appDomain` — supplying a
+     custom appDomain for the callback/logout URLs must NOT change hd=.
+     appDomain is a naming knob for the SPA's own hosting domain, NOT an
+     authorization control.
 
 This file MUST fail on the pre-fix tree (no `appName` context parameter
 exists; owner/repo, alarm email, and callback URLs are string literals in
@@ -61,12 +62,21 @@ CDK_OUT = INFRA / "cdk.out"
 
 STACK_TS = INFRA / "lib" / "contract-toaster-stack.ts"
 
+# hostedDomain is deliberately a DIFFERENT domain than appDomain here (issue
+# #349 Check G below): the two are independent security/naming concerns, and
+# using distinct values proves hostedDomain does not silently derive from
+# (or get overridden by) a custom appDomain.
+CUSTOM_HOSTED_DOMAIN = "acme-legal.example"
+CUSTOM_ADMIN_EMAIL = "gc@acme-legal.example"
+
 CUSTOM_CONTEXT = [
     "--context", "appName=acmecorp",
     "--context", "githubOwner=acme-org",
     "--context", "githubRepo=acme-toaster",
     "--context", "alarmsEmail=alerts@acme.example",
     "--context", "appDomain=acme.example",
+    "--context", f"hostedDomain={CUSTOM_HOSTED_DOMAIN}",
+    "--context", f"adminEmail={CUSTOM_ADMIN_EMAIL}",
 ]
 
 
@@ -197,9 +207,9 @@ def check_a_appname_param_declared_in_source() -> list[str]:
 
 def check_b_default_context_preserves_current_names() -> list[str]:
     print(
-        "\nCheck B: synth without githubOwner/alarmsEmail/appDomain context fails "
-        "closed naming the missing keys; explicit context resolves verbatim "
-        "(per issue #316) …"
+        "\nCheck B: synth without githubOwner/alarmsEmail/appDomain/adminEmail/hostedDomain "
+        "context fails closed naming the missing keys; explicit context resolves verbatim "
+        "(per issues #316, #349) …"
     )
     failures: list[str] = []
 
@@ -207,17 +217,17 @@ def check_b_default_context_preserves_current_names() -> list[str]:
     if failures:
         return failures
 
-    # (a) No githubOwner/alarmsEmail/appDomain context at all: synth must fail
-    # closed, naming every missing key in the error message.
+    # (a) No identity context at all: synth must fail closed, naming every
+    # missing key in the error message.
     no_context_result = _synth([])
     failures += _assert(
         no_context_result.returncode != 0,
-        "cdk synth --context env=dev (no githubOwner/alarmsEmail/appDomain) exits non-zero",
+        "cdk synth --context env=dev (no identity context) exits non-zero",
         f"stdout (last 800): {no_context_result.stdout[-800:]}\n"
         f"stderr (last 800): {no_context_result.stderr[-800:]}",
     )
     combined_output = no_context_result.stdout + no_context_result.stderr
-    for missing_key in ("githubOwner", "alarmsEmail", "appDomain"):
+    for missing_key in ("githubOwner", "alarmsEmail", "appDomain", "adminEmail", "hostedDomain"):
         failures += _assert(
             missing_key in combined_output,
             f"missing-context error message names '{missing_key}'",
@@ -379,8 +389,8 @@ def check_e_alarm_email_from_context() -> list[str]:
         f"endpoints found: {endpoints}",
     )
     failures += _assert(
-        "legal-eng@example.com" not in endpoints,
-        "alarms SNS subscription no longer hard-codes legal-eng@example.com under custom context",
+        "legal-eng@teamexos.com" not in endpoints,
+        "alarms SNS subscription no longer hard-codes legal-eng@teamexos.com under custom context",
         f"endpoints found: {endpoints}",
     )
 
@@ -414,7 +424,10 @@ def check_f_callback_urls_from_context() -> list[str]:
 
 
 def check_g_hosted_domain_enforcement_unaffected() -> list[str]:
-    print("\nCheck G: teamexos.com hosted-domain enforcement is unaffected by appDomain …")
+    print(
+        "\nCheck G: hosted-domain enforcement tracks --context hostedDomain, "
+        "independent of --context appDomain (issue #349) …"
+    )
     failures: list[str] = []
 
     templates = _collect_templates()
@@ -424,9 +437,15 @@ def check_g_hosted_domain_enforcement_unaffected() -> list[str]:
 
     hd_values = _cognito_hd_values(templates)
     failures += _assert(
-        hd_values == {"teamexos.com"},
-        "Google IdP hd= hosted-domain override is still pinned to teamexos.com "
-        "even with a custom --context appDomain",
+        hd_values == {CUSTOM_HOSTED_DOMAIN},
+        f"Google IdP hd= hosted-domain override is pinned to --context hostedDomain "
+        f"({CUSTOM_HOSTED_DOMAIN!r}), not derived from --context appDomain",
+        f"hd values found: {hd_values}",
+    )
+    failures += _assert(
+        "acme.example" not in hd_values,
+        "hd= does NOT silently pick up --context appDomain's value "
+        "(appDomain is a naming knob, not an authorization control)",
         f"hd values found: {hd_values}",
     )
 

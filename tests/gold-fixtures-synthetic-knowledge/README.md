@@ -1,1 +1,0 @@
-Empty-but-present fixtures directory for the `synthetic-knowledge` registry entry (issue #288) -- knowledge-profile playbooks have no anchor map, so the anchor/detector/coverage gates that consume `fixtures_dir` SKIP this entry explicitly instead of scoring gold cases against it; this directory exists so `fixtures_dir` still resolves to a real path.

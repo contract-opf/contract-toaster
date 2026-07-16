@@ -77,9 +77,14 @@ def _import_findings_module():
 # #249 matcher, over the committed eiaa-v1.0.0 playbook.
 # ---------------------------------------------------------------------------
 
+# Explicit "eiaa" (issue #343 repointed the registry default to the public
+# "sample-agreement" sample playbook) -- this file's fixtures are matched
+# against eiaa's real topic vocabulary and hard_rejections specifically.
+_EIAA_PLAYBOOK_PATH = REPO_ROOT / "playbooks" / "eiaa-v1.0.0.json"
+
 
 def _load_playbook() -> dict[str, Any]:
-    return corpus._load_playbook()
+    return corpus._load_playbook(_EIAA_PLAYBOOK_PATH)
 
 
 def _clause(clause_id: str, heading: str | None, text: str, order: int) -> dict[str, Any]:

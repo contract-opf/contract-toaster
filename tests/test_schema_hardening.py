@@ -60,7 +60,7 @@ KNOWN_RULE_FIELDS = {
 # Fields explicitly defined in the topics.items properties
 KNOWN_TOPIC_FIELDS = {
     "id", "section_ref", "section_anchors", "not_in_standard",
-    "exos_standard", "acceptable_variations", "must_preserve",
+    "our_standard", "acceptable_variations", "must_preserve",
     "reject_if_proposed", "hard_rejection_refs", "replacement_text",
 }
 

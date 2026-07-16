@@ -71,7 +71,7 @@ produces a finding -- `decision="flag"` -- never silence.
 Every rationale string this module emits is a TEMPLATE this module
 controls, or comes from a `FakeBedrockClient` response an injecting
 caller controls -- never verbatim playbook prose (`hard_rejections[].
-description` and `topics[].exos_standard` routinely contain the literal
+description` and `topics[].our_standard` routinely contain the literal
 word "Exos" -- see `playbooks/eiaa-v1.0.0.json`). Rationale text uses
 "your" voicing and is asserted (in `tests/test_third_party_position_
 findings.py`) free of "Exos"/"EXOS", per the project-wide de-brand rule.
@@ -272,7 +272,7 @@ def _missing_position_finding(topic: dict[str, Any], required: bool) -> dict[str
 def _build_user_prompt(topic: dict[str, Any], clause_text: str) -> str:
     payload = {
         "topic_section": topic.get("section_ref"),
-        "your_position": topic.get("exos_standard"),
+        "your_position": topic.get("our_standard"),
         "must_preserve": topic.get("must_preserve", []),
         "acceptable_variations": [
             variation.get("to") for variation in topic.get("acceptable_variations", [])

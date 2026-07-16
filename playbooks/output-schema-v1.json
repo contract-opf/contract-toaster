@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://teamexos.com/playbooks/output-schema/v1.json",
-  "title": "Exos Contract Review — Model Response Schema v1",
-  "description": "Versioned JSON Schema for the model response produced by both the primary reviewer and the adversarial critic in the Exos contract-review pipeline. This schema is the single validation source of truth for both model passes. Its content_hash is part of the release bundle (see playbooks/schema.json release.output_contract_hash and ARCHITECTURE.md). Any change to this file requires a new output_contract_hash in the release bundle and a legal-governance review. See docs/output-contract.md for the coupling rules.",
+  "$id": "https://contract-opf.github.io/playbooks/output-schema/v1.json",
+  "title": "Contract Review — Model Response Schema v1",
+  "description": "Versioned JSON Schema for the model response produced by both the primary reviewer and the adversarial critic in the contract-review pipeline. This schema is the single validation source of truth for both model passes. Its content_hash is part of the release bundle (see playbooks/schema.json release.output_contract_hash and ARCHITECTURE.md). Any change to this file requires a new output_contract_hash in the release bundle and a legal-governance review. See docs/output-contract.md for the coupling rules.",
   "output_contract_version": "v1",
   "type": "object",
   "required": [

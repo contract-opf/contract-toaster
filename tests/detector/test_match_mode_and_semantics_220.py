@@ -359,7 +359,14 @@ NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS = {
 
 
 def test_no_exos_indemnity_fixtures_still_pass() -> None:
-    results = {r.case_id: r for r in eval_harness.score_all()}
+    # Explicit eiaa fixtures_dir/playbook_path (issue #343 repointed
+    # eval_harness's module-level default FIXTURES_PATH/PLAYBOOK_PATH to the
+    # public "sample-agreement" sample playbook) -- these fixtures live in
+    # tests/gold-fixtures/, eiaa's directory.
+    results = {
+        r.case_id: r
+        for r in eval_harness.score_all(fixtures_dir=REPO_ROOT / "tests" / "gold-fixtures", playbook_path=PLAYBOOK_PATH)
+    }
     missing = NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS - set(results)
     _check(not missing, f"expected no-exos-indemnity gold fixtures not found: {sorted(missing)}")
 

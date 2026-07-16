@@ -1,0 +1,16 @@
+{
+  "description": "Per-playbook section configuration for the public SAMPLE standard form v1.0.0 (issue #343). Deliberately small: two reviewable sections (sec-1, sec-8) covered by playbook topics, plus a structural preamble and one anchor exempted from the form-coverage check, enough to exercise the anchor-map builder / form-coverage / heading-hash-drift gates end-to-end without pretending to be a real contract. Read at runtime by scripts/build_anchor_map.py via the playbook registry (scripts/playbook_registry.py).",
+  "sections": [
+    ["sec-preamble", "Preamble", false, null],
+    ["sec-1", "Delivery of Samples", false, null],
+    ["sec-8", "Limitation on Liability", false, null],
+    ["sec-9", "Assignment", false, null]
+  ],
+  "coverage_exempt_rationales": {
+    "sec-preamble": "Preamble identifies the parties and agreement purpose. It carries no reviewable legal clause -- counterparty changes here are de minimis (name/address/date corrections). No topic is needed.",
+    "sec-9": "Section 9 ('Assignment') is intentionally left uncovered in this small sample playbook -- it is registered so the anchor exists (and so the CI drift-gate fixture, which always references sec-8/sec-9, has a real anchor to describe) but carries no standing playbook position for this deliberately minimal example."
+  },
+  "absent_from_form_anchors": [],
+  "structural_anchors": ["sec-preamble"],
+  "sub_clause_splits": {}
+}

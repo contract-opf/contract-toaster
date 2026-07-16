@@ -112,9 +112,13 @@ def _run(fn, *args, **kwargs) -> tuple[int, str]:
 # ---------------------------------------------------------------------------
 # One precision entry ("precision-fixture", a stand-in for eiaa's shape:
 # both anchor_map_path and section_config_path set) and one knowledge entry
-# ("knowledge-fixture", a stand-in for the real "synthetic-knowledge" entry
-# this issue also commits: both null). Callers toggle which artifacts exist
-# via the keyword flags below to exercise the RED/GREEN paths of each gate.
+# ("knowledge-fixture", a stand-in for a knowledge-profile registry entry:
+# both null -- issue #288 committed the original "synthetic-knowledge" example
+# of this shape; issue #343 later renamed/reshaped it to a precision-profile
+# "sample-agreement" entry, so no committed knowledge-profile entry remains,
+# but the shape itself is still exercised here via this synthetic fixture).
+# Callers toggle which artifacts exist via the keyword flags below to
+# exercise the RED/GREEN paths of each gate.
 
 # The heading-hash-drift gate's regression fixture (tests/anchor/
 # test_heading_hash_drift.py) always manufactures a sec-8/sec-9 drift; a
@@ -281,8 +285,8 @@ def check_profile_both_shapes() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 2 — guard rail: resolve_playbook("synthetic-knowledge") works today,
-# and NO modified gate hard-fails (raises) on a null anchor map.
+# Check 2 — guard rail: resolve_playbook() on a knowledge-profile entry
+# works, and NO modified gate hard-fails (raises) on a null anchor map.
 # ---------------------------------------------------------------------------
 
 def check_guard_rail_no_hard_fail_on_null_anchor_map() -> list[str]:

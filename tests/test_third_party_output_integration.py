@@ -187,7 +187,7 @@ def _reject_scenario_playbook() -> dict[str, Any]:
             {
                 "id": "confidentiality",
                 "section_ref": "Confidentiality",
-                "exos_standard": "Confidentiality survives termination for a bounded period.",
+                "our_standard": "Confidentiality survives termination for a bounded period.",
                 "must_preserve": [],
                 "reject_if_proposed": [],
                 "hard_rejection_refs": ["no-perpetual-confidentiality"],
@@ -204,7 +204,7 @@ def _reject_scenario_playbook() -> dict[str, Any]:
             {
                 "id": "assignment",
                 "section_ref": "Assignment",
-                "exos_standard": "Assignment requires prior written consent.",
+                "our_standard": "Assignment requires prior written consent.",
                 "must_preserve": [],
                 "reject_if_proposed": [],
                 "hard_rejection_refs": [],
@@ -213,7 +213,7 @@ def _reject_scenario_playbook() -> dict[str, Any]:
             {
                 "id": "insurance",
                 "section_ref": "Insurance",
-                "exos_standard": "Counterparty maintains commercial general liability insurance.",
+                "our_standard": "Counterparty maintains commercial general liability insurance.",
                 "must_preserve": [],
                 "reject_if_proposed": [],
                 "hard_rejection_refs": ["insurance-required"],
@@ -230,7 +230,7 @@ def _accept_scenario_playbook() -> dict[str, Any]:
             {
                 "id": "assignment",
                 "section_ref": "Assignment",
-                "exos_standard": "Assignment requires prior written consent.",
+                "our_standard": "Assignment requires prior written consent.",
                 "must_preserve": [],
                 "reject_if_proposed": [],
                 "hard_rejection_refs": [],

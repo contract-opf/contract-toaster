@@ -101,7 +101,11 @@ def main():
         print(f"[G0] {err}")
         sys.exit(1)
 
-    standard = mod.load_standard_form_paragraphs()
+    # Explicit "eiaa" (issue #343 repointed the registry default to the
+    # public "sample-agreement" sample playbook) -- this gate's fixtures
+    # (modify-liability-cap.json, insert-new-indemnification-section.json,
+    # etc.) are all eiaa-specific.
+    standard = mod.load_standard_form_paragraphs(playbook_id="eiaa")
 
     # --- Case 1: verbatim draft -> empty diff -------------------------------
     # The verbatim draft fixture is intentionally derived from the standard-form

@@ -159,11 +159,13 @@ class TestRegistryOwnedDefault(unittest.TestCase):
                 with self.assertRaises(playbook_registry.PlaybookNotRegisteredError):
                     playbook_registry.default_playbook_id()
 
-    def test_real_registry_default_is_still_eiaa(self):
+    def test_real_registry_default_is_sample_agreement(self):
         """Guard: the REAL playbooks/registry.json carries
-        "default_playbook_id": "eiaa" -- behavior identical for eiaa
-        (issue #289's acceptance criteria)."""
-        self.assertEqual(playbook_registry.default_playbook_id(), "eiaa")
+        "default_playbook_id": "sample-agreement" (issue #343 repointed the
+        registry default from "eiaa" to the public sample playbook so no
+        real playbook is exposed by demos/screenshots by accident; eiaa
+        remains separately registered and loadable)."""
+        self.assertEqual(playbook_registry.default_playbook_id(), "sample-agreement")
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +207,9 @@ class TestCorpusResolvesDefaultViaRegistry(unittest.TestCase):
                 )
         self.assertEqual(record["playbook_id"], "synthetic-default")
 
-    def test_real_corpus_default_is_still_eiaa(self):
-        """Guard: unchanged behavior for eiaa."""
+    def test_real_corpus_default_is_sample_agreement(self):
+        """Guard: the real registry default is now "sample-agreement"
+        (issue #343)."""
         record = corpus.build_clause_record(
             source_document_id="doc-1",
             playbook_topic_id="t1",
@@ -214,7 +217,7 @@ class TestCorpusResolvesDefaultViaRegistry(unittest.TestCase):
             document_type="executed-final",
             corpus_snapshot_version="snap-1",
         )
-        self.assertEqual(record["playbook_id"], "eiaa")
+        self.assertEqual(record["playbook_id"], "sample-agreement")
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +239,7 @@ class TestDiffStandardFormSupplementsAreData(unittest.TestCase):
         """Guard: same resulting text as before the data move (the real
         tests/test_dts_pipeline_runner_real_review.py fixture depends on
         this exact substring)."""
-        paragraphs = dsf.load_standard_form_paragraphs(docx_path=None)
+        paragraphs = dsf.load_standard_form_paragraphs(docx_path=None, playbook_id="eiaa")
         sec8 = next(p for p in paragraphs if p["anchor"] == "sec-8")
         self.assertIn(
             "Neither party shall be liable to the other for consequential damages.",
@@ -309,12 +312,13 @@ class TestMockPipelineIsRegistryDriven(unittest.TestCase):
 
     def test_registered_without_mock_output_key_is_manual_review(self):
         """A registered playbook_id with no `mock_output_key` (the real
-        "synthetic-knowledge" entry) gets the "playbook coming soon" copy,
-        not the generic unknown-playbook copy -- the two MANUAL_REVIEW_
-        REQUIRED branches are distinguishable."""
+        "sample-agreement" entry, issue #343's renamed public sample
+        playbook) gets the "playbook coming soon" copy, not the generic
+        unknown-playbook copy -- the two MANUAL_REVIEW_REQUIRED branches
+        are distinguishable."""
         pr.run_mock_pipeline(
             self.REVIEW_ID,
-            {"review_id": self.REVIEW_ID, "playbook_id": "synthetic-knowledge"},
+            {"review_id": self.REVIEW_ID, "playbook_id": "sample-agreement"},
             dynamodb_resource=self.ddb,
             s3_client=self.s3,
         )
@@ -382,9 +386,11 @@ class TestReviewRoutesDefaultPlaybookIdFromRegistry(unittest.TestCase):
                 "synthetic-default",
             )
 
-    def test_real_default_is_still_eiaa(self):
-        """Guard: unchanged behavior for eiaa."""
-        self.assertEqual(review_routes.DEFAULT_PLAYBOOK_ID, "eiaa")
+    def test_real_default_is_sample_agreement(self):
+        """Guard: the real registry default is now "sample-agreement"
+        (issue #343 repointed it from "eiaa" to the public sample
+        playbook)."""
+        self.assertEqual(review_routes.DEFAULT_PLAYBOOK_ID, "sample-agreement")
 
 
 if __name__ == "__main__":

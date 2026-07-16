@@ -322,7 +322,7 @@ def verify_required_tokens_against_docx(
     against the REAL parsed section text at their `section_anchor` --
     extracted from the actual `.docx` OOXML via
     scripts/diff_standard_form.py's real-docx loader -- instead of the
-    playbook's own `exos_standard` prose (see diff_standard_form.py's module
+    playbook's own `our_standard` prose (see diff_standard_form.py's module
     docstring for why the playbook-prose synthetic body trivially/
     self-referentially satisfies this same check: the prose IS the text the
     check reads).

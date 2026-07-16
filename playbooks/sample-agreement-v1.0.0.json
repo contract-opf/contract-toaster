@@ -1,0 +1,192 @@
+{
+  "$schema": "https://contract-opf.github.io/playbooks/schema/v1.json",
+  "playbook": {
+    "id": "sample-agreement",
+    "version": "1.0.0",
+    "agreement_type": "Sample Agreement",
+    "agreement_aliases": [
+      "Sample Contract",
+      "Example Sample Agreement"
+    ],
+    "exos_party": "Your Organization, LLC",
+    "counterparty_type": "Sample Counterparty",
+    "created_at": "2026-07-16T00:00:00Z",
+    "created_by": "playbook-mockup",
+    "metadata": {
+      "primary_model_id": "anthropic.claude-opus-4-8",
+      "critic_model_id": "anthropic.claude-sonnet-4-6",
+      "embedding_model_id": "amazon.titan-embed-text-v2:0",
+      "model_region": "us-east-1",
+      "request_contract": "opus-4.8-bedrock-runtime-single-region-native-id-no-sampling-adaptive-thinking",
+      "decision_mode": "binary"
+    },
+    "status": "draft"
+  },
+  "general_principles": [
+    "This is a publicly-shipped SAMPLE playbook: a clearly fictional 'Sample Agreement' used for demos, screenshots, and documentation so no real playbook is ever exposed by accident. Default toward ACCEPT for anything that doesn't touch a hard-rejection floor below.",
+    "Push back only when a counterparty change would remove a floor protection this playbook relies on, or introduce a term this playbook rejects outright.",
+    "Be decisive. Every change is either ACCEPT (apply the change) or REQUEST_CHANGE (counter with specific replacement text and a one- or two-sentence footnote rationale). Never 'flag for review'.",
+    "Identify each issue by section number and title from the proposed document.",
+    "Never invent obligations that aren't in this playbook. Never accept obligations that aren't in this playbook unless they are de minimis."
+  ],
+  "decision_rubric": {
+    "accept_when": [
+      "Change is clerical, stylistic, or grammatical without legal impact.",
+      "Change updates the counterparty's own legal name, address, contact info, signatory, or notice recipient.",
+      "Change is within an explicit acceptable_variations range defined in this playbook for the relevant topic.",
+      "Change falls inside any de_minimis_categories entry below.",
+      "Change is mutual and symmetric (e.g., adding a clarification that applies to both parties)."
+    ],
+    "request_change_when": [
+      "Change matches an entry on the hard_rejections list.",
+      "Change removes a floor protection this playbook relies on (the sample delivery cap, the liability cap, etc.).",
+      "Change creates new liability, risk, or expense not contemplated by this sample playbook."
+    ]
+  },
+  "topics": [
+    {
+      "id": "sample-delivery",
+      "section_ref": "1 Delivery of Samples",
+      "section_anchors": [
+        "sec-1"
+      ],
+      "our_standard": "Each party may request up to 10 free samples per calendar quarter on a non-exclusive basis; the recipient bears its own evaluation costs and neither party owes the other a purchase commitment.",
+      "must_preserve": [
+        "mutual non-exclusivity of the sample arrangement",
+        "the quarterly sample cap"
+      ],
+      "reject_if_proposed": [
+        "perpetual exclusivity over sample formulas or designs",
+        "an unlimited/uncapped free-sample volume"
+      ],
+      "hard_rejection_refs": [
+        "no-perpetual-exclusivity"
+      ],
+      "replacement_text": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "sample-liability-cap",
+      "section_ref": "8 Limitation on Liability",
+      "section_anchors": [
+        "sec-8"
+      ],
+      "our_standard": "$10,000 mutual aggregate liability cap for any claim arising out of a sample; mutual waiver of consequential, special, punitive, and indirect damages.",
+      "must_preserve": [
+        "the $10,000 mutual aggregate liability cap",
+        "the mutual consequential-damages waiver"
+      ],
+      "reject_if_proposed": [
+        "uncapped liability for sample defects"
+      ],
+      "hard_rejection_refs": [
+        "preserve-sample-liability-cap"
+      ],
+      "replacement_text": {
+        "mode": "none"
+      }
+    }
+  ],
+  "hard_rejections": [
+    {
+      "id": "no-perpetual-exclusivity",
+      "description": "Counterparty introduces perpetual or exclusive rights over our sample formulas or designs.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "perpetual exclusivity",
+        "in perpetuity"
+      ],
+      "match": "word_boundary",
+      "applies_to_topics": [
+        "sample-delivery"
+      ]
+    },
+    {
+      "id": "preserve-sample-liability-cap",
+      "description": "Counterparty removes or alters the mutual $10,000 aggregate liability cap for samples.",
+      "kind": "on_remove_or_alter",
+      "protects": {
+        "section_anchor": "sec-8",
+        "required_tokens": [
+          "$10,000",
+          "aggregate liability"
+        ],
+        "token_policy": "any",
+        "fire_on": "delete_or_modify"
+      },
+      "applies_to_topics": [
+        "sample-liability-cap"
+      ]
+    }
+  ],
+  "de_minimis_categories": [
+    "Counterparty's own legal name, address, email, or signatory updates.",
+    "Typo and grammar corrections.",
+    "Reformatting changes (font, spacing, capitalization).",
+    "Section renumbering without substantive change.",
+    "Restating existing obligations in different words."
+  ],
+  "output_format": {
+    "decision_field": "ACCEPT | REQUEST_CHANGE",
+    "every_issue_includes": [
+      "section_ref",
+      "section_title",
+      "counterparty_change_summary",
+      "decision",
+      "external_rationale_for_footnote",
+      "proposed_replacement_text",
+      "playbook_topic_id",
+      "internal_precedent_citation"
+    ],
+    "footnote_phrasing_rules": [
+      "One or two sentences per footnote. No more.",
+      "Name the specific risk created rather than generic phrases like 'not standard'.",
+      "Plain English. Avoid legalese where a plain word does the job.",
+      "State the position. Don't hedge with 'we generally prefer' or 'our usual practice is'."
+    ],
+    "citation_rules": {
+      "external_footnotes_cite": "contract_position_only",
+      "precedent_citations": "internal_only",
+      "forbid_in_external_output": [
+        "counterparty_name",
+        "precedent_deal_date",
+        "verbatim_precedent_text",
+        "system_prompt_fragment",
+        "internal_playbook_id"
+      ]
+    },
+    "system_status": {
+      "states": [
+        "OK",
+        "LOW_CONFIDENCE",
+        "MANUAL_REVIEW_REQUIRED",
+        "ERROR_MANUAL_REVIEW_REQUIRED"
+      ],
+      "confidence_field": "confidence_state",
+      "manual_review_routing": "Manual-review states are operational statuses and never external legal decisions."
+    }
+  },
+  "anchor_migrations": [
+    {
+      "anchor": "sec-8",
+      "from_heading_hash": "sha256:21b7370ff0bc04b228b9a082c43349c283187b70e2a608c0a9eaa4a59994b453",
+      "to_heading_hash": "sha256:e1575714708ac339d4673450f15b44005651c0a77c7a070ac997e0dcb9a1ed1e",
+      "from_standard_form_hash": "sha256:9db9f9e043016c1eb52fbe076fe773fd54384dda25d7ea9d786a80836f65fc5e",
+      "to_standard_form_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "reason": "CI drift-gate fixture (same fixture shape used by every precision-profile playbook -- see tests/anchor/test_heading_hash_drift.py): simulates a §8/§9 renumbering so the drift gate has a covering migration record to check against for this playbook, independent of this sample form's own real section layout.",
+      "approved_by": "Marc Mandel, General Counsel",
+      "approved_at": "2026-07-16T00:00:00Z"
+    },
+    {
+      "anchor": "sec-9",
+      "from_heading_hash": "sha256:19055f301ecb9814f83a1697fd7808979dace51e83228087319040ecbc9aba52",
+      "to_heading_hash": "sha256:8cbe5c06ab20a5d0b330ba6431f02f2853c177d4ddfd54b227ee5aae95c2129c",
+      "from_standard_form_hash": "sha256:9db9f9e043016c1eb52fbe076fe773fd54384dda25d7ea9d786a80836f65fc5e",
+      "to_standard_form_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "reason": "CI drift-gate fixture (see sec-8 entry above for the shared rationale).",
+      "approved_by": "Marc Mandel, General Counsel",
+      "approved_at": "2026-07-16T00:00:00Z"
+    }
+  ]
+}

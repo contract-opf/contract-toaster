@@ -150,17 +150,18 @@ class TestRunMockPipeline(unittest.TestCase):
         self.assertEqual(s3.copies[0]["Key"], f"outputs/{REVIEW_ID}/out.docx")
         settle.assert_called_once()
 
-    def test_synthetic_knowledge_is_manual_review_no_output(self) -> None:
+    def test_sample_agreement_is_manual_review_no_output(self) -> None:
         """Issue #289: _mock_decision is registry-driven, not literal-driven
         -- "nda" isn't (and was never) a playbooks/registry.json entry, so
         it now falls into the same unregistered/unknown_playbook bucket as
         any other unregistered id (see test_unknown_playbook_is_manual_review
         below). The "coming soon" MANUAL_REVIEW_REQUIRED branch is exercised
         by a playbook that IS registered but has no mock_output_key yet --
-        the real "synthetic-knowledge" entry."""
+        the real "sample-agreement" entry (issue #343's renamed public
+        sample playbook, née "synthetic-knowledge")."""
         reviews_table = FakeReviewsTable()
         s3 = FakeS3()
-        self._run("synthetic-knowledge", reviews_table, s3)
+        self._run("sample-agreement", reviews_table, s3)
         self.assertEqual(reviews_table.item["status"], "MANUAL_REVIEW_REQUIRED")
         self.assertEqual(reviews_table.item["reason"], "playbook_coming_soon")
         self.assertNotIn("output_s3_key", reviews_table.item)

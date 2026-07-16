@@ -42,7 +42,7 @@ tracks real lexical/topical overlap -- unlike raw whole-text hashing.
 
 A playbook topic's "position text" -- the thing each clause is compared
 against -- reuses the SAME topic vocabulary `corpus.py`'s own heading/
-keyword matcher relies on: `topic["section_ref"]`, `topic["exos_standard"]`
+keyword matcher relies on: `topic["section_ref"]`, `topic["our_standard"]`
 (the position statement itself), and, when present, `corpus._KEYWORD_
 ALIASES[topic_id]` -- the SAME curated alias list `corpus._build_topic_
 alias_index` / `corpus._match_by_keyword` use for corpus ingestion's own
@@ -219,12 +219,12 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 def _topic_position_text(topic: dict[str, Any]) -> str:
     """The text a playbook topic is matched against: its display heading
-    (`section_ref`), its position statement (`exos_standard`), and -- when
+    (`section_ref`), its position statement (`our_standard`), and -- when
     this topic id has one -- `corpus._KEYWORD_ALIASES`' curated keyword
     list, the SAME curated vocabulary `corpus._build_topic_alias_index` /
     `corpus._match_by_keyword` already rely on for corpus ingestion's own
     heading-plus-body keyword fallback (issue #215)."""
-    parts = [topic.get("section_ref", ""), topic.get("exos_standard", "")]
+    parts = [topic.get("section_ref", ""), topic.get("our_standard", "")]
     parts.extend(corpus._KEYWORD_ALIASES.get(topic.get("id", ""), []))
     return "\n".join(part for part in parts if part)
 

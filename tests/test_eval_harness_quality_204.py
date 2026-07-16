@@ -132,7 +132,7 @@ def test_document_level_fixture_is_real_docx_not_a_snippet(failures: list[str]) 
 
 def test_document_level_case_scores_via_real_pipeline(failures: list[str]) -> None:
     playbook = _load_playbook()
-    standard = diff_standard_form.load_standard_form_paragraphs(docx_path=None)
+    standard = diff_standard_form.load_standard_form_paragraphs(docx_path=None, playbook_id="eiaa")
     case_raw, docx_bytes = _load_doc_level_case()
 
     result = eval_harness.score_document_level_case(case_raw, docx_bytes, playbook, standard)
@@ -172,7 +172,7 @@ def test_document_level_case_fails_red_on_a_clean_document(failures: list[str]) 
     proving the detector fire in the prior test is caused by the planted
     insertion, not a bug that fires unconditionally."""
     playbook = _load_playbook()
-    standard = diff_standard_form.load_standard_form_paragraphs(docx_path=None)
+    standard = diff_standard_form.load_standard_form_paragraphs(docx_path=None, playbook_id="eiaa")
 
     # A verbatim draft: every standard-form anchor carried over unmodified
     # (reuses the same full-document builder the committed fixture's
@@ -209,7 +209,7 @@ def test_document_level_case_fails_red_on_a_clean_document(failures: list[str]) 
 def test_redline_checks_populated_and_verified_against_patch_output(failures: list[str]) -> None:
     case_raw, docx_bytes = _load_doc_level_case()
     playbook = _load_playbook()
-    standard = diff_standard_form.load_standard_form_paragraphs(docx_path=None)
+    standard = diff_standard_form.load_standard_form_paragraphs(docx_path=None, playbook_id="eiaa")
 
     redline_checks = case_raw.get("redline_checks", [])
     if not redline_checks:

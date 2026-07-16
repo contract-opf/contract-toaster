@@ -63,7 +63,7 @@ def _import_matcher_module():
             f"  FIX: implement the deterministic semantic clause-to-playbook-"
             f"position matcher (issue #249) -- match_clauses_to_playbook(), "
             f"built on corpus.deterministic_embed, reusing corpus.py's topic "
-            f"vocabulary (section_ref / exos_standard / _KEYWORD_ALIASES)."
+            f"vocabulary (section_ref / our_standard / _KEYWORD_ALIASES)."
         )
 
 
@@ -72,9 +72,15 @@ def _import_matcher_module():
 # committed eiaa-v1.0.0 playbook.
 # ---------------------------------------------------------------------------
 
+# Explicit "eiaa" (issue #343 repointed the registry default to the public
+# "sample-agreement" sample playbook) -- this file's fixtures below
+# (confidentiality/indemnification clause text) are matched against eiaa's
+# real topic vocabulary specifically.
+_EIAA_PLAYBOOK_PATH = REPO_ROOT / "playbooks" / "eiaa-v1.0.0.json"
+
 
 def _load_playbook() -> dict[str, Any]:
-    return corpus._load_playbook()
+    return corpus._load_playbook(_EIAA_PLAYBOOK_PATH)
 
 
 def _clause(clause_id: str, heading: str | None, text: str, order: int) -> dict[str, Any]:

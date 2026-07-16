@@ -243,7 +243,7 @@ def _build_docx_bytes(body_paragraphs_xml: str) -> bytes:
 
 
 def _build_draft_docx(overrides: dict[str, str]) -> bytes:
-    standard = dsf_module.load_standard_form_paragraphs(docx_path=None)
+    standard = dsf_module.load_standard_form_paragraphs(docx_path=None, playbook_id="eiaa")
     parts = []
     for std_para in standard:
         if std_para.get("absent_from_form", False):

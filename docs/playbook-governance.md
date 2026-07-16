@@ -334,11 +334,11 @@ change, update the fixture with `python3 scripts/canonicalize.py --record` and c
 
 ## Schema versioning
 
-Every playbook instance declares `$schema: "https://teamexos.com/playbooks/schema/v1.json"`.
+Every playbook instance declares `$schema: "https://contract-opf.github.io/playbooks/schema/v1.json"`.
 The engine that validates and executes playbooks maintains an explicit **supported schema
 versions** list. Today that list contains exactly one entry:
 
-- `https://teamexos.com/playbooks/schema/v1.json`
+- `https://contract-opf.github.io/playbooks/schema/v1.json`
 
 The four rules that govern schema evolution:
 

@@ -6,7 +6,7 @@ Three checks (all must pass; exit 1 on any failure):
 
 1. GROUP-NAMING DECISION CHECK (docs-lint flavour):
    ARCHITECTURE.md Authentication section (or RUNBOOK.md Onboarding section)
-   must document the intentional misnomer: that `legal-admin@example.com` is the
+   must document the intentional misnomer: that `legal-admin@company.com` is the
    allowlist group for ALL users (not just admins), and that admin privilege is
    controlled separately by the in-app `is_admin` flag.  This prevents lifecycle
    mistakes caused by misreading the group name as "only admins belong here."
@@ -129,7 +129,7 @@ def validate(obj, schema: dict) -> list:
 
 def check_group_naming_decision(failures: list) -> None:
     """
-    ARCHITECTURE.md or RUNBOOK.md must explicitly note that legal-admin@example.com
+    ARCHITECTURE.md or RUNBOOK.md must explicitly note that legal-admin@company.com
     is the allowlist group for ALL users (not only admins), and that the in-app
     is_admin flag is the sole admin privilege gate.  This disambiguates the
     misleading group name so operators do not misread it as "admins only."
@@ -147,7 +147,7 @@ def check_group_naming_decision(failures: list) -> None:
 
     # We require an explicit misnomer note in either ARCHITECTURE.md or RUNBOOK.md.
     # Acceptable patterns:
-    #   (a) The word "misnomer" appears near legal-admin@example.com (within ~500 chars).
+    #   (a) The word "misnomer" appears near legal-admin@company.com (within ~500 chars).
     #   (b) The group name is explicitly described as covering all users / non-admins too
     #       (within a single line or paragraph, not just a DOTALL span of the whole file).
     #
@@ -161,7 +161,7 @@ def check_group_naming_decision(failures: list) -> None:
     for path, text in texts_to_search:
         # Pattern (a): explicit "misnomer" near the group name (within 600 chars)
         misnomer_near_group = False
-        for m in re.finditer(r"legal-admin@teamexos\.com", text, re.IGNORECASE):
+        for m in re.finditer(r"legal-admin@company\.com", text, re.IGNORECASE):
             window = text[max(0, m.start() - 300):m.end() + 300]
             if re.search(r"\bmisnomer\b", window, re.IGNORECASE):
                 misnomer_near_group = True
@@ -174,12 +174,12 @@ def check_group_naming_decision(failures: list) -> None:
         # appear anywhere in the pre-PR baseline.  Broad alternatives like "reviewer.*not.*admin"
         # are intentionally excluded because they false-match the existing onboarding prose
         # ("A reviewer is anyone ... they are not admins. The pre-token Lambda checks
-        # `legal-admin@example.com`") which says nothing about the group covering all users.
+        # `legal-admin@company.com`") which says nothing about the group covering all users.
         group_covers_all_inline = bool(re.search(
-            r"legal-admin@teamexos\.com[^\n]{0,200}(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)",
+            r"legal-admin@company\.com[^\n]{0,200}(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)",
             text, re.IGNORECASE,
         )) or bool(re.search(
-            r"(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)[^\n]{0,200}legal-admin@teamexos\.com",
+            r"(?:all\s+ContractToaster\s+users?|covers\s+all\s+ContractToaster)[^\n]{0,200}legal-admin@company\.com",
             text, re.IGNORECASE,
         ))
 
@@ -190,7 +190,7 @@ def check_group_naming_decision(failures: list) -> None:
     if not has_misnomer_note:
         failures.append(
             f"{label}: Neither ARCHITECTURE.md nor RUNBOOK.md documents the "
-            f"group-naming misnomer: `legal-admin@example.com` is the allowlist for "
+            f"group-naming misnomer: `legal-admin@company.com` is the allowlist for "
             f"ALL users (reviewers and admins alike), not only admins. "
             f"Add a note in the Authentication section of ARCHITECTURE.md (or the "
             f"Onboarding section of RUNBOOK.md) clarifying that (a) the group name is "
@@ -203,7 +203,7 @@ def check_group_naming_decision(failures: list) -> None:
     else:
         print(
             f"  PASS {label}: group-naming misnomer documented "
-            f"(legal-admin@example.com covers all users; is_admin flag governs privilege)."
+            f"(legal-admin@company.com covers all users; is_admin flag governs privilege)."
         )
 
 

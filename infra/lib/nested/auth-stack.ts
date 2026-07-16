@@ -10,27 +10,49 @@ export interface AuthStackProps extends cdk.NestedStackProps {
   /**
    * Resource-name prefix (issue #233). Defaults to 'contract-toaster'. Used
    * for the Cognito hosted-UI domain prefix and (with appDomain) the Amplify
-   * Hosting callback/logout URLs — NOT for the @teamexos.com hosted-domain
-   * enforcement or legal-admin@example.com allowlist, which are independent
+   * Hosting callback/logout URLs — NOT for the hosted-domain enforcement or
+   * legal-admin allowlist (see `hostedDomain` below), which are independent
    * security invariants, not naming.
    */
   readonly appName?: string;
   /**
    * Domain the SPA is hosted on, used to build Cognito callback/logout URLs
-   * (issue #233 — was hard-coded to eiaa.teamexos.com / contract-toaster.teamexos.com).
-   * Defaults to 'teamexos.com'. Independent of the @teamexos.com hosted-domain
-   * IdP/allowlist enforcement below, which does not change with this prop.
+   * (issue #233 — was hard-coded to a literal internal subdomain).
+   * REQUIRED — no internal default (issue #349: no internal-domain
+   * fallback). Independent of the `hostedDomain` IdP/allowlist enforcement
+   * below, which does not change with this prop.
    */
-  readonly appDomain?: string;
+  readonly appDomain: string;
+  /**
+   * Google Workspace hosted domain enforced for sign-in (issue #349).
+   * Drives BOTH layers of hosted-domain enforcement:
+   *   (a) the Google OAuth `hd` parameter pinned on the IdP, and
+   *   (b) the pre-token Lambda's `ALLOWED_DOMAIN` check — threaded in via
+   *       the Lambda's `environment` block, never baked into the inline
+   *       Python source (see the `lambda.Code.fromInline` construction
+   *       below), so a test that extracts and executes that source
+   *       standalone does not need to evaluate CDK/TypeScript templating.
+   * Also derives `LEGAL_ADMIN_GROUP` as `legal-admin@{hostedDomain}` (the
+   * `legal-admin` local part is a generic role name, not tenant identity,
+   * and is not independently configurable here).
+   *
+   * REQUIRED — no internal default (issue #349: no internal-tenant-domain
+   * fallback). Deliberately a SEPARATE prop from `appDomain`: `appDomain` is a naming
+   * knob for the SPA's own hosting domain (issue #233); `hostedDomain` is
+   * the authorization-security domain. Conflating the two would let a
+   * naming change silently widen (or narrow) who can sign in — see
+   * tests/test_infra_appname_prefix_233.py Check G.
+   */
+  readonly hostedDomain: string;
   /**
    * Email address of the initial admin (General Counsel).
    * CDK writes a single admin_bootstrap row keyed by this email so that on
    * first sign-in the backend can reconcile to the real Cognito sub.
    *
-   * Default: placeholder; replace via CDK context or stack parameter before
-   * first deploy.
+   * REQUIRED — no internal default (issue #349: no internal-tenant admin
+   * address fallback). Supply via CDK context (see contract-toaster-stack.ts).
    */
-  readonly adminEmail?: string;
+  readonly adminEmail: string;
   /**
    * DynamoDB table name for the users table (injected from DataStack).
    * Pre-token Lambda uses it to JIT-create active user rows.
@@ -47,7 +69,7 @@ export interface AuthStackProps extends cdk.NestedStackProps {
 
 /**
  * AuthStack — Cognito user pool federated to Google as the ONLY identity
- * provider, restricted to the `teamexos.com` hosted domain.
+ * provider, restricted to the configured `hostedDomain` (issue #349).
  *
  * Issue #53: Cognito + Google IdP
  *
@@ -59,17 +81,17 @@ export interface AuthStackProps extends cdk.NestedStackProps {
  *     URLs for Amplify + localhost).
  *  4. Hosted UI domain prefix: `contract-toaster-{envName}`.
  *  5. Pre-token-generation Lambda (two-layer hosted-domain + allowlist enforcement):
- *       a. Pins hd=teamexos.com in the Google OAuth request.
- *       b. Pre-sign-up / pre-token-generation Lambda rejects any non-@teamexos.com
- *          verified email (second, independent layer).
- *       c. Checks legal-admin@example.com group membership via the Google
+ *       a. Pins hd={hostedDomain} in the Google OAuth request.
+ *       b. Pre-sign-up / pre-token-generation Lambda rejects any verified
+ *          email outside @{hostedDomain} (second, independent layer).
+ *       c. Checks legal-admin@{hostedDomain} group membership via the Google
  *          Directory API (service-account credentials from Secrets Manager).
  *          RS256-signs the domain-wide-delegation JWT with a stdlib-only
  *          pure-Python RSA implementation (issue #223, defect a — the
  *          Lambda Python 3.12 managed runtime has no `cryptography`
  *          package, and inline Code.fromInline cannot bundle one), and
  *          impersonates an actual Workspace admin user, never the
- *          legal-admin@example.com GROUP address (issue #223, defect b).
+ *          legal-admin@{hostedDomain} GROUP address (issue #223, defect b).
  *       d. On first sign-in, JIT-creates an active users row in DynamoDB (the
  *          only non-bootstrap admission path). The Lambda's execution role
  *          is granted dynamodb:PutItem/UpdateItem scoped to the users table
@@ -128,10 +150,8 @@ export class AuthStack extends cdk.NestedStack {
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props);
 
-    const { envName } = props;
-    const adminEmail = props.adminEmail ?? 'admin@teamexos.com';
+    const { envName, adminEmail, hostedDomain, appDomain } = props;
     const appName = props.appName ?? 'contract-toaster';
-    const appDomain = props.appDomain ?? 'teamexos.com';
     // Cognito hosted-UI domain prefix + Amplify Hosting subdomain convention.
     const domainPrefix = `${appName}-${envName}`;
     this.hostedUiDomain = `${domainPrefix}.auth.us-east-1.amazoncognito.com`;
@@ -166,7 +186,7 @@ export class AuthStack extends cdk.NestedStack {
     //
     // The pre-token-generation Lambda uses a Google Directory API service
     // account (domain-wide delegation, directory-read only) to check group
-    // membership for legal-admin@example.com.
+    // membership for the configured LEGAL_ADMIN_GROUP.
     //
     // Credentials are stored in Secrets Manager, are least-privilege
     // (directory read only), and are rotated.
@@ -183,7 +203,7 @@ export class AuthStack extends cdk.NestedStack {
     //                            domain-wide delegation for the Directory
     //                            API read-only scope. Impersonated as the
     //                            JWT `sub`. MUST be a real user, never the
-    //                            legal-admin@example.com GROUP address —
+    //                            legal-admin@{hostedDomain} GROUP address —
     //                            Google's token endpoint rejects a group as
     //                            the impersonation subject.
     // -----------------------------------------------------------------------
@@ -199,21 +219,21 @@ export class AuthStack extends cdk.NestedStack {
     // This Lambda is the admission and domain-enforcement gate for EVERY
     // sign-in.  It implements TWO-layer hosted-domain enforcement:
     //
-    //   Layer (a): hd=teamexos.com is pinned in the Google OAuth request
+    //   Layer (a): hd={hostedDomain} is pinned in the Google OAuth request
     //              (see Google IdP configuration below).
     //   Layer (b): This Lambda independently rejects any identity whose
-    //              verified email is not @teamexos.com — even if Cognito
+    //              verified email is not @{hostedDomain} — even if Cognito
     //              somehow received such a token.
     //
     // Authorization (beyond domain):
-    //   - Checks legal-admin@example.com group membership via the Google
+    //   - Checks legal-admin@{hostedDomain} group membership via the Google
     //     Directory API (service account from Secrets Manager).
     //   - On first sign-in for a group member: JIT-creates an active users
     //     row in DynamoDB (keyed by Cognito sub).  This is the ONLY
     //     non-bootstrap admission path.
     //   - A group member who has not yet signed in does NOT have a users row;
     //     they get one on first sign-in.
-    //   - A user not in the group is denied, even with a valid @teamexos.com
+    //   - A user not in the group is denied, even with a valid @{hostedDomain}
     //     identity.
     //
     // Fail-closed behavior:
@@ -235,24 +255,36 @@ export class AuthStack extends cdk.NestedStack {
       functionName: `contract-toaster-pre-token-${envName}`,
       description:
         'Cognito pre-token-generation Lambda: two-layer domain enforcement + ' +
-        'legal-admin@example.com group check + JIT-create active users row on first sign-in. ' +
+        'legal-admin group check + JIT-create active users row on first sign-in. ' +
         'Fail-closed: deny on Directory API error. Never fail open.',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'index.handler',
       // Pre-token-generation Lambda enforcement code.
       //
       // This inline implementation enforces TWO independent security layers:
-      //   Layer (b): Reject any identity whose verified email is not @teamexos.com.
-      //   Authorization: Check legal-admin@example.com group membership via
-      //                  the Google Directory API; JIT-create active users row
-      //                  in DynamoDB on first sign-in; fail-closed on any error.
+      //   Layer (b): Reject any identity whose verified email is outside the
+      //              configured ALLOWED_DOMAIN.
+      //   Authorization: Check LEGAL_ADMIN_GROUP membership via the Google
+      //                  Directory API; JIT-create active users row in
+      //                  DynamoDB on first sign-in; fail-closed on any error.
+      //
+      // ALLOWED_DOMAIN and LEGAL_ADMIN_GROUP are intentionally NOT baked into
+      // this Python source as string literals (issue #349): they are read
+      // from the Lambda's environment (below) at call time, exactly like
+      // DIRECTORY_SECRET_ARN / USERS_TABLE_NAME already are. This keeps the
+      // hosted-domain value CDK-context-driven (no internal tenant-domain
+      // default) without requiring any TypeScript template-literal
+      // interpolation inside this backtick-delimited block — a test that
+      // extracts and executes this source standalone
+      // (tests/test_pre_token_lambda_deny_paths.py) only ever sees plain
+      // Python, never unresolved `${...}` templating.
       //
       // Admission path (canonical, identical to ARCHITECTURE.md):
-      //   1. User added to legal-admin@example.com group by a Workspace admin.
-      //   2. User signs in via Google SSO (layer a: hd=teamexos.com in IdP).
+      //   1. User added to the configured LEGAL_ADMIN_GROUP by a Workspace admin.
+      //   2. User signs in via Google SSO (layer a: hd={hostedDomain} in IdP).
       //   3. This Lambda (layer b + authorization):
-      //      a. Rejects non-@teamexos.com email independently of layer a.
-      //      b. Checks legal-admin@example.com group membership via Directory API
+      //      a. Rejects an email outside ALLOWED_DOMAIN independently of layer a.
+      //      b. Checks LEGAL_ADMIN_GROUP membership via Directory API
       //         (service-account creds from Secrets Manager).
       //      c. On first sign-in: JIT-creates an active users row in DynamoDB
       //         (keyed by Cognito sub).  This is the only non-bootstrap admission.
@@ -272,8 +304,11 @@ import urllib.error
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-ALLOWED_DOMAIN = "@teamexos.com"
-LEGAL_ADMIN_GROUP = "legal-admin@example.com"
+# ALLOWED_DOMAIN and LEGAL_ADMIN_GROUP are read from the Lambda's environment
+# inside handler() below (issue #349) -- NOT hard-coded here -- so the
+# enforced domain is CDK-context-driven with no internal tenant-domain
+# default. See the CDK construction above for why these are environment
+# variables rather than TypeScript-templated string literals.
 
 # ---------------------------------------------------------------------------
 # _deny: raise an exception that Cognito treats as deny (fail-closed).
@@ -398,13 +433,13 @@ def _rsa_sign_sha256(message: bytes, modulus_n: int, private_exponent_d: int) ->
 # Returns True if member, False if NOT member.
 # Raises on any Directory API / credential error — caller must deny.
 # ---------------------------------------------------------------------------
-def _check_group_membership(user_email: str, directory_secret_arn: str) -> bool:
+def _check_group_membership(user_email: str, directory_secret_arn: str, legal_admin_group: str) -> bool:
     creds = _get_secret(directory_secret_arn)
     sa_email = creds.get("client_email", "")
     sa_key_pem = creds.get("private_key", "")
     # Issue #223 (defect b): domain-wide delegation impersonates a REAL
     # Workspace user, never a group address — Google's token endpoint
-    # rejects a JWT whose 'sub' is a group (legal-admin@example.com is a
+    # rejects a JWT whose 'sub' is a group (LEGAL_ADMIN_GROUP is a
     # Google Group, not a user account). The service-account secret must
     # therefore also carry the email of an actual Workspace admin who has
     # granted this service account domain-wide delegation for the Directory
@@ -463,7 +498,7 @@ def _check_group_membership(user_email: str, directory_secret_arn: str) -> bool:
     import urllib.parse
     member_url = (
         "https://admin.googleapis.com/admin/directory/v1/groups/"
-        + urllib.parse.quote(LEGAL_ADMIN_GROUP, safe="")
+        + urllib.parse.quote(legal_admin_group, safe="")
         + "/members/"
         + urllib.parse.quote(user_email, safe="")
     )
@@ -528,10 +563,16 @@ def handler(event, context):
     email_verified = user_attrs.get("email_verified", "false").lower()
     cognito_sub = user_attrs.get("sub", "")
 
+    # ALLOWED_DOMAIN / LEGAL_ADMIN_GROUP are CDK-context-driven (issue #349):
+    # read from the environment at call time, never hard-coded above, so
+    # there is no internal tenant-domain fallback anywhere in this source.
+    allowed_domain = os.environ.get("ALLOWED_DOMAIN", "")
+    legal_admin_group = os.environ.get("LEGAL_ADMIN_GROUP", "")
+
     # --- Layer (b): Domain enforcement ---
-    # Reject non-@teamexos.com email; independent of layer (a) hd= in IdP.
-    if not email.endswith(ALLOWED_DOMAIN):
-        _deny(f"email domain not allowed: {email!r} (must be @teamexos.com)")
+    # Reject an email outside allowed_domain; independent of layer (a) hd= in IdP.
+    if not allowed_domain or not email.endswith(allowed_domain):
+        _deny(f"email domain not allowed: {email!r} (must be {allowed_domain!r})")
 
     if email_verified != "true":
         _deny(f"email not verified: {email!r}")
@@ -545,13 +586,13 @@ def handler(event, context):
 
     # Fail-closed: any error communicating with the Directory API results in deny.
     try:
-        is_member = _check_group_membership(email, directory_secret_arn)
+        is_member = _check_group_membership(email, directory_secret_arn, legal_admin_group)
     except Exception as exc:
         # Directory unavailable or credentials error → deny; never fail open.
         _deny(f"Directory API error (fail-closed): {exc}")
 
     if not is_member:
-        _deny(f"user not in {LEGAL_ADMIN_GROUP}: {email!r}")
+        _deny(f"user not in {legal_admin_group}: {email!r}")
 
     # --- JIT-create / update active users row in DynamoDB ---
     if users_table and cognito_sub:
@@ -569,6 +610,11 @@ def handler(event, context):
         ENV_NAME: envName,
         DIRECTORY_SECRET_ARN: directoryApiSecret.secretArn,
         USERS_TABLE_NAME: usersTableName,
+        // Issue #349: hosted-domain enforcement is CDK-context-driven, no
+        // internal tenant-domain default. legal-admin is a generic role
+        // local-part, not tenant identity.
+        ALLOWED_DOMAIN: `@${hostedDomain}`,
+        LEGAL_ADMIN_GROUP: `legal-admin@${hostedDomain}`,
       },
       timeout: cdk.Duration.seconds(10),
     });
@@ -585,7 +631,7 @@ def handler(event, context):
     // every JIT-create / last_auth_at update in _jit_create_user_row would
     // throw AccessDenied, and the fail-closed handler (correctly) turned
     // that into a deny. That meant EVERY sign-in failed, including
-    // legitimate legal-admin@example.com members, because the admission
+    // legitimate LEGAL_ADMIN_GROUP members, because the admission
     // path (JIT-create on first sign-in) could never complete.
     //
     // A raw ARN (rather than a bound dynamodb.ITable) is used here because
@@ -652,10 +698,10 @@ def handler(event, context):
     // -----------------------------------------------------------------------
     // Google Identity Provider
     //
-    // Layer (a) of two-layer hosted-domain enforcement: the hd=teamexos.com
+    // Layer (a) of two-layer hosted-domain enforcement: the hd={hostedDomain}
     // parameter in the Google OAuth request pins the hosted domain at the
-    // Google layer.  Only @teamexos.com accounts can select their account on
-    // the Google consent screen.
+    // Google layer.  Only accounts in the configured hostedDomain can select
+    // their account on the Google consent screen.
     //
     // Layer (b) is enforced by the pre-token-generation Lambda above.
     //
@@ -689,21 +735,23 @@ def handler(event, context):
     });
 
     // -----------------------------------------------------------------------
-    // Layer (a) hosted-domain enforcement: hd=teamexos.com in ProviderDetails
+    // Layer (a) hosted-domain enforcement: hd={hostedDomain} in ProviderDetails
     //
     // The CDK UserPoolIdentityProviderGoogle construct only exposes 'scopes'
-    // in its L2 props; the Google OAuth 'hd' (hostedDomain) parameter must
+    // in its L2 props; the Google OAuth 'hd' (hosted domain) parameter must
     // be injected via the CloudFormation escape hatch on the underlying
     // CfnUserPoolIdentityProvider resource.
     //
-    // This causes the Google OAuth consent screen to show ONLY @teamexos.com
-    // accounts — users from other domains cannot even select their account.
-    // This is layer (a) of two-layer hosted-domain enforcement; layer (b) is
-    // the pre-token-generation Lambda which independently rejects any
-    // non-@teamexos.com email.
+    // This causes the Google OAuth consent screen to show ONLY accounts in
+    // the configured hostedDomain — users from other domains cannot even
+    // select their account. This is layer (a) of two-layer hosted-domain
+    // enforcement; layer (b) is the pre-token-generation Lambda which
+    // independently rejects any email outside ALLOWED_DOMAIN (issue #349:
+    // hostedDomain is a required CDK context prop with no internal
+    // tenant-domain default — see AuthStackProps.hostedDomain above).
     // -----------------------------------------------------------------------
     const cfnGoogleIdp = googleIdp.node.findChild('Resource') as cdk.CfnResource;
-    cfnGoogleIdp.addPropertyOverride('ProviderDetails.hd', 'teamexos.com');
+    cfnGoogleIdp.addPropertyOverride('ProviderDetails.hd', hostedDomain);
 
     // -----------------------------------------------------------------------
     // UserPoolClient — Google IdP only; no USER_PASSWORD_AUTH
@@ -742,8 +790,8 @@ def handler(event, context):
           cognito.OAuthScope.PROFILE,
         ],
         // Callback URLs: Amplify Hosting URL + localhost for dev. appName/appDomain
-        // resolve from CDK context (issue #233); defaults reproduce the current
-        // contract-toaster.teamexos.com naming exactly.
+        // resolve from required CDK context (issues #233, #349 — no internal
+        // tenant-domain default).
         callbackUrls: [
           `https://${domainPrefix}.auth.us-east-1.amazoncognito.com/oauth2/idpresponse`,
           `https://${appName}.${appDomain}`,                  // Amplify Hosting prod URL

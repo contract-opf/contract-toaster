@@ -64,9 +64,20 @@ def _import_builder():
 
 def check_section_config_fixture(mod):
     """Gate 1: synthetic SECTION_CONFIG produces the expected anchor set,
-    including the sec-10 sub-clause splits."""
+    including the sec-10 sub-clause splits.
+
+    Explicitly resolved for "eiaa" (issue #343 repointed the registry
+    default to the public "sample-agreement" sample playbook, whose
+    deliberately small section config has no sec-10 sub-clause splits at
+    all) -- this gate's whole point is the sec-10 hand-split config, which
+    only eiaa's section-config data file carries."""
     failures = []
-    anchors = mod.build_anchors_from_config()
+    eiaa_section_config = mod.load_section_config("eiaa")
+    anchors = mod.build_anchors_from_config(
+        config=eiaa_section_config["sections"],
+        absent_from_form_anchors=eiaa_section_config["absent_from_form_anchors"],
+        structural_anchors=eiaa_section_config["structural_anchors"],
+    )
 
     expected_sub_splits = {
         "sec-10-notices": "sec-10",
@@ -105,8 +116,9 @@ def check_section_config_fixture(mod):
 def check_heading_hash_stability(mod):
     """Gate 2: same input -> same heading_hash per anchor across two builds."""
     failures = []
-    anchors_a = mod.build_anchors_from_config()
-    anchors_b = mod.build_anchors_from_config()
+    eiaa_section_config = mod.load_section_config("eiaa")
+    anchors_a = mod.build_anchors_from_config(config=eiaa_section_config["sections"])
+    anchors_b = mod.build_anchors_from_config(config=eiaa_section_config["sections"])
 
     if anchors_a.keys() != anchors_b.keys():
         failures.append("[G2] Two builds from the same SECTION_CONFIG produced different anchor sets.")
@@ -145,17 +157,22 @@ def check_docx_mode():
 
     import build_anchor_map as mod  # re-import for clarity within this scope
 
+    # Explicitly "eiaa" (issue #343 repointed the registry default to the
+    # small public "sample-agreement" sample playbook) -- see
+    # check_section_config_fixture's docstring above.
+    eiaa_sections = mod.load_section_config("eiaa")["sections"]
+
     with tempfile.TemporaryDirectory() as tmpdir:
         docx_path = Path(tmpdir) / "synthetic-standard-form.docx"
         doc = Document()
-        for _anchor, heading, _sub_split, _parent in mod.SECTION_CONFIG:
+        for _anchor, heading, _sub_split, _parent in eiaa_sections:
             doc.add_heading(heading, level=2)
             doc.add_paragraph(f"Body text for {heading}.")
         doc.save(str(docx_path))
 
-        anchors = mod.build_anchors_from_docx(docx_path)
+        anchors = mod.build_anchors_from_docx(docx_path, config=eiaa_sections)
 
-        for anchor, heading, _sub_split, _parent in mod.SECTION_CONFIG:
+        for anchor, heading, _sub_split, _parent in eiaa_sections:
             entry = anchors.get(anchor)
             if entry is None:
                 failures.append(f"[G3] MISSING anchor '{anchor}' from docx-mode build.")

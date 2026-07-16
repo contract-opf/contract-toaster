@@ -143,7 +143,7 @@ def _draft_paragraphs_from_body_xml(body_xml: str, label: str) -> list:
 def main() -> int:
     failures: list[str] = []
 
-    standard = diff_standard_form.load_standard_form_paragraphs()
+    standard = diff_standard_form.load_standard_form_paragraphs(playbook_id="eiaa")
     by_anchor = {p["anchor"]: p for p in standard}
     liability = by_anchor["sec-8"]  # heading: "Limitation on Liability"
     nondiscrim = by_anchor["sec-4"]  # heading: "Non-Discrimination"

@@ -14,12 +14,14 @@ import { Construct } from 'constructs';
 export interface ObservabilityStackProps extends cdk.NestedStackProps {
   readonly envName: string;
   /**
-   * Placeholder subscriber email for the alarms SNS topic (issue #57 AC:
-   * "Topic subscription is a placeholder email for now"). Defaults to
-   * legal-eng@example.com per RUNBOOK.md -> "Confirm the SNS email
-   * subscription".
+   * Subscriber email for the alarms SNS topic (issue #57 AC: "Topic
+   * subscription is a placeholder email for now"; see RUNBOOK.md -> "Confirm
+   * the SNS email subscription"). REQUIRED — no internal default (issue
+   * #349: the top-level ContractToasterStack already requires `alarmsEmail`
+   * via CDK context with no internal tenant-mailbox fallback; this prop-level
+   * default was the one place that fallback still lived).
    */
-  readonly alarmsEmail?: string;
+  readonly alarmsEmail: string;
   /** Monthly AWS Budgets ceiling in USD (issue #61 AC: target <= $100/mo dev). */
   readonly monthlyBudgetUsd?: number;
   /**
@@ -122,12 +124,11 @@ export class ObservabilityStack extends cdk.NestedStack {
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
 
-    const { envName } = props;
+    const { envName, alarmsEmail } = props;
     // Deploy profile (issue #231). See kms-keys-stack.ts / data-stack.ts for
     // the matching profile resolution pattern.
     const profile = (this.node.tryGetContext('profile') as string | undefined) ?? 'hardened';
     const isMinimal = profile === 'minimal';
-    const alarmsEmail = props.alarmsEmail ?? 'legal-eng@example.com';
     const monthlyBudgetUsd = props.monthlyBudgetUsd ?? 100;
     const appRunnerServiceName = props.appRunnerServiceName ?? `contract-toaster-api-${envName}`;
     const bedrockModelIds = props.bedrockModelIds ?? [

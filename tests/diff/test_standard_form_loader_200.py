@@ -31,7 +31,7 @@ change; only the fixture file changes.
 ## What this test asserts
 
   1. The loader parses real OOXML paragraphs from the .docx — not
-     synthesized from playbook `exos_standard` prose.
+     synthesized from playbook `our_standard` prose.
   2. The anchor-map builder (real-docx mode) resolves the §10 sub-clause
      anchors from the real document structure: no empty placeholder
      paragraphs, no phantom "deleted" §10 hunks.
@@ -109,8 +109,8 @@ def main():
     # Setup: load the real-docx-mode standard-form paragraphs, and the
     # synthetic (playbook-prose) standard-form paragraphs, for comparison.
     # -------------------------------------------------------------------
-    docx_standard = dsf.load_standard_form_paragraphs(docx_path=SYNTHETIC_DOCX)
-    synthetic_standard = dsf.load_standard_form_paragraphs()
+    docx_standard = dsf.load_standard_form_paragraphs(docx_path=SYNTHETIC_DOCX, playbook_id="eiaa")
+    synthetic_standard = dsf.load_standard_form_paragraphs(playbook_id="eiaa")
 
     docx_by_anchor = {p["anchor"]: p for p in docx_standard}
     synthetic_by_anchor = {p["anchor"]: p for p in synthetic_standard}
@@ -118,7 +118,7 @@ def main():
     # --- G1: real OOXML paragraphs, not synthesized from playbook prose ----
     # Every anchor covered by a playbook topic has DIFFERENT text in docx
     # mode than in synthetic mode (docx mode reads the .docx's own prose;
-    # synthetic mode reads playbooks/eiaa-v1.0.0.json's exos_standard
+    # synthetic mode reads playbooks/eiaa-v1.0.0.json's our_standard
     # field) -- if they were ever equal for a topic-covered anchor, that
     # would mean docx mode silently fell back to playbook prose instead of
     # the real document.
@@ -144,7 +144,7 @@ def main():
 
     # Spot-check: a known .docx-only phrase (from
     # scripts/generate_synthetic_standard_form.py's BODY_TEXT, never present
-    # in the playbook's exos_standard prose) must appear.
+    # in the playbook's our_standard prose) must appear.
     sec8_docx_text = docx_by_anchor.get("sec-8", {}).get("text", "")
     if "Neither party shall be liable to the other for consequential" not in sec8_docx_text:
         failures.append(
@@ -187,7 +187,11 @@ def main():
 
     # Anchor-map builder (real-docx mode): every §10 sub-clause anchor must
     # resolve without falling back to a bogus per-anchor heading match.
-    anchors_from_builder = bam.build_anchors_from_docx(SYNTHETIC_DOCX)
+    # Explicit "eiaa" config (issue #343 repointed the registry default to
+    # the small public "sample-agreement" sample playbook, which has no
+    # sec-10 sub-clause splits at all).
+    eiaa_sections = bam.load_section_config("eiaa")["sections"]
+    anchors_from_builder = bam.build_anchors_from_docx(SYNTHETIC_DOCX, config=eiaa_sections)
     for anchor in sec10_anchors:
         entry = anchors_from_builder.get(anchor)
         if entry is None:
@@ -255,7 +259,7 @@ def main():
         doc.add_paragraph("Students are admitted per your criteria.")
         doc.save(str(bad_docx_path))
 
-        anchor_map_data = dsf._load_active_anchor_map()
+        anchor_map_data = dsf._load_active_anchor_map("eiaa")
         anchors = anchor_map_data["anchors"]
         sub_clause_splits = anchor_map_data.get("sub_clause_splits", {})
         bad_standard = dsf._load_standard_form_paragraphs_from_docx(

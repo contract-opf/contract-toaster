@@ -130,7 +130,7 @@ def _build_draft_docx(overrides: dict[str, str]) -> bytes:
     in `overrides` -- same recipe as tests/test_review_spine.py's
     _build_draft_docx (issue #239), so every anchor NOT overridden diffs as
     "unchanged" and only the planted anchors produce real hunks."""
-    standard = dsf_module.load_standard_form_paragraphs(docx_path=None)
+    standard = dsf_module.load_standard_form_paragraphs(docx_path=None, playbook_id="eiaa")
     parts = []
     for std_para in standard:
         if std_para.get("absent_from_form", False):

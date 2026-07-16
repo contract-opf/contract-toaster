@@ -735,7 +735,7 @@ def _read_active_release_bundle_hash(
         ever been activated), OR
       - the row DOES carry a hash, but the current on-disk playbook body
         for `playbook_id` fails runtime validation (schema-invalid, or a
-        covering topic is missing its `exos_standard` standard-form text
+        covering topic is missing its `our_standard` standard-form text
         -- see `scripts/playbook_validation.py::load_and_validate_playbook`).
         An invalid playbook must never resolve as active: fail closed to
         the exact same refusal a missing bundle produces, never a

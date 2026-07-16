@@ -7,12 +7,12 @@ re-verification (issue #211).
 
 Issue #211's audit finding: "the committed anchor map is generated from a
 hand-written SECTION_CONFIG in build_anchor_map.py, and diff_standard_form.py
-synthesizes the 'standard form body' from each topic's exos_standard prose.
+synthesizes the 'standard form body' from each topic's our_standard prose.
 This is self-referential validation: the CI rule that required_tokens must
 be present in the anchored section passes trivially because the synthetic
 section text IS the playbook prose containing those tokens." Concretely,
 `_topic_text_by_anchor()` (scripts/diff_standard_form.py) assigns the SAME
-`exos_standard` prose blob to every anchor a topic covers -- e.g. the
+`our_standard` prose blob to every anchor a topic covers -- e.g. the
 "exos-discretion-and-authority" topic's prose contains "sole discretion",
 "final authority", AND "clinical care" all at once, so BOTH sec-1.2
 (preserve-admission-discretion, requires "sole discretion") and sec-1.7
@@ -29,7 +29,7 @@ load_standard_form_paragraphs(docx_path=...)) over the SYNTHETIC placeholder
 standard-forms/eiaa-v1.0.0.SYNTHETIC.docx (issue #200), and re-verifies every
 `protects.required_tokens` rule against the REAL PARSED SECTION TEXT (via
 the new scripts/build_anchor_map.verify_required_tokens_against_docx()) --
-not the playbook's shared exos_standard prose. When the real .docx replaces
+not the playbook's shared our_standard prose. When the real .docx replaces
 the placeholder, this same code path (and this same test, pointed at the
 real file) re-verifies the actual GC-provided clause text with no code
 change.
@@ -123,7 +123,7 @@ def main():
         )
         sys.exit(1)
 
-    section_config = bam.load_section_config()
+    section_config = bam.load_section_config("eiaa")
     absent_from_form_anchors = section_config["absent_from_form_anchors"]
     sub_clause_splits = section_config["sub_clause_splits"]
 
@@ -135,7 +135,13 @@ def main():
     # -------------------------------------------------------------------
     stderr_capture = io.StringIO()
     with contextlib.redirect_stderr(stderr_capture):
-        anchors_from_builder = bam.build_anchors_from_docx(SYNTHETIC_DOCX)
+        anchors_from_builder = bam.build_anchors_from_docx(
+            SYNTHETIC_DOCX,
+            config=section_config["sections"],
+            absent_from_form_anchors=absent_from_form_anchors,
+            structural_anchors=section_config["structural_anchors"],
+            sub_clause_splits=sub_clause_splits,
+        )
     warnings_text = stderr_capture.getvalue()
 
     warned_anchors = []
@@ -177,7 +183,7 @@ def main():
     # G2: protects.required_tokens verified against REAL parsed section
     # text -- the core issue #211 fix. Must be zero violations.
     # -------------------------------------------------------------------
-    violations = bam.verify_required_tokens_against_docx(SYNTHETIC_DOCX)
+    violations = bam.verify_required_tokens_against_docx(SYNTHETIC_DOCX, playbook_id="eiaa")
     if violations:
         failures.append(
             "[G2] protects.required_tokens missing from the REAL parsed "
@@ -189,7 +195,7 @@ def main():
     # spot-check that sec-1.2 and sec-1.7 (both covered by the same
     # "exos-discretion-and-authority" topic, so IDENTICAL in synthetic
     # mode) have DIFFERENT real docx-mode text.
-    docx_standard = dsf.load_standard_form_paragraphs(docx_path=SYNTHETIC_DOCX)
+    docx_standard = dsf.load_standard_form_paragraphs(docx_path=SYNTHETIC_DOCX, playbook_id="eiaa")
     docx_by_anchor = {p["anchor"]: p["text"] for p in docx_standard}
     if docx_by_anchor.get("sec-1.2") == docx_by_anchor.get("sec-1.7"):
         failures.append(

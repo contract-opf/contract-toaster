@@ -190,10 +190,10 @@ class ConfidentialCorpus:
         """Derive playbook_ngrams and standard_clause_ngrams from a loaded
         playbook dict (the playbooks/eiaa-v1.0.0.json shape).
 
-        `standard_clause_ngrams` is each topic's `exos_standard` text, kept
+        `standard_clause_ngrams` is each topic's `our_standard` text, kept
         in a *separate* list from `playbook_ngrams` (each hard_rejection
         rule's `id` and `description`). The distinction matters: an
-        `exos_standard` clause is the contract position Exos is openly
+        `our_standard` clause is the contract position Exos is openly
         asking for -- the whole point of an `on_remove_or_alter` fix is to
         restore it, so a faithful `proposed_replacement_text` /
         `critic_suggested_replacement` will legitimately reproduce it
@@ -206,7 +206,7 @@ class ConfidentialCorpus:
         playbook_ngrams: list[str] = []
         standard_clause_ngrams: list[str] = []
         for topic in playbook.get("topics", []) or []:
-            standard = topic.get("exos_standard")
+            standard = topic.get("our_standard")
             if standard:
                 standard_clause_ngrams.append(standard)
         for rule in playbook.get("hard_rejections", []) or []:
@@ -316,7 +316,7 @@ class LeakageScanner:
         if match is not None:
             return ScanResult(blocked=True, category=CATEGORY_PLAYBOOK, rule_id="playbook-ngram")
 
-        # 2b. Standard-clause leakage (topic exos_standard text). Allowlisted
+        # 2b. Standard-clause leakage (topic our_standard text). Allowlisted
         #     for replacement-text fields -- see docstring above.
         if not is_replacement_text:
             match = self._find_ngram_match(
