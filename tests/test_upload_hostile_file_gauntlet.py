@@ -178,6 +178,50 @@ def _build_docx_with_external_relationship() -> bytes:
     return buf.getvalue()
 
 
+def _build_docx_with_external_hyperlink() -> bytes:
+    """word/_rels/document.xml.rels declares a TargetMode="External"
+    relationship of type hyperlink — the benign, ubiquitous case. A hyperlink
+    is inert until a human clicks it and never fetches at parse/open time, so
+    it must be accepted (see docs/threat-model.md)."""
+    hyperlink_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+        'Target="https://example.com/location/contact" TargetMode="External"/>'
+        "</Relationships>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", CONTENT_TYPES_WORDPROCESSINGML)
+        zf.writestr("_rels/.rels", RELS_XML_BENIGN)
+        zf.writestr("word/document.xml", DOCUMENT_XML_MINIMAL)
+        zf.writestr("word/_rels/document.xml.rels", hyperlink_rels_xml)
+    return buf.getvalue()
+
+
+def _build_docx_with_external_image() -> bytes:
+    """word/_rels/document.xml.rels declares a TargetMode="External"
+    relationship of type image — Word fetches this the moment the file is
+    opened (SSRF / NTLM-hash leak), so it must stay rejected even though it is
+    not a hyperlink."""
+    image_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+        'Target="http://attacker.example/beacon.png" TargetMode="External"/>'
+        "</Relationships>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", CONTENT_TYPES_WORDPROCESSINGML)
+        zf.writestr("_rels/.rels", RELS_XML_BENIGN)
+        zf.writestr("word/document.xml", DOCUMENT_XML_MINIMAL)
+        zf.writestr("word/_rels/document.xml.rels", image_rels_xml)
+    return buf.getvalue()
+
+
 def _build_docx_with_embedded_object() -> bytes:
     """A package relationship of type oleObject pointing at an internal
     embedded OLE package — must be rejected."""
@@ -486,6 +530,41 @@ class TestExternalRelationship(unittest.TestCase):
                 review_id="rev-9",
             )
         self.assertEqual(ctx.exception.reason_code, "external_relationship")
+
+    def test_external_image_still_rejected(self) -> None:
+        """A non-hyperlink external relationship (image) fetches on open and
+        must remain rejected — the hyperlink allowance is a narrow allowlist,
+        not a blanket relaxation of external targets."""
+        payload = _build_docx_with_external_image()
+        av = _FakeAvClient()
+        audit = _FakeAuditSink()
+        with self.assertRaises(uv.HostileFileError) as ctx:
+            uv.run_upload_gauntlet(
+                payload,
+                filename="external-image.docx",
+                declared_content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                av_client=av,
+                audit_write=audit,
+                review_id="rev-9b",
+            )
+        self.assertEqual(ctx.exception.reason_code, "external_relationship")
+
+    def test_external_hyperlink_accepted(self) -> None:
+        """A plain external hyperlink is the benign, ubiquitous case (any
+        contract with a clickable URL). It is inert until clicked and never
+        fetches at parse time, so the gauntlet must accept it."""
+        payload = _build_docx_with_external_hyperlink()
+        av = _FakeAvClient()
+        audit = _FakeAuditSink()
+        result = uv.run_upload_gauntlet(
+            payload,
+            filename="hyperlink.docx",
+            declared_content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            av_client=av,
+            audit_write=audit,
+            review_id="rev-9c",
+        )
+        self.assertEqual(result, payload)
 
 
 # ---------------------------------------------------------------------------

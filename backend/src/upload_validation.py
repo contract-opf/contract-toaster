@@ -108,6 +108,12 @@ EMBEDDED_OBJECT_RELATIONSHIP_SUFFIXES = (
     "/package",
 )
 ATTACHED_TEMPLATE_RELATIONSHIP_SUFFIX = "/attachedTemplate"
+# The one relationship type permitted to target an external resource. A
+# hyperlink is inert until a human clicks it and never causes a network fetch
+# when the document is parsed or opened, so — unlike an external image,
+# subdocument, template, or OLE link — it does not violate the "no fetch at
+# parse time" guarantee. See docs/threat-model.md -> Hostile file uploads.
+HYPERLINK_RELATIONSHIP_SUFFIX = "/hyperlink"
 
 XML_DECLARATION_PREFIXES = (b"<?xml",)
 
@@ -502,16 +508,21 @@ def _check_relationships(zf: zipfile.ZipFile) -> None:
         relationships = _extract_relationships(rels_xml)
 
         for rel in relationships:
-            if rel.get("target_mode", "").lower() == "external":
-                raise HostileFileError(
-                    reason_code="external_relationship",
-                    detail=(
-                        f"Relationship in '{rels_part}' targets an external "
-                        f"resource: {rel.get('target', '<unknown>')!r}."
-                    ),
-                )
-
             rel_type = rel.get("type", "")
+
+            if rel.get("target_mode", "").lower() == "external":
+                # Hyperlinks are the sole permitted external target: inert until
+                # a human clicks them, they never fetch at parse/open time.
+                # Every other external target (image, subdocument, template,
+                # OLE link) is rejected.
+                if not rel_type.endswith(HYPERLINK_RELATIONSHIP_SUFFIX):
+                    raise HostileFileError(
+                        reason_code="external_relationship",
+                        detail=(
+                            f"Relationship in '{rels_part}' targets an external "
+                            f"resource: {rel.get('target', '<unknown>')!r}."
+                        ),
+                    )
             if rel_type.endswith(ATTACHED_TEMPLATE_RELATIONSHIP_SUFFIX):
                 raise HostileFileError(
                     reason_code="external_relationship",
