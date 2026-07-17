@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import AdminUsers from './AdminUsers';
 import AdminRetention from './AdminRetention';
+import AdminModel from './AdminModel';
 import ReviewSubmission from './ReviewSubmission';
 import PasswordLogin, { DemoIdentity } from './PasswordLogin';
 import { getToken, isPasswordMode, setDemoToken } from './auth';
@@ -72,7 +73,7 @@ type AdminCapability = 'loading' | 'admin' | 'non-admin';
 // experience shared by both roles; the two admin tabs are appended only for
 // an admin caller.
 // ---------------------------------------------------------------------------
-type TabId = 'review' | 'users' | 'retention';
+type TabId = 'review' | 'users' | 'retention' | 'model';
 
 interface TabDef {
   id: TabId;
@@ -188,6 +189,7 @@ function AppContent({
       ? ([
           { id: 'users', label: 'Users & access' },
           { id: 'retention', label: 'Retention & legal hold' },
+          { id: 'model', label: 'Model & API key' },
         ] as TabDef[])
       : []),
   ];
@@ -331,6 +333,15 @@ function AppContent({
             hidden={activeTab !== 'retention'}
           >
             <AdminRetention />
+          </section>
+          <section
+            role="tabpanel"
+            id="panel-model"
+            aria-labelledby="tab-model"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'model'}
+          >
+            <AdminModel />
           </section>
         </>
       )}

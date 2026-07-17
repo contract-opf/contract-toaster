@@ -56,6 +56,7 @@ function stubFetch(routes: Record<string, unknown>): void {
 const ADMIN_CHROME_TESTIDS = [
   'admin-users-panel',
   'admin-retention-panel',
+  'admin-model-panel',
   'sync-status-panel',
   'break-glass-note',
   'retention-slider-panel',
@@ -128,12 +129,23 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
         pending_reduction: null,
       },
       '/api/admin/retention/holds': { holds: [] },
+      '/api/admin/model-key': {
+        setting_id: 'global',
+        key_store_available: true,
+        model_provider: 'openrouter',
+        key_set: false,
+        key_source: null,
+        key_hint: '',
+        updated_at: '',
+        updated_by: '',
+      },
     });
 
     render(<App />);
 
     expect(await screen.findByTestId('admin-users-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-retention-panel')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-model-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('break-glass-note')).toBeInTheDocument();
   });
 });

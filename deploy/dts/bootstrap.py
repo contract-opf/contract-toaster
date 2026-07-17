@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DTS bootstrap — one-shot job that provisions the local emulators before the
+Docker Compose bootstrap — one-shot job that provisions the local emulators before the
 backend starts (docker-compose `bootstrap` service).
 
 Idempotent: creating a table/bucket that already exists is a no-op, so
@@ -23,6 +23,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import boto3
 
@@ -42,13 +43,19 @@ FIXTURE_KEY = "mock-fixtures/eiaa/pre-baked-redline.docx"
 _TABLES = [
     ("USERS_TABLE", "cognito_sub", None, []),
     ("REVIEWS_TABLE", "review_id", None, [("owner_sub-index", "owner_sub", "created_at")]),
-    ("REVIEW_SUBMISSIONS_TABLE", "idempotency_key", None, []),
+    # review_id-index mirrors infra/lib/nested/data-stack.ts: pipeline_runner's
+    # _find_submission_by_review_id queries it to settle a review's spend
+    # reservation. Without it every settle raises ValidationException ("table
+    # does not have the specified index") -- DTS-only, since the CDK stack has
+    # always had the index.
+    ("REVIEW_SUBMISSIONS_TABLE", "idempotency_key", None, [("review_id-index", "review_id", None)]),
     ("DAILY_SPEND_TABLE", "spend_date", None, []),
     ("AUDIT_TABLE", "partition", "timestamp", []),
     ("AUTH_SETTINGS_TABLE", "setting_id", None, []),
     ("PLAYBOOKS_TABLE", "playbook_id", None, []),
     ("PLAYBOOK_VERSIONS_TABLE", "playbook_id", "version", []),
     ("RETENTION_SETTINGS_TABLE", "setting_id", None, []),
+    ("MODEL_SETTINGS_TABLE", "setting_id", None, []),
     ("SYNC_STATUS_TABLE", "sync_type", None, []),
 ]
 
@@ -151,7 +158,7 @@ def seed_users_and_playbook() -> None:
     # deployment-level AUTH_MODE env (which get_current_user's verifier
     # dispatch uses): without seeding this DynamoDB row, login_with_password
     # defaults to sso-only and rejects password sign-in. Seed it to the
-    # deployment's AUTH_MODE (password/both); default to password for DTS.
+    # deployment's AUTH_MODE (password/both); default to password for Docker Compose.
     settings_table = os.environ.get("AUTH_SETTINGS_TABLE")
     deploy_mode = config.auth_mode()
     login_mode = deploy_mode if deploy_mode in ("password", "both") else "password"
@@ -178,12 +185,32 @@ def seed_users_and_playbook() -> None:
         print("  seeded active eiaa playbook bundle")
 
 
-def wait_for_services(timeout_seconds: int = 60) -> None:
+def wait_for_services(timeout_seconds: Optional[int] = None) -> None:
     """Block until DynamoDB-Local and MinIO accept connections (the compose
     `depends_on: service_started` only waits for the container to start, not for
-    the service inside it to be ready)."""
-    deadline = time.time() + timeout_seconds
+    the service inside it to be ready).
+
+    These are deliberately APPLICATION-level probes (ListTables / ListBuckets),
+    not HTTP liveness checks, and that distinction matters: DynamoDB-Local keeps
+    answering on its port even when its storage engine is dead (a bare GET still
+    returns 400 while every real request hangs), so an HTTP-level container
+    healthcheck reports "healthy" through exactly the failures this needs to
+    catch. Only a real API call proves readiness.
+
+    The budget is PER SERVICE. It used to be one shared deadline computed once
+    for the whole loop, so a slow DynamoDB-Local silently ate MinIO's budget and
+    then blamed MinIO -- "MinIO not ready within 60s" after MinIO had been given
+    five.
+
+    Default 120s (override with BOOTSTRAP_WAIT_TIMEOUT_SECONDS): DynamoDB-Local
+    is a JVM starting from cold, and 60s is not enough on a loaded machine --
+    e.g. while docker is still building sibling images.
+    """
+    if timeout_seconds is None:
+        timeout_seconds = int(os.environ.get("BOOTSTRAP_WAIT_TIMEOUT_SECONDS", "120"))
+
     for label, probe in (("DynamoDB-Local", _probe_ddb), ("MinIO", _probe_s3)):
+        deadline = time.time() + timeout_seconds
         while True:
             try:
                 probe()
@@ -191,7 +218,15 @@ def wait_for_services(timeout_seconds: int = 60) -> None:
                 break
             except Exception as exc:  # noqa: BLE001
                 if time.time() > deadline:
-                    raise RuntimeError(f"{label} not ready within {timeout_seconds}s") from exc
+                    raise RuntimeError(
+                        f"{label} not ready within {timeout_seconds}s. It is probably "
+                        f"not merely slow: check `docker compose logs {label.lower()}` "
+                        f"for a service that is up but broken. A known one is "
+                        f"DynamoDB-Local looping `SQLiteException: [14] unable to open "
+                        f"database file` when its data volume is root-owned but the "
+                        f"image runs as uid 1000 (see the `user: root` note in "
+                        f"docker-compose.yml)."
+                    ) from exc
                 time.sleep(1)
 
 
@@ -204,13 +239,13 @@ def _probe_s3() -> None:
 
 
 def main() -> int:
-    print("DTS bootstrap: provisioning DynamoDB-Local + MinIO …")
+    print("Docker Compose bootstrap: provisioning DynamoDB-Local + MinIO …")
     wait_for_services()
     create_tables()
     create_buckets()
     seed_fixture()
     seed_users_and_playbook()
-    print("DTS bootstrap: done.")
+    print("Docker Compose bootstrap: done.")
     return 0
 
 

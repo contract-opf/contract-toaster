@@ -1,11 +1,11 @@
 """
-In-process pipeline runner (DTS deployment target, Phase 1).
+In-process pipeline runner (Docker Compose deployment target, Phase 1).
 
 The AWS deployment drives the review pipeline with Step Functions: the backend
 calls `sfn_client.start_execution(...)` (via reviews.ensure_execution_started)
 and the Lambda stages carry the review through PENDING -> RUNNING -> terminal.
 
-The DTS deployment has no Step Functions. Rather than change submit_review /
+The Docker Compose deployment has no Step Functions. Rather than change submit_review /
 ensure_execution_started (which inject an `sfn_client`), this module provides a
 DUCK-TYPED stand-in -- `InProcessStepFunctionsClient` -- that exposes exactly
 the slice of the boto3 Step Functions client that ensure_execution_started uses
@@ -31,7 +31,8 @@ live model call.
 PHASE 2 (issue #259): `run_real_pipeline` swaps the canned fixture for a
 genuinely computed review -- `scripts/review_spine.py::run_review` (issue
 #239), driven by a real `OpenRouterModelClient` (backend/src/model_client.py)
-built from `OPENROUTER_API_KEY` / `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`.
+built from the admin-set key (backend/src/model_settings.py) or, failing that,
+`OPENROUTER_API_KEY` -- plus `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`.
 `InProcessStepFunctionsClient`'s default runner picks between the two bodies
 per review based on `config.model_provider()` (`MODEL_PROVIDER` env var):
 `openrouter` selects the real body, anything else (including unset) keeps
@@ -62,10 +63,11 @@ from typing import Any, Callable
 import boto3
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
-    from src import config, model_client, reviews
+    from src import config, model_client, model_settings, reviews
 except ImportError:  # pragma: no cover
     import config  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
+    import model_settings  # type: ignore[no-redef]
     import reviews  # type: ignore[no-redef]
 
 # scripts/review_spine.py (issue #239) composes the pipeline-stage modules
@@ -355,8 +357,17 @@ def _fetch_upload_bytes(payload: dict[str, Any], s3_client: Any) -> bytes:
     return s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
 
 
-def _build_openrouter_client() -> "model_client.OpenRouterModelClient":
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+def _build_openrouter_client(dynamodb_resource: Any = None) -> "model_client.OpenRouterModelClient":
+    """Build the real OpenRouter client for one review.
+
+    The key comes from `model_settings.resolve_openrouter_api_key`, which
+    prefers the admin-set row over `OPENROUTER_API_KEY` -- so an operator can
+    rotate the instance key from the admin panel without editing `.env` and
+    restarting, while a deploy that only ever set the env var keeps working
+    unchanged. Resolved per review rather than cached at import, so a
+    rotation takes effect on the next review instead of the next restart.
+    """
+    api_key = model_settings.resolve_openrouter_api_key(dynamodb_resource)
     return model_client.OpenRouterModelClient(api_key=api_key)
 
 
@@ -424,8 +435,8 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
     genuinely computed decision + redline. `model_client` is injectable so
     tests drive this fully offline with FakeBedrockClient instead of a live
     OpenRouter call (standing rule 4: no network in any test); production
-    leaves it unset and a real OpenRouterModelClient is built from
-    OPENROUTER_API_KEY.
+    leaves it unset and a real OpenRouterModelClient is built by
+    _build_openrouter_client (the admin-set key, else OPENROUTER_API_KEY).
 
     On any unhandled exception (S3/DDB failure, model transport error, an
     unregistered playbook_id, ...) the review is moved to a terminal state
@@ -449,7 +460,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
 
         stage = "build_model_client"
         built_client = model_client is None
-        client = model_client or _build_openrouter_client()
+        client = model_client or _build_openrouter_client(dynamodb_resource)
 
         stage = "run_review"
         try:
