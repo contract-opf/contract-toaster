@@ -1,7 +1,7 @@
 /**
- * password-auth.test.tsx — DTS password-mode auth path (VITE_AUTH_MODE=password).
+ * password-auth.test.tsx — Docker Compose password-mode auth path (VITE_AUTH_MODE=password).
  *
- * Covers the pieces the DTS deployment adds:
+ * Covers the pieces the Docker Compose deployment adds:
  *   1. PasswordLogin posts to /api/auth/login and, on success, stores the demo
  *      token in the in-memory auth module and reports the identity.
  *   2. getToken() returns that stored token in password mode (and never touches

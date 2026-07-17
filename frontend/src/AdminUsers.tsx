@@ -68,6 +68,19 @@ function formatTimestamp(epochSeconds: number | null): string {
   return new Date(epochSeconds * 1000).toLocaleString();
 }
 
+// Status → chip variant: active reads as healthy, suspended as a warning,
+// deprovisioned as a terminal/danger state. Exhaustive over UserStatus.
+function statusChipClass(status: UserStatus): string {
+  switch (status) {
+    case 'active':
+      return 'ct-chip ct-chip--ok';
+    case 'suspended':
+      return 'ct-chip ct-chip--warn';
+    case 'deprovisioned':
+      return 'ct-chip ct-chip--danger';
+  }
+}
+
 export default function AdminUsers(): React.ReactElement | null {
   const [users, setUsers] = useState<UserRow[] | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -175,38 +188,31 @@ export default function AdminUsers(): React.ReactElement | null {
   }
 
   return (
-    <section data-testid="admin-users-panel" style={{ marginTop: '2rem' }}>
-      <h2>Users</h2>
+    <section data-testid="admin-users-panel" className="ct-section ct-stack">
+      <h2 className="ct-section-title">Users</h2>
 
       {error && (
-        <p data-testid="admin-users-error" role="alert" style={{ color: '#b00020' }}>
+        <p data-testid="admin-users-error" role="alert" className="ct-error">
           {error}
         </p>
       )}
 
       {/* Sync-job visibility panel */}
-      <div
-        data-testid="sync-status-panel"
-        style={{
-          border: '1px solid #ddd',
-          borderRadius: '4px',
-          padding: '0.75rem 1rem',
-          marginBottom: '1rem',
-          fontSize: '0.9rem',
-        }}
-      >
+      <div data-testid="sync-status-panel" className="ct-note">
         <strong>Workspace sync status</strong>
         {syncStatus ? (
-          <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
+          <ul>
             <li data-testid="sync-last-run">Last run: {formatTimestamp(syncStatus.last_run_at)}</li>
             <li data-testid="sync-outcome">
               Outcome:{' '}
               {syncStatus.last_run_outcome === 'directory_unavailable' ? (
-                <span style={{ color: '#b00020' }}>
+                <span className="ct-chip ct-chip--danger">
                   directory unavailable — fail-closed, no changes made
                 </span>
+              ) : syncStatus.last_run_outcome ? (
+                <span className="ct-chip ct-chip--ok">{syncStatus.last_run_outcome}</span>
               ) : (
-                syncStatus.last_run_outcome ?? 'not yet run'
+                'not yet run'
               )}
             </li>
             <li data-testid="sync-deprovisioned-count">
@@ -220,7 +226,7 @@ export default function AdminUsers(): React.ReactElement | null {
 
       {/* Break-glass procedure — surfaced read-only, no action button here.
           Break-glass stays IAM-side per #53; see RUNBOOK.md for the procedure. */}
-      <details data-testid="break-glass-note" style={{ marginBottom: '1rem', fontSize: '0.85rem', color: '#555' }}>
+      <details data-testid="break-glass-note" className="ct-note">
         <summary>Break-glass admin recovery (read-only)</summary>
         <p>
           If the last admin is locked out, recovery does not go through this screen. A
@@ -232,7 +238,7 @@ export default function AdminUsers(): React.ReactElement | null {
       </details>
 
       {actionError && (
-        <p data-testid="admin-users-action-error" role="alert" style={{ color: '#b00020' }}>
+        <p data-testid="admin-users-action-error" role="alert" className="ct-error">
           {actionError}
         </p>
       )}
@@ -240,55 +246,65 @@ export default function AdminUsers(): React.ReactElement | null {
       {users === null ? (
         <p data-testid="admin-users-loading">Loading users…</p>
       ) : (
-        <table data-testid="users-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Email</th>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Status</th>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Admin</th>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Admission</th>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Last sign-in</th>
-              <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.cognito_sub} data-testid={`user-row-${u.cognito_sub}`}>
-                <td>{u.email}</td>
-                <td data-testid={`user-status-${u.cognito_sub}`}>{u.status}</td>
-                <td>{u.is_admin ? 'admin' : 'reviewer'}</td>
-                <td>{u.admission === 'jit' ? 'JIT (group sign-in)' : (u.admission ?? '—')}</td>
-                <td>{formatTimestamp(u.last_auth_at)}</td>
-                <td>
-                  <button
-                    disabled={pendingSub === u.cognito_sub || u.status === 'suspended'}
-                    onClick={() => void applyUpdate(u.cognito_sub, { status: 'suspended' })}
-                  >
-                    Suspend
-                  </button>{' '}
-                  <button
-                    disabled={pendingSub === u.cognito_sub || u.status === 'deprovisioned'}
-                    onClick={() => void applyUpdate(u.cognito_sub, { status: 'deprovisioned' })}
-                  >
-                    Deprovision
-                  </button>{' '}
-                  <button
-                    disabled={pendingSub === u.cognito_sub || u.status === 'active'}
-                    onClick={() => void applyUpdate(u.cognito_sub, { status: 'active' })}
-                  >
-                    Reactivate
-                  </button>{' '}
-                  <button
-                    disabled={pendingSub === u.cognito_sub}
-                    onClick={() => void applyUpdate(u.cognito_sub, { is_admin: !u.is_admin })}
-                  >
-                    {u.is_admin ? 'Revoke admin' : 'Grant admin'}
-                  </button>
-                </td>
+        <div className="ct-table-scroll">
+          <table data-testid="users-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Admin</th>
+                <th>Admission</th>
+                <th>Last sign-in</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.cognito_sub} data-testid={`user-row-${u.cognito_sub}`}>
+                  <td>{u.email}</td>
+                  <td data-testid={`user-status-${u.cognito_sub}`}>
+                    <span className={statusChipClass(u.status)}>{u.status}</span>
+                  </td>
+                  <td>{u.is_admin ? 'admin' : 'reviewer'}</td>
+                  <td>{u.admission === 'jit' ? 'JIT (group sign-in)' : (u.admission ?? '—')}</td>
+                  <td>{formatTimestamp(u.last_auth_at)}</td>
+                  <td>
+                    <div className="ct-actions" role="group">
+                      <button
+                        className="ct-icon-button"
+                        disabled={pendingSub === u.cognito_sub || u.status === 'suspended'}
+                        onClick={() => void applyUpdate(u.cognito_sub, { status: 'suspended' })}
+                      >
+                        Suspend
+                      </button>
+                      <button
+                        className="ct-icon-button"
+                        disabled={pendingSub === u.cognito_sub || u.status === 'deprovisioned'}
+                        onClick={() => void applyUpdate(u.cognito_sub, { status: 'deprovisioned' })}
+                      >
+                        Deprovision
+                      </button>
+                      <button
+                        className="ct-icon-button"
+                        disabled={pendingSub === u.cognito_sub || u.status === 'active'}
+                        onClick={() => void applyUpdate(u.cognito_sub, { status: 'active' })}
+                      >
+                        Reactivate
+                      </button>
+                      <button
+                        className="ct-icon-button"
+                        disabled={pendingSub === u.cognito_sub}
+                        onClick={() => void applyUpdate(u.cognito_sub, { is_admin: !u.is_admin })}
+                      >
+                        {u.is_admin ? 'Revoke admin' : 'Grant admin'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

@@ -23,9 +23,8 @@
  * (ARCHITECTURE.md § Wrong-format rejection UX) — see ReviewSubmission.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
-import '@aws-amplify/ui-react/styles.css';
 import AdminUsers from './AdminUsers';
 import AdminRetention from './AdminRetention';
 import ReviewSubmission from './ReviewSubmission';
@@ -67,6 +66,18 @@ interface VersionInfo {
 // non-admin (or fails), nothing admin-ish renders.
 // ---------------------------------------------------------------------------
 type AdminCapability = 'loading' | 'admin' | 'non-admin';
+
+// ---------------------------------------------------------------------------
+// Tabbed shell (issue: Pico tabbed layout). One app shell + one Review
+// experience shared by both roles; the two admin tabs are appended only for
+// an admin caller.
+// ---------------------------------------------------------------------------
+type TabId = 'review' | 'users' | 'retention';
+
+interface TabDef {
+  id: TabId;
+  label: string;
+}
 
 function useAdminCapability(): AdminCapability {
   const [capability, setCapability] = useState<AdminCapability>('loading');
@@ -166,73 +177,166 @@ function AppContent({
     };
   }, []);
 
+  const isAdmin = adminCapability === 'admin';
+
+  // Tab set: Review is always present; the two admin tabs are appended only
+  // for an admin caller. `useAdminCapability` decides ONLY this — it never
+  // branches the header, the Review tab, or <ReviewSubmission /> itself.
+  const tabs: TabDef[] = [
+    { id: 'review', label: 'Review' },
+    ...(isAdmin
+      ? ([
+          { id: 'users', label: 'Users & access' },
+          { id: 'retention', label: 'Retention & legal hold' },
+        ] as TabDef[])
+      : []),
+  ];
+
+  const [activeTab, setActiveTab] = useState<TabId>('review');
+  const tablistRef = useRef<HTMLDivElement | null>(null);
+
+  // Roving-tabindex + arrow-key navigation across the tablist, mirroring the
+  // radiogroup idiom in Toaster.tsx's ContractTypeDial: selection and focus
+  // move together, wrapping at the ends.
+  const focusTab = useCallback((id: TabId) => {
+    const buttons = tablistRef.current?.querySelectorAll<HTMLButtonElement>('button[data-tab-id]');
+    const target = buttons
+      ? Array.from(buttons).find((btn) => btn.dataset.tabId === id)
+      : undefined;
+    target?.focus();
+  }, []);
+
+  const activateAt = useCallback(
+    (index: number) => {
+      const next = tabs[(index + tabs.length) % tabs.length];
+      if (next) {
+        setActiveTab(next.id);
+        focusTab(next.id);
+      }
+    },
+    [tabs, focusTab],
+  );
+
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const currentIndex = Math.max(
+        0,
+        tabs.findIndex((t) => t.id === activeTab),
+      );
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        activateAt(currentIndex + 1);
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        activateAt(currentIndex - 1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        activateAt(0);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        activateAt(tabs.length - 1);
+      }
+    },
+    [tabs, activeTab, activateAt],
+  );
+
   return (
-    <div style={{ fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '1rem' }}>
-      {/* Header — signed-in user's email */}
-      <header
-        style={{
-          borderBottom: '1px solid #ddd',
-          paddingBottom: '0.5rem',
-          marginBottom: '1rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <span>
+    <div className="ct-app">
+      {/* Header — one shell shared by both roles. The admin badge is the only
+          role-conditional element here. */}
+      <header className="ct-header">
+        <span className="ct-header__brand">
           <strong>{PRODUCT_NAME} Review Tool</strong>
         </span>
-        <span>
-          Signed in as{' '}
-          <span data-testid="user-email" style={{ fontWeight: 'bold' }}>
-            {userEmail}
-          </span>
-          {' — '}
-          <button
-            onClick={signOut}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#0073bb',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              padding: 0,
-            }}
-          >
+        <span className="ct-identity">
+          Signed in as <strong data-testid="user-email">{userEmail}</strong>
+          {isAdmin && <span className="ct-role-badge">admin</span>}
+          <button type="button" className="ct-linkbutton" onClick={signOut}>
             Sign out
           </button>
         </span>
       </header>
 
-      {/* Main area */}
-      <main>
-        {/* Upload/poll/download review flow (issue #186). */}
-        <ReviewSubmission />
+      {/* Tabs — an accessible tablist. For a single-tab (non-admin) user we
+          drop the tab bar entirely and show the Review panel on its own. */}
+      {tabs.length > 1 && (
+        <div
+          role="tablist"
+          aria-label="Sections"
+          className="ct-tabs"
+          ref={tablistRef}
+          onKeyDown={handleTabKeyDown}
+        >
+          {tabs.map((tab) => {
+            const selected = tab.id === activeTab;
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                type="button"
+                id={`tab-${tab.id}`}
+                data-tab-id={tab.id}
+                className="ct-tab"
+                aria-selected={selected}
+                aria-controls={`panel-${tab.id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-        {/* Admin Users (#92) + retention/legal-hold (#94) screens.
-            Gated on the resolved role from GET /api/me (#234/#235): they
-            don't mount at all until the probe resolves `is_admin: true`,
-            so a non-admin reviewer never sees admin chrome — not even
-            momentarily. The server remains authoritative; each panel also
-            keeps its own 403-based gate as defense in depth. */}
-        {adminCapability === 'admin' && (
-          <>
+      {/* Tabpanels. CRITICAL: every panel stays MOUNTED at once; visibility is
+          toggled via the `hidden` attribute so ReviewSubmission's polling and
+          the admin panels' state persist across tab switches (and tests can
+          find hidden testids). Admin panels are still only *rendered* for an
+          admin caller (#234/#235) — a non-admin never mounts AdminUsers/
+          AdminRetention at all. The server stays authoritative; each panel
+          also keeps its own 403 gate as defense in depth. */}
+      {tabs.length > 1 ? (
+        <section
+          role="tabpanel"
+          id="panel-review"
+          aria-labelledby="tab-review"
+          className="ct-tabpanel"
+          hidden={activeTab !== 'review'}
+        >
+          <ReviewSubmission />
+        </section>
+      ) : (
+        <section className="ct-tabpanel">
+          <ReviewSubmission />
+        </section>
+      )}
+
+      {isAdmin && (
+        <>
+          <section
+            role="tabpanel"
+            id="panel-users"
+            aria-labelledby="tab-users"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'users'}
+          >
             <AdminUsers />
+          </section>
+          <section
+            role="tabpanel"
+            id="panel-retention"
+            aria-labelledby="tab-retention"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'retention'}
+          >
             <AdminRetention />
-          </>
-        )}
-      </main>
+          </section>
+        </>
+      )}
 
-      {/* Footer — version from authenticated /version endpoint */}
-      <footer
-        style={{
-          borderTop: '1px solid #ddd',
-          marginTop: '2rem',
-          paddingTop: '0.5rem',
-          fontSize: '0.8rem',
-          color: '#666',
-        }}
-      >
+      {/* Footer — version from authenticated /version endpoint (unchanged). */}
+      <footer className="ct-footer">
         {versionError ? (
           <span data-testid="version-error">{versionError}</span>
         ) : versionInfo ? (
@@ -265,7 +369,7 @@ function SsoApp(): React.ReactElement {
   return <AppContent userEmail={userEmail} signOut={signOut ?? (() => {})} />;
 }
 
-// Password (DTS) target: gate on PasswordLogin; once signed in, render the app
+// Password (Docker Compose) target: gate on PasswordLogin; once signed in, render the app
 // with the demo identity. Sign-out clears the in-memory token.
 function PasswordApp(): React.ReactElement {
   const [identity, setIdentity] = useState<DemoIdentity | null>(null);

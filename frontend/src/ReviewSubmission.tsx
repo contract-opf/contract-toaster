@@ -40,13 +40,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail, triggerBrowserDownload } from './api';
+import { ToasterHero, ToasterStyles, type ToasterPhase } from './toaster/Toaster';
 import {
-  ContractTypeDial,
-  ProgressToaster,
-  SoberToaster,
-  ToastUpToaster,
-  ToasterStyles,
-} from './toaster/Toaster';
+  primeAudio,
+  playLever,
+  startTicking,
+  stopTicking,
+  playPop,
+  useSoundMuted,
+} from './toaster/sounds';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/review_routes.py + backend/src/reviews.py's
@@ -80,6 +82,14 @@ interface ReviewDetail {
   decision: string | null;
   message: string | null;
   has_output: boolean;
+  // Failure diagnosis. backend/src/reviews.py's record_stage_failure records
+  // the REAL per-stage name that failed (never a hardcoded 'pipeline'), and
+  // get_review_detail has always returned both of these — this UI just used
+  // to drop them on the floor and render a bare "ERROR", which told an
+  // operator nothing about whether the cause was a missing API key, the
+  // playbook, or their document. Null on a review that didn't fail.
+  failing_stage?: string | null;
+  reason?: string | null;
   // Trust-calibration signals the attorney must see BEFORE downloading
   // (docs/output-contract.md -> "Confidence band" / "Critic-delta
   // presentation" / "Download gate"). Absent/null on a review with no band
@@ -122,6 +132,53 @@ const POLL_BACKOFF_MAX_MS = 30000;
 
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
 
+// Human-readable failure explanations, keyed by the `failing_stage` that
+// backend/src/pipeline_runner.py's run_real_pipeline records. A bare "ERROR"
+// is useless to the person who has to fix it: every entry here says what
+// broke AND what to do about it. Keep the keys in step with the `stage = "…"`
+// assignments in run_real_pipeline.
+const STAGE_EXPLANATIONS: Record<string, { cause: string; fix: string }> = {
+  build_model_client: {
+    cause: 'No usable model API key was found, so the review never reached the model.',
+    fix: 'An admin can add one under “Model & API key”. Until then every review will fail here.',
+  },
+  load_playbook: {
+    cause: "This contract type isn't set up for review yet.",
+    fix: 'Pick a different contract type, or ask an admin to activate this one.',
+  },
+  fetch_upload: {
+    cause: "Your document was uploaded, but couldn't be read back for review.",
+    fix: 'This is usually temporary — try submitting it again.',
+  },
+  run_review: {
+    cause: 'The model could not complete the review.',
+    fix:
+      'Most often the API key was rejected, the selected model is unavailable, or the ' +
+      'document is longer than the model can read at once. An admin can check the key ' +
+      'and model under “Model & API key”.',
+  },
+  persist_result: {
+    cause: 'The review finished, but the result could not be saved.',
+    fix: 'Please try again — the review will need to be re-run.',
+  },
+  mark_running: {
+    cause: "The review couldn't be started.",
+    fix: 'Please try again.',
+  },
+};
+
+function explainFailure(detail: ReviewDetail): { cause: string; fix: string } | null {
+  if (!detail.failing_stage) {
+    return null;
+  }
+  return (
+    STAGE_EXPLANATIONS[detail.failing_stage] ?? {
+      cause: 'The review stopped before it could finish.',
+      fix: 'Please try again, or contact an admin if it keeps happening.',
+    }
+  );
+}
+
 // A critic delta is "present" (and must gate the download) when it carries at
 // least one contested replacement or one critic-added issue
 // (docs/output-contract.md -> "Download gate — delta indicator must be visible
@@ -152,6 +209,9 @@ export default function ReviewSubmission(): React.ReactElement {
   // review actually in flight, so it keeps showing correctly even if the
   // attorney changes the selector afterward.
   const [playbooks, setPlaybooks] = useState<PlaybookCatalogEntry[]>([]);
+  // Distinguishes "catalog hasn't arrived yet" from "catalog arrived and
+  // nothing is loaded" — only the latter warrants the empty-state message.
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [playbookId, setPlaybookId] = useState<string>('');
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [submittedPlaybookLabel, setSubmittedPlaybookLabel] = useState<string | null>(null);
@@ -175,11 +235,23 @@ export default function ReviewSubmission(): React.ReactElement {
         if (cancelled) {
           return;
         }
+        // Every registered playbook reaches the dial, which renders the
+        // unactivated ones as de-emphasized, NON-selectable "(coming soon)"
+        // stops (see ContractTypeDial). Two things are true at once: a
+        // registered-but-unactivated playbook can't be reviewed against
+        // (run_real_pipeline fails closed at load_playbook), so offering it as
+        // a *choice* only invites a guaranteed 503 — but it is still real,
+        // published intent, and the dial is the product's roadmap as much as
+        // its control. So: visible, not selectable. The catalog endpoint
+        // remains the authority on `status`; this is presentation only.
         const entries = data.playbooks ?? [];
         setPlaybooks(entries);
+        setCatalogLoaded(true);
         setCatalogError(null);
+        // Default to the first LOADED type — never park the selection on a
+        // stop the user isn't allowed to pick.
         const firstActive = entries.find((entry) => entry.status === 'active');
-        setPlaybookId((current) => current || (firstActive ?? entries[0])?.playbook_id || '');
+        setPlaybookId((current) => current || firstActive?.playbook_id || '');
       } catch (err) {
         if (!cancelled) {
           setCatalogError(
@@ -260,6 +332,11 @@ export default function ReviewSubmission(): React.ReactElement {
         setSubmitError('Choose a .docx file first.');
         return;
       }
+
+      // Prime + play inside the user's submit gesture so the browser's audio
+      // autoplay policy is satisfied (primeAudio must run in a user gesture).
+      primeAudio();
+      playLever();
 
       setSubmitting(true);
       setSubmitError(null);
@@ -342,6 +419,41 @@ export default function ReviewSubmission(): React.ReactElement {
     }
   }, [reviewId]);
 
+  // Sound mute state (persisted by the sounds module; no localStorage here).
+  const { muted, toggle } = useSoundMuted();
+
+  // A single derived phase drives the whole photoreal toaster (ToasterHero):
+  // idle before a review is in flight; working while the pipeline is
+  // non-terminal (or the first poll hasn't landed); done on DONE; error on any
+  // other terminal status.
+  const phase: ToasterPhase = !reviewId
+    ? 'idle'
+    : !detail || NON_TERMINAL_STATUSES.has(detail.status)
+      ? 'working'
+      : detail.status === 'DONE'
+        ? 'done'
+        : 'error';
+
+  // "Is anything actually reviewable?" — distinct from "is the catalog empty?".
+  // A registry of only unactivated types yields coming-soon stops the user
+  // can't pick, which must still read as "nothing loaded".
+  const hasLoadedPlaybook = playbooks.some((entry) => entry.status === 'active');
+
+  // Ticking sound tracks the working phase; a single pop fires on the
+  // transition into done. startTicking/stopTicking are idempotent, and playPop
+  // fires once per entry into 'done' because deps are just [phase].
+  useEffect(() => {
+    if (phase === 'working') {
+      startTicking();
+    } else {
+      stopTicking();
+    }
+    if (phase === 'done') {
+      playPop();
+    }
+    return () => stopTicking();
+  }, [phase]);
+
   // ACCEPT never reads "approved" / "no action needed" (ARCHITECTURE.md's
   // Wrong-format rejection UX / accept framing) — always "no requested
   // changes identified by tool", with the same watermark every other
@@ -351,19 +463,63 @@ export default function ReviewSubmission(): React.ReactElement {
       ? 'No requested changes identified by tool.'
       : (detail?.message ?? (detail?.decision === 'REQUEST_CHANGE' ? 'Changes requested.' : null));
 
+  const failureExplanation = detail ? explainFailure(detail) : null;
+
   return (
-    <section data-testid="review-submission" style={{ marginTop: '1.5rem' }}>
-      <h2 style={{ fontSize: '1.1rem' }}>Submit a contract for review</h2>
+    <section data-testid="review-submission" className="ct-section ct-stack">
+      <h2 className="ct-section-title">Submit a contract for review</h2>
 
       <ToasterStyles />
 
-      <form onSubmit={(event) => void handleSubmit(event)}>
-        {playbooks.length > 0 && (
-          <ContractTypeDial entries={playbooks} value={playbookId} onChange={setPlaybookId} />
-        )}
+      {/*
+        One photoreal toaster drives every visual state via `phase`. It renders
+        the accessible contract-type dial itself when `entries.length > 0`
+        (data-testid review-playbook-dial + review-playbook-option-{id}),
+        rotates the pointer to `value`, and provides the progress / done / sober
+        state visuals (toaster-state-progress / -done / -sober) that used to be
+        three separate illustrations. When output is ready, the "done" toast is
+        a real download button wired to handleDownload.
+      */}
+      <ToasterHero
+        entries={playbooks}
+        value={playbookId}
+        onChange={setPlaybookId}
+        phase={phase}
+        onDownload={detail?.has_output ? () => void handleDownload() : undefined}
+        downloadDisabled={downloading}
+      />
 
+      {/*
+        No LOADED playbook == nothing is reviewable, so say so explicitly
+        rather than leave a toaster whose only stops are ones you can't pick.
+        Keyed on the absence of an *active* type, not on an empty catalog: a
+        registry holding only unactivated types still renders (coming-soon)
+        stops, and that must not read as a working dial. Only shown once the
+        catalog has actually loaded (a catalog FETCH failure has its own
+        message below).
+      */}
+      {catalogLoaded && !hasLoadedPlaybook && !catalogError && (
+        <p data-testid="review-no-playbooks" className="ct-note" role="status">
+          No contract types are loaded yet, so there&apos;s nothing to review against. An
+          admin needs to activate a playbook first.
+        </p>
+      )}
+
+      <div className="ct-toolbar">
+        <button
+          type="button"
+          className="ct-icon-button"
+          aria-pressed={muted}
+          onClick={toggle}
+          data-testid="sound-toggle"
+        >
+          {muted ? '🔇 Sound off' : '🔊 Sound on'}
+        </button>
+      </div>
+
+      <form onSubmit={(event) => void handleSubmit(event)}>
         {catalogError && (
-          <p data-testid="review-catalog-error" role="alert">
+          <p data-testid="review-catalog-error" className="ct-error" role="alert">
             {catalogError}
           </p>
         )}
@@ -374,30 +530,22 @@ export default function ReviewSubmission(): React.ReactElement {
           data-testid="review-file-input"
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
         />
-        <button type="submit" disabled={submitting || !file} data-testid="review-submit-button">
-          {submitting ? 'Uploading…' : 'Upload for review'}
-        </button>
+        <div className="ct-actions">
+          <button type="submit" disabled={submitting || !file} data-testid="review-submit-button">
+            {submitting ? 'Uploading…' : 'Upload for review'}
+          </button>
+        </div>
       </form>
 
       {submitError && (
-        <p data-testid="review-submit-error" role="alert">
+        <p data-testid="review-submit-error" className="ct-error" role="alert">
           {submitError}
         </p>
       )}
 
       {reviewId && (
-        <div data-testid="review-status" style={{ marginTop: '1rem' }} aria-live="polite">
-          {/*
-            Doneness-style progress illustration (issue #280) — reuses
-            ReviewStatus as-is (no new states): shown while the pipeline is
-            non-terminal (PENDING/RUNNING), including the brief window before
-            the first poll response arrives (`detail` still null). Purely
-            decorative; the text status above/below still carries the
-            information for assistive tech.
-          */}
-          {(!detail || NON_TERMINAL_STATUSES.has(detail.status)) && <ProgressToaster />}
-
-          <p>
+        <div data-testid="review-status" className="ct-stack" aria-live="polite">
+          <p className="ct-status">
             Review <code>{reviewId}</code>: <strong>{detail?.status ?? 'submitting…'}</strong>
           </p>
 
@@ -408,26 +556,39 @@ export default function ReviewSubmission(): React.ReactElement {
           )}
 
           {pollError && (
-            <p data-testid="review-poll-error" role="alert">
+            <p data-testid="review-poll-error" className="ct-error" role="alert">
               {pollError}
             </p>
           )}
 
-          {detail && !NON_TERMINAL_STATUSES.has(detail.status) && (
-            <div data-testid="review-result">
-              {/*
-                State mapping (issue #280): DONE gets the toast-up treatment;
-                every other terminal status (ERROR, MANUAL_REVIEW_REQUIRED,
-                ERROR_MANUAL_REVIEW_REQUIRED) gets a distinct, sober,
-                non-cute treatment — this is legal software, and failure
-                states must read as serious. Purely decorative; the copy
-                below is unchanged from before this ticket.
-              */}
-              {detail.status === 'DONE' ? <ToastUpToaster /> : <SoberToaster />}
+          {/*
+            Failure diagnosis. The server already knows exactly which stage
+            failed; showing it (with the technical stage name kept visible for
+            an admin to act on or quote in a bug report) is the difference
+            between "ERROR" and an operator knowing to go add an API key.
+          */}
+          {detail && failureExplanation && (
+            <div data-testid="review-failure" className="ct-error" role="alert">
+              <p>
+                <strong>{failureExplanation.cause}</strong>
+              </p>
+              <p>{failureExplanation.fix}</p>
+              <p className="ct-muted">
+                <small>
+                  Failed at stage <code data-testid="review-failing-stage">{detail.failing_stage}</code>
+                  {detail.reason && detail.reason !== 'unhandled_exception' && (
+                    <> · {detail.reason}</>
+                  )}
+                </small>
+              </p>
+            </div>
+          )}
 
+          {detail && !NON_TERMINAL_STATUSES.has(detail.status) && (
+            <div data-testid="review-result" className="ct-stack">
               {decisionCopy && <p>{decisionCopy}</p>}
-              <p style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>
-                Tool recommendation only — attorney approval required.
+              <p className="ct-muted">
+                <em>Tool recommendation only — attorney approval required.</em>
               </p>
 
               {/*
@@ -441,29 +602,13 @@ export default function ReviewSubmission(): React.ReactElement {
                 from the attorney-approval watermark — never a legal category.
               */}
               {detail.confidence_band && (
-                <div
-                  data-testid="review-confidence-band"
-                  style={{
-                    marginTop: '0.75rem',
-                    padding: '0.5rem',
-                    border: '1px solid currentColor',
-                    fontSize: '0.85rem',
-                  }}
-                >
+                <div data-testid="review-confidence-band" className="ct-note">
                   <strong>System status:</strong> {detail.confidence_band}
                 </div>
               )}
 
               {criticDeltaHasContent(detail.critic_delta) && (
-                <div
-                  data-testid="review-critic-delta"
-                  style={{
-                    marginTop: '0.75rem',
-                    padding: '0.5rem',
-                    border: '1px solid currentColor',
-                    fontSize: '0.85rem',
-                  }}
-                >
+                <div data-testid="review-critic-delta" className="ct-note">
                   <p style={{ margin: 0 }}>
                     <strong>Adversarial critic flagged this review.</strong> Review the
                     points below before downloading.
@@ -499,7 +644,7 @@ export default function ReviewSubmission(): React.ReactElement {
               )}
 
               {detail.has_output && (
-                <div style={{ marginTop: '0.75rem' }}>
+                <div className="ct-actions">
                   <button
                     type="button"
                     onClick={() => void handleDownload()}
@@ -512,7 +657,7 @@ export default function ReviewSubmission(): React.ReactElement {
               )}
 
               {downloadError && (
-                <p data-testid="review-download-error" role="alert">
+                <p data-testid="review-download-error" className="ct-error" role="alert">
                   {downloadError}
                 </p>
               )}
