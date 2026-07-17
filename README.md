@@ -11,12 +11,12 @@ and footnoted rationales, reviewed against your codified negotiating position
 
 In active development. Not yet deployed. See [milestones](https://github.com/contract-opf/contract-toaster/milestones) for phase progress.
 
-RUNBOOK.md and ARCHITECTURE.md describe the target design, some of it ahead of
+`RUNBOOK.md` and `ARCHITECTURE.md` describe the target design, some of it ahead of
 the code — that's a deliberate "docs as spec" choice for a solo team, but it
 means the docs alone don't tell you what's reachable today. See
 [docs/implementation-status.md](docs/implementation-status.md) for the
 SHIPPED / STUBBED / PLANNED ledger of every admin-UI capability and
-observability surface RUNBOOK.md describes.
+observability surface that `RUNBOOK.md` describes.
 
 ## What this does
 
