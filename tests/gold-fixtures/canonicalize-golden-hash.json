@@ -1,8 +1,8 @@
 {
   "description": "Golden-hash fixture for CI: records the expected content_hash of the eiaa playbook at a known commit.  If this hash drifts, tests/test_canonicalize.py::test_golden_hash_fixture fails, alerting implementers that the canonical form or playbook content changed. Re-run `python3 scripts/canonicalize.py --record` to update after an intentional playbook-content change.",
   "playbook_path": "playbooks/eiaa-v1.0.0.json",
-  "content_hash": "sha256:a384cced35ea2900c39d24f453865fa8bb73ce10d33e210e80259ea0e15d6e46",
-  "canonical_sha256": "a384cced35ea2900c39d24f453865fa8bb73ce10d33e210e80259ea0e15d6e46",
+  "content_hash": "sha256:4c686b645846662ae8a57029cd2147882e2d58232403ac367a05cfe10bd0ee58",
+  "canonical_sha256": "4c686b645846662ae8a57029cd2147882e2d58232403ac367a05cfe10bd0ee58",
   "excluded_from_canonical": [
     "release",
     "status"
