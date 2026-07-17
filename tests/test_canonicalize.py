@@ -33,7 +33,11 @@ GOLDEN_HASH_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures" / "canonicalize
 # Import the implementation under test.  This WILL FAIL (ImportError) until
 # scripts/canonicalize.py is written -- that's the RED failure.
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-from canonicalize import canonicalize, content_hash  # noqa: E402
+from canonicalize import (  # noqa: E402
+    canonicalize,
+    content_hash,
+    golden_hash_fixture_playbook_path,
+)
 
 
 def load_playbook() -> dict:
@@ -222,6 +226,12 @@ def test_golden_hash_fixture():
     print(f"PASS: golden-hash matches fixture: {actual_hash}")
 
 
+def test_golden_hash_fixture_keeps_targeting_eiaa():
+    """The fixture's EIAA contract must not follow registry-default changes."""
+    assert golden_hash_fixture_playbook_path() == PLAYBOOK_PATH
+    print("PASS: golden-hash fixture targets the EIAA playbook")
+
+
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
@@ -232,6 +242,7 @@ def main() -> int:
         test_canonicalize_stable_under_status_flips,
         test_content_hash_reproducible_across_serializations,
         test_golden_hash_fixture,
+        test_golden_hash_fixture_keeps_targeting_eiaa,
     ]
 
     failures = []

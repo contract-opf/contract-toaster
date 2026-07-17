@@ -97,19 +97,28 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import playbook_registry  # noqa: E402
 
-# Back-compat literal (issue #45-era): resolved for the default ("eiaa")
-# playbook_id. CLI resolution now goes through playbook_registry when
+# CLI resolution goes through playbook_registry when
 # --playbook-id is passed -- see main() / resolve_playbook_path() below
 # (issue #209: playbook_id must be a first-class runtime parameter, not a
 # hard-coded path).
 PLAYBOOK_PATH = playbook_registry.resolve_playbook(playbook_registry.DEFAULT_PLAYBOOK_ID).playbook_path
 GOLDEN_HASH_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures" / "canonicalize-golden-hash.json"
+# This fixture guards the EIAA bundle seeded by the active-bundle tests. It is
+# intentionally independent of the registry default, which may change as new
+# example playbooks are added.
+GOLDEN_HASH_FIXTURE_PLAYBOOK_ID = "eiaa"
 
 
 def resolve_playbook_path(playbook_id: str) -> Path:
     """Resolve a playbook_id to its playbook JSON path via the registry
     (issue #209)."""
     return playbook_registry.resolve_playbook(playbook_id).playbook_path
+
+
+def golden_hash_fixture_playbook_path() -> Path:
+    """Return the EIAA artifact protected by the committed golden fixture."""
+    return resolve_playbook_path(GOLDEN_HASH_FIXTURE_PLAYBOOK_ID)
+
 
 # Keys excluded from the canonical form.
 # These are the two fields that must not participate in the hash because they
@@ -220,6 +229,8 @@ def main() -> int:
 
     if playbook_id is not None:
         playbook_path = resolve_playbook_path(playbook_id)
+    elif record and not paths:
+        playbook_path = golden_hash_fixture_playbook_path()
     else:
         playbook_path = Path(paths[0]) if paths else PLAYBOOK_PATH
 
