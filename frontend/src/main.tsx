@@ -1,6 +1,20 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Amplify } from 'aws-amplify';
+// Global styles, load order matters:
+//   1. Pico (pumpkin build) — semantic-element base styling, warm accent.
+//   2. tokens.css — our design-token overrides (recolors Pico's accent to the
+//      exact toaster orange, defines the --ct-* vocabulary).
+//   3. app.css — app chrome (shell, tabs, header, chips) built on the tokens.
+//   4. Amplify UI styles — the SSO Authenticator sign-in screen only; loaded
+//      last so its own scoped widget styling wins, without leaking onto our
+//      app elements (which carry none of Amplify's classes).
+// The strict Amplify-hosting CSP forbids remote CSS, so every one of these is
+// bundled same-origin by Vite — no CDN links.
+import '@picocss/pico/css/pico.pumpkin.min.css';
+import './styles/tokens.css';
+import './styles/app.css';
+import '@aws-amplify/ui-react/styles.css';
 import App from './App';
 import awsExports from './aws-exports';
 import { isPasswordMode } from './auth';
@@ -16,7 +30,7 @@ import { isPasswordMode } from './auth';
 // your dev CDK stack's outputs file. Otherwise the committed placeholder
 // values (or VITE_* env var overrides) are used as-is.
 //
-// DTS target (VITE_AUTH_MODE=password): there is no Cognito, so Amplify is not
+// Docker Compose target (VITE_AUTH_MODE=password): there is no Cognito, so Amplify is not
 // configured — the SPA uses username/password sign-in (PasswordLogin) instead.
 if (!isPasswordMode()) {
   Amplify.configure(awsExports);

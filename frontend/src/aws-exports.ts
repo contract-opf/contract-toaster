@@ -19,7 +19,7 @@
  * This file IS committed to the repository (it is not gitignored). Every
  * value still resolves through `import.meta.env.VITE_*` first, so real
  * secrets never need to live in source: set the VITE_* env vars at
- * build/deploy time (as the DTS Docker target does) instead of relying on
+ * build/deploy time (as the Docker Compose target does) instead of relying on
  * whatever literal is currently checked in here.
  */
 

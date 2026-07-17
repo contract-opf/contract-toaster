@@ -274,16 +274,16 @@ export default function AdminRetention(): React.ReactElement | null {
   }
 
   return (
-    <section data-testid="admin-retention-panel" style={{ marginTop: '2rem' }}>
-      <h2>Document retention &amp; legal hold</h2>
+    <section data-testid="admin-retention-panel" className="ct-section ct-stack">
+      <h2 className="ct-section-title">Document retention &amp; legal hold</h2>
 
       {error && (
-        <p data-testid="admin-retention-error" role="alert" style={{ color: '#b00020' }}>
+        <p data-testid="admin-retention-error" role="alert" className="ct-error">
           {error}
         </p>
       )}
       {actionError && (
-        <p data-testid="admin-retention-action-error" role="alert" style={{ color: '#b00020' }}>
+        <p data-testid="admin-retention-action-error" role="alert" className="ct-error">
           {actionError}
         </p>
       )}
@@ -291,7 +291,7 @@ export default function AdminRetention(): React.ReactElement | null {
       {settings === null ? (
         <p data-testid="admin-retention-loading">Loading retention settings…</p>
       ) : (
-        <div data-testid="retention-slider-panel" style={{ marginBottom: '1.5rem' }}>
+        <div data-testid="retention-slider-panel" className="ct-card ct-stack">
           <p>
             Current retention window: <strong data-testid="retention-current-window">
               {settings.retention_window_days}
@@ -300,41 +300,48 @@ export default function AdminRetention(): React.ReactElement | null {
           </p>
 
           {settings.pending_reduction && (
-            <p data-testid="retention-pending-reduction" style={{ color: '#8a6d00' }}>
+            <p data-testid="retention-pending-reduction" className="ct-note">
               Pending reduction to {settings.pending_reduction.new_window_days} days, requested by{' '}
               {settings.pending_reduction.requested_by} — will apply automatically after the
               72-hour delay unless a second admin confirms sooner (GC is alerted).
             </p>
           )}
 
-          <label htmlFor="retention-slider">New retention window (days, 0–1095)</label>
-          <br />
-          <input
-            id="retention-slider"
-            data-testid="retention-slider"
-            type="range"
-            min={0}
-            max={1095}
-            value={sliderValue}
-            onChange={(e) => {
-              setSliderValue(Number(e.target.value));
-              setPreview(null);
-            }}
-          />{' '}
-          <span>{sliderValue} days</span>
+          <div>
+            <label htmlFor="retention-slider">New retention window (days, 0–1095)</label>
+            <div className="ct-row">
+              <input
+                id="retention-slider"
+                data-testid="retention-slider"
+                type="range"
+                min={0}
+                max={1095}
+                value={sliderValue}
+                onChange={(e) => {
+                  setSliderValue(Number(e.target.value));
+                  setPreview(null);
+                }}
+                className="ct-grow"
+              />
+              <span>{sliderValue} days</span>
+            </div>
+          </div>
 
           {isRetroactiveReduction && (
-            <div
-              data-testid="retroactive-reduction-warning"
-              style={{ marginTop: '0.5rem', color: '#8a6d00' }}
-            >
+            <div data-testid="retroactive-reduction-warning" className="ct-note">
               <p>
                 This is a <strong>retroactive reduction</strong> — it requires a second admin's
                 confirmation or a 72-hour delay before the sweep runs (dual control, #13/#61).
               </p>
-              <button data-testid="retention-preview-button" onClick={() => void loadPreview()}>
-                Preview purge impact
-              </button>
+              <div className="ct-actions">
+                <button
+                  className="secondary"
+                  data-testid="retention-preview-button"
+                  onClick={() => void loadPreview()}
+                >
+                  Preview purge impact
+                </button>
+              </div>
               {preview && (
                 <p data-testid="retention-preview-result">
                   This change will purge <strong>{preview.purge_count}</strong> object
@@ -346,7 +353,6 @@ export default function AdminRetention(): React.ReactElement | null {
                   Confirming admin (must be a different admin from the requester; leave blank to
                   enter the 72-hour delay instead)
                 </label>
-                <br />
                 <input
                   id="confirming-admin"
                   data-testid="confirming-admin-input"
@@ -358,7 +364,7 @@ export default function AdminRetention(): React.ReactElement | null {
             </div>
           )}
 
-          <div style={{ marginTop: '0.5rem' }}>
+          <div className="ct-actions">
             <button
               data-testid="retention-save-button"
               disabled={saving || sliderValue === settings.retention_window_days}
@@ -370,10 +376,9 @@ export default function AdminRetention(): React.ReactElement | null {
         </div>
       )}
 
-      <div data-testid="legal-hold-place-panel" style={{ marginBottom: '1.5rem' }}>
+      <div data-testid="legal-hold-place-panel" className="ct-card">
         <h3>Place a legal hold</h3>
         <label htmlFor="hold-review-id">Review ID</label>
-        <br />
         <input
           id="hold-review-id"
           data-testid="hold-review-id-input"
@@ -381,9 +386,7 @@ export default function AdminRetention(): React.ReactElement | null {
           value={holdReviewId}
           onChange={(e) => setHoldReviewId(e.target.value)}
         />
-        <br />
         <label htmlFor="hold-reason">Matter reference / reason</label>
-        <br />
         <input
           id="hold-reason"
           data-testid="hold-reason-input"
@@ -391,50 +394,54 @@ export default function AdminRetention(): React.ReactElement | null {
           value={holdReason}
           onChange={(e) => setHoldReason(e.target.value)}
         />
-        <br />
-        <button
-          data-testid="place-hold-button"
-          disabled={holdActionPending || !holdReviewId || !holdReason}
-          onClick={() => void placeHold()}
-        >
-          Place legal hold
-        </button>
+        <div className="ct-actions">
+          <button
+            data-testid="place-hold-button"
+            disabled={holdActionPending || !holdReviewId || !holdReason}
+            onClick={() => void placeHold()}
+          >
+            Place legal hold
+          </button>
+        </div>
       </div>
 
-      <div data-testid="legal-hold-list-panel">
+      <div data-testid="legal-hold-list-panel" className="ct-card">
         <h3>Legal holds</h3>
         {holds === null ? (
           <p data-testid="legal-holds-loading">Loading legal holds…</p>
         ) : holds.length === 0 ? (
           <p data-testid="legal-holds-empty">No reviews currently under legal hold.</p>
         ) : (
-          <table data-testid="legal-holds-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Review ID</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Reason</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Set by</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {holds.map((h) => (
-                <tr key={h.review_id} data-testid={`hold-row-${h.review_id}`}>
-                  <td>{h.review_id}</td>
-                  <td>{h.legal_hold_reason ?? '—'}</td>
-                  <td>{h.legal_hold_set_by ?? '—'}</td>
-                  <td>
-                    <button
-                      disabled={holdActionPending}
-                      onClick={() => void releaseHold(h.review_id)}
-                    >
-                      Release legal hold
-                    </button>
-                  </td>
+          <div className="ct-table-scroll">
+            <table data-testid="legal-holds-table">
+              <thead>
+                <tr>
+                  <th>Review ID</th>
+                  <th>Reason</th>
+                  <th>Set by</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {holds.map((h) => (
+                  <tr key={h.review_id} data-testid={`hold-row-${h.review_id}`}>
+                    <td>{h.review_id}</td>
+                    <td>{h.legal_hold_reason ?? '—'}</td>
+                    <td>{h.legal_hold_set_by ?? '—'}</td>
+                    <td>
+                      <button
+                        className="ct-icon-button"
+                        disabled={holdActionPending}
+                        onClick={() => void releaseHold(h.review_id)}
+                      >
+                        Release legal hold
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </section>

@@ -4,7 +4,7 @@
  * Before this file, `authorizedFetch` was copy-pasted three times
  * (ReviewSubmission.tsx, AdminUsers.tsx, AdminRetention.tsx) and each copy
  * always sent `Authorization: Bearer ${token}` even when `getToken()`
- * (auth.ts:42-47) resolved to an empty string (the DTS password-mode
+ * (auth.ts:42-47) resolved to an empty string (the Docker Compose password-mode
  * pre-login state) — sending a literal `Authorization: Bearer `. This is
  * the single implementation all three (and any future caller — see #272 /
  * #274 / #280) import instead.

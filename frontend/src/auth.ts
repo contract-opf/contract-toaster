@@ -1,16 +1,16 @@
 /**
- * auth.ts — deployment-target auth seam for the SPA (DTS Docker deployment).
+ * auth.ts — deployment-target auth seam for the SPA (Docker Compose deployment).
  *
  * Two targets, one build-time flag (VITE_AUTH_MODE):
  *   - `sso` (default, the AWS target): Cognito via Amplify. getToken() returns
  *     the Amplify session id token, exactly as before.
- *   - `password` (the DTS target): username/password via POST /api/auth/login.
+ *   - `password` (the Docker Compose target): username/password via POST /api/auth/login.
  *     getToken() returns the demo session token minted by that login.
  *
  * The demo token is held IN MEMORY only — never localStorage/sessionStorage
  * (the security-posture source guard forbids Storage.setItem in components).
  * A page refresh therefore requires re-login, which is acceptable for the
- * demo/DTS deployment and keeps the no-persisted-token posture intact.
+ * demo/Docker Compose deployment and keeps the no-persisted-token posture intact.
  */
 import { fetchAuthSession } from 'aws-amplify/auth';
 

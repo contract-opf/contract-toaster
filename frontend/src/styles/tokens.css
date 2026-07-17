@@ -1,0 +1,84 @@
+/*
+ * tokens.css — the shared design-token vocabulary for the redesigned SPA.
+ *
+ * Loaded after Pico (pico.pumpkin) and before app.css in main.tsx. Values
+ * here are the single source of truth for the app's warm "toaster" palette,
+ * spacing rhythm, and radii; app.css and every component's className hook off
+ * these variables instead of hardcoding colors. Theme-aware: the dark block
+ * mirrors prefers-color-scheme, matching Pico's own automatic scheme.
+ *
+ * A few `--pico-*` overrides nudge Pico's pumpkin build toward the exact
+ * toaster accent and soften its card borders — kept minimal so Pico upgrades
+ * stay drop-in.
+ */
+:root {
+  /* Brand — toaster warmth */
+  --ct-accent: #c0522d;         /* toaster orange-red — primary accent */
+  --ct-accent-strong: #a5401f;
+  --ct-accent-soft: #ffe2b8;    /* warm highlight fill (selected dial stop) */
+  --ct-glow: #ff7a1a;           /* the "hot slot" glow */
+  --ct-toast: #d9a463;          /* toasted bread */
+  --ct-toast-crust: #8a5a2b;
+
+  /* Status palette */
+  --ct-ok: #2f7d4f;
+  --ct-ok-bg: #e7f3ec;
+  --ct-warn: #9a6a06;
+  --ct-warn-bg: #fbf1dc;
+  --ct-danger: #b3261e;
+  --ct-danger-bg: #fbe9e8;
+  --ct-info: var(--ct-accent);
+  --ct-info-bg: #fdeadf;
+  --ct-neutral: #5c5c5c;
+  --ct-neutral-bg: #eeeae2;
+
+  /* Neutrals / surfaces (fall back to Pico's own tokens where sensible) */
+  --ct-surface: var(--pico-card-background-color);
+  --ct-border: var(--pico-muted-border-color);
+  --ct-text-muted: var(--pico-muted-color);
+
+  /* Rhythm */
+  --ct-gap: 1rem;
+  --ct-gap-sm: 0.5rem;
+  --ct-gap-lg: 1.75rem;
+  --ct-radius: 12px;
+  --ct-radius-sm: 8px;
+  --ct-maxw: 960px;
+
+  /* Nudge Pico's pumpkin primary to the exact toaster accent */
+  --pico-primary: var(--ct-accent);
+  --pico-primary-background: var(--ct-accent);
+  --pico-primary-hover-background: var(--ct-accent-strong);
+  --pico-primary-border: var(--ct-accent);
+  --pico-primary-hover-border: var(--ct-accent-strong);
+  --pico-primary-focus: rgba(192, 82, 45, 0.35);
+  --pico-primary-underline: rgba(192, 82, 45, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ct-accent: #e8a75b;
+    --ct-accent-strong: #f0b972;
+    --ct-accent-soft: #4a2e18;
+    --ct-glow: #ff9a3c;
+    --ct-toast: #b98246;
+    --ct-toast-crust: #f2ede2;
+
+    --ct-ok: #6fcf97;
+    --ct-ok-bg: #1e2f26;
+    --ct-warn: #e3b768;
+    --ct-warn-bg: #33291399;
+    --ct-danger: #f0908a;
+    --ct-danger-bg: #33201f99;
+    --ct-info: var(--ct-accent);
+    --ct-info-bg: #3a2a1a99;
+    --ct-neutral: #b8b2a6;
+    --ct-neutral-bg: #2c2924;
+
+    --pico-primary: var(--ct-accent);
+    --pico-primary-background: #c0522d;
+    --pico-primary-hover-background: #a5401f;
+    --pico-primary-focus: rgba(232, 167, 91, 0.3);
+    --pico-primary-underline: rgba(232, 167, 91, 0.5);
+  }
+}

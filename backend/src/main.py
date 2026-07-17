@@ -136,6 +136,11 @@ from src.demo_auth import (
     remove_user,
     set_auth_mode,
 )
+from src.model_settings import (
+    clear_model_key,
+    get_model_key_settings,
+    set_model_key,
+)
 from src.playbook_versions import (
     PlaybookVersionGate7MismatchError,
     PlaybookVersionNotFoundError,
@@ -407,6 +412,50 @@ async def post_admin_auth_mode(
     non-admin caller, 400 for an invalid mode value.
     """
     result = set_auth_mode(body["auth_mode"], caller_row, dynamodb_resource)
+    return JSONResponse(content=result)
+
+
+@app.get("/api/admin/model-key", include_in_schema=True)
+async def get_admin_model_key(
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: status of the instance-wide model-provider (OpenRouter) API key.
+
+    Returns whether a key is loaded, which source it came from (admin-set row
+    or the OPENROUTER_API_KEY env var), and a last-four hint — never the key
+    itself (src/model_settings.py is write-only by design). Raises HTTP 403
+    for a non-admin caller.
+    """
+    settings = get_model_key_settings(caller_row, dynamodb_resource)
+    return JSONResponse(content=settings)
+
+
+@app.post("/api/admin/model-key", include_in_schema=True)
+async def post_admin_model_key(
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: set the instance-wide model-provider (OpenRouter) API key.
+
+    Body: {"api_key": str}. Overrides OPENROUTER_API_KEY for every subsequent
+    review. Raises HTTP 403 for a non-admin caller, 400 for an invalid key or
+    on a deployment with no admin-managed key store (the AWS/Bedrock target).
+    """
+    result = set_model_key(body.get("api_key", ""), caller_row, dynamodb_resource)
+    return JSONResponse(content=result)
+
+
+@app.delete("/api/admin/model-key", include_in_schema=True)
+async def delete_admin_model_key(
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: clear the admin-set model-provider API key, reverting to
+    OPENROUTER_API_KEY. Idempotent. Raises HTTP 403 for a non-admin caller.
+    """
+    result = clear_model_key(caller_row, dynamodb_resource)
     return JSONResponse(content=result)
 
 

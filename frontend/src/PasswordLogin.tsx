@@ -1,10 +1,10 @@
 /**
- * PasswordLogin — username/password sign-in for the DTS deployment target
+ * PasswordLogin — username/password sign-in for the Docker Compose deployment target
  * (VITE_AUTH_MODE=password). Posts to POST /api/auth/login and, on success,
  * stores the returned demo session token in the in-memory auth module and
  * notifies the parent with the signed-in identity.
  *
- * There is no Cognito/Amplify here; this is the DTS counterpart of the
+ * There is no Cognito/Amplify here; this is the Docker Compose counterpart of the
  * <Authenticator> wrapper.
  */
 import { useState } from 'react';
@@ -57,41 +57,43 @@ export default function PasswordLogin({
   }
 
   return (
-    <main data-testid="password-login" style={{ maxWidth: '20rem', margin: '4rem auto' }}>
-      <h1 style={{ fontSize: '1.25rem' }}>Sign in</h1>
-      <form onSubmit={(event) => void handleSubmit(event)}>
-        <label style={{ display: 'block', marginTop: '0.75rem' }}>
-          Username
+    <main className="ct-app" data-testid="password-login">
+      <article>
+        <h1>Sign in</h1>
+        <form onSubmit={(event) => void handleSubmit(event)}>
+          <label htmlFor="login-username">Username</label>
           <input
+            id="login-username"
             type="text"
             autoComplete="username"
             data-testid="login-username"
             value={username}
             onChange={(event) => setUsername(event.target.value)}
-            style={{ display: 'block', width: '100%' }}
           />
-        </label>
-        <label style={{ display: 'block', marginTop: '0.75rem' }}>
-          Password
+          <label htmlFor="login-password">Password</label>
           <input
+            id="login-password"
             type="password"
             autoComplete="current-password"
             data-testid="login-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            style={{ display: 'block', width: '100%' }}
           />
-        </label>
-        <button
-          type="submit"
-          disabled={submitting || !username || !password}
-          data-testid="login-submit"
-          style={{ marginTop: '1rem' }}
-        >
-          {submitting ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
-      {error && <p data-testid="login-error">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting || !username || !password}
+            data-testid="login-submit"
+            aria-busy={submitting}
+          >
+            {submitting ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+        {error && (
+          <p className="ct-error" role="alert" data-testid="login-error">
+            {error}
+          </p>
+        )}
+      </article>
     </main>
   );
 }

@@ -47,6 +47,7 @@ x-resource-names: &resource-names
   PLAYBOOKS_TABLE: contract-toaster-playbooks-dts
   PLAYBOOK_VERSIONS_TABLE: contract-toaster-playbook-versions-dts
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
+  MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
   UPLOADS_BUCKET: contract-toaster-uploads-dts
   OUTPUTS_BUCKET: contract-toaster-outputs-dts

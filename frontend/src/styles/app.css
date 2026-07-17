@@ -1,0 +1,273 @@
+/*
+ * app.css — application chrome layered on Pico + tokens.css.
+ *
+ * Pico already styles bare semantic elements (headings, <article> cards,
+ * <table>, <form>, <input>, <button>, <label>). This file adds ONLY the
+ * app-specific chrome that Pico has no opinion about: the centered app
+ * shell, the tab bar, the identity/role header cluster, status chips, and a
+ * few layout utilities. Every component references the class names below;
+ * this is the shared vocabulary — do not fork per-component copies.
+ *
+ * Class vocabulary (stable contract for all components):
+ *   Shell     .ct-app  .ct-header  .ct-header__brand  .ct-identity
+ *             .ct-role-badge  .ct-linkbutton  .ct-footer
+ *   Tabs      .ct-tabs  .ct-tab  .ct-tabpanel
+ *   Sections  .ct-section  .ct-section-title  .ct-card
+ *   Status    .ct-chip (+ --ok --warn --danger --info --muted)
+ *             .ct-status  .ct-error  .ct-muted  .ct-note
+ *   Layout    .ct-row  .ct-stack  .ct-toolbar  .ct-grow  .ct-actions
+ *   Controls  .ct-icon-button
+ *
+ * Theme-aware via tokens.css (which mirrors prefers-color-scheme). Motion:
+ * transitions here are cosmetic and short; the toaster's own animations live
+ * in Toaster.tsx's inline <style> with a prefers-reduced-motion guard.
+ */
+
+/* ------------------------------------------------------------------ Shell */
+.ct-app {
+  max-width: var(--ct-maxw);
+  margin: 0 auto;
+  padding: 1rem 1.25rem 2.5rem;
+}
+
+.ct-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-gap-sm);
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--ct-border);
+}
+
+.ct-header__brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ct-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--ct-text-muted);
+}
+
+.ct-identity strong {
+  color: var(--pico-color);
+}
+
+.ct-role-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--ct-info-bg);
+  color: var(--ct-accent);
+  border: 1px solid var(--ct-accent);
+}
+
+/* A <button> that reads as an inline text link (Sign out). */
+.ct-linkbutton {
+  width: auto;
+  display: inline;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--ct-accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
+.ct-linkbutton:hover { color: var(--ct-accent-strong); }
+
+.ct-footer {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--ct-border);
+  font-size: 0.8rem;
+  color: var(--ct-text-muted);
+}
+
+/* -------------------------------------------------------------------- Tabs */
+.ct-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border-bottom: 2px solid var(--ct-border);
+}
+
+.ct-tab {
+  width: auto;
+  margin: 0;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: var(--ct-radius-sm) var(--ct-radius-sm) 0 0;
+  background: none;
+  color: var(--pico-color);
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.ct-tab:hover { background: var(--ct-neutral-bg); }
+.ct-tab[aria-selected='true'] {
+  color: var(--ct-accent);
+  border-bottom-color: var(--ct-accent);
+}
+.ct-tab:focus-visible {
+  outline: 2px solid var(--ct-accent);
+  outline-offset: 2px;
+}
+
+.ct-tabpanel {
+  padding-top: 0.25rem;
+}
+
+/* --------------------------------------------------------------- Sections */
+.ct-section {
+  margin: 0 0 var(--ct-gap-lg);
+}
+.ct-section-title {
+  font-size: 1.15rem;
+  margin: 0 0 0.75rem;
+}
+
+/* An explicit card when <article> semantics don't fit. <article> already
+   gets Pico's card treatment; use .ct-card on a <div> for the same look. */
+.ct-card {
+  background: var(--ct-surface);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius);
+  padding: 1rem 1.15rem;
+}
+
+/* ------------------------------------------------------------- Status bits */
+.ct-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--ct-neutral);
+  background: var(--ct-neutral-bg);
+  color: var(--ct-neutral);
+  white-space: nowrap;
+}
+.ct-chip--ok      { border-color: var(--ct-ok);      background: var(--ct-ok-bg);      color: var(--ct-ok); }
+.ct-chip--warn    { border-color: var(--ct-warn);    background: var(--ct-warn-bg);    color: var(--ct-warn); }
+.ct-chip--danger  { border-color: var(--ct-danger);  background: var(--ct-danger-bg);  color: var(--ct-danger); }
+.ct-chip--info    { border-color: var(--ct-accent);  background: var(--ct-info-bg);    color: var(--ct-accent); }
+.ct-chip--muted   { border-color: var(--ct-border);  background: var(--ct-neutral-bg); color: var(--ct-text-muted); }
+
+.ct-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ct-error {
+  color: var(--ct-danger);
+  background: var(--ct-danger-bg);
+  border: 1px solid var(--ct-danger);
+  border-radius: var(--ct-radius-sm);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.88rem;
+  margin: 0.5rem 0 0;
+}
+
+.ct-muted {
+  color: var(--ct-text-muted);
+  font-size: 0.85rem;
+}
+
+/* A quiet informational panel (e.g. workspace sync status, break-glass note). */
+.ct-note {
+  background: var(--ct-neutral-bg);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  padding: 0.75rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+/* ----------------------------------------------------------- Layout utils */
+.ct-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-gap-sm);
+}
+.ct-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-gap);
+}
+.ct-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0;
+}
+.ct-grow { flex: 1 1 auto; }
+
+/* Inline action row where buttons should stay auto-width (Pico makes
+   button[type=submit] full-width; this wrapper + auto-width buttons keep an
+   upload form's controls on one line). Use role="group" for Pico's grouping,
+   or this class with .ct-icon-button / type="button" children. */
+.ct-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+.ct-actions button[type='submit'],
+.ct-actions [role='button'] { width: auto; }
+
+/* Compact square-ish control (mute toggle, etc.). */
+.ct-icon-button {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: var(--ct-surface);
+  color: var(--pico-color);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  cursor: pointer;
+}
+.ct-icon-button:hover { background: var(--ct-neutral-bg); }
+.ct-icon-button[aria-pressed='true'] {
+  border-color: var(--ct-accent);
+  color: var(--ct-accent);
+}
+
+/* Tables (users, legal holds): Pico styles <table>; add zebra + tighter
+   density for these admin grids. Wrap wide tables in .ct-table-scroll so the
+   page body never scrolls horizontally on narrow viewports. */
+.ct-table-scroll {
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.ct-table-scroll table { margin: 0; }
