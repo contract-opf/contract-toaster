@@ -1,7 +1,7 @@
 # Publish the two DTS deploy images to GHCR.
 #
-# Manual-dispatch ONLY (workflow_dispatch, no push/PR trigger) — matches this
-# repo's "no auto-deploy; a human runs it deliberately" convention. Builds the
+# Auto-builds on every push to main so the deployed image tracks main, and also
+# runs on manual workflow_dispatch. Builds the
 # backend and frontend images from the deploy/dts/ Dockerfiles (repo-root
 # context) and pushes each as :latest and :<short-sha> to
 # ghcr.io/contract-opf/contract-toaster-dts-{backend,frontend}.
@@ -18,6 +18,8 @@ name: Publish DTS images
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
