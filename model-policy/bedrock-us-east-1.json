@@ -1,0 +1,181 @@
+{
+  "_comment": [
+    "Model-policy artifact for contract-toaster — us-east-1.",
+    "",
+    "This file is the machine-readable record of the pinned Bedrock model matrix and",
+    "the on-demand quotas granted for each model in this account/region pair.",
+    "It is referenced by ARCHITECTURE.md (Model-selection policy) and consumed by the",
+    "eval harness to derive max_eval_parallelism and enforce rate-limiting.",
+    "",
+    "Update procedure:",
+    "  1. Verify quotas in AWS Console → Service Quotas → Amazon Bedrock.",
+    "  2. Update granted_tpm, granted_rpm, and recertification.recertified_at below.",
+    "  3. Re-derive review_throughput_ceiling and max_eval_parallelism (formulas inline).",
+    "  4. Record the gold_set_run_id from the certifying eval run in recertification.",
+    "  5. Open a PR; this file is governed by CODEOWNERS (admin / GC approval required).",
+    "",
+    "Quarterly recertification: re-run the eval harness gold set, confirm quota figures",
+    "are still accurate, update recertification.recertified_at and gold_set_run_id.",
+    "See RUNBOOK.md → Model recertification."
+  ],
+  "schema_version": "1",
+  "region": "us-east-1",
+  "recertification": {
+    "_note": [
+      "Quarterly eval gate — updated on every recertification.",
+      "gold_set_run_id: reference to the eval run ID that certified this policy version.",
+      "Use the sentinel 'bootstrap' for the initial policy prior to a full gold-set run.",
+      "See ARCHITECTURE.md → Model-selection policy → Quarterly recertification."
+    ],
+    "recertified_at": "2026-06-13",
+    "recertified_by": "platform-engineering",
+    "gold_set_run_id": "bootstrap"
+  },
+  "models": {
+    "primary": {
+      "role": "primary_reviewer",
+      "model_id": "anthropic.claude-opus-4-8",
+      "inference_type": "single-region-native",
+      "granted_tpm": 40000,
+      "granted_rpm": 50,
+      "_quota_note": [
+        "AWS default on-demand quota for Claude Opus 4.8 (anthropic.claude-opus-4-8)",
+        "in us-east-1 as of 2026-06-13: 40,000 TPM / 50 RPM (Standard tier).",
+        "Verify via: AWS Console → Service Quotas → Amazon Bedrock →",
+        "  'Tokens per minute for claude-opus-4-8 on-demand throughput' and",
+        "  'Requests per minute for claude-opus-4-8 on-demand throughput'.",
+        "A quota increase request is on file for the eval harness workload.",
+        "If granted_tpm changes, re-derive review_throughput_ceiling and",
+        "max_eval_parallelism below."
+      ],
+      "approx_tokens_per_review_input": 60000,
+      "approx_tokens_per_review_output": 8000,
+      "cost_per_million_input_usd": 5.00,
+      "cost_per_million_output_usd": 25.00,
+      "request_contract": {
+        "omit_sampling_params": ["temperature", "top_p", "top_k"],
+        "extended_thinking": "adaptive-only"
+      }
+    },
+    "critic": {
+      "role": "adversarial_critic",
+      "model_id": "anthropic.claude-sonnet-4-6",
+      "inference_type": "single-region-native",
+      "granted_tpm": 100000,
+      "granted_rpm": 200,
+      "_quota_note": [
+        "AWS default on-demand quota for Claude Sonnet 4.6 (anthropic.claude-sonnet-4-6)",
+        "in us-east-1 as of 2026-06-13: 100,000 TPM / 200 RPM (Standard tier).",
+        "Sonnet 4.6 has a higher default quota than Opus 4.8 — the critic pass is",
+        "cheaper AND less quota-constrained, reinforcing the two-model architecture.",
+        "Verify via: AWS Console → Service Quotas → Amazon Bedrock."
+      ],
+      "approx_tokens_per_review_input": 70000,
+      "approx_tokens_per_review_output": 5000,
+      "cost_per_million_input_usd": 3.00,
+      "cost_per_million_output_usd": 15.00,
+      "request_contract": {
+        "omit_sampling_params": ["temperature", "top_p", "top_k"],
+        "extended_thinking": "adaptive-only"
+      }
+    },
+    "embedding": {
+      "role": "corpus_embedding",
+      "model_id": "amazon.titan-embed-text-v2:0",
+      "inference_type": "single-region-native",
+      "granted_tpm": 300000,
+      "granted_rpm": 1000,
+      "_quota_note": [
+        "Embedding model quota is not the bottleneck for review throughput.",
+        "A change to the embedding model requires admin (GC) approval and",
+        "produces a new corpus_snapshot_version — see ARCHITECTURE.md."
+      ],
+      "request_contract": {}
+    }
+  },
+  "review_throughput_ceiling": {
+    "_derivation": [
+      "Bottleneck: Opus 4.8 primary pass (40,000 TPM, 50 RPM).",
+      "Per-review primary-pass token consumption (worst case, uncached):",
+      "  input:  60,000 tokens (playbook ~30K + diff ~15K + retrieved context ~15K)",
+      "  output:  8,000 tokens",
+      "  total:  68,000 tokens per primary call.",
+      "Token-budget ceiling: floor(40,000 TPM / 68,000 tokens/review) ≈ 0.59 reviews/min",
+      "  → ≈ 35 reviews/hour (token-limited at 40K TPM).",
+      "RPM ceiling: 50 RPM primary calls / 1 primary call per review = 50 reviews/min",
+      "  → RPM is NOT the binding constraint at this call volume.",
+      "Prompt-cache effect: playbook block (~30K tokens) caches across back-to-back",
+      "  runs; effective uncached input per cached review ≈ 30,000 tokens.",
+      "  Cached throughput ceiling: floor(40,000 / (30,000+8,000)) ≈ 1.05 reviews/min",
+      "  → ≈ 63 reviews/hour when cache is warm.",
+      "Production volume (2–7/day) is safely under either ceiling.",
+      "The eval harness (39 cases × 2 passes × N stochastic runs) is the stress case."
+    ],
+    "bottleneck_model": "primary (Opus 4.8)",
+    "max_reviews_per_hour_uncached": 35,
+    "max_reviews_per_hour_cached": 63,
+    "production_daily_volume_expected": "2–7",
+    "production_safely_under_quota": true
+  },
+  "max_eval_parallelism": {
+    "_derivation": [
+      "Eval harness worst case (issue #17):",
+      "  gold_set_cases: 39",
+      "  passes_per_case: 2  (primary + critic)",
+      "  stochastic_runs: 3  (default; configurable via EVAL_STOCHASTIC_RUNS)",
+      "  tokens_per_primary_call: ~68,000 (uncached)",
+      "  tokens_per_critic_call:  ~75,000 (70K input + 5K output)",
+      "",
+      "  Total primary-call tokens per full eval run (uncached):",
+      "    39 cases × 3 runs × 68,000 = 7,956,000 tokens",
+      "    At 40K TPM this takes ~199 minutes if sequential.",
+      "",
+      "  With prompt-cache warm on playbook block:",
+      "    effective tokens/primary call ≈ 38,000",
+      "    39 × 3 × 38,000 = 4,446,000 tokens → ~111 minutes.",
+      "",
+      "  Max parallelism to stay under 40K TPM quota:",
+      "    Each parallel runner issues one call every ~102s (68K / 40K TPM × 60).",
+      "    Two parallel runners: 136K tokens/min → exceeds quota → ThrottlingException.",
+      "    Safe parallelism = 1 runner at a time per 40K-TPM account.",
+      "    Exception: if quota is increased, update max_runners below.",
+      "",
+      "  Rate-limiting strategy: the eval harness serializes primary-pass calls",
+      "  (one in-flight Opus call at a time) and uses a token-bucket with a",
+      "  40K TPM refill rate.  Critic calls (Sonnet 4.6, 100K TPM) can run",
+      "  concurrently with the NEXT primary call but are also token-bucket limited.",
+      "  This also maximizes prompt-cache hit rate on back-to-back runs."
+    ],
+    "max_runners": 1,
+    "primary_rate_limit_tpm": 40000,
+    "critic_rate_limit_tpm": 100000,
+    "rate_limit_strategy": "token-bucket — serialize primary-pass calls; token-bucket-limit critic calls",
+    "stochastic_runs_default": 3,
+    "gold_set_cases": 39
+  },
+  "alarm_classification": {
+    "_note": [
+      "ThrottlingException retries from the pipeline or the eval harness must NOT",
+      "fire the 'Bedrock invocation errors > 0' CloudWatch alarm.  They are an",
+      "expected operational signal when approaching quota, handled by exponential",
+      "backoff retry, and must be tracked as a separate 'ThrottlingException retries'",
+      "metric — not as errors.",
+      "",
+      "Alarm split (see ARCHITECTURE.md → Observability and RUNBOOK.md → Incident response):",
+      "  - 'Bedrock invocation errors > 0'  : fires on non-throttle errors only",
+      "      (AccessDeniedException, ValidationException, ModelNotReadyException, etc.)",
+      "      These indicate a genuine problem requiring human investigation.",
+      "  - 'Bedrock throttle retries > N'   : fires when ThrottlingException retry",
+      "      count exceeds N in a 5-minute window, indicating sustained quota pressure.",
+      "      Informational by default; escalated if retries cause SLA misses.",
+      "",
+      "CloudWatch metric filter implementation:",
+      "  Error alarm: filter on Bedrock errorCode NOT IN ('ThrottlingException')",
+      "  Throttle alarm: filter on Bedrock errorCode = 'ThrottlingException'"
+    ],
+    "error_alarm_name": "bedrock-invocation-errors",
+    "error_alarm_excludes": ["ThrottlingException"],
+    "throttle_alarm_name": "bedrock-throttle-retries",
+    "throttle_alarm_threshold_per_5min": 5
+  }
+}

@@ -1,0 +1,115 @@
+/*
+ * ct-button.css — CTDS core button (issue #388,
+ * docs/frontend-design-system.md §6).
+ *
+ * Light DOM (§5.1): a normal globally-bundled stylesheet (imported by
+ * ct-button.ts), not a shadow-scoped `static styles` block. Selectors key
+ * off the host's reflected `variant`/`size` attributes and the
+ * `.ct-button__*` classes on the real inner <button> ct-button.ts renders.
+ * Tokens only (§5.6) — no custom properties outside the --ct-* vocabulary,
+ * no hardcoded hex (transparent/currentColor allowed). Reduced motion is
+ * handled globally by base.css's `*` guard (§4.4) — no local media query
+ * needed here.
+ */
+
+ct-button {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.ct-button__el {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-space-2);
+  width: 100%;
+  font-family: var(--ct-font-sans);
+  font-weight: 600;
+  line-height: var(--ct-leading-tight);
+  border-radius: var(--ct-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--ct-dur-fast) var(--ct-ease-out),
+    border-color var(--ct-dur-fast) var(--ct-ease-out),
+    color var(--ct-dur-fast) var(--ct-ease-out);
+}
+
+.ct-button__el:focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+}
+
+.ct-button__el:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Sizes */
+ct-button[size='md'] .ct-button__el {
+  padding: 0.55rem 1.1rem;
+  font-size: var(--ct-text-sm);
+}
+ct-button[size='sm'] .ct-button__el {
+  padding: 0.3rem 0.7rem;
+  font-size: var(--ct-text-xs);
+}
+
+/* Variants */
+ct-button[variant='primary'] .ct-button__el {
+  background: var(--ct-accent);
+  border-color: var(--ct-accent);
+  color: var(--ct-accent-contrast);
+}
+ct-button[variant='primary'] .ct-button__el:hover:not(:disabled) {
+  background: var(--ct-accent-strong);
+  border-color: var(--ct-accent-strong);
+}
+
+ct-button[variant='secondary'] .ct-button__el {
+  background: var(--ct-surface);
+  border-color: var(--ct-border-strong);
+  color: var(--ct-text);
+}
+ct-button[variant='secondary'] .ct-button__el:hover:not(:disabled) {
+  background: var(--ct-neutral-bg);
+}
+
+ct-button[variant='ghost'] .ct-button__el {
+  width: auto;
+  background: none;
+  border-color: transparent;
+  color: var(--ct-accent);
+  text-decoration: underline;
+  padding: 0;
+  font-weight: 400;
+}
+ct-button[variant='ghost'] .ct-button__el:hover:not(:disabled) {
+  color: var(--ct-accent-strong);
+}
+
+ct-button[variant='danger'] .ct-button__el {
+  background: var(--ct-danger);
+  border-color: var(--ct-danger);
+  color: var(--ct-accent-contrast);
+}
+ct-button[variant='danger'] .ct-button__el:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+/* Loading spinner */
+.ct-button__spinner {
+  width: 0.9em;
+  height: 0.9em;
+  flex: none;
+  border-radius: var(--ct-radius-full);
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: ct-button-spin var(--ct-dur-slow) linear infinite;
+}
+
+@keyframes ct-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

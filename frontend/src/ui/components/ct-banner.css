@@ -1,0 +1,44 @@
+/*
+ * ct-banner.css — CTDS inline status surface (issue #388,
+ * docs/frontend-design-system.md §6). Light DOM (§5.1): styles the HOST
+ * tag directly (`ct-banner[variant=...]`) since this component never
+ * renders an internal wrapper — see ct-banner.ts's docstring. Tokens only
+ * (§5.6).
+ */
+
+ct-banner {
+  display: block;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-neutral-bg);
+  color: var(--ct-text);
+  font-size: var(--ct-text-sm);
+}
+
+ct-banner[variant='ok'] {
+  color: var(--ct-ok);
+  background: var(--ct-ok-bg);
+  border-color: var(--ct-ok-border);
+}
+ct-banner[variant='warn'] {
+  color: var(--ct-warn);
+  background: var(--ct-warn-bg);
+  border-color: var(--ct-warn-border);
+}
+ct-banner[variant='danger'] {
+  color: var(--ct-danger);
+  background: var(--ct-danger-bg);
+  border-color: var(--ct-danger-border);
+}
+ct-banner[variant='info'] {
+  color: var(--ct-text);
+  background: var(--ct-info-bg);
+  border-color: var(--ct-info-border);
+}
+ct-banner[variant='muted'] {
+  color: var(--ct-text-muted);
+  background: var(--ct-neutral-bg);
+  border-color: var(--ct-border);
+}

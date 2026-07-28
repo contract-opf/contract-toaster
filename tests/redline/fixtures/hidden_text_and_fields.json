@@ -1,0 +1,22 @@
+{
+  "description": "The document contains hidden text and a field code interleaved with visible clause text. Documented rule: hidden text and field RESULTS are stripped to their literal displayed text (not surfaced as if visible, not fatal) so the pipeline can still normalize to a clean body.",
+  "paragraphs": [
+    {
+      "heading": "Governing Law",
+      "text": "This Agreement shall be governed by the laws of Delaware.",
+      "revisions": [
+        {
+          "type": "hidden_text",
+          "status": "n/a",
+          "content": "HIDDEN: internal drafting note, do not disclose"
+        },
+        {
+          "type": "field",
+          "status": "n/a",
+          "field_code": "{ REF GoverningLawJurisdiction }",
+          "field_result": "Delaware"
+        }
+      ]
+    }
+  ]
+}

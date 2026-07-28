@@ -1,0 +1,51 @@
+/*
+ * ct-icon-button.css — CTDS square/compact button (issue #388,
+ * docs/frontend-design-system.md §6). Light DOM (§5.1): a normal
+ * globally-bundled stylesheet. Tokens only (§5.6). Reduced motion is
+ * handled globally by base.css's `*` guard.
+ */
+
+ct-icon-button {
+  display: inline-block;
+}
+
+.ct-icon-button__el {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-space-2);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.4rem 0.7rem;
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-sm);
+  line-height: 1;
+  background: var(--ct-surface);
+  color: var(--ct-text);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--ct-dur-fast) var(--ct-ease-out),
+    border-color var(--ct-dur-fast) var(--ct-ease-out),
+    color var(--ct-dur-fast) var(--ct-ease-out);
+}
+
+.ct-icon-button__el:hover:not(:disabled) {
+  background: var(--ct-neutral-bg);
+}
+
+.ct-icon-button__el:focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+}
+
+.ct-icon-button__el:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.ct-icon-button__el[aria-pressed='true'] {
+  border-color: var(--ct-accent);
+  color: var(--ct-accent);
+}

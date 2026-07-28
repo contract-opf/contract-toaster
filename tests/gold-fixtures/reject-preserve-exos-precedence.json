@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-preserve-exos-precedence",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'preserve-exos-precedence': counterparty removes/alters the protected clause in 'sec-10-precedence', deleting all of required_tokens ['prevail']. Must fire preserve-exos-precedence and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "order-of-precedence",
+      "section_ref": "sec-10-precedence",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-exos-precedence"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "order-of-precedence",
+    "altered_hunk": "The parties will address this subject in accordance with the terms otherwise set forth in this Agreement.",
+    "notes": "Mechanically generated: replacement text omits all of required_tokens ['prevail'] for rule 'preserve-exos-precedence' (token_policy='any')."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-exos-precedence",
+    "expected_result": "fire",
+    "rationale": "Replacement text contains none of required_tokens ['prevail']; must fire 'preserve-exos-precedence' under token_policy='any'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

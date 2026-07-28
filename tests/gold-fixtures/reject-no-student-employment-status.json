@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-no-student-employment-status",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'no-student-employment-status': counterparty inserts language containing the trigger term 'joint employment' into the 'student-status-and-benefits' topic. Must fire no-student-employment-status and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "student-status-and-benefits",
+      "section_ref": "1.6 No Insurance/Benefits",
+      "is_hard_rejection": true,
+      "rule_id": "no-student-employment-status"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "student-status-and-benefits",
+    "inserted_hunk": "The parties agree to add the following clause language to this section of the Agreement: 'joint employment'.",
+    "notes": "Mechanically generated: contains trigger_term 'joint employment' (match=word_boundary) for rule 'no-student-employment-status'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-student-employment-status",
+    "expected_result": "fire",
+    "rationale": "Inserted hunk contains trigger_term 'joint employment', which is not in []; must fire 'no-student-employment-status'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

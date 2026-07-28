@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-preserve-admission-discretion",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'preserve-admission-discretion': counterparty removes/alters the protected clause in 'sec-1.2', deleting all of required_tokens ['sole discretion']. Must fire preserve-admission-discretion and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "exos-discretion-and-authority",
+      "section_ref": "sec-1.2",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-admission-discretion"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "exos-discretion-and-authority",
+    "altered_hunk": "The parties will address this subject in accordance with the terms otherwise set forth in this Agreement. This section otherwise continues to state: final authority; clinical care.",
+    "notes": "Mechanically generated: replacement text omits all of required_tokens ['sole discretion'] for rule 'preserve-admission-discretion' (token_policy='any') while verbatim-preserving sibling required_tokens ['final authority', 'clinical care'] so no other rule sharing this topic is unintentionally tripped."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-admission-discretion",
+    "expected_result": "fire",
+    "rationale": "Replacement text contains none of required_tokens ['sole discretion']; must fire 'preserve-admission-discretion' under token_policy='any'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

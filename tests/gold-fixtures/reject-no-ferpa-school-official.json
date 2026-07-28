@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-no-ferpa-school-official",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'no-ferpa-school-official': counterparty inserts language containing the trigger term 'school official' into the 'ferpa' topic. Must fire no-ferpa-school-official and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "ferpa",
+      "section_ref": "5 Student Records",
+      "is_hard_rejection": true,
+      "rule_id": "no-ferpa-school-official"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "ferpa",
+    "inserted_hunk": "The parties agree to add the following clause language to this section of the Agreement: 'school official'.",
+    "notes": "Mechanically generated: contains trigger_term 'school official' (match=word_boundary) for rule 'no-ferpa-school-official'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-ferpa-school-official",
+    "expected_result": "fire",
+    "rationale": "Inserted hunk contains trigger_term 'school official', which is not in []; must fire 'no-ferpa-school-official'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

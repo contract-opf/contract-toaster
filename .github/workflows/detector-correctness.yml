@@ -1,0 +1,82 @@
+# Detector-correctness CI gate (deterministic; runs without invoking the model)
+#
+# Corresponds to docs/evaluation.md § "Detector-correctness gate".
+# Three mandatory checks:
+#   D1  zero-fire floor          (test_empty_scope_gate.py — structural; no rule is dead config)
+#   D2  right-rejection fires    (test_d2_new_section_violations.py — planted violations)
+#   D3  ReDoS guard              (test_regex_redos_guard.py — issue #7)
+#
+# These checks run on every change to:
+#   - playbooks/         (playbook content or schema)
+#   - docs/playbook-governance.md
+#   - ARCHITECTURE.md
+#   - tests/detector/    (the tests themselves)
+#
+# A failed check blocks merge. No model invocation, no AWS credentials required.
+# See docs/playbook-governance.md § "Hard-rejection detector grammar (CI)" for the
+# full rule grammar and the no-empty-scope and sec-_new CI rules these tests enforce.
+# See docs/playbook-governance.md § "Regex-dialect and ReDoS constraint" for the
+# D3 gate contract (governance doc, schema description, adversarial timing + static
+# heuristic for match:'regex' trigger_terms).
+
+name: Detector correctness
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "playbooks/**"
+      - "docs/playbook-governance.md"
+      - "ARCHITECTURE.md"
+      - "tests/detector/**"
+      - ".github/workflows/detector-correctness.yml"
+  pull_request:
+    paths:
+      - "playbooks/**"
+      - "docs/playbook-governance.md"
+      - "ARCHITECTURE.md"
+      - "tests/detector/**"
+      - ".github/workflows/detector-correctness.yml"
+
+jobs:
+  detector-correctness:
+    name: Detector-correctness gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed — the tests use only the stdlib.
+
+      - name: D1 / empty-scope structural gate
+        # Fails if any hard_rejections[] rule has a provably empty effective
+        # hunk-scope (union of section_anchors over applies_to_topics is empty
+        # and the rule is not eligible for sec-_new coverage).
+        # See: docs/playbook-governance.md § "no rule has empty effective scope"
+        run: python3 tests/detector/test_empty_scope_gate.py
+
+      - name: D2 / new-standalone-section planted violations
+        # Fails if the three rules that must fire on a wholly new inserted section
+        # (no-counterparty-home-arbitration, no-excess-insurance-levels,
+        # no-exos-indemnity) cannot detect their planted violation on a sec-_new hunk.
+        # See: docs/evaluation.md § "D2 — right-rejection fires"
+        run: python3 tests/detector/test_d2_new_section_violations.py
+
+      - name: D3 / ReDoS guard for match:regex trigger terms
+        # Three checks (A, B, C):
+        #   A: docs/playbook-governance.md has the 'Regex-dialect and ReDoS constraint'
+        #      section documenting the dialect decision, forbidden constructs, and timeout.
+        #   B: playbooks/schema.json match description warns about backtracking.
+        #   C: Every match:'regex' trigger_term completes under 0.5 s on adversarial
+        #      inputs and passes the static structural heuristic (no nested unbounded
+        #      quantifiers, no ambiguous alternation in unbounded repeat).
+        # Blocks any PR that adds a catastrophic-backtracking regex to an activated playbook.
+        # See: docs/playbook-governance.md § "Regex-dialect and ReDoS constraint"
+        run: python3 tests/detector/test_regex_redos_guard.py

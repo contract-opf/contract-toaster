@@ -1,0 +1,283 @@
+/*
+ * base.css — element base layer (CTDS v2 — docs/frontend-design-system.md §9).
+ *
+ * Styles bare HTML elements (typography, links, forms, buttons, tables) on
+ * the --ct-* token vocabulary (tokens.css). Loaded BEFORE app.css in
+ * main.tsx — app.css layers app-specific chrome on top of this baseline.
+ *
+ * Scope is bare elements only: no ct-* component classes here (those live in
+ * frontend/src/ui/) and no app-shell chrome (that's app.css).
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--ct-bg);
+  color: var(--ct-text);
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-md);
+  line-height: var(--ct-leading);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--ct-font-display);
+  font-weight: 700;
+  line-height: var(--ct-leading-tight);
+  color: var(--ct-text);
+  margin: 0 0 var(--ct-space-4);
+}
+
+h1 {
+  font-size: var(--ct-text-2xl);
+}
+h2 {
+  font-size: var(--ct-text-xl);
+}
+h3 {
+  font-size: var(--ct-text-lg);
+}
+h4,
+h5,
+h6 {
+  font-size: var(--ct-text-md);
+}
+
+p {
+  margin: 0 0 var(--ct-space-4);
+}
+
+small {
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--ct-font-mono);
+  font-size: 0.92em;
+}
+
+code,
+kbd,
+samp {
+  display: inline-block;
+  background: var(--ct-surface-sunken);
+  color: var(--ct-text);
+  padding: 0.1em 0.35em;
+  border-radius: var(--ct-radius-sm);
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+a {
+  color: var(--ct-accent);
+  text-decoration-color: var(--ct-border-strong);
+  text-underline-offset: 0.15em;
+  transition: color var(--ct-dur-fast) var(--ct-ease-out);
+}
+
+a:hover {
+  color: var(--ct-accent-strong);
+}
+
+a:focus-visible {
+  outline: none;
+  border-radius: var(--ct-radius-sm);
+  box-shadow: var(--ct-focus-ring);
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--ct-border);
+  margin: var(--ct-space-6) 0;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+ul,
+ol {
+  margin: 0 0 var(--ct-space-4);
+  padding-left: 1.25em;
+}
+
+li {
+  margin-bottom: var(--ct-space-1);
+}
+
+/* Forms — input/select/textarea share one surface + border + focus-ring
+   treatment; ct-field/ct-button (frontend/src/ui/) supersede these per
+   screen as they land, but bare elements stay usable everywhere else. */
+/* min-height (not height) keeps this a floor, not a cap, so a multi-row
+   textarea can still grow with `rows`/resize. */
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: var(--ct-text-md);
+  color: var(--ct-text);
+  background: var(--ct-surface);
+  border: 1px solid var(--ct-border-strong);
+  border-radius: var(--ct-radius-sm);
+  padding: var(--ct-space-2) var(--ct-space-3);
+  min-height: 2.5rem;
+  accent-color: var(--ct-accent);
+  transition:
+    border-color var(--ct-dur-fast) var(--ct-ease-out),
+    box-shadow var(--ct-dur-fast) var(--ct-ease-out);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ct-text-muted);
+}
+
+/* Checkbox, radio, and range render as native OS controls, not text-field
+   boxes — reset the box-model rules above (border/padding/min-height) so
+   they keep their intrinsic size; accent-color (set above) tints all three
+   with the theme accent for free. Ordered before :focus-visible/:disabled
+   below so those still win on cursor/ring for these types. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  width: auto;
+  cursor: pointer;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--ct-accent);
+  box-shadow: var(--ct-focus-ring);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+label {
+  font-weight: 500;
+}
+
+/* Buttons — baseline for bare <button>/<input type=button|submit>; ct-button
+   (frontend/src/ui/) is the primary/secondary/ghost/danger system that
+   supersedes this per screen as it lands. */
+button,
+input[type='button'],
+input[type='submit'],
+input[type='reset'] {
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-md);
+  font-weight: 500;
+  color: var(--ct-accent-contrast);
+  background: var(--ct-accent);
+  border: 1px solid var(--ct-accent);
+  border-radius: var(--ct-radius-sm);
+  padding: var(--ct-space-2) var(--ct-space-4);
+  cursor: pointer;
+  transition:
+    background var(--ct-dur-fast) var(--ct-ease-out),
+    border-color var(--ct-dur-fast) var(--ct-ease-out),
+    box-shadow var(--ct-dur-fast) var(--ct-ease-out);
+}
+
+button:hover,
+input[type='button']:hover,
+input[type='submit']:hover,
+input[type='reset']:hover {
+  background: var(--ct-accent-strong);
+  border-color: var(--ct-accent-strong);
+}
+
+button:focus-visible,
+input[type='button']:focus-visible,
+input[type='submit']:focus-visible,
+input[type='reset']:focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+}
+
+button:disabled,
+input[type='button']:disabled,
+input[type='submit']:disabled,
+input[type='reset']:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Tables — sunken header row, hairline row dividers, warm hover tint;
+   ct-table (frontend/src/ui/) wraps this baseline with a scroll container. */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ct-text-sm);
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-bottom: 1px solid var(--ct-border);
+}
+
+thead th {
+  background: var(--ct-surface-sunken);
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-sans);
+  font-weight: 600;
+  font-size: var(--ct-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+tbody tr:hover {
+  background: var(--ct-surface-sunken);
+}
+
+/* Reduced motion — every ct-* animation/transition sits behind this guard
+   (the toaster hero keeps its own inline-<style> guard, §3.2). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

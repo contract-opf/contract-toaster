@@ -1,0 +1,83 @@
+{
+  "$schema": "./policy.schema.json",
+  "playbook_id": "nda",
+  "version": 1,
+  "title": "NDA review policy",
+  "description": "Prescriptive review policy for the NDA contract type. HARVESTED BUT NOT WIRED, and deliberately so: the NDA playbook is a registered 'coming soon' stub with no anchor_map_path in playbooks/registry.json, so it cannot be reviewed in any mode, and its own source says it carries no active release bundle and governs no production review. This document exists so that the NDA playbook's governance layer is whole and survives its source's deletion -- not because anything reads it today. Nothing resolves it, nothing binds it, and no review path reaches it. The content it carries is illustrative placeholder text that the source itself labels as such; see approval.note before treating any rule here as a position anyone holds.",
+  "approval": {
+    "status": "draft",
+    "approved_by": null,
+    "approved_at": null,
+    "supersedes": null,
+    "note": "DRAFT -- and unlike the other harvests, this one should probably STAY draft until a real NDA playbook is authored. See approval.flagged_for_approver, which is the first thing to read here. WHY THIS DOCUMENT EXISTS AT ALL: the NDA playbook is HARVESTED BUT NOT WIRED. It has no anchor_map_path in playbooks/registry.json, so it cannot be reviewed in any mode; it is registered only so the contract-type picker can show NDA as a not-yet-active dial stop. Its source's own general_principles[0] says it carries no active release bundle and governs no production review. A later PR deletes the source. The governing rule of this migration is that nothing in a source's governance layer dies in the migration -- and that rule does not carve out the parts nobody is using yet, because 'nobody is using it' is exactly the condition under which a silent drop goes unnoticed. So the layer is harvested whole, and the deletion loses nothing. THIS DOES NOT WIRE IT. Nothing resolves this policy, and this document is not an argument that anything should. WHAT IS NOT CARRIED, AND WHY: the source's general_principles[0] is the ONLY item in this harvest that is dropped, and it is dropped ON PURPOSE with the reason recorded item-by-item in tests/test_nda_policy.py NOT_HARVESTED_ITEMS, under the same 'unlisted => FAIL' discipline as every other disposition. It is purely a statement ABOUT the artifact -- that this is a placeholder stub, registered but inactive, whose content is illustrative. It contains no position. Rule `text` is rendered VERBATIM into the model's binding instruction set, so harvesting it would tell a reviewing model that the agreement in front of it is not real and its own review does not count. That belongs here, in a note a human reads, and not there. NO SIGN-OFF IS CARRIED, BECAUSE NONE EXISTS: this is a synthetic stub (`created_by: playbook-placeholder`, `status: draft`) with no legal_approval block, so approval.carried_determinations is absent rather than empty -- there is no determination of record to strand. Nobody has reviewed these positions. OTHER DISPOSITIONS: (1) VOICING -- rules are voiced in the first person (\"we\"/\"our\"/\"us\") per the white-label release rule, and the source's placeholder party name is not reproduced. The source's phrase \"a floor protection this placeholder relies on\" is voiced as \"one of the floor red lines below\" for the same reason as general_principles[0]: the model must not be told it is reading a placeholder. (2) general.be-decisive was ADAPTED, following the EIAA harvest: the source said \"Never 'flag for review'\", which contradicts the required behaviour that a must-rule tension or a failed integrity check escalates to attorney review. The decisiveness intent is preserved; the absolute prohibition is not. (3) DETECTOR MECHANICS DROPPED -- the source's hard_rejection carried trigger_terms (\"in perpetuity\", \"perpetual obligation\") and a word_boundary match mode. Those describe the retired lexical detector layer, not policy. The POSITION is harvested in full as floor.no-perpetual-unbounded-confidentiality. (4) NO REPLACEMENT-TEXT BOUNDS EXISTED TO CARRY. Checked specifically, because scripts/replacement_text_enforcement.py is being retired and the model's self-check becomes the only guard on what text reaches a contract. This source has NO must_not_introduce list: its one topic sets replacement_text to `{\"mode\": \"none\"}` and nothing else. There is no lexical replacement-text constraint here for the retirement to drop, so none is carried and none is owed. (5) decision_rubric was NOT harvested (the rubric is retired -- the model judges), per the launch decision. Both of its accept_when entries restate something harvested elsewhere (de minimis) or a floor, so unlike the Sample Agreement harvest, retiring it here drops no disposition. (6) `our_standard` was NOT harvested: it describes a standard form that does not exist yet. Its carve-out list (already known, independently developed, publicly available, compelled by law) is not lost -- the carve-outs are named in the harvested reject_if_proposed item and reach the model through floor.no-perpetual-unbounded-confidentiality. PROVENANCE: harvested_from pins the exact committed revision read, by blob and commit, and tests/test_nda_policy.py asserts the hash RESOLVES to that revision rather than merely being non-empty. Mandatory because the public cut is FRESH-HISTORY: the source is deleted by a later PR, and there this record is all that says what this policy was harvested from.",
+    "harvested_from": {
+      "path": "playbooks/nda-v0.1.0.json",
+      "content_hash": "sha256:5ac75e4e7fd05e5e3650a2de5948e03d5fc3abb7a0c107d9cc18a9a903c807df",
+      "git_blob_sha": "b6c623f283ebb13bc8c81c33de60ac65430169ce",
+      "git_commit": "262b1d8c8ce1685274506c65e817982cd80a2bf7",
+      "note": "content_hash is the sha256 of the RAW BYTES of the source at git blob b6c623f2, which is what playbooks/nda-v0.1.0.json resolves to in the tree of commit 262b1d8c (\"Redesign UI: Pico CSS design system + photoreal toaster hero (#357)\", 2026-07-16) -- the revision this harvest actually read. tests/test_nda_policy.py verifies the blob still hashes to content_hash AND that the commit's tree resolves `path` to that blob, so the record is checkable rather than decorative. The source carries NO legal approval block and no determinations; nothing is carried into approval.carried_determinations."
+    },
+    "flagged_for_approver": [
+      {
+        "id": "nda-content-is-illustrative-placeholder",
+        "question": "Should this document be approved at all, or should it stay draft until a real NDA playbook is authored? Approving it would turn text the source itself calls illustrative placeholder content into binding policy.",
+        "rule_ids": [
+          "floor.no-perpetual-unbounded-confidentiality",
+          "confidentiality.preserve-mutuality",
+          "confidentiality.preserve-bounded-survival"
+        ],
+        "detail": "This is the first thing to decide, and the harvest cannot decide it. The source's own general_principles[0] says: this is an unbound 'coming soon' stub, it governs no production review, and \"Content below is illustrative placeholder text only.\" That sentence is a claim about every position in this document. The three positional rules above are therefore not positions anyone has actually taken on NDAs -- they are plausible-sounding defaults someone wrote to fill a stub, and they are faithfully harvested as such because dropping them would be a silent drop. The migration's job was to carry them across intact; it was not to bless them. Two things follow. First, `status` must stay `draft`: an approver stamping this is not ratifying a considered NDA position, they are promoting placeholder text, and the strengths make that consequential -- all three are `must`, which means binding-when-applicable and re-read against every finished redline by the closing self-check. Second, the safer path is almost certainly to leave this draft, and to treat authoring the real NDA playbook as the event that produces a real policy (v2, superseding this one) rather than editing this one into truth. Note that nothing turns on this today: the playbook has no anchor_map_path and cannot be reviewed in any mode, so an approval here would change nothing operationally -- which is precisely why it could be granted without anyone noticing what was being approved."
+      },
+      {
+        "id": "nda-floor-conjunction-ambiguity",
+        "question": "floor.no-perpetual-unbounded-confidentiality describes a THREE-part conjunction -- perpetual AND uncapped AND no carve-outs. Does it fire on a proposal with only one or two of those properties?",
+        "rule_ids": ["floor.no-perpetual-unbounded-confidentiality", "confidentiality.preserve-bounded-survival"],
+        "detail": "The harvest did not resolve this; it carried the source's wording, and the ambiguity is the source's. Both the hard_rejection description and the reject_if_proposed item read as a single conjunctive object: \"a perpetual, unbounded confidentiality obligation with no carve-outs\". On the narrowest reading the floor fires only when all three hold at once, which would let a perpetual obligation WITH carve-outs pass the floor -- a materially different and much more common proposal. On the broadest reading any one of the three trips it. In the source this never had to be decided, because the position was enforced by a lexical detector matching the phrases \"in perpetuity\" and \"perpetual obligation\", so scope came from the trigger terms rather than from the sentence. With the detector layer retired and the model reading rule text, the sentence is now the whole of the scope and it has to mean something definite. confidentiality.preserve-bounded-survival covers part of the gap on the narrow reading -- it independently requires a bounded survival period -- but it is a preserve-rule aimed at removals, not at a perpetual obligation proposed fresh. The approver should say which reading governs. This harvest left the wording conjunctive, matching the source."
+      },
+      {
+        "id": "nda-de-minimis-definition-has-no-referent",
+        "question": "general.de-minimis-categories defines 'de minimis', but no other rule in this policy uses the term. Keep the definition as a standalone accept-disposition, or is a rule missing?",
+        "rule_ids": ["general.de-minimis-categories", "general.default-accept"],
+        "detail": "Raised rather than settled. The source's de_minimis_categories are harvested in full (three items, all onto this one rule) because they ARE prescriptive -- they say these changes are acceptable -- and dropping them would be a silent drop. But this playbook is shaped differently from the other two: the EIAA and Sample Agreement sources both carry a no-invented-obligations principle that conditions on 'de minimis', which is what gives their definition a job. This source has no such principle, so the definition stands alone. Two readings, and they differ in what they imply. Either it is a self-sufficient accept-disposition (these categories are acceptable; the definition is the rule), which is coherent and needs no change. Or the stub was copied from a fuller playbook and the principle that referenced it was never copied along, in which case something the author assumed is genuinely missing -- and the mirror image of this situation is a real defect the EIAA harvest shipped, where the definition left and the rules conditioning on it stayed, dangling. The harvest kept the definition and did not invent the missing principle: a rule with no source basis fails the invention check in tests/test_nda_policy.py, and rightly."
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "general.default-accept",
+      "strength": "should",
+      "topic": "general",
+      "text": "Default toward ACCEPT for anything that does not touch one of the floor red lines below."
+    },
+    {
+      "id": "general.be-decisive",
+      "strength": "should",
+      "topic": "general",
+      "text": "Be decisive. Every change is either ACCEPT (apply the change) or REQUEST_CHANGE (counter with specific replacement text). Escalate to attorney review only where this policy requires it -- a 'must' rule in tension with the clause at hand, or a failed integrity check -- never as a way to avoid making a decision."
+    },
+    {
+      "id": "general.de-minimis-categories",
+      "strength": "should",
+      "topic": "general",
+      "text": "A change is DE MINIMIS -- and should be accepted -- if it falls into any of these categories: (1) updates to the counterparty's own legal name, address, email, or signatory; (2) typo and grammar corrections; (3) reformatting changes, including font, spacing, and capitalization."
+    },
+    {
+      "id": "floor.no-perpetual-unbounded-confidentiality",
+      "strength": "must",
+      "topic": "nda-confidentiality",
+      "text": "Do not accept a perpetual, unbounded confidentiality obligation with no carve-outs. The usual carve-outs -- information already known, independently developed, publicly available, or compelled by law -- must remain available."
+    },
+    {
+      "id": "confidentiality.preserve-mutuality",
+      "strength": "must",
+      "topic": "nda-confidentiality",
+      "text": "Do not accept removal or weakening of the mutual treatment of confidentiality obligations. What binds one party binds the other."
+    },
+    {
+      "id": "confidentiality.preserve-bounded-survival",
+      "strength": "must",
+      "topic": "nda-confidentiality",
+      "text": "Do not accept removal or weakening of the bounded survival period for confidentiality obligations after termination. The obligation survives termination for a defined period; it does not survive without end."
+    }
+  ]
+}

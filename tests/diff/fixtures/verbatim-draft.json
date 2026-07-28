@@ -1,0 +1,4 @@
+{
+  "description": "Draft identical to the canonical standard form (verbatim). Every hunk must diff as 'unchanged'. This is the D1 zero-fire baseline input (docs/evaluation.md).",
+  "draft": "__VERBATIM__"
+}

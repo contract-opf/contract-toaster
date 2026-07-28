@@ -1,0 +1,83 @@
+/*
+ * ct-app-shell.css — CTDS outer chrome (issue #390,
+ * docs/frontend-design-system.md §6/§7). Light DOM (§5.1): a CSS Grid with
+ * named areas, keyed off the `slot="..."` ATTRIBUTE ct-app-shell's React
+ * consumer (App.tsx) sets on each region's wrapper element — see
+ * ct-app-shell.ts's docstring for why this is attribute-selector CSS and
+ * not a real shadow-DOM `<slot>`. Tokens only (§5.6).
+ */
+
+ct-app-shell {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'brand    identity'
+    'tabs     tabs'
+    'content  content'
+    'footer   footer';
+  column-gap: var(--ct-space-4);
+  max-width: var(--ct-maxw);
+  margin: 0 auto;
+  padding: var(--ct-space-4) var(--ct-space-5) var(--ct-space-6);
+  background: var(--ct-bg);
+}
+
+.ct-app-shell__brand {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  font-family: var(--ct-font-display);
+  font-weight: 700;
+  font-size: var(--ct-text-lg);
+  color: var(--ct-text);
+  padding-bottom: var(--ct-space-3);
+  margin-bottom: var(--ct-space-3);
+  border-bottom: 1px solid var(--ct-border);
+}
+
+ct-app-shell > [slot='identity'] {
+  grid-area: identity;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: end;
+  gap: var(--ct-space-2);
+  padding-bottom: var(--ct-space-3);
+  margin-bottom: var(--ct-space-3);
+  border-bottom: 1px solid var(--ct-border);
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text-muted);
+}
+
+ct-app-shell > [slot='tabs'] {
+  grid-area: tabs;
+}
+
+ct-app-shell > [slot='footer'] {
+  grid-area: footer;
+  margin-top: var(--ct-space-6);
+  padding-top: var(--ct-space-3);
+  border-top: 1px solid var(--ct-border);
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
+
+ct-app-shell > :not([slot]):not(.ct-app-shell__brand) {
+  grid-area: content;
+}
+
+@media (max-width: 640px) {
+  ct-app-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'brand'
+      'identity'
+      'tabs'
+      'content'
+      'footer';
+  }
+  ct-app-shell > [slot='identity'] {
+    justify-self: start;
+  }
+}

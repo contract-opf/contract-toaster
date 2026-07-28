@@ -1,0 +1,24 @@
+{
+  "description": "Playbook registry (issue #209): the single source of truth mapping a playbook_id to its release-bundle artifact paths. Every script that resolves a playbook's playbook JSON, anchor-map JSON, section-config data file, or gold-fixtures directory does so through this file (see scripts/playbook_registry.py), keyed on playbook_id, instead of hard-coding a literal path. Adding a new contract type is: author a playbook.json + standard-form + anchor-map + section-config + fixtures dir, then add one entry here -- no code edit.",
+  "default_playbook_id": "synthetic-nda-sample",
+  "playbooks": {
+    "synthetic-generic": {
+      "playbook_id": "synthetic-generic",
+      "playbook_path": "tests/fixtures/playbooks/synthetic-generic-v1.0.0.json",
+      "anchor_map_path": "standard-forms/synthetic-generic-v1.0.0.anchor-map.json",
+      "section_config_path": "tests/fixtures/playbooks/synthetic-generic-v1.0.0.sections.json",
+      "fixtures_dir": "tests/gold-fixtures",
+      "standard_form_docx": null,
+      "mock_output_key": "mock-fixtures/eiaa/pre-baked-redline.docx",
+      "test_only": true
+    },
+    "synthetic-nda-sample": {
+      "playbook_id": "synthetic-nda-sample",
+      "playbook_path": "playbooks/samples/synthetic-nda-sample-v1.0.0.json",
+      "fixtures_dir": "tests/gold-fixtures-nda",
+      "display_name": "Synthetic NDA Sample",
+      "bundled_sample": true,
+      "seed_notes": "Synthetic NDA Sample — a fictional, brand-free NDA playbook shipped to demonstrate the review flow. It is not legal advice and not a real NDA. Remove or replace it with your own playbook. Find more playbooks at https://github.com/contract-opf/playbooks."
+    }
+  }
+}

@@ -1,0 +1,113 @@
+/*
+ * ct-file-drop.css — CTDS drag-and-drop upload well (issue #393,
+ * docs/frontend-design-system.md §6/§7). Light DOM (§5.1): styles the HOST
+ * tag plus the well/input/label/pill elements ct-file-drop.ts builds
+ * itself in `connectedCallback`. Tokens only (§5.6). Reduced motion is
+ * handled globally by base.css's `*` guard.
+ */
+
+ct-file-drop {
+  display: block;
+}
+
+.ct-file-drop__well {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-space-2);
+  padding: var(--ct-space-5) var(--ct-space-4);
+  text-align: center;
+  background: var(--ct-surface-sunken);
+  border: 2px dashed var(--ct-border-strong);
+  border-radius: var(--ct-radius);
+  transition:
+    border-color var(--ct-dur) var(--ct-ease-out),
+    box-shadow var(--ct-dur) var(--ct-ease-out),
+    background-color var(--ct-dur) var(--ct-ease-out);
+}
+
+.ct-file-drop--over {
+  border-color: var(--ct-accent);
+  background: var(--ct-accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ct-accent) 25%, transparent), var(--ct-shadow-2);
+}
+
+/* Visually hidden but fully focusable/interactive — never display:none or
+   visibility:hidden, which would remove it from the tab order. This is the
+   only focus stop in the component (the well/label are pointer-only). */
+.ct-file-drop__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ct-file-drop__label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ct-space-2);
+  cursor: pointer;
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-sans);
+}
+
+.ct-file-drop__input:focus-visible ~ .ct-file-drop__label {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+  border-radius: var(--ct-radius-sm);
+}
+
+.ct-file-drop__icon {
+  width: 28px;
+  height: 28px;
+  color: var(--ct-accent);
+}
+
+.ct-file-drop__text {
+  font-size: var(--ct-text-sm);
+  color: var(--ct-text);
+}
+
+.ct-file-drop__pill {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-2);
+  margin-top: var(--ct-space-3);
+  padding: var(--ct-space-2) var(--ct-space-3);
+  background: var(--ct-surface-raised);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+}
+
+.ct-file-drop__pill-name {
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-sm);
+  font-weight: 600;
+  color: var(--ct-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ct-file-drop__pill-size {
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  white-space: nowrap;
+}
+
+/* The clear control is a ct-icon-button primitive now (ct-file-drop.ts) —
+   its size/color/hover/focus-ring chrome lives entirely in
+   ct-icon-button.css. This rule only positions it within the pill's flex
+   row. */
+.ct-file-drop__clear {
+  margin-left: auto;
+}

@@ -1,0 +1,268 @@
+/*
+ * gallery.css — layout/chrome for the dev-only component gallery (issue
+ * #395, docs/frontend-design-system.md §9). This is NOT a ct-* component
+ * stylesheet — it styles the gallery's own scaffolding (nav, section
+ * cards, swatches, code blocks) — but it still keys off `--ct-*` tokens
+ * exclusively (§5.6 discipline applies here too: the gallery documents the
+ * system's rules, it shouldn't break them). Loaded after tokens.css/
+ * base.css, NOT after app.css (main.ts never imports app.css — the gallery
+ * proves components stand alone, docs/frontend-design-system.md §9).
+ */
+
+.gallery-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.gallery-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--ct-space-5) var(--ct-space-4);
+  background: var(--ct-surface-sunken);
+  border-right: 1px solid var(--ct-border);
+}
+
+.gallery-nav__brand {
+  font-family: var(--ct-font-display);
+  font-weight: 700;
+  font-size: var(--ct-text-md);
+  margin: 0 0 var(--ct-space-1);
+}
+
+.gallery-nav__subtitle {
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  margin: 0 0 var(--ct-space-4);
+}
+
+.gallery-theme-toggle {
+  width: 100%;
+  margin-bottom: var(--ct-space-5);
+}
+
+.gallery-nav__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+}
+
+.gallery-nav__list a {
+  display: block;
+  padding: var(--ct-space-1) var(--ct-space-2);
+  border-radius: var(--ct-radius-sm);
+  font-size: var(--ct-text-sm);
+  text-decoration: none;
+  color: var(--ct-text-muted);
+}
+
+.gallery-nav__list a:hover {
+  background: var(--ct-surface-raised);
+  color: var(--ct-text);
+}
+
+.gallery-main {
+  padding: var(--ct-space-6) var(--ct-space-6) var(--ct-space-8);
+  max-width: 980px;
+}
+
+.gallery-intro {
+  margin-bottom: var(--ct-space-7);
+}
+
+.gallery-section {
+  margin-bottom: var(--ct-space-8);
+  padding-top: var(--ct-space-5);
+  border-top: 1px solid var(--ct-border);
+}
+
+.gallery-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.gallery-section__desc {
+  color: var(--ct-text-muted);
+  max-width: 60ch;
+}
+
+.gallery-example-group {
+  margin: var(--ct-space-4) 0;
+}
+
+.gallery-example-group__label {
+  display: block;
+  font-size: var(--ct-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ct-text-muted);
+  margin-bottom: var(--ct-space-2);
+}
+
+.gallery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-space-3);
+}
+
+.gallery-frame {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius);
+  background: var(--ct-bg);
+  padding: var(--ct-space-4);
+  overflow: auto;
+}
+
+.gallery-snippet {
+  margin: var(--ct-space-3) 0 0;
+  padding: var(--ct-space-3) var(--ct-space-4);
+  background: var(--ct-surface-sunken);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  overflow-x: auto;
+}
+
+.gallery-snippet code {
+  display: block;
+  background: none;
+  padding: 0;
+  font-size: var(--ct-text-xs);
+  white-space: pre;
+  color: var(--ct-text);
+}
+
+/* Tokens page */
+.gallery-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--ct-space-3);
+}
+
+.gallery-swatch {
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-sm);
+  overflow: hidden;
+}
+
+.gallery-swatch__fill {
+  height: 48px;
+}
+
+.gallery-swatch__label {
+  padding: var(--ct-space-2);
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  background: var(--ct-surface);
+}
+
+.gallery-space-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-3);
+  margin-bottom: var(--ct-space-2);
+}
+
+.gallery-space-bar {
+  background: var(--ct-accent);
+  height: 16px;
+}
+
+.gallery-space-row__name {
+  width: 9em;
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
+
+.gallery-radius-row,
+.gallery-shadow-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-4);
+}
+
+.gallery-radius-swatch {
+  width: 88px;
+  height: 88px;
+  background: var(--ct-surface-raised);
+  border: 1px solid var(--ct-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  text-align: center;
+}
+
+.gallery-shadow-swatch {
+  width: 140px;
+  height: 88px;
+  background: var(--ct-surface);
+  border-radius: var(--ct-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
+
+.gallery-type-specimen {
+  margin-bottom: var(--ct-space-4);
+}
+
+.gallery-type-specimen__meta {
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+  margin: 0 0 var(--ct-space-1);
+}
+
+.gallery-motion-demo {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-4);
+  flex-wrap: wrap;
+}
+
+.gallery-motion-box {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--ct-radius-sm);
+  background: var(--ct-accent);
+  transition: transform var(--ct-dur-slow) var(--ct-ease-spring);
+}
+
+.gallery-motion-demo:hover .gallery-motion-box {
+  transform: translateX(48px);
+}
+
+.gallery-motion-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ct-space-3);
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
+
+@media (max-width: 720px) {
+  .gallery-shell {
+    grid-template-columns: 1fr;
+  }
+  .gallery-nav {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--ct-border);
+  }
+}

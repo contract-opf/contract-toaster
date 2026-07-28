@@ -1,0 +1,91 @@
+# Redline anchoring + fail-closed patching + input normalization gate
+# (deterministic; no model invocation, no AWS credentials).
+#
+# Issue #65 (BLOCKING GATE): "Redline anchoring + fail-closed patching + input
+# normalization".
+#
+# Redline patching is a security-bearing operation: an approximate edit can
+# silently modify the WRONG clause of a legal document. This gate proves:
+#   - scripts/redline_patch.py applies a patch ONLY on an exact
+#     (anchor, source_text_hash) match, and FAILS CLOSED (no approximate
+#     edit, reason=hash_mismatch_at_patch) when the target has drifted or the
+#     anchor no longer exists.
+#   - A batch of patches fails the review closed if ANY patch in the batch
+#     could not be safely applied, even if other patches in the same batch
+#     matched exactly.
+#   - scripts/normalize_input.py applies the documented accept/reject rule to
+#     pre-existing tracked changes / comments / hidden text / fields, and
+#     fails closed (reason=unnormalizable_input) when a paragraph's operative
+#     text is ambiguous (unresolved tracked change).
+#   - Both fail-closed paths build the analysis_report artifact shape
+#     (docs/output-contract.md -> "Fail-closed internal analysis report") and
+#     never carry a legal `decision` field -- the fail-closed outcome is a
+#     SYSTEM status (MANUAL_REVIEW_REQUIRED), never a legal decision.
+#
+# This is also picked up by the full Python test suite in ci-pipeline.yml
+# (tests/*/test_*.py glob); this dedicated workflow exists so a BLOCKING GATE
+# issue gets its own clearly-labeled, independently-runnable check, matching
+# the standard-form-diff-gate.yml / anchor-map-gates.yml convention for the
+# other blocking-gate issues (#1, #3, #18, #64).
+#
+# See:
+#   ARCHITECTURE.md § "Anchored, hash-validated patching (fail closed)"
+#   ARCHITECTURE.md § "Input normalization (before review)"
+#   docs/output-contract.md § "Fail-closed internal analysis report"
+#   docs/phase-0-issues.md item 17
+
+name: Redline fail-closed gate
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "scripts/redline_patch.py"
+      - "scripts/normalize_input.py"
+      - "scripts/diff_standard_form.py"
+      - "tests/redline/**"
+      - ".github/workflows/redline-fail-closed-gate.yml"
+  pull_request:
+    paths:
+      - "scripts/redline_patch.py"
+      - "scripts/normalize_input.py"
+      - "scripts/diff_standard_form.py"
+      - "tests/redline/**"
+      - ".github/workflows/redline-fail-closed-gate.yml"
+
+jobs:
+  redline-fail-closed-gate:
+    name: Redline anchoring / fail-closed patching / normalization gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed -- both modules use only the stdlib.
+
+      - name: Fail-closed patching / normalization gate
+        # Fails if:
+        #   - scripts/redline_patch.py or scripts/normalize_input.py is
+        #     missing or fails to import
+        #   - an exact (anchor, source_text_hash) match is not applied
+        #   - a hash mismatch or vanished anchor is applied anyway (an
+        #     approximate/closest-match edit), or does not set
+        #     fail_closed=True / reason=hash_mismatch_at_patch
+        #   - a batch with one mismatched patch fails to still apply the
+        #     other exact-match patches, or fails to report the batch itself
+        #     as fail_closed
+        #   - the analysis_report builder omits a required field, or attaches
+        #     a legal `decision` field to a fail-closed report
+        #   - a clean document, or a document with only accepted tracked
+        #     changes / resolved fields / hidden text, fails to normalize
+        #   - a document with an unresolved tracked change or corrupt
+        #     revision structure normalizes anyway instead of failing closed
+        #     with reason=unnormalizable_input
+        run: python3 tests/redline/test_fail_closed_patching.py

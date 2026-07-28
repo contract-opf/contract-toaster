@@ -1,0 +1,58 @@
+{
+  "$schema": "../../playbooks/policy.schema.json",
+  "playbook_id": "acme-university",
+  "version": 1,
+  "title": "Fixture review policy \u2014 Acme University affiliation (SYNTHETIC)",
+  "description": "Synthetic policy for the OPF 0.3 gold fixture. Fictional parties and positions only; it exists so tests and the acceptance harness exercise the real policy path end to end without touching any real playbook. Mirrors the shape of a production policy: a floor of binding `must` rules plus weighted `should` dispositions.",
+  "approval": {
+    "status": "approved",
+    "approved_by": "Fixture Approver, Synthetic Counsel",
+    "approved_at": "2026-01-01T00:00:00Z",
+    "supersedes": null,
+    "note": "Synthetic fixture policy \u2014 approved so tests can exercise the approved path."
+  },
+  "rules": [
+    {
+      "id": "general.default-accept",
+      "strength": "should",
+      "topic": "general",
+      "text": "This agreement type is generally low-risk. Default toward ACCEPT."
+    },
+    {
+      "id": "general.prefer-counterparty-wording",
+      "strength": "should",
+      "topic": "general",
+      "text": "If two reasonable formulations of the same standard concept exist, accept the counterparty's wording rather than insist on ours."
+    },
+    {
+      "id": "general.precedent-is-internal-only",
+      "strength": "must",
+      "topic": "general",
+      "text": "Use corpus precedent as internal evidence only. Never quote counterparty names, deal dates, or precedent language in external-facing comments or redlines."
+    },
+    {
+      "id": "floor.no-uncapped-liability",
+      "strength": "must",
+      "topic": "limitation-of-liability",
+      "text": "Do not accept uncapped or unlimited liability, or an indemnity covering the counterparty's own negligence."
+    },
+    {
+      "id": "floor.no-one-way-indemnity",
+      "strength": "must",
+      "topic": "indemnification",
+      "text": "Do not accept general or one-way indemnification by us. Narrow mutual negligence-based indemnification is an acceptable variation and does not violate this rule."
+    },
+    {
+      "id": "confidentiality.preserve-standard-exceptions",
+      "strength": "must",
+      "topic": "confidentiality",
+      "text": "Do not accept removal of the standard confidentiality exceptions."
+    },
+    {
+      "id": "governing-law.negotiable",
+      "strength": "should",
+      "topic": "governing-law",
+      "text": "Governing law is negotiable: concede the counterparty's home-state law where no exclusive forum-selection clause is added."
+    }
+  ]
+}

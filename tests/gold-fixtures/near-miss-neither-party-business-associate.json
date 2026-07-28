@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-neither-party-business-associate",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty inserts 'neither party is a Business Associate' language, which uses the words 'business associate' but never the literal trigger phrase 'business associate agreement' or the abbreviation 'BAA'. Must ACCEPT with zero fires on 'no-business-associate-agreement'.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "hipaa",
+      "rule_id": "no-business-associate-agreement",
+      "reason": "The hunk uses 'Business Associate' as a defined-term reference, never the full phrase 'business associate agreement' or 'BAA'; it must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "hipaa",
+    "inserted_hunk": "The parties acknowledge that neither party is a Business Associate of the other under HIPAA, and no business associate relationship is created by this Agreement.",
+    "notes": "Near-miss: contains 'business associate' but never the two-word-boundary phrase 'business associate agreement', and never 'baa' as a standalone word."
+  },
+  "detector_expectation": {
+    "rule_id": "no-business-associate-agreement",
+    "expected_result": "no_fire",
+    "rationale": "Hunk contains neither trigger_term 'business associate agreement' nor 'baa'."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

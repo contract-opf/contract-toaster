@@ -1,0 +1,116 @@
+/*
+ * app.css — application chrome layered on base.css + tokens.css.
+ *
+ * base.css styles bare semantic elements (headings, <table>, <form>,
+ * <input>, <button>, <label>). This file adds ONLY the app-specific chrome
+ * that base.css has no opinion about: the login shell, tabpanel spacing,
+ * section headings, and a few layout utilities. Every component references
+ * the class names below; this is the shared vocabulary — do not fork
+ * per-component copies. Surfaces, status, and control chrome that used to
+ * live here have been absorbed into the ct-* components (frontend/src/ui/)
+ * as each screen migrated; see git history for the removed classes.
+ *
+ * Class vocabulary (stable contract for all components):
+ *   Login     .ct-login-shell  .ct-login-brand  .ct-login-card
+ *             (PasswordLogin.tsx only — App.tsx uses ct-app-shell, issue
+ *             #390; the pre-auth login screen has its own nameplate
+ *             instead, issue #391)
+ *   Tabs      .ct-tabpanel (the tab STRIP itself is ct-tab-bar, issue #390)
+ *   Sections  .ct-section  .ct-section-title
+ *   Status    .ct-muted  .ct-mono
+ *   Layout    .ct-row  .ct-stack  .ct-actions
+ *
+ * Theme-aware via tokens.css (which mirrors prefers-color-scheme). Motion:
+ * transitions here are cosmetic and short; the toaster's own animations live
+ * in Toaster.tsx's inline <style> with a prefers-reduced-motion guard.
+ */
+
+/* .ct-app, .ct-header/.ct-header__brand/.ct-identity/.ct-role-badge/
+   .ct-tabs/.ct-tab/.ct-footer were absorbed into ct-app-shell.css/
+   ct-tab-bar.css (issue #390) and ct-login-shell below (issue #391) —
+   neither App.tsx nor PasswordLogin.tsx renders any of that markup
+   anymore, so these classes were removed rather than left as dead code
+   (§9 of docs/frontend-design-system.md). */
+
+/* ------------------------------------------------------------------ Login */
+/* PasswordLogin.tsx's pre-auth screen: centered nameplate + CtCard on the
+   warm app background. Not ct-app-shell (that's the post-auth chrome, and
+   wraps content this screen doesn't have yet — tabs, identity, sign-out). */
+.ct-login-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ct-space-4);
+  padding: var(--ct-space-6) var(--ct-space-4);
+  background: var(--ct-bg);
+}
+.ct-login-brand {
+  font-family: var(--ct-font-display);
+  font-weight: 700;
+  font-size: var(--ct-text-xl);
+  color: var(--ct-text);
+  letter-spacing: 0.01em;
+}
+.ct-login-card {
+  width: 100%;
+  max-width: 360px;
+}
+
+/* Tabpanel spacing — App.tsx's <section role="tabpanel"> elements still
+   carry this class; the tab STRIP itself is now ct-tab-bar.css. */
+.ct-tabpanel {
+  padding-top: 0.25rem;
+}
+
+/* --------------------------------------------------------------- Sections */
+.ct-section {
+  margin: 0 0 var(--ct-gap-lg);
+}
+.ct-section-title {
+  font-size: 1.15rem;
+  margin: 0 0 0.75rem;
+}
+
+.ct-muted {
+  color: var(--ct-text-muted);
+  font-size: 0.85rem;
+}
+
+/* Review IDs, digests, key hints — mono face per docs/frontend-design-
+   system.md §4.5. */
+.ct-mono {
+  font-family: var(--ct-font-mono);
+}
+
+/* ----------------------------------------------------------- Layout utils */
+.ct-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-gap-sm);
+}
+.ct-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-gap);
+}
+/* Inline action row where buttons should stay auto-width (an upload form's
+   controls stay on one line rather than each stretching full-width). Use
+   role="group" for a native button/input grouping, or this class with
+   ct-button / ct-icon-button / type="button" children. */
+.ct-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+.ct-actions button[type='submit'],
+.ct-actions [role='button'] { width: auto; }
+
+/* .ct-table-scroll (users/legal-holds table wrapper) was absorbed into
+   ui/components/ct-table.css (issue #392) — AdminUsers.tsx /
+   AdminRetention.tsx wrap their tables in <CtTable> now, so this class is
+   no longer referenced anywhere (§9 of docs/frontend-design-system.md). */

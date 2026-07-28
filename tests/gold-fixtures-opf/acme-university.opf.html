@@ -1,0 +1,1454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OPF playbook — acme-university</title>
+<!--
+  Single-file OPF bundle. The canonical playbook is the JSON embedded in
+  the script block with id "opf-canonical" below. Extract that block,
+  JSON-parse it, and verify identity.content_hash over the canonical
+  serialization (see scripts/opf_canonicalize.py).
+-->
+</head>
+<body>
+<h1>OPF playbook — acme-university</h1>
+<script id="opf-canonical" type="application/json">
+{
+  "opf_version": "0.3",
+  "agreement_type": {
+    "id": "educational-affiliation",
+    "name": "Educational Affiliation Agreement",
+    "aliases": [
+      "acme-university",
+      "eiaa-fixture"
+    ]
+  },
+  "baseline": {
+    "has_canonical_template": true,
+    "template_ref": {
+      "document_id": "template",
+      "title": "FixtureCorp Affiliation Template",
+      "source": "template/affiliation-template.docx"
+    }
+  },
+  "taxonomy": {
+    "source": "custom",
+    "entries": [
+      {
+        "id": "indemnification",
+        "label": "Indemnification",
+        "status": "active",
+        "cuad_origin": "Indemnification",
+        "description": "Who bears third-party claim risk."
+      },
+      {
+        "id": "governing_law",
+        "label": "Governing Law",
+        "status": "active",
+        "cuad_origin": "Governing Law",
+        "description": "Which jurisdiction's law applies."
+      },
+      {
+        "id": "term_termination",
+        "label": "Term and Termination",
+        "status": "active",
+        "cuad_origin": "Termination For Convenience",
+        "description": "How and when the agreement ends."
+      },
+      {
+        "id": "confidentiality",
+        "label": "Confidentiality",
+        "status": "active",
+        "cuad_origin": "Confidentiality",
+        "description": "Protection of exchanged information."
+      }
+    ]
+  },
+  "perspective": {
+    "party": "FixtureCorp",
+    "counterparty_type": "Educational Institution"
+  },
+  "de_minimis": [
+    "typo fixes",
+    "renumbering with no substantive change"
+  ],
+  "evidence": {
+    "clauses": [
+      {
+        "id": "clause.indemnification",
+        "taxonomy_id": "indemnification",
+        "title": "Indemnification",
+        "our_standard": {
+          "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "8",
+            "char_span": [
+              0,
+              110
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Mutual indemnification limited to each party's own negligence.",
+            "full_text": "Each party shall indemnify, defend, and hold harmless the other party from third-party claims to the extent caused by the indemnifying party's own negligence or willful misconduct.",
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "8.1",
+              "char_span": [
+                0,
+                160
+              ]
+            },
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 6
+          },
+          {
+            "text_summary": "Mutual indemnification, negligence-based, with a notice-and-cooperation proviso.",
+            "full_text": "Each party shall indemnify the other for third-party claims arising from its negligence, provided the indemnified party gives prompt notice and reasonable cooperation.",
+            "example_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "8.1",
+              "char_span": [
+                0,
+                150
+              ]
+            },
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "better",
+              "magnitude": "minor"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 3
+          },
+          {
+            "text_summary": "One-way indemnity running to the counterparty for IP infringement claims.",
+            "full_text": "FixtureCorp shall indemnify Acme University against any claim that the placement materials infringe a third party's intellectual property rights.",
+            "example_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "8.2",
+              "char_span": [
+                0,
+                140
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "provenance": "counterparty_paper",
+            "outcome": "signed",
+            "precedent_count": 1
+          }
+        ],
+        "summary": {
+          "historical_stance": "usually_held",
+          "stance_detail": {
+            "held": 8,
+            "of": 10,
+            "basis": "our_paper"
+          },
+          "acceptable_if": [
+            {
+              "if": "mutual, negligence-limited indemnification",
+              "to": "Mutual indemnification limited to each party's own negligence, worded to match the counterparty's standard drafting.",
+              "rationale": "Signed at neutral risk in 6 of 8 held opportunities; reworded_equivalent only, no risk movement.",
+              "observation_ref": {
+                "document_id": "acme-university",
+                "version": 3,
+                "clause_path": "8.1",
+                "char_span": [
+                  0,
+                  160
+                ]
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "text_summary": "One-way indemnity running to the counterparty for IP infringement claims.",
+              "full_text": "FixtureCorp shall indemnify Acme University against any claim that the placement materials infringe a third party's intellectual property rights.",
+              "example_ref": {
+                "document_id": "example-institute",
+                "version": 4,
+                "clause_path": "8.2",
+                "char_span": [
+                  0,
+                  140
+                ]
+              },
+              "deviation": "substantive",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "provenance": "counterparty_paper",
+              "outcome": "signed",
+              "precedent_count": 1
+            }
+          ],
+          "rejected": [
+            {
+              "text_summary": "Uncapped, one-way indemnity covering all claims including the counterparty's own negligence.",
+              "full_text": "FixtureCorp shall indemnify Acme University against any and all claims of any kind, including those arising from Acme University's own negligence, without limitation.",
+              "example_ref": {
+                "document_id": "acme-university",
+                "version": 1,
+                "clause_path": "8.1",
+                "char_span": [
+                  0,
+                  150
+                ]
+              },
+              "deviation": "substantive",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "material"
+              },
+              "provenance": "counterparty_paper",
+              "outcome": "proposed_then_reversed",
+              "precedent_count": 2
+            }
+          ],
+          "confidence": {
+            "score": 0.72,
+            "basis": "precedent_count + provenance_mix",
+            "n_our_paper": 8,
+            "n_counterparty_paper": 2,
+            "evidence_sufficient": true
+          }
+        }
+      },
+      {
+        "id": "clause.governing-law",
+        "taxonomy_id": "governing_law",
+        "title": "Governing Law",
+        "our_standard": {
+          "text": "This Agreement is governed by the laws of the State of Fixtureland.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "14",
+            "char_span": [
+              0,
+              66
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Counterparty's home-state law, no forum-selection clause.",
+            "full_text": "This Agreement shall be governed by the laws of the State of Acmeland.",
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "14",
+              "char_span": [
+                0,
+                70
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "minor"
+            },
+            "provenance": "counterparty_paper",
+            "outcome": "signed",
+            "precedent_count": 4
+          },
+          {
+            "text_summary": "Our home-state law retained.",
+            "full_text": "This Agreement shall be governed by the laws of the State of Fixtureland.",
+            "example_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "14",
+              "char_span": [
+                0,
+                72
+              ]
+            },
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 3
+          }
+        ],
+        "summary": {
+          "historical_stance": "mixed",
+          "stance_detail": {
+            "held": 3,
+            "of": 7,
+            "basis": "all"
+          },
+          "acceptable_if": [
+            {
+              "if": "counterparty insists on its home-state law with no exclusive forum clause",
+              "to": "Counterparty's home-state governing law, provided no exclusive forum-selection clause is added.",
+              "rationale": "Conceded in 4 of 7 opportunities at neutral/minor risk; governing law alone rarely moves substantive exposure.",
+              "observation_ref": {
+                "document_id": "acme-university",
+                "version": 3,
+                "clause_path": "14",
+                "char_span": [
+                  0,
+                  70
+                ]
+              }
+            }
+          ],
+          "fallbacks": [],
+          "rejected": [],
+          "confidence": {
+            "score": 0.55,
+            "basis": "precedent_count + provenance_mix",
+            "n_our_paper": 3,
+            "n_counterparty_paper": 4,
+            "evidence_sufficient": true
+          }
+        }
+      },
+      {
+        "id": "clause.term-termination",
+        "taxonomy_id": "term_termination",
+        "title": "Term and Termination",
+        "our_standard": {
+          "text": "Either party may terminate for convenience on thirty (30) days' written notice.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "11",
+            "char_span": [
+              0,
+              78
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Mutual termination for convenience on 30 days' notice.",
+            "full_text": "Either party may terminate this Agreement for convenience upon thirty (30) days' prior written notice.",
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "11.1",
+              "char_span": [
+                0,
+                100
+              ]
+            },
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 5
+          },
+          {
+            "text_summary": "Termination for convenience extended to 60 days' notice.",
+            "full_text": "Either party may terminate for convenience upon sixty (60) days' prior written notice.",
+            "example_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "11.1",
+              "char_span": [
+                0,
+                90
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "minor"
+            },
+            "provenance": "counterparty_paper",
+            "outcome": "signed",
+            "precedent_count": 2
+          }
+        ],
+        "summary": {
+          "historical_stance": "usually_held",
+          "stance_detail": {
+            "held": 5,
+            "of": 7,
+            "basis": "our_paper"
+          },
+          "acceptable_if": [
+            {
+              "if": "counterparty asks for a longer convenience-termination notice window",
+              "to": "Termination for convenience on up to sixty (60) days' written notice.",
+              "rationale": "Signed twice at 60 days with only minor risk movement; the notice window is negotiable within reason.",
+              "observation_ref": {
+                "document_id": "example-institute",
+                "version": 4,
+                "clause_path": "11.1",
+                "char_span": [
+                  0,
+                  90
+                ]
+              }
+            }
+          ],
+          "fallbacks": [
+            {
+              "text_summary": "Termination for convenience extended to 60 days' notice.",
+              "full_text": "Either party may terminate for convenience upon sixty (60) days' prior written notice.",
+              "example_ref": {
+                "document_id": "example-institute",
+                "version": 4,
+                "clause_path": "11.1",
+                "char_span": [
+                  0,
+                  90
+                ]
+              },
+              "deviation": "substantive",
+              "risk_delta": {
+                "direction": "worse",
+                "magnitude": "minor"
+              },
+              "provenance": "counterparty_paper",
+              "outcome": "signed",
+              "precedent_count": 2
+            }
+          ],
+          "rejected": [],
+          "confidence": {
+            "score": 0.68,
+            "basis": "precedent_count + provenance_mix",
+            "n_our_paper": 5,
+            "n_counterparty_paper": 2,
+            "evidence_sufficient": true
+          }
+        }
+      },
+      {
+        "id": "clause.confidentiality",
+        "taxonomy_id": "confidentiality",
+        "title": "Confidentiality",
+        "our_standard": {
+          "text": "Confidential Information shall be protected for three (3) years after disclosure.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "9",
+            "char_span": [
+              0,
+              80
+            ]
+          }
+        },
+        "observed_positions": [
+          {
+            "text_summary": "Mutual confidentiality, 3-year survival.",
+            "full_text": "Each party shall protect the other's Confidential Information for three (3) years following disclosure.",
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "9.1",
+              "char_span": [
+                0,
+                100
+              ]
+            },
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "provenance": "our_paper",
+            "outcome": "signed",
+            "precedent_count": 7
+          },
+          {
+            "text_summary": "Perpetual confidentiality for student records.",
+            "full_text": "Confidential Information consisting of student education records shall be protected in perpetuity.",
+            "example_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "9.2",
+              "char_span": [
+                0,
+                95
+              ]
+            },
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "better",
+              "magnitude": "minor"
+            },
+            "provenance": "counterparty_paper",
+            "outcome": "signed",
+            "precedent_count": 3
+          }
+        ],
+        "summary": {
+          "historical_stance": "consistently_held",
+          "stance_detail": {
+            "held": 9,
+            "of": 9,
+            "basis": "all"
+          },
+          "acceptable_if": [
+            {
+              "if": "counterparty asks for perpetual protection of student education records specifically",
+              "to": "Perpetual confidentiality limited to student education records; three years for all other Confidential Information.",
+              "rationale": "Signed repeatedly; a records-only carve-out reduces our risk and aligns with education-privacy norms.",
+              "observation_ref": {
+                "document_id": "fixture-college",
+                "version": 2,
+                "clause_path": "9.2",
+                "char_span": [
+                  0,
+                  95
+                ]
+              }
+            }
+          ],
+          "fallbacks": [],
+          "rejected": [],
+          "confidence": {
+            "score": 0.9,
+            "basis": "precedent_count + provenance_mix",
+            "n_our_paper": 7,
+            "n_counterparty_paper": 3,
+            "evidence_sufficient": true
+          }
+        }
+      }
+    ],
+    "clause_library": []
+  },
+  "posture": {
+    "system_prompt": "This is a generally low-risk agreement type; default toward ACCEPT. Hold firm on indemnification and confidentiality; governing law is negotiable.",
+    "generation": {
+      "generated_by": "playbook-engine (synthetic fixture)",
+      "generated_at": "2026-01-01T00:00:00Z",
+      "interview": [
+        {
+          "q": "rounds",
+          "question": "How many rounds do you typically go?",
+          "answer": "Usually 2."
+        }
+      ],
+      "grounded_in": "evidence@fixture"
+    }
+  },
+  "floor": {
+    "invariants": [
+      {
+        "id": "no-uncapped-liability",
+        "statement": "Never accept uncapped liability or indemnity covering the counterparty's own negligence.",
+        "rationale": "Uncapped exposure is categorically unacceptable regardless of deal value."
+      }
+    ]
+  },
+  "corpus": {
+    "documents": [
+      {
+        "document_id": "acme-university",
+        "title": "Acme University Affiliation Agreement",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.98,
+        "versions": 3,
+        "signed_version": 3,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "fixture-college",
+        "title": "FixtureCorp College Placement Agreement",
+        "provenance": "our_paper",
+        "in_scope": true,
+        "scope_rationale": "Educational affiliation agreement matching target type.",
+        "scope_confidence": 0.95,
+        "versions": 2,
+        "signed_version": 2,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      },
+      {
+        "document_id": "example-institute",
+        "title": "Example Institute Clinical Placement Agreement",
+        "provenance": "counterparty_paper",
+        "in_scope": true,
+        "scope_rationale": "Counterparty-paper affiliation agreement in scope.",
+        "scope_confidence": 0.9,
+        "versions": 4,
+        "signed_version": 4,
+        "version_order_basis": "edit_distance_chain+signed_anchor"
+      }
+    ],
+    "stats": {
+      "documents_total": 3,
+      "documents_in_scope": 3,
+      "versions_total": 9
+    }
+  },
+  "compiler": {
+    "name": "playbook-engine",
+    "version": "0.3.0",
+    "run_id": "fixture-run-001",
+    "generated_at": "2026-01-01T00:00:00Z",
+    "stub_basis_present": false
+  },
+  "digest": {
+    "digest_version": "2",
+    "clause_count": 4,
+    "clauses": [
+      {
+        "id": "clause.indemnification",
+        "taxonomy_id": "indemnification",
+        "title": "Indemnification",
+        "historical_stance": "usually_held",
+        "stance_detail": {
+          "held": 8,
+          "of": 10,
+          "basis": "our_paper"
+        },
+        "our_standard": {
+          "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "8",
+            "char_span": [
+              0,
+              110
+            ]
+          }
+        },
+        "preferred_variations": [
+          {
+            "if": "mutual, negligence-limited indemnification",
+            "to": "Mutual indemnification limited to each party's own negligence, worded to match the counterparty's standard drafting.",
+            "observation_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "8.1",
+              "char_span": [
+                0,
+                160
+              ]
+            },
+            "n": 6,
+            "band": "sometimes"
+          }
+        ],
+        "concessions": [
+          {
+            "text_summary": "One-way indemnity running to the counterparty for IP infringement claims.",
+            "n": 1,
+            "band": "rare",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "example_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "8.2",
+              "char_span": [
+                0,
+                140
+              ]
+            }
+          }
+        ],
+        "unacceptable": [
+          {
+            "text_summary": "Uncapped, one-way indemnity covering all claims including the counterparty's own negligence.",
+            "n": 2,
+            "band": "sometimes",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 1,
+              "clause_path": "8.1",
+              "char_span": [
+                0,
+                150
+              ]
+            }
+          }
+        ],
+        "exemplar_forms": [
+          {
+            "text_summary": "Mutual indemnification limited to each party's own negligence.",
+            "n": 6,
+            "band": "sometimes",
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "8.1",
+              "char_span": [
+                0,
+                160
+              ]
+            }
+          },
+          {
+            "text_summary": "Mutual indemnification, negligence-based, with a notice-and-cooperation proviso.",
+            "n": 3,
+            "band": "sometimes",
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "better",
+              "magnitude": "minor"
+            },
+            "example_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "8.1",
+              "char_span": [
+                0,
+                150
+              ]
+            }
+          },
+          {
+            "text_summary": "One-way indemnity running to the counterparty for IP infringement claims.",
+            "n": 1,
+            "band": "rare",
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "material"
+            },
+            "example_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "8.2",
+              "char_span": [
+                0,
+                140
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "clause.governing-law",
+        "taxonomy_id": "governing_law",
+        "title": "Governing Law",
+        "historical_stance": "mixed",
+        "stance_detail": {
+          "held": 3,
+          "of": 7,
+          "basis": "all"
+        },
+        "our_standard": {
+          "text": "This Agreement is governed by the laws of the State of Fixtureland.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "14",
+            "char_span": [
+              0,
+              66
+            ]
+          }
+        },
+        "preferred_variations": [
+          {
+            "if": "counterparty insists on its home-state law with no exclusive forum clause",
+            "to": "Counterparty's home-state governing law, provided no exclusive forum-selection clause is added.",
+            "observation_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "14",
+              "char_span": [
+                0,
+                70
+              ]
+            },
+            "n": 4,
+            "band": "sometimes"
+          }
+        ],
+        "concessions": [],
+        "unacceptable": [],
+        "exemplar_forms": [
+          {
+            "text_summary": "Counterparty's home-state law, no forum-selection clause.",
+            "n": 4,
+            "band": "sometimes",
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "minor"
+            },
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "14",
+              "char_span": [
+                0,
+                70
+              ]
+            }
+          },
+          {
+            "text_summary": "Our home-state law retained.",
+            "n": 3,
+            "band": "sometimes",
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "example_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "14",
+              "char_span": [
+                0,
+                72
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "clause.term-termination",
+        "taxonomy_id": "term_termination",
+        "title": "Term and Termination",
+        "historical_stance": "usually_held",
+        "stance_detail": {
+          "held": 5,
+          "of": 7,
+          "basis": "our_paper"
+        },
+        "our_standard": {
+          "text": "Either party may terminate for convenience on thirty (30) days' written notice.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "11",
+            "char_span": [
+              0,
+              78
+            ]
+          }
+        },
+        "preferred_variations": [
+          {
+            "if": "counterparty asks for a longer convenience-termination notice window",
+            "to": "Termination for convenience on up to sixty (60) days' written notice.",
+            "observation_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "11.1",
+              "char_span": [
+                0,
+                90
+              ]
+            },
+            "n": 2,
+            "band": "sometimes"
+          }
+        ],
+        "concessions": [
+          {
+            "text_summary": "Termination for convenience extended to 60 days' notice.",
+            "n": 2,
+            "band": "sometimes",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "minor"
+            },
+            "example_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "11.1",
+              "char_span": [
+                0,
+                90
+              ]
+            }
+          }
+        ],
+        "unacceptable": [],
+        "exemplar_forms": [
+          {
+            "text_summary": "Mutual termination for convenience on 30 days' notice.",
+            "n": 5,
+            "band": "sometimes",
+            "deviation": "reworded_equivalent",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "11.1",
+              "char_span": [
+                0,
+                100
+              ]
+            }
+          },
+          {
+            "text_summary": "Termination for convenience extended to 60 days' notice.",
+            "n": 2,
+            "band": "sometimes",
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "worse",
+              "magnitude": "minor"
+            },
+            "example_ref": {
+              "document_id": "example-institute",
+              "version": 4,
+              "clause_path": "11.1",
+              "char_span": [
+                0,
+                90
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "clause.confidentiality",
+        "taxonomy_id": "confidentiality",
+        "title": "Confidentiality",
+        "historical_stance": "consistently_held",
+        "stance_detail": {
+          "held": 9,
+          "of": 9,
+          "basis": "all"
+        },
+        "our_standard": {
+          "text": "Confidential Information shall be protected for three (3) years after disclosure.",
+          "source_ref": {
+            "document_id": "template",
+            "version": "template",
+            "clause_path": "9",
+            "char_span": [
+              0,
+              80
+            ]
+          }
+        },
+        "preferred_variations": [
+          {
+            "if": "counterparty asks for perpetual protection of student education records specifically",
+            "to": "Perpetual confidentiality limited to student education records; three years for all other Confidential Information.",
+            "observation_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "9.2",
+              "char_span": [
+                0,
+                95
+              ]
+            },
+            "n": 3,
+            "band": "sometimes"
+          }
+        ],
+        "concessions": [],
+        "unacceptable": [],
+        "exemplar_forms": [
+          {
+            "text_summary": "Mutual confidentiality, 3-year survival.",
+            "n": 7,
+            "band": "sometimes",
+            "deviation": "none",
+            "risk_delta": {
+              "direction": "neutral",
+              "magnitude": "none"
+            },
+            "example_ref": {
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "9.1",
+              "char_span": [
+                0,
+                100
+              ]
+            }
+          },
+          {
+            "text_summary": "Perpetual confidentiality for student records.",
+            "n": 3,
+            "band": "sometimes",
+            "deviation": "substantive",
+            "risk_delta": {
+              "direction": "better",
+              "magnitude": "minor"
+            },
+            "example_ref": {
+              "document_id": "fixture-college",
+              "version": 2,
+              "clause_path": "9.2",
+              "char_span": [
+                0,
+                95
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "identity": {
+    "id": "educational-affiliation",
+    "version": "1.0.0",
+    "supersedes": null,
+    "content_hash": "sha256:c3dfddcb16fba4fd41d7ceb62b404a3c7a33117d0c76ed453946eba2a3abc45e",
+    "section_digests": {
+      "evidence": "sha256:e1ae2fb9bd98b29e29cd8e78c6d82609c9c7e9936819088831ab5da43e545532",
+      "posture": "sha256:2bac011300d833c1b74a6a727bf9fcbab7856a9c439f8300979523a3682c7055",
+      "floor": "sha256:c7a35ad2101a34c5ceee6a2a885f3b9d7d1d303e324e41401f19d958d622dc6a",
+      "curation": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    }
+  }
+}
+
+</script>
+<script id="opf-digest" type="application/json">
+{
+ "digest_version": "2",
+ "clause_count": 4,
+ "clauses": [
+  {
+   "id": "clause.indemnification",
+   "taxonomy_id": "indemnification",
+   "title": "Indemnification",
+   "historical_stance": "usually_held",
+   "stance_detail": {
+    "held": 8,
+    "of": 10,
+    "basis": "our_paper"
+   },
+   "our_standard": {
+    "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct.",
+    "source_ref": {
+     "document_id": "template",
+     "version": "template",
+     "clause_path": "8",
+     "char_span": [
+      0,
+      110
+     ]
+    }
+   },
+   "preferred_variations": [
+    {
+     "if": "mutual, negligence-limited indemnification",
+     "to": "Mutual indemnification limited to each party's own negligence, worded to match the counterparty's standard drafting.",
+     "observation_ref": {
+      "document_id": "acme-university",
+      "version": 3,
+      "clause_path": "8.1",
+      "char_span": [
+       0,
+       160
+      ]
+     },
+     "n": 6,
+     "band": "sometimes"
+    }
+   ],
+   "concessions": [
+    {
+     "text_summary": "One-way indemnity running to the counterparty for IP infringement claims.",
+     "n": 1,
+     "band": "rare",
+     "risk_delta": {
+      "direction": "worse",
+      "magnitude": "material"
+     },
+     "example_ref": {
+      "document_id": "example-institute",
+      "version": 4,
+      "clause_path": "8.2",
+      "char_span": [
+       0,
+       140
+      ]
+     }
+    }
+   ],
+   "unacceptable": [
+    {
+     "text_summary": "Uncapped, one-way indemnity covering all claims including the counterparty's own negligence.",
+     "n": 2,
+     "band": "sometimes",
+     "risk_delta": {
+      "direction": "worse",
+      "magnitude": "material"
+     },
+     "example_ref": {
+      "document_id": "acme-university",
+      "version": 1,
+      "clause_path": "8.1",
+      "char_span": [
+       0,
+       150
+      ]
+     }
+    }
+   ],
+   "exemplar_forms": [
+    {
+     "text_summary": "Mutual indemnification limited to each party's own negligence.",
+     "n": 6,
+     "band": "sometimes",
+     "deviation": "reworded_equivalent",
+     "risk_delta": {
+      "direction": "neutral",
+      "magnitude": "none"
+     },
+     "example_ref": {
+      "document_id": "acme-university",
+      "version": 3,
+      "clause_path": "8.1",
+      "char_span": [
+       0,
+       160
+      ]
+     }
+    },
+    {
+     "text_summary": "Mutual indemnification, negligence-based, with a notice-and-cooperation proviso.",
+     "n": 3,
+     "band": "sometimes",
+     "deviation": "reworded_equivalent",
+     "risk_delta": {
+      "direction": "better",
+      "magnitude": "minor"
+     },
+     "example_ref": {
+      "document_id": "fixture-college",
+      "version": 2,
+      "clause_path": "8.1",
+      "char_span": [
+       0,
+       150
+      ]
+     }
+    },
+    {
+     "text_summary": "One-way indemnity running to the counterparty for IP infringement claims.",
+     "n": 1,
+     "band": "rare",
+     "deviation": "substantive",
+     "risk_delta": {
+      "direction": "worse",
+      "magnitude": "material"
+     },
+     "example_ref": {
+      "document_id": "example-institute",
+      "version": 4,
+      "clause_path": "8.2",
+      "char_span": [
+       0,
+       140
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "clause.governing-law",
+   "taxonomy_id": "governing_law",
+   "title": "Governing Law",
+   "historical_stance": "mixed",
+   "stance_detail": {
+    "held": 3,
+    "of": 7,
+    "basis": "all"
+   },
+   "our_standard": {
+    "text": "This Agreement is governed by the laws of the State of Fixtureland.",
+    "source_ref": {
+     "document_id": "template",
+     "version": "template",
+     "clause_path": "14",
+     "char_span": [
+      0,
+      66
+     ]
+    }
+   },
+   "preferred_variations": [
+    {
+     "if": "counterparty insists on its home-state law with no exclusive forum clause",
+     "to": "Counterparty's home-state governing law, provided no exclusive forum-selection clause is added.",
+     "observation_ref": {
+      "document_id": "acme-university",
+      "version": 3,
+      "clause_path": "14",
+      "char_span": [
+       0,
+       70
+      ]
+     },
+     "n": 4,
+     "band": "sometimes"
+    }
+   ],
+   "concessions": [],
+   "unacceptable": [],
+   "exemplar_forms": [
+    {
+     "text_summary": "Counterparty's home-state law, no forum-selection clause.",
+     "n": 4,
+     "band": "sometimes",
+     "deviation": "substantive",
+     "risk_delta": {
+      "direction": "neutral",
+      "magnitude": "minor"
+     },
+     "example_ref": {
+      "document_id": "acme-university",
+      "version": 3,
+      "clause_path": "14",
+      "char_span": [
+       0,
+       70
+      ]
+     }
+    },
+    {
+     "text_summary": "Our home-state law retained.",
+     "n": 3,
+     "band": "sometimes",
+     "deviation": "none",
+     "risk_delta": {
+      "direction": "neutral",
+      "magnitude": "none"
+     },
+     "example_ref": {
+      "document_id": "fixture-college",
+      "version": 2,
+      "clause_path": "14",
+      "char_span": [
+       0,
+       72
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "clause.term-termination",
+   "taxonomy_id": "term_termination",
+   "title": "Term and Termination",
+   "historical_stance": "usually_held",
+   "stance_detail": {
+    "held": 5,
+    "of": 7,
+    "basis": "our_paper"
+   },
+   "our_standard": {
+    "text": "Either party may terminate for convenience on thirty (30) days' written notice.",
+    "source_ref": {
+     "document_id": "template",
+     "version": "template",
+     "clause_path": "11",
+     "char_span": [
+      0,
+      78
+     ]
+    }
+   },
+   "preferred_variations": [
+    {
+     "if": "counterparty asks for a longer convenience-termination notice window",
+     "to": "Termination for convenience on up to sixty (60) days' written notice.",
+     "observation_ref": {
+      "document_id": "example-institute",
+      "version": 4,
+      "clause_path": "11.1",
+      "char_span": [
+       0,
+       90
+      ]
+     },
+     "n": 2,
+     "band": "sometimes"
+    }
+   ],
+   "concessions": [
+    {
+     "text_summary": "Termination for convenience extended to 60 days' notice.",
+     "n": 2,
+     "band": "sometimes",
+     "risk_delta": {
+      "direction": "worse",
+      "magnitude": "minor"
+     },
+     "example_ref": {
+      "document_id": "example-institute",
+      "version": 4,
+      "clause_path": "11.1",
+      "char_span": [
+       0,
+       90
+      ]
+     }
+    }
+   ],
+   "unacceptable": [],
+   "exemplar_forms": [
+    {
+     "text_summary": "Mutual termination for convenience on 30 days' notice.",
+     "n": 5,
+     "band": "sometimes",
+     "deviation": "reworded_equivalent",
+     "risk_delta": {
+      "direction": "neutral",
+      "magnitude": "none"
+     },
+     "example_ref": {
+      "document_id": "acme-university",
+      "version": 3,
+      "clause_path": "11.1",
+      "char_span": [
+       0,
+       100
+      ]
+     }
+    },
+    {
+     "text_summary": "Termination for convenience extended to 60 days' notice.",
+     "n": 2,
+     "band": "sometimes",
+     "deviation": "substantive",
+     "risk_delta": {
+      "direction": "worse",
+      "magnitude": "minor"
+     },
+     "example_ref": {
+      "document_id": "example-institute",
+      "version": 4,
+      "clause_path": "11.1",
+      "char_span": [
+       0,
+       90
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "clause.confidentiality",
+   "taxonomy_id": "confidentiality",
+   "title": "Confidentiality",
+   "historical_stance": "consistently_held",
+   "stance_detail": {
+    "held": 9,
+    "of": 9,
+    "basis": "all"
+   },
+   "our_standard": {
+    "text": "Confidential Information shall be protected for three (3) years after disclosure.",
+    "source_ref": {
+     "document_id": "template",
+     "version": "template",
+     "clause_path": "9",
+     "char_span": [
+      0,
+      80
+     ]
+    }
+   },
+   "preferred_variations": [
+    {
+     "if": "counterparty asks for perpetual protection of student education records specifically",
+     "to": "Perpetual confidentiality limited to student education records; three years for all other Confidential Information.",
+     "observation_ref": {
+      "document_id": "fixture-college",
+      "version": 2,
+      "clause_path": "9.2",
+      "char_span": [
+       0,
+       95
+      ]
+     },
+     "n": 3,
+     "band": "sometimes"
+    }
+   ],
+   "concessions": [],
+   "unacceptable": [],
+   "exemplar_forms": [
+    {
+     "text_summary": "Mutual confidentiality, 3-year survival.",
+     "n": 7,
+     "band": "sometimes",
+     "deviation": "none",
+     "risk_delta": {
+      "direction": "neutral",
+      "magnitude": "none"
+     },
+     "example_ref": {
+      "document_id": "acme-university",
+      "version": 3,
+      "clause_path": "9.1",
+      "char_span": [
+       0,
+       100
+      ]
+     }
+    },
+    {
+     "text_summary": "Perpetual confidentiality for student records.",
+     "n": 3,
+     "band": "sometimes",
+     "deviation": "substantive",
+     "risk_delta": {
+      "direction": "better",
+      "magnitude": "minor"
+     },
+     "example_ref": {
+      "document_id": "fixture-college",
+      "version": 2,
+      "clause_path": "9.2",
+      "char_span": [
+       0,
+       95
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}
+</script>
+</body>
+</html>

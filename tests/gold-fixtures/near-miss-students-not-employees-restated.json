@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-students-not-employees-restated",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty reaffirms general non-employment status of Students without using any of 'no-student-employment-status's trigger phrases ('co-employment', 'co-employer', 'joint employer', 'joint employment'). Must ACCEPT with zero fires.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "student-status-and-benefits",
+      "rule_id": "no-student-employment-status",
+      "reason": "Reaffirming that Students are not employees is standard boilerplate and contains none of the rule's trigger_terms; it must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "student-status-and-benefits",
+    "inserted_hunk": "The parties reaffirm that Students are not employees, agents, contractors, or representatives of the Company for any purpose under this Agreement.",
+    "notes": "Near-miss: general non-employment reaffirmation; deliberately avoids the literal trigger phrases 'co-employment'/'co-employer'/'joint employer'/'joint employment'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-student-employment-status",
+    "expected_result": "no_fire",
+    "rationale": "Hunk contains none of trigger_terms ['co-employment', 'co-employer', 'joint employer', 'joint employment']."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

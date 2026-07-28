@@ -1,0 +1,9 @@
+{
+  "schema_version": "output-schema-v1",
+  "decision": "ACCEPT",
+  "confidence_state": "OK",
+  "confidence_band": null,
+  "issues": [],
+  "critic_delta": null,
+  "verdict_summary": "The counterparty's changes to the notices and term-length sections preserve your standard positions; no requested changes identified by tool."
+}

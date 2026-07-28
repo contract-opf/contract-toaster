@@ -1,0 +1,11 @@
+{
+  "description": "Golden-hash fixture for CI: records the expected content_hash of the SYNTHETIC generic playbook fixture (tests/fixtures/playbooks/synthetic-generic-v1.0.0.json, issue #410) at a known commit, hashed by DIRECT file path. If this hash drifts, tests/test_canonicalize.py::test_golden_hash_fixture fails, alerting implementers that the canonical form or the fixture content changed. This is a SEPARATE fixture from tests/gold-fixtures/canonicalize-golden-hash.json, which hashes the SAME underlying file but reached by resolving the registered \"eiaa\" playbook_id (issue #403 repointed the real, evicted eiaa playbook onto this synthetic fixture) and is still relied on by tests/test_active_bundle_resolver_194.py -- the two protect different resolution paths to (now) the same content and must not be conflated.",
+  "playbook_path": "tests/fixtures/playbooks/synthetic-generic-v1.0.0.json",
+  "content_hash": "sha256:a50ce0b608a76127f48fd09f968771d7f0d3979134c261344d9651e58c430cb2",
+  "canonical_sha256": "a50ce0b608a76127f48fd09f968771d7f0d3979134c261344d9651e58c430cb2",
+  "excluded_from_canonical": [
+    "release",
+    "status"
+  ],
+  "canonicalization_rule": "canonical = playbook JSON minus playbook.status and playbook.release, serialized with sort_keys=True, separators=(',', ':'), UTF-8."
+}

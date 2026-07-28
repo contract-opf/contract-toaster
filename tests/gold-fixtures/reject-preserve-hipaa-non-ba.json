@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-preserve-hipaa-non-ba",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'preserve-hipaa-non-ba': counterparty removes/alters the protected clause in 'sec-6', deleting all of required_tokens ['business associate']. Must fire preserve-hipaa-non-ba and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "hipaa",
+      "section_ref": "sec-6",
+      "is_hard_rejection": true,
+      "rule_id": "preserve-hipaa-non-ba"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "hipaa",
+    "altered_hunk": "The parties will address this subject in accordance with the terms otherwise set forth in this Agreement.",
+    "notes": "Mechanically generated: replacement text omits all of required_tokens ['business associate'] for rule 'preserve-hipaa-non-ba' (token_policy='any')."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-hipaa-non-ba",
+    "expected_result": "fire",
+    "rationale": "Replacement text contains none of required_tokens ['business associate']; must fire 'preserve-hipaa-non-ba' under token_policy='any'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

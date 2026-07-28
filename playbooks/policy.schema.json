@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://contract-opf.github.io/playbooks/policy.schema.json",
+  "title": "Review policy document",
+  "description": "A plain-English, human-authored policy document for one playbook. This is the ONE home for all prescriptive human input into a review: general rules, scoped guidance, and 'regardless of what the corpus shows, treat our position as X' statements. It is deliberately NOT derived from the corpus -- the OPF playbook's evidence/digest carries what the corpus HAS shown (descriptive precedent), while this document carries what a human says we DO (prescriptive policy). The playbook feedback loop corrects derivation errors of fact and never edits this file. Filename convention: <playbook_id>-policy-v<N>.json, where N is the integer `version` below.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["playbook_id", "version", "title", "approval", "rules"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional local schema pointer for editor tooling."
+    },
+    "playbook_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "The playbook this policy governs, as registered in playbooks/registry.json. Generic: nothing in the schema or the consuming code is specific to any one playbook_id."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic integer version. Editing the policy bumps this by 1 and re-stamps `approval`, then the bundle is re-bound. Deliberately an integer, not semver: a policy edit is a governance event, not a semantic-compatibility event."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable title, shown in the Rules admin page."
+    },
+    "description": {
+      "type": "string",
+      "description": "What this policy covers and any caveats a reviewer/approver should know."
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "description": "Governance stamp. A policy is only prescriptive input a human has signed off on, so who approved which version, when, is recorded here.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["draft", "approved"],
+          "description": "`draft` until a human with authority approves this exact content. Never stamp `approved` on content an approver has not actually reviewed."
+        },
+        "approved_by": {
+          "type": ["string", "null"],
+          "description": "Name and role of the approver, e.g. 'Jane Doe, Head of Legal'. Null while draft."
+        },
+        "approved_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "RFC 3339 timestamp of approval. Null while draft."
+        },
+        "supersedes": {
+          "type": ["integer", "null"],
+          "description": "The `version` this one replaces, or null for the first version."
+        },
+        "note": {
+          "type": "string",
+          "description": "Free-text context for the approver: what changed, what needs scrutiny."
+        },
+        "harvested_from": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Provenance when this policy's content was migrated out of an earlier artifact, so an approver can diff intent against the source they previously approved. content_hash MUST be recomputed from the actual harvested revision and is always verified directly against `path` on disk. git_blob_sha/git_commit are recorded IN PAIR and are OPTIONAL: they additionally anchor content_hash to a git revision when the harvested source was already a landed commit at harvest time. They MUST be omitted -- never fabricated -- when no such landed commit exists yet (e.g. the source was edited in the same changeset that records the harvest); a commit object reachable from no pushed ref resolves on the machine that made it and nowhere else. The source may later be deleted, and a fresh-history public cut carries no history to recover it from, so this record is what makes the policy stand alone.",
+          "properties": {
+            "path": { "type": "string" },
+            "content_hash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "sha256 of the RAW BYTES of the harvested revision of `path`."
+            },
+            "git_blob_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$",
+              "description": "Optional. The git blob object whose bytes hash to content_hash; recorded only when git_commit is also recorded."
+            },
+            "git_commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$",
+              "description": "Optional. A commit already in history whose tree resolves `path` to git_blob_sha; recorded only when git_blob_sha is also recorded."
+            },
+            "note": { "type": "string" }
+          }
+        },
+        "carried_determinations": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Determinations of record made by an approver on the HARVESTED SOURCE that this policy carries forward. The point of a policy document is that such decisions live in one versioned, signed home; harvesting the rules without them would strand the decision. Carrying a determination does NOT approve this document -- `status` governs that.",
+          "properties": {
+            "note": { "type": "string" },
+            "source_legal_approval": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The approval block recorded on the source artifact, reproduced here for the approver's benefit. It signs the SOURCE's exact content, not this document.",
+              "properties": {
+                "issue": { "type": "string" },
+                "scope": { "type": "string" },
+                "approved_by": { "type": "string" },
+                "approved_at": { "type": "string", "format": "date-time" },
+                "note": { "type": "string" }
+              }
+            },
+            "determinations": {
+              "type": "array",
+              "description": "Each determination and the policy rule(s) that now carry it.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "summary", "policy_rule_ids"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "summary": { "type": "string" },
+                  "requires_attorney_override": { "type": "boolean" },
+                  "policy_rule_ids": { "type": "array", "items": { "type": "string" } },
+                  "source": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "flagged_for_approver": {
+          "type": "array",
+          "description": "Questions the harvest deliberately did NOT decide because they are legal judgment calls. An approver must resolve each before `status` moves to `approved`.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "question"],
+            "properties": {
+              "id": { "type": "string" },
+              "question": { "type": "string" },
+              "rule_ids": { "type": "array", "items": { "type": "string" } },
+              "detail": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The prescriptive rules. Order is presentation order; it carries no precedence meaning.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "strength", "text"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]*$",
+            "description": "Stable identifier, unique within this document. Cited verbatim by the attribution manifest as a change's authorizing input, so it must not be recycled across meanings."
+          },
+          "strength": {
+            "type": "string",
+            "enum": ["must", "should"],
+            "description": "`must`: binding when applicable. If a must rule appears inapplicable or in tension with the clause at hand, the reviewer FLAGS for attorney review -- never silently overrides in either direction. Every must rule is also re-read against the finished redline by the closing model self-check. `should`: weighs heavily, but the model may decide against it on the facts and say why."
+          },
+          "topic": {
+            "type": "string",
+            "description": "Optional grouping label for display in the Rules admin page (e.g. 'indemnification'). Advisory only: scope that actually constrains a rule belongs in its `text`, because `text` is what the model reads."
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The rule in plain English, exactly as a human wrote it. Rendered verbatim to the model and to the Rules admin page -- never paraphrased, summarized, or templated by code."
+          }
+        }
+      }
+    }
+  }
+}

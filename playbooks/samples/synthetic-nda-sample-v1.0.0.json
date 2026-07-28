@@ -1,0 +1,197 @@
+{
+  "$schema": "https://contract-opf.github.io/playbooks/schema/v1.json",
+  "playbook": {
+    "id": "synthetic-nda-sample",
+    "version": "1.0.0",
+    "agreement_type": "Non-Disclosure Agreement",
+    "agreement_aliases": [
+      "NDA",
+      "Confidentiality Agreement",
+      "Mutual Non-Disclosure Agreement"
+    ],
+    "exos_party": "Your Organization, LLC",
+    "counterparty_type": "Sample Counterparty",
+    "created_at": "2026-07-24T00:00:00Z",
+    "created_by": "playbook-sample",
+    "metadata": {
+      "primary_model_id": "anthropic.claude-opus-4-8",
+      "critic_model_id": "anthropic.claude-sonnet-4-6",
+      "embedding_model_id": "amazon.titan-embed-text-v2:0",
+      "model_region": "us-east-1",
+      "request_contract": "opus-4.8-bedrock-runtime-single-region-native-id-no-sampling-adaptive-thinking",
+      "decision_mode": "binary"
+    },
+    "status": "draft"
+  },
+  "general_principles": [
+    "This is a publicly-shipped, SYNTHETIC sample playbook: a clearly fictional mutual NDA bundled with this tool so a fresh install has something real to review against out of the box, for demos, screenshots, and documentation. No real party, no real playbook is ever exposed by shipping this.",
+    "Default toward ACCEPT for anything that does not touch a floor protection this playbook relies on, or introduce a term this playbook rejects outright.",
+    "Be decisive. Every change is either ACCEPT (apply the change) or REQUEST_CHANGE (counter with specific replacement text and a one- or two-sentence footnote rationale). Never 'flag for review'.",
+    "Identify each issue by section number and title from the proposed document.",
+    "Never invent obligations that aren't in this playbook. Never accept obligations that aren't in this playbook unless they are de minimis."
+  ],
+  "decision_rubric": {
+    "accept_when": [
+      "Change is clerical, stylistic, or grammatical without legal impact.",
+      "Change updates the counterparty's own legal name, address, contact info, or signatory.",
+      "Change falls inside any de_minimis_categories entry below.",
+      "Change is mutual and symmetric (e.g., a clarification that applies equally to both parties)."
+    ],
+    "request_change_when": [
+      "Change matches an entry on the hard_rejections list.",
+      "Change removes a floor protection this playbook relies on (mutuality, the bounded survival period, or the standard carve-outs).",
+      "Change creates a new obligation, risk, or liability not contemplated by this playbook."
+    ]
+  },
+  "topics": [
+    {
+      "id": "nda-confidentiality-scope",
+      "section_ref": "Confidentiality Obligations",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "our_standard": "Each party's confidential information is protected on a mutual basis. The obligation does not apply to information that is already known to the receiving party without a duty of confidentiality, is independently developed without reference to the disclosing party's information, becomes publicly available through no fault of the receiving party, or is required to be disclosed by law or valid legal process.",
+      "must_preserve": [
+        "mutual (two-way) treatment of the confidentiality obligation",
+        "the four standard carve-outs (already known, independently developed, publicly available, legally compelled)"
+      ],
+      "reject_if_proposed": [
+        "a one-sided obligation that binds only one party",
+        "removal of any of the four standard carve-outs"
+      ],
+      "hard_rejection_refs": [
+        "nda-no-unilateral-confidentiality"
+      ],
+      "replacement_text": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "nda-term-survival",
+      "section_ref": "Term and Survival",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "our_standard": "The confidentiality obligation survives termination or expiration of the agreement for three (3) years from the date of disclosure.",
+      "must_preserve": [
+        "a defined, bounded survival period"
+      ],
+      "reject_if_proposed": [
+        "a perpetual or indefinite confidentiality obligation with no end date"
+      ],
+      "hard_rejection_refs": [
+        "nda-no-perpetual-unbounded-obligation"
+      ],
+      "replacement_text": {
+        "mode": "bounded_edit",
+        "max_chars": 600,
+        "must_not_introduce": [
+          "perpetual",
+          "in perpetuity",
+          "indefinitely",
+          "no expiration"
+        ]
+      }
+    },
+    {
+      "id": "nda-compelled-disclosure",
+      "section_ref": "Compelled Disclosure",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "our_standard": "If a party is legally compelled to disclose the other party's confidential information, it will give prompt written notice (where legally permitted) so the disclosing party may seek a protective order, and will disclose only the portion of the information legally required.",
+      "must_preserve": [
+        "prompt notice to the disclosing party before compelled disclosure, where legally permitted",
+        "disclosure limited to what is legally required"
+      ],
+      "reject_if_proposed": [
+        "compelled disclosure with no notice obligation at all"
+      ],
+      "hard_rejection_refs": [],
+      "replacement_text": {
+        "mode": "none"
+      }
+    }
+  ],
+  "hard_rejections": [
+    {
+      "id": "nda-no-unilateral-confidentiality",
+      "description": "Counterparty proposes a one-sided confidentiality obligation that binds only one party, or removes the mutual (two-way) framing of the obligation.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "obligates only the Receiving Party",
+        "solely for the benefit of the Disclosing Party",
+        "one-way confidentiality"
+      ],
+      "match": "word_boundary",
+      "applies_to_topics": [
+        "nda-confidentiality-scope"
+      ]
+    },
+    {
+      "id": "nda-no-perpetual-unbounded-obligation",
+      "description": "Counterparty introduces a perpetual, indefinite, or otherwise unbounded confidentiality obligation with no end date.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "in perpetuity",
+        "perpetual obligation",
+        "survive indefinitely",
+        "no expiration"
+      ],
+      "match": "word_boundary",
+      "applies_to_topics": [
+        "nda-confidentiality-scope",
+        "nda-term-survival"
+      ]
+    }
+  ],
+  "de_minimis_categories": [
+    "Counterparty's own legal name, address, email, or signatory updates.",
+    "Typo and grammar corrections.",
+    "Reformatting changes (font, spacing, capitalization).",
+    "Section renumbering without substantive change.",
+    "Restating an existing obligation in different words."
+  ],
+  "output_format": {
+    "decision_field": "ACCEPT | REQUEST_CHANGE",
+    "every_issue_includes": [
+      "section_ref",
+      "section_title",
+      "counterparty_change_summary",
+      "decision",
+      "external_rationale_for_footnote",
+      "proposed_replacement_text",
+      "playbook_topic_id"
+    ],
+    "footnote_phrasing_rules": [
+      "One or two sentences per footnote. No more.",
+      "Name the specific risk created rather than generic phrases like 'not standard'.",
+      "Plain English. Avoid legalese where a plain word does the job.",
+      "State the position. Don't hedge with 'we generally prefer' or 'our usual practice is'."
+    ],
+    "citation_rules": {
+      "external_footnotes_cite": "contract_position_only",
+      "precedent_citations": "internal_only",
+      "forbid_in_external_output": [
+        "counterparty_name",
+        "precedent_deal_date",
+        "verbatim_precedent_text",
+        "system_prompt_fragment",
+        "internal_playbook_id"
+      ]
+    },
+    "system_status": {
+      "states": [
+        "OK",
+        "LOW_CONFIDENCE",
+        "MANUAL_REVIEW_REQUIRED",
+        "ERROR_MANUAL_REVIEW_REQUIRED"
+      ],
+      "confidence_field": "confidence_state",
+      "manual_review_routing": "Manual-review states are operational statuses and never external legal decisions."
+    }
+  }
+}

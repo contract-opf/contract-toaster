@@ -1,0 +1,203 @@
+/*
+ * tokens.css — the shared design-token vocabulary for the redesigned SPA
+ * (CTDS v2 — docs/frontend-design-system.md §4).
+ *
+ * Loaded before base.css/app.css in main.tsx. Values here are the single
+ * source of truth for the app's warm "toaster" palette, surfaces/elevation,
+ * spacing rhythm, radii, focus ring, motion, and typography; base.css,
+ * app.css, and every ct-* component hook off these variables instead of
+ * hardcoding colors. Theme-aware: the dark block mirrors
+ * prefers-color-scheme (with a [data-theme] attribute override).
+ */
+:root {
+  /* Brand — toaster warmth */
+  --ct-accent: #af4b29;         /* toaster orange-red — primary accent
+                                    (darkened from #c0522d in the #396 contrast
+                                    audit: at #c0522d, accent-contrast-on-accent
+                                    and accent(info)-on-info-bg both missed AA
+                                    4.5:1 in day theme; same hue/saturation) */
+  --ct-accent-strong: #a5401f;
+  --ct-accent-soft: #ffe2b8;    /* warm highlight fill (selected dial stop) */
+  --ct-accent-contrast: #fff8f2; /* text/icons on top of --ct-accent */
+  --ct-glow: #ff7a1a;           /* the "hot slot" glow */
+  --ct-toast: #d9a463;          /* toasted bread */
+  --ct-toast-crust: #8a5a2b;
+
+  /* Status palette */
+  --ct-ok: #2e794d;             /* darkened from #2f7d4f — #396 contrast audit
+                                    (ok-vs-ok-bg was 4.42:1, below AA 4.5:1) */
+  --ct-ok-bg: #e7f3ec;
+  --ct-ok-border: #a9d2ba;
+  --ct-warn: #936506;           /* darkened from #9a6a06 — #396 contrast audit
+                                    (warn-vs-warn-bg was 4.22:1, below AA 4.5:1) */
+  --ct-warn-bg: #fbf1dc;
+  --ct-warn-border: #e8cb8c;
+  --ct-danger: #b3261e;
+  --ct-danger-bg: #fbe9e8;
+  --ct-danger-border: #eab0ac;
+  --ct-info: var(--ct-accent);
+  --ct-info-bg: #fdeadf;
+  --ct-info-border: #e3ab8a;
+  --ct-neutral: #5c5c5c;
+  --ct-neutral-bg: #eeeae2;
+  --ct-neutral-border: #d8d1c3;
+
+  /* Surfaces & elevation (day — "counter-top": warm off-white app bg, cream
+     surfaces, soft warm-gray borders, charcoal text). */
+  --ct-bg: #faf7f2;
+  --ct-surface: #fffaf3;
+  --ct-surface-raised: #fffefb;
+  --ct-surface-sunken: #f1e9dc;
+  --ct-border: #e6ddd0;
+  --ct-border-strong: #9c8d72;
+  --ct-text: #26221c;
+  --ct-text-muted: #6b6255;
+  --ct-shadow-1: 0 1px 2px rgba(90, 62, 30, 0.08), 0 1px 1px rgba(90, 62, 30, 0.04);
+  --ct-shadow-2: 0 6px 16px rgba(90, 62, 30, 0.12), 0 2px 6px rgba(90, 62, 30, 0.08);
+  --ct-shadow-3: 0 16px 40px rgba(90, 62, 30, 0.18), 0 6px 12px rgba(90, 62, 30, 0.1);
+
+  /* Rhythm (4/8/12/16/24/32/48/64px scale). --ct-gap* are kept as aliases
+     during migration — --ct-gap-lg's old ad-hoc value (1.75rem/28px) has no
+     exact step, so it's normalized to the nearest one (--ct-space-6/24px). */
+  --ct-space-1: 4px;
+  --ct-space-2: 8px;
+  --ct-space-3: 12px;
+  --ct-space-4: 16px;
+  --ct-space-5: 24px;
+  --ct-space-6: 32px;
+  --ct-space-7: 48px;
+  --ct-space-8: 64px;
+  --ct-gap-sm: var(--ct-space-2);
+  --ct-gap: var(--ct-space-4);
+  --ct-gap-lg: var(--ct-space-5);
+  --ct-radius: 12px;
+  --ct-radius-sm: 8px;
+  --ct-radius-lg: 20px;
+  --ct-radius-full: 999px;
+  --ct-maxw: 960px;
+
+  /* Focus */
+  --ct-focus-ring: 0 0 0 2px var(--ct-bg), 0 0 0 4px var(--ct-accent);
+
+  /* Motion */
+  --ct-ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ct-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ct-dur-fast: 120ms;
+  --ct-dur: 200ms;
+  --ct-dur-slow: 400ms;
+
+  /* Typography — self-hosted via @fontsource (see main.tsx), latin subset
+     only, weights 400/500/700 (display: 500/700; mono: 400). */
+  --ct-font-display: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ct-font-sans: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ct-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --ct-text-xs: 12px;
+  --ct-text-sm: 14px;
+  --ct-text-md: 16px;
+  --ct-text-lg: 20px;
+  --ct-text-xl: 25px;
+  --ct-text-2xl: 31px;
+  --ct-leading-tight: 1.25;
+  --ct-leading: 1.55;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ct-accent: #e8a75b;
+    --ct-accent-strong: #f0b972;
+    --ct-accent-soft: #4a2e18;
+    --ct-accent-contrast: #201510; /* night accent is light — needs dark text/icons */
+    --ct-glow: #ff9a3c;
+    --ct-toast: #b98246;
+    --ct-toast-crust: #f2ede2;
+
+    --ct-ok: #6fcf97;
+    --ct-ok-bg: #1e2f26;
+    --ct-ok-border: #3a5c47;
+    --ct-warn: #e3b768;
+    --ct-warn-bg: #292113;     /* #396: pre-flattened from the alpha hex
+                                   #33291399 (0.6 alpha over --ct-bg #191512)
+                                   — same rendered pixel, but the contrast
+                                   audit can't resolve alpha, so a plain hex
+                                   keeps this pair genuinely checked */
+    --ct-warn-border: #5c4a26;
+    --ct-danger: #f0908a;
+    --ct-danger-bg: #291c1a;   /* #396: pre-flattened from #33201f99
+                                   (0.6 alpha over --ct-bg #191512) */
+    --ct-danger-border: #5c332f;
+    --ct-info: var(--ct-accent);
+    --ct-info-bg: #2d2217;     /* #396: pre-flattened from #3a2a1a99
+                                   (0.6 alpha over --ct-bg #191512) */
+    --ct-info-border: #5c3f28;
+    --ct-neutral: #b8b2a6;
+    --ct-neutral-bg: #2c2924;
+    --ct-neutral-border: #4a463e;
+
+    /* Surfaces & elevation (night — "midnight kitchen": warm-tinted dark
+       surfaces, never pure gray; depth from surface steps + 1px borders,
+       shadows nearly disappear). */
+    --ct-bg: #191512;
+    --ct-surface: #221d18;
+    --ct-surface-raised: #2b241e;
+    --ct-surface-sunken: #14100c;
+    --ct-border: #3a332c;
+    --ct-border-strong: #7c6c56;
+    --ct-text: #f2ede4;
+    --ct-text-muted: #a89b80;
+    --ct-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --ct-shadow-2: 0 6px 16px rgba(0, 0, 0, 0.4);
+    --ct-shadow-3: 0 16px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/*
+ * Explicit [data-theme='dark'] override — same values as the media-query
+ * block above, duplicated rather than shared, because plain CSS custom
+ * properties can't be conditionally assigned from inside a media query and
+ * then reused outside of it. This is what actually makes the override
+ * attribute bidirectional: the block above only ever applies when the OS
+ * already prefers dark (it just lets [data-theme='light'] veto it back to
+ * day), so without this block a caller could not force NIGHT while the OS
+ * prefers light — which a UI theme toggle (e.g. the component gallery,
+ * issue #395) needs to do. Keep both blocks' values identical.
+ */
+:root[data-theme='dark'] {
+  --ct-accent: #e8a75b;
+  --ct-accent-strong: #f0b972;
+  --ct-accent-soft: #4a2e18;
+  --ct-accent-contrast: #201510;
+  --ct-glow: #ff9a3c;
+  --ct-toast: #b98246;
+  --ct-toast-crust: #f2ede2;
+
+  --ct-ok: #6fcf97;
+  --ct-ok-bg: #1e2f26;
+  --ct-ok-border: #3a5c47;
+  --ct-warn: #e3b768;
+  --ct-warn-bg: #292113;      /* #396: pre-flattened alpha hex, see the
+                                  media-query dark block above for detail */
+  --ct-warn-border: #5c4a26;
+  --ct-danger: #f0908a;
+  --ct-danger-bg: #291c1a;    /* #396: pre-flattened alpha hex, see the
+                                  media-query dark block above for detail */
+  --ct-danger-border: #5c332f;
+  --ct-info: var(--ct-accent);
+  --ct-info-bg: #2d2217;      /* #396: pre-flattened alpha hex, see the
+                                  media-query dark block above for detail */
+  --ct-info-border: #5c3f28;
+  --ct-neutral: #b8b2a6;
+  --ct-neutral-bg: #2c2924;
+  --ct-neutral-border: #4a463e;
+
+  --ct-bg: #191512;
+  --ct-surface: #221d18;
+  --ct-surface-raised: #2b241e;
+  --ct-surface-sunken: #14100c;
+  --ct-border: #3a332c;
+  --ct-border-strong: #7c6c56;
+  --ct-text: #f2ede4;
+  --ct-text-muted: #a89b80;
+  --ct-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --ct-shadow-2: 0 6px 16px rgba(0, 0, 0, 0.4);
+  --ct-shadow-3: 0 16px 40px rgba(0, 0, 0, 0.5);
+}

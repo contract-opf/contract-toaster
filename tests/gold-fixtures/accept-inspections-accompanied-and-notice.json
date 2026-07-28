@@ -1,0 +1,19 @@
+{
+  "case_id": "accept-inspections-accompanied-and-notice",
+  "description": "Counterparty proposes reasonable advance notice for inspections, accompanied by a representative. This combines two listed acceptable_variations in the inspections topic; no hard_rejection rule applies to this topic today, so there is no detector to hook, but this exercises the ACCEPT / acceptable_variation gold-case category per issue #183.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "inspections",
+    "inserted_hunk": "Institution may inspect the premises upon 48 business hours' advance written notice, accompanied by a representative of the Company.",
+    "notes": "Matches acceptable_variations 'specific reasonable advance notice' -> '24-72 business hours' notice' and 'accompanied inspection' -> 'accompanied by a representative'."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

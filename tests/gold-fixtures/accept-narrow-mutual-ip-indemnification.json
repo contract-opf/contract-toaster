@@ -1,0 +1,27 @@
+{
+  "case_id": "accept-narrow-mutual-ip-indemnification",
+  "description": "Counterparty inserts narrow mutual IP indemnification capped by Section 8. This is an explicit acceptable_variation in the indemnification topic and must ACCEPT without triggering no-exos-indemnity.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "indemnification",
+      "rule_id": "no-exos-indemnity",
+      "reason": "Narrow mutual IP indemnification capped by Section 8 is listed as an acceptable_variation; the no-exos-indemnity rule must not fire on this insertion."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "indemnification",
+    "variation_index": 0,
+    "inserted_hunk": "Each party (the 'Indemnifying Party') shall indemnify, defend, and hold harmless the other party (the 'Indemnified Party') from and against any third-party claims alleging that materials provided by the Indemnifying Party infringe any third-party intellectual property right, subject to and capped by the mutual aggregate liability limit set forth in Section 8.",
+    "notes": "Mutual IP indemnification, capped by Section 8. Matches acceptable_variation 'mutual third-party IP-infringement indemnification, capped by Section 8'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-exos-indemnity",
+    "expected_result": "no_fire",
+    "rationale": "The no-exos-indemnity rule fires on general or one-way indemnification. Narrow mutual IP indemnification capped by Section 8 is an accepted variation; the rule must not fire on it after the fix."
+  }
+}

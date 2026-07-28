@@ -1,0 +1,44 @@
+# Public-cut exclusion manifest.
+#
+# This repo can never be flipped public: its history holds a real client
+# corpus (real signed agreements, real counterparty identities) and real
+# negotiation positions. The public launch is instead a FRESH-HISTORY cut --
+# `git archive HEAD` of a clean tree, scrub, `git init` -- published to the
+# separate `contract-opf/contract-toaster` repo.
+#
+# That cut was first taken 2026-07-15 against a scrub allow-list held in a
+# human's head and applied by hand. This file is that list, written down.
+# Fresh history means a mistake here is not recoverable by reverting: the
+# file simply ships. `tests/lint-public-cut-exclude.py` is the gate.
+#
+# Format: one path per line, matched against `git ls-files` output.
+#   - a line ending in `/` excludes that directory and everything under it
+#   - any other line excludes exactly that path
+#   - `#` starts a comment; blank lines are ignored
+#
+# To exclude something new: add it here. Do not rely on remembering it at
+# publish time -- that is the failure mode this file exists to remove.
+
+# The real contract library: 200+ real signed agreements from ~44 real
+# counterparties. The FOLDER NAMES ALONE leak the counterparties, so no
+# file-content scrub can make this publishable. Excluded wholesale.
+docs/planning/
+
+# Internal AWS access request naming the real dev account and real staff.
+# (The docs/planning/ copy is already covered by the directory rule above;
+# this is the root-level duplicate.)
+aws-access-request.md
+
+# CODEOWNERS routes review to GitHub TEAMS in the private origin org
+# (@exos-legal/gc, @exos-legal/engineering). Those teams do not exist in the
+# public org, so the file is BOTH non-functional there and the single most
+# visible place the private org name would appear in the published tree.
+# Excluded until the public org has real teams and a deliberate public
+# CODEOWNERS is authored (issue #406).
+.github/CODEOWNERS
+
+# The manifest gate itself. It asserts that every pattern in THIS file matches
+# a tracked path -- true in the private origin, and necessarily false in the
+# cut, where those very paths have just been scrubbed. It is tooling for the
+# repo that DOES the cutting, meaningless in the artifact the cut produces.
+tests/lint-public-cut-exclude.py

@@ -1,0 +1,67 @@
+/*
+ * ct-table.css — CTDS styled table wrapper (issue #392,
+ * docs/frontend-design-system.md §6/§7). Light DOM (§5.1): the HOST tag is
+ * the horizontal-scroll container (absorbs `.ct-table-scroll`'s job), and
+ * every other rule targets the slotted `<table>` via descendant selectors
+ * — see ct-table.ts's docstring for why there's no wrapper element to
+ * select instead. Tokens only (§5.6).
+ */
+
+ct-table {
+  display: block;
+  overflow-x: auto;
+  margin: var(--ct-space-2) 0;
+}
+
+ct-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: var(--ct-text-sm);
+}
+
+ct-table thead th {
+  background: var(--ct-surface-sunken);
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  white-space: nowrap;
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-bottom: 1px solid var(--ct-border);
+}
+
+ct-table tbody td {
+  padding: var(--ct-space-2) var(--ct-space-3);
+  border-bottom: 1px solid var(--ct-border);
+  color: var(--ct-text);
+  vertical-align: middle;
+}
+
+ct-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+ct-table tbody tr:hover {
+  background: var(--ct-surface-raised);
+}
+
+/* Opt-in class for id/digest cells (review IDs, cognito subs, hashes) — see
+   ct-table.ts's docstring. */
+.ct-table__mono {
+  font-family: var(--ct-font-mono);
+  font-size: var(--ct-text-xs);
+}
+
+/* Empty-state row: a quiet centered muted line inside the table region
+   (docs/frontend-design-system.md issue #392's "Empty states" note). Apply
+   to a <td colspan> spanning every column so the row still reads as one
+   real table row for RTL/screen readers. */
+.ct-table__empty {
+  padding: var(--ct-space-5) var(--ct-space-3);
+  text-align: center;
+  color: var(--ct-text-muted);
+}

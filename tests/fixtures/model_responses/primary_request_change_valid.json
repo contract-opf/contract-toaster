@@ -1,0 +1,21 @@
+{
+  "schema_version": "output-schema-v1",
+  "decision": "REQUEST_CHANGE",
+  "confidence_state": "OK",
+  "confidence_band": null,
+  "issues": [
+    {
+      "section_ref": "8",
+      "section_title": "Limitation on Liability",
+      "counterparty_change_summary": "Counterparty removed the $150,000 aggregate liability cap from Section 8.",
+      "decision": "REQUEST_CHANGE",
+      "external_rationale_for_footnote": "Section 8 must retain the standard aggregate liability cap.",
+      "proposed_replacement_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+      "playbook_topic_id": "limitation-of-liability",
+      "internal_precedent_citation": null,
+      "provenance": "model"
+    }
+  ],
+  "critic_delta": null,
+  "verdict_summary": "One issue identified in Section 8 requiring attention before your organization can accept this draft."
+}

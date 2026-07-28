@@ -1,0 +1,15 @@
+{
+  "description": "A clean uploaded draft with no pre-existing tracked changes, comments, hidden text, fields, or footnotes affecting clause text. Baseline case: must normalize trivially.",
+  "paragraphs": [
+    {
+      "heading": "Limitation on Liability",
+      "text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+      "revisions": []
+    },
+    {
+      "heading": "Governing Law",
+      "text": "This Agreement shall be governed by the laws of Delaware.",
+      "revisions": []
+    }
+  ]
+}

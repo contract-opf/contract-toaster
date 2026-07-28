@@ -1,0 +1,23 @@
+Contract Toaster
+Copyright 2026 Athletes' Performance, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use the files in this repository except in compliance with the License. You
+may obtain a copy of the License in the LICENSE file or at
+http://www.apache.org/licenses/LICENSE-2.0.
+
+Trademarks. "Contract Toaster" is a trademark of Athletes' Performance, Inc.,
+used and redistributable under the terms in the TRADEMARKS.md file. That file
+grants permission to use the name to identify and refer to this software; all
+other trademark rights, including any logo or design mark, are reserved.
+
+Third-party software. This repository incorporates third-party open-source
+dependencies as identified in backend/requirements.txt,
+frontend/package.json, and infra/package.json, each used under its own
+license. No third-party source code is vendored into this repository.
+
+Playbook content. Playbook data files (negotiation positions and related
+content, e.g. under playbooks/) may be separately licensed under the
+Creative Commons Attribution 4.0 International license (CC-BY-4.0) where so
+marked in the file or an accompanying README; the Apache License applies to
+the software, schemas, and tooling.

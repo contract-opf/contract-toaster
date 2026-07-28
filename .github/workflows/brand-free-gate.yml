@@ -1,0 +1,37 @@
+name: brand-free-gate
+
+# Issue #404: the engine's public surface must carry no tenant brand.
+#
+# The toaster is a brand-free empty shell developed in public (epic #408).
+# tests/lint-brand-free.py scans every tracked file EXCEPT the paths in
+# public-cut-exclude.txt -- i.e. exactly what a public cut would publish --
+# and hard-fails on the tenant brand, on the corporate domain outside a
+# reviewed allowlist, and on any tests/ .docx that does not declare itself
+# synthetic. It self-tests its own scanner first, so a matcher that silently
+# matches nothing cannot pass.
+#
+# scripts/check.sh already runs this file (its loop picks up tests/lint-*.py).
+# This workflow exists so the gate also blocks pushes and pull requests
+# independently of the full suite.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  brand-free:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The lint reads `git ls-files`; a shallow checkout is fine, but the
+          # working tree must be complete.
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Brand-free lint
+        run: python3 tests/lint-brand-free.py

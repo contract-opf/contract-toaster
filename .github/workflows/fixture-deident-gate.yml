@@ -1,0 +1,67 @@
+# Fixture de-identification and threat-model CI gate (issue #12)
+#
+# Runs three checks:
+#   1  docs/threat-model.md contains a "Source-control processor" section with
+#      required GitHub controls (private repo, org SSO, least-privilege, secret
+#      scanning, "no production data ever").
+#   2  docs/evaluation.md contains a "De-identification standard" section with
+#      a deidentification_approved_by sign-off field requirement.
+#   3  Every gold fixture in tests/gold-fixtures/ that carries
+#      "provenance": "production" also has deidentification_approved_by +
+#      deidentification_approved_at fields — CI rejects fixtures without them.
+#
+# The guard fires on any change to:
+#   - tests/gold-fixtures/        (new or modified fixtures)
+#   - docs/threat-model.md        (source-control section must stay present)
+#   - docs/evaluation.md          (de-identification section must stay present)
+#   - tests/test_github_threatmodel_deident.py  (the gate script itself)
+#
+# A failed check blocks merge.  No model invocation, no AWS credentials required.
+# See docs/threat-model.md § "Source-control processor" and
+#     docs/evaluation.md § "De-identification standard" for the requirements.
+
+name: Fixture de-ident gate
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "tests/gold-fixtures/**"
+      - "docs/threat-model.md"
+      - "docs/evaluation.md"
+      - "tests/test_github_threatmodel_deident.py"
+      - ".github/workflows/fixture-deident-gate.yml"
+  pull_request:
+    paths:
+      - "tests/gold-fixtures/**"
+      - "docs/threat-model.md"
+      - "docs/evaluation.md"
+      - "tests/test_github_threatmodel_deident.py"
+      - ".github/workflows/fixture-deident-gate.yml"
+
+jobs:
+  fixture-deident-gate:
+    name: Fixture de-ident & threat-model gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed — the gate uses only the stdlib.
+
+      - name: Run fixture de-ident and threat-model gate
+        # Fails if:
+        #   - threat-model.md is missing the Source-control processor section
+        #     or any of its required sub-controls
+        #   - evaluation.md is missing the De-identification standard section
+        #     or the deidentification_approved_by field requirement / standard text
+        #   - any tests/gold-fixtures/*.json with "provenance":"production" is
+        #     missing deidentification_approved_by or deidentification_approved_at
+        run: python3 tests/test_github_threatmodel_deident.py

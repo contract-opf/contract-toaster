@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Operational question (not a bug)
+    url: https://github.com/contract-opf/contract-toaster/discussions
+    about: For operational, runbook, or design questions, prefer Discussions.

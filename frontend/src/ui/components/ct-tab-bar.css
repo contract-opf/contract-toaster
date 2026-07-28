@@ -1,0 +1,68 @@
+/*
+ * ct-tab-bar.css — CTDS tab strip (issue #390,
+ * docs/frontend-design-system.md §6/§7). Light DOM (§5.1): a normal
+ * globally-bundled stylesheet (imported by ct-tab-bar.ts), not a
+ * shadow-scoped `static styles` block. Selectors key off the
+ * `.ct-tab-bar__*` classes on the real `<button role="tab">` elements
+ * ct-tab-bar.ts renders. Tokens only (§5.6). Reduced motion is handled
+ * globally by base.css's `*` guard (§4.4) — no local media query needed.
+ */
+
+ct-tab-bar {
+  display: block;
+}
+
+.ct-tab-bar__track {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ct-space-1);
+  margin: 0 0 var(--ct-space-5);
+  padding: 0;
+  border-bottom: 1px solid var(--ct-border);
+}
+
+.ct-tab-bar__tab {
+  width: auto;
+  margin: 0 0 -1px;
+  border: none;
+  background: none;
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-display);
+  font-weight: 600;
+  font-size: var(--ct-text-sm);
+  padding: var(--ct-space-3) var(--ct-space-4);
+  cursor: pointer;
+  transition:
+    color var(--ct-dur-fast) var(--ct-ease-out),
+    background-color var(--ct-dur-fast) var(--ct-ease-out);
+}
+.ct-tab-bar__tab:hover {
+  color: var(--ct-text);
+  background: var(--ct-neutral-bg);
+}
+.ct-tab-bar__tab[aria-selected='true'] {
+  color: var(--ct-accent);
+}
+.ct-tab-bar__tab:focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+  border-radius: var(--ct-radius-sm);
+}
+
+/* Sliding active indicator — decorative only (aria-hidden), positioned via
+   measured geometry (ct-tab-bar.ts) rather than pure CSS. */
+.ct-tab-bar__indicator {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  width: 0;
+  opacity: 0;
+  background: var(--ct-accent);
+  pointer-events: none;
+  transition:
+    transform var(--ct-dur) var(--ct-ease-out),
+    width var(--ct-dur) var(--ct-ease-out),
+    opacity var(--ct-dur-fast) var(--ct-ease-out);
+}

@@ -1,0 +1,50 @@
+/*
+ * ct-field.css — CTDS form field wrapper (issue #391,
+ * docs/frontend-design-system.md §6). Light DOM (§5.1): styles the HOST
+ * tag plus the label/hint/error elements ct-field.ts builds itself in
+ * `connectedCallback` — see that file's docstring for why. The slotted
+ * control's DOM position isn't controlled by this component (it's
+ * React-owned content this component never moves), so visual order
+ * (label, control, hint, error) comes from flex `order` here rather than
+ * DOM position. Tokens only (§5.6).
+ */
+
+ct-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ct-space-1);
+  margin: 0 0 var(--ct-space-4);
+}
+
+.ct-field__label {
+  order: -2;
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-sm);
+  font-weight: 500;
+  color: var(--ct-text);
+}
+
+.ct-field__hint {
+  order: 2;
+  margin: 0;
+  font-size: var(--ct-text-xs);
+  color: var(--ct-text-muted);
+}
+
+.ct-field__error {
+  order: 3;
+  margin: 0;
+  font-size: var(--ct-text-xs);
+  font-weight: 500;
+  color: var(--ct-danger);
+}
+
+/* The slotted control is React-owned light-DOM content (see the docstring
+   above), not a shadow-DOM part — base.css already rings bare
+   input/select/textarea on :focus-visible, but ct-field owns this contract
+   too (issue #396 focus audit) so the field keeps a visible ring even for
+   a control base.css doesn't otherwise style (e.g. a custom ct-* input). */
+ct-field :is(input, select, textarea, button):focus-visible {
+  outline: none;
+  box-shadow: var(--ct-focus-ring);
+}

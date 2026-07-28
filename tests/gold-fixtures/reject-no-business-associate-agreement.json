@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-no-business-associate-agreement",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'no-business-associate-agreement': counterparty inserts language containing the trigger term 'business associate agreement' into the 'hipaa' topic. Must fire no-business-associate-agreement and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "hipaa",
+      "section_ref": "6 HIPAA",
+      "is_hard_rejection": true,
+      "rule_id": "no-business-associate-agreement"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "hipaa",
+    "inserted_hunk": "The parties agree to add the following clause language to this section of the Agreement: 'business associate agreement'.",
+    "notes": "Mechanically generated: contains trigger_term 'business associate agreement' (match=word_boundary) for rule 'no-business-associate-agreement'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-business-associate-agreement",
+    "expected_result": "fire",
+    "rationale": "Inserted hunk contains trigger_term 'business associate agreement', which is not in []; must fire 'no-business-associate-agreement'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}

@@ -1,0 +1,19 @@
+{
+  "case_id": "accept-survival-narrow-compliance-survival",
+  "description": "Counterparty proposes narrow survival of FERPA/HIPAA/Non-Discrimination compliance obligations actually triggered during the term. This is a listed acceptable_variation in the survival topic; no hard_rejection rule applies to this topic today, so there is no detector to hook, but this exercises the ACCEPT / acceptable_variation gold-case category per issue #183.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "survival",
+    "inserted_hunk": "The parties' obligations under the FERPA, HIPAA, and Non-Discrimination sections survive termination of this Agreement, narrowly limited to compliance obligations actually triggered during the Term.",
+    "notes": "Matches acceptable_variation 'additional survival of FERPA, HIPAA, or Non-Discrimination' -> 'narrow survival of compliance obligations actually triggered during the term'."
+  },
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

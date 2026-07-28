@@ -1,0 +1,55 @@
+/*
+ * ct-progress.css — CTDS indeterminate shimmer bar (issue #393,
+ * docs/frontend-design-system.md §6/§7). Light DOM (§5.1): styles the HOST
+ * tag plus the track/fill/label elements ct-progress.ts builds itself in
+ * `connectedCallback`. Tokens only (§5.6). Reduced motion is handled
+ * globally by base.css's `*` guard, which zeroes this animation's
+ * duration.
+ */
+
+ct-progress {
+  display: block;
+}
+
+.ct-progress__track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  background: var(--ct-surface-sunken);
+  border-radius: var(--ct-radius-full);
+}
+
+.ct-progress__fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--ct-accent-soft) 20%,
+    var(--ct-accent) 50%,
+    var(--ct-accent-soft) 80%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  border-radius: inherit;
+  /* Linear + infinite: an eased curve would visibly jump at the loop
+     boundary of a continuously-repeating sweep. */
+  animation: ct-progress-sweep var(--ct-dur-slow) linear infinite;
+}
+
+@keyframes ct-progress-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.ct-progress__label {
+  margin: var(--ct-space-2) 0 0;
+  color: var(--ct-text-muted);
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-xs);
+  text-align: center;
+}

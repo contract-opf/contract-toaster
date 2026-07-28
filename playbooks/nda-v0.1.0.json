@@ -1,0 +1,117 @@
+{
+  "$schema": "https://contract-opf.github.io/playbooks/schema/v1.json",
+  "playbook": {
+    "id": "nda",
+    "version": "0.1.0",
+    "agreement_type": "NDA",
+    "agreement_aliases": [
+      "Non-Disclosure Agreement",
+      "Confidentiality Agreement"
+    ],
+    "exos_party": "Placeholder Party, LLC",
+    "counterparty_type": "Disclosing/Receiving Counterparty",
+    "created_at": "2026-07-16T00:00:00Z",
+    "created_by": "playbook-placeholder",
+    "metadata": {
+      "decision_mode": "binary"
+    },
+    "status": "draft"
+  },
+  "general_principles": [
+    "PLACEHOLDER playbook for the NDA contract type. This is an unbound 'coming soon' stub: it is registered in the catalog so the contract-type picker can surface NDA as a not-yet-active dial stop, but it carries no active release bundle and governs no production review. Content below is illustrative placeholder text only.",
+    "Default toward ACCEPT for anything that does not touch a floor protection this placeholder relies on.",
+    "Every change is either ACCEPT or REQUEST_CHANGE with specific replacement text. Never 'flag for review'."
+  ],
+  "decision_rubric": {
+    "accept_when": [
+      "Change is clerical, stylistic, or grammatical without legal impact.",
+      "Change updates the counterparty's own legal name, address, contact info, or signatory."
+    ],
+    "request_change_when": [
+      "Change matches an entry on the hard_rejections list.",
+      "Change introduces an obligation not contemplated by this placeholder playbook."
+    ]
+  },
+  "topics": [
+    {
+      "id": "nda-confidentiality",
+      "section_ref": "Placeholder Confidentiality Obligations",
+      "not_in_standard": true,
+      "section_anchors": [
+        "sec-_new"
+      ],
+      "our_standard": "Placeholder position: confidentiality obligations are mutual and survive termination for a defined, bounded period, with the usual carve-outs (already known, independently developed, publicly available, or compelled by law).",
+      "must_preserve": [
+        "mutual treatment of confidentiality obligations",
+        "a bounded survival period"
+      ],
+      "reject_if_proposed": [
+        "a perpetual, uncapped confidentiality obligation with no carve-outs"
+      ],
+      "hard_rejection_refs": [
+        "nda-no-perpetual-unbounded-obligation"
+      ],
+      "replacement_text": {
+        "mode": "none"
+      }
+    }
+  ],
+  "hard_rejections": [
+    {
+      "id": "nda-no-perpetual-unbounded-obligation",
+      "description": "Placeholder floor: counterparty introduces a perpetual, unbounded confidentiality obligation with no carve-outs.",
+      "kind": "on_insert",
+      "trigger_terms": [
+        "in perpetuity",
+        "perpetual obligation"
+      ],
+      "match": "word_boundary",
+      "applies_to_topics": [
+        "nda-confidentiality"
+      ]
+    }
+  ],
+  "de_minimis_categories": [
+    "Counterparty's own legal name, address, email, or signatory updates.",
+    "Typo and grammar corrections.",
+    "Reformatting changes (font, spacing, capitalization)."
+  ],
+  "output_format": {
+    "decision_field": "ACCEPT | REQUEST_CHANGE",
+    "every_issue_includes": [
+      "section_ref",
+      "section_title",
+      "counterparty_change_summary",
+      "decision",
+      "external_rationale_for_footnote",
+      "proposed_replacement_text",
+      "playbook_topic_id"
+    ],
+    "footnote_phrasing_rules": [
+      "One or two sentences per footnote. No more.",
+      "Name the specific risk created rather than generic phrases like 'not standard'.",
+      "Plain English. Avoid legalese where a plain word does the job."
+    ],
+    "citation_rules": {
+      "external_footnotes_cite": "contract_position_only",
+      "precedent_citations": "internal_only",
+      "forbid_in_external_output": [
+        "counterparty_name",
+        "precedent_deal_date",
+        "verbatim_precedent_text",
+        "system_prompt_fragment",
+        "internal_playbook_id"
+      ]
+    },
+    "system_status": {
+      "states": [
+        "OK",
+        "LOW_CONFIDENCE",
+        "MANUAL_REVIEW_REQUIRED",
+        "ERROR_MANUAL_REVIEW_REQUIRED"
+      ],
+      "confidence_field": "confidence_state",
+      "manual_review_routing": "Manual-review states are operational statuses and never external legal decisions."
+    }
+  }
+}

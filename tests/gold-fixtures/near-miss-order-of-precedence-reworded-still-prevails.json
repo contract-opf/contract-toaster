@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-order-of-precedence-reworded-still-prevails",
+  "description": "Near-miss probe (issue #183): counterparty renumbers Section 10's precedence clause but KEEPS 'prevail' language intact. Must ACCEPT with zero fires on the order-of-precedence Floor rule.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "order-of-precedence",
+      "rule_id": "preserve-exos-precedence",
+      "reason": "A cosmetic renumber that verbatim-preserves 'prevail' must not fire the token-removal Floor rule."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "order-of-precedence",
+    "altered_hunk": "Section 10 is renumbered for clarity: in the event of any conflict between the body of this Agreement and any addendum, the terms of this Agreement shall prevail unless the addendum expressly states otherwise.",
+    "notes": "Near-miss: cosmetic renumber; retains required_token 'prevail'."
+  },
+  "detector_expectation": {
+    "rule_id": "preserve-exos-precedence",
+    "expected_result": "no_fire",
+    "rationale": "Altered hunk retains required_token 'prevail'; token_policy='any' does not fire when nothing required is missing."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

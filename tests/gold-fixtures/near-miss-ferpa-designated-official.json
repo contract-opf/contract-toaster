@@ -1,0 +1,31 @@
+{
+  "case_id": "near-miss-ferpa-designated-official",
+  "description": "Near-miss probe (issue #183, docs/evaluation.md D1 near-miss set): counterparty names a 'designated official' rather than using the literal trigger phrase 'school official' for 'no-ferpa-school-official'. Must ACCEPT with zero fires.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "ACCEPT",
+  "expected_issues": [],
+  "must_not_flag": [
+    {
+      "topic_id": "ferpa",
+      "rule_id": "no-ferpa-school-official",
+      "reason": "'designated official' is a distinct phrase from the trigger_term 'school official'; must not fire."
+    }
+  ],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "ferpa",
+    "inserted_hunk": "Institution shall designate a specific designated official responsible for FERPA compliance who is not authorized to redisclose education records for any third-party purpose.",
+    "notes": "Near-miss: 'designated official' never forms the consecutive two-word phrase 'school official'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-ferpa-school-official",
+    "expected_result": "no_fire",
+    "rationale": "Hunk does not contain the trigger_term 'school official' as a consecutive phrase."
+  },
+  "case_type": "near_miss",
+  "synthetic": true,
+  "gc_signoff": "pending",
+  "provenance": "synthetic",
+  "authorship_note": "AFK-drafted per issue #183 (owner-approved synthetic scaffold, 2026-07-10): fully invented, no real-world contract text, no de-identification required. Marked synthetic and pending GC sign-off; not production-qualified until Legal/GC reviews and approves."
+}

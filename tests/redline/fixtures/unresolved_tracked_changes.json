@@ -1,0 +1,18 @@
+{
+  "description": "MUST-NORMALIZE (issue #199): the document arrives with a single PENDING (status=unresolved) counterparty tracked-change insertion/deletion pair affecting clause text -- this is the flagship counterparty-markup scenario, the primary use case. Documented rule (post-#199): a lone pending tracked change from one author IS the proposal under review -- normalization ACCEPTS-ALL the pending revision into the operative draft and records the disposition in a normalization note; it does not fail closed. (Prior to #199 this fixture asserted the opposite -- fail closed on any unresolved change -- which made the flagship scenario yield nothing by design.)",
+  "paragraphs": [
+    {
+      "heading": "Limitation on Liability",
+      "text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+      "revisions": [
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "counterparty",
+          "original_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+          "resulting_text": "Each party's liability under this Agreement shall be uncapped."
+        }
+      ]
+    }
+  ]
+}

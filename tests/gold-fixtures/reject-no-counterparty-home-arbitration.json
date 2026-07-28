@@ -1,0 +1,29 @@
+{
+  "case_id": "reject-no-counterparty-home-arbitration",
+  "description": "Mechanically-derived D2 planted case (scripts/generate_gold_fixtures.py) for hard_rejection rule 'no-counterparty-home-arbitration': counterparty inserts language containing the trigger term 'mandatory arbitration' into the 'governing-law-and-venue' topic. Must fire no-counterparty-home-arbitration and result in REQUEST_CHANGE.",
+  "playbook_version": "1.0.0",
+  "expected_decision": "REQUEST_CHANGE",
+  "expected_issues": [
+    {
+      "playbook_topic_id": "governing-law-and-venue",
+      "section_ref": "[absent] Governing Law and Venue",
+      "is_hard_rejection": true,
+      "rule_id": "no-counterparty-home-arbitration"
+    }
+  ],
+  "must_not_flag": [],
+  "fp_tolerance": 0,
+  "redline_checks": [],
+  "planted_variation": {
+    "topic_id": "governing-law-and-venue",
+    "inserted_hunk": "The parties agree to add the following clause language to this section of the Agreement: 'mandatory arbitration'.",
+    "notes": "Mechanically generated: contains trigger_term 'mandatory arbitration' (match=word_boundary) for rule 'no-counterparty-home-arbitration'."
+  },
+  "detector_expectation": {
+    "rule_id": "no-counterparty-home-arbitration",
+    "expected_result": "fire",
+    "rationale": "Inserted hunk contains trigger_term 'mandatory arbitration', which is not in []; must fire 'no-counterparty-home-arbitration'."
+  },
+  "provenance": "synthetic",
+  "generated_by": "scripts/generate_gold_fixtures.py"
+}
