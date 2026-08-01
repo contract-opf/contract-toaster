@@ -45,12 +45,42 @@ Environment variables consumed:
   SYNC_STATUS_TABLE  DynamoDB sync_status table name (PK: sync_type)
 """
 
+import decimal
 import os
 import time
 import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce boto3's `Decimal`s into plain ints/floats, recursively.
+
+    boto3's DynamoDB *resource* API deserializes every stored number to
+    `decimal.Decimal`, which `json.dumps` -- and therefore FastAPI's
+    `JSONResponse` -- cannot encode. Any row handed straight to a response
+    will 500 the moment it carries a number.
+
+    That is not hypothetical: `GET /api/users` did exactly this in
+    production, taking the whole Users & access tab down with
+    `TypeError: Object of type Decimal is not JSON serializable`. The
+    suite missed it because the in-memory test double stores plain `int`s,
+    so the fake and the real client differ in precisely the field that
+    breaks (see tests/test_user_management_92.py's Decimal test).
+
+    Integral values become `int` so `last_auth_at` stays an epoch second
+    rather than becoming `5000.0`; genuinely fractional ones become
+    `float`. Other routes in main.py solve this by hand-building a JSON-safe
+    dict per response; this does it once, at the boundary that returns rows.
+    """
+    if isinstance(value, decimal.Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 # ---------------------------------------------------------------------------
 # Lifecycle statuses (ARCHITECTURE.md -> "Deprovisioning and lifecycle").
@@ -161,7 +191,9 @@ def list_users(
 
     table = _users_table(dynamodb_resource)
     resp = table.scan()
-    users = resp.get("Items", [])
+    # Coerce before sorting and returning: these rows go straight into a
+    # JSONResponse, and boto3 hands back Decimals that json.dumps rejects.
+    users = [_json_safe(item) for item in resp.get("Items", [])]
     # Deterministic ordering for a stable UI: most-recently-authenticated first.
     users.sort(key=lambda u: u.get("last_auth_at", 0), reverse=True)
     return users
@@ -362,4 +394,11 @@ def get_sync_status(
             "users_deprovisioned_count": 0,
             "next_run_at": None,
         }
-    return row
+    # Same Decimal hazard as list_users: this row goes straight into a
+    # JSONResponse (main.py's /api/users/sync-status). It is latent rather
+    # than live only because the branch above -- the "never run yet" default,
+    # all plain ints -- is what a deployment with no completed sync returns.
+    # The first real sync worker run writes `last_run_at` and
+    # `users_deprovisioned_count` as numbers, and boto3 reads them back as
+    # Decimals, which would 500 the panel exactly as GET /api/users did.
+    return _json_safe(row)
