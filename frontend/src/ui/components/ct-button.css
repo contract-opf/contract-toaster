@@ -113,3 +113,46 @@ ct-button[variant='danger'] .ct-button__el:hover:not(:disabled) {
     transform: rotate(360deg);
   }
 }
+
+/* Confirm-step "armed" state (§14) — a distinct accent pulse using the
+   existing motion tokens and the --ct-glow accent (no new color). Rendered as
+   a pseudo-element ring so it never clobbers the real button's own
+   :focus-visible box-shadow. Duration routes through --ct-dur-slow, so the
+   base.css `prefers-reduced-motion` guard zeroes it for free (§4.4). */
+ct-button[data-armed] .ct-button__el {
+  position: relative;
+}
+ct-button[data-armed] .ct-button__el::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--ct-glow);
+  animation: ct-button-arm-pulse var(--ct-dur-slow) var(--ct-ease-spring) infinite alternate;
+}
+
+@keyframes ct-button-arm-pulse {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Confirm-step announcement channel — a visually-hidden co-located
+   aria-live="polite" region (see ct-button.ts). Standard clip pattern (mirrors
+   ct-file-drop.css) so screen readers get the label swap while nothing shows
+   visually. */
+.ct-button__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

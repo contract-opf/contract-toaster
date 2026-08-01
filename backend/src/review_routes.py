@@ -283,10 +283,11 @@ async def post_review(
     toaster_guidance (issue #398, optional, default ""): per-review
     free-text instructions, forwarded verbatim to reviews.submit_review ->
     the pipeline's primary + critic passes (scripts/primary_review_pass.py
-    -> assemble_system_blocks). The toaster UI input that would actually
-    let a reviewer set this is a separate, out-of-scope follow-up
-    (afk-backlog) -- this field exists so that follow-up is additive, no
-    backend change required once it lands.
+    -> assemble_system_blocks). Issue #431 landed the UI input that
+    actually sets it (the Review tab's submission form), additively and
+    with no change to this signature -- the SPA omits the field entirely
+    when the reviewer leaves it blank, so the default above still stands
+    for every such submission.
 
     Order (per issue #84's Context: "multipart upload -> gauntlet ->
     submission record with idempotency ... bundle resolved at submission"):
@@ -408,18 +409,18 @@ def _put_upload_object(s3_client: Any, key: str, contents: bytes) -> None:
 #                  all three fail closed to the same "not active" signal
 #                  here, exactly as they do for submission).
 #
-# `has_bundled_sample` (issue #402): mirrors the registry's own
-# "bundled_sample" marker (src.sample_playbooks reads the same field) so
-# the empty-shell first-run UI can offer a "Activate the bundled sample"
-# affordance for a "coming_soon" entry WITHOUT hard-coding a playbook_id --
-# issue #289's type-blindness convention, extended to the frontend.
+# Those two are the ONLY statuses (issue #433): the playbook the image
+# ships with is installed by a deploy-time seed (src.sample_playbooks)
+# through the same functions any admin-uploaded version goes through, so it
+# is an ordinary catalog entry with an ordinary status -- there is no
+# sample-only third state, and no `has_bundled_sample` flag, to synthesize
+# here.
 #
 # `notes` (issue #411): the currently-active playbook_versions row's
 # admin-editable `notes` field (src.playbook_versions.get_active_version_notes),
-# or "" if there is no active version row (e.g. a bundled-sample activation,
-# which never writes one -- see src.sample_playbooks's own docstring) or the
-# row has no note set. This is a live read at request time, same as `status`
-# above -- never cached or denormalized onto the playbooks table row.
+# or "" if there is no active version row or the row has no note set. This
+# is a live read at request time, same as `status` above -- never cached or
+# denormalized onto the playbooks table row.
 #
 # `test_only` (issue #412): a registry entry carrying `"test_only": true`
 # (e.g. "synthetic-generic", the renamed former "eiaa" fixture the anchor/
@@ -438,8 +439,7 @@ def _load_playbook_catalog(
     """Registered, non-`test_only` playbook_ids, sorted, each with a display
     name (the registry's optional `display_name` field, falling back to the
     id upper-cased -- issue #272's documented fallback), active/coming_soon
-    status, whether a bundled sample exists to one-click-activate (issue
-    #402), and the active version's admin-editable notes (issue #411).
+    status, and the active version's admin-editable notes (issue #411).
     A `"test_only": true` entry (issue #412) is never included -- it is not
     a shipped contract type.
 
@@ -470,7 +470,6 @@ def _load_playbook_catalog(
                 "playbook_id": playbook_id,
                 "display_name": display_name,
                 "status": "active" if active_hash else "coming_soon",
-                "has_bundled_sample": bool(raw.get("bundled_sample", False)),
                 "notes": playbook_versions.get_active_version_notes(
                     playbook_id, dynamodb_resource
                 ),

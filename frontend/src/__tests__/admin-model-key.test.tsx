@@ -171,9 +171,9 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     );
   });
 
-  it('clears a saved key back to the environment key', async () => {
+  it('clears a saved key back to the environment key, but only on the second click', async () => {
     let current = settings({ key_set: true, key_source: 'admin', key_hint: '…beef' });
-    stubModelKeyFetch({
+    const fetchMock = stubModelKeyFetch({
       get: () => ({ status: 200, body: current }),
       delete: () => {
         current = settings({ key_set: true, key_source: 'env', key_hint: '…9a7c' });
@@ -182,13 +182,28 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     });
     render(<AdminModel />);
 
-    fireEvent.click(await screen.findByTestId('admin-model-clear'));
+    // "Clear saved key" is destructive, so it uses the confirm-step pattern
+    // (issue #428, §14): the first click arms the button and fires nothing.
+    // Asserting the DELETE is what actually pins the `confirm` prop to this
+    // call site — without it, removing the prop would leave the suite green.
+    const clearBtn = await screen.findByTestId('admin-model-clear');
+    const deletes = (): number =>
+      fetchMock.mock.calls.filter(
+        ([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase() === 'DELETE',
+      ).length;
+
+    fireEvent.click(clearBtn); // arm — must NOT clear
+    expect(deletes()).toBe(0);
+    expect(clearBtn.textContent).toContain('Click again to clear');
+
+    fireEvent.click(clearBtn); // confirm → performs the clear
 
     await waitFor(() => {
       expect(screen.getByTestId('admin-model-notice')).toHaveTextContent(
         /key from the deployment environment/i,
       );
     });
+    expect(deletes()).toBe(1);
   });
 
   it('explains itself instead of offering a form when the deployment has no key store', async () => {

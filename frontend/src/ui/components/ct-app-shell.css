@@ -63,7 +63,15 @@ ct-app-shell > [slot='footer'] {
   color: var(--ct-text-muted);
 }
 
-ct-app-shell > :not([slot]):not(.ct-app-shell__brand) {
+/* The tabpanels. App.tsx keeps every panel MOUNTED and toggles visibility
+   with the `hidden` attribute, so this selector is `:not([hidden])`-guarded
+   pre-emptively (issue #423): it declares no `display` today, which makes the
+   guard a no-op — a `display: none` box's `grid-area` is inert either way —
+   but the moment a `display` declaration lands here it would otherwise
+   override the UA `[hidden] { display: none }` rule (a cascade-origin win,
+   unbeatable by specificity) and un-hide every tab at once. See
+   ct-file-drop.css's pill rule for the live instance of this bug class. */
+ct-app-shell > :not([slot]):not(.ct-app-shell__brand):not([hidden]) {
   grid-area: content;
 }
 

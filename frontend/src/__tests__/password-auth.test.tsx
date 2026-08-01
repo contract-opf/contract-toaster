@@ -8,6 +8,9 @@
  *      Amplify).
  *   3. <App/> in password mode renders the login gate, not the Cognito
  *      Authenticator.
+ *   4. Login failures render friendly copy only — never a raw `HTTP <n>` status
+ *      or endpoint path (issue #425), the same rule resilience-a11y.test.tsx
+ *      enforces for the review screens.
  *
  * The token is deliberately in-memory only (no localStorage/sessionStorage) —
  * the security-posture source guard forbids Storage.setItem in components.
@@ -36,6 +39,18 @@ function stubFetch(routes: Record<string, unknown>): void {
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );
+}
+
+/** Stub every fetch with one canned failure response (login is the only call). */
+function stubLoginFailure(status: number, json: () => Promise<unknown>): void {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json }) as unknown as Response));
+}
+
+function submitLogin(): void {
+  render(<PasswordLogin onAuthenticated={vi.fn()} />);
+  fireEvent.change(screen.getByTestId('login-username'), { target: { value: 'x' } });
+  fireEvent.change(screen.getByTestId('login-password'), { target: { value: 'y' } });
+  fireEvent.click(screen.getByTestId('login-submit'));
 }
 
 beforeEach(() => {
@@ -72,6 +87,49 @@ describe('PasswordLogin', () => {
     fireEvent.click(screen.getByTestId('login-submit'));
     await screen.findByTestId('login-error');
     expect(getDemoToken()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Friendly login errors (issue #425) — the rendered banner must never carry a
+// raw `HTTP <n>` status or an /api/ path; the technical detail goes to the
+// console only.
+// ---------------------------------------------------------------------------
+describe('PasswordLogin error copy', () => {
+  function assertFriendly(text: string, status: number): void {
+    expect(text).not.toMatch(/HTTP/i);
+    expect(text).not.toContain(String(status));
+    expect(text).not.toMatch(/\/api\//);
+    expect(text.trim().length).toBeGreaterThan(0);
+  }
+
+  it('renders no HTTP status code when the failure body carries no detail', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubLoginFailure(503, async () => ({}));
+    submitLogin();
+
+    const banner = await screen.findByTestId('login-error');
+    assertFriendly(banner.textContent ?? '', 503);
+    expect(logged).toHaveBeenCalled();
+    expect(getDemoToken()).toBeNull();
+  });
+
+  it('renders no HTTP status code when the failure body is not JSON', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubLoginFailure(500, () => Promise.reject(new SyntaxError('Unexpected token < in JSON')));
+    submitLogin();
+
+    const banner = await screen.findByTestId('login-error');
+    assertFriendly(banner.textContent ?? '', 500);
+    expect(getDemoToken()).toBeNull();
+  });
+
+  it('still renders the server-supplied rejection message verbatim', async () => {
+    stubLoginFailure(401, async () => ({ detail: 'Invalid username or password.' }));
+    submitLogin();
+
+    const banner = await screen.findByTestId('login-error');
+    expect(banner.textContent).toBe('Invalid username or password.');
   });
 });
 

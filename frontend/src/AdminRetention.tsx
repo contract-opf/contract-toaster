@@ -30,7 +30,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
-import { CtBanner, CtButton, CtCard, CtChip, CtField, CtTable, CtToolbar } from './ui/react';
+import {
+  CtBanner,
+  CtButton,
+  CtCard,
+  CtChip,
+  CtField,
+  CtProgress,
+  CtTable,
+  CtToolbar,
+} from './ui/react';
 import type { CtChipVariant } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -300,7 +309,7 @@ export default function AdminRetention(): React.ReactElement | null {
       )}
 
       {settings === null ? (
-        <p data-testid="admin-retention-loading">Loading retention settings…</p>
+        <CtProgress data-testid="admin-retention-loading" label="Loading retention settings…" />
       ) : (
         <CtCard data-testid="retention-slider-panel">
           <div className="ct-stack">
@@ -428,8 +437,6 @@ export default function AdminRetention(): React.ReactElement | null {
         <CtToolbar title="Legal holds" />
         {holds === null ? (
           <p data-testid="legal-holds-loading">Loading legal holds…</p>
-        ) : holds.length === 0 ? (
-          <p data-testid="legal-holds-empty">No reviews currently under legal hold.</p>
         ) : (
           <CtTable>
             <table data-testid="legal-holds-table">
@@ -443,29 +450,38 @@ export default function AdminRetention(): React.ReactElement | null {
                 </tr>
               </thead>
               <tbody>
-                {holds.map((h) => (
-                  <tr key={h.review_id} data-testid={`hold-row-${h.review_id}`}>
-                    <td className="ct-table__mono">{h.review_id}</td>
-                    <td>
-                      <CtChip variant={holdChipVariant(h.legal_hold)}>
-                        {h.legal_hold ? 'active' : 'released'}
-                      </CtChip>
-                    </td>
-                    <td>{h.legal_hold_reason ?? '—'}</td>
-                    <td>{h.legal_hold_set_by ?? '—'}</td>
-                    <td>
-                      <CtButton
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        disabled={holdActionPending}
-                        onClick={() => void releaseHold(h.review_id)}
-                      >
-                        Release legal hold
-                      </CtButton>
+                {holds.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="ct-table__empty" data-testid="legal-holds-empty">
+                      No reviews currently under legal hold.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  holds.map((h) => (
+                    <tr key={h.review_id} data-testid={`hold-row-${h.review_id}`}>
+                      <td className="ct-table__mono">{h.review_id}</td>
+                      <td>
+                        <CtChip variant={holdChipVariant(h.legal_hold)}>
+                          {h.legal_hold ? 'active' : 'released'}
+                        </CtChip>
+                      </td>
+                      <td>{h.legal_hold_reason ?? '—'}</td>
+                      <td>{h.legal_hold_set_by ?? '—'}</td>
+                      <td>
+                        <CtButton
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          confirm="Click again to release"
+                          disabled={holdActionPending}
+                          onClick={() => void releaseHold(h.review_id)}
+                        >
+                          Release legal hold
+                        </CtButton>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </CtTable>

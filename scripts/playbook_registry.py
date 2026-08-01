@@ -84,26 +84,20 @@ class PlaybookEntry:
     # every other field above -- it is carried through verbatim, never
     # joined against `root` in resolve_playbook() below.
     mock_output_key: Optional[str] = None
-    # Issue #402: True when `playbook_path` points at a playbook the repo/
-    # image ships in the clear -- a synthetic, brand-free sample an admin
-    # can activate with no upload/legal-approval ceremony (see
-    # backend/src/sample_playbooks.py). A boolean, not derived from any
-    # other field, so a playbook can be "knowledge" profile (no anchor map)
-    # without also being an activatable bundled sample, and vice versa.
-    # False (the default) for every existing entry -- additive, like
-    # bundle_path/mock_output_key above.
-    bundled_sample: bool = False
     # Issue #412: True when this entry exists ONLY to give the test suite a
     # real, registered, on-disk playbook to resolve fixtures through (e.g.
     # "synthetic-generic") -- it is never surfaced on `GET /api/playbooks`
-    # (backend/src/review_routes.py's catalog filters it out) and is never a
-    # `bundled_sample`. False (the default) for every shipped entry.
+    # (backend/src/review_routes.py's catalog filters it out), and the
+    # deploy-time seed (backend/src/sample_playbooks.py) refuses to install
+    # it. False (the default) for every shipped entry.
     test_only: bool = False
-    # Issue #412: for a `bundled_sample` entry, the brand-free, admin-editable
-    # note text seeded onto its `playbook_versions` row the first time it is
-    # activated (src.sample_playbooks.activate_bundled_sample) -- explaining
-    # what the sample is and where to find a real playbook. None (the
-    # default) for every entry that isn't a bundled sample.
+    # Issue #412/#433: the brand-free, admin-editable note text seeded onto
+    # this playbook's `playbook_versions` row when a fresh deployment
+    # installs it (src.sample_playbooks.seed_shipped_playbook) -- explaining
+    # what the shipped content is and where to find more. Ordinary version
+    # notes from then on: an admin edits them through the normal
+    # `update_playbook_version_notes` path and the seed never rewrites them.
+    # None (the default) for an entry that ships no note.
     seed_notes: Optional[str] = None
 
 
@@ -217,7 +211,6 @@ def resolve_playbook(
         standard_form_docx=_resolve("standard_form_docx"),
         bundle_path=_resolve("bundle_path"),
         mock_output_key=raw.get("mock_output_key"),
-        bundled_sample=bool(raw.get("bundled_sample", False)),
         test_only=bool(raw.get("test_only", False)),
         seed_notes=raw.get("seed_notes"),
     )

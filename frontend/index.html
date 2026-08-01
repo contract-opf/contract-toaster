@@ -4,6 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Contract Toaster</title>
+
+    <!--
+      Document metadata (issue #427). Everything below is same-origin and
+      static: the CSP is `default-src 'self'; img-src 'self' data:`, so no
+      external icon service or CDN may ever be referenced here.
+
+      The icons and the manifest live in frontend/public/, which Vite copies
+      to the site root verbatim; that is what makes /favicon.ico a real image
+      instead of the SPA fallback's index.html. favicon.svg is the source of
+      truth for the artwork (see its own comment); favicon.ico is a raster of
+      it, kept for the legacy well-known path browsers still probe.
+    -->
+    <meta
+      name="description"
+      content="Upload an agreement, review it against your negotiating playbook, and get an issue-by-issue redline back as a tool recommendation that still needs attorney approval."
+    />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf7f2" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#191512" />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 64x64" />
+
+    <!--
+      Metadata only, deliberately "display": "browser" in the manifest: no
+      service worker, no offline mode, no installed-app runtime behaviour.
+      Its "name" mirrors the static <title> above, i.e. the DEFAULT product
+      name; an adopter who renames the product through VITE_PRODUCT_NAME
+      (App.tsx, issue #274) overrides the title at runtime but not this file.
+    -->
+    <link rel="manifest" href="/manifest.json" />
   </head>
   <body>
     <div id="root"></div>

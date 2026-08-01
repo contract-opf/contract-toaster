@@ -29,6 +29,16 @@
  * path as any other submission failure (no special-cased copy, no
  * crash).
  *
+ * PER-REVIEW GUIDANCE (issue #431): an optional free-text field on the
+ * submission form, appended to the upload FormData as `toaster_guidance` --
+ * the field `POST /api/reviews` has accepted since issue #398 but that no
+ * frontend surface ever sent. It governs over the playbook's positions on
+ * conflict and never over the playbook's hard requirements; that precedence
+ * is stated permanently beside the input itself (GUIDANCE_PRECEDENCE_COPY),
+ * because a precedence rule only a doc knows about is not a rule the person
+ * typing the instruction can act on. On a terminal review, whatever
+ * guidance the review actually ran under is shown back read-only.
+ *
  * ATTORNEY-APPROVAL WATERMARK (ARCHITECTURE.md -> "Every output and UI
  * state is watermarked..."): the terminal-status panel below always
  * carries "tool recommendation only — attorney approval required", and an
@@ -49,7 +59,16 @@ import {
   playPop,
   useSoundMuted,
 } from './toaster/sounds';
-import { CtBanner, CtButton, CtCard, CtChip, CtFileDrop, CtIconButton, CtProgress } from './ui/react';
+import {
+  CtBanner,
+  CtButton,
+  CtCard,
+  CtChip,
+  CtField,
+  CtFileDrop,
+  CtIconButton,
+  CtProgress,
+} from './ui/react';
 import type { CtChipVariant } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +117,12 @@ interface ReviewDetail {
   // or no critic delta.
   confidence_band?: string | null;
   critic_delta?: CriticDelta | null;
+  // The per-review free-text instructions this review was submitted with
+  // (issue #431). Recorded on the reviews row at submission and projected
+  // by backend/src/reviews.py's get_review_detail; null/absent on a review
+  // submitted without any, and on every review created before that field
+  // was recorded.
+  toaster_guidance?: string | null;
 }
 
 interface OutputResponse {
@@ -108,15 +133,13 @@ interface OutputResponse {
 // Contract-type catalog entry — mirrors backend/src/review_routes.py's
 // `get_playbooks` response shape (issue #272). `status` distinguishes an
 // activated playbook ("active") from one that is registered but not yet
-// activated ("coming_soon"). `has_bundled_sample` (issue #402) marks a
-// "coming_soon" entry the repo ships a synthetic sample for — optional so
-// an older backend response (missing the field entirely) degrades to "no
-// sample available" rather than a crash.
+// activated ("coming_soon") — those are the only two, for every playbook
+// alike (issue #433: the playbook the image ships with is installed by a
+// deploy-time seed and carries no special marker).
 interface PlaybookCatalogEntry {
   playbook_id: string;
   display_name: string;
   status: string;
-  has_bundled_sample?: boolean;
 }
 
 interface PlaybookCatalogResponse {
@@ -137,6 +160,26 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_BACKOFF_MAX_MS = 30000;
 
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
+
+// Permanent, non-dismissable precedence copy shown with the per-review
+// guidance field (issue #431; docs/frontend-design-system.md §15.3). It is
+// rendered as the field's own `hint`, so it is wired into the control's
+// accessible description and cannot be dismissed or scrolled past
+// independently of the input it qualifies.
+//
+// The wording is load-bearing. ARCHITECTURE.md's "Guidance-precedence model"
+// is explicit that this precedence is enforced by INSTRUCTION to the model
+// (scripts/primary_review_pass.py's TOASTER_GUIDANCE_INTRO — "THIS GUIDANCE
+// GOVERNS"), never mechanically: the critic pass is the only check. So this
+// says "govern", matching the prompt's own framing, and never "will
+// override", which would promise a guarantee the system does not make. The
+// hard-requirements carve-out is likewise not optional wording — guidance
+// never reaches the judged-NL Floor the playbook's `hard_rejections`
+// project, and copy that implied otherwise would misdescribe the tool.
+const GUIDANCE_PRECEDENCE_COPY =
+  "These instructions govern over the playbook's positions wherever the two conflict — " +
+  'but never over rules the playbook marks as hard requirements, which nothing can ' +
+  'override. A sentence or two is plenty.';
 
 // Human-readable failure explanations, keyed by the `failing_stage` that
 // backend/src/pipeline_runner.py's run_real_pipeline records. A bare "ERROR"
@@ -213,20 +256,7 @@ function confidenceChipVariant(band: string): CtChipVariant {
   return 'info';
 }
 
-interface ReviewSubmissionProps {
-  // Issue #402: gates the empty-shell "Activate the bundled sample"
-  // affordance, same convention as App.tsx's own admin-visibility gate
-  // (issue #234/#235) — the server remains authoritative (a non-admin
-  // caller still 403s POST /api/admin/playbooks/{id}/activate-sample);
-  // this only decides whether the SPA offers the button at all. Defaults
-  // to false so any other/older caller of this component degrades to
-  // "no admin actions offered", never a crash.
-  isAdmin?: boolean;
-}
-
-export default function ReviewSubmission({
-  isAdmin = false,
-}: ReviewSubmissionProps = {}): React.ReactElement {
+export default function ReviewSubmission(): React.ReactElement {
   const [file, setFile] = useState<File | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
@@ -235,6 +265,24 @@ export default function ReviewSubmission({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
+  // Per-review free-text guidance (issue #431). `toasterGuidance` is what is
+  // currently typed; `submittedGuidance` freezes what was actually sent with
+  // the review now in flight — the same "freeze the submitted value" pattern
+  // as submittedPlaybookLabel below, so editing the box afterwards can never
+  // misreport what governed the running review. React state only: never
+  // localStorage/sessionStorage, and never carried across a page load.
+  const [toasterGuidance, setToasterGuidance] = useState('');
+  const [submittedGuidance, setSubmittedGuidance] = useState<string | null>(null);
+  // Whether the submit that produced the review now in flight was *resumed*
+  // onto a pre-existing review (`SubmitResponse.resumed`). This matters only
+  // for the guidance readback: the idempotency key
+  // (backend/src/reviews.py's derive_idempotency_key) deliberately excludes
+  // `toaster_guidance`, so re-dropping the same file inside the same time
+  // bucket with instructions added returns the original review and leaves
+  // its stored guidance untouched. On that path the locally held text never
+  // governed anything, so it must never stand in for the server's record.
+  const [submittedResumed, setSubmittedResumed] = useState(false);
 
   // Contract-type catalog + selection (issue #272). `playbooks` renders the
   // picker entirely — never a hardcoded id/name list. `playbookId` is the
@@ -249,21 +297,12 @@ export default function ReviewSubmission({
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [submittedPlaybookLabel, setSubmittedPlaybookLabel] = useState<string | null>(null);
 
-  // Empty-shell "activate the bundled sample" action (issue #402). Kept
-  // alongside the catalog state above rather than in its own component:
-  // it exists only to unblock the SAME catalog this whole block manages.
-  const [activatingSampleId, setActivatingSampleId] = useState<string | null>(null);
-  const [activateSampleError, setActivateSampleError] = useState<string | null>(null);
-  const [activateSampleNotice, setActivateSampleNotice] = useState<string | null>(null);
-
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch the contract-type catalog. Called on mount, and again after a
-  // successful "activate the bundled sample" action (issue #402) so the
-  // dial picks up the newly-active playbook without a page reload. A
-  // failure here degrades gracefully (no selector renders; the submission
-  // FormData simply omits playbook_id and the backend's own default
-  // applies) rather than blocking upload.
+  // Fetch the contract-type catalog on mount. A failure here degrades
+  // gracefully (no selector renders; the submission FormData simply omits
+  // playbook_id and the backend's own default applies) rather than
+  // blocking upload.
   const fetchCatalog = useCallback(async (): Promise<void> => {
     try {
       const response = await authorizedFetch('/api/playbooks');
@@ -298,43 +337,6 @@ export default function ReviewSubmission({
   useEffect(() => {
     void fetchCatalog();
   }, [fetchCatalog]);
-
-  const handleActivateSample = useCallback(
-    async (targetPlaybookId: string) => {
-      setActivatingSampleId(targetPlaybookId);
-      setActivateSampleError(null);
-      setActivateSampleNotice(null);
-      try {
-        const response = await authorizedFetch(
-          `/api/admin/playbooks/${encodeURIComponent(targetPlaybookId)}/activate-sample`,
-          { method: 'POST' },
-        );
-        if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST /api/admin/playbooks/${targetPlaybookId}/activate-sample returned HTTP ${response.status}`,
-                "We couldn't activate that sample. Please try again.",
-              ),
-          );
-        }
-        setActivateSampleNotice('Sample activated. Reviews against it can run now.');
-        // Pick up the newly-active playbook (status flips coming_soon ->
-        // active) without asking the attorney to reload the page.
-        await fetchCatalog();
-      } catch (err) {
-        setActivateSampleError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't activate that sample. Please try again."),
-        );
-      } finally {
-        setActivatingSampleId(null);
-      }
-    },
-    [fetchCatalog],
-  );
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current !== null) {
@@ -413,12 +415,28 @@ export default function ReviewSubmission({
       stopPolling();
       setDetail(null);
       setReviewId(null);
+      setSubmittedGuidance(null);
+      setSubmittedResumed(false);
 
       try {
         const formData = new FormData();
         formData.append('file', file);
         if (playbookId) {
           formData.append('playbook_id', playbookId);
+        }
+        // Issue #431: the already-wired optional `toaster_guidance` form
+        // field (backend/src/review_routes.py's post_review). Appended only
+        // when it carries content — whitespace-only guidance is no guidance
+        // at all (scripts/primary_review_pass.py's
+        // render_toaster_guidance_block treats it that way too), and an
+        // empty field must leave the request byte-identical to the one this
+        // form sent before the field existed. No escaping/sanitization here:
+        // the backend treats this as trusted first-party instruction text,
+        // deliberately NOT wrapped in the pipeline's untrusted-input
+        // delimiting (see that module's docstring).
+        const guidance = toasterGuidance.trim();
+        if (guidance) {
+          formData.append('toaster_guidance', guidance);
         }
 
         const response = await authorizedFetch('/api/reviews', {
@@ -440,6 +458,8 @@ export default function ReviewSubmission({
         const data = (await response.json()) as SubmitResponse;
         const selected = playbooks.find((entry) => entry.playbook_id === playbookId);
         setSubmittedPlaybookLabel(selected?.display_name ?? (playbookId || null));
+        setSubmittedGuidance(guidance || null);
+        setSubmittedResumed(Boolean(data.resumed));
         setReviewId(data.review_id);
       } catch (err) {
         setSubmitError(
@@ -451,7 +471,7 @@ export default function ReviewSubmission({
         setSubmitting(false);
       }
     },
-    [file, playbookId, playbooks, stopPolling],
+    [file, playbookId, playbooks, stopPolling, toasterGuidance],
   );
 
   const handleDownload = useCallback(async () => {
@@ -508,14 +528,6 @@ export default function ReviewSubmission({
   // can't pick, which must still read as "nothing loaded".
   const hasLoadedPlaybook = playbooks.some((entry) => entry.status === 'active');
 
-  // The empty-shell first-run affordance (issue #402): a registered-but-
-  // unactivated entry the repo ships a synthetic sample for. Data-driven —
-  // no playbook_id is hard-coded here — so this simply has nothing to show
-  // once every bundled sample has been activated, or if none ever ships.
-  const bundledSampleEntry = playbooks.find(
-    (entry) => entry.status !== 'active' && entry.has_bundled_sample,
-  );
-
   // Ticking sound tracks the working phase; a single pop fires on the
   // transition into done. startTicking/stopTicking are idempotent, and playPop
   // fires once per entry into 'done' because deps are just [phase].
@@ -541,6 +553,20 @@ export default function ReviewSubmission({
       : (detail?.message ?? (detail?.decision === 'REQUEST_CHANGE' ? 'Changes requested.' : null));
 
   const failureExplanation = detail ? explainFailure(detail) : null;
+
+  // Which per-review instructions actually governed this review (issue
+  // #431). The server's own record of it wins — get_review_detail projects
+  // the value stored on the reviews row at submission. The value frozen at
+  // submit time is a fallback for backend/frontend version skew ONLY (a
+  // deploy whose detail response predates the field), and only on a fresh
+  // submission: on a resumed one the review already existed and its stored
+  // guidance was left untouched (backend/src/reviews.py's submit_review), so
+  // the text typed into *this* submit governed nothing and must not be
+  // presented as though it had. Null/empty on both sides renders nothing at
+  // all: a review submitted with no guidance must show no extra banner, not
+  // an empty one.
+  const appliedGuidance: string | null =
+    detail?.toaster_guidance ?? (submittedResumed ? null : submittedGuidance);
 
   return (
     <section data-testid="review-submission" className="ct-section ct-stack">
@@ -587,6 +613,29 @@ export default function ReviewSubmission({
               </CtBanner>
             )}
 
+            {/*
+              Per-review instructions (issue #431). Optional and free-text:
+              the backend already accepts it, defaults it to "", and omits
+              the prompt block entirely when it is empty. The precedence copy
+              rides along as the field's own hint so it is permanent,
+              non-dismissable, and part of the control's accessible
+              description — precedence is visible at the point of authoring,
+              not only in a doc (docs/frontend-design-system.md §15.3).
+            */}
+            <div data-testid="review-guidance-field">
+              <CtField
+                label="Instructions for this review (optional)"
+                hint={GUIDANCE_PRECEDENCE_COPY}
+              >
+                <textarea
+                  data-testid="review-guidance-input"
+                  rows={3}
+                  value={toasterGuidance}
+                  onChange={(event) => setToasterGuidance(event.target.value)}
+                />
+              </CtField>
+            </div>
+
             <CtFileDrop
               accept=".docx"
               label="Drop your contract here or browse"
@@ -627,12 +676,12 @@ export default function ReviewSubmission({
         catalog has actually loaded (a catalog FETCH failure has its own
         message below).
 
-        The empty-shell state (issue #401/#402): an admin sees a one-click
-        "Activate the bundled sample" affordance when the catalog offers one
-        (data-driven via has_bundled_sample — see bundledSampleEntry above);
-        anyone else just sees who needs to act. Either way, a pointer to
-        authoring your own closes the loop the ticket asks for ("upload your
-        own" / "author your own with the playbook-engine").
+        The empty-shell state (issue #401/#433): there is no bespoke
+        activate-the-sample action here any more — every playbook, including
+        the one the image ships with, is installed and activated from the
+        Playbooks admin tab (or, on a fresh deployment, by the deploy-time
+        seed). So this says who needs to act and where, plus a pointer to
+        authoring your own.
       */}
       {catalogLoaded && !hasLoadedPlaybook && !catalogError && (
         <CtBanner variant="muted" data-testid="review-no-playbooks">
@@ -641,40 +690,7 @@ export default function ReviewSubmission({
               No contract types are loaded yet, so there&apos;s nothing to review against.
             </p>
 
-            {isAdmin && bundledSampleEntry ? (
-              <div className="ct-stack" data-testid="review-activate-sample">
-                <p>
-                  Activate the bundled <strong>{bundledSampleEntry.display_name}</strong> sample
-                  to try this tool end to end on synthetic content.
-                </p>
-                <div className="ct-actions">
-                  <CtButton
-                    type="button"
-                    variant="primary"
-                    onClick={() => void handleActivateSample(bundledSampleEntry.playbook_id)}
-                    disabled={activatingSampleId !== null}
-                    loading={activatingSampleId === bundledSampleEntry.playbook_id}
-                    data-testid="review-activate-sample-button"
-                  >
-                    {activatingSampleId === bundledSampleEntry.playbook_id
-                      ? 'Activating…'
-                      : `Activate the bundled ${bundledSampleEntry.display_name} sample`}
-                  </CtButton>
-                </div>
-                {activateSampleError && (
-                  <CtBanner variant="danger" data-testid="review-activate-sample-error">
-                    {activateSampleError}
-                  </CtBanner>
-                )}
-                {activateSampleNotice && (
-                  <CtBanner variant="ok" data-testid="review-activate-sample-notice">
-                    {activateSampleNotice}
-                  </CtBanner>
-                )}
-              </div>
-            ) : (
-              <p>An admin needs to activate a playbook first.</p>
-            )}
+            <p>An admin needs to install and activate a playbook first, from the Playbooks tab.</p>
 
             <p className="ct-muted">
               <small>
@@ -746,6 +762,24 @@ export default function ReviewSubmission({
               <p className="ct-muted">
                 <em>Tool recommendation only — attorney approval required.</em>
               </p>
+
+              {/*
+                Read-only readback of the per-review instructions this review
+                actually ran under (issue #431), so "which instructions
+                applied to this review?" is answerable from the review itself
+                rather than from memory. Rendered as text, never an editable
+                control: a completed review's guidance is a record, not a
+                setting. Only present when there was guidance — no empty
+                banner on a review submitted without any.
+              */}
+              {appliedGuidance && (
+                <CtBanner variant="info" data-testid="review-applied-guidance">
+                  <p style={{ margin: '0 0 0.25rem' }}>
+                    <strong>Instructions applied to this review</strong>
+                  </p>
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{appliedGuidance}</p>
+                </CtBanner>
+              )}
 
               {/*
                 Pre-download trust-calibration signals. These render ABOVE the

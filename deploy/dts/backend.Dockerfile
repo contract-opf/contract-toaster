@@ -28,6 +28,28 @@ COPY deploy/dts/bootstrap.py deploy/dts/bootstrap.py
 # which import each other as top-level modules).
 ENV PYTHONPATH=/app/backend:/app/scripts
 
+# ---- build-time metadata (issue #424) ----
+# Mirrors backend/Dockerfile:1-15 (the AWS target). GET /version reads these at
+# runtime via os.environ (backend/src/main.py); without them the endpoint always
+# hits its fallbacks and the deployed footer reads "Version dev (unknown)".
+#
+# The defaults deliberately match those os.environ.get fallbacks, so a build
+# with no --build-arg degrades exactly as before. Declared HERE, after the COPY
+# layers, so a per-commit COMMIT_SHA does not invalidate the cached
+# pip-install layer above on every build.
+#
+# IMAGE_DIGEST stays `unknown` on this deploy target: the digest is the digest
+# of the PUSHED manifest, so it is not knowable at build time, and baking it in
+# would change the very digest being recorded. The publish workflow echoes the
+# real digest after `docker push` so an operator can supply it as a runtime
+# env var instead (see deploy/dts/docker-compose.coolify.yml).
+ARG VERSION=dev
+ARG COMMIT_SHA=unknown
+ARG IMAGE_DIGEST=unknown
+ENV VERSION=${VERSION}
+ENV COMMIT_SHA=${COMMIT_SHA}
+ENV IMAGE_DIGEST=${IMAGE_DIGEST}
+
 WORKDIR /app/backend
 EXPOSE 8080
 

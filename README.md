@@ -159,27 +159,28 @@ docker compose -f deploy/dts/docker-compose.yml --env-file deploy/dts/.env up --
 - SPA: <http://localhost:8081> — sign in with **admin/admin** or **user/user**
 - API: <http://localhost:8080>
 
-### First run: activate a playbook
+### First run: the shipped playbook
 
-**A fresh install has no active playbook, and that is deliberate.** Contract
-Toaster is an empty shell: it knows nothing about any agreement type until you
-give it one. Until a playbook is active, submitting a review is refused with
-`503 no active playbook` rather than silently falling back to some built-in
-default — there isn't one.
+**Contract Toaster is an empty shell:** it knows nothing about any agreement
+type until a playbook is installed. With no active playbook, submitting a
+review is refused with `503 no active playbook` rather than silently falling
+back to some built-in default — there isn't one.
 
-One step gets you running. Sign in as an admin and the submission page offers:
+So that a fresh install is runnable out of the box, the deploy bootstrap
+(`deploy/dts/bootstrap.py`) installs and activates the playbook the image
+ships with, `synthetic-nda-sample` ("Synthetic NDA Sample"), the first time it
+runs against empty tables. Bring the stack up and upload a `.docx` — the
+review runs end to end, no first-run click required.
 
-> **Activate the bundled Synthetic NDA Sample**
+That install is **not** a special path: it calls the same
+`record_playbook_version_upload` / `activate_playbook_version` functions an
+admin-uploaded version goes through, so the shipped playbook lands as an
+ordinary version row with an ordinary `ACTIVE` status. The seed is
+install-once — once the playbook has version rows, or once an admin has
+removed it, re-running the bootstrap does nothing, so a container restart can
+never overwrite your changes or resurrect something you deleted.
 
-or do the same over the API:
-
-```bash
-curl -X POST http://localhost:8080/api/admin/playbooks/synthetic-nda-sample/activate-sample
-```
-
-Then upload a `.docx` and the review runs end to end.
-
-The bundled sample is a **fictional, brand-free NDA playbook** — a worked
+The shipped playbook is a **fictional, brand-free NDA playbook** — a worked
 example, not legal content, and not anyone's real negotiating position. It
 carries an admin-editable note explaining what it is and where to find more.
 

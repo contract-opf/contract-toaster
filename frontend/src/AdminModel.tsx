@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
-import { CtBanner, CtButton, CtCard, CtChip, CtField } from './ui/react';
+import { CtBanner, CtButton, CtCard, CtChip, CtField, CtProgress, CtToolbar } from './ui/react';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/model_settings.py::get_model_key_settings.
@@ -183,7 +183,7 @@ export default function AdminModel(): React.ReactElement | null {
 
   return (
     <section data-testid="admin-model-panel" className="ct-section ct-stack">
-      <h2 className="ct-section-title">Model &amp; API key</h2>
+      <CtToolbar title="Model & API key" />
 
       {error && (
         <CtBanner variant="danger" data-testid="admin-model-error">
@@ -202,7 +202,7 @@ export default function AdminModel(): React.ReactElement | null {
       )}
 
       {settings === null ? (
-        <p data-testid="admin-model-loading">Loading model key settings…</p>
+        <CtProgress data-testid="admin-model-loading" label="Loading model key settings…" />
       ) : !settings.key_store_available ? (
         <CtCard data-testid="admin-model-unavailable">
           <div className="ct-stack">
@@ -303,8 +303,9 @@ export default function AdminModel(): React.ReactElement | null {
                 {settings.key_source === 'admin' && (
                   <CtButton
                     type="button"
-                    variant="secondary"
+                    variant="danger"
                     data-testid="admin-model-clear"
+                    confirm="Click again to clear"
                     disabled={saving}
                     onClick={() => void handleClear()}
                   >
