@@ -46,7 +46,12 @@ jobs:
           # publishes under whichever org hosts it (issue #406).
           owner="$(echo "${{ github.repository_owner }}" | tr "[:upper:]" "[:lower:]")"
           echo "image=ghcr.io/${owner}/contract-toaster-dts-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
-          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          short_sha="${GITHUB_SHA::7}"
+          echo "sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          # VERSION follows the AWS path's convention (ci-pipeline.yml:320-321):
+          # "<short-sha>-<UTC build timestamp>", unique per build so two builds
+          # of the same commit are still distinguishable in the footer.
+          echo "version=${short_sha}-$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -57,8 +62,19 @@ jobs:
 
       - name: Build image
         run: |
+          # Version metadata is baked into the BACKEND image only: it is what
+          # serves GET /version (issue #424). deploy/dts/frontend.Dockerfile
+          # declares no such ARGs, so passing them there would only produce an
+          # unconsumed-build-arg warning.
+          # Seeded with -f so the array is never empty (expanding an empty array
+          # is an error on bash < 4.4 under `set -u`).
+          build_flags=(-f "${{ matrix.dockerfile }}")
+          if [ "${{ matrix.component }}" = "backend" ]; then
+            build_flags+=(--build-arg "VERSION=${{ steps.meta.outputs.version }}")
+            build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.sha }}")
+          fi
           docker build \
-            -f "${{ matrix.dockerfile }}" \
+            "${build_flags[@]}" \
             -t "${{ steps.meta.outputs.image }}:latest" \
             -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
             .
@@ -67,3 +83,14 @@ jobs:
         run: |
           docker push "${{ steps.meta.outputs.image }}:latest"
           docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}"
+          # IMAGE_DIGEST is only knowable AFTER the push — it is the digest of
+          # the pushed manifest, so the build cannot bake it in (doing so would
+          # change the digest). Echo it here, mirroring ci-pipeline.yml's
+          # capture on the AWS path, so an operator can paste it into the deploy
+          # host's IMAGE_DIGEST variable. Left unset it stays "unknown", which
+          # GET /version degrades to gracefully (backend/src/main.py).
+          digest="$(docker inspect \
+            --format='{{index .RepoDigests 0}}' \
+            "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
+            | cut -d@ -f2)"
+          echo "Pushed image digest: ${digest}"

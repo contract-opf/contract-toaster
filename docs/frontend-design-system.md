@@ -124,7 +124,9 @@ did it wrong.
 ### 3.4 Behavioral invariants locked by tests
 - **All tabpanels stay mounted**, toggled via the `hidden` attribute —
   never conditionally unmount (`security-posture.test.tsx` +
-  polling-state survival; see `App.tsx:294-300`).
+  polling-state survival; see `App.tsx:233-286` — corrected 2026-07-28,
+  was cited as `294-300`, which now falls inside the footer JSX as the
+  file has grown; re-verify the line range before citing it again).
 - **No web storage.** `localStorage.setItem`/`sessionStorage.setItem` are
   banned by a source grep in `security-posture.test.tsx`; tokens and
   mute state are in-memory only.
@@ -437,3 +439,128 @@ removal commit. Each phase lands green on `main`.
 11. **Theme & a11y hardening** — contrast audit, focus audit,
     reduced-motion audit, night-mode QA across every screen.
 12. **(Infra, parallel)** DTS nginx CSP parity with the Amplify CSP.
+
+## 14. Confirm-step pattern for destructive actions (new, 2026-07-28)
+
+The 2026-07-27/28 release audit
+(`docs/planning/frontend-release-audit-2026-07-27.md` §A6) confirmed that
+**every existing destructive action fires immediately on click, with no
+confirmation step at all** — "Deprovision" (`AdminUsers.tsx`), "Release legal
+hold" (`AdminRetention.tsx`), and "Clear saved key" (`AdminModel.tsx`, which
+also isn't even styled `variant="danger"` despite being destructive). §6
+already rules out a modal/dialog ("Deliberately not building… no current
+use") — this section closes the gap without reversing that.
+
+**Pattern: an "armed" state on `ct-button` itself, not a new component or a
+dialog.** New optional prop `confirm: string` (the label to show once armed,
+e.g. `"Click again to remove"`):
+
+- First click while un-armed: does **not** fire `onClick`. The visible label
+  swaps to the `confirm` text, the button gains a distinct armed visual (an
+  accent pulse using existing motion tokens — never a new color), and a
+  4-second auto-disarm timer starts.
+- Second click while armed: fires `onClick` normally, then disarms.
+- Auto-disarm timer elapsing, the button losing focus, or `Escape` while
+  armed: reverts to the original label, no action taken.
+- The label swap must be announced to assistive tech via a co-located
+  `aria-live="polite"` region — a button's own accessible-name change is not
+  reliably announced by screen readers on its own.
+
+Existing call sites that must adopt this once built: Deprovision, Release
+legal hold, Clear saved key (switch this one to `variant="danger"` while it's
+being touched). The new Playbooks tab's "Remove playbook" (§15.1) is the
+first new consumer. Add a `ct-button` "confirm" state to the gallery (§9).
+
+## 15. Playbook admin & guidance-precedence surfaces (new, 2026-07-28)
+
+Backend grounding for this whole section:
+`docs/planning/frontend-release-audit-2026-07-27.md`'s "PART B grounding"
+(route inventory, guidance-precedence model) and `ARCHITECTURE.md`'s
+"Guidance-precedence model" subsection — read both before implementing any
+of this; they are the source of truth for current backend behavior, not this
+summary.
+
+### 15.1 The Playbooks admin tab
+
+A fourth admin tab, `AdminPlaybooks.tsx`, following the *existing*
+admin-screen conventions exactly (re-derived from `AdminUsers.tsx` /
+`AdminRetention.tsx` / `AdminModel.tsx` — copy the pattern, don't reinvent
+it):
+
+- `<section data-testid="admin-playbooks-panel" className="ct-section
+  ct-stack">`, a `<CtToolbar title="Playbooks">` header (not a raw `<h2>` —
+  `AdminModel.tsx` does that; it's a documented inconsistency, audit §A7 —
+  don't add a third instance), one or more `<CtCard>` bodies, `<CtTable>` for
+  lists.
+- A local `authorizedFetch`-wrapping `jsonFetch` helper, duplicated the same
+  way the other three screens each have their own copy (the established
+  convention — see `frontend/src/api.ts`'s docstring for why it's not
+  shared).
+- Loading: **use `ct-progress`**, not the bare `<p>Loading…</p>` the other
+  three screens ship despite §7 always having called for it. File a
+  follow-up to bring those three in line — don't copy their drift into new
+  code.
+- Empty state: an in-table `.ct-table__empty` row (`AdminUsers.tsx`'s
+  convention), not a standalone paragraph outside the table
+  (`AdminRetention.tsx`'s divergent one).
+- `data-testid`s: `admin-playbooks-*` for panel-level ids,
+  `playbooks-table` / `playbook-versions-table` for tables,
+  `playbook-row-${playbook_id}` / `playbook-version-row-${version}` for rows
+  — matching the existing `<entity>-row-${id}` house style.
+- Version/content-hash/uploader/timestamp columns use `.ct-table__mono`
+  (already built for exactly this).
+- Actions: upload a new version, activate, roll back, rename, remove (with
+  the §14 confirm-step — the first real consumer), per-version notes
+  (create/edit — already routed, `PATCH …/notes`). **Upload, rollback, and
+  version-trail have no backend route today** (confirmed in the audit's
+  route inventory) — that is a separate backend-slice ticket this one
+  depends on; don't fake any of the three client-side.
+
+### 15.2 The bundled sample becomes an ordinary playbook
+
+This supersedes the `has_bundled_sample` / `coming_soon` / `activate-sample`
+special-casing (issue #412's design — reversed here per Marc's direction).
+The `synthetic-nda-sample` registry entry, `GET /api/playbooks`'s
+`has_bundled_sample`/`coming_soon` fields, and the bespoke
+`POST /api/admin/playbooks/{id}/activate-sample` route are removed. In their
+place: a deploy/startup seed step calls the **same**
+`playbook_versions.record_playbook_version_upload` +
+`activate_playbook_version` functions any admin-uploaded version goes
+through (§15.1's backend slice) — the sample becomes a version row like any
+other, distinguishable only by an honest `ACTIVE`/`INACTIVE` status, never a
+bespoke third state. `ReviewSubmission.tsx`'s dial keeps rendering
+unactivated playbooks as de-emphasized, non-selectable "(coming soon)"
+stops — that part is fine and unrelated to the special-casing. What goes
+away is the bespoke activation button and the `has_bundled_sample` branch: an
+admin with nothing active is pointed at the Playbooks tab, exactly as they
+would be for any other not-yet-active playbook.
+
+### 15.3 Guidance-precedence surfaces
+
+Two independent authoring surfaces at very different levels of runtime
+maturity — **the UI must not present them as equally live.** Re-read
+`ARCHITECTURE.md`'s "Guidance-precedence model" subsection before building
+either.
+
+- **Per-review `toaster_guidance` (Review tab).** A new free-text field on
+  the submission form, sent as the already-wired `toaster_guidance`
+  multipart field. Pair it with short, permanent, un-dismissable copy near
+  the field — to the effect of *"This overrides the playbook's positions
+  where they conflict — except rules the playbook marks as hard
+  requirements, which nothing can override."* — so precedence is visible at
+  the point of authoring, not only in a doc. On the review-result view, if a
+  review carried non-empty guidance, show it back (read-only) alongside the
+  result, so "which rules applied to this review" is answerable by looking
+  at the review itself.
+- **Per-playbook pen-rules / posture-override** (admin authoring, likely
+  inside the Playbooks tab's per-version view). Needs new backend routes
+  wrapping `bind_bundle()`'s validation before any UI can call it — a
+  backend-slice ticket comes first. Once built, the authoring surface must
+  surface live validation feedback for what the backend enforces (unknown
+  `floor_ref`, stale digest, non-monotonic version — full list in the
+  ARCHITECTURE.md subsection) and **must carry a persistent, impossible-to-
+  miss banner** stating these rules affect only the *next* activated
+  version's replacement-text generation — never the currently active
+  playbook, and never review judgment (that's the separate
+  `toaster_guidance`/Floor layer above). Shipping this without that caveat
+  presents an inert control as a live one.

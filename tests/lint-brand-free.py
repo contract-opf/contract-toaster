@@ -99,7 +99,7 @@ GUARD_FILES = {
     "tests/test_playbook_version_audit_9.py": "asserts the audit trail carries no brand",
     "tests/test_playbook_version_notes.py": "brand-bearing note fixture + non-leak assertion",
     "tests/test_review_api_84.py": "asserts user-facing error copy carries no brand",
-    "tests/test_sample_playbook_activation.py": "asserts sample playbook content carries no brand",
+    "tests/test_shipped_playbook_seed.py": "asserts shipped playbook content carries no brand",
     "tests/test_retention_window_config_34.py": "asserts rendered option labels carry no brand",
     "public-cut-exclude.txt": "the exclusion manifest; naming what it excludes is its job",
     "tests/test_infra_appname_prefix_233.py": "asserts CodeBuild no longer hard-codes the org",

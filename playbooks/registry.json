@@ -17,7 +17,6 @@
       "playbook_path": "playbooks/samples/synthetic-nda-sample-v1.0.0.json",
       "fixtures_dir": "tests/gold-fixtures-nda",
       "display_name": "Synthetic NDA Sample",
-      "bundled_sample": true,
       "seed_notes": "Synthetic NDA Sample — a fictional, brand-free NDA playbook shipped to demonstrate the review flow. It is not legal advice and not a real NDA. Remove or replace it with your own playbook. Find more playbooks at https://github.com/contract-opf/playbooks."
     }
   }

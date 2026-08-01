@@ -42,3 +42,8 @@ aws-access-request.md
 # cut, where those very paths have just been scrubbed. It is tooling for the
 # repo that DOES the cutting, meaningless in the artifact the cut produces.
 tests/lint-public-cut-exclude.py
+
+# The Exos production overlay: real AWS account, hosted domain, admin/alarms
+# addresses, the real playbook bundle and gold set. This is the one directory
+# whose entire purpose is to hold what must never be public.
+overlay/

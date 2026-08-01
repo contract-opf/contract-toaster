@@ -21,7 +21,14 @@ on:
 
 jobs:
   brand-free:
-    runs-on: ubuntu-latest
+    # Same indirection as the other 29 gate jobs: `vars.CI_RUNS_ON` points at
+    # the self-hosted fleet, falling back to a GitHub-hosted runner if unset.
+    # This gate was the one left hardcoded, so it kept targeting a runner that
+    # is currently unavailable and failed before its first step could run --
+    # a red gate on every push that said nothing about the brand lint.
+    # (ci-pipeline.yml's build-sign-push/promote jobs stay hardcoded on
+    # purpose; they need Docker + AWS OIDC the home-lab runner lacks.)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:

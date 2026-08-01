@@ -26,8 +26,8 @@ ONE "Synthetic NDA Sample" playbook with a seeded note).
   - "synthetic-generic" (the registry entry #412 renamed from "eiaa") remains
     separately registered and loadable, for the anchor/detector test suite
     that still resolves fixtures through it -- but is marked `"test_only":
-    true` and is never the default, never a `bundled_sample`, and never
-    surfaced on `GET /api/playbooks` (see tests/test_playbook_catalog_
+    true` and is never the default, and is never surfaced on
+    `GET /api/playbooks` (see tests/test_playbook_catalog_
     endpoint.py's RealCatalogShipsExactlyOneSampleTest for the full catalog
     acceptance criterion -- not re-driven here to avoid duplicating that
     coverage).
@@ -112,18 +112,17 @@ class TestRegistryDefaultRepointed(unittest.TestCase):
         self.assertIsNone(entry.anchor_map_path)
         self.assertIsNone(entry.section_config_path)
         self.assertEqual(playbook_registry.profile(entry), "knowledge")
-        self.assertTrue(entry.bundled_sample)
 
     def test_synthetic_generic_still_registered_and_loadable_but_test_only(self):
         """The renamed former "eiaa" entry is not removed -- the ~30 tests
         that resolve fixtures through it (issue #412's Scope) still need
-        it -- but it is marked test_only, is never the registry default,
-        and is never a bundled_sample (Gate 7 stays the only way to
-        activate it were it ever given a real release bundle)."""
+        it -- but it is marked test_only and is never the registry default.
+        `test_only` is also what the deploy-time seed (issue #433's
+        src.sample_playbooks) refuses to install, so a fixtures entry can
+        never become a deployment's active playbook."""
         self.assertIn("synthetic-generic", playbook_registry.list_playbook_ids())
         entry = playbook_registry.resolve_playbook("synthetic-generic")
         self.assertTrue(entry.test_only)
-        self.assertFalse(entry.bundled_sample)
         doc = playbook_validation.load_and_validate_playbook("synthetic-generic")
         self.assertEqual(doc["playbook"]["id"], "synthetic-generic")
 

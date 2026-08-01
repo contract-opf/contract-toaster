@@ -76,7 +76,17 @@ ct-file-drop {
   color: var(--ct-text);
 }
 
-.ct-file-drop__pill {
+/* The `:not([hidden])` guard is LOAD-BEARING, not decoration (issue #423).
+   ct-file-drop.ts hides/shows this pill with `pill.hidden = true/false`, and
+   an author stylesheet's normal `display: flex` unconditionally beats the UA
+   stylesheet's `[hidden] { display: none }` — that is a cascade-ORIGIN rule,
+   not a specificity contest, so no amount of extra specificity on the UA side
+   can win. Without the guard the pill stays visible forever (an empty grey
+   box holding only the lone `×`) whether or not a file is selected. Any
+   future rule that sets `display` on a programmatically-`hidden` element in
+   this codebase needs the same guard. Note vitest runs with `css: false`, so
+   the unit suite cannot catch a regression here — verify in a browser. */
+.ct-file-drop__pill:not([hidden]) {
   display: flex;
   align-items: center;
   gap: var(--ct-space-2);

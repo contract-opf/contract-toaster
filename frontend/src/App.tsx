@@ -28,6 +28,8 @@ import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import AdminUsers from './AdminUsers';
 import AdminRetention from './AdminRetention';
 import AdminModel from './AdminModel';
+import AdminPenRules from './AdminPenRules';
+import AdminPlaybooks from './AdminPlaybooks';
 import ReviewSubmission from './ReviewSubmission';
 import PasswordLogin, { DemoIdentity } from './PasswordLogin';
 import { getToken, isPasswordMode, setDemoToken } from './auth';
@@ -73,7 +75,7 @@ type AdminCapability = 'loading' | 'admin' | 'non-admin';
 // Tabbed shell. One app shell + one Review experience shared by both roles;
 // the two admin tabs are appended only for an admin caller.
 // ---------------------------------------------------------------------------
-type TabId = 'review' | 'users' | 'retention' | 'model';
+type TabId = 'review' | 'users' | 'retention' | 'model' | 'pen-rules' | 'playbooks';
 
 interface TabDef {
   id: TabId;
@@ -181,12 +183,12 @@ function AppContent({
   const isAdmin = adminCapability === 'admin';
 
   // Tab set: Review is always present; the two admin tabs are appended only
-  // for an admin caller. `useAdminCapability` decides the tab set, the
-  // header admin badge, and — additively, issue #402 — whether
-  // <ReviewSubmission /> offers its one "Activate the bundled sample"
-  // affordance; it never branches which panel renders or the rest of the
-  // Review flow, and the server stays authoritative for the action itself
-  // (a non-admin caller still 403s the endpoint this button calls).
+  // for an admin caller. `useAdminCapability` decides the tab set and the
+  // header admin badge; it never branches which panel renders or the rest
+  // of the Review flow. <ReviewSubmission /> takes no admin gate of its own
+  // (issue #433 removed the one bespoke admin action it used to offer) —
+  // playbook administration lives in the admin tabs, and the server stays
+  // authoritative for every action there.
   const tabs: TabDef[] = [
     { id: 'review', label: 'Review' },
     ...(isAdmin
@@ -194,6 +196,16 @@ function AppContent({
           { id: 'users', label: 'Users & access' },
           { id: 'retention', label: 'Retention & legal hold' },
           { id: 'model', label: 'Model & API key' },
+          // Playbook lifecycle (issue #434) — upload, activate, roll back,
+          // rename, remove, per-version notes. Since #433 retired the
+          // bundled-sample special case, this is the ONLY playbook-lifecycle
+          // surface in the app.
+          { id: 'playbooks', label: 'Playbooks' },
+          // Pen rules & posture (issue #435). Still its own tab rather than a
+          // sub-view of the Playbooks tab above — re-homing it into a
+          // per-version view is a follow-up, not part of #434; see
+          // AdminPenRules.tsx's docstring.
+          { id: 'pen-rules', label: 'Pen rules & posture' },
         ] as TabDef[])
       : []),
   ];
@@ -245,11 +257,11 @@ function AppContent({
           className="ct-tabpanel"
           hidden={activeTab !== 'review'}
         >
-          <ReviewSubmission isAdmin={isAdmin} />
+          <ReviewSubmission />
         </section>
       ) : (
         <section className="ct-tabpanel">
-          <ReviewSubmission isAdmin={isAdmin} />
+          <ReviewSubmission />
         </section>
       )}
 
@@ -281,6 +293,24 @@ function AppContent({
             hidden={activeTab !== 'model'}
           >
             <AdminModel />
+          </section>
+          <section
+            role="tabpanel"
+            id="panel-playbooks"
+            aria-labelledby="tab-playbooks"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'playbooks'}
+          >
+            <AdminPlaybooks />
+          </section>
+          <section
+            role="tabpanel"
+            id="panel-pen-rules"
+            aria-labelledby="tab-pen-rules"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'pen-rules'}
+          >
+            <AdminPenRules />
           </section>
         </>
       )}
@@ -341,5 +371,24 @@ export default function App(): React.ReactElement {
   if (isPasswordMode()) {
     return <PasswordApp />;
   }
-  return <Authenticator>{() => <SsoApp />}</Authenticator>;
+  // Two Authenticator props make the AWS-target sign-in screen match the
+  // product's actual access model (issue #426):
+  //
+  //   socialProviders={['google']} — renders a "Sign In with Google" button
+  //     ABOVE the standard form. It ADDS the federated path; it does not
+  //     replace the username/password form. Both are supported sign-in paths.
+  //   hideSignUp — removes the "Create Account" tab. This product has zero
+  //     self-registration: admission is Google SSO + Cognito JIT provisioning
+  //     behind an application allowlist (ARCHITECTURE.md → Authentication), so
+  //     a sign-up tab is an affordance that can only ever dead-end.
+  //
+  // Both are verified present on the installed @aws-amplify/ui-react@6.15.4
+  // (AuthenticatorProps → RouterProps/SignInBaseProps; both are destructured
+  // by AuthenticatorInternal). See sso-signin-surface.test.tsx, which renders
+  // the REAL Authenticator — no vi.mock — and asserts the resulting surface.
+  return (
+    <Authenticator hideSignUp socialProviders={['google']}>
+      {() => <SsoApp />}
+    </Authenticator>
+  );
 }

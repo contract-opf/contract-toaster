@@ -137,6 +137,180 @@ describe('CtButton', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Confirm-step ("armed") pattern — issue #428, docs/frontend-design-system.md
+// §14. An optional `confirm` label turns a single destructive click into a
+// two-step arm→confirm interaction, WITHOUT a modal (§6 rules one out). All
+// state changes are synchronous DOM mutations (see ct-button.ts docstring
+// point 3), so these assert label/attribute/ARIA/testid text, never computed
+// styles — consistent with the css:false harness.
+// ---------------------------------------------------------------------------
+describe('CtButton confirm-step', () => {
+  it('without a confirm prop, a single click fires immediately (behavior unchanged)', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="no-confirm" onClick={onClick}>
+        Go
+      </CtButton>,
+    );
+    await settleHost('ct-button');
+    fireEvent.click(screen.getByTestId('no-confirm'));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('first click arms instead of firing, swapping the visible label to the confirm text', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="confirm-arm" confirm="Click again to remove" onClick={onClick}>
+        Remove
+      </CtButton>,
+    );
+    await settleHost('ct-button');
+    const btn = screen.getByTestId('confirm-arm');
+    expect(btn.textContent).toContain('Remove');
+
+    fireEvent.click(btn);
+
+    expect(onClick).not.toHaveBeenCalled();
+    expect(btn.textContent).toContain('Click again to remove');
+    expect(btn.textContent).not.toContain('Remove');
+    // Still a real, un-disabled <button> — arming is a behavior change on the
+    // same element, not a swap to some non-interactive node.
+    expect(btn.tagName).toBe('BUTTON');
+    expect(btn).not.toBeDisabled();
+  });
+
+  it('second click while armed fires the handler once, then disarms back to the original label', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="confirm-fire" confirm="Click again to remove" onClick={onClick}>
+        Remove
+      </CtButton>,
+    );
+    await settleHost('ct-button');
+    const btn = screen.getByTestId('confirm-fire');
+
+    fireEvent.click(btn); // arm
+    expect(onClick).not.toHaveBeenCalled();
+
+    fireEvent.click(btn); // confirm
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(btn.textContent).toContain('Remove');
+    expect(btn.textContent).not.toContain('Click again to remove');
+  });
+
+  it('auto-disarms after the 4s window elapses, reverting the label with no action taken', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="confirm-timer" confirm="Click again to remove" onClick={onClick}>
+        Remove
+      </CtButton>,
+    );
+    // Settle under real timers (Lit's updateComplete is a microtask), THEN
+    // switch to fake timers so only the component's own 4s disarm setTimeout
+    // is driven by advanceTimersByTime — arm/disarm are synchronous DOM
+    // mutations, so no awaits are needed once fake timers are installed.
+    await settleHost('ct-button');
+    const btn = screen.getByTestId('confirm-timer');
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(btn); // arm + start the 4s timer
+      expect(onClick).not.toHaveBeenCalled();
+      expect(btn.textContent).toContain('Click again to remove');
+
+      vi.advanceTimersByTime(4000); // auto-disarm
+
+      expect(btn.textContent).toContain('Remove');
+      expect(btn.textContent).not.toContain('Click again to remove');
+      expect(onClick).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Escape while armed reverts the label and takes no action', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="confirm-esc" confirm="Click again to remove" onClick={onClick}>
+        Remove
+      </CtButton>,
+    );
+    await settleHost('ct-button');
+    const btn = screen.getByTestId('confirm-esc');
+
+    fireEvent.click(btn); // arm
+    expect(btn.textContent).toContain('Click again to remove');
+
+    fireEvent.keyDown(btn, { key: 'Escape' });
+    expect(btn.textContent).toContain('Remove');
+    expect(btn.textContent).not.toContain('Click again to remove');
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('losing focus while armed reverts the label and takes no action', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="confirm-blur" confirm="Click again to remove" onClick={onClick}>
+        Remove
+      </CtButton>,
+    );
+    await settleHost('ct-button');
+    const btn = screen.getByTestId('confirm-blur');
+    btn.focus();
+
+    fireEvent.click(btn); // arm
+    expect(btn.textContent).toContain('Click again to remove');
+
+    fireEvent.blur(btn);
+    expect(btn.textContent).toContain('Remove');
+    expect(btn.textContent).not.toContain('Click again to remove');
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('announces the armed label via a co-located aria-live="polite" region', async () => {
+    render(
+      <CtButton data-testid="confirm-live" confirm="Click again to remove">
+        Remove
+      </CtButton>,
+    );
+    const host = await settleHost('ct-button');
+    const live = host.querySelector('[aria-live="polite"]');
+    expect(live).not.toBeNull();
+    // Empty until armed (a button's own accessible-name change is not
+    // reliably announced on its own — this region is the announcement channel).
+    expect(live?.textContent ?? '').toBe('');
+
+    fireEvent.click(screen.getByTestId('confirm-live')); // arm
+    expect(live?.textContent).toContain('Click again to remove');
+  });
+
+  it('remains a real, focusable <button> throughout (keyboard operable arm→confirm)', async () => {
+    const onClick = vi.fn();
+    render(
+      <CtButton data-testid="confirm-kbd" confirm="Click again to remove" onClick={onClick}>
+        Remove
+      </CtButton>,
+    );
+    await settleHost('ct-button');
+    const btn = screen.getByTestId('confirm-kbd');
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    expect(btn.tagName).toBe('BUTTON');
+
+    // A real <button> activates on Enter/Space natively; simulate the click
+    // each keypress produces. First activation arms, second confirms.
+    fireEvent.keyDown(btn, { key: 'Enter' });
+    fireEvent.click(btn);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(btn); // still focused → still armed
+    expect(btn.textContent).toContain('Click again to remove');
+
+    fireEvent.keyDown(btn, { key: 'Enter' });
+    fireEvent.click(btn);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('CtIconButton', () => {
   it('renders a real <button> with the required label as aria-label', async () => {
     render(

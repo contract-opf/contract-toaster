@@ -61,6 +61,13 @@ const CtButtonComponent = createComponent({
 export interface CtButtonProps
   extends Omit<React.ComponentProps<typeof CtButtonComponent>, 'text' | 'children'> {
   children: string;
+  /**
+   * Optional confirm-step label (issue #428, §14). When set, the button arms
+   * on first click (swapping its visible label to this text, firing nothing)
+   * and only performs `onClick` on a second click within ~4s. Omit for a
+   * plain single-click button.
+   */
+  confirm?: string;
 }
 
 export function CtButton({ children, ...rest }: CtButtonProps): React.ReactElement {

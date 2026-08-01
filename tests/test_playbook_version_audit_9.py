@@ -32,6 +32,9 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-test")
+# Activation/rollback append an audit row, so the lifecycle tests below need
+# the audit table provisioned too.
+os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-versions-test")
 
 import boto3  # noqa: E402
 from moto import mock_aws  # noqa: E402
@@ -55,6 +58,18 @@ class PlaybookVersionAuditTrailTestBase(unittest.TestCase):
             AttributeDefinitions=[
                 {"AttributeName": "playbook_id", "AttributeType": "S"},
                 {"AttributeName": "version", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        self.ddb.create_table(
+            TableName=os.environ["AUDIT_TABLE"],
+            KeySchema=[
+                {"AttributeName": "partition", "KeyType": "HASH"},
+                {"AttributeName": "timestamp", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "partition", "AttributeType": "S"},
+                {"AttributeName": "timestamp", "AttributeType": "S"},
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -221,13 +236,21 @@ class TestTrailReadPath(PlaybookVersionAuditTrailTestBase):
         self.assertNotIn("Exos", serialized)
         self.assertNotIn("EXOS", serialized)
 
-    def test_trail_only_carries_identifiers_timestamps_and_notes(self):
-        """The read path is a documented no-document-substance surface --
-        only playbook_id/version/uploaded_by/uploaded_at, matching the
-        `audit` table's identifiers-only posture (ARCHITECTURE.md ->
-        'Audit posture') -- plus `notes` (issue #411's one deliberately-
-        mutable field, surfaced read-only here; default "" at upload
-        time)."""
+    def test_trail_carries_identifiers_statuses_hashes_and_notes(self):
+        """The read path is a documented no-document-substance surface, and
+        the posture it implements is `_write_audit_entry`'s: "Identifiers,
+        statuses, and hashes only -- never document substance"
+        (ARCHITECTURE.md -> 'Audit posture'). `status` and `content_hash`
+        are exactly that, so both belong here; `content_hash` is a digest
+        from which no document is recoverable, and it is already written
+        into the `audit` table itself (src/sample_playbooks.py). Plus
+        `notes` -- issue #411's one deliberately-mutable field, surfaced
+        read-only here; default "" at upload time.
+
+        This key set is a contract, asserted exactly: an admin reviewing
+        the trail cannot tell an active version from a retired one without
+        `status`, nor verify what was uploaded without `content_hash`
+        (issue #434)."""
         pv.record_playbook_version_upload(
             playbook_id=PLAYBOOK_ID,
             version="1.0.0",
@@ -240,9 +263,60 @@ class TestTrailReadPath(PlaybookVersionAuditTrailTestBase):
         trail = pv.list_playbook_version_trail(PLAYBOOK_ID, self.ddb)
         self.assertEqual(
             set(trail[0].keys()),
-            {"playbook_id", "version", "uploaded_by", "uploaded_at", "notes"},
+            {
+                "playbook_id",
+                "version",
+                "uploaded_by",
+                "uploaded_at",
+                "status",
+                "content_hash",
+                "notes",
+            },
         )
         self.assertEqual(trail[0]["notes"], "")
+        self.assertEqual(trail[0]["status"], pv.STATUS_DRAFT)
+        self.assertEqual(trail[0]["content_hash"], "sha256:deadbeef")
+
+    def test_trail_reflects_lifecycle_transitions_in_status(self):
+        """`status` has to track activation, or the Playbooks tab's chip
+        would show every version as a draft forever."""
+        for version, ts in (("1.0.0", 1_700_000_000), ("1.1.0", 1_700_000_100)):
+            pv.record_playbook_version_upload(
+                playbook_id=PLAYBOOK_ID,
+                version=version,
+                uploader_identity="admin-1",
+                dynamodb_resource=self.ddb,
+                content_hash=f"sha256:{version}",
+                now_epoch_value=ts,
+            )
+        pv.activate_playbook_version(
+            playbook_id=PLAYBOOK_ID,
+            version="1.1.0",
+            actor_identity="admin-1",
+            dynamodb_resource=self.ddb,
+            now_epoch_value=1_700_000_200,
+        )
+
+        trail = pv.list_playbook_version_trail(PLAYBOOK_ID, self.ddb)
+        self.assertEqual(
+            {row["version"]: row["status"] for row in trail},
+            {"1.0.0": pv.STATUS_DRAFT, "1.1.0": pv.STATUS_ACTIVE},
+        )
+
+    def test_trail_omits_content_hash_key_when_none_was_recorded(self):
+        """Older rows predate content-hash recording; the key is absent
+        rather than present-and-null, matching how the item is written."""
+        pv.record_playbook_version_upload(
+            playbook_id=PLAYBOOK_ID,
+            version="1.0.0",
+            uploader_identity="admin-1",
+            dynamodb_resource=self.ddb,
+            now_epoch_value=1_700_000_000,
+        )
+
+        trail = pv.list_playbook_version_trail(PLAYBOOK_ID, self.ddb)
+        self.assertNotIn("content_hash", trail[0])
+        self.assertEqual(trail[0]["status"], pv.STATUS_DRAFT)
 
     def test_empty_trail_for_unknown_playbook(self):
         trail = pv.list_playbook_version_trail("no-such-playbook", self.ddb)
