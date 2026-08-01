@@ -110,6 +110,7 @@ export function buildButtonSection(): HTMLElement {
     text: string;
     loading?: boolean;
     disabled?: boolean;
+    confirm?: string;
   }): CtButton {
     const b = createEl<CtButton>('ct-button');
     b.setAttribute('variant', opts.variant);
@@ -120,6 +121,9 @@ export function buildButtonSection(): HTMLElement {
     }
     if (opts.disabled) {
       b.disabled = true;
+    }
+    if (opts.confirm) {
+      b.confirm = opts.confirm;
     }
     return b;
   }
@@ -150,8 +154,12 @@ export function buildButtonSection(): HTMLElement {
         button({ variant: 'secondary', text: 'Disabled', disabled: true }),
       ]),
     ),
+    exampleGroup(
+      'Confirm step (destructive) — click once to arm, again to confirm (auto-disarms after 4s)',
+      row([button({ variant: 'danger', text: 'Remove', confirm: 'Click again to remove' })]),
+    ),
     codeSnippet(
-      `import { CtButton } from '../ui/react';\n\n<CtButton variant="primary" loading={isSubmitting}>\n  Toast it\n</CtButton>`,
+      `import { CtButton } from '../ui/react';\n\n<CtButton variant="primary" loading={isSubmitting}>\n  Toast it\n</CtButton>\n\n// Destructive action — arms on first click, fires on the second:\n<CtButton variant="danger" confirm="Click again to remove" onClick={remove}>\n  Remove\n</CtButton>`,
     ),
   );
 
@@ -517,33 +525,55 @@ export function buildFileDropSection(): HTMLElement {
     'Drag-and-drop + click-to-browse upload well. Emits ct-files {files}; the visible input stays the only focus stop (§5.1 note on ct-file-drop.ts).',
   );
 
-  const empty = createEl<CtFileDrop>('ct-file-drop');
-  empty.accept = '.docx';
-
-  const withFile = createEl<CtFileDrop>('ct-file-drop');
-  withFile.accept = '.docx';
   // Simulates a real user selection through the component's own real
   // <input type=file> (light DOM — §5.1), the same DataTransfer path a
   // browser drag-drop or file picker would produce; this is dev-gallery-only
   // demo wiring, not a public ct-file-drop API.
-  queueMicrotask(() => {
-    const input = withFile.querySelector<HTMLInputElement>('input[type="file"]');
+  const selectDemoFile = (drop: CtFileDrop, filename: string): boolean => {
+    const input = drop.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) {
-      return;
+      return false;
     }
-    const file = new File(['sample contents'], 'Sample Agreement.docx', {
+    const file = new File(['sample contents'], filename, {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(file);
     input.files = dataTransfer.files;
     input.dispatchEvent(new Event('change'));
+    return true;
+  };
+
+  const empty = createEl<CtFileDrop>('ct-file-drop');
+  empty.accept = '.docx';
+
+  const withFile = createEl<CtFileDrop>('ct-file-drop');
+  withFile.accept = '.docx';
+  queueMicrotask(() => {
+    selectDemoFile(withFile, 'Sample Agreement.docx');
+  });
+
+  // Selected, then CLEARED — the exact state issue #423 fixed. Before
+  // ct-file-drop.css's `:not([hidden])` guard this frame rendered a lingering
+  // empty grey box holding a lone `×`; it must now look identical to the
+  // never-touched "empty" frame on its left.
+  const cleared = createEl<CtFileDrop>('ct-file-drop');
+  cleared.accept = '.docx';
+  queueMicrotask(() => {
+    if (!selectDemoFile(cleared, 'Sample Agreement.docx')) {
+      return;
+    }
+    cleared.querySelector<HTMLElement>('.ct-file-drop__clear')?.click();
   });
 
   body.append(
     exampleGroup(
-      'Empty / with a file selected',
-      row([el('div', { className: 'gallery-frame' }, [empty]), el('div', { className: 'gallery-frame' }, [withFile])]),
+      'Empty / with a file selected / selected then cleared',
+      row([
+        el('div', { className: 'gallery-frame' }, [empty]),
+        el('div', { className: 'gallery-frame' }, [withFile]),
+        el('div', { className: 'gallery-frame' }, [cleared]),
+      ]),
     ),
     codeSnippet(
       `import { CtFileDrop } from '../ui/react';\n\n<CtFileDrop accept=".docx" onFiles={(e) => setFile(e.detail.files[0] ?? null)} />`,

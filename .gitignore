@@ -118,3 +118,7 @@ tmp/
 backend/vendor/*/build/
 backend/vendor/*/dist/
 backend/vendor/*/__pycache__/
+
+# Tenant production overlay secrets (never committed)
+overlay/.env
+overlay/*.secret

@@ -24,7 +24,7 @@ Covers the issue's "Acceptance criteria":
       (`review_routes.get_active_user_row`) every other route in this
       router uses.
   (4) the response shape is `{"playbooks": [{"playbook_id",
-      "display_name", "status", "has_bundled_sample", "notes"}, ...]}`,
+      "display_name", "status", "notes"}, ...]}`,
       sorted by playbook_id.
 
 Issue #411 added `notes` (the catalog's read of the currently-active
@@ -186,27 +186,24 @@ class PlaybookCatalogEndpointTest(PlaybookCatalogEndpointTestBase):
                         "display_name": ACTIVE_PLAYBOOK_ID.upper(),  # no
                         # registry display_name -> id upper-cased fallback
                         "status": "active",
-                        "has_bundled_sample": False,
                         "notes": "",  # no playbook_versions row at all
                     },
                     {
                         "playbook_id": COMING_SOON_PLAYBOOK_ID,
                         "display_name": "Widget Services Agreement",
                         "status": "coming_soon",
-                        "has_bundled_sample": False,
                         "notes": "",
                     },
                 ]
             },
         )
 
-    def test_coming_soon_entry_with_bundled_sample_marker_is_flagged(self):
-        """issue #402: a registry entry carrying "bundled_sample": true
-        surfaces `has_bundled_sample: true` in the catalog even while its
-        status is still "coming_soon" (no active bundle yet) -- this is the
-        empty-shell first-run UI's data source for offering a one-click
-        "activate the bundled sample" affordance without hard-coding a
-        playbook_id on the frontend."""
+    def test_a_stale_bundled_sample_marker_synthesizes_no_extra_field(self):
+        """Issue #433 removed the sample-only special case. A registry file
+        left over from an older image (one still carrying the retired
+        "bundled_sample" marker) must NOT resurrect a `has_bundled_sample`
+        catalog field or a third status -- the marker is inert, and the
+        entry is described exactly like any other unactivated playbook."""
         registry = {
             "playbooks": {
                 "sample-id": {
@@ -229,7 +226,6 @@ class PlaybookCatalogEndpointTest(PlaybookCatalogEndpointTestBase):
                         "playbook_id": "sample-id",
                         "display_name": "Sample With Bundle",
                         "status": "coming_soon",
-                        "has_bundled_sample": True,
                         "notes": "",
                     },
                 ]
@@ -366,11 +362,10 @@ class RealCatalogShipsExactlyOneSampleTest(unittest.TestCase):
         self.assertNotIn("sample-agreement", ids)
         self.assertNotIn("synthetic-generic", ids)
 
-    def test_activated_sample_carries_its_seeded_note(self):
+    def test_seeded_sample_carries_its_seeded_note(self):
         from src import sample_playbooks
 
-        admin_row = {"cognito_sub": "admin-1", "status": "active", "is_admin": True}
-        sample_playbooks.activate_bundled_sample("synthetic-nda-sample", admin_row, self.ddb)
+        sample_playbooks.seed_shipped_playbook("synthetic-nda-sample", self.ddb)
 
         response = self.client.get("/api/playbooks")
         self.assertEqual(response.status_code, 200)

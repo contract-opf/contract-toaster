@@ -15,6 +15,12 @@ config.boto3_client_kwargs):
      mock-fixtures/eiaa/pre-baked-redline.docx (what the mock pipeline copies).
   4. Seed the demo users (admin/admin, user/user) and a minimal active eiaa
      playbook bundle so submit_review's active-bundle check passes.
+  5. Install and activate the playbook the image ships with (issue #433), so a
+     fresh deployment never comes up with an empty catalog. This is the ONLY
+     way the shipped playbook gets installed -- there is no bespoke
+     activate-the-sample route or button any more; it goes through the same
+     src.playbook_versions upload/activate functions an admin-uploaded
+     version does, and is an ordinary playbook from then on.
 
 Run: python3 deploy/dts/bootstrap.py   (PYTHONPATH must include backend/)
 """
@@ -33,7 +39,17 @@ _BACKEND = _APP_ROOT / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from src import config, demo_auth  # noqa: E402
+from src import config, demo_auth, sample_playbooks  # noqa: E402
+
+# scripts/ for the registry that names WHICH playbook a deployment installs --
+# a registry field, never a playbook_id literal here (issue #289's
+# type-blindness convention). backend/src/sample_playbooks.py already inserts
+# this path; doing it explicitly keeps the dependency visible.
+_SCRIPTS = _APP_ROOT / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import playbook_registry  # noqa: E402
 
 FIXTURE_PATH = _APP_ROOT / "infra" / "fixtures" / "mock-outputs" / "eiaa" / "pre-baked-redline.docx"
 FIXTURE_KEY = "mock-fixtures/eiaa/pre-baked-redline.docx"
@@ -185,6 +201,39 @@ def seed_users_and_playbook() -> None:
         print("  seeded active eiaa playbook bundle")
 
 
+def seed_shipped_playbook() -> None:
+    """Install + activate the playbook the image ships with (issue #433).
+
+    Idempotent in the strong sense: `sample_playbooks.seed_shipped_playbook`
+    installs only into a FRESH deployment and skips once the playbook has
+    version rows, or once an admin has removed it -- so re-running the
+    bootstrap on every `docker compose up` can never stomp admin state or
+    resurrect a removed playbook. Which playbook_id gets installed comes
+    from the registry's `default_playbook_id`, never a literal here.
+
+    The two documented refusals (nothing shippable registered; on-disk
+    content that fails runtime validation) are reported and survived rather
+    than crashing the stack -- the app's own empty-shell state is a
+    supported, documented condition (reviews are refused with 503 "no active
+    playbook" rather than silently mis-served). Anything else -- a table
+    that isn't there, a DynamoDB error -- propagates and fails the bootstrap
+    loudly, because that is a broken deployment, not an empty one.
+    """
+    playbook_id = playbook_registry.default_playbook_id()
+    try:
+        result = sample_playbooks.seed_shipped_playbook(playbook_id, _ddb_resource())
+    except (
+        sample_playbooks.SampleNotAvailableError,
+        sample_playbooks.SampleInvalidError,
+    ) as exc:
+        print(f"  WARNING: could not install the shipped playbook: {type(exc).__name__}: {exc}")
+        return
+    if result["status"] == "active":
+        print(f"  installed and activated shipped playbook {playbook_id!r}")
+    else:
+        print(f"  shipped playbook {playbook_id!r} not installed ({result['reason']})")
+
+
 def wait_for_services(timeout_seconds: Optional[int] = None) -> None:
     """Block until DynamoDB-Local and MinIO accept connections (the compose
     `depends_on: service_started` only waits for the container to start, not for
@@ -245,6 +294,7 @@ def main() -> int:
     create_buckets()
     seed_fixture()
     seed_users_and_playbook()
+    seed_shipped_playbook()
     print("Docker Compose bootstrap: done.")
     return 0
 

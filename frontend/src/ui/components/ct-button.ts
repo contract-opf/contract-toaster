@@ -44,6 +44,21 @@
  *    what a plain `<button>` gave those tests before this migration.
  *    `variant`/`size` stay ordinary Lit reactive properties (reflected
  *    attributes only used for CSS) since nothing needs them synchronously.
+ *
+ * 3. The optional `confirm` "armed" state (issue #428,
+ *    docs/frontend-design-system.md §14 — a two-step confirm for destructive
+ *    actions WITHOUT a modal, which §6 rules out) follows point 2's pattern:
+ *    it is driven by a native `click` listener on the real inner `<button>`
+ *    and synchronous DOM mutation, NOT a Lit reactive property. The listener
+ *    sits on the button (the deepest node in the bubble path), so on the
+ *    ARMING click it can `stopPropagation()` (and `preventDefault()`, in case
+ *    it's a submit) BEFORE the event reaches React's root-delegated `onClick`
+ *    — that is what makes the first click arm instead of fire. The CONFIRMING
+ *    (second) click does not stop propagation, so the consumer's `onClick`
+ *    fires exactly as it would for a plain button. Auto-disarm (4s), `blur`,
+ *    and `Escape` all revert synchronously. The label swap is mirrored into a
+ *    co-located `aria-live="polite"` region because a button's own
+ *    accessible-name change is not reliably announced on its own.
  */
 import { LitElement } from 'lit';
 import { defineOnce } from '../define';
@@ -54,6 +69,9 @@ export type CtButtonSize = 'sm' | 'md';
 export type CtButtonType = 'button' | 'submit' | 'reset';
 
 const TAG = 'ct-button';
+
+/** Auto-disarm window for the confirm-step pattern (§14). */
+const CONFIRM_DISARM_MS = 4000;
 
 export class CtButton extends LitElement {
   createRenderRoot(): this {
@@ -71,10 +89,14 @@ export class CtButton extends LitElement {
   private _btn: HTMLButtonElement | null = null;
   private _label: HTMLSpanElement | null = null;
   private _spinner: HTMLSpanElement | null = null;
+  private _live: HTMLSpanElement | null = null;
   private _loading = false;
   private _disabled = false;
   private _type: CtButtonType = 'button';
   private _text = '';
+  private _confirm = '';
+  private _armed = false;
+  private _disarmTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
@@ -121,8 +143,34 @@ export class CtButton extends LitElement {
     }
     btn.appendChild(label);
 
+    // Confirm-step announcement channel (§14, docstring point 3). A
+    // visually-hidden, co-located polite live region — present up front (so
+    // assistive tech is already watching it) and populated only while armed.
+    // It lives on the host, a SIBLING of the real button, so it never lands
+    // in the button's accessible name or textContent.
+    const live = document.createElement('span');
+    live.className = 'ct-button__live';
+    live.setAttribute('aria-live', 'polite');
+    live.setAttribute('aria-atomic', 'true');
+    this._live = live;
+
+    // See docstring point 3: this listener is on the button itself so it runs
+    // before the click bubbles to React's root-delegated onClick, letting the
+    // arming click intercept it.
+    btn.addEventListener('click', this._onClick);
+    btn.addEventListener('blur', this._onBlur);
+    btn.addEventListener('keydown', this._onKeydown);
+
     this.appendChild(btn);
+    this.appendChild(live);
     this._btn = btn;
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    // Never let a pending disarm timer fire against a detached element, and
+    // drop any armed state so a remount starts clean.
+    this._disarm();
   }
 
   get disabled(): boolean {
@@ -174,10 +222,96 @@ export class CtButton extends LitElement {
 
   set text(value: string) {
     this._text = value;
-    if (this._label) {
+    // While armed the label shows the `confirm` text; don't stomp it — the
+    // new resting label takes effect on the next disarm.
+    if (this._label && !this._armed) {
       this._label.textContent = value;
     }
   }
+
+  /**
+   * Optional confirm-step label (§14). When set, the first click ARMS the
+   * button (swaps the visible label to this text, no action) and the second
+   * click within the 4s window fires normally. Empty/unset = plain button.
+   */
+  get confirm(): string {
+    return this._confirm;
+  }
+
+  set confirm(value: string) {
+    this._confirm = value ?? '';
+    // If the confirm affordance is removed while armed, revert to a plain button.
+    if (!this._confirm && this._armed) {
+      this._disarm();
+    }
+  }
+
+  // ----- Confirm-step state machine (§14, docstring point 3) ---------------
+
+  private _arm(): void {
+    if (this._armed) {
+      return;
+    }
+    this._armed = true;
+    if (this._label) {
+      this._label.textContent = this._confirm;
+    }
+    if (this._live) {
+      this._live.textContent = this._confirm;
+    }
+    // Host attribute drives the accent pulse in ct-button.css (tokens only).
+    this.setAttribute('data-armed', '');
+    this._disarmTimer = setTimeout(() => {
+      this._disarmTimer = null;
+      this._disarm();
+    }, CONFIRM_DISARM_MS);
+  }
+
+  private _disarm(): void {
+    if (this._disarmTimer !== null) {
+      clearTimeout(this._disarmTimer);
+      this._disarmTimer = null;
+    }
+    if (!this._armed) {
+      return;
+    }
+    this._armed = false;
+    this.removeAttribute('data-armed');
+    if (this._label) {
+      this._label.textContent = this._text;
+    }
+    if (this._live) {
+      this._live.textContent = '';
+    }
+  }
+
+  private _onClick = (event: MouseEvent): void => {
+    // No confirm affordance → today's behavior exactly (let it bubble/fire).
+    if (!this._confirm) {
+      return;
+    }
+    if (this._armed) {
+      // Confirming click: disarm the visual, then let the event reach the
+      // consumer's onClick (do NOT stop propagation).
+      this._disarm();
+      return;
+    }
+    // Arming click: block the action (incl. a possible form submit) before it
+    // reaches React's root-delegated onClick, then arm.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this._arm();
+  };
+
+  private _onBlur = (): void => {
+    this._disarm();
+  };
+
+  private _onKeydown = (event: KeyboardEvent): void => {
+    if (this._armed && event.key === 'Escape') {
+      this._disarm();
+    }
+  };
 
   // No render() override: this component's real content is the button
   // built once in connectedCallback and mutated directly by the accessors

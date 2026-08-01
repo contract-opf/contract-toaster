@@ -29,7 +29,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
-import { CtBanner, CtButton, CtCard, CtChip, CtTable, CtToolbar } from './ui/react';
+import { CtBanner, CtButton, CtCard, CtChip, CtProgress, CtTable, CtToolbar } from './ui/react';
 import type { CtChipVariant } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ export default function AdminUsers(): React.ReactElement | null {
       )}
 
       {users === null ? (
-        <p data-testid="admin-users-loading">Loading users…</p>
+        <CtProgress data-testid="admin-users-loading" label="Loading users…" />
       ) : (
         <CtCard data-testid="admin-users-table-panel">
           <CtTable>
@@ -298,6 +298,7 @@ export default function AdminUsers(): React.ReactElement | null {
                             type="button"
                             variant="danger"
                             size="sm"
+                            confirm="Click again to deprovision"
                             disabled={pendingSub === u.cognito_sub || u.status === 'deprovisioned'}
                             onClick={() => void applyUpdate(u.cognito_sub, { status: 'deprovisioned' })}
                           >

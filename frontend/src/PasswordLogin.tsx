@@ -6,15 +6,28 @@
  *
  * There is no Cognito/Amplify here; this is the Docker Compose counterpart of the
  * <Authenticator> wrapper.
+ *
+ * Networking and error copy go through the shared api.ts helpers (issue #425)
+ * like every other screen: `authorizedFetch` resolves VITE_API_BASE_URL and —
+ * pre-login, where getToken() is the empty string — sends no Authorization
+ * header at all, and `friendlyErrorMessage`/`readErrorDetail` guarantee that
+ * only a server-supplied `detail` or a safe fallback reaches the DOM. The
+ * technical detail (endpoint, HTTP status) is logged to the console only.
  */
 import { useState } from 'react';
 import { setDemoToken } from './auth';
+import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import { CtButton, CtBanner, CtCard, CtField } from './ui/react';
 
 // Mirrors App.tsx's PRODUCT_NAME (issue #274) without importing App.tsx —
 // App.tsx imports PasswordLogin, and a PasswordLogin -> App import back
 // would make the two modules circular.
 const PRODUCT_NAME: string = import.meta.env.VITE_PRODUCT_NAME ?? 'Contract Toaster';
+
+// The only copy shown when the server gives us nothing usable. It must stay
+// free of endpoint paths and HTTP status codes — those go to the console via
+// friendlyErrorMessage instead.
+const SIGN_IN_FALLBACK = "We couldn't sign you in. Please try again.";
 
 export interface DemoIdentity {
   username: string;
@@ -42,21 +55,26 @@ export default function PasswordLogin({
     setSubmitting(true);
     setError(null);
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
-      const response = await fetch(`${apiBase}/api/auth/login`, {
+      const response = await authorizedFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}) as { detail?: string });
-        throw new Error(body.detail ?? `Sign-in failed (HTTP ${response.status}).`);
+        const detail = await readErrorDetail(response);
+        throw new Error(
+          detail ??
+            friendlyErrorMessage(
+              `POST /api/auth/login returned HTTP ${response.status}`,
+              SIGN_IN_FALLBACK,
+            ),
+        );
       }
       const data = (await response.json()) as LoginResponse;
       setDemoToken(data.token);
       onAuthenticated({ username: data.username, isAdmin: Boolean(data.is_admin) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed.');
+      setError(err instanceof Error ? err.message : friendlyErrorMessage(err, SIGN_IN_FALLBACK));
     } finally {
       setSubmitting(false);
     }

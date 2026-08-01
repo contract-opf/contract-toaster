@@ -63,14 +63,43 @@ Endpoints:
                         and in playbook_versions.list_playbook_version_trail.
                         An unknown version is 404.
 
-  POST /api/admin/playbooks/{playbook_id}/activate-sample
-                      — admin: one-click activation of a BUNDLED sample
-                        playbook (#402's empty-shell first-run flow) — no
-                        upload row, no Gate 7. Refuses (404) unless
-                        registry.json marks playbook_id "bundled_sample":
-                        true; see src.sample_playbooks for the full
-                        contract and why this is deliberately not the same
-                        path as the versions/{version}/activate route above.
+  POST /api/admin/playbooks/{playbook_id}/pen-rules/validate
+                      — admin: validate a candidate pen-rules /
+                        posture-override document against a submitted OPF
+                        (#432), reusing scripts/bind_bundle.py's fail-closed
+                        validators. Returns one machine-readable error per
+                        failure (unknown floor_ref, stale
+                        parent_section_digest, non-monotonic version, colliding
+                        floor_additions id). Read-only: validation only, no
+                        persistence, no audit row — and zero runtime effect, as
+                        no live review consumes a v2 bundle yet. See
+                        src.bundle_authoring.
+
+  POST /api/admin/playbooks/{playbook_id}/versions
+                      — admin: multipart upload of a new playbook version's
+                        content (#430). The content hash is computed
+                        server-side over the uploaded bytes and is the value
+                        recorded; a client-supplied `content_hash` form
+                        field, if present, is validated against it (400 on
+                        mismatch) but never trusted as the stored value. New
+                        rows land status="draft" (append-only — the version
+                        row is itself the upload audit record). A re-upload of
+                        an already-recorded (playbook_id, version) is 409.
+                        Activation is the separate, Gate-7'd route above.
+
+  GET /api/admin/playbooks/{playbook_id}/versions
+                      — admin: the full version-upload trail for a playbook,
+                        oldest first (#430) — playbook_id, version,
+                        uploaded_by, uploaded_at, notes only, never document
+                        substance. Empty list for a playbook with no uploads.
+
+  POST /api/admin/playbooks/{playbook_id}/versions/{version}/rollback
+                      — admin: roll back to a previously-active (now retired)
+                        version (#430) — restores it as active, demoting the
+                        current active version, and appends one
+                        release_bundle_rollback audit row. An unknown version
+                        is 404; a target that was never active (status not
+                        "retired") is 409.
 
   POST /api/corpus — admin: corpus ingestion (#197). Runs the real ingestion
                       pipeline (clause extraction, content-addressed
@@ -137,16 +166,18 @@ Security invariants:
     uvicorn is started with --no-access-log to avoid logging request bodies.
 """
 
+import hashlib
 import os
 import time
 from typing import Any
 
 import boto3
-from fastapi import Body, Depends, FastAPI, HTTPException, Path, status
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path, UploadFile, status
 from fastapi.responses import JSONResponse
 
 from src import config
 from src.auth import get_current_user
+from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
 from src.demo_auth import (
     add_user,
@@ -162,11 +193,16 @@ from src.model_settings import (
     set_model_key,
 )
 from src.playbook_versions import (
+    PlaybookVersionConflictError,
     PlaybookVersionGate7MismatchError,
     PlaybookVersionNotFoundError,
+    PlaybookVersionRollbackError,
     activate_release_bundle,
+    list_playbook_version_trail,
+    record_playbook_version_upload,
     remove_playbook,
     rename_playbook,
+    rollback_playbook_version,
     update_playbook_version_notes,
 )
 from src.review_routes import router as review_router
@@ -178,11 +214,6 @@ from src.retention import (
     release_legal_hold,
     request_retention_change,
     set_legal_hold,
-)
-from src.sample_playbooks import (
-    SampleInvalidError,
-    SampleNotAvailableError,
-    activate_bundled_sample,
 )
 from src.users import get_sync_status, list_users, require_active_user, update_user
 
@@ -674,6 +705,169 @@ async def post_admin_playbook_version_activate(
     )
 
 
+@app.post(
+    "/api/admin/playbooks/{playbook_id}/versions",
+    include_in_schema=True,
+)
+async def post_admin_playbook_version_upload(
+    playbook_id: str = Path(...),
+    file: UploadFile = File(...),
+    version: str = Form(...),
+    content_hash: str | None = Form(None),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: upload a new playbook release-bundle version (issue #430).
+
+    Multipart upload of a new version's content. The content hash is computed
+    server-side over the uploaded bytes (`"sha256:" + sha256(bytes)`) and is
+    the value recorded -- a client-supplied `content_hash` form field, when
+    present, is treated only as an integrity claim to validate against the
+    server-computed hash, never trusted as the stored value (a mismatch is
+    rejected with HTTP 400). New rows land `status="draft"`; the version row
+    is itself the append-only upload audit record (see
+    `src.playbook_versions.record_playbook_version_upload`). Activation is a
+    separate, Gate-7-enforced admin action
+    (`POST .../versions/{version}/activate` above).
+
+    Body (multipart/form-data): `file` (the version content), `version` (the
+    new version identifier), optional `content_hash` (an integrity claim, the
+    full `"sha256:<hex>"` form). Raises HTTP 403 for a non-admin caller, 400
+    for a missing/blank `version` or a content-hash mismatch, 409 if
+    `(playbook_id, version)` was already uploaded (append-only -- re-uploads
+    must use a new version identifier).
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to upload a playbook version.",
+        )
+    if not version.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Body must include a non-empty 'version' field.",
+        )
+    contents = await file.read()
+    # Server-computed hash is authoritative; a client-supplied hash is only
+    # ever validated against it, never trusted as the value we record.
+    computed_hash = "sha256:" + hashlib.sha256(contents).hexdigest()
+    if content_hash is not None and content_hash != computed_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Content-hash mismatch: the uploaded bytes do not match the "
+                "supplied content_hash (the server computes the hash itself; a "
+                "client-supplied hash is validated, never trusted)."
+            ),
+        )
+    try:
+        result = record_playbook_version_upload(
+            playbook_id=playbook_id,
+            version=version,
+            uploader_identity=caller_row.get("cognito_sub", ""),
+            dynamodb_resource=dynamodb_resource,
+            content_hash=computed_hash,
+        )
+    except PlaybookVersionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return JSONResponse(
+        content={
+            "playbook_id": result.get("playbook_id"),
+            "version": result.get("version"),
+            "status": result.get("status"),
+            "content_hash": result.get("content_hash"),
+            "uploaded_by": result.get("uploaded_by"),
+            "uploaded_at": (
+                int(result["uploaded_at"]) if result.get("uploaded_at") is not None else None
+            ),
+        }
+    )
+
+
+@app.get(
+    "/api/admin/playbooks/{playbook_id}/versions",
+    include_in_schema=True,
+)
+async def get_admin_playbook_versions(
+    playbook_id: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the full version-upload trail for a playbook, oldest first
+    (issue #430).
+
+    Returns identifiers, timestamps, and the mutable `notes` field only --
+    `playbook_id`, `version`, `uploaded_by`, `uploaded_at`, `notes` -- never
+    document substance (see
+    `src.playbook_versions.list_playbook_version_trail`). A playbook with no
+    uploaded versions returns an empty list. Raises HTTP 403 for a non-admin
+    caller.
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to view a playbook's version trail.",
+        )
+    trail = list_playbook_version_trail(playbook_id, dynamodb_resource)
+    return JSONResponse(content={"versions": trail})
+
+
+@app.post(
+    "/api/admin/playbooks/{playbook_id}/versions/{version}/rollback",
+    include_in_schema=True,
+)
+async def post_admin_playbook_version_rollback(
+    playbook_id: str = Path(...),
+    version: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: roll back to a previously-active playbook version (issue #430).
+
+    Restores a version this module previously demoted from `active` to
+    `retired` as the active bundle; any currently-active version is demoted to
+    `retired` as part of the same rollback, and one append-only audit row
+    (`release_bundle_rollback`) is written -- see
+    `src.playbook_versions.rollback_playbook_version`. Rolling back to a
+    version that was never active is not a rollback (callers should activate
+    it instead).
+
+    Raises HTTP 403 for a non-admin caller, 404 for an unknown
+    `(playbook_id, version)`, and 409 if the target version was never active
+    (its status is not `retired`) -- there is nothing to roll back to.
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to roll back a playbook version.",
+        )
+    try:
+        result = rollback_playbook_version(
+            playbook_id=playbook_id,
+            version=version,
+            actor_identity=caller_row.get("cognito_sub", ""),
+            dynamodb_resource=dynamodb_resource,
+        )
+    except PlaybookVersionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PlaybookVersionRollbackError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    # Same JSON-safe construction as the activate route: `uploaded_at` is a
+    # Decimal off the DynamoDB item and must be coerced to int.
+    return JSONResponse(
+        content={
+            "playbook_id": result.get("playbook_id"),
+            "version": result.get("version"),
+            "status": result.get("status"),
+            "content_hash": result.get("content_hash"),
+            "uploaded_by": result.get("uploaded_by"),
+            "uploaded_at": (
+                int(result["uploaded_at"]) if result.get("uploaded_at") is not None else None
+            ),
+        }
+    )
+
+
 @app.patch(
     "/api/admin/playbooks/{playbook_id}/versions/{version}/notes",
     include_in_schema=True,
@@ -727,6 +921,40 @@ async def patch_admin_playbook_version_notes(
             "notes": result.get("notes", ""),
         }
     )
+
+
+@app.post(
+    "/api/admin/playbooks/{playbook_id}/pen-rules/validate",
+    include_in_schema=True,
+)
+async def post_admin_playbook_pen_rules_validate(
+    playbook_id: str = Path(...),
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+) -> JSONResponse:
+    """Admin: validate a candidate pen-rules / posture-override document for a
+    playbook (issue #432) — the backend surface an authoring UI (separate,
+    dependent ticket) calls before it can offer to bind one.
+
+    Reuses `scripts/bind_bundle.py`'s own fail-closed validators (never
+    reimplements them) and returns one machine-readable error per failure —
+    `unknown_floor_ref`, `stale_parent_section_digest`, `non_monotonic_version`,
+    `colliding_floor_additions` (plus `playbook_id_mismatch`) — so the frontend
+    can point at the specific offending field. See
+    `src.bundle_authoring.validate_pen_rules_document` for the request/response
+    contract, including why the OPF document is supplied in the body.
+
+    Read-only: validation only, **no persistence** and therefore no audit
+    entry. Even a valid document has zero runtime effect — no live review
+    consumes a v2 bundle yet (`pipeline_runner._load_playbook_bundle` reads only
+    `entry.playbook_path`, never a v2 `bundle_path`); persist/activate is a
+    deliberate follow-up. Raises HTTP 403 for a non-admin caller and HTTP 400
+    for a malformed body (missing/non-object `opf`, or a wrong-typed field). A
+    well-formed document that fails a rule is a 200 with `valid: false`, not an
+    HTTP error.
+    """
+    result = validate_pen_rules_document(playbook_id, body, caller_row)
+    return JSONResponse(content=result)
 
 
 def _require_registered_playbook(playbook_id: str) -> None:
@@ -794,9 +1022,16 @@ async def delete_admin_playbook(
     load-bearing (the registry is a file baked into the image, so the entry
     would otherwise re-appear on the next request).
 
-    Re-activating a bundled sample clears the tombstone, so removing the
-    shipped sample is reversible. Raises HTTP 403 for a non-admin caller,
-    404 for a playbook_id the registry does not list.
+    Removal is currently a ONE-WAY DOOR for every playbook alike: nothing in
+    this codebase clears the tombstone. Issue #433 retired the bespoke
+    re-activate-the-sample path, which used to clear it for the shipped
+    sample only, and deliberately did not replace it with a seed that
+    re-installs on restart — a container restart resurrecting a playbook an
+    admin removed would be worse than removal being irreversible. A generic
+    restore belongs with the Playbooks admin surface (issue #434).
+
+    Raises HTTP 403 for a non-admin caller, 404 for a playbook_id the
+    registry does not list.
     """
     if not _is_admin(caller_row):
         raise HTTPException(
@@ -809,37 +1044,6 @@ async def delete_admin_playbook(
         actor_identity=caller_row.get("cognito_sub", ""),
         dynamodb_resource=dynamodb_resource,
     )
-    return JSONResponse(content=result)
-
-
-@app.post(
-    "/api/admin/playbooks/{playbook_id}/activate-sample",
-    include_in_schema=True,
-)
-async def post_admin_playbook_activate_sample(
-    playbook_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-) -> JSONResponse:
-    """Admin: one-click activation of a BUNDLED sample playbook (issue #402
-    -- the empty-shell first-run flow). No upload row, no Gate 7 -- see
-    `src.sample_playbooks.activate_bundled_sample` for the full contract
-    and why this is deliberately a separate, lower-ceremony path from
-    `POST /api/admin/playbooks/{playbook_id}/versions/{version}/activate`
-    above.
-
-    Raises HTTP 403 for a non-admin caller, 404 if `playbook_id` has no
-    bundled sample to activate (unregistered, or not marked
-    `"bundled_sample": true` in `playbooks/registry.json`), 409 if the
-    bundled sample's on-disk content fails runtime validation (should
-    never happen for a committed sample -- defense in depth).
-    """
-    try:
-        result = activate_bundled_sample(playbook_id, caller_row, dynamodb_resource)
-    except SampleNotAvailableError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except SampleInvalidError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return JSONResponse(content=result)
 
 

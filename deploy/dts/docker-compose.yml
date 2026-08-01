@@ -25,6 +25,22 @@ x-aws-emulator-env: &aws-emulator-env
   S3_ENDPOINT_URL: http://minio:9000
   DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
 
+# Shared by `bootstrap` and `backend` — both run the same image, so a single
+# anchor keeps them on one build (differing build args would build it twice).
+x-backend-build: &backend-build
+  context: ../..
+  dockerfile: deploy/dts/backend.Dockerfile
+  args:
+    # Baked into the image as ENV by deploy/dts/backend.Dockerfile and read by
+    # GET /version (issue #424). The defaults match the /version fallbacks, so
+    # a plain `docker compose build` behaves exactly as before; pass real
+    # values with e.g.
+    #   VERSION=$(git describe --tags --always) \
+    #   COMMIT_SHA=$(git rev-parse --short HEAD) \
+    #   docker compose -f deploy/dts/docker-compose.yml build
+    VERSION: ${VERSION:-dev}
+    COMMIT_SHA: ${COMMIT_SHA:-unknown}
+
 x-resource-names: &resource-names
   USERS_TABLE: contract-toaster-users-dts
   REVIEWS_TABLE: contract-toaster-reviews-dts
@@ -80,9 +96,7 @@ services:
       - "9001:9001"   # console
 
   bootstrap:
-    build:
-      context: ../..
-      dockerfile: deploy/dts/backend.Dockerfile
+    build: *backend-build
     command: ["python3", "/app/deploy/dts/bootstrap.py"]
     working_dir: /app
     environment:
@@ -95,11 +109,19 @@ services:
     restart: "no"
 
   backend:
-    build:
-      context: ../..
-      dockerfile: deploy/dts/backend.Dockerfile
+    build: *backend-build
     environment:
       <<: [*aws-emulator-env, *resource-names]
+      # Version metadata (issue #424) is BAKED INTO THE IMAGE by the build args
+      # above. These three are listed in the pass-through form (a key with no
+      # value) on purpose: compose resolves them from the host environment and,
+      # when unset there, does not pass them at all, leaving the image's ENV
+      # intact. Writing `VERSION: ${VERSION:-dev}` here instead would ALWAYS
+      # override the baked-in value — a compose `environment:` entry beats the
+      # image ENV — and re-break the footer this ticket fixes.
+      VERSION:
+      COMMIT_SHA:
+      IMAGE_DIGEST:
       DEPLOY_TARGET: dts
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password

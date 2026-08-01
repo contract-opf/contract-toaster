@@ -1,60 +1,66 @@
 #!/usr/bin/env python3
 """
-Executable tests for issue #402 (bundle a synthetic NDA sample playbook +
-first-run activate flow) and issue #412 (rename it to the one shipped
-"Synthetic NDA Sample" playbook, and give it a real playbook_versions row
-with a seeded, admin-editable note).
+Executable tests for the DEPLOY-TIME SEED that installs the playbook the
+image ships with -- issue #433, which replaced issue #402/#412's bespoke
+one-click "activate the bundled sample" path (a registry marker, a
+`has_bundled_sample` catalog field, and a dedicated
+`POST /api/admin/playbooks/{id}/activate-sample` route) with an ordinary
+install through the same functions any admin-uploaded version goes through.
+
+Renamed from tests/test_sample_playbook_activation.py: what is under test is
+the seed, not an activation route that no longer exists.
 
 ## What this proves
 
-  1. The bundled sample (playbooks/samples/synthetic-nda-sample-v1.0.0.json)
+  1. The shipped playbook (playbooks/samples/synthetic-nda-sample-v1.0.0.json)
      is real content -- schema-valid, brand-free, and genuinely different
      from the OLD "coming soon" placeholder stub (playbooks/nda-v0.1.0.json,
      left untouched here -- see tests/test_nda_policy.py's own
-     harvested-but-not-wired gate, which this ticket does not touch).
-  2. registry.json's "synthetic-nda-sample" entry marks itself
-     `"bundled_sample": true` and is the registry's `default_playbook_id`,
-     and ONLY a playbook_id the registry marks that way is reachable
-     through the low-ceremony activation path (src.sample_playbooks) --
-     issue #289's type-blindness convention, extended: no playbook_id
-     literal gates activation, a registry field does.
-  3. Before activation, "synthetic-nda-sample" resolves as NOT active (the
-     empty-shell state issue #401 built).
-     `src.sample_playbooks.activate_bundled_sample`:
-       - 403s a non-admin caller.
-       - raises `SampleNotAvailableError` for a playbook_id with no
-         bundled sample (unregistered, or registered without the marker).
-       - for the real, admin, bundled-sample case: writes the SAME
-         content_hash `scripts/seed_active_bundle.py` would compute onto
-         `PLAYBOOKS_TABLE`, appends one of its own audit rows, and (issue
-         #412) gives the sample a real `playbook_versions` row via
-         `src.playbook_versions`' own upload/activate/notes functions.
-  4. After activation, "synthetic-nda-sample" resolves as active
-     (`reviews._read_active_release_bundle_hash`) -- the same read
-     `GET /api/playbooks` (issue #272, exercised directly in
-     tests/test_playbook_catalog_endpoint.py) and the submission path both
-     depend on. The registry's `seed_notes` survives activation as that
-     version row's `notes` -- the same field `GET /api/playbooks` surfaces
-     (issue #411's `get_active_version_notes`) and an admin can edit like
-     any other playbook's note.
-  5. THE ACCEPTANCE CRITERION: with "synthetic-nda-sample" activated, a
-     submitted review against it runs a REAL review end to end --
+     harvested-but-not-wired gate, which this ticket does not touch). It
+     carries NO `bundled_sample` marker -- issue #433 removed that field
+     from the registry and the `PlaybookEntry` dataclass entirely.
+  2. `src.sample_playbooks.seed_shipped_playbook` fails closed on what it
+     will install -- `SampleNotAvailableError` for an unregistered
+     playbook_id and for a `"test_only": true` fixtures entry
+     (`synthetic-generic`), `SampleInvalidError` for content that fails
+     runtime validation. No playbook_id literal gates this; a registry
+     field does (issue #289's type-blindness convention).
+  3. THE FRESH-DEPLOY ACCEPTANCE CRITERION: driving the REAL bootstrap
+     entry point (`deploy/dts/bootstrap.py::seed_shipped_playbook`) against
+     EMPTY tables leaves "synthetic-nda-sample" ACTIVE, with the same
+     version-row/audit-trail shape an admin-uploaded-and-activated playbook
+     would have: a `playbook_versions` row written by
+     `record_playbook_version_upload`, flipped to `active` by
+     `activate_playbook_version`, carrying the registry's `seed_notes` as
+     its admin-editable `notes`, and `playbooks.active_release_bundle_hash`
+     pointing at the same real content hash
+     `scripts/seed_active_bundle.py` computes.
+  4. INSTALL ONCE, NEVER RE-STOMP. The bootstrap re-runs on every container
+     start, so a second run must be a no-op: no duplicate version row, no
+     second audit row, an admin's edited note preserved, an admin's newer
+     uploaded version left active, and -- the sharp one -- a playbook an
+     admin REMOVED stays removed rather than being resurrected on restart.
+  5. The seeded playbook is an ordinary playbook: it accepts a new uploaded
+     version, rolls back, renames, and removes through plain
+     `src.playbook_versions` calls, with zero special-casing.
+  6. With it installed, a submitted review runs a REAL review end to end --
      backend/src/pipeline_runner.py's `run_real_pipeline` (issue
      #259/#401), driven by a `FakeBedrockClient` (no live model call, per
      this repo's standing "no network in any test" rule), reaches DONE
      with a genuinely computed REQUEST_CHANGE decision and a real
      tracked-changes output object -- never QUARANTINED, never stuck
      PENDING/RUNNING. The contrasting case (submitting the SAME payload
-     without activating first) is quarantined at #401's
-     verify_active_bundle gate, `_load_playbook_bundle` never called --
-     proving activation is actually load-bearing, not cosmetic.
+     without seeding first) is quarantined at #401's verify_active_bundle
+     gate, `_load_playbook_bundle` never called -- proving the seed is
+     actually load-bearing, not cosmetic.
 
-Run standalone: `python3 tests/test_sample_playbook_activation.py`
+Run standalone: `python3 tests/test_shipped_playbook_seed.py`
 Exit codes: 0 = pass, 1 = fail
 """
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -88,8 +94,6 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "playbook-versions-test")
 os.environ.setdefault("AUDIT_TABLE", "audit-test")
 
-from fastapi import HTTPException  # noqa: E402
-
 import model_client as model_client_module  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import playbook_registry  # noqa: E402
@@ -99,6 +103,15 @@ import reviews as reviews_module  # noqa: E402
 import sample_playbooks  # noqa: E402
 import seed_active_bundle  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402 -- issue #412 rename/remove reach the catalog
+
+# The REAL deploy bootstrap (issue #433's only install path). Imported by
+# file location because `deploy/dts/` is not an importable package -- this
+# test drives the actual entry point, not a re-implementation of it.
+_BOOTSTRAP_SPEC = importlib.util.spec_from_file_location(
+    "dts_bootstrap", REPO_ROOT / "deploy" / "dts" / "bootstrap.py"
+)
+dts_bootstrap = importlib.util.module_from_spec(_BOOTSTRAP_SPEC)
+_BOOTSTRAP_SPEC.loader.exec_module(dts_bootstrap)
 
 PLAYBOOK_ID = "synthetic-nda-sample"
 REVIEW_ID = "00000000-0000-4000-a000-000000000402"
@@ -143,10 +156,11 @@ class FakeReviewsTable:
 
 
 class FakePlaybooksTable:
-    """PLAYBOOKS_TABLE (PK: playbook_id) -- seed_active_bundle.seed_active_bundle
-    (which src.sample_playbooks.activate_bundled_sample reuses) writes here
-    with a plain put_item; reviews._read_active_release_bundle_hash reads
-    it back with get_item."""
+    """PLAYBOOKS_TABLE (PK: playbook_id) -- reviews._read_active_release_bundle_hash
+    reads `active_release_bundle_hash` back off this row with get_item;
+    `src.sample_playbooks.seed_shipped_playbook` and
+    `src.playbook_versions` write it with update_item (see update_item's own
+    note below)."""
 
     def __init__(self):
         self.items: dict[str, dict[str, Any]] = {}
@@ -160,11 +174,12 @@ class FakePlaybooksTable:
 
     def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None,
                     ExpressionAttributeValues=None):
-        """Issue #412: `playbook_versions.rename_playbook` / `remove_playbook`
-        and `sample_playbooks._clear_removed_tombstone` set the catalog
-        override attributes (`display_name`, `removed`) on this row -- the
-        real table's update_item creates the item if absent, so this does
-        too."""
+        """`playbook_versions.rename_playbook` / `remove_playbook` set the
+        catalog override attributes (`display_name`, `removed`) on this row,
+        and `sample_playbooks.seed_shipped_playbook` writes
+        `active_release_bundle_hash` here the same way (update_item, never
+        put_item, so it cannot clobber those overrides). The real table's
+        update_item creates the item if absent, so this does too."""
         item = self.items.setdefault(Key["playbook_id"], dict(Key))
         names = ExpressionAttributeNames or {}
         values = ExpressionAttributeValues or {}
@@ -204,15 +219,15 @@ class _FakeMeta:
 
 
 class FakePlaybookVersionsTable:
-    """PLAYBOOK_VERSIONS_TABLE (PK: playbook_id, SK: version) -- issue #412:
-    `src.sample_playbooks.activate_bundled_sample` now writes/activates/
-    notes a REAL version row for the bundled sample via
-    `src.playbook_versions`' own functions, the exact same ones every other
-    playbook_id's governed upload/activate/rollback/notes lifecycle uses.
+    """PLAYBOOK_VERSIONS_TABLE (PK: playbook_id, SK: version) --
+    `src.sample_playbooks.seed_shipped_playbook` writes/notes/activates a
+    REAL version row for the shipped playbook via `src.playbook_versions`'
+    own functions, the exact same ones every other playbook_id's governed
+    upload/activate/rollback/notes lifecycle uses.
     `.meta.client.exceptions.ConditionalCheckFailedException` mirrors just
     enough of boto3's real `Table` shape for
     `playbook_versions.record_playbook_version_upload`'s append-only
-    conflict check (a repeat activation re-uploading the same
+    conflict check (a concurrent bootstrap re-uploading the same
     `(playbook_id, version)`) to behave exactly like the real table."""
 
     meta = _FakeMeta()
@@ -292,12 +307,11 @@ class FakeS3:
         self.puts.append({"Bucket": Bucket, "Key": Key, "Body": Body})
 
 
-def _admin_row() -> dict[str, Any]:
-    return {"cognito_sub": "admin-1", "status": "active", "is_admin": True}
-
-
-def _non_admin_row() -> dict[str, Any]:
-    return {"cognito_sub": "attorney-1", "status": "active", "is_admin": False}
+def _seed(ddb: Any, playbook_id: str = PLAYBOOK_ID) -> dict[str, Any]:
+    """Run the deploy-time seed the way the bootstrap does. `actor_identity`
+    is deliberately left at its default so the audit assertions below pin
+    the real `SEED_ACTOR`, not a test-supplied string."""
+    return sample_playbooks.seed_shipped_playbook(playbook_id, ddb)
 
 
 # ---------------------------------------------------------------------------
@@ -453,25 +467,28 @@ def _payload(release_bundle_hash: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 1. The bundled sample is real, schema-valid, brand-free content.
+# 1. The shipped playbook is real, schema-valid, brand-free content.
 # ---------------------------------------------------------------------------
 
 
-class TestBundledSampleIsRealContent(unittest.TestCase):
-    def test_registry_marks_synthetic_nda_sample_as_a_bundled_sample(self):
+class TestShippedPlaybookIsRealContent(unittest.TestCase):
+    def test_registry_ships_synthetic_nda_sample_as_the_default(self):
         entry = playbook_registry.resolve_playbook(PLAYBOOK_ID)
-        self.assertTrue(entry.bundled_sample)
         self.assertEqual(entry.playbook_path.name, "synthetic-nda-sample-v1.0.0.json")
         self.assertEqual(playbook_registry.profile(entry), "knowledge")
+        self.assertFalse(entry.test_only)
         self.assertEqual(playbook_registry.default_playbook_id(), PLAYBOOK_ID)
 
-    def test_other_registered_playbooks_are_not_marked_bundled_sample(self):
-        """The marker is specific to synthetic-nda-sample -- it must not
-        accidentally leak onto synthetic-generic (the renamed, test-only
-        "eiaa" entry), which would let the low-ceremony path activate it
-        with no Gate 7."""
-        entry = playbook_registry.resolve_playbook("synthetic-generic")
-        self.assertFalse(entry.bundled_sample)
+    def test_no_bundled_sample_marker_survives_anywhere(self):
+        """Issue #433 acceptance: the registry no longer carries a
+        `bundled_sample` marker, and `PlaybookEntry` no longer has the
+        field -- there is no sample-only branch left to key off."""
+        raw = playbook_registry.load_registry()["playbooks"]
+        self.assertNotIn("bundled_sample", raw[PLAYBOOK_ID])
+        self.assertNotIn("bundled_sample", json.dumps(raw))
+        self.assertFalse(
+            hasattr(playbook_registry.resolve_playbook(PLAYBOOK_ID), "bundled_sample")
+        )
 
     def test_sample_validates_against_the_runtime_schema(self):
         doc = playbook_validation.load_and_validate_playbook(PLAYBOOK_ID)
@@ -505,40 +522,64 @@ class TestBundledSampleIsRealContent(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 2. src.sample_playbooks.activate_bundled_sample.
+# 2. src.sample_playbooks.seed_shipped_playbook -- what it refuses to
+#    install, and what a fresh install actually writes.
 # ---------------------------------------------------------------------------
 
 
-class TestActivateBundledSample(unittest.TestCase):
-    def test_nda_is_not_active_before_activation(self):
+class TestSeedRefusals(unittest.TestCase):
+    def test_nothing_is_active_before_the_seed_runs(self):
         ddb = FakeDDB(FakeReviewsTable())
         self.assertIsNone(reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb))
 
-    def test_non_admin_caller_is_refused(self):
-        ddb = FakeDDB(FakeReviewsTable())
-        with self.assertRaises(HTTPException) as ctx:
-            sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _non_admin_row(), ddb)
-        self.assertEqual(ctx.exception.status_code, 403)
-        # Refused before anything is written.
-        self.assertIsNone(reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb))
-
-    def test_playbook_id_with_no_bundled_sample_is_refused(self):
+    def test_test_only_registry_entry_is_refused(self):
         """synthetic-generic is a real, registered, schema-valid playbook --
-        but it is NOT marked "bundled_sample", so this low-ceremony path
-        must refuse it exactly like an unregistered id (Gate 7 stays the
-        only way to activate it)."""
+        but it is marked `"test_only": true`, so it exists for the fixtures
+        suite and must never be installed into a deployment. Nothing is
+        written when it is refused."""
         ddb = FakeDDB(FakeReviewsTable())
         with self.assertRaises(sample_playbooks.SampleNotAvailableError):
-            sample_playbooks.activate_bundled_sample("synthetic-generic", _admin_row(), ddb)
+            _seed(ddb, "synthetic-generic")
+        self.assertEqual(ddb._playbook_versions.items, {})
+        self.assertEqual(ddb._audit.items, [])
 
     def test_unregistered_playbook_id_is_refused(self):
         ddb = FakeDDB(FakeReviewsTable())
         with self.assertRaises(sample_playbooks.SampleNotAvailableError):
-            sample_playbooks.activate_bundled_sample("not-a-real-playbook", _admin_row(), ddb)
+            _seed(ddb, "not-a-real-playbook")
 
-    def test_activation_seeds_the_real_content_hash_and_makes_nda_active(self):
+    def test_content_that_fails_runtime_validation_is_refused(self):
+        """Fail closed rather than install content that would not itself
+        resolve as valid -- and leave NOTHING behind (no version row, no
+        active hash), so a broken image cannot half-install a playbook."""
         ddb = FakeDDB(FakeReviewsTable())
-        result = sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        with patch.object(
+            playbook_validation,
+            "load_and_validate_playbook",
+            side_effect=playbook_validation.PlaybookValidationError("boom"),
+        ):
+            with self.assertRaises(sample_playbooks.SampleInvalidError):
+                _seed(ddb)
+        self.assertEqual(ddb._playbook_versions.items, {})
+        self.assertIsNone(reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb))
+
+
+class TestFreshDeploySeed(unittest.TestCase):
+    """THE ISSUE #433 ACCEPTANCE CRITERION: a fresh deployment (empty
+    tables) comes up with the shipped playbook already ACTIVE, with the
+    same version-row/audit-trail shape any admin-uploaded-and-activated
+    playbook would have.
+
+    `test_the_real_bootstrap_entry_point_seeds_an_active_playbook` drives
+    `deploy/dts/bootstrap.py` itself rather than calling
+    `sample_playbooks.seed_shipped_playbook` directly -- otherwise this
+    file would keep passing if the bootstrap stopped calling the seed at
+    all, which is exactly the regression that would ship an empty catalog.
+    """
+
+    def test_seed_writes_the_real_content_hash_and_makes_it_active(self):
+        ddb = FakeDDB(FakeReviewsTable())
+        result = _seed(ddb)
 
         expected_hash = seed_active_bundle.compute_seed_hash(PLAYBOOK_ID)
         self.assertTrue(expected_hash.startswith("sha256:"))
@@ -549,147 +590,197 @@ class TestActivateBundledSample(unittest.TestCase):
         active_hash = reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb)
         self.assertEqual(active_hash, expected_hash)
 
-    def test_activation_writes_its_own_audit_entry(self):
-        """Issue #412: activation now ALSO writes to the playbook_versions
-        row's own audit trail (release_bundle_activate, and
-        playbook_version_notes_update since this sample carries seed_notes)
-        -- so this asserts THIS module's own `bundled_sample_activate` entry
-        is present, rather than asserting the audit table's total row
-        count."""
-        ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
-
-        own_entries = [e for e in ddb._audit.items if e["action"] == "bundled_sample_activate"]
-        self.assertEqual(len(own_entries), 1)
-        entry = own_entries[0]
-        self.assertEqual(entry["actor"], "admin-1")
-        self.assertEqual(entry["playbook_id"], PLAYBOOK_ID)
-        self.assertEqual(entry["outcome"], "success")
-
-    def test_activation_is_repeatable(self):
-        """A second click (e.g. after a page reload) is a no-op on the
-        active hash, not an error -- same idempotent-write posture as
-        seed_active_bundle's own put_item. Each click still appends its
-        own audit row (append-only, never deduped)."""
-        ddb = FakeDDB(FakeReviewsTable())
-        first = sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
-        second = sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
-        self.assertEqual(first["content_hash"], second["content_hash"])
-        own_entries = [e for e in ddb._audit.items if e["action"] == "bundled_sample_activate"]
-        self.assertEqual(len(own_entries), 2)
-
-    def test_activation_seeds_a_real_playbook_versions_row_with_the_note(self):
-        """THE #412 ACCEPTANCE CRITERION: the bundled sample gets a REAL
-        `playbook_versions` row (not a bundled-sample special case), and
-        the registry's `seed_notes` survives activation as that row's
-        admin-editable `notes` -- exactly what `GET /api/playbooks` (issue
-        #411's `get_active_version_notes`) reads."""
+    def test_seed_writes_a_real_version_row_through_the_ordinary_functions(self):
+        """The row an admin-uploaded version would produce: written by
+        `record_playbook_version_upload` (so it carries `uploaded_by` /
+        `uploaded_at` and shows up in the trail), flipped to `active` by
+        `activate_playbook_version`, carrying the registry's `seed_notes`
+        as the admin-editable `notes` that `GET /api/playbooks` reads."""
         ddb = FakeDDB(FakeReviewsTable())
         entry = playbook_registry.resolve_playbook(PLAYBOOK_ID)
         self.assertTrue(entry.seed_notes, "registry entry must carry seed_notes to prove anything here")
 
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        result = _seed(ddb)
 
-        row = ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION)]
+        row = ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]
         self.assertEqual(row["status"], pv.STATUS_ACTIVE)
         self.assertEqual(row["notes"], entry.seed_notes)
+        self.assertEqual(row["content_hash"], result["content_hash"])
+        self.assertEqual(row["uploaded_by"], sample_playbooks.SEED_ACTOR)
+
+        trail = pv.list_playbook_version_trail(PLAYBOOK_ID, ddb)
+        self.assertEqual([t["version"] for t in trail], [sample_playbooks._SEED_VERSION])
 
         # The exact read path GET /api/playbooks uses.
         self.assertEqual(pv.get_active_version_notes(PLAYBOOK_ID, ddb), entry.seed_notes)
 
-    def test_second_activation_does_not_duplicate_or_lose_the_version_row(self):
+    def test_seed_writes_its_own_audit_entry_alongside_the_lifecycle_ones(self):
+        """The seed appends one row of its own; `src.playbook_versions`
+        appends the ordinary `release_bundle_activate` (and, because this
+        playbook ships a note, `playbook_version_notes_update`) rows -- so
+        the trail is indistinguishable from an ordinary install apart from
+        the actor being the deploy step."""
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
+
+        own = [e for e in ddb._audit.items if e["action"] == "shipped_playbook_seeded"]
+        self.assertEqual(len(own), 1)
+        self.assertEqual(own[0]["actor"], sample_playbooks.SEED_ACTOR)
+        self.assertEqual(own[0]["playbook_id"], PLAYBOOK_ID)
+        self.assertEqual(own[0]["outcome"], "success")
+
+        actions = [e.get("action") for e in ddb._audit.items]
+        self.assertIn("release_bundle_activate", actions)
+
+    def test_the_real_bootstrap_entry_point_seeds_an_active_playbook(self):
+        """Drive `deploy/dts/bootstrap.py::seed_shipped_playbook` against
+        EMPTY tables -- the actual deploy step, not a re-implementation."""
+        ddb = FakeDDB(FakeReviewsTable())
+        self.assertIsNone(reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb))
+
+        with patch.object(dts_bootstrap, "_ddb_resource", return_value=ddb):
+            dts_bootstrap.seed_shipped_playbook()
+
+        self.assertEqual(
+            reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb),
+            seed_active_bundle.compute_seed_hash(PLAYBOOK_ID),
+            "FRESH DEPLOY ACTIVE: False -- the bootstrap did not leave the "
+            "shipped playbook active",
+        )
+        self.assertEqual(
+            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]["status"],
+            pv.STATUS_ACTIVE,
+        )
+
+    def test_a_fresh_deployment_catalog_is_never_empty(self):
+        """The user-visible consequence: after the bootstrap runs, the
+        catalog `GET /api/playbooks` serves has at least one ACTIVE entry,
+        so the SPA never opens on the empty-shell state out of the box."""
+        ddb = FakeDDB(FakeReviewsTable())
+        with patch.object(dts_bootstrap, "_ddb_resource", return_value=ddb):
+            dts_bootstrap.seed_shipped_playbook()
+
+        catalog = review_routes._load_playbook_catalog(review_routes.PLAYBOOK_REGISTRY_PATH, ddb)
+        active = [row for row in catalog if row["status"] == "active"]
+        self.assertEqual([row["playbook_id"] for row in active], [PLAYBOOK_ID])
+        self.assertNotIn(
+            "has_bundled_sample",
+            catalog[0],
+            "issue #433: the catalog carries no sample-only field any more",
+        )
+
+
+class TestSeedInstallsOnceAndNeverRestomps(unittest.TestCase):
+    """The bootstrap re-runs on every container start. Each test here is a
+    second run over state a fresh install (or an admin) already produced."""
+
+    def test_second_run_is_a_no_op_skip(self):
+        ddb = FakeDDB(FakeReviewsTable())
+        first = _seed(ddb)
+        second = _seed(ddb)
+
+        self.assertEqual(first["status"], "active")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(second["reason"], "already_installed")
 
         trail = pv.list_playbook_version_trail(PLAYBOOK_ID, ddb)
-        self.assertEqual(len(trail), 1)
-        self.assertEqual(trail[0]["version"], sample_playbooks._SAMPLE_VERSION)
-        entry = playbook_registry.resolve_playbook(PLAYBOOK_ID)
-        self.assertEqual(pv.get_active_version_notes(PLAYBOOK_ID, ddb), entry.seed_notes)
+        self.assertEqual(len(trail), 1, "a second run must not duplicate the version row")
+        own = [e for e in ddb._audit.items if e["action"] == "shipped_playbook_seeded"]
+        self.assertEqual(len(own), 1, "a skipped run must not append an audit row")
+        self.assertEqual(
+            reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb),
+            first["content_hash"],
+        )
 
-    def test_admin_edited_note_survives_a_second_activation(self):
-        """Regression for issue #412 fix-round-1 finding 1: a re-click of
-        activate-sample must NOT silently revert an admin's edited note back
-        to the shipped seed text. `_activate_version_row` must seed `notes`
-        only when the version row is newly created, never on a repeat
-        activation -- `notes` is admin-editable exactly like any other
-        playbook's note (issue #411's `update_playbook_version_notes`)."""
+    def test_admin_edited_note_survives_a_second_run(self):
+        """`notes` is admin-editable exactly like any other playbook's note
+        (issue #411's `update_playbook_version_notes`); a container restart
+        must never revert it to the shipped seed text."""
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
 
         edited_note = "OUR INTERNAL NDA GUIDANCE"
         pv.update_playbook_version_notes(
-            PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION, edited_note, "admin-1", ddb
+            PLAYBOOK_ID, sample_playbooks._SEED_VERSION, edited_note, "admin-1", ddb
         )
-        self.assertEqual(pv.get_active_version_notes(PLAYBOOK_ID, ddb), edited_note)
 
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
 
         self.assertEqual(
             pv.get_active_version_notes(PLAYBOOK_ID, ddb),
             edited_note,
-            "ADMIN EDIT SURVIVED: False -- a second activation must not "
-            "reseed the shipped note over an admin's edit",
+            "ADMIN EDIT SURVIVED: False -- a re-run must not reseed the "
+            "shipped note over an admin's edit",
         )
 
-    def test_content_hash_is_reconciled_on_a_second_activation_after_a_content_change(self):
-        """Regression for issue #412 fix-round-1 finding 2: because
-        `_SAMPLE_VERSION` is a fixed literal, a second activation after the
-        on-disk sample content changed must not leave the `playbook_versions`
-        row's `content_hash` stale relative to `playbooks.
-        active_release_bundle_hash` -- both must end up in sync, and the
-        reconciliation must be audited."""
+    def test_a_removed_playbook_is_not_resurrected_by_a_restart(self):
+        """The sharp one. `remove_playbook` DELETES the version rows as
+        part of tombstoning, so a seed that only checked "are there version
+        rows?" would happily re-install on the next container start and
+        undo the admin's removal."""
         ddb = FakeDDB(FakeReviewsTable())
-        first = sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
+        pv.remove_playbook(PLAYBOOK_ID, "admin-1", ddb)
 
-        changed_hash = "sha256:" + ("a" * 64)
-        self.assertNotEqual(first["content_hash"], changed_hash)
+        result = _seed(ddb)
 
-        with patch.object(seed_active_bundle, "compute_seed_hash", return_value=changed_hash):
-            second = sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "removed_by_admin")
+        self.assertEqual(pv.list_playbook_version_trail(PLAYBOOK_ID, ddb), [])
+        self.assertIsNone(
+            reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb),
+            "STAYED REMOVED: False -- a restart resurrected a playbook the "
+            "admin deliberately removed",
+        )
+        catalog = review_routes._load_playbook_catalog(review_routes.PLAYBOOK_REGISTRY_PATH, ddb)
+        self.assertEqual([row["playbook_id"] for row in catalog], [])
 
-        self.assertEqual(second["content_hash"], changed_hash)
+    def test_an_admin_uploaded_newer_version_is_left_alone_by_a_restart(self):
+        ddb = FakeDDB(FakeReviewsTable())
+        _seed(ddb)
+        pv.record_playbook_version_upload(
+            PLAYBOOK_ID, "1.1.0", "admin-1", ddb, content_hash="sha256:" + ("c" * 64)
+        )
+        pv.activate_playbook_version(PLAYBOOK_ID, "1.1.0", "admin-1", ddb)
 
-        row = ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION)]
-        active_hash = reviews_module._read_active_release_bundle_hash(PLAYBOOK_ID, ddb)
+        result = _seed(ddb)
+
+        self.assertEqual(result["status"], "skipped")
         self.assertEqual(
-            row["content_hash"],
-            active_hash,
-            f"IN SYNC: False -- version row content_hash={row['content_hash']!r} vs "
-            f"playbooks.active_release_bundle_hash={active_hash!r}",
+            ddb._playbook_versions.items[(PLAYBOOK_ID, "1.1.0")]["status"], pv.STATUS_ACTIVE
         )
-        self.assertEqual(row["content_hash"], changed_hash)
+        self.assertEqual(
+            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]["status"],
+            pv.STATUS_RETIRED,
+        )
 
-        reconcile_entries = [
-            e for e in ddb._audit.items if e["action"] == "bundled_sample_content_hash_reconciled"
-        ]
-        self.assertEqual(len(reconcile_entries), 1)
-        self.assertEqual(reconcile_entries[0]["previous_content_hash"], first["content_hash"])
-        self.assertEqual(reconcile_entries[0]["content_hash"], changed_hash)
-
-    def test_sample_accepts_a_new_uploaded_version_and_rolls_back_like_any_playbook(self):
-        """Partial coverage for issue #412's Scope bullet ('accepts a new
-        uploaded version, rolls back ... through the normal admin paths'),
-        added per fix-round-1 finding 5. Proves the sample's REAL
-        `playbook_versions` row is genuinely first-class for the two
-        lifecycle operations that already exist in this codebase for every
-        playbook_id: an admin uploads version 1.1.0 through the normal
-        governed `record_playbook_version_upload` path, activates it (which
-        retires the seeded 1.0.0 row, never deletes it), and rolls back to
-        1.0.0 -- all via plain `src.playbook_versions` calls, with zero
-        special-casing for the bundled sample.
-
-        Rename/remove are covered separately by
-        `TestBundledSampleRenameAndRemove` below (issue #412 fix-round-1
-        finding 5, implemented rather than waived)."""
+    def test_a_renamed_playbook_keeps_its_name_when_the_seed_runs_again(self):
+        """The seed's resolver wiring uses `update_item`, never `put_item`,
+        so it can never clobber the `display_name` / `removed` attributes
+        an admin set on the same `playbooks` row."""
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
+        pv.rename_playbook(PLAYBOOK_ID, "Our House NDA", "admin-1", ddb)
+
+        _seed(ddb)
+
+        self.assertEqual(
+            ddb._playbooks.items[PLAYBOOK_ID]["display_name"],
+            "Our House NDA",
+        )
+
+    def test_seeded_playbook_accepts_a_new_version_and_rolls_back_like_any_playbook(self):
+        """The seeded row is genuinely first-class: an admin uploads 1.1.0
+        through the normal governed `record_playbook_version_upload` path,
+        activates it (which RETIRES the seeded 1.0.0 row, never deletes
+        it), and rolls back to 1.0.0 -- all via plain `src.playbook_versions`
+        calls, with zero special-casing."""
+        ddb = FakeDDB(FakeReviewsTable())
+        _seed(ddb)
 
         new_version = "1.1.0"
-        new_hash = "sha256:" + ("c" * 64)
         pv.record_playbook_version_upload(
-            PLAYBOOK_ID, new_version, "admin-1", ddb, content_hash=new_hash
+            PLAYBOOK_ID, new_version, "admin-1", ddb, content_hash="sha256:" + ("c" * 64)
         )
         pv.activate_playbook_version(PLAYBOOK_ID, new_version, "admin-1", ddb)
 
@@ -697,17 +788,15 @@ class TestActivateBundledSample(unittest.TestCase):
             ddb._playbook_versions.items[(PLAYBOOK_ID, new_version)]["status"], pv.STATUS_ACTIVE
         )
         self.assertEqual(
-            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION)]["status"],
+            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]["status"],
             pv.STATUS_RETIRED,
             "uploading and activating a new version must retire, never delete, the seeded row",
         )
 
-        pv.rollback_playbook_version(
-            PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION, "admin-1", ddb
-        )
+        pv.rollback_playbook_version(PLAYBOOK_ID, sample_playbooks._SEED_VERSION, "admin-1", ddb)
 
         self.assertEqual(
-            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION)]["status"],
+            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)]["status"],
             pv.STATUS_ACTIVE,
         )
         self.assertEqual(
@@ -721,11 +810,10 @@ class TestActivateBundledSample(unittest.TestCase):
         )
 
 
-class TestBundledSampleRenameAndRemove(unittest.TestCase):
-    """Issue #412 fix-round-1 finding 5: the shipped sample must be
-    RENAMABLE and REMOVABLE through the normal admin path, not just
-    activatable -- Marc's verbatim intent, "make it removable and updatable
-    and renamable etc just like a real playbook".
+class TestSeededPlaybookRenameAndRemove(unittest.TestCase):
+    """The shipped playbook must be RENAMABLE and REMOVABLE through the
+    normal admin path -- Marc's verbatim intent, "make it removable and
+    updatable and renamable etc just like a real playbook".
 
     Both are DB overrides on the `playbooks` row rather than edits to
     `playbooks/registry.json`, because the registry is a file baked into the
@@ -746,7 +834,7 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
 
     def test_rename_overrides_the_shipped_display_name_in_the_catalog(self):
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
         shipped = self._entry(ddb)["display_name"]
 
         pv.rename_playbook(PLAYBOOK_ID, "Our House NDA", "admin-1", ddb)
@@ -763,7 +851,7 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
 
     def test_rename_to_empty_string_restores_the_shipped_name(self):
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
         shipped = self._entry(ddb)["display_name"]
 
         pv.rename_playbook(PLAYBOOK_ID, "Temporary", "admin-1", ddb)
@@ -773,7 +861,7 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
 
     def test_remove_drops_it_from_the_catalog_and_deletes_its_version_rows(self):
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
         self.assertIsNotNone(self._entry(ddb))
 
         result = pv.remove_playbook(PLAYBOOK_ID, "admin-1", ddb)
@@ -795,31 +883,24 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
             "a removed playbook must never still resolve as active",
         )
 
-    def test_re_activating_a_removed_sample_brings_it_back(self):
-        """Removal of the SHIPPED sample must be reversible -- otherwise a
-        stray click permanently bricks the one playbook a fresh install
-        ships with."""
-        ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
-        pv.remove_playbook(PLAYBOOK_ID, "admin-1", ddb)
-        self.assertIsNone(self._entry(ddb))
-
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
-
-        restored = self._entry(ddb)
-        self.assertIsNotNone(restored)
-        self.assertEqual(restored["status"], "active")
-        self.assertEqual(
-            restored["notes"],
-            playbook_registry.resolve_playbook(PLAYBOOK_ID).seed_notes,
-            "a re-activated sample gets a freshly-seeded row, so its shipped "
-            "note is back",
-        )
+    # NOTE (issue #433): the deleted `test_re_activating_a_removed_sample_
+    # brings_it_back` asserted the OPPOSITE of what must now be true, and is
+    # replaced by `TestSeedInstallsOnceAndNeverRestomps::
+    # test_a_removed_playbook_is_not_resurrected_by_a_restart`. It relied on
+    # `sample_playbooks._clear_removed_tombstone` -- a sample-ONLY branch
+    # that cleared the `removed` tombstone on every activation. As a
+    # deploy-time seed that re-runs on every container start, that branch
+    # would silently undo an admin's removal on the next restart, so it is
+    # gone. The consequence is honest and shared with every other playbook:
+    # `remove_playbook` is a one-way door via the API today (nothing in
+    # `src.playbook_versions` clears the tombstone). Restoring a removed
+    # playbook belongs to the Playbooks admin tab (#434), not to a
+    # sample-only escape hatch here.
 
     def test_full_lifecycle_upload_activate_rollback_rename_remove(self):
         """The end-to-end lifecycle finding 5 asked for, in one pass."""
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
 
         pv.record_playbook_version_upload(
             PLAYBOOK_ID, "1.1.0", "admin-1", ddb, content_hash="sha256:" + ("d" * 64)
@@ -830,10 +911,10 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
         )
 
         pv.rollback_playbook_version(
-            PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION, "admin-1", ddb
+            PLAYBOOK_ID, sample_playbooks._SEED_VERSION, "admin-1", ddb
         )
         self.assertEqual(
-            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SAMPLE_VERSION)][
+            ddb._playbook_versions.items[(PLAYBOOK_ID, sample_playbooks._SEED_VERSION)][
                 "status"
             ],
             pv.STATUS_ACTIVE,
@@ -850,7 +931,7 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
 
     def test_rename_and_remove_are_audited(self):
         ddb = FakeDDB(FakeReviewsTable())
-        sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        _seed(ddb)
 
         pv.rename_playbook(PLAYBOOK_ID, "Audited Name", "admin-1", ddb)
         pv.remove_playbook(PLAYBOOK_ID, "admin-1", ddb)
@@ -861,16 +942,16 @@ class TestBundledSampleRenameAndRemove(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. The acceptance criterion: activating it -> reviews run.
+# 3. Seeding it -> reviews actually run against it.
 # ---------------------------------------------------------------------------
 
 
-class TestActivatedSampleRunsRealReviews(unittest.TestCase):
-    def test_review_against_the_activated_sample_reaches_done(self):
+class TestSeededPlaybookRunsRealReviews(unittest.TestCase):
+    def test_review_against_the_seeded_playbook_reaches_done(self):
         reviews_table = FakeReviewsTable()
         ddb = FakeDDB(reviews_table)
 
-        activation = sample_playbooks.activate_bundled_sample(PLAYBOOK_ID, _admin_row(), ddb)
+        activation = _seed(ddb)
 
         docx_bytes = _build_docx_bytes()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
@@ -891,14 +972,14 @@ class TestActivatedSampleRunsRealReviews(unittest.TestCase):
         self.assertEqual(s3.puts[0]["Key"], f"outputs/{REVIEW_ID}/out.docx")
         settle.assert_called_once()
 
-    def test_review_without_activation_is_quarantined_not_run(self):
-        """The empty-shell contrast case: WITHOUT activating first, the
+    def test_review_without_the_seed_is_quarantined_not_run(self):
+        """The empty-shell contrast case: WITHOUT the seed having run, the
         exact same submission is quarantined at issue #401's
         verify_active_bundle gate -- it never falls through to a computed
-        review, proving activation is actually load-bearing here, not
+        review, proving the seed is actually load-bearing here, not
         cosmetic."""
         reviews_table = FakeReviewsTable()
-        ddb = FakeDDB(reviews_table)  # nothing activated
+        ddb = FakeDDB(reviews_table)  # nothing installed
 
         docx_bytes = _build_docx_bytes()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
@@ -921,13 +1002,17 @@ class TestActivatedSampleRunsRealReviews(unittest.TestCase):
 
 
 def _run_tests() -> int:
+    # EXPLICIT class registry, NOT auto-discovery: a new TestCase class
+    # silently does not run until it is added here.
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     for case in (
-        TestBundledSampleIsRealContent,
-        TestActivateBundledSample,
-        TestBundledSampleRenameAndRemove,
-        TestActivatedSampleRunsRealReviews,
+        TestShippedPlaybookIsRealContent,
+        TestSeedRefusals,
+        TestFreshDeploySeed,
+        TestSeedInstallsOnceAndNeverRestomps,
+        TestSeededPlaybookRenameAndRemove,
+        TestSeededPlaybookRunsRealReviews,
     ):
         suite.addTests(loader.loadTestsFromTestCase(case))
     result = unittest.TextTestRunner(verbosity=2).run(suite)

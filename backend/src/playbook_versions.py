@@ -605,10 +605,10 @@ def get_active_version_notes(
 ) -> str:
     """The currently-`active` version's `notes` for `playbook_id`, or `""`
     if there is no active version row or the active row simply has no note
-    set. (Issue #412 made the bundled sample write a real
-    `playbook_versions` row of its own — precisely so its shipped note has
-    somewhere to live and stays admin-editable like any other playbook's —
-    so a bundled-sample activation is no longer a no-row case.)
+    set. (Issue #412/#433: the playbook the image ships with gets a real
+    `playbook_versions` row from the deploy seed — precisely so its shipped
+    note has somewhere to live and stays admin-editable like any other
+    playbook's — so it is not a no-row case either.)
 
     Thin wrapper over `_find_active_item` so cross-module callers (issue
     #411's `GET /api/playbooks` catalog in `src/review_routes.py`) don't
@@ -629,9 +629,9 @@ def get_active_version_notes(
 # rename or removal written to that file would not survive the next deploy,
 # and the file is not writable at runtime anyway. So the catalog enumerates
 # the registry and layers these per-playbook DB overrides on top — which is
-# what makes a registry-listed playbook (including the bundled sample)
-# genuinely renamable and removable through the normal admin path, rather
-# than fixed by whatever the image happened to ship.
+# what makes a registry-listed playbook (including the one the image ships
+# with) genuinely renamable and removable through the normal admin path,
+# rather than fixed by whatever the image happened to ship.
 # ---------------------------------------------------------------------------
 
 
@@ -716,9 +716,12 @@ def remove_playbook(
     THE TOMBSTONE IS LOAD-BEARING, not bookkeeping: the catalog enumerates
     `playbooks/registry.json`, a file baked into the image, so deleting the
     DB rows alone would leave the playbook re-appearing (as `coming_soon`)
-    on the next request. Re-activating a bundled sample clears the
-    tombstone (see `src.sample_playbooks`), which is what makes "remove"
-    reversible for the shipped sample rather than a one-way door.
+    on the next request. Nothing in this codebase clears the tombstone, so
+    removal is a one-way door for every playbook alike — including the one
+    the image ships with, whose deploy seed (`src.sample_playbooks`)
+    deliberately SKIPS a removed playbook rather than resurrecting it on the
+    next container start (issue #433). A generic admin restore belongs with
+    the Playbooks admin surface (issue #434), not here.
 
     Appends one audit record (`playbook_removed`) with identifiers and the
     number of version rows deleted — never document substance.
@@ -758,11 +761,23 @@ def list_playbook_version_trail(
 ) -> list[dict[str, Any]]:
     """Read path: the upload audit trail for a playbook, oldest first.
 
-    Returns identifiers, timestamps, and the mutable `notes` field —
-    `playbook_id`, `version`, `uploaded_by`, `uploaded_at`, `notes` — never
-    document substance beyond that one free-form admin-authored field
-    (same posture as the `audit` table field dictionary; ARCHITECTURE.md ->
-    "Audit posture"; see this module's "The one mutable field" section).
+    Returns `playbook_id`, `version`, `uploaded_by`, `uploaded_at`,
+    `status`, `content_hash` (only when one was recorded), and the mutable
+    `notes` field — never document substance. That is exactly
+    `_write_audit_entry`'s posture, which this surface mirrors:
+    "Identifiers, statuses, and hashes only — never document substance"
+    (ARCHITECTURE.md -> "Audit posture"). A `content_hash` is a digest from
+    which no document is recoverable, and it is already written into the
+    append-only `audit` table itself by activation/rollback and by the
+    shipped-playbook seed — so surfacing it here discloses nothing the
+    audit trail does not already hold.
+
+    `notes` is the one free-form admin-authored field (see this module's
+    "The one mutable field" section); it is the only value here that could
+    carry arbitrary text, which is why it — and not the controlled-
+    vocabulary fields around it — is the one the notes audit row records a
+    length for rather than a value.
+
     Records are returned in upload order (ascending `uploaded_at`),
     independent of how the `version` sort-key strings happen to compare
     lexicographically.
@@ -775,13 +790,21 @@ def list_playbook_version_trail(
     items = list(resp.get("Items", []))
     items.sort(key=lambda item: int(item.get("uploaded_at", 0)))
 
-    return [
-        {
+    trail: list[dict[str, Any]] = []
+    for item in items:
+        row: dict[str, Any] = {
             "playbook_id": item["playbook_id"],
             "version": item["version"],
             "uploaded_by": item["uploaded_by"],
             "uploaded_at": int(item["uploaded_at"]),
+            "status": item.get("status") or STATUS_DRAFT,
             "notes": item.get("notes") or "",
         }
-        for item in items
-    ]
+        # Absent rather than present-and-null for rows that predate
+        # content-hash recording — mirrors how the item itself is written.
+        content_hash = item.get("content_hash")
+        if content_hash is not None:
+            row["content_hash"] = content_hash
+        trail.append(row)
+
+    return trail

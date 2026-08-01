@@ -939,6 +939,12 @@ def submit_review(
     exactly like review_id above: the existing submission's own recorded
     execution_input is authoritative there, not whatever this retried call
     happened to pass.
+
+    Issue #431 additionally records it on the reviews row itself (see
+    _create_review_row) so get_review_detail can hand it back to the UI --
+    the resumed path leaves the original row's value untouched, which is
+    correct: the already-started execution runs under the guidance the
+    FIRST call supplied, so the row keeps naming what actually governed.
     """
     idempotency_key = resolve_idempotency_key(
         client_supplied_idempotency_key, owner_sub, file_sha256, active_release_bundle_hash
@@ -1007,6 +1013,7 @@ def submit_review(
         active_release_bundle_hash,
         dynamodb_resource,
         opf_lineage=opf_lineage,
+        toaster_guidance=toaster_guidance,
     )
 
     ensure_execution_started(submission, execution_input_json, dynamodb_resource, sfn_client)
@@ -1309,6 +1316,7 @@ def _create_review_row(
     release_bundle_hash: str,
     dynamodb_resource: Any,
     opf_lineage: dict[str, str | int | None] | None = None,
+    toaster_guidance: str = "",
 ) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
@@ -1337,6 +1345,21 @@ def _create_review_row(
     # editing a policy and re-binding leaves two reviews indistinguishable
     # in the record even though different rules governed them.
     item.update(_recorded_lineage_fields(opf_lineage))
+
+    # Issue #431: the per-review free-text guidance this review actually ran
+    # under, recorded on the row so "which instructions governed this
+    # review?" is answerable from the review itself (get_review_detail
+    # projects it back for the Review tab's read-only readback) rather than
+    # only from the submission record's execution_input, which the read path
+    # never touches. Recorded on the SAME "absent, never a null placeholder"
+    # terms as the lineage fields above -- and whitespace-only guidance is
+    # no guidance at all, exactly as scripts/primary_review_pass.py
+    # ::render_toaster_guidance_block treats it, so a row for a review that
+    # supplied none stays byte-identical to the row written before this
+    # issue. The value is stored verbatim (never the stripped copy): the
+    # record must be what was submitted.
+    if toaster_guidance.strip():
+        item["toaster_guidance"] = toaster_guidance
 
     table.put_item(Item=item)
 
@@ -1485,6 +1508,12 @@ def get_review_detail(
         "message": STATUS_USER_MESSAGES.get(status_value),
         "has_output": bool(item.get("output_s3_key")),
         "playbook_id": item.get("playbook_id"),
+        # Issue #431: the per-review free-text guidance this review was
+        # submitted with, so the Review tab can show back (read-only) which
+        # instructions governed it. None for a review submitted without any
+        # -- and for every review created before that field was recorded --
+        # the same faithful-projection convention as every field above.
+        "toaster_guidance": item.get("toaster_guidance"),
         "owner_sub": owner_sub,
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),

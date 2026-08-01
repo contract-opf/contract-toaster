@@ -39,6 +39,15 @@
 #                             rotated without a redeploy.
 #   S3_PUBLIC_ENDPOINT_URL  - public https URL of the minio service's domain,
 #                             e.g. https://<your-minio-subdomain>.
+#   IMAGE_DIGEST            - OPTIONAL. The pushed image's sha256 digest, shown
+#                             by GET /version. It cannot be baked into the image
+#                             (it is the digest OF that image), so the publish
+#                             workflow prints it after `docker push` and an
+#                             operator may paste it here. Unset it reports
+#                             "unknown", which degrades gracefully.
+#   VERSION / COMMIT_SHA    - OPTIONAL overrides only. Both are baked into the
+#                             published image at build time; leave them unset
+#                             unless you deliberately want to override.
 
 x-aws-emulator-env: &aws-emulator-env
   AWS_REGION: us-east-1
@@ -112,6 +121,19 @@ services:
       AUTH_MODE: password
       PIPELINE_RUNNER: inprocess
       STATE_MACHINE_ARN: "inprocess:contract-toaster-dts"
+      # Version metadata (issue #424). VERSION and COMMIT_SHA are BAKED INTO
+      # THE IMAGE at build time by .github/workflows/dts-image-publish.yml;
+      # IMAGE_DIGEST is not knowable at build time and stays "unknown" unless an
+      # operator sets it (the publish workflow echoes the real digest after
+      # push). All three use the pass-through form (a key with no value):
+      # compose resolves them from the host environment and, when unset there,
+      # does not pass them at all, so the image's baked-in ENV survives.
+      # Writing `VERSION: ${VERSION:-dev}` here instead would ALWAYS override
+      # the baked-in value — a compose `environment:` entry beats the image ENV
+      # — and re-break the footer this ticket fixes.
+      VERSION:
+      COMMIT_SHA:
+      IMAGE_DIGEST:
       # Downloads are presigned for a browser-reachable host, not the internal
       # `minio` DNS name. Set this to the minio service's public domain.
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL}
