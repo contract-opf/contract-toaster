@@ -22,6 +22,7 @@ so the suite runs in CI without extra installs.
 Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
+import json
 import sys
 import types
 import unittest
@@ -249,6 +250,45 @@ class TestListUsers(unittest.TestCase):
         result = _users_module.list_users(caller, ddb)
         self.assertEqual([u["cognito_sub"] for u in result], ["sub-b", "admin-1", "sub-a"])
 
+    def test_result_is_json_serializable_when_dynamodb_returns_decimals(self):
+        """GET /api/users 500'd in production on exactly this.
+
+        boto3's DynamoDB *resource* API deserializes every stored number to
+        `decimal.Decimal`, and `JSONResponse` (via json.dumps) cannot encode
+        one -- so `main.get_users`, which hands the rows straight to
+        JSONResponse, raised
+
+            TypeError: Object of type Decimal is not JSON serializable
+
+        and the whole Users & access tab was unusable. This suite never
+        caught it because `_seed_user` writes plain Python `int`s: the fake
+        table diverges from the real client in precisely the field that
+        breaks. Seed Decimals here, the way DynamoDB actually returns them.
+        """
+        from decimal import Decimal
+
+        ddb, users, _, _ = _new_ddb()
+        _seed_user(users, "admin-1", "admin@example.com", is_admin=True)
+        _seed_user(users, "sub-a", "a@example.com")
+        # Exactly what boto3 hands back for a stored number.
+        users.items["admin-1"]["last_auth_at"] = Decimal("5000")
+        users.items["admin-1"]["created_at"] = Decimal("900")
+        users.items["sub-a"]["last_auth_at"] = Decimal("4000")
+        users.items["sub-a"]["created_at"] = Decimal("880")
+        caller = _users_module.require_active_user("admin-1", ddb)
+
+        result = _users_module.list_users(caller, ddb)
+
+        # The actual production failure: this raises TypeError unmodified.
+        json.dumps({"users": result})
+
+        # …and the coercion must preserve the value, not stringify it.
+        admin = next(u for u in result if u["cognito_sub"] == "admin-1")
+        self.assertEqual(admin["last_auth_at"], 5000)
+        self.assertIsInstance(admin["last_auth_at"], int)
+        # Ordering still works on the coerced values.
+        self.assertEqual([u["cognito_sub"] for u in result], ["admin-1", "sub-a"])
+
 
 # ---------------------------------------------------------------------------
 # update_user — PATCH /api/users/{sub}
@@ -363,6 +403,31 @@ class TestSyncStatus(unittest.TestCase):
         }
         result = _users_module.get_sync_status(self.admin, self.ddb)
         self.assertEqual(result["last_run_outcome"], "ok")
+        self.assertEqual(result["users_deprovisioned_count"], 2)
+
+    def test_real_run_row_is_json_serializable(self):
+        """The same Decimal trap as list_users, one step behind it.
+
+        This row also goes straight into a JSONResponse. It has not broken
+        in production only because a deployment whose sync worker has never
+        completed a run gets the hardcoded "never run yet" default, which is
+        all plain ints. The first real run writes numbers, boto3 reads them
+        back as Decimals, and the panel would 500 the way GET /api/users did.
+        """
+        from decimal import Decimal
+
+        self.sync_status.items[_users_module.SYNC_TYPE_USER_DEPROVISION] = {
+            "sync_type": _users_module.SYNC_TYPE_USER_DEPROVISION,
+            "last_run_at": Decimal("123456"),
+            "last_run_outcome": "ok",
+            "users_deprovisioned_count": Decimal("2"),
+            "next_run_at": Decimal("127056"),
+        }
+        result = _users_module.get_sync_status(self.admin, self.ddb)
+
+        json.dumps(result)  # raises TypeError unfixed
+        self.assertEqual(result["last_run_at"], 123456)
+        self.assertIsInstance(result["last_run_at"], int)
         self.assertEqual(result["users_deprovisioned_count"], 2)
 
     def test_reflects_fail_closed_state(self):
