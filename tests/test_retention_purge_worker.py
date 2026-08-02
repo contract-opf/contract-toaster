@@ -208,10 +208,15 @@ class FakeS3Client:
         return {"TagSet": [{"Key": k, "Value": v} for k, v in tags.items()]}
 
     def list_objects_v2(self, Bucket, Prefix):
+        # A deleted object is GONE from a listing -- issue #454: this fake
+        # used to keep returning deleted keys, which is not what S3 does and
+        # would make the sweep's post-delete survivor check see phantom
+        # survivors. Fake fidelity is load-bearing here: the whole #454 defect
+        # survived because a fake disagreed with real S3.
         contents = [
             {"Key": key}
-            for (bucket, key) in self.objects
-            if bucket == Bucket and key.startswith(Prefix)
+            for (bucket, key), obj in self.objects.items()
+            if bucket == Bucket and key.startswith(Prefix) and not obj["deleted"]
         ]
         return {"Contents": contents} if contents else {}
 
@@ -270,14 +275,25 @@ class PurgeWorkerTestCase(unittest.TestCase):
             "pending_reduction": None,
         }
 
+    def _upload_key(self, review_id: str, owner_sub: str = "user-1") -> str:
+        """The layout backend/src/review_routes.py actually writes -- issue
+        #454: this helper used to seed `uploads/{review_id}/contract.docx`,
+        the sweep's own (wrong) prefix, so the suite agreed with the bug and
+        no test could see that no input document was ever purged."""
+        return f"uploads/{owner_sub}/{review_id}/in.docx"
+
+    def _output_key(self, review_id: str) -> str:
+        return f"outputs/{review_id}/out.docx"
+
     def _seed_review(self, review_id: str, *, status: str, age_days: int,
                       retention_window_at_creation: int = 90,
                       legal_hold: bool = False, has_upload: bool = True,
-                      has_output: bool = True) -> None:
+                      has_output: bool = True, owner_sub: str = "user-1",
+                      record_pointer: bool = True) -> None:
         now = _handler_module.now_epoch()
         created_at = now - age_days * 86400
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
-        reviews_table.items[review_id] = {
+        row = {
             "review_id": review_id,
             "status": status,
             "created_at": str(int(created_at)),
@@ -285,18 +301,24 @@ class PurgeWorkerTestCase(unittest.TestCase):
             "legal_hold": legal_hold,
             "verdict_summary": "some substantive summary",
             "issue_rationale_text": "some substantive rationale",
-            "owner_sub": "user-1",
+            "owner_sub": owner_sub,
         }
+        if record_pointer:
+            # What backend/src/reviews.py::_create_review_row records (#449) --
+            # the pointer the sweep now derives its targeting from.
+            row["upload_s3_key"] = self._upload_key(review_id, owner_sub)
+            row["output_s3_key"] = self._output_key(review_id)
+        reviews_table.items[review_id] = row
         if has_upload:
             self.s3.put_test_object(
                 os.environ["UPLOADS_BUCKET"],
-                f"uploads/{review_id}/contract.docx",
+                self._upload_key(review_id, owner_sub),
                 tags={"contract-toaster:legal-hold": "true" if legal_hold else "false"},
             )
         if has_output:
             self.s3.put_test_object(
                 os.environ["OUTPUTS_BUCKET"],
-                f"outputs/{review_id}/redline.docx",
+                self._output_key(review_id),
                 tags={"contract-toaster:legal-hold": "true" if legal_hold else "false"},
             )
 
@@ -314,7 +336,7 @@ class PurgeWorkerTestCase(unittest.TestCase):
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         self.assertEqual(reviews_table.items["review-pending"]["status"], "PENDING")
         self.assertTrue(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], "uploads/review-pending/contract.docx")]["deleted"] is False
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-pending"))]["deleted"] is False
         )
 
     def test_running_review_never_purged(self):
@@ -367,10 +389,10 @@ class PurgeWorkerTestCase(unittest.TestCase):
             "Substance fields on a held review must not be cleared.",
         )
         self.assertFalse(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], "uploads/review-held/contract.docx")]["deleted"]
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-held"))]["deleted"]
         )
         self.assertFalse(
-            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], "outputs/review-held/redline.docx")]["deleted"]
+            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], self._output_key("review-held"))]["deleted"]
         )
 
     def test_purge_role_delete_attempt_on_held_object_is_denied_by_storage_layer(self):
@@ -418,10 +440,10 @@ class PurgeWorkerTestCase(unittest.TestCase):
         _handler_module.run_purge_sweep()
 
         self.assertTrue(
-            self.s3.objects[(os.environ["UPLOADS_BUCKET"], "uploads/review-del/contract.docx")]["deleted"]
+            self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-del"))]["deleted"]
         )
         self.assertTrue(
-            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], "outputs/review-del/redline.docx")]["deleted"]
+            self.s3.objects[(os.environ["OUTPUTS_BUCKET"], self._output_key("review-del"))]["deleted"]
         )
 
     # -- Pagination: reviews_table.scan() must follow LastEvaluatedKey ----
@@ -466,7 +488,7 @@ class PurgeWorkerTestCase(unittest.TestCase):
         for review_id in review_ids:
             self.assertTrue(
                 self.s3.objects[(os.environ["UPLOADS_BUCKET"],
-                                  f"uploads/{review_id}/contract.docx")]["deleted"],
+                                  self._upload_key(review_id))]["deleted"],
                 f"{review_id}'s upload was never deleted -- likely on a "
                 "scan page that was never fetched.",
             )

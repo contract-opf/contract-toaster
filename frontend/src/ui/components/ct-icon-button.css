@@ -35,8 +35,11 @@ ct-icon-button {
   background: var(--ct-neutral-bg);
 }
 
+/* Transparent outline, not `outline: none` — forced-colors: active discards
+   box-shadow and repaints the transparent outline (tokens.css, issue #438). */
 .ct-icon-button__el:focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   box-shadow: var(--ct-focus-ring);
 }
 
