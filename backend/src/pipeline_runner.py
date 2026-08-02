@@ -40,7 +40,10 @@ the Phase 1 mock body -- so existing tests/deployments that never set
 `MODEL_PROVIDER` are unaffected. On any unhandled exception the real body
 calls the SHARED `reviews.record_stage_failure` (issue #258) with the actual
 failing stage name, exactly the AWS error-handler Lambda's contract, instead
-of leaving the review PENDING/RUNNING forever.
+of leaving the review PENDING/RUNNING forever -- and, since issue #442, with
+a CLASSIFIED reason token (`classify_failure_reason` below) instead of the
+constant "unhandled_exception", so the row records WHY it failed and not
+merely that it did.
 
 RUNTIME PLAYBOOK LOADING (issue #401, empty-shell foundation): before
 `run_real_pipeline` loads any playbook content, it re-resolves the active
@@ -100,6 +103,64 @@ _WATERMARK = "tool recommendation only - attorney approval required"
 
 # In-process concurrency cap -- the semaphore equivalent for a single container.
 _MAX_CONCURRENCY = int(os.environ.get("PIPELINE_MAX_CONCURRENCY", "5"))
+
+# ---------------------------------------------------------------------------
+# Failure classification (issue #442)
+# ---------------------------------------------------------------------------
+#
+# `run_real_pipeline`'s deliberate catch-all used to record the constant
+# "unhandled_exception" for EVERY failure, so a review that died because the
+# model account was out of credits looked -- to the person who has to fix it
+# -- exactly like one that died on a malformed response. The real cause was
+# known: it reached `logger.exception` (container log) and was then thrown
+# away, which meant diagnosing a two-minute admin fix needed shell access to
+# a production container.
+#
+# This maps the caught exception to a reason TOKEN drawn from the taxonomy in
+# `reviews.STAGE_FAILURE_REASON_STATUS`. A token, never a message: the token
+# is what crosses the API boundary, and the frontend
+# (`frontend/src/ReviewSubmission.tsx`'s REASON_EXPLANATIONS) is what turns
+# it into prose. That indirection is exactly what buys BOTH comprehensibility
+# and issue #425's rule -- no raw `HTTP <n>`, endpoint, key material, stack
+# trace, or prompt/document substance can reach user-facing copy, because
+# none of it is in the token.
+#
+# Classification is by the STRUCTURED `ModelInvocationError.status_code`, not
+# by parsing the exception message, which would rot the next time that copy
+# changes.
+FAILURE_REASON_UNCLASSIFIED = "unhandled_exception"
+
+_MODEL_STATUS_FAILURE_REASONS: dict[int, str] = {
+    401: "model_key_rejected",  # key absent/invalid at the provider
+    402: "model_account_out_of_credits",  # payment required -- fund the account
+    403: "model_key_rejected",  # key present but not permitted
+    404: "model_unavailable",  # the selected model id is not served
+    429: "model_rate_limited",  # too many requests for this account
+    503: "model_unavailable",  # provider/model temporarily out of service
+}
+
+
+def classify_failure_reason(exc: BaseException) -> str:
+    """Map a pipeline exception to a stage-failure reason token.
+
+    Anything not recognised -- an unmapped status, a model error with no
+    status (transport/malformed-response), or an exception from any other
+    stage entirely -- falls back to `unhandled_exception`, i.e. EXACTLY
+    today's behavior. This function can therefore only ever make the
+    recorded reason more specific, never less.
+    """
+    if isinstance(exc, model_client.ModelContextLengthExceededError):
+        # Its own token rather than `document_too_large`: this one was
+        # measured by the provider, not estimated pre-call. Same terminal
+        # status (see reviews.STAGE_FAILURE_REASON_STATUS).
+        return "model_context_length_exceeded"
+    if isinstance(exc, model_client.ModelInvocationError):
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int):
+            return _MODEL_STATUS_FAILURE_REASONS.get(
+                status_code, FAILURE_REASON_UNCLASSIFIED
+            )
+    return FAILURE_REASON_UNCLASSIFIED
 
 
 class ExecutionAlreadyExists(Exception):
@@ -532,11 +593,20 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         output_s3_key = _write_real_output(review_id, result, s3_client)
         _write_real_terminal(review_id, result, output_s3_key, dynamodb_resource)
         _settle_reservation(review_id, dynamodb_resource)
-    except Exception:  # noqa: BLE001 - fail closed, never wedge PENDING/RUNNING
+    except Exception as exc:  # noqa: BLE001 - fail closed, never wedge PENDING/RUNNING
+        # Still one catch-all -- failing closed is deliberate. What changes
+        # (issue #442) is that the cause is CLASSIFIED here instead of being
+        # discarded into the container log: the review row now records WHY it
+        # failed, not merely that it did. An unrecognised exception still
+        # records `unhandled_exception`, so no path is worse than before.
+        reason = classify_failure_reason(exc)
         logger.exception(
-            "In-process real pipeline failed for review %s at stage %s", review_id, stage
+            "In-process real pipeline failed for review %s at stage %s (reason %s)",
+            review_id,
+            stage,
+            reason,
         )
-        reviews.record_stage_failure(review_id, stage, "unhandled_exception", dynamodb_resource)
+        reviews.record_stage_failure(review_id, stage, reason, dynamodb_resource)
         _settle_reservation(review_id, dynamodb_resource)
 
 

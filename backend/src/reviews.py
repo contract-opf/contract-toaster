@@ -172,12 +172,41 @@ REVIEW_STATUSES_TERMINAL = {
 # for an unmapped/unexpected failure) -- this taxonomy only carves out the
 # two statuses that must be specifically reachable, it does not replace the
 # generic failure path.
+#
+# Issue #442 extends this with the model-provider tokens
+# `backend/src/pipeline_runner.py::classify_failure_reason` produces. Each
+# terminal status below is chosen DELIBERATELY, and every entry is listed
+# explicitly -- including the ones that resolve to the generic `ERROR` --
+# so "which status does this token land on?" is answered by reading this
+# table rather than by inferring it from an absence.
 STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # Structured-output retry exhausted (a model stage that never produced
     # parseable structured output after its retry budget).
     "structured_output_retry_exhausted": "ERROR_MANUAL_REVIEW_REQUIRED",
     # Document exceeds the size cap enforced ahead of the model stages.
     "document_too_large": "MANUAL_REVIEW_REQUIRED",
+    # --- Model-provider conditions (issue #442) ----------------------------
+    # OPERATOR problems, not document problems: the document was fine and
+    # would review cleanly the moment the account/key/model is fixed. They
+    # stay on the generic `ERROR` status precisely so they are NOT filed
+    # alongside the documented manual-review outcomes above -- there is no
+    # attorney work to queue here, only an admin fix. The `reason` token is
+    # what makes them distinguishable, not the status.
+    "model_account_out_of_credits": "ERROR",
+    "model_key_rejected": "ERROR",
+    "model_rate_limited": "ERROR",
+    "model_unavailable": "ERROR",
+    # A DOCUMENT problem: the provider itself rejected the assembled prompt
+    # as over the model's context window. This is the same condition the
+    # step-14 pre-call estimate catches, and it is deliberately given the
+    # SAME `MANUAL_REVIEW_REQUIRED` terminal status as `document_too_large`
+    # (the reasoning is `model_client.ModelContextLengthExceededError`'s own
+    # docstring: a provider-side length rejection is a real occurrence, not a
+    # misconfiguration, and must not degrade to a generic pipeline ERROR).
+    # It keeps its own token rather than reusing `document_too_large` so the
+    # two remain telling-apart-able in the row: one was estimated ahead of
+    # the call, the other was measured by the provider.
+    "model_context_length_exceeded": "MANUAL_REVIEW_REQUIRED",
 }
 
 

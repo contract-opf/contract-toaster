@@ -363,7 +363,24 @@ class ModelInvocationError(RuntimeError):
     """Raised when a live model invocation fails (non-200, malformed response,
     or transport error). Carries ONLY non-substantive facts (status code,
     shape) -- never the request or response body, which may contain
-    counterparty-confidential contract substance."""
+    counterparty-confidential contract substance.
+
+    `status_code` (issue #442) is the provider's HTTP status as a STRUCTURED
+    attribute, so a caller can classify WHY the call failed (out of credits
+    vs. key rejected vs. rate limited) without regex-matching this class's
+    message string -- a message-parse would silently rot the next time that
+    copy changes. `None` whenever there is no status to carry: a
+    transport-level failure, a malformed 200 response, or an exhausted retry
+    budget.
+
+    The status NUMBER stops here. `backend/src/pipeline_runner.py` maps it to
+    a reason TOKEN, and only the token crosses the API boundary -- the
+    frontend turns the token into prose. No raw `HTTP <n>` ever reaches
+    user-facing copy (issue #425)."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ModelContextLengthExceededError(ModelInvocationError):
@@ -627,7 +644,8 @@ class OpenRouterModelClient:
                 # step-14 pre-call estimate).
                 raise ModelContextLengthExceededError(
                     "OpenRouter rejected the request as exceeding the model's "
-                    f"context length (HTTP {status})."
+                    f"context length (HTTP {status}).",
+                    status_code=status,
                 )
 
             if self._is_retryable_status(status) and not is_last_attempt:
@@ -635,7 +653,12 @@ class OpenRouterModelClient:
                 continue
 
             # Do NOT include the response body -- it may echo prompt substance.
-            raise ModelInvocationError(f"OpenRouter returned HTTP {status}.")
+            # `status_code` carries the status structurally (issue #442) so the
+            # runner can classify 402/401/403/429/404/503 without parsing this
+            # message; the number itself never leaves the backend.
+            raise ModelInvocationError(
+                f"OpenRouter returned HTTP {status}.", status_code=status
+            )
 
         # Unreachable: attempts_allowed >= 1, and every branch above either
         # returns or raises before the loop can run out.
