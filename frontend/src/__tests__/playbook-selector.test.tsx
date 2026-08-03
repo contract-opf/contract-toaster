@@ -185,6 +185,119 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
     expect(sample).toHaveAttribute('aria-checked', 'false');
   });
 
+  // ---------------------------------------------------------------------
+  // Full WAI-ARIA radiogroup keyboard contract (issue #450 item 1).
+  //
+  // The live audit could never exercise this: production has exactly ONE
+  // dial stop, so no arrow key has anywhere to go (audit §E6). These drive
+  // the real dial with a TWO-active-stop catalog, which is the condition the
+  // audit item was waiting on a deployment to provide. What they do not
+  // cover is pixels — "focus stays visible" is a rendered-style question and
+  // jsdom runs with `css: false`; that half stays owed to a browser pass.
+  // ---------------------------------------------------------------------
+
+  it('moves backwards on ArrowLeft, wrapping past the start', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+
+    render(<ReviewSubmission />);
+    const dial = await screen.findByTestId('review-playbook-dial');
+    const [eiaa, sample] = within(dial).getAllByRole('radio');
+
+    // From the first stop, back wraps to the LAST SELECTABLE stop — which is
+    // 'sample-agreement', not the coming-soon 'nda' that ends the list.
+    fireEvent.keyDown(dial, { key: 'ArrowLeft' });
+    expect(sample).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.keyDown(dial, { key: 'ArrowLeft' });
+    expect(eiaa).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('treats ArrowDown/ArrowUp as the vertical synonyms of Right/Left', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+
+    render(<ReviewSubmission />);
+    const dial = await screen.findByTestId('review-playbook-dial');
+    const [eiaa, sample] = within(dial).getAllByRole('radio');
+
+    fireEvent.keyDown(dial, { key: 'ArrowDown' });
+    expect(sample).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.keyDown(dial, { key: 'ArrowUp' });
+    expect(eiaa).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('jumps to the first and last SELECTABLE stop on Home/End', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+
+    render(<ReviewSubmission />);
+    const dial = await screen.findByTestId('review-playbook-dial');
+    const [eiaa, sample] = within(dial).getAllByRole('radio');
+    const nda = screen.getByTestId('review-playbook-option-nda');
+
+    fireEvent.keyDown(dial, { key: 'End' });
+    // 'nda' is the last stop in the DOM but the last *reachable* one is
+    // 'sample-agreement' — End must not park selection on a coming-soon stop
+    // that neither click nor arrow keys can reach.
+    expect(sample).toHaveAttribute('aria-checked', 'true');
+    expect(nda).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.keyDown(dial, { key: 'Home' });
+    expect(eiaa).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('keeps a single tab stop and moves focus with the selection (roving tabindex)', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+
+    render(<ReviewSubmission />);
+    const dial = await screen.findByTestId('review-playbook-dial');
+    const [eiaa, sample] = within(dial).getAllByRole('radio');
+    const nda = screen.getByTestId('review-playbook-option-nda');
+
+    // Exactly one stop is in the tab order at rest — the checked one.
+    expect(eiaa).toHaveAttribute('tabindex', '0');
+    expect(sample).toHaveAttribute('tabindex', '-1');
+    expect(nda).toHaveAttribute('tabindex', '-1');
+
+    fireEvent.keyDown(dial, { key: 'ArrowRight' });
+
+    // Focus follows selection, or a keyboard user's next arrow press lands on
+    // an element that is no longer the checked stop.
+    expect(document.activeElement).toBe(sample);
+    expect(sample).toHaveAttribute('tabindex', '0');
+    expect(eiaa).toHaveAttribute('tabindex', '-1');
+
+    fireEvent.keyDown(dial, { key: 'End' });
+    expect(document.activeElement).toBe(sample);
+
+    fireEvent.keyDown(dial, { key: 'Home' });
+    expect(document.activeElement).toBe(eiaa);
+  });
+
+  it('ignores Home/End when only one stop is selectable, rather than throwing', async () => {
+    stubFetch({
+      'GET /api/playbooks': {
+        playbooks: [
+          { playbook_id: 'eiaa', display_name: 'EIAA', status: 'active' },
+          { playbook_id: 'nda', display_name: 'NDA', status: 'coming_soon' },
+        ],
+      },
+    });
+
+    render(<ReviewSubmission />);
+    const dial = await screen.findByTestId('review-playbook-dial');
+    const eiaa = screen.getByTestId('review-playbook-option-eiaa');
+
+    // This is production's shape today (audit §E6): one selectable stop.
+    fireEvent.keyDown(dial, { key: 'End' });
+    fireEvent.keyDown(dial, { key: 'Home' });
+    fireEvent.keyDown(dial, { key: 'ArrowRight' });
+    expect(eiaa).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('review-playbook-option-nda')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
   it('appends the CHOSEN playbook_id to the submitted FormData and shows the type in the result view', async () => {
     const fetchMock = stubFetch({
       'GET /api/playbooks': { playbooks: CATALOG },

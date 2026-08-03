@@ -24,6 +24,27 @@ fails loudly on any divergence.
 Docker Compose/OpenRouter deployment target has no embedding-model concept), so its
 absence from openrouter.json is not a divergence.
 
+SCOPE (issue #445): this gate covers openrouter.json's DEFAULT PINS ONLY --
+`models.primary` and `models.critic` (SHARED_ROLES below). The file's
+top-level `selectable` array (the models an admin may choose between in the
+app, see backend/src/model_settings.py) is deliberately unchecked, and
+`check_consistency` never reads it. Two reasons, both structural rather than
+an exemption of convenience:
+
+  1. A selectable entry is intentionally allowed to be non-Anthropic
+     (Gemini, GPT, Kimi, DeepSeek). Those ids carry no opus/sonnet/haiku
+     family token at all, so parse_model_id would raise ModelIdParseError on
+     every one of them -- this lint has no opinion to express about a model
+     outside the Claude matrix.
+  2. There is nothing on the other side to compare them WITH. Admin model
+     selection is a DTS/OpenRouter-target feature; bedrock-us-east-1.json
+     has no selectable concept, and the Bedrock target still has its full
+     Opus/Sonnet matrix pinned and enforced here.
+
+The runtime allowlist check for `selectable` lives where it belongs, in
+backend/src/model_client.py::enforce_openrouter_policy_model_id, which still
+refuses any id that is in neither the pins nor the allowlist.
+
 Run: python3 tests/lint-model-policy-consistency.py
 Exit 0 = pass, 1 = fail.
 """

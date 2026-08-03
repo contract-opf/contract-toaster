@@ -54,7 +54,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 
-def _json_safe(value: Any) -> Any:
+def json_safe(value: Any) -> Any:
     """Coerce boto3's `Decimal`s into plain ints/floats, recursively.
 
     boto3's DynamoDB *resource* API deserializes every stored number to
@@ -73,14 +73,77 @@ def _json_safe(value: Any) -> Any:
     rather than becoming `5000.0`; genuinely fractional ones become
     `float`. Other routes in main.py solve this by hand-building a JSON-safe
     dict per response; this does it once, at the boundary that returns rows.
+
+    PUBLIC (issue #443): the same hazard applies to every route that returns
+    raw DynamoDB rows, so `src/reviews.py`'s diagnostics projection imports
+    this rather than growing a second copy. It lives here because this is
+    where the production outage was found, not because it is users-specific.
     """
     if isinstance(value, decimal.Decimal):
         return int(value) if value == value.to_integral_value() else float(value)
     if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
+        return {k: json_safe(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_safe(v) for v in value]
+        return [json_safe(v) for v in value]
     return value
+
+# ---------------------------------------------------------------------------
+# The API-boundary projection for a `users` row (issue #453).
+#
+# A users row carries credential material -- password-mode rows store
+# `password_hash` ("salt$hash", written by demo_auth._hash_password) -- and
+# `GET /api/users` used to return whole scanned rows, so every admin's browser
+# received every password user's hash. The UI never read it (`grep
+# password_hash frontend/src/` is empty): it was pure over-exposure.
+#
+# ALLOWLIST, NOT DENYLIST, and applied INSIDE the row-returning functions
+# rather than at each caller. Both halves of that are the lesson of the bug:
+# the hazard had already been recognised and patched at exactly one of four
+# sites (demo_auth.add_user's one-line `result.pop("password_hash", None)`)
+# while the scan-based list route -- the one that returns *every* row at once
+# -- and the routed PATCH (`update_user`) stayed open. A denylist would
+# likewise leak the next secret field someone adds to the row. Anything not
+# named here does not cross the boundary.
+#
+# Every field the admin Users table renders is present: AdminUsers.tsx's
+# `UserRow` consumes cognito_sub, email, username, status, is_admin,
+# last_auth_at, created_at and admission; user_type and role are included for
+# API consumers of the same shape (demo_auth.add_user's response).
+# ---------------------------------------------------------------------------
+PUBLIC_USER_FIELDS = (
+    "cognito_sub",
+    "email",
+    "username",
+    "user_type",
+    "status",
+    "is_admin",
+    "role",
+    "admission",
+    "created_at",
+    "last_auth_at",
+)
+
+
+def public_user_view(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a raw `users` row down to the fields safe to return to a client.
+
+    This is the single definition of "safe to return" for a users row; every
+    function in this codebase that hands a row to an HTTP response goes
+    through it (`list_users`, `get_user`, `update_user`, `demo_auth.add_user`).
+    Keep that enumeration true: a new row-returning function must call this,
+    not scrub its own output.
+
+    Deliberately separate from `json_safe`, which is a *type* coercion and not
+    a security boundary -- overloading that with field filtering would hide
+    this decision inside a Decimal helper. Coercion is still applied here, on
+    the projected fields, because these dicts go straight into a JSONResponse.
+
+    Keys absent from the row stay absent from the projection (an SSO row has
+    no `username`, a never-signed-in row may have no `last_auth_at`), so the
+    wire shape is unchanged apart from the removal of non-allowlisted fields.
+    """
+    return {field: json_safe(row[field]) for field in PUBLIC_USER_FIELDS if field in row}
+
 
 # ---------------------------------------------------------------------------
 # Lifecycle statuses (ARCHITECTURE.md -> "Deprovisioning and lifecycle").
@@ -191,11 +254,30 @@ def list_users(
 
     table = _users_table(dynamodb_resource)
     resp = table.scan()
-    # Coerce before sorting and returning: these rows go straight into a
-    # JSONResponse, and boto3 hands back Decimals that json.dumps rejects.
-    users = [_json_safe(item) for item in resp.get("Items", [])]
-    # Deterministic ordering for a stable UI: most-recently-authenticated first.
-    users.sort(key=lambda u: u.get("last_auth_at", 0), reverse=True)
+    # Project before sorting and returning. `public_user_view` both drops
+    # everything outside PUBLIC_USER_FIELDS -- a raw scanned row carries
+    # `password_hash` for every password-mode user (issue #453) -- and coerces
+    # Decimals, since these rows go straight into a JSONResponse and boto3
+    # hands back Decimals that json.dumps rejects.
+    users = [public_user_view(item) for item in resp.get("Items", [])]
+    # Deterministic ordering for a stable UI: most-recently-authenticated first,
+    # with never-signed-in rows at the bottom.
+    #
+    # `or 0` and NOT `.get("last_auth_at", 0)` (issue #452): `dict.get`'s
+    # default applies only when the key is ABSENT, and a never-signed-in row
+    # has it PRESENT and explicitly `None` -- `demo_auth.py` writes
+    # `last_auth_at: None` when it seeds the demo rows and when an admin adds a
+    # user. Two such rows made the comparison raise `TypeError: '<' not
+    # supported between instances of 'NoneType' and ...` and 500'd the whole
+    # Users & access tab. `or 0` collapses `None` (and a stored 0) to a real
+    # sort key, which under `reverse=True` puts those rows last -- after every
+    # row carrying a genuine epoch.
+    #
+    # Coerce for the SORT only; the returned value stays `None` so the UI
+    # renders "never" rather than an epoch-1970 date (AdminUsers.tsx
+    # `formatTimestamp`). Fixing the consumer, not the producer: `None` is the
+    # honest stored value for "never signed in".
+    users.sort(key=lambda u: u.get("last_auth_at") or 0, reverse=True)
     return users
 
 
@@ -204,7 +286,12 @@ def get_user(
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
 ) -> dict[str, Any]:
-    """Fetch a single users row (admin only). Raises 403/404 as appropriate."""
+    """Fetch a single users row (admin only). Raises 403/404 as appropriate.
+
+    Returns the same `public_user_view` projection as `list_users` (issue
+    #453): this function is unrouted today, and returning the raw Item would
+    leak `password_hash` the moment anyone wires it to a route.
+    """
     if not _is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -216,7 +303,7 @@ def get_user(
     user = resp.get("Item")
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-    return user
+    return public_user_view(user)
 
 
 def update_user(
@@ -317,7 +404,13 @@ def update_user(
         event_id=event_id,
     )
 
-    return after
+    # Same boundary as list_users/get_user (issue #453). `after` is built from
+    # the raw pre-update Item, so it carries `password_hash` for every
+    # password-mode row -- and unlike get_user this one IS routed
+    # (main.py's PATCH /api/users/{sub} returns this dict verbatim). The audit
+    # entry above is written from the unprojected `before`/`after`, which is
+    # correct: the audit row records lifecycle values, not a response body.
+    return public_user_view(after)
 
 
 def _write_audit_entry(
@@ -401,4 +494,4 @@ def get_sync_status(
     # The first real sync worker run writes `last_run_at` and
     # `users_deprovisioned_count` as numbers, and boto3 reads them back as
     # Decimals, which would 500 the panel exactly as GET /api/users did.
-    return _json_safe(row)
+    return json_safe(row)

@@ -4,7 +4,8 @@
 #
 # Runs the TypeScript typecheck + production Vite build (`build:ci` = `tsc &&
 # vite build`), the vitest component-test suite (`npm test`), then the CTDS
-# design-system audits (contrast + focus/reduced-motion, issue #396). This is
+# design-system audits (contrast + focus/reduced-motion, issue #396; narrow-
+# viewport layout containment, issue #457). This is
 # the authoritative gate for changes under frontend/: it fails on any type
 # error, build breakage, failing component test, or a11y/contrast
 # regression, entirely offline (no AWS/Cognito, no network beyond the
@@ -27,8 +28,9 @@ npm run build:ci
 echo "Component tests (vitest) …"
 npm test
 
-echo "Design-system audits (contrast + focus/reduced-motion) …"
+echo "Design-system audits (contrast + focus/reduced-motion + layout) …"
 npm run audit:contrast
 npm run audit:focus
+npm run audit:layout
 
 echo "CHECK-FRONTEND: ALL GREEN"

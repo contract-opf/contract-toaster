@@ -44,8 +44,11 @@ ct-tab-bar {
 .ct-tab-bar__tab[aria-selected='true'] {
   color: var(--ct-accent);
 }
+/* Transparent outline, not `outline: none` — forced-colors: active discards
+   box-shadow and repaints the transparent outline (tokens.css, issue #438). */
 .ct-tab-bar__tab:focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   box-shadow: var(--ct-focus-ring);
   border-radius: var(--ct-radius-sm);
 }

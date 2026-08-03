@@ -80,7 +80,17 @@ import uuid
 from typing import Any
 
 import boto3
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from src import config, download, pipeline_runner, playbook_versions, reviews, upload_validation
@@ -499,14 +509,34 @@ async def get_playbooks(
 # ---------------------------------------------------------------------------
 
 
+SCOPE_MINE = "mine"
+
+
 @router.get("/api/reviews", include_in_schema=True)
 async def get_reviews(
+    scope: str = Query(
+        "all",
+        description=(
+            "'mine' restricts the listing to the caller's own reviews even for "
+            "an admin; anything else keeps the default (admin: all reviews)."
+        ),
+    ),
     caller_row: dict[str, Any] = Depends(get_active_user_row),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
 ) -> JSONResponse:
     """List the caller's own reviews; an admin sees every review
-    (ARCHITECTURE.md Routes table)."""
-    items = reviews.list_reviews(caller_row, dynamodb_resource)
+    (ARCHITECTURE.md Routes table).
+
+    `?scope=mine` (issue #449) opts out of that admin widening -- the History
+    tab is a personal surface ("what did I toast, and how?"), so an admin
+    opening it gets their OWN history rather than a table of every user's
+    contract activity. It can only ever NARROW what the caller may see, so it
+    is not an authorization decision: `reviews.list_reviews` remains the sole
+    authority for what any caller is allowed to read.
+    """
+    items = reviews.list_reviews(
+        caller_row, dynamodb_resource, owner_scoped=(scope == SCOPE_MINE)
+    )
     return JSONResponse(content={"reviews": items})
 
 
@@ -589,6 +619,11 @@ async def get_review_output(
         env_name,
         s3_client,
         dynamodb_client,
+        # Issue #449: a retention purge deletes the OBJECT and leaves the row's
+        # pointer in place, so `output_s3_key` alone stopped being proof that
+        # anything is still downloadable. Without this the History tab would
+        # hand out a valid-looking URL that 404s on click.
+        require_object_exists=True,
     )
 
     # Audit only a SUCCESSFUL download-URL issuance (generate_presigned_download_url
@@ -600,6 +635,107 @@ async def get_review_output(
         target=review_id,
         target_type="review",
         detail={"s3_key": output_s3_key},
+    )
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# GET /api/reviews/{review_id}/input
+#
+# Issue #449: the History tab links each past review back to the document it
+# reviewed. There was no such route -- `/api/reviews/{id}/download` appears in
+# src/download.py's module docstring as a USAGE EXAMPLE and has never been
+# registered, a false lead recorded in that ticket's audit.
+#
+# Deliberately a sibling of /output rather than a parameterised variant of it:
+# the two differ in bucket, in key layout (the uploads prefix carries
+# `owner_sub`, the outputs prefix does not), and in audit action, and the
+# owner-or-admin gate is short enough that duplicating it keeps each route
+# readable in one screen -- this module's existing small-duplication
+# convention.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/reviews/{review_id}/input", include_in_schema=True)
+async def get_review_input(
+    review_id: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    dynamodb_client: Any = Depends(get_dynamodb_client),
+    s3_client: Any = Depends(get_s3_client),
+    env_name: str = Depends(get_env_name),
+) -> JSONResponse:
+    """Scoped presigned download of the review's INPUT document -- the same
+    owner-or-admin gate, short TTL, no-store and audit trail as /output.
+
+    The owner_sub and s3_key are derived from the authoritative `reviews` row,
+    never from client input. The key's prefix is built from that row's OWN
+    `owner_sub` (not the caller's) so an admin downloading another user's
+    input still presigns the correct object, and `download
+    ._validate_s3_key_bound_to_review` independently re-checks that the stored
+    key really does sit under it.
+
+    Three distinct absences, three distinct answers:
+      * no review row              -> 404 (unchanged /output behavior)
+      * no recorded upload pointer -> 404 ("not recorded": every review created
+        before this issue, which the History tab renders as such)
+      * pointer recorded, object gone -> 410 Gone, raised inside
+        `generate_presigned_download_url`
+
+    The 410 is reachable on both routes: issue #454 fixed the retention
+    sweep's uploads targeting (it listed `uploads/{review_id}/`, a prefix that
+    omitted the owner segment and so matched nothing, while still reporting
+    the review purged), so a past-window input document is genuinely deleted
+    and this route reports it Gone rather than handing back a document
+    retention believed it had deleted.
+    """
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    resp = table.get_item(Key={"review_id": review_id})
+    item = resp.get("Item")
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
+
+    # Authorization BEFORE existence-of-input is disclosed -- same ordering
+    # and same reasoning as get_review_output above.
+    owner_sub = item.get("owner_sub", "")
+    caller_sub = caller_row.get("cognito_sub", "")
+    if caller_sub != owner_sub and not caller_row.get("is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Download denied: you are not the owner of this review and "
+                "do not have admin privileges."
+            ),
+        )
+
+    upload_s3_key = item.get("upload_s3_key")
+    if not upload_s3_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No input document is recorded for this review.",
+        )
+
+    response = download.generate_presigned_download_url(
+        review_id,
+        owner_sub,
+        upload_s3_key,
+        caller_row,
+        env_name,
+        s3_client,
+        dynamodb_client,
+        expected_key_prefix=f"uploads/{owner_sub}/{review_id}/",
+        bucket_name=download.get_uploads_bucket(),
+        require_object_exists=True,
+    )
+
+    _write_audit_row(
+        dynamodb_resource,
+        actor=caller_row.get("cognito_sub", ""),
+        action="review_input_downloaded",
+        target=review_id,
+        target_type="review",
+        detail={"s3_key": upload_s3_key},
     )
 
     return response

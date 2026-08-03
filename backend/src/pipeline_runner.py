@@ -32,7 +32,8 @@ PHASE 2 (issue #259): `run_real_pipeline` swaps the canned fixture for a
 genuinely computed review -- `scripts/review_spine.py::run_review` (issue
 #239), driven by a real `OpenRouterModelClient` (backend/src/model_client.py)
 built from the admin-set key (backend/src/model_settings.py) or, failing that,
-`OPENROUTER_API_KEY` -- plus `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`.
+`OPENROUTER_API_KEY`, against the admin-selected models (issue #445) or,
+failing that, `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`, or the policy pin.
 `InProcessStepFunctionsClient`'s default runner picks between the two bodies
 per review based on `config.model_provider()` (`MODEL_PROVIDER` env var):
 `openrouter` selects the real body, anything else (including unset) keeps
@@ -40,7 +41,10 @@ the Phase 1 mock body -- so existing tests/deployments that never set
 `MODEL_PROVIDER` are unaffected. On any unhandled exception the real body
 calls the SHARED `reviews.record_stage_failure` (issue #258) with the actual
 failing stage name, exactly the AWS error-handler Lambda's contract, instead
-of leaving the review PENDING/RUNNING forever.
+of leaving the review PENDING/RUNNING forever -- and, since issue #442, with
+a CLASSIFIED reason token (`classify_failure_reason` below) instead of the
+constant "unhandled_exception", so the row records WHY it failed and not
+merely that it did.
 
 RUNTIME PLAYBOOK LOADING (issue #401, empty-shell foundation): before
 `run_real_pipeline` loads any playbook content, it re-resolves the active
@@ -101,6 +105,64 @@ _WATERMARK = "tool recommendation only - attorney approval required"
 # In-process concurrency cap -- the semaphore equivalent for a single container.
 _MAX_CONCURRENCY = int(os.environ.get("PIPELINE_MAX_CONCURRENCY", "5"))
 
+# ---------------------------------------------------------------------------
+# Failure classification (issue #442)
+# ---------------------------------------------------------------------------
+#
+# `run_real_pipeline`'s deliberate catch-all used to record the constant
+# "unhandled_exception" for EVERY failure, so a review that died because the
+# model account was out of credits looked -- to the person who has to fix it
+# -- exactly like one that died on a malformed response. The real cause was
+# known: it reached `logger.exception` (container log) and was then thrown
+# away, which meant diagnosing a two-minute admin fix needed shell access to
+# a production container.
+#
+# This maps the caught exception to a reason TOKEN drawn from the taxonomy in
+# `reviews.STAGE_FAILURE_REASON_STATUS`. A token, never a message: the token
+# is what crosses the API boundary, and the frontend
+# (`frontend/src/ReviewSubmission.tsx`'s REASON_EXPLANATIONS) is what turns
+# it into prose. That indirection is exactly what buys BOTH comprehensibility
+# and issue #425's rule -- no raw `HTTP <n>`, endpoint, key material, stack
+# trace, or prompt/document substance can reach user-facing copy, because
+# none of it is in the token.
+#
+# Classification is by the STRUCTURED `ModelInvocationError.status_code`, not
+# by parsing the exception message, which would rot the next time that copy
+# changes.
+FAILURE_REASON_UNCLASSIFIED = "unhandled_exception"
+
+_MODEL_STATUS_FAILURE_REASONS: dict[int, str] = {
+    401: "model_key_rejected",  # key absent/invalid at the provider
+    402: "model_account_out_of_credits",  # payment required -- fund the account
+    403: "model_key_rejected",  # key present but not permitted
+    404: "model_unavailable",  # the selected model id is not served
+    429: "model_rate_limited",  # too many requests for this account
+    503: "model_unavailable",  # provider/model temporarily out of service
+}
+
+
+def classify_failure_reason(exc: BaseException) -> str:
+    """Map a pipeline exception to a stage-failure reason token.
+
+    Anything not recognised -- an unmapped status, a model error with no
+    status (transport/malformed-response), or an exception from any other
+    stage entirely -- falls back to `unhandled_exception`, i.e. EXACTLY
+    today's behavior. This function can therefore only ever make the
+    recorded reason more specific, never less.
+    """
+    if isinstance(exc, model_client.ModelContextLengthExceededError):
+        # Its own token rather than `document_too_large`: this one was
+        # measured by the provider, not estimated pre-call. Same terminal
+        # status (see reviews.STAGE_FAILURE_REASON_STATUS).
+        return "model_context_length_exceeded"
+    if isinstance(exc, model_client.ModelInvocationError):
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int):
+            return _MODEL_STATUS_FAILURE_REASONS.get(
+                status_code, FAILURE_REASON_UNCLASSIFIED
+            )
+    return FAILURE_REASON_UNCLASSIFIED
+
 
 class ExecutionAlreadyExists(Exception):
     """Duck-type of botocore's SFN ExecutionAlreadyExists, so
@@ -143,6 +205,56 @@ def _mark_running(review_id: str, dynamodb_resource: Any) -> None:
     except Exception as exc:  # ConditionalCheckFailed -> not PENDING; no-op
         if type(exc).__name__ != "ConditionalCheckFailedException" and not _is_conditional(exc):
             raise
+
+
+def _write_progress_stage(review_id: str, stage_token: str, dynamodb_resource: Any) -> None:
+    """Record WHICH sub-stage of the review is running right now (issue #447).
+
+    `scripts/review_spine.py::run_review` calls this (via the `on_progress`
+    seam) immediately before each of its four user-visible sub-stages, so
+    `progress_stage` on the reviews row is a live fact -- "the critic pass is
+    running" -- not an elapsed-time guess. `get_review_detail` projects it and
+    the polling UI turns it into "Step 2 of 4". Four extra small writes per
+    review, against two model calls: negligible.
+
+    NOTHING HERE MAY FAIL THE REVIEW. Progress is cosmetic; the review is not.
+    This is the same lesson as #446's `_settle_reservation_safely` -- a
+    bookkeeping write that throws must not reach run_real_pipeline's
+    fail-closed `except` and terminate a review that is running perfectly
+    well. So every exception is swallowed:
+
+      - A ConditionalCheckFailed (the row is no longer RUNNING -- already
+        terminal, or never left PENDING) is an expected no-op, silently.
+        The condition is what stops a late/racing progress write from
+        re-touching a finished row.
+      - Anything else (throttling, a transient DDB error) is logged at
+        WARNING, once, and dropped. The user simply keeps seeing the
+        previous step, which is honest: the pipeline really is still
+        somewhere at or after that step.
+    """
+    try:
+        table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET progress_stage = :p, updated_at = :now",
+            ConditionExpression="#s = :running",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":p": stage_token,
+                ":running": "RUNNING",
+                ":now": str(int(time.time())),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - a cosmetic write must never fail the review
+        if type(exc).__name__ == "ConditionalCheckFailedException" or _is_conditional(exc):
+            return
+        logger.warning(
+            "Failed to record progress stage %s for review %s. The review itself is "
+            "UNAFFECTED; only the live progress indicator is stale.",
+            stage_token,
+            review_id,
+            exc_info=True,
+        )
 
 
 def _is_conditional(exc: Exception) -> bool:
@@ -289,6 +401,33 @@ def _settle_reservation(review_id: str, dynamodb_resource: Any) -> None:
     )
 
 
+def _settle_reservation_safely(review_id: str, dynamodb_resource: Any) -> None:
+    """Settle the reservation, but never let settling FAIL THE REVIEW (#446).
+
+    An unsettled spend reservation is an ACCOUNTING problem: the review's
+    result is already computed, written to object storage, and recorded on the
+    reviews row by the time this runs. Letting a settle error propagate meant
+    the caller's fail-closed `except` re-terminated a review that had already
+    succeeded -- on the live deployment (a `review_submissions` table missing
+    `review_id-index`) that turned EVERY successful review into
+    "Failed at stage persist_result", document and all.
+
+    So the failure is logged loudly -- this is real money left reserved
+    against the daily cap, and an operator has to see it -- and swallowed.
+    The reservation is recoverable (the row keeps its `spend_reservation_id`
+    and no `reservation_released` flag); a destroyed result is not.
+    """
+    try:
+        _settle_reservation(review_id, dynamodb_resource)
+    except Exception:  # noqa: BLE001 - an unsettled reservation must not fail the review
+        logger.exception(
+            "Failed to settle the spend reservation for review %s. The review's own "
+            "result is UNAFFECTED; the reservation is still held against the daily "
+            "cap and needs reconciling.",
+            review_id,
+        )
+
+
 def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
                       dynamodb_resource: Any, s3_client: Any) -> None:
     """Phase 1 in-process mock pipeline for one review. Injectable stores make
@@ -300,11 +439,11 @@ def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
         result = _mock_decision(review_id, playbook_id)
         object_written = _copy_output_object(result, s3_client)
         _write_terminal(review_id, result, object_written, dynamodb_resource)
-        _settle_reservation(review_id, dynamodb_resource)
+        _settle_reservation_safely(review_id, dynamodb_resource)
     except Exception:  # noqa: BLE001 - fail closed to ERROR, never wedge PENDING
         logger.exception("In-process mock pipeline failed for review %s", review_id)
         _fail_review(review_id, dynamodb_resource)
-        _settle_reservation(review_id, dynamodb_resource)
+        _settle_reservation_safely(review_id, dynamodb_resource)
 
 
 def _fail_review(review_id: str, dynamodb_resource: Any) -> None:
@@ -349,20 +488,31 @@ def _load_playbook_bundle(playbook_id: str) -> dict[str, Any]:
         return json.load(f)
 
 
-def _bundle_with_openrouter_model_ids(bundle: dict[str, Any]) -> dict[str, Any]:
+def _bundle_with_openrouter_model_ids(
+    bundle: dict[str, Any], dynamodb_resource: Any = None
+) -> dict[str, Any]:
     """review_spine.run_review resolves its primary/critic model ids from
     `bundle["playbook"]["metadata"]` (falling back to the Bedrock policy
     defaults) -- but the on-disk playbook bundle pins Bedrock-form model ids
     (e.g. "anthropic.claude-opus-4-8"), meaningless to OpenRouter's
     provider/model id form. Return a shallow-patched copy pointing at the
-    OpenRouter policy's model ids (model-policy/openrouter.json, overridable
-    per-deployment via OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID) instead, so the
-    real chain calls OpenRouter with ids it actually understands."""
+    OpenRouter ids instead, so the real chain calls OpenRouter with ids it
+    actually understands.
+
+    Which ids those are is resolved by
+    `model_settings.resolve_openrouter_model_ids` (issue #445): the admin's
+    selection if one is set, else OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID, else
+    the model-policy/openrouter.json pin -- the same precedence the API key
+    uses. Resolved PER REVIEW rather than cached at import, so changing the
+    models in the admin panel takes effect on the next review instead of the
+    next redeploy. `dynamodb_resource` defaults to None so a caller with no
+    handle keeps exactly the pre-#445 env-var/policy behavior."""
     patched = dict(bundle)
     playbook_section = dict(patched.get("playbook", {}))
     metadata = dict(playbook_section.get("metadata", {}))
-    metadata["primary_model_id"] = model_client.openrouter_primary_model_id()
-    metadata["critic_model_id"] = model_client.openrouter_critic_model_id()
+    resolved = model_settings.resolve_openrouter_model_ids(dynamodb_resource)
+    metadata["primary_model_id"] = resolved["primary"]
+    metadata["critic_model_id"] = resolved["critic"]
     playbook_section["metadata"] = metadata
     patched["playbook"] = playbook_section
     return patched
@@ -404,8 +554,28 @@ def _write_real_output(review_id: str, result: dict[str, Any], s3_client: Any) -
     return output_key
 
 
+def _model_ids_for_run(bundle: dict[str, Any]) -> dict[str, str]:
+    """The primary/critic model ids this run's spine will actually resolve
+    its calls from (issue #449).
+
+    Read back off the SAME bundle metadata `_bundle_with_openrouter_model_ids`
+    just wrote and `review_spine.run_review` reads (`bundle["playbook"]
+    ["metadata"]`), rather than re-reading configuration -- so the pair
+    recorded on the review row is the pair the review genuinely used, not a
+    second, independently-resolved answer that could differ if the
+    configuration moved between the two reads.
+    """
+    metadata = (bundle.get("playbook") or {}).get("metadata") or {}
+    return {
+        field: metadata[field]
+        for field in ("primary_model_id", "critic_model_id")
+        if metadata.get(field)
+    }
+
+
 def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: str | None,
-                          dynamodb_resource: Any) -> None:
+                          dynamodb_resource: Any,
+                          model_ids: dict[str, str] | None = None) -> None:
     """Write the terminal reviews-row state from a ReviewResult dict
     (scripts/review_spine.py::run_review's return contract). Unlike
     reviews.record_stage_failure (used only for an actual raised
@@ -413,11 +583,22 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     status for every expected fail-closed condition (MANUAL_REVIEW_REQUIRED /
     ERROR_MANUAL_REVIEW_REQUIRED / OK) -- this just persists it verbatim,
     same "never clobbers a terminal/ERROR row" guard as the mock path's
-    _write_terminal."""
+    _write_terminal.
+
+    `model_ids` (issue #449) is `_model_ids_for_run`'s dict: the per-step
+    model provenance the History tab reads back. Omitted keys are simply not
+    written -- a caller that has none (the mock path, which invokes no model)
+    leaves a row byte-identical to the one this function wrote before that
+    issue, and the History tab renders "not recorded" rather than guessing.
+    """
     status_value = result["status"]
     terminal = "DONE" if status_value == "OK" else status_value
     set_clauses = ["#s = :s", "updated_at = :now"]
     values: dict[str, Any] = {":s": terminal, ":now": str(int(time.time())), ":error": "ERROR"}
+    for index, (field, model_id) in enumerate(sorted((model_ids or {}).items())):
+        placeholder = f":m{index}"
+        set_clauses.append(f"{field} = {placeholder}")
+        values[placeholder] = model_id
     if result.get("decision") is not None:
         set_clauses.append("decision = :d")
         values[":d"] = result["decision"]
@@ -481,6 +662,25 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
     from run_review itself (e.g. MANUAL_REVIEW_REQUIRED) is not an
     exception -- it is persisted directly via _write_real_terminal using
     the status run_review already computed.
+
+    Issue #446: that fail-closed handler can no longer destroy a review that
+    already SUCCEEDED. Two things changed. `reviews.record_stage_failure` is
+    now guarded and refuses to overwrite a `DONE` row, and settling the spend
+    reservation goes through `_settle_reservation_safely`, which cannot throw
+    at all -- so a settle error (the live incident: a `review_submissions`
+    table missing `review_id-index`) is logged as the accounting problem it is
+    instead of re-terminating a review whose redline is already written and
+    downloadable.
+
+    Issue #447: this is also where LIVE progress comes from. `stage` above is
+    a local variable persisted only on FAILURE, and the four sub-stages a
+    waiting user cares about are not these stages at all -- they are inside
+    `run_review`, which this function sees as one opaque `stage =
+    "run_review"`. So the spine's new `on_progress` seam is wired to
+    `_write_progress_stage`, publishing primary_pass -> critic_pass ->
+    reconciliation -> redline onto the reviews row AS EACH ONE STARTS. The
+    UI's "Step 2 of 4" is therefore a fact about the pipeline, never a
+    function of elapsed time. That write cannot fail the review.
     """
     playbook_id = payload.get("playbook_id", "")
     stage = "mark_running"
@@ -492,11 +692,16 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             review_id, playbook_id, payload.get("release_bundle_hash") or "", dynamodb_resource
         )
         if not verify_result.get("verified", False):
-            _settle_reservation(review_id, dynamodb_resource)
+            _settle_reservation_safely(review_id, dynamodb_resource)
             return
 
         stage = "load_playbook"
-        bundle = _bundle_with_openrouter_model_ids(_load_playbook_bundle(playbook_id))
+        bundle = _bundle_with_openrouter_model_ids(
+            _load_playbook_bundle(playbook_id), dynamodb_resource
+        )
+        # Issue #449: capture the per-step model provenance for the terminal
+        # write, from the bundle the spine is about to read it from.
+        model_ids = _model_ids_for_run(bundle)
 
         stage = "fetch_upload"
         docx_bytes = _fetch_upload_bytes(payload, s3_client)
@@ -515,7 +720,20 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         toaster_guidance = payload.get("toaster_guidance") or ""
         try:
             result = review_spine.run_review(
-                docx_bytes, bundle, client, review_id=review_id, toaster_guidance=toaster_guidance
+                docx_bytes,
+                bundle,
+                client,
+                review_id=review_id,
+                toaster_guidance=toaster_guidance,
+                # Issue #447: publish the spine's real sub-stage
+                # (primary_pass -> critic_pass -> reconciliation -> redline)
+                # onto the reviews row as it happens, so the polling UI can
+                # say "Step 2 of 4" truthfully instead of animating a bar
+                # that carries no information. _write_progress_stage cannot
+                # throw -- see its docstring.
+                on_progress=lambda stage_token: _write_progress_stage(
+                    review_id, stage_token, dynamodb_resource
+                ),
             )
         finally:
             # issue #270: a real OpenRouterModelClient now owns a single
@@ -530,14 +748,30 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
 
         stage = "persist_result"
         output_s3_key = _write_real_output(review_id, result, s3_client)
-        _write_real_terminal(review_id, result, output_s3_key, dynamodb_resource)
-        _settle_reservation(review_id, dynamodb_resource)
-    except Exception:  # noqa: BLE001 - fail closed, never wedge PENDING/RUNNING
-        logger.exception(
-            "In-process real pipeline failed for review %s at stage %s", review_id, stage
+        _write_real_terminal(
+            review_id, result, output_s3_key, dynamodb_resource, model_ids=model_ids
         )
-        reviews.record_stage_failure(review_id, stage, "unhandled_exception", dynamodb_resource)
-        _settle_reservation(review_id, dynamodb_resource)
+        # Settling is deliberately the LAST thing, and deliberately cannot
+        # throw (issue #446): by this point the redline is in object storage
+        # and the terminal row is written, so an accounting failure must not
+        # reach the fail-closed `except` below and re-terminate a review that
+        # already succeeded.
+        _settle_reservation_safely(review_id, dynamodb_resource)
+    except Exception as exc:  # noqa: BLE001 - fail closed, never wedge PENDING/RUNNING
+        # Still one catch-all -- failing closed is deliberate. What changes
+        # (issue #442) is that the cause is CLASSIFIED here instead of being
+        # discarded into the container log: the review row now records WHY it
+        # failed, not merely that it did. An unrecognised exception still
+        # records `unhandled_exception`, so no path is worse than before.
+        reason = classify_failure_reason(exc)
+        logger.exception(
+            "In-process real pipeline failed for review %s at stage %s (reason %s)",
+            review_id,
+            stage,
+            reason,
+        )
+        reviews.record_stage_failure(review_id, stage, reason, dynamodb_resource)
+        _settle_reservation_safely(review_id, dynamodb_resource)
 
 
 # ---------------------------------------------------------------------------

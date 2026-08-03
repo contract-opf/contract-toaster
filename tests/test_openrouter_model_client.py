@@ -20,11 +20,17 @@ Covered:
      that matches neither the policy pin nor an active
      OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID override, and allows + logs an
      explicit override.
+  9. Zero-data-retention routing (issue #444): EVERY request -- including
+     every retry attempt -- carries provider.zdr=true /
+     provider.data_collection="deny" / provider.require_parameters=true, and
+     no env var can switch the enforcement off. The Bedrock payload is
+     unaffected.
 
 Run: python3 tests/test_openrouter_model_client.py
 Exit 0 = pass, 1 = fail.
 """
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -279,12 +285,124 @@ class TestEnforceOpenRouterPolicyModelId(unittest.TestCase):
                 mc.enforce_openrouter_policy_model_id("some/other-model")
 
 
+class TestOpenRouterDataRetentionPosture(unittest.TestCase):
+    """Issue #444: client contracts must never be routed to a provider that
+    retains them or may train on them. The guarantee is a per-REQUEST
+    parameter (an account-level toggle is invisible to this codebase and lost
+    when the key is swapped), so it is asserted on the wire payload the real
+    `invoke()` code path builds -- not on a mock of the payload builder."""
+
+    def _client(self, http: FakeHttpClient, **kwargs) -> mc.OpenRouterModelClient:
+        kwargs.setdefault("max_retries", 0)
+        kwargs.setdefault("sleep_fn", lambda _seconds: None)
+        return mc.OpenRouterModelClient(
+            api_key="sk-test", http_client=http, **kwargs
+        )
+
+    def _invoke_ok(self, http: FakeHttpClient, env: dict | None = None) -> None:
+        with patch.dict("os.environ", env or {}, clear=True):
+            self._client(http).invoke(
+                model_id=PRIMARY_MODEL_ID,
+                system_prompt="SYS",
+                user_prompt=SECRET_PROMPT,
+                max_output_tokens=8000,
+            )
+
+    def _assert_enforced(self, body: dict) -> None:
+        self.assertIn(
+            "provider",
+            body,
+            "OpenRouter request has no `provider` block -- the contract is "
+            "eligible to route to a retaining/training provider (issue #444).",
+        )
+        provider = body["provider"]
+        self.assertIs(provider["zdr"], True)
+        self.assertEqual(provider["data_collection"], "deny")
+        self.assertIs(provider["require_parameters"], True)
+
+    def test_request_carries_zdr_and_denies_data_collection(self) -> None:
+        http = FakeHttpClient(_ok_response('{"decision":"ACCEPT"}'))
+        self._invoke_ok(http)
+        self._assert_enforced(http.calls[0]["json"])
+
+    def test_every_retry_attempt_also_carries_the_provider_block(self) -> None:
+        # A 429 is retried (issue #270). Enforcement must ride on EVERY
+        # attempt, not just the first -- a retry that dropped it would
+        # disclose the contract on exactly the paths nobody watches.
+        http = FakeHttpClient(FakeResponse(429, {}))
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(mc.ModelInvocationError):
+                self._client(http, max_retries=2).invoke(
+                    model_id=PRIMARY_MODEL_ID,
+                    system_prompt="SYS",
+                    user_prompt=SECRET_PROMPT,
+                    max_output_tokens=8000,
+                )
+        self.assertEqual(len(http.calls), 3)  # initial + 2 retries
+        for call in http.calls:
+            self._assert_enforced(call["json"])
+
+    def test_no_env_var_can_switch_the_enforcement_off(self) -> None:
+        # Guards against a future opt-out knob: a deployment reviewing real
+        # agreements has no legitimate non-ZDR mode, so these must be inert.
+        http = FakeHttpClient(_ok_response("{}"))
+        self._invoke_ok(
+            http,
+            {
+                "OPENROUTER_ZDR": "false",
+                "OPENROUTER_DATA_COLLECTION": "allow",
+                "OPENROUTER_REQUIRE_PARAMETERS": "false",
+                "OPENROUTER_PROVIDER_ROUTING": "",
+                "OPENROUTER_ALLOW_DATA_RETENTION": "1",
+            },
+        )
+        self._assert_enforced(http.calls[0]["json"])
+
+    def test_payload_mutation_cannot_poison_the_next_request(self) -> None:
+        # The payload embeds a COPY of the module-level policy; a caller (or a
+        # retry path) mutating one request's block must not edit the policy
+        # out from under every later call in the process.
+        http = FakeHttpClient(_ok_response("{}"))
+        self._invoke_ok(http)
+        http.calls[0]["json"]["provider"]["zdr"] = False
+        self._invoke_ok(http)
+        self._assert_enforced(http.calls[1]["json"])
+
+    def test_bedrock_payload_is_unaffected(self) -> None:
+        # Bedrock's data posture is governed by AWS contract terms, not by an
+        # OpenRouter routing field -- the Bedrock request must not grow one.
+        captured: dict = {}
+
+        class FakeBody:
+            @staticmethod
+            def read() -> bytes:
+                return b'{"content": [{"text": "ok"}]}'
+
+        class FakeRuntime:
+            @staticmethod
+            def invoke_model(**kwargs):
+                captured.update(kwargs)
+                return {"body": FakeBody()}
+
+        out = mc.LiveBedrockModelClient(
+            bedrock_runtime_client=FakeRuntime()
+        ).invoke(
+            model_id="anthropic.claude-opus-4-8",
+            system_prompt="SYS",
+            user_prompt=SECRET_PROMPT,
+            max_output_tokens=8000,
+        )
+        self.assertEqual(out, "ok")
+        self.assertNotIn("provider", json.loads(captured["body"]))
+
+
 def _run_tests() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterInvoke))
     suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterResolvers))
     suite.addTests(loader.loadTestsFromTestCase(TestEnforceOpenRouterPolicyModelId))
+    suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterDataRetentionPosture))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

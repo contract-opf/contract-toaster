@@ -59,8 +59,11 @@ ct-file-drop {
   font-family: var(--ct-font-sans);
 }
 
+/* Transparent outline, not `outline: none` — forced-colors: active discards
+   box-shadow and repaints the transparent outline (tokens.css, issue #438). */
 .ct-file-drop__input:focus-visible ~ .ct-file-drop__label {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   box-shadow: var(--ct-focus-ring);
   border-radius: var(--ct-radius-sm);
 }

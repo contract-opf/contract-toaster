@@ -10,10 +10,16 @@
  * These lock in that the diagnosis reaches the DOM, and that it says what to
  * DO about it, not just what broke.
  *
+ * Issue #442 adds the second half: the `reason` TOKEN, when the backend
+ * managed to classify one, must beat the stage-keyed copy — a review that
+ * died because the model account was out of credits has to SAY so, not offer
+ * three guesses. And the prose must carry none of what the backend knew and
+ * must not surface: no raw `HTTP <n>`, endpoint, or key material (#425).
+ *
  * Fully offline — fetch stubbed, no network.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
 
 vi.mock('../auth', () => ({
@@ -31,7 +37,11 @@ function docx(): File {
 }
 
 /** Stub the catalog + submit + a terminal FAILED poll for `failing_stage`. */
-function stubFailedReview(failing_stage: string | null, reason = 'unhandled_exception'): void {
+function stubFailedReview(
+  failing_stage: string | null,
+  reason = 'unhandled_exception',
+  status = 'ERROR',
+): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -60,7 +70,7 @@ function stubFailedReview(failing_stage: string | null, reason = 'unhandled_exce
           status: 200,
           json: async () => ({
             review_id: REVIEW_ID,
-            status: 'ERROR',
+            status,
             decision: null,
             message: null,
             has_output: false,
@@ -74,8 +84,12 @@ function stubFailedReview(failing_stage: string | null, reason = 'unhandled_exce
   );
 }
 
-async function submitAndFail(failing_stage: string | null, reason?: string): Promise<void> {
-  stubFailedReview(failing_stage, reason);
+async function submitAndFail(
+  failing_stage: string | null,
+  reason?: string,
+  status?: string,
+): Promise<void> {
+  stubFailedReview(failing_stage, reason, status);
   render(<ReviewSubmission />);
   // Wait for the playbook catalog so the submit button is live.
   await screen.findByTestId('review-file-input');
@@ -129,5 +143,104 @@ describe('a failed review explains itself', () => {
 
     await screen.findByTestId('review-status');
     expect(screen.queryByTestId('review-failure')).toBeNull();
+  });
+});
+
+describe('the classified reason beats the stage guess (issue #442)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('names an out-of-credits model account, and who fixes it, instead of guessing', async () => {
+    // The production case: run_review died on a 402. The stage copy can only
+    // say "the model could not complete the review"; the reason knows better.
+    await submitAndFail('run_review', 'model_account_out_of_credits');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/run out of credits/i);
+    expect(panel).toHaveTextContent(/add funds/i);
+    expect(panel).toHaveTextContent(/model & api key/i);
+    // The vaguer stage-keyed fallback must NOT be what got rendered.
+    expect(panel).not.toHaveTextContent(/exact cause was not identified/i);
+    // It must not blame the reader's document for an operator's billing problem.
+    expect(panel).toHaveTextContent(/nothing is wrong with your document/i);
+    // The token stays visible for an admin to quote, alongside the stage.
+    expect(screen.getByTestId('review-failing-stage')).toHaveTextContent('run_review');
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
+      'model_account_out_of_credits',
+    );
+  });
+
+  it('tells a rejected key apart from an unavailable model apart from a rate limit', async () => {
+    await submitAndFail('run_review', 'model_key_rejected');
+    expect(await screen.findByTestId('review-failure')).toHaveTextContent(/rejected the key/i);
+
+    cleanup();
+    vi.unstubAllGlobals();
+    await submitAndFail('run_review', 'model_unavailable');
+    expect(await screen.findByTestId('review-failure')).toHaveTextContent(/not available/i);
+
+    cleanup();
+    vi.unstubAllGlobals();
+    await submitAndFail('run_review', 'model_rate_limited');
+    expect(await screen.findByTestId('review-failure')).toHaveTextContent(
+      /too many were sent at once/i,
+    );
+  });
+
+  it('falls back to the stage copy for a reason this build has never heard of', async () => {
+    // Forward compatibility: a newer backend token must degrade to today's
+    // stage-keyed copy, never to a blank panel.
+    await submitAndFail('run_review', 'a_token_from_a_newer_backend');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/could not complete the review/i);
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
+      'a_token_from_a_newer_backend',
+    );
+  });
+
+  it('explains a failure that recorded a reason but no stage', async () => {
+    // A quarantine writes `reason` with no `failing_stage` at all, so before
+    // #442 this review rendered no explanation whatsoever.
+    await submitAndFail(null, 'submission_time_bundle_retired', 'QUARANTINED');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/replaced or switched off/i);
+    expect(panel).toHaveTextContent(/submit the document again/i);
+    expect(screen.queryByTestId('review-failing-stage')).toBeNull();
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
+      'submission_time_bundle_retired',
+    );
+  });
+
+  it('tells the reader it is their document that is too long, and what to do', async () => {
+    await submitAndFail('run_review', 'model_context_length_exceeded', 'MANUAL_REVIEW_REQUIRED');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/longer than the model can read/i);
+    expect(panel).toHaveTextContent(/split it into smaller documents/i);
+  });
+
+  it('never surfaces a raw status code, endpoint, or provider name (#425)', async () => {
+    const tokens = [
+      'model_account_out_of_credits',
+      'model_key_rejected',
+      'model_rate_limited',
+      'model_unavailable',
+      'model_context_length_exceeded',
+    ];
+    for (const token of tokens) {
+      cleanup();
+      vi.unstubAllGlobals();
+      await submitAndFail('run_review', token);
+      const text = (await screen.findByTestId('review-failure')).textContent ?? '';
+      expect(text).not.toMatch(/http/i);
+      expect(text).not.toMatch(/openrouter/i);
+      expect(text).not.toMatch(/\b(401|402|403|404|429|503)\b/);
+      // No bare digits at all in the failure copy — a status code has no
+      // route to the screen, and neither does a key or an endpoint port.
+      expect(text).not.toMatch(/\d/);
+    }
   });
 });

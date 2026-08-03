@@ -9,9 +9,23 @@
  * proves components stand alone, docs/frontend-design-system.md §9).
  */
 
+/*
+ * `minmax(0, 1fr)`, not `1fr`. A bare `1fr` track is `minmax(auto, 1fr)`, and
+ * that automatic minimum is the MIN-CONTENT width of everything in the track —
+ * so one non-shrinkable child (a swatch row, a nowrap input) sets a floor the
+ * track cannot go below, the track overflows its own container, and the
+ * sticky nav gets stretched along with it.
+ *
+ * That is what made the gallery unusable below ~1000px, NOT a missing
+ * breakpoint (the `max-width: 720px` block below has been here since the
+ * gallery landed). The audit recorded the symptom as "`.gallery-nav` is a
+ * fixed 750px sidebar"; the nav has no width of its own at all — measured at
+ * a 375 viewport it was 782px wide because the grid track was 782px wide.
+ * See docs/planning/frontend-release-audit-2026-07-27.md §F2.
+ */
 .gallery-shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -257,7 +271,7 @@
 
 @media (max-width: 720px) {
   .gallery-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .gallery-nav {
     position: static;

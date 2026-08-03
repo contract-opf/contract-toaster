@@ -44,7 +44,10 @@ ct-field {
    input/select/textarea on :focus-visible, but ct-field owns this contract
    too (issue #396 focus audit) so the field keeps a visible ring even for
    a control base.css doesn't otherwise style (e.g. a custom ct-* input). */
+/* Transparent outline, not `outline: none` — forced-colors: active discards
+   box-shadow and repaints the transparent outline (tokens.css, issue #438). */
 ct-field :is(input, select, textarea, button):focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   box-shadow: var(--ct-focus-ring);
 }

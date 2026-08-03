@@ -7,9 +7,18 @@
  * not a real shadow-DOM `<slot>`. Tokens only (§5.6).
  */
 
+/* `minmax(0, 1fr)`, never a bare `1fr` (issue #457, and the gallery's own
+   instance of this before it — audit F2). A bare `1fr` is `minmax(auto, 1fr)`,
+   and that automatic minimum is the MIN-CONTENT width of everything in the
+   track. The content area holds the admin tables, whose min-content is a few
+   hundred pixels wider than a phone: at 375 that pinned this grid open to
+   835px and dragged the brand, the tab strip and the footer out with it —
+   three tabs ended up painted entirely off-screen and unreachable by pointer.
+   `minmax(0, 1fr)` lets the track shrink to the viewport and leaves the
+   overflow where it belongs, inside ct-table's own `overflow-x: auto`. */
 ct-app-shell {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     'brand    identity'
     'tabs     tabs'
@@ -77,7 +86,7 @@ ct-app-shell > :not([slot]):not(.ct-app-shell__brand):not([hidden]) {
 
 @media (max-width: 640px) {
   ct-app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       'brand'
       'identity'

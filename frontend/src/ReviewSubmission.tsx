@@ -39,6 +39,21 @@
  * typing the instruction can act on. On a terminal review, whatever
  * guidance the review actually ran under is shown back read-only.
  *
+ * COMPLETION HANDOFF (issue #448): the moment a review reaches DONE the
+ * toaster dings (the already-bundled `pop` clip, governed by the existing
+ * sound toggle), a persistent `aria-live` region announces that the redline
+ * is ready, keyboard focus moves to the download control, and — ONLY when
+ * the download gate below is already satisfied — a plain `<a download>`
+ * click is fired so the file usually lands in the downloads folder with no
+ * click at all.
+ *
+ * What is deliberately NOT done: `showSaveFilePicker()`. It requires
+ * transient user activation and throws `SecurityError` without one, and a
+ * review completes in a poll callback where no user gesture exists. A plain
+ * anchor click is materially more permissive; when a browser suppresses it
+ * anyway, nothing breaks — the focused button below is still the reliable
+ * path, which is why focus and the announcement are not optional extras.
+ *
  * ATTORNEY-APPROVAL WATERMARK (ARCHITECTURE.md -> "Every output and UI
  * state is watermarked..."): the terminal-status panel below always
  * carries "tool recommendation only — attorney approval required", and an
@@ -111,6 +126,13 @@ interface ReviewDetail {
   // playbook, or their document. Null on a review that didn't fail.
   failing_stage?: string | null;
   reason?: string | null;
+  // Live progress (issue #447): which of the review spine's four sub-stages
+  // (primary_pass / critic_pass / reconciliation / redline) is running RIGHT
+  // NOW, written as each one starts and projected by get_review_detail. Null
+  // or absent on a review that hasn't reached the spine, on a runner that
+  // predates the seam, and on any target that reports no progress — the hero
+  // then shows its indeterminate treatment rather than guessing a step.
+  progress_stage?: string | null;
   // Trust-calibration signals the attorney must see BEFORE downloading
   // (docs/output-contract.md -> "Confidence band" / "Critic-delta
   // presentation" / "Download gate"). Absent/null on a review with no band
@@ -181,12 +203,144 @@ const GUIDANCE_PRECEDENCE_COPY =
   'but never over rules the playbook marks as hard requirements, which nothing can ' +
   'override. A sentence or two is plenty.';
 
+// Completion-handoff announcements (issue #448). Rendered into a persistent
+// polite live region, so assistive tech is already watching it when the review
+// lands rather than being handed a region that only appears at the same moment
+// its text does. All three name the button by its visible label, because the
+// announcement's whole job is to tell someone who cannot see the screen where
+// the keyboard focus they just received now is.
+const READY_SAVED_COPY =
+  'Your redline is ready. Saving it to your downloads — the “Download result” button now has focus if you need it again.';
+const READY_GATED_COPY =
+  'Your redline is ready, but the adversarial critic flagged this review. Read the flagged points above, then use the “Download result” button to save it.';
+const READY_NO_OUTPUT_COPY =
+  'Your review has finished. There is no marked-up document to download.';
+
+export interface FailureExplanation {
+  cause: string;
+  fix: string;
+}
+
+/**
+ * The two failure facts a reviews row carries, and the only inputs
+ * `explainFailure` reads. Declared narrowly (rather than taking a whole
+ * `ReviewDetail`) so the ADMIN Diagnostics tab — whose rows carry five fields
+ * and nothing else, by design (issue #443) — can call the same function the
+ * reviewer-facing Review tab does, instead of growing a second copy of the
+ * token→prose mapping that would drift the moment one surface learned a token
+ * the other did not.
+ */
+export interface FailureFacts {
+  reason?: string | null;
+  failing_stage?: string | null;
+}
+
+// The generic reason token the backend records when it could not classify a
+// failure any further (backend/src/pipeline_runner.py's
+// FAILURE_REASON_UNCLASSIFIED). It carries no information, so it never wins
+// over the stage-keyed copy below — it is precisely the "we don't know"
+// value.
+const UNCLASSIFIED_REASON = 'unhandled_exception';
+
+// Human-readable failure explanations, keyed by the `reason` TOKEN the
+// backend records on the review row (issue #442).
+//
+// The token→prose mapping lives HERE, on purpose. The backend knows the
+// provider's HTTP status, the endpoint, the key, and the exception text; none
+// of that may reach a user-facing string (issue #425, and model_client.py's
+// deliberate response-body omission). So the backend ships a token that
+// contains no such material, and this table turns it into copy. That is what
+// buys comprehensibility and the leak guarantee at the same time.
+//
+// The bar for every entry: a reader who is not an engineer can tell whose
+// problem it is — THEIRS (the document), the OPERATOR'S (the account, key or
+// model), or the SYSTEM'S (something broke; nothing you can do) — and what
+// happens next. Never a raw status number, endpoint, stack trace, or any
+// substance from the prompt or the document.
+//
+// Exported (issue #443) so the admin Diagnostics tab renders the SAME prose
+// for the same token. It deliberately stays declared in THIS file rather than
+// moving to a module of its own: tests/test_review_failure_reason_442.py
+// asserts every classifier token has copy by reading this table out of this
+// file, so "the reader-facing copy lives where the reader-facing screen is"
+// is a checked property, not a convention.
+export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
+  // --- The operator's problem: the model account, key or model ------------
+  model_account_out_of_credits: {
+    cause: 'The model account has run out of credits, so the review was never run.',
+    fix: 'An admin needs to add funds to the account used under “Model & API key”. Nothing is wrong with your document — resubmit it once that is done.',
+  },
+  model_key_rejected: {
+    cause: 'The model provider rejected the key this deployment is using.',
+    fix: 'An admin can replace the key under “Model & API key”. Until then every review will fail the same way.',
+  },
+  model_rate_limited: {
+    cause: 'The model provider is temporarily refusing requests because too many were sent at once.',
+    fix: 'Wait a few minutes and submit again. If it keeps happening, an admin should check the account’s limits under “Model & API key”.',
+  },
+  model_unavailable: {
+    cause: 'The model this deployment is set to use is not available from the provider right now.',
+    fix: 'Try again later, or ask an admin to select a different model under “Model & API key”.',
+  },
+  // --- Your problem: the document itself ----------------------------------
+  model_context_length_exceeded: {
+    cause: 'Your document is longer than the model can read in one go, so it was not reviewed.',
+    fix: 'Split it into smaller documents and submit them separately, or have the long sections reviewed by hand.',
+  },
+  document_too_large: {
+    cause: 'Your document is longer than the model can read in one go, so it was not reviewed.',
+    fix: 'Split it into smaller documents and submit them separately, or have the long sections reviewed by hand.',
+  },
+  unnormalizable_input: {
+    cause: 'Your file could not be read as a Word document.',
+    fix: 'Upload a .docx file saved by Word — not a PDF, an older .doc, or a scan — and try again.',
+  },
+  // --- The operator's problem: which playbook is installed/active ---------
+  unknown_playbook: {
+    cause: 'The contract type this review was submitted for is not installed.',
+    fix: 'Pick a different contract type, or ask an admin to install this one.',
+  },
+  playbook_coming_soon: {
+    cause: 'This contract type is registered but not switched on for review yet.',
+    fix: 'Pick a different contract type, or ask an admin when this one will be available.',
+  },
+  submission_time_bundle_retired: {
+    cause: 'The playbook this review was submitted against was replaced or switched off before the review started, so it was stopped rather than run against different rules than you chose.',
+    fix: 'Submit the document again — it will be reviewed against the playbook that is active now.',
+  },
+  // --- The system's problem: nothing the reader can do --------------------
+  structured_output_retry_exhausted: {
+    cause: 'The model kept returning a result the system could not read, so no review was produced.',
+    fix: 'This has been recorded. Please try again; if it keeps happening, an admin should try a different model under “Model & API key”.',
+  },
+  quote_patches_not_applied: {
+    cause: 'The review found changes to request, but none of them could be placed into your document, so no marked-up copy was produced.',
+    fix: 'Try submitting the document again. If it keeps happening, the document may be formatted in a way the tool cannot mark up, and the changes will need to be made by hand.',
+  },
+  leakage_detected: {
+    cause: 'A safety check stopped this review before any result was produced.',
+    fix: 'There is nothing to fix on your side and nothing to download. It has been recorded — contact an admin if you still need this document reviewed.',
+  },
+  output_ooxml_scan_failed: {
+    cause: 'The marked-up document failed the tool’s own safety check, so it was not released.',
+    fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
+  },
+  round_trip_verification_failed: {
+    cause: 'The marked-up document could not be verified as safe to open in Word, so it was not released.',
+    fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
+  },
+};
+
 // Human-readable failure explanations, keyed by the `failing_stage` that
 // backend/src/pipeline_runner.py's run_real_pipeline records. A bare "ERROR"
 // is useless to the person who has to fix it: every entry here says what
 // broke AND what to do about it. Keep the keys in step with the `stage = "…"`
 // assignments in run_real_pipeline.
-const STAGE_EXPLANATIONS: Record<string, { cause: string; fix: string }> = {
+//
+// These are the FALLBACK: the stage says where the pipeline stopped, which is
+// necessarily vaguer than why. Whenever the backend managed to classify the
+// cause, REASON_EXPLANATIONS above wins.
+const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
   build_model_client: {
     cause: 'No usable model API key was found, so the review never reached the model.',
     fix: 'An admin can add one under “Model & API key”. Until then every review will fail here.',
@@ -202,9 +356,9 @@ const STAGE_EXPLANATIONS: Record<string, { cause: string; fix: string }> = {
   run_review: {
     cause: 'The model could not complete the review.',
     fix:
-      'Most often the API key was rejected, the selected model is unavailable, or the ' +
-      'document is longer than the model can read at once. An admin can check the key ' +
-      'and model under “Model & API key”.',
+      'The exact cause was not identified. An admin can check the account, key and ' +
+      'model under “Model & API key”; it is also worth re-submitting in case it was ' +
+      'a passing problem at the provider.',
   },
   persist_result: {
     cause: 'The review finished, but the result could not be saved.',
@@ -216,7 +370,33 @@ const STAGE_EXPLANATIONS: Record<string, { cause: string; fix: string }> = {
   },
 };
 
-function explainFailure(detail: ReviewDetail): { cause: string; fix: string } | null {
+/**
+ * Explain a failed review, preferring the specific over the vague.
+ *
+ * Order is load-bearing (issue #442):
+ *   1. the `reason` token, when the backend classified one — it names the
+ *      actual cause (out of credits, key rejected, document too long);
+ *   2. the `failing_stage`, which only says where the pipeline stopped;
+ *   3. a generic "try again", for a stage this build has never heard of.
+ *
+ * `unhandled_exception` is skipped at step 1 by design: it is the backend's
+ * "could not classify" value, so falling through to the stage copy is
+ * strictly more informative — and is exactly today's behavior, which is why
+ * no existing failure path regresses.
+ *
+ * Exported (issue #443): the admin Diagnostics tab resolves each of its rows
+ * through this very function, so the two surfaces cannot disagree about what
+ * a token means. It takes `FailureFacts`, not `ReviewDetail`, because the
+ * diagnostics row deliberately carries nothing else.
+ */
+export function explainFailure(detail: FailureFacts): FailureExplanation | null {
+  const reason = detail.reason;
+  if (reason && reason !== UNCLASSIFIED_REASON) {
+    const byReason = REASON_EXPLANATIONS[reason];
+    if (byReason) {
+      return byReason;
+    }
+  }
   if (!detail.failing_stage) {
     return null;
   }
@@ -298,6 +478,17 @@ export default function ReviewSubmission(): React.ReactElement {
   const [submittedPlaybookLabel, setSubmittedPlaybookLabel] = useState<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Completion handoff (issue #448). `readyAnnouncement` populates a live
+  // region that is mounted from first render; `saveControlRef` wraps the
+  // download action row so focus can be moved onto the real <button> ct-button
+  // renders into its light DOM; `handedOffReviewRef` remembers which review has
+  // already been handed off so the announcement, the focus move and the
+  // automatic save happen exactly once per review — never again on a re-render
+  // or a late poll.
+  const [readyAnnouncement, setReadyAnnouncement] = useState('');
+  const saveControlRef = useRef<HTMLDivElement | null>(null);
+  const handedOffReviewRef = useRef<string | null>(null);
 
   // Fetch the contract-type catalog on mount. A failure here degrades
   // gracefully (no selector renders; the submission FormData simply omits
@@ -417,6 +608,13 @@ export default function ReviewSubmission(): React.ReactElement {
       setReviewId(null);
       setSubmittedGuidance(null);
       setSubmittedResumed(false);
+      // Clear the previous completion handoff. The ref is keyed on review id
+      // rather than simply "has run", and re-dropping the same file inside the
+      // same idempotency bucket RESUMES the same review id — so without this
+      // reset a resubmit that resolves straight back to an already-DONE review
+      // would announce nothing, focus nothing and save nothing.
+      setReadyAnnouncement('');
+      handedOffReviewRef.current = null;
 
       try {
         const formData = new FormData();
@@ -474,6 +672,25 @@ export default function ReviewSubmission(): React.ReactElement {
     [file, playbookId, playbooks, stopPolling, toasterGuidance],
   );
 
+  // Mint a short-lived presigned URL for this review's output. Shared by the
+  // button the attorney clicks and by the automatic save on completion, so the
+  // two can never drift on which endpoint they call or how they read a failure.
+  const fetchOutputUrl = useCallback(async (): Promise<string> => {
+    const response = await authorizedFetch(`/api/reviews/${reviewId}/output`);
+    if (!response.ok) {
+      const errorDetail = await readErrorDetail(response);
+      throw new Error(
+        errorDetail ??
+          friendlyErrorMessage(
+            `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
+            "We couldn't prepare your download. Please try again.",
+          ),
+      );
+    }
+    const data = (await response.json()) as OutputResponse;
+    return data.url;
+  }, [reviewId]);
+
   const handleDownload = useCallback(async () => {
     if (!reviewId) {
       return;
@@ -481,22 +698,10 @@ export default function ReviewSubmission(): React.ReactElement {
     setDownloading(true);
     setDownloadError(null);
     try {
-      const response = await authorizedFetch(`/api/reviews/${reviewId}/output`);
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(
-          detail ??
-            friendlyErrorMessage(
-              `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
-              "We couldn't prepare your download. Please try again.",
-            ),
-        );
-      }
-      const data = (await response.json()) as OutputResponse;
       // Hand the URL to the browser via a temporary anchor rather than
       // window.location.assign — the SPA (and its in-memory app state)
       // never navigates away (issue #271 item 5).
-      triggerBrowserDownload(data.url);
+      triggerBrowserDownload(await fetchOutputUrl());
     } catch (err) {
       setDownloadError(
         err instanceof Error
@@ -506,7 +711,28 @@ export default function ReviewSubmission(): React.ReactElement {
     } finally {
       setDownloading(false);
     }
-  }, [reviewId]);
+  }, [reviewId, fetchOutputUrl]);
+
+  // The automatic save (issue #448) — the same anchor click the button
+  // performs, fired once on completion without a user gesture.
+  //
+  // Deliberately NOT routed through handleDownload: this is a background
+  // courtesy the attorney did not ask for, so it must not flip the visible
+  // button into its disabled "Preparing download…" state (which would yank
+  // away the focus we just placed there), and a failure must not paint a
+  // download error over a result nobody tried to download yet. The button
+  // below is the reliable path and will report any real failure when clicked,
+  // so here the technical detail is logged and nothing else happens.
+  const autoSaveOutput = useCallback(async (): Promise<void> => {
+    if (!reviewId) {
+      return;
+    }
+    try {
+      triggerBrowserDownload(await fetchOutputUrl());
+    } catch (err) {
+      friendlyErrorMessage(err, 'The automatic save did not run; the download button still will.');
+    }
+  }, [reviewId, fetchOutputUrl]);
 
   // Sound mute state (persisted by the sounds module; no localStorage here).
   const { muted, toggle } = useSoundMuted();
@@ -542,6 +768,50 @@ export default function ReviewSubmission(): React.ReactElement {
     }
     return () => stopTicking();
   }, [phase]);
+
+  // Completion handoff (issue #448): announce readiness, move focus to the
+  // save control, and — only when the download gate is already satisfied —
+  // fire the automatic save.
+  //
+  // THE GATE IS NOT BYPASSABLE HERE. docs/output-contract.md's "Download gate"
+  // requires the critic-delta indicator to be surfaced before the download
+  // affordance is acted on; it is a visual-surfacing rule, which an automatic
+  // save performed while nobody is looking would silently defeat. So a review
+  // whose critic delta carries content still dings, still announces, and still
+  // focuses the button — but saves nothing until a human clicks, having passed
+  // the indicator that now sits above that button. `criticDeltaHasContent` is
+  // the same predicate that decides whether the indicator renders at all, so
+  // the two can never disagree about whether the gate is in force.
+  //
+  // Ordering: focus BEFORE the save is attempted. The automatic save is best
+  // effort (a browser may suppress an anchor click with no user activation),
+  // and the focused button is the path that always works — it must not wait on
+  // a network round trip that might fail.
+  useEffect(() => {
+    if (phase !== 'done' || !detail) {
+      return;
+    }
+    if (handedOffReviewRef.current === detail.review_id) {
+      return;
+    }
+    handedOffReviewRef.current = detail.review_id;
+
+    const gateSatisfied = !criticDeltaHasContent(detail.critic_delta);
+    const canSave = Boolean(detail.has_output);
+
+    setReadyAnnouncement(
+      !canSave ? READY_NO_OUTPUT_COPY : gateSatisfied ? READY_SAVED_COPY : READY_GATED_COPY,
+    );
+
+    // ct-button renders a real <button> into its light DOM (ui/components/
+    // ct-button.ts), so the focusable node is a descendant of this wrapper,
+    // not the wrapper itself.
+    saveControlRef.current?.querySelector('button')?.focus();
+
+    if (canSave && gateSatisfied) {
+      void autoSaveOutput();
+    }
+  }, [phase, detail, autoSaveOutput]);
 
   // ACCEPT never reads "approved" / "no action needed" (ARCHITECTURE.md's
   // Wrong-format rejection UX / accept framing) — always "no requested
@@ -598,11 +868,18 @@ export default function ReviewSubmission(): React.ReactElement {
             phase={phase}
             onDownload={detail?.has_output ? () => void handleDownload() : undefined}
             downloadDisabled={downloading}
+            progressStage={detail?.progress_stage ?? null}
           />
 
-          {/* Non-terminal states (submitting / polling) get a shimmer beneath
-              the hero, alongside its own progress-treatment illustration. */}
-          {phase === 'working' && (
+          {/* Non-terminal states (submitting / polling). Issue #447 retired
+              the indeterminate <CtProgress> bar that used to sit here ONCE
+              the pipeline reports a real stage: an animated line that
+              carries no information is strictly worse than the hero's
+              staged toast, which says which of the four steps we are in.
+              Until a stage lands (the first poll, or a runner that reports
+              none) the bar stays — that period genuinely IS indeterminate,
+              and the shimmer is the honest way to say so. */}
+          {phase === 'working' && !detail?.progress_stage && (
             <CtProgress label="Reviewing your document…" data-testid="review-progress" />
           )}
 
@@ -666,6 +943,23 @@ export default function ReviewSubmission(): React.ReactElement {
           </form>
         </div>
       </CtCard>
+
+      {/*
+        Completion announcement (issue #448). Mounted from the very first
+        render and left empty until a review lands, rather than appearing at
+        the same moment its text does — a polite live region that is inserted
+        already-populated is not reliably announced. It sits OUTSIDE the
+        review-status block below (which is itself aria-live) so the two are
+        never nested regions competing to narrate the same event.
+      */}
+      <p
+        role="status"
+        aria-live="polite"
+        className="ct-muted"
+        data-testid="review-ready-announcement"
+      >
+        {readyAnnouncement}
+      </p>
 
       {/*
         No LOADED playbook == nothing is reviewable, so say so explicitly
@@ -734,10 +1028,16 @@ export default function ReviewSubmission(): React.ReactElement {
           )}
 
           {/*
-            Failure diagnosis. The server already knows exactly which stage
-            failed; showing it (with the technical stage name kept visible for
-            an admin to act on or quote in a bug report) is the difference
-            between "ERROR" and an operator knowing to go add an API key.
+            Failure diagnosis. The server already knows exactly why the review
+            failed; showing it — in prose above, with the technical stage and
+            reason tokens kept visible for an admin to act on or quote in a bug
+            report — is the difference between "ERROR" and an operator knowing
+            to go top up the model account.
+
+            The tokens below are identifiers, never messages: everything the
+            backend knew that must not be surfaced (status codes, endpoints,
+            key material, exception text, prompt or document substance) was
+            dropped on the backend side, and cannot reappear here.
           */}
           {detail && failureExplanation && (
             <CtBanner variant="danger" data-testid="review-failure">
@@ -747,9 +1047,17 @@ export default function ReviewSubmission(): React.ReactElement {
               <p>{failureExplanation.fix}</p>
               <p className="ct-muted">
                 <small>
-                  Failed at stage <code data-testid="review-failing-stage">{detail.failing_stage}</code>
-                  {detail.reason && detail.reason !== 'unhandled_exception' && (
-                    <> · {detail.reason}</>
+                  {detail.failing_stage && (
+                    <>
+                      Failed at stage{' '}
+                      <code data-testid="review-failing-stage">{detail.failing_stage}</code>
+                    </>
+                  )}
+                  {detail.reason && detail.reason !== UNCLASSIFIED_REASON && (
+                    <>
+                      {detail.failing_stage ? ' · ' : 'Recorded as '}
+                      <code data-testid="review-failure-reason">{detail.reason}</code>
+                    </>
                   )}
                 </small>
               </p>
@@ -844,7 +1152,9 @@ export default function ReviewSubmission(): React.ReactElement {
               )}
 
               {detail.has_output && (
-                <div className="ct-actions">
+                // ref: the completion handoff moves keyboard focus onto the
+                // real <button> inside this row (issue #448).
+                <div className="ct-actions" ref={saveControlRef}>
                   <CtButton
                     type="button"
                     variant="primary"

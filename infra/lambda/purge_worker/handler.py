@@ -41,12 +41,16 @@ Environment variables:
                               (default 259200 = 72 hours)
 """
 
+import logging
 import os
 import time
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 REVIEWS_TABLE = os.environ.get("REVIEWS_TABLE", "")
 RETENTION_SETTINGS_TABLE = os.environ.get("RETENTION_SETTINGS_TABLE", "")
@@ -258,34 +262,171 @@ def _is_past_retention(review: dict[str, Any]) -> bool:
     return age_seconds >= (window_days * 86400)
 
 
-def _delete_review_documents(review_id: str) -> None:
-    """Delete the review's uploads/outputs objects. Legal-hold-tagged
+# ---------------------------------------------------------------------------
+# Object targeting (issue #454)
+#
+# The input document is written to `uploads/{owner_sub}/{review_id}/in.docx`
+# (backend/src/review_routes.py), and the reviews row records that exact key in
+# `upload_s3_key` (backend/src/reviews.py::_create_review_row, issue #449).
+# Targeting is derived from the ROW's stored pointer rather than reconstructed
+# from a prefix convention, so a future layout change moves the writer and the
+# purger together instead of silently desyncing them -- which is exactly how
+# `uploads/{review_id}/` (a prefix omitting the owner segment, matching
+# nothing) went unnoticed while the sweep reported success.
+#
+# The prefix scans are the fallback for rows that predate the recorded pointer,
+# plus a belt-and-braces sweep of any sibling object under the review's own
+# prefix. Both prefixes are review-scoped, so neither can reach another
+# review's objects.
+#
+# Mirrors backend/src/retention.py's block of the same name EXACTLY (this file
+# ships independently of backend/src and owns its own copy, per this module's
+# existing convention); both must change together.
+# ---------------------------------------------------------------------------
+
+UPLOAD_POINTER_FIELDS = ("upload_s3_key", "upload_pointer")
+OUTPUT_POINTER_FIELDS = ("output_s3_key",)
+
+
+def _dedup(keys: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key in keys:
+        if key not in seen:
+            seen.add(key)
+            ordered.append(key)
+    return ordered
+
+
+def _list_keys(s3: Any, bucket: str, prefix: str) -> list[str]:
+    resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    return [obj["Key"] for obj in resp.get("Contents", [])]
+
+
+def _is_bound_to_review(key: str, review_id: str, root: str) -> bool:
+    """A stored pointer is only acted on when it sits under the expected bucket
+    root AND names this review, so a corrupted or mis-migrated row can never
+    make the sweep delete another review's object."""
+    return key.startswith(f"{root}/") and f"/{review_id}/" in key
+
+
+def _existing_pointer_keys(
+    review: dict[str, Any],
+    s3: Any,
+    bucket: str,
+    fields: tuple[str, ...],
+    root: str,
+) -> list[str]:
+    """The row's recorded pointers that are bound to this review AND still
+    resolve to an object. A pointer whose object is already gone is not a
+    target: the itemised report an operator reads before an irreversible sweep
+    must name objects that actually exist, not keys a row happens to carry."""
+    review_id = review["review_id"]
+    keys = []
+    for field in fields:
+        key = review.get(field)
+        if not key or not _is_bound_to_review(key, review_id, root):
+            continue
+        if key in _list_keys(s3, bucket, key):
+            keys.append(key)
+    return keys
+
+
+def _review_object_targets(review: dict[str, Any]) -> list[tuple[str, str]]:
+    """Every (bucket, key) belonging to this review: the row's own recorded
+    input/output pointers, plus a scan of the review-scoped prefixes for rows
+    that predate those fields."""
+    s3 = _s3()
+    review_id = review["review_id"]
+    owner_sub = review.get("owner_sub") or ""
+    targets: list[tuple[str, str]] = []
+
+    if UPLOADS_BUCKET:
+        keys = _existing_pointer_keys(
+            review, s3, UPLOADS_BUCKET, UPLOAD_POINTER_FIELDS, "uploads"
+        )
+        prefixes = []
+        if owner_sub:
+            prefixes.append(f"uploads/{owner_sub}/{review_id}/")
+        # Pre-owner-segment layout: harmless when nothing matches, and the only
+        # reachable target for a row carrying neither pointer nor owner_sub.
+        prefixes.append(f"uploads/{review_id}/")
+        for prefix in prefixes:
+            keys.extend(_list_keys(s3, UPLOADS_BUCKET, prefix))
+        targets.extend((UPLOADS_BUCKET, key) for key in _dedup(keys))
+
+    if OUTPUTS_BUCKET:
+        keys = _existing_pointer_keys(
+            review, s3, OUTPUTS_BUCKET, OUTPUT_POINTER_FIELDS, "outputs"
+        )
+        keys.extend(_list_keys(s3, OUTPUTS_BUCKET, f"outputs/{review_id}/"))
+        targets.extend((OUTPUTS_BUCKET, key) for key in _dedup(keys))
+
+    return targets
+
+
+def _surviving_targets(targets: list[tuple[str, str]]) -> list[str]:
+    """The targeted keys STILL present after the delete calls. The sweep's
+    success record is tied to this outcome, not to having issued the calls:
+    before issue #454 a review was recorded as deleted whether or not anything
+    was actually deleted."""
+    s3 = _s3()
+    survivors: list[str] = []
+    for bucket, key in targets:
+        if key in _list_keys(s3, bucket, key):
+            survivors.append(key)
+    return survivors
+
+
+def _log_purge_plan(review_id: str, keys: list[str], dry_run: bool) -> None:
+    """Itemise what this sweep is about to delete (issue #454 operator gate).
+
+    The first sweep after the prefix fix deletes a BACKLOG of input documents
+    already past their retention window that the broken prefix never matched.
+    Deleting them is the intended behaviour; the volume is the surprise, so
+    every sweep names the reviews and keys it acts on where an operator sees
+    them (CloudWatch), and `dry_run=True` reports the same list without
+    deleting anything."""
+    prefix = "DRY RUN -- would purge" if dry_run else "purging"
+    logger.warning(
+        "retention sweep: %s review %s (%d object(s))", prefix, review_id, len(keys)
+    )
+    for key in keys:
+        logger.info("retention sweep: %s %s", prefix, key)
+
+
+def _delete_review_documents(
+    review: dict[str, Any], targets: list[tuple[str, str]] | None = None
+) -> list[str]:
+    """Delete the review's uploads/outputs objects, returning the targeted keys
+    that SURVIVED (empty when the purge fully succeeded). Legal-hold-tagged
     objects are also denied at the storage layer (bucket-policy DENY on
     contract-toaster:legal-hold=true, see data-stack.ts _addLegalHoldPolicy) as a
     backstop -- this function is only ever reached for reviews that already
-    passed the application-level hold check in run_purge_sweep."""
-    s3 = _s3()
-    for bucket, prefix in (
-        (UPLOADS_BUCKET, f"uploads/{review_id}/"),
-        (OUTPUTS_BUCKET, f"outputs/{review_id}/"),
-    ):
-        if not bucket:
-            continue
-        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        keys = [obj["Key"] for obj in resp.get("Contents", [])]
+    passed the application-level hold check in run_purge_sweep.
 
-        for key in keys:
-            try:
-                s3.delete_object(Bucket=bucket, Key=key)
-            except ClientError as exc:
-                code = exc.response.get("Error", {}).get("Code", "")
-                if code == "AccessDenied":
-                    # Storage-layer legal-hold DENY caught something the
-                    # application-level check missed -- fail loud rather
-                    # than silently swallow (defense-in-depth working as
-                    # intended, but this should never happen in practice).
-                    raise
+    Takes the review ROW (not just its id): targeting is derived from the row's
+    own recorded pointer -- see `_review_object_targets`. `targets` may be
+    passed in by a caller that already resolved them (run_purge_sweep does, to
+    itemise the plan before acting on it) so the listing is not repeated."""
+    s3 = _s3()
+    if targets is None:
+        targets = _review_object_targets(review)
+
+    for bucket, key in targets:
+        try:
+            s3.delete_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code == "AccessDenied":
+                # Storage-layer legal-hold DENY caught something the
+                # application-level check missed -- fail loud rather
+                # than silently swallow (defense-in-depth working as
+                # intended, but this should never happen in practice).
                 raise
+            raise
+
+    return _surviving_targets(targets)
 
 
 def _clear_substance_fields(review_id: str) -> None:
@@ -297,14 +438,24 @@ def _clear_substance_fields(review_id: str) -> None:
     )
 
 
-def run_purge_sweep() -> dict[str, Any]:
+def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
     """Run one purge sweep (used for both the scheduled sweep and the
     immediate on-save retroactive sweep -- both modes enforce all five
     invariants identically).
 
+    dry_run=True (issue #454) is the report-only path an operator invokes to
+    measure the backlog BEFORE it is irreversibly deleted: it resolves and
+    itemises exactly the objects a real sweep would delete, and deletes
+    nothing, clears no substance field, and returns an empty `deleted_reviews`.
+    Nothing invokes it automatically -- there is no deploy-time or migration
+    purge; the existing schedule remains the only mechanism that deletes.
+
     Returns a summary dict: deleted_reviews, skipped_active, skipped_hold,
     skipped_not_yet_eligible -- mirroring the audit entry each run writes
-    (objects considered, deleted, skipped-for-active, skipped-for-hold).
+    (objects considered, deleted, skipped-for-active, skipped-for-hold) --
+    plus, per #454: dry_run, eligible_reviews (the backlog), failed_reviews
+    (targeted objects survived -> NOT recorded as deleted), objects_by_review
+    and object_count (the itemisation).
     """
     settings = get_retention_settings()
     settings = _apply_ready_pending_reduction(settings)
@@ -312,6 +463,9 @@ def run_purge_sweep() -> dict[str, Any]:
     reviews_table = _ddb().Table(REVIEWS_TABLE)
 
     deleted: list[str] = []
+    eligible: list[str] = []
+    failed: list[str] = []
+    objects_by_review: dict[str, list[str]] = {}
     skipped_active: list[str] = []
     skipped_hold: list[str] = []
     skipped_not_yet_eligible: list[str] = []
@@ -348,7 +502,30 @@ def run_purge_sweep() -> dict[str, Any]:
 
             # Invariant 4: delete documents, then clear matched substance
             # fields.
-            _delete_review_documents(review_id)
+            eligible.append(review_id)
+            targets = _review_object_targets(review)
+            objects_by_review[review_id] = [key for _bucket, key in targets]
+            _log_purge_plan(review_id, objects_by_review[review_id], dry_run)
+
+            if dry_run:
+                continue
+
+            survivors = _delete_review_documents(review, targets)
+            if survivors:
+                # The success record is tied to the OUTCOME: a review whose
+                # targeted object survived is not "purged", so it is neither
+                # recorded as deleted nor stripped of its substance fields --
+                # the next sweep retries it.
+                logger.error(
+                    "retention sweep: review %s NOT purged -- %d targeted "
+                    "object(s) survived deletion: %s",
+                    review_id,
+                    len(survivors),
+                    ", ".join(survivors),
+                )
+                failed.append(review_id)
+                continue
+
             _clear_substance_fields(review_id)
             deleted.append(review_id)
 
@@ -357,7 +534,12 @@ def run_purge_sweep() -> dict[str, Any]:
             break
 
     return {
+        "dry_run": dry_run,
         "deleted_reviews": deleted,
+        "eligible_reviews": eligible,
+        "failed_reviews": failed,
+        "objects_by_review": objects_by_review,
+        "object_count": sum(len(keys) for keys in objects_by_review.values()),
         "skipped_active": skipped_active,
         "skipped_hold": skipped_hold,
         "skipped_not_yet_eligible": skipped_not_yet_eligible,
@@ -369,10 +551,16 @@ def handler(event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any
     on-demand invocation triggered by an admin settings save.
 
     event (optional):
-      {"trigger": "scheduled" | "on_demand_settings_save"}
+      {"trigger": "scheduled" | "on_demand_settings_save",
+       "dry_run": true | false}
     Both trigger types run the identical run_purge_sweep() -- the retroactive
     behavior on a settings save comes from the window having just changed
     (or a pending reduction having just become ready), not from a different
     code path.
+
+    `"dry_run": true` (issue #454) is the operator's report-only invocation:
+    it itemises the backlog a real sweep would delete and deletes nothing.
+    It must be requested explicitly -- the scheduled invocation carries no
+    `dry_run` key and therefore deletes, exactly as before.
     """
-    return run_purge_sweep()
+    return run_purge_sweep(dry_run=bool((event or {}).get("dry_run")))

@@ -201,10 +201,62 @@ issue audits both themes.
 --ct-focus-ring      0 0 0 2px var(--ct-bg), 0 0 0 4px var(--ct-accent)
                      (two-layer ring; every interactive element uses
                      :focus-visible { box-shadow: var(--ct-focus-ring) })
+--ct-focus-outline           2px solid transparent
+--ct-focus-outline-offset    2px
+                     (forced-colors counterpart — pair it with the ring on
+                     EVERY :focus-visible rule, never `outline: none`)
 --ct-ease-out        cubic-bezier(.2,.8,.3,1)
 --ct-ease-spring     cubic-bezier(.34,1.56,.64,1)   (toast pop, chip enter)
 --ct-dur-fast 120ms  --ct-dur 200ms  --ct-dur-slow 400ms
 ```
+**Focus is two declarations, not one.** `--ct-focus-ring` is a
+`box-shadow`, and `forced-colors: active` (Windows High Contrast Mode)
+discards `box-shadow` while still honouring `outline` — so a rule that
+suppresses the outline with `outline: none` leaves keyboard users there
+with no focus indicator at all (WCAG 2.4.7; this shipped once, issue
+#438). Write instead:
+```css
+.thing:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
+  box-shadow: var(--ct-focus-ring);
+}
+```
+The outline is transparent, so normal-mode appearance is unchanged and
+outlines take no layout space; forced-colors repaints it with the system
+highlight colour. Preferred over an `@media (forced-colors: active)`
+block because it travels with the rule and cannot drift as components
+land. `npm run audit:focus` rejects any `:focus`, `:focus-visible` or
+`:focus-within` rule under `frontend/src` that suppresses the outline —
+`outline: none` / `outline: 0`, or the `outline-style: none` /
+`outline-width: 0` longhands. (A bare `:focus` rule counts because at
+equal specificity it wins on source order and would undo the fix.) The
+one exemption is a rule inside an explicit
+`@media (forced-colors: active)` block, which is the deliberate
+forced-colors branch.
+
+**Narrow viewports fail through containment, not breakpoints** (issue
+#457, and the gallery's own instance before it). Two spellings have each
+produced a measured horizontal page scroll on the admin screens, and
+`npm run audit:layout` now rejects both:
+
+- A **bare `1fr` grid track** is `minmax(auto, 1fr)`, and that automatic
+  minimum is the *min-content* width of everything in the track. One
+  non-shrinkable child — an admin table, a long email — pins the track
+  open and drags the whole shell with it (at 375 this pushed three tabs
+  off-screen entirely). Always write `minmax(0, 1fr)`.
+- An **absolutely-positioned visually-hidden helper** is clipped by its
+  containing block's overflow, not by whatever element it sits inside. A
+  helper with no positioned owner escapes any scroll container in
+  between and enlarges the *document's* scrollable overflow instead —
+  `.ct-button__live` inside a scrolled `ct-table` row bought a 60px
+  horizontal page scroll with nothing painted in it. Give the helper's
+  owner `position: relative`, and declare the pair in the audit's
+  `HIDDEN_HELPER_OWNERS` map.
+
+Overflow belongs to the component that owns it: a `ct-table` that scrolls
+itself is correct, a page that scrolls horizontally is not.
+
 Every animation/transition in the system uses these tokens and sits
 behind the global reduced-motion guard in `base.css`
 (`@media (prefers-reduced-motion: reduce)` zeroes durations). The
@@ -375,9 +427,18 @@ visual QA surface and the living documentation for future workers.
   cases when extracted).
 - Migration issues run the **existing** suite untouched as their
   regression gate — that is the point of preserving testids/roles.
-- Gates: `bash scripts/check-frontend.sh` (tsc + vite build + vitest)
-  and `.venv/bin/python tests/test_frontend_xss_posture.py`
-  (source-posture greps). Both offline.
+- Gates: `bash scripts/check-frontend.sh` (tsc + vite build + vitest +
+  the contrast/focus/layout audits) and
+  `.venv/bin/python tests/test_frontend_xss_posture.py` (source-posture
+  greps). Both offline.
+- The three audits are **static source guards, not renderers** — they
+  cannot tell you the app looks right, only that a spelling which has
+  already broken it once cannot come back. Each carries a self-test of
+  fixture mutations so it fails closed if narrowed. Anything about
+  *rendered* behaviour (contrast on composed surfaces, forced-colors
+  appearance, reflow at 375/768) has to be measured in a real browser;
+  those measurements live in
+  `docs/planning/frontend-release-audit-2026-07-27.md`.
 
 ## 11. Contributor guide: adding or changing a component
 
@@ -390,8 +451,10 @@ visual QA surface and the living documentation for future workers.
 3. Register via `defineOnce`, export from `index.ts`, wrap in
    `react.ts` with typed props/events.
 4. Style with `--ct-*` tokens only; namespace classes
-   `ct-<name>__part`; include `:focus-visible { box-shadow:
-   var(--ct-focus-ring) }` on interactive parts; respect reduced motion
+   `ct-<name>__part`; include `:focus-visible { outline:
+   var(--ct-focus-outline); outline-offset:
+   var(--ct-focus-outline-offset); box-shadow: var(--ct-focus-ring) }` on
+   interactive parts (never `outline: none` — §4.4); respect reduced motion
    (inherit the base.css guard; add a local guard only for inline
    `<style>` blocks).
 5. Add the component to the gallery page in all variants/states.

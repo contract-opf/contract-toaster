@@ -30,7 +30,9 @@ import AdminRetention from './AdminRetention';
 import AdminModel from './AdminModel';
 import AdminPenRules from './AdminPenRules';
 import AdminPlaybooks from './AdminPlaybooks';
+import AdminDiagnostics from './AdminDiagnostics';
 import ReviewSubmission from './ReviewSubmission';
+import ReviewHistory from './ReviewHistory';
 import PasswordLogin, { DemoIdentity } from './PasswordLogin';
 import { getToken, isPasswordMode, setDemoToken } from './auth';
 import { CtAppShell, CtButton, CtChip, CtTabBar } from './ui/react';
@@ -75,7 +77,18 @@ type AdminCapability = 'loading' | 'admin' | 'non-admin';
 // Tabbed shell. One app shell + one Review experience shared by both roles;
 // the two admin tabs are appended only for an admin caller.
 // ---------------------------------------------------------------------------
-type TabId = 'review' | 'users' | 'retention' | 'model' | 'pen-rules' | 'playbooks';
+type TabId =
+  | 'review'
+  // Issue #449 — past redlines and how they were produced. Deliberately NOT
+  // in the admin block below: a reviewer's history is their own work, and the
+  // screen asks the API for `?scope=mine` so an admin's History is theirs too.
+  | 'history'
+  | 'users'
+  | 'retention'
+  | 'model'
+  | 'pen-rules'
+  | 'playbooks'
+  | 'diagnostics';
 
 interface TabDef {
   id: TabId;
@@ -191,6 +204,8 @@ function AppContent({
   // authoritative for every action there.
   const tabs: TabDef[] = [
     { id: 'review', label: 'Review' },
+    // History (issue #449) — every signed-in user, not gated on isAdmin.
+    { id: 'history', label: 'History' },
     ...(isAdmin
       ? ([
           { id: 'users', label: 'Users & access' },
@@ -206,6 +221,11 @@ function AppContent({
           // per-version view is a follow-up, not part of #434; see
           // AdminPenRules.tsx's docstring.
           { id: 'pen-rules', label: 'Pen rules & posture' },
+          // Diagnostics (issue #443) — why recent reviews failed, read from
+          // the #442 reason vocabulary. Last in the admin set on purpose:
+          // it is where you go when something is wrong, not part of the
+          // routine configuration flow above.
+          { id: 'diagnostics', label: 'Diagnostics' },
         ] as TabDef[])
       : []),
   ];
@@ -233,14 +253,12 @@ function AppContent({
         </CtButton>
       </div>
 
-      {/* Tabs — an accessible tablist (ct-tab-bar). For a single-tab
-          (non-admin) user we drop the tab bar entirely and show the Review
-          panel on its own. */}
-      {tabs.length > 1 && (
-        <div slot="tabs">
-          <CtTabBar tabs={tabs} active={activeTab} onSelect={handleTabSelect} />
-        </div>
-      )}
+      {/* Tabs — an accessible tablist (ct-tab-bar). Every signed-in user has
+          at least Review + History (issue #449); the tab bar used to be
+          dropped for the single-tab case, which no longer exists. */}
+      <div slot="tabs">
+        <CtTabBar tabs={tabs} active={activeTab} onSelect={handleTabSelect} />
+      </div>
 
       {/* Tabpanels. CRITICAL: every panel stays MOUNTED at once; visibility is
           toggled via the `hidden` attribute so ReviewSubmission's polling and
@@ -249,21 +267,28 @@ function AppContent({
           admin caller (#234/#235) — a non-admin never mounts AdminUsers/
           AdminRetention at all. The server stays authoritative; each panel
           also keeps its own 403 gate as defense in depth. */}
-      {tabs.length > 1 ? (
-        <section
-          role="tabpanel"
-          id="panel-review"
-          aria-labelledby="tab-review"
-          className="ct-tabpanel"
-          hidden={activeTab !== 'review'}
-        >
-          <ReviewSubmission />
-        </section>
-      ) : (
-        <section className="ct-tabpanel">
-          <ReviewSubmission />
-        </section>
-      )}
+      <section
+        role="tabpanel"
+        id="panel-review"
+        aria-labelledby="tab-review"
+        className="ct-tabpanel"
+        hidden={activeTab !== 'review'}
+      >
+        <ReviewSubmission />
+      </section>
+
+      {/* History — mounted for every signed-in user, not inside the isAdmin
+          block below. Always mounted like every other panel, so the list it
+          has loaded survives a tab switch. */}
+      <section
+        role="tabpanel"
+        id="panel-history"
+        aria-labelledby="tab-history"
+        className="ct-tabpanel"
+        hidden={activeTab !== 'history'}
+      >
+        <ReviewHistory />
+      </section>
 
       {isAdmin && (
         <>
@@ -311,6 +336,15 @@ function AppContent({
             hidden={activeTab !== 'pen-rules'}
           >
             <AdminPenRules />
+          </section>
+          <section
+            role="tabpanel"
+            id="panel-diagnostics"
+            aria-labelledby="tab-diagnostics"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'diagnostics'}
+          >
+            <AdminDiagnostics />
           </section>
         </>
       )}

@@ -54,6 +54,7 @@ docstring.
 """
 
 import hashlib
+import logging
 import os
 import sys
 import time
@@ -65,10 +66,13 @@ from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
-    from src import config, model_client
+    from src import config, model_client, model_settings
+    from src.users import json_safe
 except ImportError:  # pragma: no cover
     import config  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
+    import model_settings  # type: ignore[no-redef]
+    from users import json_safe  # type: ignore[no-redef]
 
 # Cross-directory import (same convention backend/src/pipeline_runner.py and
 # scripts/primary_review_pass.py already use) to reach
@@ -88,6 +92,19 @@ import playbook_validation  # noqa: E402
 # the repo uses.
 import canonicalize  # noqa: E402
 import playbook_registry  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+
+def _is_conditional_check_failed(exc: Exception) -> bool:
+    """True for a DynamoDB ConditionalCheckFailedException, however it reached
+    us: a real botocore `ClientError`, or a duck-typed stand-in carrying the
+    same `response` shape (the convention `pipeline_runner._is_conditional`
+    already uses, so test doubles keep working)."""
+    resp = getattr(exc, "response", None)
+    if not isinstance(resp, dict):
+        return False
+    return resp.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
 
 # ---------------------------------------------------------------------------
 # Idempotency-key derivation constants.
@@ -154,6 +171,12 @@ REVIEW_STATUSES_TERMINAL = {
     "SUPERSEDED",
 }
 
+# The one terminal status that means "this review SUCCEEDED and its result is
+# persisted" -- as opposed to the failure/administrative terminals above. It is
+# named rather than spelled inline because it is now load-bearing: issue #446's
+# guard in `record_stage_failure` refuses to overwrite a row holding it.
+REVIEW_STATUS_SUCCESS_TERMINAL = "DONE"
+
 # ---------------------------------------------------------------------------
 # Stage-failure taxonomy (issue #258) -- target-agnostic core shared by both
 # deployment targets. Today `failing_stage` is hardcoded to `'pipeline'` in
@@ -172,12 +195,41 @@ REVIEW_STATUSES_TERMINAL = {
 # for an unmapped/unexpected failure) -- this taxonomy only carves out the
 # two statuses that must be specifically reachable, it does not replace the
 # generic failure path.
+#
+# Issue #442 extends this with the model-provider tokens
+# `backend/src/pipeline_runner.py::classify_failure_reason` produces. Each
+# terminal status below is chosen DELIBERATELY, and every entry is listed
+# explicitly -- including the ones that resolve to the generic `ERROR` --
+# so "which status does this token land on?" is answered by reading this
+# table rather than by inferring it from an absence.
 STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # Structured-output retry exhausted (a model stage that never produced
     # parseable structured output after its retry budget).
     "structured_output_retry_exhausted": "ERROR_MANUAL_REVIEW_REQUIRED",
     # Document exceeds the size cap enforced ahead of the model stages.
     "document_too_large": "MANUAL_REVIEW_REQUIRED",
+    # --- Model-provider conditions (issue #442) ----------------------------
+    # OPERATOR problems, not document problems: the document was fine and
+    # would review cleanly the moment the account/key/model is fixed. They
+    # stay on the generic `ERROR` status precisely so they are NOT filed
+    # alongside the documented manual-review outcomes above -- there is no
+    # attorney work to queue here, only an admin fix. The `reason` token is
+    # what makes them distinguishable, not the status.
+    "model_account_out_of_credits": "ERROR",
+    "model_key_rejected": "ERROR",
+    "model_rate_limited": "ERROR",
+    "model_unavailable": "ERROR",
+    # A DOCUMENT problem: the provider itself rejected the assembled prompt
+    # as over the model's context window. This is the same condition the
+    # step-14 pre-call estimate catches, and it is deliberately given the
+    # SAME `MANUAL_REVIEW_REQUIRED` terminal status as `document_too_large`
+    # (the reasoning is `model_client.ModelContextLengthExceededError`'s own
+    # docstring: a provider-side length rejection is a real occurrence, not a
+    # misconfiguration, and must not degrade to a generic pipeline ERROR).
+    # It keeps its own token rather than reusing `document_too_large` so the
+    # two remain telling-apart-able in the row: one was estimated ahead of
+    # the call, the other was measured by the provider.
+    "model_context_length_exceeded": "MANUAL_REVIEW_REQUIRED",
 }
 
 
@@ -359,7 +411,37 @@ def create_submission_record(
 # Atomic, worst-case, retry-inclusive spend reservation
 # ---------------------------------------------------------------------------
 
-def _active_provider_rates() -> tuple[float, float, float, float]:
+def _openrouter_rates_for_role(
+    policy: dict[str, Any], role: str, effective_model_id: str
+) -> tuple[float, float]:
+    """The `(input, output)` per-million rates for the model a role will
+    ACTUALLY run on, out of model-policy/openrouter.json.
+
+    Looked up in the `selectable` allowlist first (issue #445 -- an admin
+    selection resolves to one of those ids), falling back to the role's
+    pinned `models.<role>` block. The fallback covers both "nothing is
+    selected" (the effective id IS the pin) and "an OPENROUTER_*_MODEL_ID
+    break-glass override is in force" -- an off-policy id the artifact
+    carries no rates for, so the pin's rates remain the only honest
+    estimate available. That second case is the pre-existing behavior and is
+    unchanged here.
+    """
+    for entry in model_client.openrouter_selectable_models(policy):
+        if entry.get("model_id") == effective_model_id:
+            return (
+                entry["cost_per_million_input_usd"],
+                entry["cost_per_million_output_usd"],
+            )
+    block = policy["models"][role]
+    return (
+        block["cost_per_million_input_usd"],
+        block["cost_per_million_output_usd"],
+    )
+
+
+def _active_provider_rates(
+    dynamodb_resource: Any = None,
+) -> tuple[float, float, float, float]:
     """Per-million-token worst-case rates for whichever model provider is
     actually being billed, keyed by `config.model_provider()`
     (`MODEL_PROVIDER` env var) -- issue #268.
@@ -372,19 +454,34 @@ def _active_provider_rates() -> tuple[float, float, float, float]:
     regional-rate constants, UNCHANGED -- this branch must never perturb
     the Bedrock path's documented $2.11 worst case (issue #189).
 
+    ADMIN SELECTION (issue #445). On the OpenRouter path the rates are those
+    of the models that will actually be invoked -- the admin's stored
+    selection resolved through `model_settings.resolve_openrouter_model_ids`,
+    which applies the documented admin > env > pin precedence and drops a
+    selection that has fallen off the allowlist. Pricing the DEFAULT PINS
+    while the review runs on something else makes the daily cap wrong in
+    whichever direction the admin chose: reserving the pins' 192c for a pair
+    that can cost 256c lets a $20/day cap permit ~$26.67/day of real
+    exposure, and reserving 192c for a 17c Budget pair denies the admin the
+    headroom the picker just advertised. `dynamodb_resource` is optional so
+    a caller with no handle (or a deployment with no settings store) keeps
+    exactly the pre-#445 pin behavior, and a DynamoDB blip degrades to the
+    pins rather than failing the reservation -- the resolver swallows its own
+    read errors.
+
     Returns `(primary_input, primary_output, critic_input, critic_output)`
     in USD per million tokens.
     """
     if config.model_provider() == "openrouter":
         policy = model_client.load_openrouter_policy()
-        primary = policy["models"]["primary"]
-        critic = policy["models"]["critic"]
-        return (
-            primary["cost_per_million_input_usd"],
-            primary["cost_per_million_output_usd"],
-            critic["cost_per_million_input_usd"],
-            critic["cost_per_million_output_usd"],
+        effective = model_settings.resolve_openrouter_model_ids(dynamodb_resource)
+        primary_input, primary_output = _openrouter_rates_for_role(
+            policy, "primary", effective["primary"]
         )
+        critic_input, critic_output = _openrouter_rates_for_role(
+            policy, "critic", effective["critic"]
+        )
+        return (primary_input, primary_output, critic_input, critic_output)
     return (
         PRIMARY_INPUT_RATE_USD_PER_MILLION,
         PRIMARY_OUTPUT_RATE_USD_PER_MILLION,
@@ -393,7 +490,7 @@ def _active_provider_rates() -> tuple[float, float, float, float]:
     )
 
 
-def compute_worst_case_reservation_usd_cents() -> int:
+def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> int:
     """Worst-case spend reservation for a single review.
 
     Retry-inclusive, per-model formula (issue #189 fix; retry-inclusive
@@ -407,10 +504,13 @@ def compute_worst_case_reservation_usd_cents() -> int:
     rate rather than a single blended "most expensive tier" rate applied to
     both passes (see the constants above for why that overshot 4.6x).
 
-    The rate table itself is provider-aware (`_active_provider_rates`,
-    issue #268): `MODEL_PROVIDER=openrouter` prices from
-    `model-policy/openrouter.json` instead of the Bedrock constants, so the
-    reservation reflects whichever provider is actually being billed.
+    The rate table itself is provider-aware AND selection-aware
+    (`_active_provider_rates`, issues #268 and #445):
+    `MODEL_PROVIDER=openrouter` prices from `model-policy/openrouter.json`
+    instead of the Bedrock constants, at the rates of the models the admin
+    has actually selected. Pass `dynamodb_resource` wherever one is in scope
+    — without it the reservation falls back to the policy pins, which is the
+    right answer only when no admin selection can be in force.
 
     Folding the retry budget into the reservation at reserve-time means any
     sequence of attempts within that budget cannot overshoot the reservation
@@ -419,7 +519,7 @@ def compute_worst_case_reservation_usd_cents() -> int:
     """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
-        _active_provider_rates()
+        _active_provider_rates(dynamodb_resource)
     )
     primary_usd = MAX_INPUT_TOKENS * (
         primary_input_rate / 1_000_000
@@ -434,6 +534,7 @@ def compute_worst_case_reservation_usd_cents() -> int:
 def compute_actual_usd_cents_from_usage(
     primary_usage: dict[str, int] | None,
     critic_usage: dict[str, int] | None,
+    dynamodb_resource: Any = None,
 ) -> int:
     """Actual settled cost (cents) for one review's primary + critic passes,
     priced from REAL provider-reported token usage rather than the
@@ -448,13 +549,14 @@ def compute_actual_usd_cents_from_usage(
     (e.g. the critic pass never ran because the primary pass failed closed)
     contributes $0 rather than raising.
 
-    Uses `_active_provider_rates()` -- the SAME provider-aware rate table
-    `compute_worst_case_reservation_usd_cents` uses for this review's
-    reservation, so a review's reservation and its eventual settlement are
-    always priced against the same provider.
+    Uses `_active_provider_rates()` -- the SAME provider-aware,
+    selection-aware rate table `compute_worst_case_reservation_usd_cents`
+    uses for this review's reservation, so a review's reservation and its
+    eventual settlement are always priced against the same provider and the
+    same chosen models.
     """
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
-        _active_provider_rates()
+        _active_provider_rates(dynamodb_resource)
     )
     total_usd = 0.0
     if primary_usage:
@@ -488,7 +590,10 @@ def reserve_spend(
     table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
     now_epoch = time.time() if now_epoch is None else now_epoch
     spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
-    reservation_amount_cents = compute_worst_case_reservation_usd_cents()
+    # Priced against the models this review will actually run on (#445), not
+    # the policy pins -- the same resource the reservation is written on
+    # carries the admin selection.
+    reservation_amount_cents = compute_worst_case_reservation_usd_cents(dynamodb_resource)
     daily_cap_cents = int(
         os.environ.get("DAILY_SPEND_CAP_USD_CENTS", str(DAILY_SPEND_CAP_USD_CENTS_DEFAULT))
     )
@@ -577,11 +682,23 @@ def settle_spend(
     the orphan reconciler on the dead-execution path — so a failed or
     retried review still settles (possibly to $0 actual spend) rather than
     silently holding the worst-case reservation forever.
+
+    The amount to reverse is RECOMPUTED here rather than read back from the
+    reservation, exactly as it always has been, and so is priced against the
+    admin model selection in force right now (#445). KNOWN RESIDUAL: an admin
+    who changes the selection while a review is in flight makes the reversal
+    disagree with what that review reserved, leaving the day's
+    `reserved_usd_cents` counter off by the difference until the UTC-midnight
+    row rolls over. Same shape as the pre-existing mid-day
+    DAILY_SPEND_CAP_USD_CENTS window documented in `reserve_spend`. Closing
+    it properly means persisting the reserved amount alongside the
+    reservation id and reversing the stored figure — issue #459, deliberately
+    kept out of #445 rather than smuggled into it.
     """
     table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
     now_epoch = time.time() if now_epoch is None else now_epoch
     spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
-    reservation_amount_cents = compute_worst_case_reservation_usd_cents()
+    reservation_amount_cents = compute_worst_case_reservation_usd_cents(dynamodb_resource)
     # Reverse the worst-case reservation, apply the actual settled cost.
     delta = actual_usd_cents - reservation_amount_cents
     table.update_item(
@@ -1014,6 +1131,7 @@ def submit_review(
         dynamodb_resource,
         opf_lineage=opf_lineage,
         toaster_guidance=toaster_guidance,
+        upload_s3_key=upload_pointer,
     )
 
     ensure_execution_started(submission, execution_input_json, dynamodb_resource, sfn_client)
@@ -1317,6 +1435,7 @@ def _create_review_row(
     dynamodb_resource: Any,
     opf_lineage: dict[str, str | int | None] | None = None,
     toaster_guidance: str = "",
+    upload_s3_key: str = "",
 ) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
@@ -1361,6 +1480,18 @@ def _create_review_row(
     if toaster_guidance.strip():
         item["toaster_guidance"] = toaster_guidance
 
+    # Issue #449: the pointer to the INPUT document this review ran against.
+    # It already existed on the `review_submissions` row (`upload_pointer`) and
+    # inside the execution input, but neither is on the read path -- so "let me
+    # re-read what I actually sent you" was unanswerable from the review
+    # itself, and there was nothing for a download route to derive a key from
+    # without trusting client input. Recorded on the same "absent, never a null
+    # placeholder" terms as the fields above, so a row written before this
+    # issue stays byte-identical (and renders as "not recorded" rather than
+    # offering a download that cannot work).
+    if upload_s3_key:
+        item["upload_s3_key"] = upload_s3_key
+
     table.put_item(Item=item)
 
 
@@ -1387,25 +1518,60 @@ def record_stage_failure(
     falls back to the generic `ERROR` status, same as today's unmapped
     failure behavior -- only `failing_stage` becomes accurate.
 
-    Returns the terminal status that was written.
+    NEVER DOWNGRADES A SUCCEEDED REVIEW (issue #446). The write is guarded by
+    a ConditionExpression so it cannot overwrite a row that already holds
+    `REVIEW_STATUS_SUCCESS_TERMINAL`. It used to be unconditional, and that
+    took down every successful review on a live deployment: the persist stage
+    wrote the redline object and `status=DONE`, the NEXT statement (settling
+    the spend reservation) raised, and this function then clobbered the good
+    row with `ERROR` -- destroying a result that was already complete and
+    downloadable. The trap was never specific to the settle: ANY exception
+    raised after a successful terminal write reached this write. A review that
+    finished must stay finished, so `ConditionalCheckFailedException` is
+    swallowed as a deliberate no-op.
+
+    Only the SUCCESS terminal is protected -- `ERROR` /
+    `MANUAL_REVIEW_REQUIRED` / `QUARANTINED` rows stay writable, so
+    reclassifying an already-failed review is unaffected.
+
+    Returns the terminal status the row actually holds afterwards: the status
+    written, or the untouched `REVIEW_STATUS_SUCCESS_TERMINAL` when the guard
+    refused the write (callers log/branch on this and must not be told `ERROR`
+    was recorded when it was not).
     """
     now_epoch = time.time() if now_epoch is None else now_epoch
     terminal_status = STAGE_FAILURE_REASON_STATUS.get(reason, "ERROR")
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
-    table.update_item(
-        Key={"review_id": review_id},
-        UpdateExpression=(
-            "SET #status = :status, failing_stage = :stage, "
-            "reason = :reason, updated_at = :now"
-        ),
-        ExpressionAttributeNames={"#status": "status"},
-        ExpressionAttributeValues={
-            ":status": terminal_status,
-            ":stage": stage_name,
-            ":reason": reason,
-            ":now": str(int(now_epoch)),
-        },
-    )
+    try:
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=(
+                "SET #status = :status, failing_stage = :stage, "
+                "reason = :reason, updated_at = :now"
+            ),
+            ConditionExpression="attribute_not_exists(#status) OR #status <> :succeeded",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":status": terminal_status,
+                ":stage": stage_name,
+                ":reason": reason,
+                ":now": str(int(now_epoch)),
+                ":succeeded": REVIEW_STATUS_SUCCESS_TERMINAL,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - only the guard is swallowed
+        if not _is_conditional_check_failed(exc):
+            raise
+        logger.warning(
+            "Refusing to mark review %s as %s at stage %s (reason %s): it is already %s "
+            "-- the result is persisted and stays intact (issue #446).",
+            review_id,
+            terminal_status,
+            stage_name,
+            reason,
+            REVIEW_STATUS_SUCCESS_TERMINAL,
+        )
+        return REVIEW_STATUS_SUCCESS_TERMINAL
     return terminal_status
 
 
@@ -1505,9 +1671,39 @@ def get_review_detail(
         # pipeline stage a failure occurred in, when
         # `record_stage_failure` has written one.
         "failing_stage": item.get("failing_stage"),
+        # Live progress (issue #447): which of the review spine's four
+        # user-visible sub-stages (primary_pass / critic_pass /
+        # reconciliation / redline -- scripts/review_spine.py's
+        # PROGRESS_STAGES) is running RIGHT NOW, written by
+        # pipeline_runner._write_progress_stage as each one starts. None on a
+        # review that has not reached the spine yet, on one whose runner
+        # predates this field, and on any deployment target that does not
+        # report progress -- the UI falls back to its honest indeterminate
+        # treatment rather than inventing a step. Same faithful-projection
+        # convention as every field above: this is a read of the row, never a
+        # computation of pipeline state (and emphatically never elapsed
+        # time).
+        "progress_stage": item.get("progress_stage"),
         "message": STATUS_USER_MESSAGES.get(status_value),
         "has_output": bool(item.get("output_s3_key")),
+        # Issue #449: whether the INPUT document is still identifiable from
+        # this row (the pointer, never the key itself -- same discipline as
+        # `has_output` directly above). False for every review created before
+        # the pointer was recorded; that is a truthful "not recorded", not a
+        # claim that the document is gone.
+        "has_input": bool(item.get("upload_s3_key")),
         "playbook_id": item.get("playbook_id"),
+        # Issue #449: WHICH MODELS RAN THIS REVIEW. Written at terminal-write
+        # time by pipeline_runner._write_real_terminal from the bundle metadata
+        # the spine actually resolved its primary/critic calls from. None for a
+        # review that predates the field, for the mock pipeline (which invokes
+        # no model at all), and for one that failed before the spine ran -- and
+        # deliberately NOT back-filled from today's configured model: a review
+        # run last week under a different model must never be relabelled with
+        # the one configured now (this gets sharper once an admin can change
+        # models). "Not recorded" is the honest answer; a guess is not.
+        "primary_model_id": item.get("primary_model_id"),
+        "critic_model_id": item.get("critic_model_id"),
         # Issue #431: the per-review free-text guidance this review was
         # submitted with, so the Review tab can show back (read-only) which
         # instructions governed it. None for a review submitted without any
@@ -1547,14 +1743,33 @@ _REVIEW_LIST_ITEM_FIELDS = (
     "confidence_band",
     "created_at",
     "updated_at",
+    # Issue #449 -- the provenance the History table renders per row: WHICH
+    # version of the governing rules applied, and WHICH models ran each step.
+    # None on a row that predates each field; the UI renders "not recorded"
+    # rather than substituting today's value (see get_review_detail).
+    "policy_version",
+    "posture_version",
+    "primary_model_id",
+    "critic_model_id",
 )
 
 
 def _review_list_item(item: dict[str, Any]) -> dict[str, Any]:
     """Lean summary shape for the list view -- confidential per-review
-    content (verdict_summary, issues, critic_delta) is reserved for the
-    single-review detail route, not the list."""
-    return {field: item.get(field) for field in _REVIEW_LIST_ITEM_FIELDS}
+    content (verdict_summary, issues, critic_delta, toaster_guidance) is
+    reserved for the single-review detail route, not the list.
+
+    Issue #449 adds the two DOWNLOAD-AVAILABILITY booleans the History table
+    needs. They are booleans, never the S3 keys they are derived from: the
+    list is the one response an admin receives for every user's reviews, and
+    an object key is storage-layout detail a caller has no use for (the
+    detail route has projected `has_output` this way since #84 -- this just
+    applies the same rule to the input pointer).
+    """
+    projection = {field: item.get(field) for field in _REVIEW_LIST_ITEM_FIELDS}
+    projection["has_output"] = bool(item.get("output_s3_key"))
+    projection["has_input"] = bool(item.get("upload_s3_key"))
+    return projection
 
 
 def _scan_all_reviews(table: Any) -> list[dict[str, Any]]:
@@ -1593,13 +1808,24 @@ def _list_reviews_for_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
 def list_reviews(
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
+    owner_scoped: bool = False,
 ) -> list[dict[str, Any]]:
     """GET /api/reviews (issue #84): the caller's own reviews, newest first;
     an admin sees every review (ARCHITECTURE.md Routes table: "List my
-    reviews (admin: all reviews)")."""
+    reviews (admin: all reviews)").
+
+    `owner_scoped=True` (issue #449) opts OUT of the admin widening: the
+    listing is restricted to the caller's own rows no matter who the caller
+    is. The History tab asks for this. An admin's History is their own
+    history -- a cross-user history view is a different surface with
+    different consequences (it shows every user's contract activity in one
+    table) and is explicitly out of scope for that ticket. Nothing about the
+    default is changed: an admin calling GET /api/reviews without the
+    parameter still sees everything, exactly as documented.
+    """
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
 
-    if _is_admin_caller(caller_user_row):
+    if _is_admin_caller(caller_user_row) and not owner_scoped:
         items = _scan_all_reviews(table)
     else:
         owner_sub = caller_user_row.get("cognito_sub", "")
@@ -1607,3 +1833,153 @@ def list_reviews(
 
     items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
     return [_review_list_item(i) for i in items]
+
+
+# ---------------------------------------------------------------------------
+# Admin diagnostics (issue #443) -- GET /api/admin/diagnostics/recent-failures
+# ---------------------------------------------------------------------------
+
+# A terminal status that is NOT a failure, and therefore never a diagnostics
+# row. `DONE` is the success terminal; `SUPERSEDED` is a post-terminal
+# ADMINISTRATIVE overlay (ARCHITECTURE.md -> QUARANTINED/SUPERSEDED are
+# overlays written by an admin action or a rollback sweep, not by the
+# pipeline), so a superseded review is not a thing that "failed" and has no
+# cause to explain. QUARANTINED deliberately stays IN: it is a review the
+# pipeline stopped, and its reason (`submission_time_bundle_retired`, written
+# by `verify_submission_time_bundle`) is exactly what an operator is here to
+# read. That token is stored under `quarantine_reason`, not `reason`, which is
+# why the projection below resolves the reason rather than reading one
+# attribute.
+_DIAGNOSTIC_NON_FAILURE_STATUSES = frozenset({REVIEW_STATUS_SUCCESS_TERMINAL, "SUPERSEDED"})
+
+# Derived, not hand-listed, on purpose: a terminal failure status added to
+# REVIEW_STATUSES_TERMINAL later must show up in diagnostics automatically.
+# The safety property of this route does not come from which ROWS are
+# selected -- it comes from `_RECENT_FAILURE_FIELDS` below, which is what
+# bounds the CONTENT that leaves the backend.
+DIAGNOSTIC_FAILURE_STATUSES = frozenset(
+    REVIEW_STATUSES_TERMINAL - _DIAGNOSTIC_NON_FAILURE_STATUSES
+)
+
+# Default and hard ceiling on how many rows the route will return. The cap is
+# not advisory: a caller-supplied `limit` is clamped into [1, MAX], so no
+# request can turn this into a full-table dump.
+RECENT_FAILURES_DEFAULT_LIMIT = 50
+RECENT_FAILURES_MAX_LIMIT = 200
+
+# THE SECURITY BOUNDARY OF THIS ROUTE (issue #443).
+#
+# This is an ALLOWLIST, and it is the whole reason the Diagnostics tab is not
+# a log viewer. A reviews row carries Confidential document substance
+# (`verdict_summary`, `issues`, `issue_rationale_text`, the per-review
+# `toaster_guidance` the submitter typed) and deployment internals
+# (`output_s3_key`, execution names). None of it may reach an operator's
+# browser through a diagnostics panel -- the same rule
+# `retention._HOLD_LIST_FIELDS` applies to the legal-hold list view, for the
+# same reason (docs/data-handling.md purge invariant 5; threat-model.md
+# "Malicious admin or compromised session").
+#
+# So rows are PROJECTED field by field, never spread. Adding a field here is
+# a deliberate disclosure decision; forgetting to add one leaks nothing.
+# `reason` is safe to serve precisely because issue #442 made it a controlled
+# TOKEN vocabulary that contains no status code, endpoint, exception text, or
+# key material -- the frontend turns the token into prose.
+_RECENT_FAILURE_FIELDS = (
+    "review_id",
+    "created_at",
+    "failing_stage",
+    "reason",
+    "status",
+)
+
+
+def _resolve_failure_reason(item: dict[str, Any]) -> Any:
+    """The failure reason token for a reviews row, wherever it was written.
+
+    The SAME three-field coalesce `get_review_detail` runs, and it has to be:
+    the token is not always stored under `reason`. The only QUARANTINED writer
+    in this module, `verify_submission_time_bundle`, writes
+    `quarantine_reason` -- the documented post-terminal administrative overlay
+    field (docs/data-handling.md) -- and writes neither `reason` nor
+    `failing_stage`. Reading the bare `reason` attribute therefore returned
+    null for EVERY quarantined review: the submitter saw the true cause on
+    their own Review tab (which coalesces) while an admin's Diagnostics tab
+    said "no cause was recorded". That is exactly the "the system knows, the
+    operator cannot see" failure this route exists to remove, and a drift
+    between two surfaces the ticket set out to prevent.
+
+    This coalesces INTO the single `reason` output key. `quarantine_reason` is
+    deliberately NOT added to `_RECENT_FAILURE_FIELDS`: the allowlist stays at
+    exactly five served fields, and the disclosure decision is unchanged --
+    every one of these values is an issue-#442 controlled token.
+    """
+    return (
+        item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")
+    )
+
+
+def list_recent_failures(
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+    limit: int = RECENT_FAILURES_DEFAULT_LIMIT,
+) -> list[dict[str, Any]]:
+    """GET /api/admin/diagnostics/recent-failures -- why recent reviews failed.
+
+    Answers, from inside the app, the question that on 2026-08-01 could only
+    be answered by driving the Coolify UI into a production container's logs:
+    *why* did these reviews fail? Each row carries the #442 `reason` token,
+    the stage that failed, the terminal status, and when -- and nothing else.
+
+    NOT A LOG VIEWER (issue #443, explicitly out of scope): no stack trace,
+    no exception message, no prompt or document substance, no key material,
+    no raw endpoint. That guarantee is structural, not editorial -- the
+    response is projected through `_RECENT_FAILURE_FIELDS`, so a field added
+    to the reviews row tomorrow cannot appear here by accident.
+
+    Bounded by construction: `limit` is clamped into
+    [1, RECENT_FAILURES_MAX_LIMIT], newest first by `created_at`.
+
+    Raises HTTPException(403) for a non-admin caller. This is instance-wide
+    visibility -- every user's failures, not the caller's own -- so unlike
+    `get_review_detail` (which 404s a non-owner to keep review ids
+    non-enumerable) there is no "your own row" case to be coy about: you are
+    an admin or you get nothing.
+    """
+    if not _is_admin_caller(caller_user_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to view diagnostics.",
+        )
+
+    try:
+        requested = int(limit)
+    except (TypeError, ValueError):
+        requested = RECENT_FAILURES_DEFAULT_LIMIT
+    bounded = max(1, min(requested, RECENT_FAILURES_MAX_LIMIT))
+
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    failures = [
+        item
+        for item in _scan_all_reviews(table)
+        if str(item.get("status") or "") in DIAGNOSTIC_FAILURE_STATUSES
+    ]
+    # Same ordering key as `list_reviews`: `created_at` is written as a
+    # fixed-width epoch-second STRING by `_create_review_row`, so a plain
+    # reverse string sort is a true newest-first ordering.
+    failures.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return [
+        # `json_safe` because these rows come back through boto3's resource
+        # API, which deserializes every stored number to `decimal.Decimal` --
+        # unserializable by JSONResponse. That took GET /api/users down in
+        # production (issue #440, commit df60971) and the unit fakes cannot
+        # see it, since they store plain ints.
+        json_safe(
+            {
+                field: (
+                    _resolve_failure_reason(item) if field == "reason" else item.get(field)
+                )
+                for field in _RECENT_FAILURE_FIELDS
+            }
+        )
+        for item in failures[:bounded]
+    ]

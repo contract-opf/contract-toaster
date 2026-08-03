@@ -42,6 +42,17 @@ Endpoints:
   POST /api/admin/retention/holds/{review_id}    — admin: place a legal hold (#94).
   DELETE /api/admin/retention/holds/{review_id}  — admin: release a legal hold (#94).
 
+  GET  /api/admin/diagnostics/recent-failures  — admin: why recent reviews
+                      failed (#443) — a bounded, newest-first list of recent
+                      non-OK terminal reviews carrying ONLY review_id,
+                      created_at, failing_stage, the #442 `reason` token, and
+                      the terminal status. `?limit=N` is clamped into
+                      [1, reviews.RECENT_FAILURES_MAX_LIMIT]. Deliberately not
+                      a log viewer: no stack trace, exception message, prompt
+                      or document substance, or key material is reachable
+                      through it (the response is an explicit field
+                      projection, see reviews.list_recent_failures).
+
   POST /api/admin/playbooks/{playbook_id}/versions/{version}/activate
                       — admin: activate a playbook release-bundle version,
                         Gate-7-enforced and wired to the resolver (#242).
@@ -190,7 +201,9 @@ from src.demo_auth import (
 from src.model_settings import (
     clear_model_key,
     get_model_key_settings,
+    get_model_selection_settings,
     set_model_key,
+    set_model_selection,
 )
 from src.playbook_versions import (
     PlaybookVersionConflictError,
@@ -206,6 +219,7 @@ from src.playbook_versions import (
     update_playbook_version_notes,
 )
 from src.review_routes import router as review_router
+from src.reviews import RECENT_FAILURES_DEFAULT_LIMIT, list_recent_failures
 from src.retention import (
     RETENTION_WINDOW_FOREVER,
     get_retention_settings,
@@ -518,6 +532,48 @@ async def delete_admin_model_key(
     return JSONResponse(content=result)
 
 
+@app.get("/api/admin/model-selection", include_in_schema=True)
+async def get_admin_model_selection(
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: which models reviews run on, and which ones may be chosen
+    (issue #445).
+
+    Returns the selectable catalogue from model-policy/openrouter.json (ids,
+    tier labels, notes, per-million rates) plus the stored and effective
+    primary/critic ids. A SIBLING of /api/admin/model-key rather than an
+    extension of it, so the key route's write-only response shape is
+    untouched — nothing here reads or returns key material. Raises HTTP 403
+    for a non-admin caller.
+    """
+    settings = get_model_selection_settings(caller_row, dynamodb_resource)
+    return JSONResponse(content=settings)
+
+
+@app.post("/api/admin/model-selection", include_in_schema=True)
+async def post_admin_model_selection(
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: set the instance-wide primary/critic model choice (issue #445).
+
+    Body: {"primary_model_id": str|null, "critic_model_id": str|null} — each
+    must be on model-policy/openrouter.json's `selectable` allowlist, or
+    ""/null to revert that role to the policy default. Takes effect on the
+    next review, no redeploy. Raises HTTP 403 for a non-admin caller, 400 for
+    an unlisted model or on a deployment with no settings store.
+    """
+    result = set_model_selection(
+        body.get("primary_model_id"),
+        body.get("critic_model_id"),
+        caller_row,
+        dynamodb_resource,
+    )
+    return JSONResponse(content=result)
+
+
 @app.post("/api/auth/login", include_in_schema=True)
 async def post_auth_login(
     body: dict[str, Any] = Body(...),
@@ -645,6 +701,31 @@ async def delete_admin_retention_hold(
     an unknown review."""
     result = release_legal_hold(review_id, caller_row, dynamodb_resource, s3_client)
     return JSONResponse(content=result)
+
+
+@app.get("/api/admin/diagnostics/recent-failures", include_in_schema=True)
+async def get_admin_diagnostics_recent_failures(
+    limit: int = RECENT_FAILURES_DEFAULT_LIMIT,
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: why recent reviews failed (issue #443).
+
+    Returns a BOUNDED list of recent non-OK terminal reviews, newest first,
+    each carrying only `review_id`, `created_at`, `failing_stage`, the #442
+    `reason` token, and the terminal `status`. `limit` is clamped into
+    [1, `reviews.RECENT_FAILURES_MAX_LIMIT`], so no request can turn this
+    into a full-table dump.
+
+    This is NOT a log viewer, and deliberately so: no stack trace, exception
+    message, prompt or document substance, key material, or raw endpoint is
+    reachable through it. The response is projected through
+    `reviews._RECENT_FAILURE_FIELDS`; see `reviews.list_recent_failures`.
+
+    Raises HTTP 403 for a non-admin caller.
+    """
+    failures = list_recent_failures(caller_row, dynamodb_resource, limit=limit)
+    return JSONResponse(content={"failures": failures})
 
 
 @app.post(

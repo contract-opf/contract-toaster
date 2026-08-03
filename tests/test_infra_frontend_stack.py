@@ -13,6 +13,11 @@ Verifies that all acceptance criteria for issue #54 are satisfied:
 
   C. Amplify Auth configured via aws-exports reference or Amplify.configure call.
      The app uses the Authenticator component from @aws-amplify/ui-react.
+     Judged over shipping code only — non-test files with comments stripped —
+     and it demands both a real `import { Authenticator } from
+     '@aws-amplify/ui-react'` and a rendered `<Authenticator>` element. See #451:
+     the previous bare-word grep passed on comments and on the `vi.mock` calls
+     that replace the Authenticator, so it could not fail.
 
   D. Header shows signed-in user email.
      An App.tsx (or equivalent) references the user's email.
@@ -42,6 +47,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 from infra_synth_helper import NEUTRAL_CDK_CONTEXT
 
@@ -53,6 +59,305 @@ FRONTEND_STACK_PATH = INFRA / "lib" / "nested" / "frontend-stack.ts"
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Source-corpus helpers
+#
+# Greps over "every file under frontend/src/" are worthless as acceptance
+# checks: a mention in a comment, or a `vi.mock` that *replaces* the very thing
+# being asserted, satisfies them just as well as real code does. Issue #451
+# proved exactly that for Check C. Everything below exists so a check can ask
+# about *shipping code* — non-test files, comments removed.
+# ---------------------------------------------------------------------------
+
+_TEST_DIR_NAMES = {"__tests__", "__mocks__"}
+
+
+def _is_test_source(path: Path) -> bool:
+    """True for anything that is test scaffolding rather than shipping code."""
+    if any(part in _TEST_DIR_NAMES for part in path.parts):
+        return True
+    name = path.name
+    return ".test." in name or ".spec." in name or name == "setupTests.ts"
+
+
+def _frontend_source_files() -> list[Path]:
+    """Every non-test .ts/.tsx file under frontend/src/, in stable order."""
+    src_dir = FRONTEND_DIR / "src"
+    if not src_dir.is_dir():
+        return []
+    return [
+        p
+        for p in sorted(src_dir.rglob("*.ts*"))
+        if p.suffix in (".ts", ".tsx") and not _is_test_source(p)
+    ]
+
+
+class _Scan(NamedTuple):
+    """Result of one pass of the TypeScript comment scanner."""
+
+    stripped: str
+    """`src` with `//` and `/* */` comments removed, newlines preserved."""
+
+    open_quote: str | None
+    """Quote character still open at EOF — must be None for a sane parse."""
+
+    template_lines: frozenset[int]
+    """1-based line numbers of `stripped` holding template-literal content.
+
+    CSS inside a `<style>{`…`}</style>` template is *string* content, so a
+    `/* … */` in it is correctly preserved rather than stripped. These lines
+    are therefore exempt from the "no comment survived" corpus assertion.
+    """
+
+
+_WORD_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
+
+def _scan_ts(src: str) -> _Scan:
+    """Scan `src`, stripping `//` and `/* */` comments.
+
+    A small hand-rolled scanner rather than a regex, because it must not treat
+    the `//` inside a string literal (`'https://…'`) as a comment. Single,
+    double and template quotes are tracked; newlines are preserved so that
+    reported line numbers still line up with the file on disk.
+
+    A `'` preceded by a word character does NOT open a string. Prose in JSX is
+    full of apostrophes (`a second admin's confirmation`), and treating one as
+    a string opener puts the scanner into a bogus in-string state for the rest
+    of the file, silently disabling comment stripping from that point on —
+    which is #451 reappearing by way of an unrelated file. TypeScript never
+    starts a string literal directly after an identifier or digit, so the rule
+    costs nothing. `open_quote` is reported so callers can prove that no file
+    in the corpus ends mid-string.
+    """
+    out: list[str] = []
+    template_lines: set[int] = set()
+    line = 1
+    i = 0
+    n = len(src)
+    quote: str | None = None
+
+    def emit(text: str) -> None:
+        nonlocal line
+        for ch in text:
+            out.append(ch)
+            if quote == "`":
+                template_lines.add(line)
+            if ch == "\n":
+                line += 1
+
+    while i < n:
+        ch = src[i]
+        if quote is not None:
+            if ch == "\\" and i + 1 < n:
+                emit(src[i : i + 2])
+                i += 2
+                continue
+            emit(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"`" or (ch == "'" and not (i > 0 and src[i - 1] in _WORD_CHARS)):
+            quote = ch
+            emit(ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < n and src[i + 1] == "/":
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and src[i + 1] == "*":
+            i += 2
+            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
+                if src[i] == "\n":
+                    emit("\n")
+                i += 1
+            i += 2
+            continue
+        emit(ch)
+        i += 1
+
+    return _Scan("".join(out), quote, frozenset(template_lines))
+
+
+def _strip_ts_comments(src: str) -> str:
+    """Return `src` with `//` and `/* */` comments removed."""
+    return _scan_ts(src).stripped
+
+
+def _comment_like_lines(scan: _Scan) -> list[tuple[int, str]]:
+    """Lines of `scan.stripped` that still look like a comment.
+
+    Template-literal lines are excluded: a `/* … */` inside a CSS-in-template
+    block is string content the stripper is *supposed* to keep.
+    """
+    found: list[tuple[int, str]] = []
+    for number, text in enumerate(scan.stripped.splitlines(), 1):
+        if number in scan.template_lines:
+            continue
+        if _is_comment_line(text):
+            found.append((number, text.strip()))
+    return found
+
+
+def _is_comment_line(text: str) -> bool:
+    """True when `text` is a source line whose content begins a comment."""
+    stripped = text.lstrip()
+    return stripped.startswith(("//", "/*", "*"))
+
+
+def _match_in_shipping_code(pattern: re.Pattern[str], original: str) -> bool:
+    """True when `pattern` matches `original` as real code, not as commentary.
+
+    Defence in depth, deliberately independent of the comment stripper: a match
+    is rejected when the corresponding line of the *unmodified* source begins
+    with `//`, `*` or `/*`. So even if the scanner above regressed to a no-op,
+    a commented-out import or a doc-comment mention of `<Authenticator>` still
+    cannot satisfy Check C on its own.
+    """
+    stripped = _strip_ts_comments(original)
+    original_lines = original.splitlines()
+    for match in pattern.finditer(stripped):
+        index = stripped.count("\n", 0, match.start())
+        line = original_lines[index] if index < len(original_lines) else ""
+        if _is_comment_line(line):
+            continue
+        return True
+    return False
+
+
+def _frontend_code(files: list[Path] | None = None) -> str:
+    """Concatenated shipping code of frontend/src/ — no tests, no comments."""
+    return "\n".join(
+        _strip_ts_comments(_read(p)) for p in (files if files is not None else _frontend_source_files())
+    )
+
+
+def _check_comment_stripper(source_files: list[Path]) -> list[str]:
+    """Guard the guard — against the real corpus, not only a sample.
+
+    If the scanner ever silently degrades, every check built on it quietly
+    returns to matching comments, which is the #451 defect coming back wearing
+    a different hat. A 5-line synthetic sample cannot show that: the review of
+    the first fix found this self-check printing [PASS] while the scanner was
+    in fact mis-parsing `frontend/src/AdminRetention.tsx` from a prose
+    apostrophe onward. So the sample now carries the cases that actually bite
+    (prose apostrophe, `vi.mock` of the package, commented-out import and
+    usage), and the corpus itself is asserted over as well.
+    """
+    failures: list[str] = []
+
+    # --- Negative sample: nothing here is shipping code. -------------------
+    commented_only = (
+        "// import { Authenticator } from '@aws-amplify/ui-react';\n"
+        "/* <Authenticator> in a block comment */\n"
+        "{/* <Authenticator hideSignUp> in a JSX comment */}\n"
+        "/**\n"
+        " * <Authenticator> wrapper — as in the PasswordLogin.tsx doc comment.\n"
+        " */\n"
+        "vi.mock('@aws-amplify/ui-react', () => ({ Authenticator: stub }));\n"
+        "const note = <p>a second admin's confirmation is required</p>;\n"
+        "const url = 'https://example.test/no-comment-here';\n"
+    )
+    failures += _assert(
+        not _match_in_shipping_code(_IMPORT_RE, commented_only)
+        and not _match_in_shipping_code(_USAGE_RE, commented_only),
+        "commented-out and vi.mock'd Authenticator forms do NOT satisfy Check C",
+        "Self-check: the #451 defect exactly — a comment or a mock that "
+        "*replaces* the Authenticator must not read as a real import or usage.",
+    )
+
+    scan = _scan_ts(commented_only)
+    failures += _assert(
+        scan.open_quote is None
+        and "https://example.test/no-comment-here" in scan.stripped
+        and not _comment_like_lines(scan)
+        and "Authenticator" not in scan.stripped.split("vi.mock")[0],
+        "comment stripper survives a prose apostrophe and preserves string literals",
+        "Self-check of the scanner: expected no comment to survive, the URL "
+        f"intact, and no quote left open. Got: {scan.stripped!r} "
+        f"(open_quote={scan.open_quote!r})",
+    )
+
+    # --- The second line of defence, exercised without the stripper. -------
+    # `_match_in_shipping_code` rejects a match whose *original* line begins a
+    # comment, so Check C does not rest on the hand-rolled lexer alone. These
+    # are the exact forms that beat the first fix: the injected `//` pair and
+    # PasswordLogin.tsx:8.
+    comment_forms = (
+        "// import { Authenticator } from '@aws-amplify/ui-react';",
+        "  // <Authenticator hideSignUp>",
+        " * <Authenticator> wrapper.",
+        "/* <Authenticator> */",
+    )
+    code_forms = (
+        "import { Authenticator } from '@aws-amplify/ui-react';",
+        "    <Authenticator hideSignUp socialProviders={['google']}>",
+    )
+    failures += _assert(
+        all(_is_comment_line(line) for line in comment_forms)
+        and not any(_is_comment_line(line) for line in code_forms),
+        "comment lines are rejected independently of the comment stripper",
+        "Self-check of the second line of defence: expected every form in "
+        f"{comment_forms} to be treated as commentary and every form in "
+        f"{code_forms} to be treated as code.",
+    )
+
+    # --- Positive sample: real code must still be seen. ---------------------
+    shipping = (
+        "import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';\n"
+        "const el = <Authenticator hideSignUp socialProviders={['google']}>{kids}</Authenticator>;\n"
+    )
+    failures += _assert(
+        _match_in_shipping_code(_IMPORT_RE, shipping)
+        and _match_in_shipping_code(_USAGE_RE, shipping),
+        "a real import and a real <Authenticator> element DO satisfy Check C",
+        "Self-check: the check must not be so strict it rejects genuine code.",
+    )
+
+    # --- The real corpus. ---------------------------------------------------
+    unbalanced: list[str] = []
+    leftover: list[str] = []
+    for path in source_files:
+        file_scan = _scan_ts(_read(path))
+        rel = path.relative_to(REPO_ROOT)
+        if file_scan.open_quote is not None:
+            unbalanced.append(f"{rel} (ends inside {file_scan.open_quote!r})")
+        leftover += [
+            f"{rel}:{number}: {text[:60]}"
+            for number, text in _comment_like_lines(file_scan)
+        ]
+
+    failures += _assert(
+        not unbalanced,
+        "comment stripper ends every frontend/src/ file with no string left open",
+        "A file that ends mid-string was mis-parsed somewhere, and comment "
+        "stripping stopped there — see #451. Files: " + "; ".join(unbalanced),
+    )
+    failures += _assert(
+        not leftover,
+        "no comment line survives stripping anywhere in frontend/src/ shipping code",
+        "These lines still begin a comment after stripping, so any check over "
+        "this corpus can be satisfied by commentary: " + "; ".join(leftover[:10]),
+    )
+
+    return failures
+
+
+# A real named import of Authenticator from @aws-amplify/ui-react. Tolerates
+# multi-line / multi-symbol import clauses and either quote style, but the
+# symbol and the package must appear in one statement.
+_IMPORT_RE = re.compile(
+    r"import\s*\{[^}]*\bAuthenticator\b[^}]*\}\s*from\s*['\"]@aws-amplify/ui-react['\"]",
+    re.DOTALL,
+)
+
+# A real <Authenticator …> element actually rendered. `useAuthenticator` must
+# not satisfy this, hence the explicit '<' and the trailing character class.
+_USAGE_RE = re.compile(r"<Authenticator[\s/>]")
 
 
 def _assert(condition: bool, label: str, detail: str = "") -> list[str]:
@@ -177,41 +482,73 @@ def check_c_amplify_auth_config() -> list[str]:
     if not FRONTEND_DIR.is_dir():
         return _assert(False, "frontend/ directory exists (prerequisite)")
 
-    # Look in all .tsx / .ts files under frontend/src/
     src_dir = FRONTEND_DIR / "src"
     if not src_dir.is_dir():
         return _assert(False, "frontend/src/ directory exists (prerequisite)")
 
-    all_src = ""
-    for f in src_dir.rglob("*.tsx"):
-        all_src += _read(f)
-    for f in src_dir.rglob("*.ts"):
-        all_src += _read(f)
-
-    has_authenticator = bool(
-        re.search(
-            r"Authenticator|authenticator|from.*@aws-amplify/ui-react",
-            all_src,
-            re.IGNORECASE,
-        )
-    )
+    # Shipping code only. Until #451 this scanned every file including
+    # frontend/src/__tests__/ and matched a bare case-insensitive "authenticator"
+    # anywhere — so a passing mention in a comment, or the `vi.mock(
+    # '@aws-amplify/ui-react')` calls that *replace* the Authenticator, kept the
+    # check green on a codebase with no Amplify auth at all. It is now scoped to
+    # non-test files with comments stripped, and it demands a real import plus a
+    # real JSX usage.
+    source_files = _frontend_source_files()
     failures += _assert(
-        has_authenticator,
-        "Authenticator component from @aws-amplify/ui-react used in frontend/src/",
-        "Per AC: 'Use @aws-amplify/ui-react Authenticator component for the sign-in flow.'",
+        bool(source_files),
+        "frontend/src/ contains non-test .ts/.tsx source (prerequisite)",
+    )
+    if not source_files:
+        return failures
+
+    failures += _check_comment_stripper(source_files)
+
+    # (1) A real named import of Authenticator from @aws-amplify/ui-react.
+    importing_files = [p for p in source_files if _match_in_shipping_code(_IMPORT_RE, _read(p))]
+    failures += _assert(
+        bool(importing_files),
+        "Authenticator is imported from '@aws-amplify/ui-react' in non-test frontend/src/ code",
+        "Per AC: 'Use @aws-amplify/ui-react Authenticator component for the sign-in flow.' "
+        "No import statement naming Authenticator was found outside tests and comments — "
+        "a mention in a comment or a vi.mock in __tests__/ does not satisfy this.",
     )
 
-    # Amplify.configure or aws-exports reference
-    has_amplify_configure = bool(
-        re.search(
-            r"Amplify\.configure|amplify\.configure|aws-exports|awsExports|amplifyconfig",
-            all_src,
-            re.IGNORECASE,
+    # (2) A real <Authenticator …> element actually rendered.
+    using_files = [p for p in source_files if _match_in_shipping_code(_USAGE_RE, _read(p))]
+    failures += _assert(
+        bool(using_files),
+        "an <Authenticator> element is rendered in non-test frontend/src/ code",
+        "Per AC: 'Use @aws-amplify/ui-react Authenticator component for the sign-in flow.' "
+        "Importing the symbol is not enough — the sign-in flow must actually render it.",
+    )
+    if using_files:
+        print(
+            "         rendered in: "
+            + ", ".join(str(p.relative_to(REPO_ROOT)) for p in using_files)
         )
+
+    # (3) Both in the SAME file. Without this, a stray match in an unrelated
+    #     file could carry the check on its own — the two-line edit to
+    #     AdminRetention.tsx that the #451 review used to resurrect the defect.
+    together = sorted(set(importing_files) & set(using_files))
+    failures += _assert(
+        bool(together),
+        "the Authenticator import and the rendered <Authenticator> are in the same file",
+        "Per AC: the sign-in flow must import and render the Authenticator in "
+        "one module (App.tsx today). Import found in "
+        f"{[str(p.relative_to(REPO_ROOT)) for p in importing_files]}, usage in "
+        f"{[str(p.relative_to(REPO_ROOT)) for p in using_files]}.",
+    )
+
+    # (4) Amplify.configure or aws-exports reference — same shipping-code corpus,
+    #     so the aws-exports mention in a doc comment cannot carry it either.
+    code = _frontend_code(source_files)
+    has_amplify_configure = bool(
+        re.search(r"Amplify\.configure|awsExports|aws-exports|amplifyconfig", code)
     )
     failures += _assert(
         has_amplify_configure,
-        "Amplify.configure (or aws-exports reference) present in frontend/src/",
+        "Amplify.configure (or aws-exports reference) present in non-test frontend/src/ code",
         "Per AC (Notes): 'Configure Amplify Auth via the aws-exports.js output from cdk deploy.'",
     )
 

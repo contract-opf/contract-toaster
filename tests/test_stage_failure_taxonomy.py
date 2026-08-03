@@ -150,13 +150,39 @@ class TestRecordStageFailure(unittest.TestCase):
         self.assertEqual(item["failing_stage"], "leakage_scan")
 
     def test_taxonomy_only_defines_the_two_documented_manual_review_outcomes(self) -> None:
+        """The #258 invariant, restated after issue #442 extended the table.
+
+        This used to pin the table to EXACTLY its two original entries. #442
+        deliberately adds the model-provider reason tokens, so an equality pin
+        would now be nothing but a change-detector. What #258 was actually
+        guaranteeing survives intact, and is what is asserted instead:
+
+          * the two documented manual-review outcomes are still reachable by
+            their original reasons, and
+          * they remain the ONLY non-`ERROR` outcomes this table can produce
+            -- no reason quietly acquires a fourth terminal status, and every
+            value is a real terminal status.
+
+        (`model_context_length_exceeded` is a third MANUAL_REVIEW_REQUIRED
+        REASON, not a third STATUS: it is the provider-measured twin of
+        `document_too_large` -- see reviews.STAGE_FAILURE_REASON_STATUS's own
+        comment for why it keeps a separate token.)
+        """
         self.assertEqual(
-            reviews.STAGE_FAILURE_REASON_STATUS,
-            {
-                "structured_output_retry_exhausted": "ERROR_MANUAL_REVIEW_REQUIRED",
-                "document_too_large": "MANUAL_REVIEW_REQUIRED",
-            },
+            reviews.STAGE_FAILURE_REASON_STATUS["structured_output_retry_exhausted"],
+            "ERROR_MANUAL_REVIEW_REQUIRED",
         )
+        self.assertEqual(
+            reviews.STAGE_FAILURE_REASON_STATUS["document_too_large"],
+            "MANUAL_REVIEW_REQUIRED",
+        )
+        self.assertEqual(
+            set(reviews.STAGE_FAILURE_REASON_STATUS.values()),
+            {"ERROR", "ERROR_MANUAL_REVIEW_REQUIRED", "MANUAL_REVIEW_REQUIRED"},
+        )
+        for reason, status_value in reviews.STAGE_FAILURE_REASON_STATUS.items():
+            with self.subTest(reason=reason):
+                self.assertIn(status_value, reviews.REVIEW_STATUSES_TERMINAL)
 
 
 class TestGetReviewDetailSurfacesStageFailure(unittest.TestCase):

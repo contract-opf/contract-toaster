@@ -76,8 +76,22 @@
   --ct-radius-full: 999px;
   --ct-maxw: 960px;
 
-  /* Focus */
+  /* Focus.
+     --ct-focus-ring is the visible ring in normal rendering modes. It is a
+     box-shadow, and `forced-colors: active` (Windows High Contrast Mode)
+     DISCARDS box-shadow while still honouring outline — so a rule that
+     pairs the ring with `outline: none` leaves keyboard users there with no
+     focus indicator at all (WCAG 2.4.7, issue #438).
+     --ct-focus-outline is the counterpart every :focus-visible rule uses in
+     place of `outline: none`: invisible in normal mode (transparent is an
+     explicitly allowed literal, §5.6), repainted by the UA with the system
+     highlight colour under forced-colors. Its offset matches the ring's
+     outer edge (2px..4px out) so the two indicators sit in the same place.
+     Prefer this over an @media (forced-colors: active) block: it travels
+     with the rule and so cannot drift as new components land. */
   --ct-focus-ring: 0 0 0 2px var(--ct-bg), 0 0 0 4px var(--ct-accent);
+  --ct-focus-outline: 2px solid transparent;
+  --ct-focus-outline-offset: 2px;
 
   /* Motion */
   --ct-ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);

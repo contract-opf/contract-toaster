@@ -68,6 +68,14 @@ export function ToasterStyles(): React.ReactElement {
         --ct-contact-shadow-soft: rgba(58, 34, 14, 0.16);
         --ct-knob-shadow: rgba(20, 14, 8, 0.13);
         --ct-toast-seal-edge: #7a1712;
+        /* Deep end of the DONENESS ramp (issue #447) — what a fully-toasted
+           slice mixes toward. It is NOT --ct-toast-crust: at night that
+           token is deliberately light (#f2ede2, the stroke that keeps the
+           slice legible on a dark page), so mixing toward it would make the
+           toast get PALER as the review progressed — the metaphor upside
+           down. One token, overridden in the dark block below, keeps
+           "further along = darker" true in both themes. */
+        --ct-doneness-deep: #8a5a2b;
       }
 
       /* --- Legacy state illustrations (ProgressToaster/ToastUpToaster/SoberToaster) --- */
@@ -179,6 +187,42 @@ export function ToasterStyles(): React.ReactElement {
       .toaster-hero__progress { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
       .toaster-hero__progress p { font-size: 0.85rem; margin: 0; }
 
+      /* --- Staged doneness (issue #447): the toast slice IS the bar ---
+         The slice darkens one step per real pipeline sub-stage, along a warm
+         ramp mixed from --ct-toast toward --ct-doneness-deep (CTDS §5:
+         tokens only, both themed above). The plain --ct-toast declaration
+         before each color-mix is the fallback for an engine without
+         color-mix — it simply shows an undarkened slice, and the step TEXT
+         still carries the actual information, so nothing is lost but the
+         delight. Colour is NEVER the sole carrier here. */
+      .toaster-doneness__slice { transition: fill var(--ct-dur-slow, 400ms) var(--ct-ease-out, cubic-bezier(.2, .8, .3, 1)); }
+      .toaster-doneness--step1 .toaster-doneness__slice { fill: var(--ct-toast, #d9a463); }
+      .toaster-doneness--step2 .toaster-doneness__slice {
+        fill: var(--ct-toast, #d9a463);
+        fill: color-mix(in srgb, var(--ct-doneness-deep) 26%, var(--ct-toast));
+      }
+      .toaster-doneness--step3 .toaster-doneness__slice {
+        fill: var(--ct-toast, #d9a463);
+        fill: color-mix(in srgb, var(--ct-doneness-deep) 52%, var(--ct-toast));
+      }
+      .toaster-doneness--step4 .toaster-doneness__slice {
+        fill: var(--ct-toast, #d9a463);
+        fill: color-mix(in srgb, var(--ct-doneness-deep) 78%, var(--ct-toast));
+      }
+      /* Honest within-step motion: the heat shimmer says "still working on
+         THIS step". It never advances the step — only a real stage token
+         from the pipeline does that. */
+      .toaster-doneness__heat {
+        animation: toaster-doneness-shimmer calc(var(--ct-dur-slow, 400ms) * 5) var(--ct-ease-out, cubic-bezier(.2, .8, .3, 1)) infinite;
+        transform-box: fill-box; transform-origin: center;
+      }
+      @keyframes toaster-doneness-shimmer {
+        0%, 100% { opacity: 0.18; }
+        50% { opacity: 0.62; }
+      }
+      .toaster-doneness__step { font-size: 0.85rem; font-weight: 600; margin: 0; text-align: center; }
+      .toaster-doneness__hint { font-size: 0.78rem; margin: 0; opacity: 0.75; text-align: center; }
+
       @media (prefers-color-scheme: dark) {
         .toaster-dial-stop { background: #2e2a24; color: #f2ede2; border-color: #6b6b6b; }
         .toaster-illustration .toaster-body { fill: #4a4a4a; stroke: #d0d0d0; }
@@ -211,6 +255,11 @@ export function ToasterStyles(): React.ReactElement {
           --ct-contact-shadow-soft: rgba(0, 0, 0, 0.2);
           --ct-knob-shadow: rgba(0, 0, 0, 0.28);
           --ct-toast-seal-edge: #4a0f0c;
+          /* Night doneness deepens from the night --ct-toast (#b98246)
+             toward this, so the slice still DARKENS with progress; the
+             light --ct-toast-crust stroke keeps its silhouette readable
+             against the dark page at every level. */
+          --ct-doneness-deep: #5c3a1c;
         }
       }
 
@@ -223,10 +272,22 @@ export function ToasterStyles(): React.ReactElement {
         .toaster-lever,
         .toaster-glow,
         .toaster-hero__toast,
-        .toaster-hero__stage {
+        .toaster-hero__stage,
+        /* Issue #447: the staged-doneness darkening + within-step heat
+           shimmer are covered here explicitly. base.css's global
+           universal-selector rule already neutralizes them, but this file's
+           stylesheet is self-contained (it is what the reduced-motion test
+           greps), so the toaster's own animations are all listed here rather
+           than relying on a stylesheet that may not be loaded. */
+        .toaster-doneness__slice,
+        .toaster-doneness__heat {
           transition: none !important;
           animation: none !important;
         }
+        /* Reduced motion keeps the DONENESS LEVEL (it is information, not
+           decoration) — only the transition between levels and the shimmer
+           go away. The heat marks settle at a steady mid opacity. */
+        .toaster-doneness__heat { opacity: 0.4 !important; }
         /* Reduced motion still shows a steady, mid-intensity glow — never a
            pulse — and the toast simply appears at rest. */
         .toaster-glow { opacity: 0.6 !important; }
@@ -270,19 +331,17 @@ export function ContractTypeDial({ entries, value, onChange }: ContractTypeDialP
   // through `selectable`.
   const selectable = entries.filter((entry) => entry.status === 'active');
 
-  const moveSelection = useCallback(
-    (delta: number) => {
+  // Select the nth SELECTABLE stop (wrapping), and move focus to it. Indexing
+  // `selectable` rather than `entries` is what keeps every keyboard route —
+  // arrows, Home and End alike — off the coming-soon stops a mouse user can't
+  // click either. `Math.abs` is not enough for the wrap: a negative index has
+  // to come back around from the end, so the modulo is taken twice.
+  const selectAt = useCallback(
+    (index: number) => {
       if (selectable.length === 0) {
         return;
       }
-      // Arrow keys cycle the SELECTABLE stops only, so a keyboard user can
-      // never land on a coming-soon stop a mouse user can't click either.
-      const currentIndex = Math.max(
-        0,
-        selectable.findIndex((e) => e.playbook_id === value),
-      );
-      const nextIndex = (currentIndex + delta + selectable.length) % selectable.length;
-      const next = selectable[nextIndex];
+      const next = selectable[((index % selectable.length) + selectable.length) % selectable.length];
       if (next) {
         onChange(next.playbook_id);
         // Move focus with selection (roving tabindex / ARIA radiogroup
@@ -296,9 +355,25 @@ export function ContractTypeDial({ entries, value, onChange }: ContractTypeDialP
         nextButton?.focus();
       }
     },
-    [selectable, value, onChange],
+    [selectable, onChange],
   );
 
+  const moveSelection = useCallback(
+    (delta: number) => {
+      const currentIndex = Math.max(
+        0,
+        selectable.findIndex((e) => e.playbook_id === value),
+      );
+      selectAt(currentIndex + delta);
+    },
+    [selectable, value, selectAt],
+  );
+
+  // Arrows + Home/End, matching `ui/components/ct-tab-bar.ts`'s handler. Home
+  // and End were missing here while the tab bar had both, so the two roving
+  // widgets in the same app answered the keyboard differently — a gap the
+  // live audit could not catch, because production has a single dial stop and
+  // no key has anywhere to move (audit §E6, issue #450 item 1).
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
@@ -307,9 +382,15 @@ export function ContractTypeDial({ entries, value, onChange }: ContractTypeDialP
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
         event.preventDefault();
         moveSelection(-1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        selectAt(0);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        selectAt(selectable.length - 1);
       }
     },
-    [moveSelection],
+    [moveSelection, selectAt, selectable.length],
   );
 
   return (
@@ -371,6 +452,36 @@ export function ContractTypeDial({ entries, value, onChange }: ContractTypeDialP
 // ===========================================================================
 export type ToasterPhase = 'idle' | 'working' | 'done' | 'error';
 
+// ---------------------------------------------------------------------------
+// Staged review progress (issue #447). The four tokens are a WIRE CONTRACT
+// with the backend — scripts/review_spine.py's PROGRESS_STAGES, written onto
+// the reviews row by pipeline_runner._write_progress_stage as each sub-stage
+// starts and projected by get_review_detail as `progress_stage`. Order here
+// IS the step numbering; keep it identical to PROGRESS_STAGES.
+//
+// The labels are the user's vocabulary, not the pipeline's module names.
+// ---------------------------------------------------------------------------
+export type ReviewProgressStage = 'primary_pass' | 'critic_pass' | 'reconciliation' | 'redline';
+
+export const PROGRESS_STEPS: ReadonlyArray<{ token: ReviewProgressStage; label: string }> = [
+  { token: 'primary_pass', label: 'First read-through' },
+  { token: 'critic_pass', label: 'Adversarial critic' },
+  { token: 'reconciliation', label: 'Reconciling both passes' },
+  { token: 'redline', label: 'Writing your redline' },
+];
+
+/** 1-based step number for a reported token, or 0 for "no honest step to show".
+ *  An absent, null, or unrecognised token (an older runner, a deployment that
+ *  reports no progress, a stage renamed on the backend) deliberately yields 0
+ *  rather than a guess — the caller then shows the indeterminate treatment,
+ *  which claims nothing, instead of a step number that might be a lie. */
+export function progressStepNumber(stage: string | null | undefined): number {
+  if (!stage) {
+    return 0;
+  }
+  return PROGRESS_STEPS.findIndex((step) => step.token === stage) + 1;
+}
+
 export interface ToasterHeroProps {
   entries: DialEntry[];
   value: string;
@@ -380,6 +491,13 @@ export interface ToasterHeroProps {
   onDownload?: () => void;
   /** Disables that toast button while a download is preparing. */
   downloadDisabled?: boolean;
+  /**
+   * The review's CURRENT pipeline sub-stage, straight off the polled detail
+   * (`progress_stage`). Drives the staged doneness treatment while
+   * phase==='working'. Null/absent/unknown falls back to the indeterminate
+   * ring — never a timer-driven guess at which step we are on.
+   */
+  progressStage?: string | null;
 }
 
 // Geometry constants for the hero SVG (user-space units; viewBox 0 0 420 340).
@@ -394,6 +512,7 @@ export function ToasterHero({
   phase,
   onDownload,
   downloadDisabled,
+  progressStage,
 }: ToasterHeroProps): React.ReactElement {
   // Namespace every gradient/filter id so multiple toasters on a page can't
   // collide on url(#…) references. useId is stable across renders; strip the
@@ -629,14 +748,102 @@ export function ToasterHero({
           entries. The SVG knob above is decoration that mirrors `value`. */}
       {hasDial && <ContractTypeDial entries={entries} value={value} onChange={onChange} />}
 
-      {/* WORKING — doneness ring + copy. */}
+      {/* WORKING — staged doneness when the pipeline reports where it is;
+          the indeterminate ring when it does not. */}
       {working && (
         <div data-testid="toaster-state-progress" className="toaster-hero__progress">
-          <DonenessRing />
-          <p>Toasting your review…</p>
+          <StagedDoneness progressStage={progressStage} />
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StagedDoneness — the progress indicator, and the reason this ticket exists.
+//
+// The appliance IS the bar: a slice of toast that darkens one step per REAL
+// pipeline sub-stage (issue #447), not a line that flashes. The visual is the
+// delight; the "Step 2 of 4 · Adversarial critic" text beneath it is the
+// information and the accessibility, and it always ships with the darkening.
+//
+// The one rule that makes this honest: the step only ever advances when the
+// backend reports a new `progress_stage` token. Nothing here is on a timer.
+// The within-step heat shimmer is the only motion that runs on its own, and
+// it says "still working on THIS step", which is true by construction.
+//
+// No reported stage (a runner that predates the seam, a deployment that
+// reports nothing, a token this build doesn't know) -> the old indeterminate
+// ring, unchanged. An honest "working" beats an invented "step 3 of 4".
+// ---------------------------------------------------------------------------
+function StagedDoneness({ progressStage }: { progressStage?: string | null }): React.ReactElement {
+  const step = progressStepNumber(progressStage);
+
+  if (step === 0) {
+    return (
+      <>
+        <DonenessRing />
+        <p data-testid="review-progress-indeterminate">Toasting your review…</p>
+      </>
+    );
+  }
+
+  const label = PROGRESS_STEPS[step - 1].label;
+  const stepText = `Step ${step} of ${PROGRESS_STEPS.length} · ${label}`;
+
+  return (
+    <>
+      <div
+        className={`toaster-doneness toaster-doneness--step${step}`}
+        data-testid="review-progress-stage"
+        data-progress-stage={progressStage ?? undefined}
+        data-progress-step={String(step)}
+        role="progressbar"
+        aria-label="Review progress"
+        aria-valuemin={1}
+        aria-valuemax={PROGRESS_STEPS.length}
+        aria-valuenow={step}
+        aria-valuetext={stepText}
+      >
+        <DonenessSlice step={step} />
+      </div>
+      {/* The step text is the actual information — announced on change, and
+          never replaced by the darkening alone. */}
+      <p className="toaster-doneness__step" data-testid="review-progress-step-text" aria-live="polite">
+        {stepText}
+      </p>
+      <p className="toaster-doneness__hint">Toasting your review…</p>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DonenessSlice — a small slice of toast whose crust deepens with `step`. The
+// fill comes from `.toaster-doneness--step{n}` in ToasterStyles (a color-mix
+// of the existing --ct-toast / --ct-toast-crust ramp, CTDS §5: tokens only);
+// the inline `fill` here is only the no-CSS fallback. Purely decorative — the
+// progressbar wrapper and the step text carry every accessible fact.
+// ---------------------------------------------------------------------------
+function DonenessSlice({ step }: { step: number }): React.ReactElement {
+  // One heat mark per completed-or-current step, so the slice reads as
+  // "further along" even where colour alone would not (colour is never the
+  // sole carrier — the step text is authoritative).
+  const marks = Array.from({ length: step }, (_, i) => 26 + i * 15);
+  return (
+    <svg viewBox="0 0 96 96" width="64" height="64" aria-hidden="true" focusable="false" style={{ display: 'block' }}>
+      <path
+        className="toaster-doneness__slice"
+        d="M12 34 Q12 12 34 10 Q48 6 62 10 Q84 12 84 34 L84 84 Q84 88 80 88 L16 88 Q12 88 12 84 Z"
+        fill="var(--ct-toast, #d9a463)"
+        stroke="var(--ct-toast-crust, #8a5a2b)"
+        strokeWidth="3"
+      />
+      <g className="toaster-doneness__heat" fill="var(--ct-glow, #ff7a1a)">
+        {marks.map((y) => (
+          <rect key={y} x="26" y={y} width="44" height="7" rx="3.5" />
+        ))}
+      </g>
+    </svg>
   );
 }
 

@@ -8,8 +8,12 @@ Idempotent: creating a table/bucket that already exists is a no-op, so
 
 Does four things against DynamoDB-Local + MinIO (endpoints from env, via
 config.boto3_client_kwargs):
-  1. Create the DynamoDB tables the backend reads (with the one GSI the backend
-     queries: reviews.owner_sub-index).
+  1. Create the DynamoDB tables the backend reads, with the GSIs it queries
+     (reviews.owner_sub-index, review_submissions.review_id-index) -- and, for
+     a table that ALREADY exists, converge it onto that declared index set
+     (issue #446). Creating is not enough: a table provisioned before an index
+     was declared here would otherwise be skipped forever, which is how a live
+     deployment ran without review_id-index and failed every spend settle.
   2. Create the uploads/outputs S3 buckets.
   3. Seed the mock eiaa redline fixture into the outputs bucket at
      mock-fixtures/eiaa/pre-baked-redline.docx (what the mock pipeline copies).
@@ -106,6 +110,80 @@ def _key_schema(hash_attr, range_attr):
     return schema
 
 
+def _gsi_definition(idx, hash_attr, range_attr):
+    return {
+        "IndexName": idx,
+        "KeySchema": _key_schema(hash_attr, range_attr),
+        "Projection": {"ProjectionType": "ALL"},
+    }
+
+
+def _existing_gsi_names(client, name) -> set:
+    table = client.describe_table(TableName=name)["Table"]
+    return {idx["IndexName"] for idx in table.get("GlobalSecondaryIndexes") or []}
+
+
+def _wait_for_gsi_active(client, name, index_name) -> None:
+    """Block until a just-created GSI reports ACTIVE.
+
+    Real DynamoDB backfills a new index asynchronously and refuses a second
+    index creation while one is still building, so this is what makes adding
+    several indexes in one pass safe. DynamoDB-Local reports ACTIVE
+    immediately, which is why the status is checked BEFORE the first sleep.
+    """
+    timeout_seconds = int(os.environ.get("BOOTSTRAP_GSI_TIMEOUT_SECONDS", "600"))
+    deadline = time.time() + timeout_seconds
+    while True:
+        table = client.describe_table(TableName=name)["Table"]
+        for idx in table.get("GlobalSecondaryIndexes") or []:
+            # DynamoDB-Local omits IndexStatus entirely; an index it reports at
+            # all is usable, so a missing status counts as ACTIVE.
+            if idx["IndexName"] == index_name and idx.get("IndexStatus", "ACTIVE") == "ACTIVE":
+                return
+        if time.time() > deadline:
+            raise RuntimeError(
+                f"index {index_name} on table {name} did not become ACTIVE within "
+                f"{timeout_seconds}s (override with BOOTSTRAP_GSI_TIMEOUT_SECONDS)."
+            )
+        time.sleep(2)
+
+
+def _converge_gsis(client, name, hash_attr, range_attr, gsis) -> None:
+    """Bring an EXISTING table's indexes up to the declared set (issue #446).
+
+    `create_table` only ever provisions indexes for a table that does not yet
+    exist. A table created before an index was declared here is reported
+    "already exists" and skipped -- so the declaration only ever helped a
+    FRESH deployment, and an existing one could never converge no matter how
+    many times it was redeployed. That is exactly how a live deployment ran
+    without `review_id-index`, where every spend settle raised
+    ValidationException.
+
+    Since the bootstrap runs on every `docker compose up`, doing the diff here
+    is the one mechanism that can repair a deployment in place. Adding an
+    index is the only convergence performed: it is additive and safe. Indexes
+    present on the table but no longer declared are left ALONE -- dropping
+    data-bearing infrastructure is not something a boot script should do
+    unattended. Once converged, re-running is a plain no-op.
+    """
+    if not gsis:
+        return
+    for idx, gh, gr in gsis:
+        if idx in _existing_gsi_names(client, name):
+            continue
+        print(f"    adding missing index {idx} to {name} …")
+        client.update_table(
+            TableName=name,
+            # UpdateTable requires the key attributes of the index being
+            # created, and only those -- the table's own key attributes are
+            # already defined.
+            AttributeDefinitions=_attr_defs(gh, gr, []),
+            GlobalSecondaryIndexUpdates=[{"Create": _gsi_definition(idx, gh, gr)}],
+        )
+        _wait_for_gsi_active(client, name, idx)
+        print(f"    index {idx} on {name} is ACTIVE")
+
+
 def create_tables() -> None:
     client = _ddb_client()
     for env_var, hash_attr, range_attr, gsis in _TABLES:
@@ -121,18 +199,14 @@ def create_tables() -> None:
         }
         if gsis:
             kwargs["GlobalSecondaryIndexes"] = [
-                {
-                    "IndexName": idx,
-                    "KeySchema": _key_schema(gh, gr),
-                    "Projection": {"ProjectionType": "ALL"},
-                }
-                for idx, gh, gr in gsis
+                _gsi_definition(idx, gh, gr) for idx, gh, gr in gsis
             ]
         try:
             client.create_table(**kwargs)
             print(f"  created table {name}")
         except client.exceptions.ResourceInUseException:
             print(f"  table {name} already exists")
+            _converge_gsis(client, name, hash_attr, range_attr, gsis)
 
 
 def create_buckets() -> None:

@@ -112,6 +112,12 @@ export interface AppStackProps extends cdk.NestedStackProps {
  *       - upload:       s3:PutObject on the uploads bucket prefix.
  *       - download:     s3:GetObject on the outputs bucket prefix (scoped;
  *                       full scoped pre-signed download wired in #71).
+ *       - download-input: s3:GetObject on the UPLOADS bucket prefix (issue
+ *                       #449) — GET /api/reviews/{id}/input presigns the
+ *                       document that was reviewed, so the role reads as well
+ *                       as writes uploads/*. Scoped to the same uploads/*
+ *                       prefix as the PutObject grant; the bucket root is
+ *                       never granted.
  *       - dynamodb:     dynamodb:GetItem, PutItem, Query, UpdateItem on
  *                       reviews, review_submissions, users tables.
  *       - dynamodb:     dynamodb:PutItem ONLY on the audit table (issue #191)
@@ -277,6 +283,14 @@ export class AppStack extends cdk.NestedStack {
     //                    objects written under the expected context.
     //                    Additionally: kms:GenerateDataKey on the outputs CMK so the
     //                    presigned URL path can work end-to-end.
+    //   download-input — s3:GetObject on the UPLOADS bucket prefix (issue #449).
+    //                    GET /api/reviews/{id}/input head_objects the stored pointer
+    //                    and then presigns it, so the role needs READ on uploads/*
+    //                    — not just the PutObject it had held since #71.  Without
+    //                    it head_object answers AccessDenied, which download.py maps
+    //                    to 503 (not the 410 the route documents), and even past
+    //                    that the presigned URL is signed by a principal with no
+    //                    read on uploads/* and 403s in the browser.
     //   dynamodb       — GetItem, PutItem, Query, UpdateItem on review tables.
     //
     // bedrock inference actions are EXPLICITLY EXCLUDED — inference runs under the
@@ -340,6 +354,59 @@ export class AppStack extends cdk.NestedStack {
               // does NOT require either key to be present — it only rejects
               // *other* keys.  Presence-and-value enforcement lives in the
               // uploads CMK key policy (the DENY statements in KmsKeysStack).
+              // NOTE: the set-qualifier and operator must be a single key
+              // "ForAllValues:StringEquals" — two separate keys would be
+              // non-existent operators and cause MalformedPolicyDocument on deploy.
+              'ForAllValues:StringEquals': {
+                'kms:EncryptionContextKeys': [
+                  'contract-toaster:data-class',
+                  'contract-toaster:review-id',
+                ],
+              },
+            },
+          }),
+          // download-input — uploads bucket prefix only (issue #449).
+          //
+          // GET /api/reviews/{id}/input hands the user back the document that
+          // was reviewed. It head_objects the pointer stored on the review row
+          // and then presigns it, so this role needs s3:GetObject on
+          // uploads/* — the Upload statement above is PutObject only, and the
+          // Download statement below is scoped to the OUTPUTS bucket. Without
+          // this statement the head_object is answered AccessDenied, which
+          // download.py maps to 503 rather than the documented 410, and even
+          // with the HEAD removed the presigned URL would be signed by a
+          // principal holding no read on uploads/* and 403 in the browser.
+          //
+          // A SEPARATE statement rather than adding the uploads ARN to
+          // Download: the two data classes must stay independently auditable
+          // and independently revocable, and a reader grepping for "what can
+          // this role do to uploads?" should find every answer under a
+          // uploads-scoped sid.
+          //
+          // CMK NOTE (deliberate, symmetric with Download): reading an SSE-KMS
+          // object also requires kms:Decrypt on the uploads CMK, and no
+          // application principal holds one today — KmsKeysStack is
+          // instantiated WITHOUT uploadWriterRole/outputsRole (see
+          // contract-toaster-stack.ts: "Per-data-class runtime role props are
+          // intentionally omitted here until role-splitting in #55/#71
+          // produces the distinct roles"). This statement introduces no new
+          // asymmetry: the outputs Download path carries exactly the same
+          // deferred gap. Granting the CMK here would mean handing the shared
+          // App Runner task role a per-data-class key grant that #70's key
+          // policy explicitly reserves for DISTINCT roles, which is a
+          // role-splitting decision, not a download-route one.
+          new iam.PolicyStatement({
+            sid: 'DownloadInput',
+            effect: iam.Effect.ALLOW,
+            actions: ['s3:GetObject'],
+            resources: [
+              `arn:aws:s3:::contract-toaster-uploads-${envName}/uploads/*`,
+            ],
+            conditions: {
+              // Same subset-semantics caveat as every other statement in this
+              // policy: this constrains WHICH encryption-context keys may
+              // appear, not that any are present. Presence-and-value
+              // enforcement is the uploads CMK key-policy DENY in KmsKeysStack.
               // NOTE: the set-qualifier and operator must be a single key
               // "ForAllValues:StringEquals" — two separate keys would be
               // non-existent operators and cause MalformedPolicyDocument on deploy.

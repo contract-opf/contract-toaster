@@ -120,7 +120,21 @@ def critic_model_id(policy: dict[str, Any] | None = None) -> str:
 # `enforce_openrouter_policy_model_id` (below) is the OpenRouter-side runtime
 # assertion analogous to `enforce_single_region_native_model_id` above: it is
 # called from `OpenRouterModelClient.invoke()` and refuses a model_id that
-# matches neither the policy pin nor an active override.
+# matches neither the policy pin, the `selectable` admin allowlist, nor an
+# active override.
+#
+# ADMIN SELECTION (issue #445). model-policy/openrouter.json also carries a
+# `selectable` allowlist -- the models an admin may choose between in the
+# "Model & API key" tab (backend/src/model_settings.py stores the choice).
+# Resolution precedence for an effective model id, deliberately matching the
+# API key's own precedence (admin-set row beats the env var, so a choice made
+# in the UI is not silently overridden by deployment config):
+#
+#     admin selection  >  OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID  >  policy pin
+#
+# The env overrides are NOT removed -- they remain the break-glass path for a
+# deployment with no reachable admin UI (and for the AWS target, which has no
+# model-settings table at all).
 # ---------------------------------------------------------------------------
 
 
@@ -129,7 +143,68 @@ def load_openrouter_policy(path: Path = OPENROUTER_POLICY_PATH) -> dict[str, Any
         return json.load(fh)
 
 
-def openrouter_primary_model_id(policy: dict[str, Any] | None = None) -> str:
+def openrouter_selectable_models(policy: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """The admin-selectable model catalogue (issue #445) --
+    model-policy/openrouter.json's top-level `selectable` array, each entry
+    carrying `model_id`, `display_name`, `tier`, `note`, the two
+    `cost_per_million_*_usd` rates and `context_length`.
+
+    Returns a fresh list of fresh dicts so a caller (the admin route, which
+    serialises these straight to JSON) cannot mutate the loaded policy for
+    the rest of the process. Empty when the policy file has no `selectable`
+    block -- an older artifact, which then simply offers no choice rather
+    than raising.
+    """
+    policy = policy if policy is not None else load_openrouter_policy()
+    entries = policy.get("selectable") or []
+    return [dict(entry) for entry in entries if isinstance(entry, dict) and entry.get("model_id")]
+
+
+def openrouter_selectable_model_ids(policy: dict[str, Any] | None = None) -> set[str]:
+    """Just the ids from `openrouter_selectable_models` -- the allowlist
+    `enforce_openrouter_policy_model_id` accepts and `model_settings`
+    validates an admin's choice against."""
+    return {str(entry["model_id"]) for entry in openrouter_selectable_models(policy)}
+
+
+def _resolved_admin_model_id(
+    admin_model_id: str | None, role: str, policy: dict[str, Any] | None = None
+) -> str | None:
+    """An admin-selected model id, but only if it is STILL on the
+    `selectable` allowlist; otherwise None (with a warning).
+
+    Failing safe matters here: the allowlist can shrink under a stored
+    selection (a model retired from the policy artifact between deploys). If
+    the stale id were returned anyway it would reach
+    `enforce_openrouter_policy_model_id`, raise, and turn every review into
+    a terminal ERROR. Dropping back to the env override / policy pin degrades
+    to a model that is always allowed instead.
+    """
+    candidate = (admin_model_id or "").strip()
+    if not candidate:
+        return None
+    if candidate in openrouter_selectable_model_ids(policy):
+        return candidate
+    logger.warning(
+        "Ignoring the admin-selected OpenRouter %s model id %r: it is no longer on "
+        "the `selectable` allowlist in model-policy/openrouter.json. Falling back "
+        "to the env override / policy pin.",
+        role,
+        candidate,
+    )
+    return None
+
+
+def openrouter_primary_model_id(
+    policy: dict[str, Any] | None = None, *, admin_model_id: str | None = None
+) -> str:
+    """The effective primary-reviewer model id: the admin selection if one is
+    set and still selectable, else OPENROUTER_PRIMARY_MODEL_ID, else the
+    policy pin. `admin_model_id` defaults to None so every pre-#445 caller
+    keeps the exact behavior it had."""
+    selected = _resolved_admin_model_id(admin_model_id, "primary", policy)
+    if selected:
+        return selected
     override = os.environ.get("OPENROUTER_PRIMARY_MODEL_ID", "").strip()
     if override:
         return override
@@ -137,7 +212,15 @@ def openrouter_primary_model_id(policy: dict[str, Any] | None = None) -> str:
     return policy["models"]["primary"]["model_id"]
 
 
-def openrouter_critic_model_id(policy: dict[str, Any] | None = None) -> str:
+def openrouter_critic_model_id(
+    policy: dict[str, Any] | None = None, *, admin_model_id: str | None = None
+) -> str:
+    """The effective adversarial-critic model id. Same precedence as
+    `openrouter_primary_model_id` -- admin selection, then
+    OPENROUTER_CRITIC_MODEL_ID, then the policy pin."""
+    selected = _resolved_admin_model_id(admin_model_id, "critic", policy)
+    if selected:
+        return selected
     override = os.environ.get("OPENROUTER_CRITIC_MODEL_ID", "").strip()
     if override:
         return override
@@ -147,8 +230,9 @@ def openrouter_critic_model_id(policy: dict[str, Any] | None = None) -> str:
 
 class OpenRouterModelPolicyViolation(ValueError):
     """Raised when a model ID passed to OpenRouterModelClient.invoke matches
-    neither a policy-pinned model id (model-policy/openrouter.json) nor an
-    active OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID override env var."""
+    neither a policy-pinned model id (model-policy/openrouter.json), nor an
+    entry on that file's `selectable` admin allowlist, nor an active
+    OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID override env var."""
 
 
 def enforce_openrouter_policy_model_id(
@@ -156,25 +240,36 @@ def enforce_openrouter_policy_model_id(
 ) -> None:
     """Runtime assertion (issue #269): the model_id an OpenRouterModelClient
     is about to invoke must equal the policy-pinned primary or critic model
-    id in model-policy/openrouter.json, OR an explicit per-deployment
+    id in model-policy/openrouter.json, OR an entry on that file's
+    `selectable` admin allowlist (issue #445), OR an explicit per-deployment
     override via OPENROUTER_PRIMARY_MODEL_ID / OPENROUTER_CRITIC_MODEL_ID --
-    which is allowed, but logged as an explicit override so an operator can
-    see when a deployment is running off-policy.
+    the last of which is allowed but logged as an explicit override so an
+    operator can see when a deployment is running off-policy.
 
     Unlike the Bedrock single-region check, this is not a syntax check --
     OpenRouter ids are provider/model strings with no forbidden-prefix
     concept. It instead loudly refuses (raises) any model_id that matches
-    neither the pin nor an active override: a mismatch here means the
-    caller bypassed the openrouter_primary_model_id() / critic resolvers
-    (or the policy file and an in-flight override have drifted apart),
-    either of which the pipeline should fail closed on rather than
-    silently invoke an unpinned model.
+    none of the three, a mismatch meaning the caller bypassed the
+    openrouter_primary_model_id() / critic resolvers (or the policy file
+    and an in-flight override/selection have drifted apart), either of
+    which the pipeline should fail closed on rather than silently invoke an
+    unpinned model.
+
+    The `selectable` allowlist WIDENS this check; it does not remove it. The
+    invariant the check exists for -- never invoke an *arbitrary* model --
+    still holds: an id that is not in the artifact is still refused before a
+    request is spent on it. A selectable id is not logged as an override
+    because, unlike the env vars, it is an on-policy, deliberately offered
+    choice rather than a deployment running off the artifact.
     """
     policy = policy if policy is not None else load_openrouter_policy()
     pinned_primary = policy["models"]["primary"]["model_id"]
     pinned_critic = policy["models"]["critic"]["model_id"]
 
     if model_id in (pinned_primary, pinned_critic):
+        return
+
+    if model_id in openrouter_selectable_model_ids(policy):
         return
 
     primary_override = os.environ.get("OPENROUTER_PRIMARY_MODEL_ID", "").strip()
@@ -200,8 +295,9 @@ def enforce_openrouter_policy_model_id(
     raise OpenRouterModelPolicyViolation(
         f"Model id {model_id!r} matches neither the policy-pinned OpenRouter "
         f"model ids ({pinned_primary!r} primary / {pinned_critic!r} critic, "
-        "model-policy/openrouter.json) nor an active OPENROUTER_PRIMARY_MODEL_ID "
-        "/ OPENROUTER_CRITIC_MODEL_ID override. Refusing to invoke an unpinned model."
+        "model-policy/openrouter.json), nor that file's `selectable` admin "
+        "allowlist, nor an active OPENROUTER_PRIMARY_MODEL_ID / "
+        "OPENROUTER_CRITIC_MODEL_ID override. Refusing to invoke an unpinned model."
     )
 
 
@@ -363,7 +459,24 @@ class ModelInvocationError(RuntimeError):
     """Raised when a live model invocation fails (non-200, malformed response,
     or transport error). Carries ONLY non-substantive facts (status code,
     shape) -- never the request or response body, which may contain
-    counterparty-confidential contract substance."""
+    counterparty-confidential contract substance.
+
+    `status_code` (issue #442) is the provider's HTTP status as a STRUCTURED
+    attribute, so a caller can classify WHY the call failed (out of credits
+    vs. key rejected vs. rate limited) without regex-matching this class's
+    message string -- a message-parse would silently rot the next time that
+    copy changes. `None` whenever there is no status to carry: a
+    transport-level failure, a malformed 200 response, or an exhausted retry
+    budget.
+
+    The status NUMBER stops here. `backend/src/pipeline_runner.py` maps it to
+    a reason TOKEN, and only the token crosses the API boundary -- the
+    frontend turns the token into prose. No raw `HTTP <n>` ever reaches
+    user-facing copy (issue #425)."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ModelContextLengthExceededError(ModelInvocationError):
@@ -394,6 +507,36 @@ OPENROUTER_DEFAULT_BACKOFF_BASE_SECONDS = 0.5
 OPENROUTER_DEFAULT_BACKOFF_MAX_SECONDS = 8.0
 OPENROUTER_DEFAULT_BACKOFF_JITTER_SECONDS = 0.25
 
+# ---------------------------------------------------------------------------
+# Data-retention posture (issue #444). Every OpenRouter request carries a
+# client contract -- a real counterparty agreement -- so routing is restricted
+# at the REQUEST level, per call, rather than trusted to an account-level
+# toggle (invisible to this codebase, unversioned, and silently lost if the
+# key is swapped for one on another account).
+#
+#   zdr: True                  -- route only to Zero Data Retention endpoints.
+#   data_collection: "deny"    -- route only to providers that do not collect
+#                                 user data (i.e. may not train on prompts).
+#   require_parameters: True   -- refuse a provider that would silently drop
+#                                 request params rather than honor them.
+#
+# This FAILS CLOSED by design: if the selected model has no ZDR endpoint,
+# OpenRouter errors (surfacing as the usual ModelInvocationError) instead of
+# quietly routing to a retaining provider. A visible failure beats a silent
+# disclosure, and it means this codebase never has to maintain its own list
+# of which models are ZDR-capable -- OpenRouter enforces it per request.
+#
+# DELIBERATELY NOT CONFIGURABLE: there is no env var, constructor argument, or
+# policy field that turns any of this off. A deployment reviewing real
+# agreements has no legitimate non-ZDR mode, and an opt-out knob is exactly
+# the thing that fails open in production.
+# ---------------------------------------------------------------------------
+OPENROUTER_PROVIDER_ROUTING: dict[str, Any] = {
+    "zdr": True,
+    "data_collection": "deny",
+    "require_parameters": True,
+}
+
 # OpenAI-compatible (OpenRouter) providers signal an oversized request as
 # HTTP 413, or HTTP 400 with an `error.code`/`error.message` naming the
 # context-length limit. These substrings are matched against the LOWERCASED
@@ -422,6 +565,15 @@ class OpenRouterModelClient:
     only status codes / shape facts -- the same posture as the backend's
     `--no-access-log`. The request contract omits sampling params
     (temperature/top_p/top_k), matching model-policy/openrouter.json.
+
+    ZERO-DATA-RETENTION ROUTING (issue #444): every request carries the
+    `provider` block in `OPENROUTER_PROVIDER_ROUTING` (`zdr: true`,
+    `data_collection: "deny"`, `require_parameters: true`), so a contract is
+    only ever routed to an endpoint that neither retains it nor may train on
+    it. It is not configurable off, and it fails closed -- a model with no ZDR
+    endpoint raises `ModelInvocationError` rather than routing to a retaining
+    provider. Guarding the response body from logs (below) protects an echo of
+    the prompt; this protects the document itself.
 
     `http_client` (anything exposing `.post(url, *, json, headers) -> resp`
     where `resp` has `.status_code` and `.json()`) is injectable so tests
@@ -578,6 +730,12 @@ class OpenRouterModelClient:
             "max_tokens": max_output_tokens,
             # Sampling params (temperature/top_p/top_k) deliberately omitted --
             # request contract (model-policy/openrouter.json).
+            #
+            # Zero-data-retention / no-training routing (issue #444), enforced
+            # per request and never optional -- see OPENROUTER_PROVIDER_ROUTING.
+            # Copied, not shared, so a mutation of the payload can never edit
+            # the module-level policy out from under a later call.
+            "provider": dict(OPENROUTER_PROVIDER_ROUTING),
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -627,7 +785,8 @@ class OpenRouterModelClient:
                 # step-14 pre-call estimate).
                 raise ModelContextLengthExceededError(
                     "OpenRouter rejected the request as exceeding the model's "
-                    f"context length (HTTP {status})."
+                    f"context length (HTTP {status}).",
+                    status_code=status,
                 )
 
             if self._is_retryable_status(status) and not is_last_attempt:
@@ -635,7 +794,12 @@ class OpenRouterModelClient:
                 continue
 
             # Do NOT include the response body -- it may echo prompt substance.
-            raise ModelInvocationError(f"OpenRouter returned HTTP {status}.")
+            # `status_code` carries the status structurally (issue #442) so the
+            # runner can classify 402/401/403/429/404/503 without parsing this
+            # message; the number itself never leaves the backend.
+            raise ModelInvocationError(
+                f"OpenRouter returned HTTP {status}.", status_code=status
+            )
 
         # Unreachable: attempts_allowed >= 1, and every branch above either
         # returns or raises before the loop can run out.

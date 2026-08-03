@@ -42,12 +42,15 @@ Environment variables consumed:
   OUTPUTS_BUCKET             S3 outputs bucket name
 """
 
+import logging
 import os
 import time
 import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 GLOBAL_SETTING_ID = "global"
 
@@ -413,7 +416,159 @@ def preview_purge_sweep(
     return {"purge_count": len(review_ids), "review_ids": review_ids}
 
 
-def run_purge_sweep_now(s3_client: Any, dynamodb_resource: Any) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# Object targeting (issue #454)
+#
+# The input document is written to `uploads/{owner_sub}/{review_id}/in.docx`
+# (src/review_routes.py::post_review), and the reviews row records that
+# exact key in `upload_s3_key` (src/reviews.py::_create_review_row, issue #449)
+# -- the same pointer `GET /api/reviews/{id}/input` presigns. Targeting is
+# therefore derived from the ROW's stored pointer, not reconstructed from a
+# prefix convention: a future layout change moves both the writer and the
+# purger together, instead of silently desyncing them (which is exactly how
+# `uploads/{review_id}/` -- a prefix that omits the owner segment and so never
+# matched anything -- survived undetected).
+#
+# The prefix scans are the fallback for rows that predate the recorded
+# pointer, plus a belt-and-braces sweep of any sibling object under the
+# review's own prefix. Both prefixes are review-scoped, so neither can reach
+# another review's objects.
+#
+# Mirrored EXACTLY in infra/lambda/purge_worker/handler.py (the copy that runs
+# on AWS): both must change together or the deployment silently keeps the
+# broken behaviour.
+# ---------------------------------------------------------------------------
+
+# Row fields that may carry the authoritative input-document pointer.
+# `upload_s3_key` is what `_create_review_row` writes on the reviews row (#449)
+# and what get_review_input presigns; `upload_pointer` is the name the
+# `review_submissions` row uses for the same value and is accepted here so a
+# row copied/backfilled from that table is still targeted.
+UPLOAD_POINTER_FIELDS = ("upload_s3_key", "upload_pointer")
+OUTPUT_POINTER_FIELDS = ("output_s3_key",)
+
+
+def _dedup(keys: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key in keys:
+        if key not in seen:
+            seen.add(key)
+            ordered.append(key)
+    return ordered
+
+
+def _list_keys(s3_client: Any, bucket: str, prefix: str) -> list[str]:
+    listing = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    return [obj["Key"] for obj in listing.get("Contents", [])]
+
+
+def _is_bound_to_review(key: str, review_id: str, root: str) -> bool:
+    """A stored pointer is only ever acted on when it sits under the expected
+    bucket root AND names this review -- the same key-binding check
+    src/download.py::_validate_s3_key_bound_to_review makes before presigning.
+    A corrupted or mis-migrated row can therefore never make the sweep delete
+    (or the legal-hold tagger tag) another review's object."""
+    return key.startswith(f"{root}/") and f"/{review_id}/" in key
+
+
+def _existing_pointer_keys(
+    review: dict[str, Any],
+    s3_client: Any,
+    bucket: str,
+    fields: tuple[str, ...],
+    root: str,
+) -> list[str]:
+    """The row's recorded pointers that are bound to this review AND still
+    resolve to an object. A pointer whose object is already gone is not a
+    target: the itemised report an operator reads before an irreversible sweep
+    must name objects that actually exist, not keys a row happens to carry."""
+    review_id = review["review_id"]
+    keys = []
+    for field in fields:
+        key = review.get(field)
+        if not key or not _is_bound_to_review(key, review_id, root):
+            continue
+        if key in _list_keys(s3_client, bucket, key):
+            keys.append(key)
+    return keys
+
+
+def _review_object_targets(
+    review: dict[str, Any],
+    s3_client: Any,
+    uploads_bucket: str,
+    outputs_bucket: str,
+) -> list[tuple[str, str]]:
+    """Every (bucket, key) belonging to this review: the row's own recorded
+    input/output pointers, plus a scan of the review-scoped prefixes for rows
+    that predate those fields."""
+    review_id = review["review_id"]
+    owner_sub = review.get("owner_sub") or ""
+    targets: list[tuple[str, str]] = []
+
+    if uploads_bucket:
+        keys = _existing_pointer_keys(
+            review, s3_client, uploads_bucket, UPLOAD_POINTER_FIELDS, "uploads"
+        )
+        prefixes = []
+        if owner_sub:
+            prefixes.append(f"uploads/{owner_sub}/{review_id}/")
+        # Pre-owner-segment layout: harmless when nothing matches, and the
+        # only reachable target for a row carrying neither pointer nor
+        # owner_sub.
+        prefixes.append(f"uploads/{review_id}/")
+        for prefix in prefixes:
+            keys.extend(_list_keys(s3_client, uploads_bucket, prefix))
+        targets.extend((uploads_bucket, key) for key in _dedup(keys))
+
+    if outputs_bucket:
+        keys = _existing_pointer_keys(
+            review, s3_client, outputs_bucket, OUTPUT_POINTER_FIELDS, "outputs"
+        )
+        keys.extend(_list_keys(s3_client, outputs_bucket, f"outputs/{review_id}/"))
+        targets.extend((outputs_bucket, key) for key in _dedup(keys))
+
+    return targets
+
+
+def _surviving_targets(
+    s3_client: Any, targets: list[tuple[str, str]]
+) -> list[str]:
+    """The targeted keys that are STILL present after the delete calls.
+
+    The sweep's success record must be tied to the outcome, not to having
+    issued the calls: before issue #454 a review was appended to
+    `deleted_reviews` whether or not anything was actually deleted, which is
+    how a sweep that deleted no input document at all reported success for
+    years."""
+    survivors: list[str] = []
+    for bucket, key in targets:
+        if key in _list_keys(s3_client, bucket, key):
+            survivors.append(key)
+    return survivors
+
+
+def _log_purge_plan(review_id: str, keys: list[str], dry_run: bool) -> None:
+    """Itemise what a sweep is about to delete (issue #454 operator gate).
+
+    The first sweep after the prefix fix deletes a BACKLOG of input documents
+    that were already past their retention window but never matched the broken
+    prefix. Deleting them is the intended behaviour; the volume is the
+    surprise, so every sweep names the reviews and the object keys it acts on
+    at a level an operator sees, and `dry_run=True` reports the same list
+    without deleting anything."""
+    prefix = "DRY RUN -- would purge" if dry_run else "purging"
+    logger.warning(
+        "retention sweep: %s review %s (%d object(s))", prefix, review_id, len(keys)
+    )
+    for key in keys:
+        logger.info("retention sweep: %s %s", prefix, key)
+
+
+def run_purge_sweep_now(
+    s3_client: Any, dynamodb_resource: Any, dry_run: bool = False
+) -> dict[str, Any]:
     """Run an immediate purge sweep using each review's own snapshotted
     window (invariant 2), for parity-checking the preview against the real
     sweep outcome. Mirrors
@@ -422,6 +577,23 @@ def run_purge_sweep_now(s3_client: Any, dynamodb_resource: Any) -> dict[str, Any
     this function lets the admin-API test suite and any on-demand "sweep
     now" admin action drive the identical logic against the tables this
     module already has handles to).
+
+    dry_run=True (issue #454) is the report-only path: it resolves and
+    itemises exactly the objects a real sweep would delete -- so the backlog's
+    scale can be measured before it becomes history -- and deletes nothing,
+    clears no substance field, and returns an empty `deleted_reviews`.
+
+    Returns, in addition to the skipped_* buckets:
+      dry_run           echo of the mode this sweep ran in
+      deleted_reviews   reviews whose every targeted object is now gone
+                        (empty on a dry run)
+      eligible_reviews  reviews that passed invariants 1-3 -- the backlog
+      objects_by_review {review_id: [key, ...]} itemisation of what was (or
+                        would be) deleted
+      object_count      total objects across `objects_by_review`
+      failed_reviews    reviews where a targeted object SURVIVED the delete;
+                        deliberately NOT in deleted_reviews, and their
+                        substance fields are left intact for the next sweep
     """
     reviews_table = _reviews_table(dynamodb_resource)
     resp = reviews_table.scan()
@@ -430,6 +602,9 @@ def run_purge_sweep_now(s3_client: Any, dynamodb_resource: Any) -> dict[str, Any
     outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
 
     deleted: list[str] = []
+    eligible: list[str] = []
+    failed: list[str] = []
+    objects_by_review: dict[str, list[str]] = {}
     skipped_active: list[str] = []
     skipped_hold: list[str] = []
     skipped_not_yet_eligible: list[str] = []
@@ -448,15 +623,28 @@ def run_purge_sweep_now(s3_client: Any, dynamodb_resource: Any) -> dict[str, Any
             skipped_not_yet_eligible.append(review_id)
             continue
 
-        for bucket, prefix in (
-            (uploads_bucket, f"uploads/{review_id}/"),
-            (outputs_bucket, f"outputs/{review_id}/"),
-        ):
-            if not bucket:
-                continue
-            listing = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-            for obj in listing.get("Contents", []):
-                s3_client.delete_object(Bucket=bucket, Key=obj["Key"])
+        eligible.append(review_id)
+        targets = _review_object_targets(review, s3_client, uploads_bucket, outputs_bucket)
+        objects_by_review[review_id] = [key for _bucket, key in targets]
+        _log_purge_plan(review_id, objects_by_review[review_id], dry_run)
+
+        if dry_run:
+            continue
+
+        for bucket, key in targets:
+            s3_client.delete_object(Bucket=bucket, Key=key)
+
+        survivors = _surviving_targets(s3_client, targets)
+        if survivors:
+            logger.error(
+                "retention sweep: review %s NOT purged -- %d targeted object(s) "
+                "survived deletion: %s",
+                review_id,
+                len(survivors),
+                ", ".join(survivors),
+            )
+            failed.append(review_id)
+            continue
 
         reviews_table.update_item(
             Key={"review_id": review_id},
@@ -465,7 +653,12 @@ def run_purge_sweep_now(s3_client: Any, dynamodb_resource: Any) -> dict[str, Any
         deleted.append(review_id)
 
     return {
+        "dry_run": dry_run,
         "deleted_reviews": deleted,
+        "eligible_reviews": eligible,
+        "failed_reviews": failed,
+        "objects_by_review": objects_by_review,
+        "object_count": sum(len(keys) for keys in objects_by_review.values()),
         "skipped_active": skipped_active,
         "skipped_hold": skipped_hold,
         "skipped_not_yet_eligible": skipped_not_yet_eligible,
@@ -478,34 +671,34 @@ def run_purge_sweep_now(s3_client: Any, dynamodb_resource: Any) -> dict[str, Any
 
 
 def _tag_review_objects(
-    review_id: str,
+    review: dict[str, Any],
     s3_client: Any,
     held: bool,
 ) -> None:
     """Mirror the review's legal-hold state onto its S3 objects via the
     `contract-toaster:legal-hold` tag, matching the bucket-policy DENY condition in
     infra/lib/nested/data-stack.ts (StringEquals on
-    's3:ExistingObjectTag/contract-toaster:legal-hold' = 'true')."""
+    's3:ExistingObjectTag/contract-toaster:legal-hold' = 'true').
+
+    Takes the review ROW (not just its id) because targeting is derived from
+    the row's own recorded pointer -- see `_review_object_targets`. Issue #454:
+    this tagger previously listed `uploads/{review_id}/`, which never matched
+    the layout the API writes, so a held INPUT document never received the tag
+    and the storage-layer DENY backstop covered outputs only."""
     uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
     outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
 
-    for bucket, prefix in (
-        (uploads_bucket, f"uploads/{review_id}/"),
-        (outputs_bucket, f"outputs/{review_id}/"),
+    for bucket, key in _review_object_targets(
+        review, s3_client, uploads_bucket, outputs_bucket
     ):
-        if not bucket:
-            continue
-        listing = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        for obj in listing.get("Contents", []):
-            key = obj["Key"]
-            if held:
-                s3_client.put_object_tagging(
-                    Bucket=bucket,
-                    Key=key,
-                    Tagging={"TagSet": [{"Key": "contract-toaster:legal-hold", "Value": "true"}]},
-                )
-            else:
-                s3_client.delete_object_tagging(Bucket=bucket, Key=key)
+        if held:
+            s3_client.put_object_tagging(
+                Bucket=bucket,
+                Key=key,
+                Tagging={"TagSet": [{"Key": "contract-toaster:legal-hold", "Value": "true"}]},
+            )
+        else:
+            s3_client.delete_object_tagging(Bucket=bucket, Key=key)
 
 
 def _get_review_or_404(review_id: str, dynamodb_resource: Any) -> dict[str, Any]:
@@ -543,7 +736,7 @@ def set_legal_hold(
             detail="A matter reference / reason is required to place a legal hold.",
         )
 
-    _get_review_or_404(review_id, dynamodb_resource)
+    review = _get_review_or_404(review_id, dynamodb_resource)
     actor = caller_user_row.get("cognito_sub", "")
 
     reviews_table = _reviews_table(dynamodb_resource)
@@ -561,7 +754,7 @@ def set_legal_hold(
         },
     )
 
-    _tag_review_objects(review_id, s3_client, held=True)
+    _tag_review_objects(review, s3_client, held=True)
 
     _write_audit_entry(
         dynamodb_resource,
@@ -593,7 +786,7 @@ def release_legal_hold(
     """
     _require_admin(caller_user_row, "Admin privilege required to release a legal hold.")
 
-    _get_review_or_404(review_id, dynamodb_resource)
+    review = _get_review_or_404(review_id, dynamodb_resource)
     actor = caller_user_row.get("cognito_sub", "")
 
     reviews_table = _reviews_table(dynamodb_resource)
@@ -610,7 +803,7 @@ def release_legal_hold(
         },
     )
 
-    _tag_review_objects(review_id, s3_client, held=False)
+    _tag_review_objects(review, s3_client, held=False)
 
     _write_audit_entry(
         dynamodb_resource,
