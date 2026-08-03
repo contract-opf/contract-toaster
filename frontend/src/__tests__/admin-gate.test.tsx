@@ -59,6 +59,7 @@ const ADMIN_CHROME_TESTIDS = [
   'admin-model-panel',
   'admin-pen-rules-panel',
   'admin-playbooks-panel',
+  'admin-diagnostics-panel',
   'sync-status-panel',
   'break-glass-note',
   'retention-slider-panel',
@@ -132,6 +133,7 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
       },
       '/api/admin/retention/holds': { holds: [] },
       '/api/playbooks': { playbooks: [] },
+      '/api/admin/diagnostics/recent-failures': { failures: [] },
       '/api/admin/model-key': {
         setting_id: 'global',
         key_store_available: true,
@@ -153,6 +155,7 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
     // POST-only, fired on submit), so it needs no stubbed route above.
     expect(await screen.findByTestId('admin-pen-rules-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-playbooks-panel')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-diagnostics-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('break-glass-note')).toBeInTheDocument();
   });
 });

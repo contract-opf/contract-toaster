@@ -12,9 +12,20 @@
  * needed here.
  */
 
+/* `position: relative` is load-bearing, not decoration (issue #457). The host
+   carries `.ct-button__live`, the absolutely-positioned visually-hidden live
+   region #428 added below. An absolutely-positioned box is clipped by its
+   CONTAINING BLOCK's overflow, not by whatever it happens to sit inside — so
+   without a positioned host, the live region of a button in a horizontally
+   scrolled `ct-table` row escaped that scroll container and enlarged the
+   DOCUMENT's scrollable overflow instead: a 60px horizontal page scroll with
+   nothing painted in it, measured on the Users tab at 768 and 375. Making the
+   host the containing block keeps the region inside the scroller, where the
+   rest of the row already lives. */
 ct-button {
   display: inline-block;
   max-width: 100%;
+  position: relative;
 }
 
 .ct-button__el {
@@ -35,8 +46,11 @@ ct-button {
     color var(--ct-dur-fast) var(--ct-ease-out);
 }
 
+/* Transparent outline, not `outline: none` — forced-colors: active discards
+   box-shadow and repaints the transparent outline (tokens.css, issue #438). */
 .ct-button__el:focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   box-shadow: var(--ct-focus-ring);
 }
 

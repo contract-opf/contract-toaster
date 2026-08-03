@@ -33,6 +33,14 @@ just the .ts source):
      sync_status table.
   E. The API task-role IAM policy grants dynamodb:GetItem and
      dynamodb:UpdateItem on the retention_settings table.
+  F. The API task-role IAM policy grants s3:GetObject on the UPLOADS bucket
+     prefix (issue #449). Same class of bug as C-E, one bucket over: the
+     only uploads grant the role ever held was s3:PutObject, so the
+     `GET /api/reviews/{id}/input` route added in #449 would have had its
+     head_object answered AccessDenied on the AWS target (a 503, not the 410
+     it claims) and, even past that, would have presigned a URL signed by a
+     principal with no read on `uploads/*` -- a browser GET that 403s. The
+     PutObject grant must survive alongside it (regression guard).
 
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
@@ -285,6 +293,63 @@ def check_cde_task_role_grants(policy: dict[str, Any]) -> list[str]:
     return failures
 
 
+# ---------------------------------------------------------------------------
+# Check F -- the API task role can READ the uploads bucket (issue #449).
+# ---------------------------------------------------------------------------
+
+UPLOADS_PREFIX_ARN_FRAGMENT = "contract-toaster-uploads-dev/uploads/*"
+
+
+def check_f_uploads_read_grant(policy: dict[str, Any]) -> list[str]:
+    print("\nCheck F: API task-role IAM policy can read the uploads bucket "
+          "(GET /api/reviews/{id}/input, issue #449) …")
+    failures: list[str] = []
+
+    statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
+    uploads_statements = _statements_for_resource_substring(
+        statements, UPLOADS_PREFIX_ARN_FRAGMENT
+    )
+    failures += _assert(
+        len(uploads_statements) >= 1,
+        "a policy statement targets the uploads bucket's uploads/* prefix",
+    )
+
+    uploads_actions: set[str] = set()
+    for s in uploads_statements:
+        uploads_actions |= _actions(s)
+
+    failures += _assert(
+        "s3:GetObject" in uploads_actions,
+        "uploads/* grant includes s3:GetObject (the input-document download)",
+        f"got actions: {sorted(uploads_actions)} -- without GetObject the /input "
+        f"route's head_object is AccessDenied (503, not 410) and the presigned "
+        f"URL it hands the browser 403s",
+    )
+
+    # Regression guard: the pre-existing upload path must not have been
+    # traded away while adding the read.
+    failures += _assert(
+        "s3:PutObject" in uploads_actions,
+        "pre-existing s3:PutObject on uploads/* still present",
+        f"got actions: {sorted(uploads_actions)}",
+    )
+
+    # The read must stay scoped to the uploads PREFIX -- never the bucket root.
+    for s in uploads_statements:
+        resource = s.get("Resource")
+        resources_list = resource if isinstance(resource, list) else [resource]
+        failures += _assert(
+            all(
+                isinstance(r, str) and r.endswith("/uploads/*")
+                for r in resources_list
+            ),
+            f"uploads statement {s.get('Sid')!r} stays scoped to the uploads/* prefix",
+            f"got resources: {resources_list}",
+        )
+
+    return failures
+
+
 def main() -> int:
     all_failures: list[str] = []
 
@@ -308,6 +373,7 @@ def main() -> int:
         all_failures += _assert(False, "API task-role AWS::IAM::Policy resource found in App template")
     else:
         all_failures += check_cde_task_role_grants(policy)
+        all_failures += check_f_uploads_read_grant(policy)
 
     if all_failures:
         print(f"\n{len(all_failures)} check(s) failed:")

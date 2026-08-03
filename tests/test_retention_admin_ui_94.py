@@ -204,17 +204,33 @@ def _seed_non_admin(sub: str = "reviewer-1") -> dict:
     return {"cognito_sub": sub, "email": f"{sub}@example.com", "is_admin": False}
 
 
+# The layout backend/src/review_routes.py actually writes, and the pointer
+# backend/src/reviews.py::_create_review_row records on the row (#449) -- the
+# sweep and the legal-hold tagger derive their targeting from it (#454). This
+# suite previously seeded neither, so it could not see that no input document
+# was ever purged or tagged.
+def _upload_key(review_id: str, owner_sub: str = "owner-1") -> str:
+    return f"uploads/{owner_sub}/{review_id}/in.docx"
+
+
+def _output_key(review_id: str) -> str:
+    return f"outputs/{review_id}/out.docx"
+
+
 def _seed_review(reviews: FakeTable, review_id: str, status_: str = "DONE",
                   created_at: float = 0.0, window_days: int = 90,
-                  legal_hold: bool = False) -> None:
+                  legal_hold: bool = False, owner_sub: str = "owner-1") -> None:
     reviews.items[review_id] = {
         "review_id": review_id,
+        "owner_sub": owner_sub,
         "status": status_,
         "created_at": created_at,
         "retention_window_at_creation": window_days,
         "legal_hold": legal_hold,
         "verdict_summary": "some summary",
         "issue_rationale_text": "some rationale",
+        "upload_s3_key": _upload_key(review_id, owner_sub),
+        "output_s3_key": _output_key(review_id),
     }
 
 
@@ -417,8 +433,8 @@ class TestLegalHold(unittest.TestCase):
         self.non_admin = _seed_non_admin("reviewer-1")
         _seed_review(self.reviews, "r-1", status_="DONE")
         self.fake_s3 = FakeS3()
-        self.fake_s3.put_object(Bucket=os.environ["UPLOADS_BUCKET"], Key="uploads/r-1/doc.docx")
-        self.fake_s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key="outputs/r-1/redline.docx")
+        self.fake_s3.put_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=_upload_key("r-1"))
+        self.fake_s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=_output_key("r-1"))
 
     def test_non_admin_403(self):
         with self.assertRaises(HTTPException) as ctx:
@@ -437,22 +453,31 @@ class TestLegalHold(unittest.TestCase):
         self.assertEqual(self.reviews.items["r-1"]["legal_hold_set_by"], "admin-1")
 
         uploads_tags = self.fake_s3.tags.get(
-            (os.environ["UPLOADS_BUCKET"], "uploads/r-1/doc.docx"), {}
+            (os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}
         )
         outputs_tags = self.fake_s3.tags.get(
-            (os.environ["OUTPUTS_BUCKET"], "outputs/r-1/redline.docx"), {}
+            (os.environ["OUTPUTS_BUCKET"], _output_key("r-1")), {}
         )
         self.assertEqual(uploads_tags.get("contract-toaster:legal-hold"), "true")
         self.assertEqual(outputs_tags.get("contract-toaster:legal-hold"), "true")
 
     def test_release_hold_clears_review_row_and_s3_tags(self):
         _retention_module.set_legal_hold("r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3)
+        # Asserted before the release so this test cannot pass vacuously on a
+        # tree where the input object was never tagged in the first place
+        # (issue #454 -- it did exactly that until the tagger's prefix was
+        # fixed).
+        self.assertEqual(
+            self.fake_s3.tags.get((os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {})
+            .get("contract-toaster:legal-hold"),
+            "true",
+        )
         result = _retention_module.release_legal_hold("r-1", self.admin, self.ddb, self.fake_s3)
         self.assertFalse(result["legal_hold"])
         self.assertEqual(self.reviews.items["r-1"]["legal_hold"], False)
 
         uploads_tags = self.fake_s3.tags.get(
-            (os.environ["UPLOADS_BUCKET"], "uploads/r-1/doc.docx"), {}
+            (os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}
         )
         self.assertNotEqual(uploads_tags.get("contract-toaster:legal-hold"), "true")
 

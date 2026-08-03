@@ -119,6 +119,15 @@ describe('download affordance — ReviewSubmission.tsx', () => {
     });
 
     await submitAndReachResult();
+
+    // Issue #448: this review carries no critic delta, so the download gate is
+    // not in force and the completion handoff has ALREADY saved it once by the
+    // time anything is clicked. Baseline that first, then assert the manual
+    // click adds a download of its own — the button stays a real, working
+    // affordance whether or not the automatic save ran.
+    await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(1));
+    const clicksBefore = anchorClickSpy.mock.calls.length;
+
     fireEvent.click(screen.getByTestId('review-download-button'));
 
     // Clicking download must fetch the scoped presigned-URL endpoint...
@@ -128,12 +137,13 @@ describe('download affordance — ReviewSubmission.tsx', () => {
     // ...and hand the returned URL to the browser via a clicked anchor whose
     // href is the presigned URL — never window.location.assign, so the SPA
     // itself never navigates away.
-    await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(1));
-    const anchorCallIndex = createElementSpy.mock.calls.findIndex(
-      ([tag]: [string]) => tag === 'a',
-    );
-    expect(anchorCallIndex).toBeGreaterThanOrEqual(0);
-    const anchor = createElementSpy.mock.results[anchorCallIndex]!.value as HTMLAnchorElement;
+    await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(clicksBefore + 1));
+    const anchorCalls = createElementSpy.mock.calls
+      .map((call: unknown[], i: number) => ({ tag: call[0], index: i }))
+      .filter((entry: { tag: unknown }) => entry.tag === 'a');
+    expect(anchorCalls.length).toBeGreaterThan(0);
+    const lastAnchorIndex = anchorCalls[anchorCalls.length - 1]!.index;
+    const anchor = createElementSpy.mock.results[lastAnchorIndex]!.value as HTMLAnchorElement;
     expect(anchor.href).toBe(presignedUrl);
     expect(assignMock).not.toHaveBeenCalled();
     // The SPA's own mount point survives — no navigation occurred.

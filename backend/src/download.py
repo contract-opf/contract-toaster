@@ -105,6 +105,23 @@ def _get_outputs_bucket() -> str:
     return bucket
 
 
+def get_uploads_bucket() -> str:
+    """The uploads bucket, for the issue-#449 input-document download.
+
+    Named after the SAME env var `src/review_routes.py::_put_upload_object`
+    writes through, so the download reads from exactly the bucket the upload
+    wrote to; a deployment that configured one and not the other fails loudly
+    here rather than presigning against the wrong data class.
+    """
+    bucket = os.environ.get("UPLOADS_BUCKET", "")
+    if not bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="UPLOADS_BUCKET not configured.",
+        )
+    return bucket
+
+
 def _is_admin(caller_user_row: dict[str, Any]) -> bool:
     """Return True if the caller's users row (looked up by cognito_sub) is an admin.
 
@@ -149,7 +166,9 @@ def _check_owner_or_admin(
         )
 
 
-def _validate_s3_key_bound_to_review(s3_key: str, review_id: str) -> None:
+def _validate_s3_key_bound_to_review(
+    s3_key: str, review_id: str, expected_prefix: str | None = None
+) -> None:
     """Reject any S3 key that is not bound to the authorized review (AC2).
 
     Defence-in-depth for issue #71 AC2 ("scoped download authorization, no path
@@ -175,11 +194,22 @@ def _validate_s3_key_bound_to_review(s3_key: str, review_id: str) -> None:
     Args:
         s3_key: the candidate S3 object key.
         review_id: the UUID v4 review identifier the caller is authorized for.
+        expected_prefix: the per-review prefix the key must sit under.
+            Defaults to ``outputs/<review_id>/`` — the only data class this
+            gate served before issue #449 added the input-document download,
+            whose keys are ``uploads/<owner_sub>/<review_id>/`` (the layout
+            `review_routes._put_upload_object` writes) and therefore cannot be
+            derived from ``review_id`` alone. Whatever prefix is supplied,
+            ``review_id`` MUST appear in it as a whole path segment: that is
+            what keeps this an independent review-binding gate rather than a
+            caller-supplied allowlist, so a mis-wired future caller still
+            cannot widen it to another review or another data class.
 
     Raises:
-        HTTPException(403) if the key is not scoped to ``outputs/<review_id>/``.
+        HTTPException(403) if the key is not scoped to `expected_prefix`, or
+            if `expected_prefix` does not itself bind to `review_id`.
     """
-    expected_prefix = f"outputs/{review_id}/"
+    expected_prefix = expected_prefix or f"outputs/{review_id}/"
 
     def _reject() -> None:
         raise HTTPException(
@@ -189,6 +219,13 @@ def _validate_s3_key_bound_to_review(s3_key: str, review_id: str) -> None:
                 "this review."
             ),
         )
+
+    # The prefix must genuinely name THIS review. A caller that passed a
+    # review-agnostic prefix (say "uploads/") would otherwise turn this gate
+    # into a data-class check only, and every one of that class's objects
+    # would satisfy it.
+    if review_id not in expected_prefix.split("/"):
+        _reject()
 
     if not s3_key.startswith(expected_prefix):
         _reject()
@@ -290,19 +327,32 @@ def generate_presigned_download_url(
     env_name: str,
     s3_client: Any,
     dynamodb_client: Any,
+    *,
+    expected_key_prefix: str | None = None,
+    bucket_name: str | None = None,
+    require_object_exists: bool = False,
 ) -> JSONResponse:
     """Generate a short-lived presigned URL for an output file download.
 
     Steps:
       1. Owner/admin check (raises HTTP 403 for non-owner/non-admin callers).
       1b. Key-vs-review-id binding check: the s3_key must be scoped to
-         ``outputs/<review_id>/`` with no path traversal (raises HTTP 403
+         ``outputs/<review_id>/`` — or to `expected_key_prefix` when the
+         caller supplies one — with no path traversal (raises HTTP 403
          otherwise — AC2 IDOR / path-traversal defence).
-      2. Per-user daily limit check via DynamoDB conditional write (raises
+      2. (opt-in) Object-existence check — see `require_object_exists`.
+      3. Per-user daily limit check via DynamoDB conditional write (raises
          HTTP 429 when the limit is exceeded).
-      3. Generate a presigned GetObject URL with a 60-second TTL, embedding
+      4. Generate a presigned GetObject URL with a 60-second TTL, embedding
          the per-review KMS encryption context so the key policy is satisfied.
-      4. Return the URL with Cache-Control: no-store so it is not cached.
+      5. Return the URL with Cache-Control: no-store so it is not cached.
+
+    The existence check sits between the authorization gates and the quota
+    deliberately. After the gates, because an unauthorized or mis-scoped key
+    must be refused with 403 without ever having its existence probed. Before
+    the quota, because a 410 delivers nothing and so must not be charged a
+    download slot — otherwise clicking through purged rows exhausts the very
+    limit that protects a user's still-downloadable redlines.
 
     Args:
         review_id: the UUID v4 review identifier (non-enumerable).
@@ -317,6 +367,21 @@ def generate_presigned_download_url(
         env_name: the deployment environment name (dev/staging/prod).
         s3_client: a boto3 S3 client (injected for testability).
         dynamodb_client: a boto3 DynamoDB client (injected for testability).
+        expected_key_prefix: overrides the per-review prefix `s3_key` is
+            validated against (issue #449's input-document download lives
+            under ``uploads/<owner_sub>/<review_id>/``).  The prefix must
+            itself name `review_id` — see `_validate_s3_key_bound_to_review`.
+        bucket_name: overrides the bucket the URL is signed against.  Defaults
+            to the outputs bucket, unchanged.
+        require_object_exists: when True, HEAD the object first and raise HTTP
+            410 Gone if it is not there.  Opt-in rather than always-on because
+            this function's contract is "presign a key", and the extra S3 round
+            trip is only worth paying where a MISSING object is an expected,
+            meaningful state rather than an error — which is exactly the case
+            once retention starts purging documents out from under review rows
+            that still carry their pointers (issue #449).  Without it, a purged
+            review hands the browser a valid-looking URL that 404s on click; a
+            dead link is a worse answer than "no longer available".
 
     Returns:
         JSONResponse with {"url": "<presigned-url>", "expires_in": 60} and
@@ -324,7 +389,9 @@ def generate_presigned_download_url(
 
     Raises:
         HTTPException(403) if the caller is not the owner or admin, or if the
-            s3_key is not scoped to ``outputs/<review_id>/`` (IDOR / traversal).
+            s3_key is not scoped to the expected per-review prefix (IDOR /
+            traversal).
+        HTTPException(410) if `require_object_exists` and the object is gone.
         HTTPException(429) if the per-user daily limit is exceeded.
         HTTPException(503) if S3 or DynamoDB operations fail.
     """
@@ -332,20 +399,67 @@ def generate_presigned_download_url(
     _check_owner_or_admin(review_owner_sub, caller_user_row)
 
     # Step 1b: key-vs-review-id binding (AC2 — no path traversal / IDOR).
-    # The s3_key MUST belong to this review's outputs prefix.  Callers are
+    # The s3_key MUST belong to this review's own prefix.  Callers are
     # required to derive s3_key from the authoritative review record, not from
     # client input; this is an independent gate so an incorrectly-wired caller
     # still cannot presign a key scoped to another review or data class.
-    _validate_s3_key_bound_to_review(s3_key, review_id)
+    _validate_s3_key_bound_to_review(s3_key, review_id, expected_key_prefix)
 
-    # Step 2: per-user daily limit (DynamoDB conditional write with ConditionExpression).
+    bucket = bucket_name or _get_outputs_bucket()
+
+    # Step 2 (issue #449): does the object still exist?
+    #
+    # Ordered AFTER the owner/admin and key-binding gates, so an unauthorized
+    # or mis-scoped key is still refused with 403 and never gets so far as to
+    # have its existence probed — nothing is disclosed here that those gates
+    # had not already let through.
+    #
+    # Ordered BEFORE the per-user daily limit, which is the other half of the
+    # ordering argument and was got wrong first time round: a Gone answer
+    # delivers no bytes, so it must not spend one of the caller's 20 daily
+    # download slots. It previously did, which meant a user with a page of
+    # purged rows could exhaust — by clicking on documents that no longer
+    # exist — the very quota that protects their still-downloadable redlines.
+    # (Proven by tests/test_review_history_449.py::
+    # TestGoneIsNotChargedAgainstTheDailyLimit.)
+    #
+    # The reorder does not weaken the limit: HEAD is a cheap, read-only,
+    # already-authorized probe of one specific key the caller owns, and every
+    # request that actually yields a URL still passes through the counter
+    # below.
+    if require_object_exists:
+        try:
+            s3_client.head_object(Bucket=bucket, Key=s3_key)
+        except ClientError as exc:
+            # Only a genuine "it isn't there" is Gone.  Anything else (a
+            # throttle, an IAM problem, an outage) is a 503: reporting a
+            # transient failure as a permanent deletion would tell a user their
+            # document had been purged when it had not.
+            err_code = exc.response.get("Error", {}).get("Code", "")
+            http_status = (
+                exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            )
+            if err_code in ("404", "NoSuchKey", "NotFound") or http_status == 404:
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail=(
+                        "This document is no longer available. Files are removed "
+                        "once their retention window has passed."
+                    ),
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Unable to check whether the document is still available: {exc!r}",
+            ) from exc
+
+    # Step 3: per-user daily limit (DynamoDB conditional write with ConditionExpression).
     _check_per_user_limits(
         user_sub=caller_user_row["cognito_sub"],
         env_name=env_name,
         dynamodb_client=dynamodb_client,
     )
 
-    # Step 3: generate presigned URL.
+    # Step 4: generate presigned URL.
     # For SSE-KMS: the S3 service performs the KMS Decrypt call server-side
     # using the outputs role (the role that signed the presigned URL).  The
     # KMS encryption context enforcement ({contract-toaster:data-class, contract-toaster:review-id})
@@ -353,8 +467,7 @@ def generate_presigned_download_url(
     # KmsKeysStack — not by parameters embedded in the presigned URL itself.
     # The presigned URL authorises the caller's GET; the key policy enforces
     # that the outputs role was granted only for the correct context.
-    bucket = _get_outputs_bucket()
-
+    #
     # Docker Compose target only (issue #273): a presigned URL is host-bound (the SigV4
     # signature commits to the endpoint host used at generation time). The
     # injected s3_client above reaches MinIO at the compose-internal

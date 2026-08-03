@@ -60,6 +60,11 @@ from typing import Any
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
 
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src.users import public_user_view
+except ImportError:  # pragma: no cover
+    from users import public_user_view  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -553,9 +558,12 @@ def add_user(
     )
     logger.info("USER_ADDED: actor=%s target=%s user_type=%s role=%s", actor, cognito_sub, user_type, role)
 
-    result = dict(item)
-    result.pop("password_hash", None)
-    return result
+    # One definition of "safe to return" for a users row, shared with
+    # src/users.py's list_users/get_user/update_user (issue #453). This used to
+    # be an ad-hoc `result.pop("password_hash", None)` here and nowhere else,
+    # which is precisely how the scan-based GET /api/users and the routed
+    # PATCH /api/users/{sub} kept leaking hashes.
+    return public_user_view(item)
 
 
 def remove_user(

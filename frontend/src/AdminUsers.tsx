@@ -2,10 +2,12 @@
  * AdminUsers — allowlist UI, lifecycle actions, sync visibility (issue #92).
  *
  * Admin-only screen (RUNBOOK.md refers to this as "Admin UI -> Users"):
- *   - Lists every `users` row (GET /api/users): email, status
+ *   - Lists every `users` row (GET /api/users): identity, status
  *     (active/suspended/deprovisioned), admin flag, last_auth_at, and
  *     whether the row was JIT-created (issue #33's canonical admission
- *     path — see ARCHITECTURE.md -> Authentication).
+ *     path — see ARCHITECTURE.md -> Authentication). "Identity" is
+ *     email-or-username, because the two auth targets name people
+ *     differently and neither field is universal (issue #441).
  *   - Suspend / deprovision / reactivate actions (PATCH /api/users/{sub}),
  *     and toggling the admin flag.
  *   - A read-only sync-status panel (GET /api/users/sync-status): last
@@ -25,6 +27,11 @@
  * legal-document tool), so no optimistic UI: the table only reflects a
  * change after the PATCH response confirms it, and any error is shown
  * inline rather than silently retried.
+ *
+ * Both reads are modelled as an explicit `LoadState` (see below) rather than
+ * a `data | null` sentinel, so a failed load is a TERMINAL state that renders
+ * an error plus a working retry — never an error and a spinner at the same
+ * time (issue #439).
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -38,12 +45,34 @@ import type { CtChipVariant } from './ui/react';
 
 export type UserStatus = 'active' | 'suspended' | 'deprovisioned';
 
+/**
+ * A `users` row. BOTH identity fields are optional, because the two auth
+ * targets legitimately identify people differently (issue #441):
+ *
+ *   - SSO rows (JIT-created by the pre-token Lambda, #33) carry `email`.
+ *   - Password rows (`backend/src/demo_auth.py`) carry `username` and have no
+ *     `email` key at all.
+ *
+ * `email` used to be declared required, which made every password-mode row
+ * render a blank identity cell above its Suspend/Deprovision buttons. Neither
+ * field is guaranteed, so nothing here may be read without a fallback — see
+ * `userIdentity`.
+ */
 export interface UserRow {
   cognito_sub: string;
-  email: string;
+  email?: string;
+  username?: string;
   status: UserStatus;
   is_admin: boolean;
-  last_auth_at: number;
+  /**
+   * `null` for a user who has never signed in — `backend/src/demo_auth.py`
+   * writes `last_auth_at: None` when it seeds the demo rows and when an admin
+   * adds a user, so the wire value really is JSON null (issue #452). This was
+   * declared plain `number`, which was a type lie about the response; the
+   * runtime was already correct, since `formatTimestamp` renders 'never' for
+   * null. Do not "simplify" that guard away on the strength of the type.
+   */
+  last_auth_at: number | null;
   created_at: number;
   admission?: string; // "jit" for pre-token-Lambda-created rows (#33)
 }
@@ -55,6 +84,26 @@ export interface SyncStatus {
   users_deprovisioned_count: number;
   next_run_at: number | null;
 }
+
+/**
+ * An explicit three-state load, replacing the `T | null` sentinel this screen
+ * used to key its loading branch off (issue #439).
+ *
+ * The shipped bug: a failed load set an error string and left the data at
+ * `null`, so "has an error" and "is still loading" were both true at once and
+ * the screen rendered a danger banner AND a permanent "Loading users…". This
+ * shape makes that state unrepresentable — the failure message lives INSIDE
+ * the failed state, so there is nowhere for an error to sit while the status
+ * is still `loading`.
+ *
+ * `failed` is deliberately distinct from `ready` with empty data: an empty
+ * workspace and a failed load are different claims, and collapsing them would
+ * make a 500 render as "No users yet."
+ */
+type LoadState<T> =
+  | { status: 'loading' }
+  | { status: 'ready'; data: T }
+  | { status: 'failed'; message: string };
 
 function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
   return authorizedFetch(path, {
@@ -68,6 +117,32 @@ function formatTimestamp(epochSeconds: number | null): string {
     return 'never';
   }
   return new Date(epochSeconds * 1000).toLocaleString();
+}
+
+/**
+ * The single identity string for a row — never empty (issue #441).
+ *
+ * Prefers `email` (SSO), falls back to `username` (password mode), and last
+ * resorts to `cognito_sub`, which is the primary key and therefore always
+ * present. A blank cell is not an acceptable outcome here: every row carries
+ * Suspend / Deprovision / Revoke admin, so an unidentifiable row is an
+ * irreversible access decision taken against an unknown person. Showing the
+ * subject is ugly; showing nothing is dangerous.
+ *
+ * Whitespace-only values count as absent, so a row with `email: ""` degrades
+ * to its username rather than rendering the empty string it literally holds.
+ * The `Admin` column is deliberately NOT part of this: `admin`/`reviewer` is a
+ * role, identical across every admin, and it only looks like a name by
+ * coincidence.
+ */
+export function userIdentity(user: UserRow): string {
+  const candidates = [user.email, user.username, user.cognito_sub];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') {
+      return candidate;
+    }
+  }
+  return '—';
 }
 
 // Status → chip variant: active reads as healthy, suspended as a warning,
@@ -84,9 +159,8 @@ function statusChipVariant(status: UserStatus): CtChipVariant {
 }
 
 export default function AdminUsers(): React.ReactElement | null {
-  const [users, setUsers] = useState<UserRow[] | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [usersLoad, setUsersLoad] = useState<LoadState<UserRow[]>>({ status: 'loading' });
+  const [syncLoad, setSyncLoad] = useState<LoadState<SyncStatus>>({ status: 'loading' });
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingSub, setPendingSub] = useState<string | null>(null);
   // Non-admins get HTTP 403 from every /api/users* call (server-enforced —
@@ -110,13 +184,17 @@ export default function AdminUsers(): React.ReactElement | null {
         );
       }
       const data = (await response.json()) as { users: UserRow[] };
-      setUsers(data.users);
+      setUsersLoad({ status: 'ready', data: data.users });
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the users list. Please try again."),
-      );
+      // Terminal, and it carries its own message — the loader branch below
+      // cannot render alongside it (issue #439).
+      setUsersLoad({
+        status: 'failed',
+        message:
+          err instanceof Error
+            ? err.message
+            : friendlyErrorMessage(err, "We couldn't load the users list. Please try again."),
+      });
     }
   }, []);
 
@@ -135,13 +213,15 @@ export default function AdminUsers(): React.ReactElement | null {
           ),
         );
       }
-      setSyncStatus((await response.json()) as SyncStatus);
+      setSyncLoad({ status: 'ready', data: (await response.json()) as SyncStatus });
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the sync status. Please try again."),
-      );
+      setSyncLoad({
+        status: 'failed',
+        message:
+          err instanceof Error
+            ? err.message
+            : friendlyErrorMessage(err, "We couldn't load the sync status. Please try again."),
+      });
     }
   }, []);
 
@@ -149,6 +229,23 @@ export default function AdminUsers(): React.ReactElement | null {
     void loadUsers();
     void loadSyncStatus();
   }, [loadUsers, loadSyncStatus]);
+
+  // Retry handlers (issue #439). Each one re-runs its own load IN PLACE —
+  // no page reload, which would destroy the in-memory session token
+  // (auth.ts) and sign the operator out, i.e. the only "try again" the old
+  // copy left available. The status is flipped back to `loading` here rather
+  // than at the top of the load function itself, so that the post-PATCH
+  // re-fetch in applyUpdate keeps the current table on screen instead of
+  // blanking it to a spinner on every mutation.
+  const retryLoadUsers = useCallback(() => {
+    setUsersLoad({ status: 'loading' });
+    void loadUsers();
+  }, [loadUsers]);
+
+  const retryLoadSyncStatus = useCallback(() => {
+    setSyncLoad({ status: 'loading' });
+    void loadSyncStatus();
+  }, [loadSyncStatus]);
 
   const applyUpdate = useCallback(
     async (sub: string, updates: Partial<Pick<UserRow, 'status' | 'is_admin'>>) => {
@@ -193,32 +290,64 @@ export default function AdminUsers(): React.ReactElement | null {
     <section data-testid="admin-users-panel" className="ct-section ct-stack">
       <CtToolbar title="Users" />
 
-      {error && (
-        <CtBanner variant="danger" data-testid="admin-users-error">
-          {error}
-        </CtBanner>
+      {/* A failed load is terminal: the banner carries the message and a
+          working retry, and the loader below is unreachable while it shows. */}
+      {usersLoad.status === 'failed' && (
+        <div className="ct-stack">
+          <CtBanner variant="danger" data-testid="admin-users-error">
+            {usersLoad.message}
+          </CtBanner>
+          <div className="ct-actions" role="group">
+            <CtButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="admin-users-retry"
+              onClick={retryLoadUsers}
+            >
+              Try again
+            </CtButton>
+          </div>
+        </div>
       )}
 
       {/* Sync-job visibility panel */}
       <CtBanner variant="muted" data-testid="sync-status-panel">
         <strong>Workspace sync status</strong>
-        {syncStatus ? (
+        {syncLoad.status === 'ready' ? (
           <ul>
-            <li data-testid="sync-last-run">Last run: {formatTimestamp(syncStatus.last_run_at)}</li>
+            <li data-testid="sync-last-run">Last run: {formatTimestamp(syncLoad.data.last_run_at)}</li>
             <li data-testid="sync-outcome">
               Outcome:{' '}
-              {syncStatus.last_run_outcome === 'directory_unavailable' ? (
+              {syncLoad.data.last_run_outcome === 'directory_unavailable' ? (
                 <CtChip variant="danger">directory unavailable — fail-closed, no changes made</CtChip>
-              ) : syncStatus.last_run_outcome ? (
-                <CtChip variant="ok">{syncStatus.last_run_outcome}</CtChip>
+              ) : syncLoad.data.last_run_outcome ? (
+                <CtChip variant="ok">{syncLoad.data.last_run_outcome}</CtChip>
               ) : (
                 'not yet run'
               )}
             </li>
             <li data-testid="sync-deprovisioned-count">
-              Users deprovisioned on last run: {syncStatus.users_deprovisioned_count}
+              Users deprovisioned on last run: {syncLoad.data.users_deprovisioned_count}
             </li>
           </ul>
+        ) : syncLoad.status === 'failed' ? (
+          <div className="ct-stack">
+            <CtBanner variant="danger" data-testid="sync-status-error">
+              {syncLoad.message}
+            </CtBanner>
+            <div className="ct-actions" role="group">
+              <CtButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="sync-status-retry"
+                onClick={retryLoadSyncStatus}
+              >
+                Try again
+              </CtButton>
+            </div>
+          </div>
         ) : (
           <p data-testid="sync-status-loading">Loading sync status…</p>
         )}
@@ -250,7 +379,7 @@ export default function AdminUsers(): React.ReactElement | null {
         </CtBanner>
       )}
 
-      {users === null ? (
+      {usersLoad.status === 'failed' ? null : usersLoad.status === 'loading' ? (
         <CtProgress data-testid="admin-users-loading" label="Loading users…" />
       ) : (
         <CtCard data-testid="admin-users-table-panel">
@@ -258,7 +387,10 @@ export default function AdminUsers(): React.ReactElement | null {
             <table data-testid="users-table">
               <thead>
                 <tr>
-                  <th>Email</th>
+                  {/* Not "Email": a password-mode deployment has none, and a
+                      header that names a field half the rows cannot have is
+                      how the blank column went unnoticed (#441). */}
+                  <th data-testid="users-identity-header">Email / username</th>
                   <th>Status</th>
                   <th>Admin</th>
                   <th>Admission</th>
@@ -267,16 +399,16 @@ export default function AdminUsers(): React.ReactElement | null {
                 </tr>
               </thead>
               <tbody>
-                {users.length === 0 ? (
+                {usersLoad.data.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="ct-table__empty" data-testid="admin-users-empty">
                       No users yet.
                     </td>
                   </tr>
                 ) : (
-                  users.map((u) => (
+                  usersLoad.data.map((u) => (
                     <tr key={u.cognito_sub} data-testid={`user-row-${u.cognito_sub}`}>
-                      <td>{u.email}</td>
+                      <td data-testid={`user-identity-${u.cognito_sub}`}>{userIdentity(u)}</td>
                       <td data-testid={`user-status-${u.cognito_sub}`}>
                         <CtChip variant={statusChipVariant(u.status)}>{u.status}</CtChip>
                       </td>

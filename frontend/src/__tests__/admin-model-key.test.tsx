@@ -38,13 +38,54 @@ function settings(overrides: Partial<ModelKeySettings> = {}): ModelKeySettings {
   };
 }
 
-/** Stub fetch with a per-method handler for /api/admin/model-key. */
+/**
+ * Stub fetch with a per-method handler for /api/admin/model-key.
+ *
+ * Routed BY URL, not by method alone: the panel also loads
+ * /api/admin/model-selection (issue #445), and a method-only stub would hand
+ * that request this file's key payload — a wrong-shaped body, purely an
+ * artefact of the stub. Model-selection requests get the inert
+ * "this deployment doesn't choose its models here" payload below, so the
+ * picker renders one static card and cannot perturb the key assertions. The
+ * picker's own behavior is covered in admin-model-picker.test.tsx.
+ */
+const INERT_SELECTION = {
+  setting_id: 'models',
+  selection_store_available: false,
+  model_provider: 'openrouter',
+  selectable: [],
+  default_primary: {
+    model_id: 'anthropic/claude-opus-4.8',
+    cost_per_million_input_usd: 5,
+    cost_per_million_output_usd: 25,
+  },
+  default_critic: {
+    model_id: 'anthropic/claude-sonnet-4.6',
+    cost_per_million_input_usd: 3,
+    cost_per_million_output_usd: 15,
+  },
+  pricing_basis_primary: { input_tokens: 60000, output_tokens: 8000 },
+  pricing_basis_critic: { input_tokens: 70000, output_tokens: 5000 },
+  selected_primary_model_id: '',
+  selected_critic_model_id: '',
+  effective_primary_model_id: 'anthropic/claude-opus-4.8',
+  effective_critic_model_id: 'anthropic/claude-sonnet-4.6',
+  primary_source: 'default',
+  critic_source: 'default',
+  updated_at: '',
+  updated_by: '',
+};
+
 function stubModelKeyFetch(handlers: {
   get?: () => { status: number; body: unknown };
   post?: (body: unknown) => { status: number; body: unknown };
   delete?: () => { status: number; body: unknown };
 }): ReturnType<typeof vi.fn> {
-  const impl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/admin/model-selection')) {
+      return { ok: true, status: 200, json: async () => INERT_SELECTION } as Response;
+    }
     const method = (init?.method ?? 'GET').toUpperCase();
     const handler =
       method === 'POST'

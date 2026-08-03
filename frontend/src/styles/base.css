@@ -101,8 +101,15 @@ a:hover {
   color: var(--ct-accent-strong);
 }
 
+/* Focus indicators pair the box-shadow ring with a transparent outline
+   rather than `outline: none` — forced-colors: active drops box-shadow and
+   repaints the transparent outline as the system highlight, so keyboard
+   focus stays visible in Windows High Contrast Mode (tokens.css "Focus",
+   issue #438). Normal-mode appearance is unchanged: the outline is
+   transparent and outlines take no layout space. */
 a:focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   border-radius: var(--ct-radius-sm);
   box-shadow: var(--ct-focus-ring);
 }
@@ -180,7 +187,8 @@ input[type='radio'] {
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   border-color: var(--ct-accent);
   box-shadow: var(--ct-focus-ring);
 }
@@ -230,7 +238,8 @@ button:focus-visible,
 input[type='button']:focus-visible,
 input[type='submit']:focus-visible,
 input[type='reset']:focus-visible {
-  outline: none;
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
   box-shadow: var(--ct-focus-ring);
 }
 

@@ -102,6 +102,29 @@ STATUS_OK = "OK"
 STATUS_MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
 STATUS_ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
 
+# Live progress tokens (issue #447). These are the four sub-stages a WAITING
+# USER can be told about -- the ones that actually consume the wall clock --
+# and they are reported by `run_review`'s optional `on_progress` callback
+# immediately BEFORE each one starts, so "primary_pass" means "the primary
+# pass is running now", never "the primary pass has finished".
+#
+# They are a STABLE WIRE CONTRACT: pipeline_runner writes the token verbatim
+# onto the reviews row, get_review_detail projects it, and the frontend maps
+# it to a step number + label. Renaming one silently degrades a running
+# review's UI to the honest-but-uninformative indeterminate treatment, so
+# treat these as API, not as internal labels. `PROGRESS_STAGES` is the
+# ordered tuple; the frontend's step numbering is this order.
+PROGRESS_PRIMARY_PASS = "primary_pass"
+PROGRESS_CRITIC_PASS = "critic_pass"
+PROGRESS_RECONCILIATION = "reconciliation"
+PROGRESS_REDLINE = "redline"
+PROGRESS_STAGES = (
+    PROGRESS_PRIMARY_PASS,
+    PROGRESS_CRITIC_PASS,
+    PROGRESS_RECONCILIATION,
+    PROGRESS_REDLINE,
+)
+
 
 def _terminal(
     *,
@@ -138,6 +161,7 @@ def run_review(
     corpus: Optional["leakage_scan.ConfidentialCorpus"] = None,
     current_counterparty_name: Optional[str] = None,
     toaster_guidance: str = "",
+    on_progress: Optional[Callable[[str], None]] = None,
 ) -> dict[str, Any]:
     """Compose the full review pipeline: extract -> normalize -> primary ->
     critic -> reconcile -> leakage scan -> redline, with `model_client`
@@ -175,8 +199,25 @@ def run_review(
     primary_review_pass.assemble_system_blocks's precedence contract:
     on conflict with the playbook, this guidance governs, but it never
     reaches the judged-NL Floor). Empty is today's behavior.
+
+    `on_progress` (issue #447, default `None`): a live progress seam. When
+    given, it is called with one of `PROGRESS_STAGES`' tokens immediately
+    BEFORE the corresponding sub-stage starts, so a caller can persist
+    "where this review actually is" for a waiting user. Default `None`
+    leaves every existing caller and test byte-identical -- this function
+    still owns no I/O of its own; the callback does.
+
+    The callback MUST NOT raise: progress is cosmetic and the review is
+    not, so a caller that writes to a store is responsible for swallowing
+    its own write failures (see pipeline_runner._write_progress_stage).
+    This function deliberately does NOT wrap the call in a try/except --
+    that would hide a genuine programming error in the callback behind a
+    silent no-op, and the one caller that does I/O already guards itself.
+    Nothing here is timer-driven: a token is emitted only when the stage it
+    names is genuinely about to run.
     """
     ledger_write = ledger_write or (lambda record: None)
+    report_progress: Callable[[str], None] = on_progress or (lambda stage: None)
     playbook = bundle
     metadata = playbook.get("playbook", {}).get("metadata", {})
     primary_model_id = metadata.get("primary_model_id") or _model_client.primary_model_id()
@@ -200,6 +241,7 @@ def run_review(
     # reads doc_text (the full counterparty document, or a section outline
     # over threshold) instead.
     doc_text = "\n\n".join(p.get("text", "") for p in draft_paragraphs)
+    report_progress(PROGRESS_PRIMARY_PASS)
     primary_result = primary_review_pass.run_primary_pass(
         review_id=review_id,
         diff_hunks=[],
@@ -224,6 +266,7 @@ def run_review(
     # after a successful primary pass (ARCHITECTURE.md: never a silent
     # single-pass DONE, and never a wasted call when the primary already
     # failed closed).
+    report_progress(PROGRESS_CRITIC_PASS)
     critic_result = critic_review_pass.run_critic_pass(
         review_id=review_id,
         diff_hunks=[],
@@ -238,6 +281,7 @@ def run_review(
 
     # Stage 4: deterministic reconciliation (issue #82). No detector_fires
     # (issue #380) -- reconcile() defaults that to an empty list.
+    report_progress(PROGRESS_RECONCILIATION)
     two_pass = reconciliation.run_two_pass_review(
         primary_pass_result=primary_result,
         critic_pass_result=critic_result,
@@ -257,6 +301,7 @@ def run_review(
     # anchor-joined patch path); REQUEST_CHANGE now locates each issue's
     # `source_quote` via the quote-based patcher (issue #379) -- see
     # redline_generate.py's own docstring for the full result-shape contract.
+    report_progress(PROGRESS_REDLINE)
     redline_result = redline_generate.generate_redline(
         reconciled_result=reconciled,
         corpus=corpus,

@@ -90,6 +90,30 @@ export class CtChip extends LitElement {
       border-radius: 999px;
       background: currentColor;
     }
+    /*
+     * NOTE: no backticks below — this comment lives inside a css tagged
+     * template literal, and one would terminate it (it did, once).
+     *
+     * forced-colors: active (Windows High Contrast) forces background-color
+     * to Canvas, NOT to the forced text colour — so a dot painted with
+     * background: currentColor becomes Canvas-on-Canvas and vanishes while
+     * its 6px box and 0.35rem gap keep their layout space, leaving the chip
+     * with a phantom indent. Measured in real Chrome, not argued: issue #455
+     * / audit F5 recorded dotBackground rgb(255, 255, 255) on a
+     * rgb(255, 255, 255) chip, for all five variants in both themes.
+     *
+     * System colour keywords are exempt from the forced override, so painting
+     * the dot with CanvasText restores it. That literal is an exemption case
+     * under §5.6 for the same reason as transparent in the focus rules: no
+     * token can express "whatever the user's forced palette calls text". The
+     * dot is aria-hidden decoration in every shipped usage — this restores
+     * the intended shape, not any meaning.
+     */
+    @media (forced-colors: active) {
+      .ct-chip__dot {
+        background: CanvasText;
+      }
+    }
   `;
 
   render() {
