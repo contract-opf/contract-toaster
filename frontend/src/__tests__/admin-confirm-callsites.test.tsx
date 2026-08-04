@@ -1,12 +1,16 @@
 /**
- * admin-confirm-callsites.test.tsx — the #428 confirm step, pinned to the two
- * call sites that got it retrofitted without a test (issue #450 item 5).
+ * admin-confirm-callsites.test.tsx — the #428 confirm step, pinned to the
+ * call sites that got it retrofitted without a test (issue #450 item 5,
+ * plus the #473 follow-up).
  *
  * `ct-button`'s confirm state machine has its own unit coverage
  * (`ui-button.test.tsx`), and `admin-model-key.test.tsx` pins the API-key
- * clear button. The two retrofits from #428 that were never pinned are:
+ * clear button. The retrofits that were never pinned at their call site are:
  *
  *   - `AdminUsers.tsx`      — "Deprovision"        (`confirm="Click again to deprovision"`)
+ *   - `AdminUsers.tsx`      — "Revoke admin"       (`confirm="Click again to revoke admin"`,
+ *                             issue #473: self-targeting is now allowed once a second active
+ *                             admin exists, so a stray click can strip the caller's OWN access)
  *   - `AdminRetention.tsx`  — "Release legal hold" (`confirm="Click again to release"`)
  *
  * Without an assertion at the CALL SITE, deleting the `confirm=` prop leaves
@@ -16,10 +20,12 @@
  * Counting the requests is load-bearing; asserting only the label swap would
  * still pass if the prop armed the button but let the action through.
  *
- * Both destructive actions here are irreversible in the operator's frame:
- * deprovisioning removes a person's access to a legal-document tool, and
- * releasing a legal hold drops the preservation flag that stops the retention
- * sweep from deleting evidence (`backend/src/retention.py`, #61).
+ * All three destructive actions here are irreversible (or self-service-less)
+ * in the operator's frame: deprovisioning and revoking admin both remove a
+ * person's access — to the tool, or to administering it, with no in-app path
+ * back for the person who just lost it — and releasing a legal hold drops
+ * the preservation flag that stops the retention sweep from deleting
+ * evidence (`backend/src/retention.py`, #61).
  *
  * These drive the REAL components with only the network transport stubbed —
  * nothing about AdminUsers/AdminRetention or ct-button is mocked, so the
@@ -111,6 +117,27 @@ const ACTIVE_USER = {
   created_at: 0,
 };
 
+// Two active admins so neither row is the last-active-admin (which disables
+// Revoke admin outright, issue #473) — the button under test here needs to
+// be enabled and armable.
+const ADMIN_ONE = {
+  cognito_sub: 'sub-admin-1',
+  email: 'admin1@example.com',
+  status: 'active',
+  is_admin: true,
+  last_auth_at: 0,
+  created_at: 0,
+};
+
+const ADMIN_TWO = {
+  cognito_sub: 'sub-admin-2',
+  email: 'admin2@example.com',
+  status: 'active',
+  is_admin: true,
+  last_auth_at: 0,
+  created_at: 0,
+};
+
 const RETENTION_SETTINGS = {
   setting_id: 'global',
   retention_window_days: 90,
@@ -195,6 +222,54 @@ describe('AdminUsers — "Deprovision" is a two-step confirm (#428 call site)', 
 
     await waitFor(() => {
       expect(callsFor(fetchMock, 'PATCH', '/api/users/sub-1')).toBe(1);
+    });
+  });
+});
+
+describe('AdminUsers — "Revoke admin" is a two-step confirm (#473 call site)', () => {
+  it('does not PATCH on the first click — it only arms', async () => {
+    const fetchMock = stubFetch({
+      '/api/users': { users: [ADMIN_ONE, ADMIN_TWO] },
+      '/api/users/sync-status': SYNC_STATUS_OK,
+      'PATCH /api/users/sub-admin-1': { ok: true },
+    });
+
+    render(<AdminUsers />);
+    const row = await screen.findByTestId('user-row-sub-admin-1');
+    const revoke = within(row).getByRole('button', { name: 'Revoke admin' });
+
+    fireEvent.click(revoke);
+    await settle();
+
+    // THE assertion this block exists for: with the `confirm` prop deleted
+    // from the call site, this click revokes the caller's own admin access
+    // outright (issue #473 is what makes self-targeting reachable at all).
+    expect(callsFor(fetchMock, 'PATCH', '/api/users/sub-admin-1')).toBe(0);
+    expect(revoke.textContent).toContain('Click again to revoke admin');
+  });
+
+  it('PATCHes exactly once, with is_admin=false, on the second click', async () => {
+    const fetchMock = stubFetch({
+      '/api/users': { users: [ADMIN_ONE, ADMIN_TWO] },
+      '/api/users/sync-status': SYNC_STATUS_OK,
+      'PATCH /api/users/sub-admin-1': { ok: true },
+    });
+
+    render(<AdminUsers />);
+    const row = await screen.findByTestId('user-row-sub-admin-1');
+    const revoke = within(row).getByRole('button', { name: 'Revoke admin' });
+
+    fireEvent.click(revoke); // arm
+    fireEvent.click(revoke); // confirm
+
+    await waitFor(() => {
+      expect(callsFor(fetchMock, 'PATCH', '/api/users/sub-admin-1')).toBe(1);
+    });
+    const patch = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',
+    );
+    expect(JSON.parse((patch?.[1] as RequestInit).body as string)).toEqual({
+      is_admin: false,
     });
   });
 });

@@ -250,7 +250,14 @@ class TestTrailReadPath(PlaybookVersionAuditTrailTestBase):
         This key set is a contract, asserted exactly: an admin reviewing
         the trail cannot tell an active version from a retired one without
         `status`, nor verify what was uploaded without `content_hash`
-        (issue #434)."""
+        (issue #434).
+
+        Issue #478 adds `accepted_stub_basis` to this set -- unlike the
+        other #478 fields (`artifact_kind`/`opf_content_hash`/`storage_key`,
+        each absent when a caller never parsed/validated the artifact, as
+        this direct `record_playbook_version_upload` call does not),
+        `accepted_stub_basis` defaults to and is always written as `False`,
+        so it is never absent -- see that function's docstring."""
         pv.record_playbook_version_upload(
             playbook_id=PLAYBOOK_ID,
             version="1.0.0",
@@ -271,6 +278,7 @@ class TestTrailReadPath(PlaybookVersionAuditTrailTestBase):
                 "status",
                 "content_hash",
                 "notes",
+                "accepted_stub_basis",
             },
         )
         self.assertEqual(trail[0]["notes"], "")

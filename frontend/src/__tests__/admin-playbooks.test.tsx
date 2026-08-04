@@ -448,15 +448,63 @@ describe('AdminPlaybooks — activate and roll back', () => {
     });
   });
 
-  it('disables roll back for a version that was never active, and explains why', async () => {
+  it('hides roll back entirely for a version that was never active, rather than disabling it', async () => {
     stubRoutes();
     await renderWithVersions();
 
-    const rollback = screen.getByTestId('playbook-version-rollback-v3.0.0');
-    expect(rollback).toBeDisabled();
-    // The hint lives on the ct-button host; the testid is on the real inner
-    // <button> (see ct-button.ts's docstring).
-    expect(rollback.closest('ct-button')?.getAttribute('title')).toContain('was active before');
+    // v3.0.0 is a draft — it was never active, so there is nothing to roll
+    // back to. The affordance is absent, not a disabled dead end (#476).
+    expect(screen.queryByTestId('playbook-version-rollback-v3.0.0')).toBeNull();
+  });
+
+  it('hides Activate on the currently-active version and shows a quiet note in its place', async () => {
+    stubRoutes();
+    await renderWithVersions();
+
+    const activeRow = screen.getByTestId('playbook-version-row-v2.0.0');
+    expect(within(activeRow).queryByTestId('playbook-version-activate-v2.0.0')).toBeNull();
+    expect(within(activeRow).getByTestId('playbook-version-active-note-v2.0.0').textContent).toContain(
+      'active',
+    );
+    // Re-running activation on the active version is likewise not offered
+    // as a hidden rollback target.
+    expect(within(activeRow).queryByTestId('playbook-version-rollback-v2.0.0')).toBeNull();
+  });
+
+  it('offers Activate on a draft row', async () => {
+    stubRoutes();
+    await renderWithVersions();
+
+    expect(screen.getByTestId('playbook-version-activate-v3.0.0')).toBeEnabled();
+  });
+
+  it('shows neither Activate nor Roll back for a single-version, already-active playbook', async () => {
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/other-agreement/versions',
+        status: 200,
+        body: {
+          versions: [
+            {
+              playbook_id: 'other-agreement',
+              version: 'v1.0.0',
+              uploaded_by: 'admin-sub',
+              uploaded_at: 1_700_000_000,
+              status: 'active',
+              notes: '',
+              content_hash: FULL_HASH,
+            },
+          ],
+        },
+      },
+    ]);
+    await renderPanel();
+    fireEvent.click(screen.getByTestId('playbook-versions-other-agreement'));
+    await screen.findByTestId('playbook-version-row-v1.0.0');
+
+    expect(screen.queryByTestId('playbook-version-activate-v1.0.0')).toBeNull();
+    expect(screen.queryByTestId('playbook-version-rollback-v1.0.0')).toBeNull();
   });
 
   it("surfaces the backend's never-active refusal when it rejects a rollback", async () => {
@@ -545,6 +593,104 @@ describe('AdminPlaybooks — per-version notes', () => {
     expect(addButton.textContent).toContain('Add a note');
     fireEvent.click(addButton);
     expect(await screen.findByTestId('playbook-version-notes-input-v2.0.0')).toHaveValue('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Note links (issue #476)
+// ---------------------------------------------------------------------------
+
+describe('AdminPlaybooks — linkified notes', () => {
+  const SAMPLE_NOTE_URL = 'https://github.com/contract-opf/playbooks';
+
+  it("linkifies an http(s) URL in a version's note, opening it in a new tab", async () => {
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/synthetic-nda-sample/versions',
+        status: 200,
+        body: {
+          versions: [
+            {
+              playbook_id: 'synthetic-nda-sample',
+              version: 'v1.0.0',
+              uploaded_by: 'admin-sub',
+              uploaded_at: 1_700_000_000,
+              status: 'active',
+              notes: `See ${SAMPLE_NOTE_URL} for the source.`,
+              content_hash: FULL_HASH,
+            },
+          ],
+        },
+      },
+    ]);
+    await renderPanel();
+    fireEvent.click(screen.getByTestId('playbook-versions-synthetic-nda-sample'));
+    const row = await screen.findByTestId('playbook-version-row-v1.0.0');
+
+    const link = within(row).getByRole('link', { name: SAMPLE_NOTE_URL });
+    expect(link).toHaveAttribute('href', SAMPLE_NOTE_URL);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link.getAttribute('rel')).toContain('noreferrer');
+    // The trailing period is punctuation, not part of the link.
+    expect(row.textContent).toContain(`${SAMPLE_NOTE_URL} for the source.`);
+  });
+
+  it('linkifies the active version note on the top-level playbook table too', async () => {
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/api/playbooks',
+        status: 200,
+        body: {
+          playbooks: [
+            {
+              playbook_id: 'synthetic-nda-sample',
+              display_name: 'Synthetic NDA Sample',
+              status: 'active',
+              notes: `Shipped sample — see ${SAMPLE_NOTE_URL}`,
+            },
+          ],
+        },
+      },
+    ]);
+    await renderPanel();
+
+    const row = screen.getByTestId('playbook-row-synthetic-nda-sample');
+    expect(within(row).getByRole('link', { name: SAMPLE_NOTE_URL })).toHaveAttribute(
+      'href',
+      SAMPLE_NOTE_URL,
+    );
+  });
+
+  it('leaves a non-http(s) scheme as plain text, never a clickable link', async () => {
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/synthetic-nda-sample/versions',
+        status: 200,
+        body: {
+          versions: [
+            {
+              playbook_id: 'synthetic-nda-sample',
+              version: 'v1.0.0',
+              uploaded_by: 'admin-sub',
+              uploaded_at: 1_700_000_000,
+              status: 'draft',
+              notes: 'Do not click javascript:alert(1) — testing only.',
+              content_hash: FULL_HASH,
+            },
+          ],
+        },
+      },
+    ]);
+    await renderPanel();
+    fireEvent.click(screen.getByTestId('playbook-versions-synthetic-nda-sample'));
+    const row = await screen.findByTestId('playbook-version-row-v1.0.0');
+
+    expect(within(row).queryByRole('link')).toBeNull();
+    expect(row.textContent).toContain('javascript:alert(1)');
   });
 });
 

@@ -80,3 +80,20 @@ Ingest validates an uploaded OPF against the schema named by its `opf_version`
 (`scripts/opf_load.py`). Content-hash verification uses
 `scripts/opf_canonicalize.py` (the OPF canonical-form definition, vendored from
 playbook-engine `playbook_engine/canonicalize.py`).
+
+## Sibling-id uniqueness (spec §3.13) is enforced loader-side, not by the schema
+
+OPF spec §3.13 makes sibling-id uniqueness a blocking normative rule for
+`evidence.clauses[].id`, `evidence.clause_library[].concept_id`,
+`floor.invariants[].id`, and `corpus.documents[].document_id`. Playbook-engine
+shipped it 2026-07-29 (engine commit `390a259`) as a fail-closed validator rule
+only — `playbook_engine/validator.py::_check_duplicate_ids` — with **no schema
+change and no version bump**, so it does not show up in either vendored schema
+file above and JSON Schema validation alone cannot catch a violation.
+`scripts/opf_load.py::_check_duplicate_sibling_ids` closes that parity gap
+loader-side (issue #480): it runs after schema validation and rejects a
+document that repeats an id in any of the four sets, raising
+`OpfDuplicateIdError`. Do not try to "fix" this by editing the vendored schema
+files — they must stay byte-identical to the engine's pins (see "Re-vendoring"
+above); this rule is enforced in code, deliberately outside the schema, the
+same way the engine enforces it.

@@ -24,32 +24,39 @@ the specific offending field rather than parsing one opaque string.
 The validators judge a pen-rules / posture-override document against a
 specific OPF document (its ``opf.floor.invariants`` ids and its
 ``opf.identity.section_digests.posture``). There is **no server-side OPF
-store keyed by playbook_id** today: every entry in ``playbooks/registry.json``
-is a v1 playbook (``playbook_path``, a plain playbook JSON with no
-``identity``/``floor`` block), and ``pipeline_runner._load_playbook_bundle``
-only ever reads ``entry.playbook_path``. So the OPF document is supplied in
-the request body -- exactly as ``bind_bundle.py``'s CLI takes it as a
-required ``--opf`` input. The ``{playbook_id}`` in the route path is
-cross-checked against the submitted OPF's own ``agreement_type`` id/aliases
-(the same fail-closed check ``bind_bundle`` runs first), surfaced as a
-``playbook_id_mismatch`` error rather than silently validating pen-rules
-against the wrong OPF.
+store keyed by playbook_id** for THIS route's purposes today: every entry in
+``playbooks/registry.json`` is a v1 playbook (``playbook_path``, a plain
+playbook JSON with no ``identity``/``floor`` block), and this route has no
+way to look up an activated OPF *document* by ``playbook_id`` to validate
+against. So the OPF document is supplied in the request body -- exactly as
+``bind_bundle.py``'s CLI takes it as a required ``--opf`` input. The
+``{playbook_id}`` in the route path is cross-checked against the submitted
+OPF's own ``agreement_type`` id/aliases (the same fail-closed check
+``bind_bundle`` runs first), surfaced as a ``playbook_id_mismatch`` error
+rather than silently validating pen-rules against the wrong OPF.
 
 ## Zero runtime effect (preserve this truth)
 
-This is validation only -- **no persistence**. And even a validated,
-schema-correct pen-rules / posture bundle has **zero effect on any live
-review**: ``pipeline_runner._load_playbook_bundle`` reads only
-``entry.playbook_path`` (v1), never a v2 ``bundle_path``, so nothing in the
-review pipeline consumes a v2 bundle yet (see ``bind_bundle.py``'s module
-docstring: "an artifact-only slice: no runtime consumer reads v2 bundles
-yet", and ARCHITECTURE.md's "Guidance-precedence model" -> item 4). The
-persist/activate counterpart route -- which would call ``bind_bundle``'s
-actual bundle-construction logic and write a v2 artifact into a server-side
-store -- is a deliberate follow-up: it needs a v2-bundle storage/activation
-model that does not exist server-side yet (the DynamoDB/S3 + registry
-plumbing that ``playbook_versions.py`` provides for v1 versions), a larger
-change this ticket intentionally does not include.
+This is validation only -- **no persistence**. Since issue #479,
+``pipeline_runner._load_playbook_bundle`` DOES consume an activated OPF
+*document* (loading the stored artifact for whichever ``playbook_versions``
+row is active) -- so it is no longer true that nothing in the review
+pipeline reads an OPF document. What remains true, and is this section's
+actual load-bearing claim, is narrower: even a validated, schema-correct
+pen-rules / posture-**overrides** bundle -- THIS route's own output, the
+``bind_bundle``-shaped ``{floor_additions, posture}`` document -- has **zero
+effect on any live review**. `_load_opf_bundle_if_active` hard-codes
+``"overrides": None`` on every bundle it builds, so no v2 overrides document
+this route validates is ever consumed by `review_knowledge.resolve_knowledge`
+(see ``bind_bundle.py``'s module docstring: "an artifact-only slice: no
+runtime consumer reads v2 bundles yet", and ARCHITECTURE.md's "Guidance-
+precedence model" -> item 4). The persist/activate counterpart route --
+which would call ``bind_bundle``'s actual bundle-construction logic and
+write a v2 overrides artifact into a server-side store -- is a deliberate
+follow-up: it needs a v2-bundle storage/activation model that does not
+exist server-side yet (the DynamoDB/S3 + registry plumbing that
+``playbook_versions.py`` provides for v1 versions), a larger change this
+ticket intentionally does not include.
 
 ## Auth
 

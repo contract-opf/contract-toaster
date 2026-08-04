@@ -553,7 +553,7 @@ class TestGoneIsNotChargedAgainstTheDailyLimit(HistoryRouteTestBase):
         lock the user out of the one document that IS still there."""
         live_key = "outputs/quota-live/out.docx"
         self.s3.put_object(
-            Bucket=os.environ["S3_OUTPUTS_BUCKET"], Key=live_key, Body=b"the redline"
+            Bucket=os.environ["OUTPUTS_BUCKET"], Key=live_key, Body=b"the redline"
         )
         self._seed_review("quota-live", owner_sub=OWNER, output_s3_key=live_key)
         self._authenticate_as(OWNER)

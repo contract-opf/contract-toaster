@@ -90,7 +90,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
-os.environ.setdefault("S3_OUTPUTS_BUCKET", "contract-toaster-outputs-test")
+os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
 # Explicitly disabled (not merely left unset): importing test_review_api_84
@@ -159,7 +159,7 @@ class ReviewOutputEndpointTestBase(unittest.TestCase):
         self._mock_aws.start()
 
         self.s3 = boto3.client("s3", region_name="us-east-1")
-        self.s3.create_bucket(Bucket=os.environ["S3_OUTPUTS_BUCKET"])
+        self.s3.create_bucket(Bucket=os.environ["OUTPUTS_BUCKET"])
         self.spy_s3 = _SpyS3Client(self.s3)
 
         self.ddb_resource = boto3.resource("dynamodb", region_name="us-east-1")
@@ -213,7 +213,7 @@ class ReviewOutputEndpointTestBase(unittest.TestCase):
         )
 
     def _put_output_object(self, s3_key: str, body: bytes = b"redline bytes") -> None:
-        self.s3.put_object(Bucket=os.environ["S3_OUTPUTS_BUCKET"], Key=s3_key, Body=body)
+        self.s3.put_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=s3_key, Body=body)
 
 
 # -- (1) s3_key derived from the stored review record, never a request param -

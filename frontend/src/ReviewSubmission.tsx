@@ -64,7 +64,20 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail, triggerBrowserDownload } from './api';
+import {
+  authorizedFetch,
+  DOWNLOAD_ERROR_COPY,
+  friendlyDownloadError,
+  friendlyErrorMessage,
+  readErrorDetail,
+  triggerBrowserDownload,
+} from './api';
+// The shared outcome→(label, variant) map (issue #470) — see outcome.ts's
+// module docstring. `explainFailure`/`REASON_EXPLANATIONS` below stay
+// separate: those explain WHY a failure happened (stage + reason token),
+// this says WHAT the outcome is.
+import { describeOutcome } from './outcome';
+import { GUIDANCE_PRECEDENCE_COPY as SHARED_GOVERNS_CLAUSE } from './guidancePrecedenceCopy';
 import { ToasterHero, ToasterStyles, type ToasterPhase } from './toaster/Toaster';
 import {
   primeAudio,
@@ -198,19 +211,35 @@ const STILL_CHECKING_COPY = "Still checking on your review's status — reconnec
 // hard-requirements carve-out is likewise not optional wording — guidance
 // never reaches the judged-NL Floor the playbook's `hard_rejections`
 // project, and copy that implied otherwise would misdescribe the tool.
+//
+// The shared middle clause now lives in guidancePrecedenceCopy.ts (issue
+// #484) — AdminInstructions.tsx's standing-instructions field states the
+// identical precedence, so the two surfaces compose it from one constant
+// rather than risking the wording drifting apart. The rendered text here is
+// unchanged from before that extraction.
 const GUIDANCE_PRECEDENCE_COPY =
-  "These instructions govern over the playbook's positions wherever the two conflict — " +
-  'but never over rules the playbook marks as hard requirements, which nothing can ' +
-  'override. A sentence or two is plenty.';
+  `These instructions ${SHARED_GOVERNS_CLAUSE} A sentence or two is plenty.`;
 
 // Completion-handoff announcements (issue #448). Rendered into a persistent
 // polite live region, so assistive tech is already watching it when the review
 // lands rather than being handed a region that only appears at the same moment
-// its text does. All three name the button by its visible label, because the
+// its text does. All name the button by its visible label, because the
 // announcement's whole job is to tell someone who cannot see the screen where
 // the keyboard focus they just received now is.
+//
+// READY_FOCUSED_COPY vs READY_SAVED_COPY (issue #466): the automatic save is a
+// network round trip that can fail (e.g. a mis-configured outputs bucket —
+// #465), so the moment the review lands can only truthfully promise that the
+// button has focus, never that a save is already under way. READY_FOCUSED_COPY
+// is what's announced immediately; autoSaveOutput below upgrades it to
+// READY_SAVED_COPY *only once the fetch has actually resolved*, and leaves a
+// visible failure banner (downloadError, DOWNLOAD_ERROR_COPY) instead if it
+// hasn't. A UI that announced "saving" before knowing that was untrue was
+// exactly the defect #466 fixed.
+const READY_FOCUSED_COPY =
+  'Your redline is ready — the “Download result” button now has focus if you need it.';
 const READY_SAVED_COPY =
-  'Your redline is ready. Saving it to your downloads — the “Download result” button now has focus if you need it again.';
+  'Your redline is ready and has been saved to your downloads — the “Download result” button still has focus if you need it again.';
 const READY_GATED_COPY =
   'Your redline is ready, but the adversarial critic flagged this review. Read the flagged points above, then use the “Download result” button to save it.';
 const READY_NO_OUTPUT_COPY =
@@ -282,6 +311,31 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
     cause: 'The model this deployment is set to use is not available from the provider right now.',
     fix: 'Try again later, or ask an admin to select a different model under “Model & API key”.',
   },
+  // Issue #472: the pre-call sibling of model_key_rejected above — no key
+  // was configured at all, so the review never reached the model. This is
+  // the single most likely first-run mistake (upload before setting a key).
+  model_key_missing: {
+    cause: 'No API key is configured for the model provider, so the review was never sent.',
+    fix: 'An admin can add one under “Model & API key”. Until then every review will fail here.',
+  },
+  model_timeout: {
+    cause: 'The model provider did not respond in time, so the review was not completed.',
+    fix: 'This is usually temporary — it is worth submitting again. If it keeps happening, an admin should check the account and model under “Model & API key”.',
+  },
+  // Issue #527: the model returned no usable content at all -- distinct
+  // from model_output_truncated below, which has a specific, actionable
+  // cause (the token budget ran out) this one does not.
+  model_empty_content: {
+    cause: 'The model returned an empty response, so the review could not be completed.',
+    fix: 'This is usually temporary — it is worth submitting again. If it keeps happening, an admin should try a different model under “Model & API key”.',
+  },
+  // Issue #527: the model was cut off before it finished (its response hit
+  // the token budget) -- a reasoning-class model spends part of that budget
+  // on internal reasoning before it can produce any output.
+  model_output_truncated: {
+    cause: 'The model ran out of room to finish its answer, so the review could not be completed.',
+    fix: 'This has been recorded. An admin can select a different model under “Model & API key”. If it keeps happening with the same model, whoever operates this deployment needs to raise that model’s reasoning allowance.',
+  },
   // --- Your problem: the document itself ----------------------------------
   model_context_length_exceeded: {
     cause: 'Your document is longer than the model can read in one go, so it was not reviewed.',
@@ -328,6 +382,24 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   round_trip_verification_failed: {
     cause: 'The marked-up document could not be verified as safe to open in Word, so it was not released.',
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
+  },
+  // --- The operator's problem: the activated playbook itself (issue #479) -
+  // scripts/review_spine.py's REASON_OPF_KNOWLEDGE_REFUSED /
+  // REASON_OPF_DIGEST_MISSING / REASON_FLOOR_INVARIANT_UNJUDGED -- all three
+  // are fail-closed outcomes of trying to compose the activated OPF
+  // playbook into a review, never something wrong with the submitted
+  // document.
+  opf_knowledge_refused: {
+    cause: 'The contract type you submitted for is set up in a way the tool cannot honestly turn into review instructions.',
+    fix: 'Nothing is wrong with your document. An admin needs to check how this contract type is configured before it can be reviewed.',
+  },
+  opf_digest_missing: {
+    cause: 'The contract type you submitted for is missing the reference material the review needs, so it was not reviewed.',
+    fix: 'Nothing is wrong with your document. An admin needs to fix or re-upload this contract type before it can be reviewed.',
+  },
+  floor_invariant_unjudged: {
+    cause: 'One of this contract type’s required rules could not be checked, so the review was stopped rather than finish with a rule unverified.',
+    fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should check the account and model under “Model & API key”.',
   },
 };
 
@@ -436,7 +508,22 @@ function confidenceChipVariant(band: string): CtChipVariant {
   return 'info';
 }
 
-export default function ReviewSubmission(): React.ReactElement {
+export interface ReviewSubmissionProps {
+  /**
+   * Issue #464: a plain refresh signal (not the catalog itself — see
+   * App.tsx's `catalogVersion` comment for why a full state lift wasn't
+   * worth the props-contract churn). App.tsx bumps this after an admin
+   * rename/remove/activate/rollback lands in AdminPlaybooks, so this
+   * component's own `fetchCatalog` (below) re-runs and the dial reflects it
+   * without a reload. Optional and defaulted so every existing render of
+   * this component with no props (all current tests) is unaffected.
+   */
+  catalogVersion?: number;
+}
+
+export default function ReviewSubmission({
+  catalogVersion = 0,
+}: ReviewSubmissionProps = {}): React.ReactElement {
   const [file, setFile] = useState<File | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
@@ -515,9 +602,19 @@ export default function ReviewSubmission(): React.ReactElement {
       setCatalogLoaded(true);
       setCatalogError(null);
       // Default to the first LOADED type — never park the selection on a
-      // stop the user isn't allowed to pick.
+      // stop the user isn't allowed to pick. This also re-runs on a refetch
+      // (issue #464, catalogVersion above): keep the current selection when
+      // it is still a loaded type (e.g. a rename left the same playbook_id
+      // selected), but fall back to the new first-loaded type when it isn't
+      // any more (e.g. an admin removed the selected playbook) — never leave
+      // `playbookId` pointing at an entry that no longer exists or is no
+      // longer active, which the dial would render as nothing checked.
       const firstActive = entries.find((entry) => entry.status === 'active');
-      setPlaybookId((current) => current || firstActive?.playbook_id || '');
+      setPlaybookId((current) =>
+        entries.some((entry) => entry.playbook_id === current && entry.status === 'active')
+          ? current
+          : firstActive?.playbook_id || '',
+      );
     } catch (err) {
       setCatalogError(
         friendlyErrorMessage(err, "We couldn't load the list of contract types right now."),
@@ -525,9 +622,11 @@ export default function ReviewSubmission(): React.ReactElement {
     }
   }, []);
 
+  // catalogVersion (issue #464) is a plain counter bumped by App.tsx after
+  // an admin mutation — its VALUE carries no data, only "refetch now".
   useEffect(() => {
     void fetchCatalog();
-  }, [fetchCatalog]);
+  }, [fetchCatalog, catalogVersion]);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current !== null) {
@@ -678,13 +777,16 @@ export default function ReviewSubmission(): React.ReactElement {
   const fetchOutputUrl = useCallback(async (): Promise<string> => {
     const response = await authorizedFetch(`/api/reviews/${reviewId}/output`);
     if (!response.ok) {
+      // A 503 here carries a `detail` naming the unset storage env var
+      // (#465's own failure mode) — server configuration, never something a
+      // reviewer should read. Route through the shared friendlyDownloadError
+      // instead of rendering readErrorDetail's string verbatim (issue #466);
+      // the raw detail still reaches the console.
       const errorDetail = await readErrorDetail(response);
       throw new Error(
-        errorDetail ??
-          friendlyErrorMessage(
-            `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
-            "We couldn't prepare your download. Please try again.",
-          ),
+        friendlyDownloadError(
+          errorDetail ?? `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
+        ),
       );
     }
     const data = (await response.json()) as OutputResponse;
@@ -703,11 +805,7 @@ export default function ReviewSubmission(): React.ReactElement {
       // never navigates away (issue #271 item 5).
       triggerBrowserDownload(await fetchOutputUrl());
     } catch (err) {
-      setDownloadError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't prepare your download. Please try again."),
-      );
+      setDownloadError(err instanceof Error ? err.message : friendlyDownloadError(err));
     } finally {
       setDownloading(false);
     }
@@ -719,18 +817,35 @@ export default function ReviewSubmission(): React.ReactElement {
   // Deliberately NOT routed through handleDownload: this is a background
   // courtesy the attorney did not ask for, so it must not flip the visible
   // button into its disabled "Preparing download…" state (which would yank
-  // away the focus we just placed there), and a failure must not paint a
-  // download error over a result nobody tried to download yet. The button
-  // below is the reliable path and will report any real failure when clicked,
-  // so here the technical detail is logged and nothing else happens.
+  // away the focus we just placed there). Unlike before #466, a failure here
+  // is NOT silent: the review finished fine but nothing was actually saved,
+  // so the same downloadError banner the manual button uses renders the same
+  // honest, no-false-"try again" copy — the button below still works as a
+  // retry path, it just isn't described as one. Success is likewise the only
+  // thing allowed to upgrade the live-region announcement to "saved" (see the
+  // block comment above READY_FOCUSED_COPY).
   const autoSaveOutput = useCallback(async (): Promise<void> => {
     if (!reviewId) {
       return;
     }
+    // The fetch below is in flight while a resubmit can reset reviewId,
+    // detail and handedOffReviewRef out from under it (handleSubmit above).
+    // Capture which review this save belongs to and re-check it against
+    // handedOffReviewRef — which handleSubmit clears to null and the
+    // handoff effect re-stamps with the *new* review's id — before either
+    // setter runs, so a save for review A can never paint review B's screen.
+    const savingReviewId = reviewId;
     try {
       triggerBrowserDownload(await fetchOutputUrl());
-    } catch (err) {
-      friendlyErrorMessage(err, 'The automatic save did not run; the download button still will.');
+      if (handedOffReviewRef.current === savingReviewId) {
+        setReadyAnnouncement(READY_SAVED_COPY);
+      }
+    } catch {
+      // fetchOutputUrl already logged the real technical detail to the
+      // console via friendlyDownloadError — nothing further to log here.
+      if (handedOffReviewRef.current === savingReviewId) {
+        setDownloadError(DOWNLOAD_ERROR_COPY);
+      }
     }
   }, [reviewId, fetchOutputUrl]);
 
@@ -800,7 +915,7 @@ export default function ReviewSubmission(): React.ReactElement {
     const canSave = Boolean(detail.has_output);
 
     setReadyAnnouncement(
-      !canSave ? READY_NO_OUTPUT_COPY : gateSatisfied ? READY_SAVED_COPY : READY_GATED_COPY,
+      !canSave ? READY_NO_OUTPUT_COPY : gateSatisfied ? READY_FOCUSED_COPY : READY_GATED_COPY,
     );
 
     // ct-button renders a real <button> into its light DOM (ui/components/
@@ -1012,7 +1127,27 @@ export default function ReviewSubmission(): React.ReactElement {
             <CtChip variant="muted">
               <span className="ct-mono">{reviewId}</span>
             </CtChip>
-            <strong>{detail?.status ?? 'submitting…'}</strong>
+            {/*
+              The SAME outcome→(label, variant) map History and Diagnostics
+              use (issue #470) — before this, a raw enum (`MANUAL_REVIEW_
+              REQUIRED`, `ERROR_MANUAL_REVIEW_REQUIRED`, …) rendered here in
+              plain text while the History tab showed a friendlier read of
+              the same underlying data. `detail` is not yet loaded on the
+              very first paint after submit — "submitting…" is prose, not an
+              outcome, so it stays outside the shared map.
+            */}
+            {detail ? (
+              (() => {
+                const chip = describeOutcome(detail.status, detail.decision);
+                return (
+                  <CtChip variant={chip.variant} data-testid="review-outcome">
+                    {chip.label}
+                  </CtChip>
+                );
+              })()
+            ) : (
+              <strong>submitting…</strong>
+            )}
           </div>
 
           {submittedPlaybookLabel && (

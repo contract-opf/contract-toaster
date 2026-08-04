@@ -62,7 +62,9 @@ return type: this function returns `list[str]`.
 `compose_opf_system_blocks` only ever reads five paths off the input doc:
 `posture.system_prompt`, `digest.clauses`, `floor.invariants`,
 `perspective`, and `de_minimis` (plus, off the separate policy document,
-`rules[].{id,strength,text}`). Note `evidence` is NOT among them any more:
+`rules[].{id,strength,text}`, and off the caller's own `instructions_text`
+param -- issue #479/#482/#483's operator standing instructions, never read
+from the OPF document itself). Note `evidence` is NOT among them any more:
 the digest is the projection of it that reaches the model, and the full
 evidence section is read only on demand, off disk, by the lookup tool.
 Every other top-level section --
@@ -137,6 +139,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import opf_clause_lookup  # noqa: E402
 import opf_terminology  # noqa: E402
+import primary_review_pass  # noqa: E402
 
 #: Composition modes. `review_knowledge.py` re-exports these and adds its own
 #: MODE_V1_PROJECTION (the pre-OPF projection path, which does not compose here).
@@ -586,6 +589,24 @@ def _guidance_block(policy: Optional[dict] = None) -> str | None:
     return "\n".join(lines)
 
 
+def _standing_instructions_block(instructions_text: str) -> str | None:
+    """The operator's standing instructions (issue #479 DECISION,
+    2026-08-04; #482's store, #483's v1-path composition), slotted into the
+    SAME relative position (GUIDANCE, between the Digest/policy-Guidance
+    block and Context) that #483's own issue text specifies for the OPF
+    path. Delegates rendering to `primary_review_pass
+    .render_standing_instructions_block` -- the single source for the
+    intro/precedence copy (#483 AC3) -- rather than duplicating it here.
+
+    This is deliberately the ONLY way an admin supplies posture-like intent
+    for an OPF-governed review: the DECISION's rule 2 is "admin-supplied
+    posture rides in through standing instructions", not a new
+    `overrides.posture` write path. None (no block) when there is nothing
+    to render, same "absent, not empty" doctrine as every other block here.
+    """
+    return primary_review_pass.render_standing_instructions_block(instructions_text)
+
+
 def _context_block(opf_doc: dict) -> str | None:
     """`perspective` and `de_minimis`, only if at least one is present in
     the source doc. Returns None (no block emitted) when neither is
@@ -606,6 +627,7 @@ def compose_opf_system_blocks(
     *,
     policy: Optional[dict] = None,
     mode: str = MODE_PLAYBOOK_DIGEST,
+    instructions_text: str = "",
 ) -> list[str]:
     """Compose an OPF document's knowledge into review system-prompt blocks.
 
@@ -627,6 +649,13 @@ def compose_opf_system_blocks(
     (playbooks/policy.schema.json), already loaded and validated by
     `scripts/policy_load.py`. Its `must` rules join the Binding block and its
     `should` rules become the Guidance block, `text` VERBATIM in both.
+
+    `instructions_text` (issue #479/#482/#483, default `""`): the playbook's
+    resolved standing instructions, rendered into the SAME GUIDANCE slot,
+    immediately after the policy's `should`-rule block (both are "weighted,
+    not absolute" additions to the Digest, in the order they were resolved:
+    approved-policy guidance, then operator instructions). Empty (the
+    default) omits the block entirely -- see `_standing_instructions_block`.
 
     `mode`: MODE_PLAYBOOK_DIGEST (default) composes the Digest block and
     refuses without one. MODE_POLICY_ONLY composes NO Digest block -- a review
@@ -654,6 +683,7 @@ def compose_opf_system_blocks(
             _binding_block(opf_doc, overrides, policy),
             None if mode == MODE_POLICY_ONLY else _digest_block(opf_doc),
             _guidance_block(policy),
+            _standing_instructions_block(instructions_text),
             _context_block(opf_doc),
         ):
             if block is not None:

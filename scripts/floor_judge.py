@@ -56,17 +56,38 @@ MOCKED-MODEL, offline, deterministic (issue #81's owner-approved scope,
 extended to this module): driven entirely by an injected
 `model_client.BedrockModelClient`. No live Bedrock, no network.
 
-Out of scope for this slice (see issue #285 "Out of scope"): wiring this
-module into the pipeline/spine or `run_two_pass_review` (lands with the
-v2-bundle spine work), prompt-manifest/ledger integration, any lexical
-detector change.
+WIRED (issue #479). This module is no longer standalone: for an OPF-governed
+review, `scripts/review_spine.py::run_review` calls `judge_floor_invariants`
+once per review as stage 3.5, between the critic pass and reconciliation, so
+every `opf.floor.invariants` entry is judged exactly once. Every judge attempt
+is ledgered through the `ledger_write` seam with `pass_name="floor"`, alongside
+the primary and critic records. A `judgment.fail_closed` result terminates the
+review MANUAL_REVIEW_REQUIRED / `floor_invariant_unjudged` rather than letting
+an unevaluated invariant pass silently, and a `violation` verdict becomes a
+monotonic `detector_fires` entry that `reconcile()` cannot downgrade.
+
+Still out of scope (the remainder of issue #285's list): prompt-manifest
+integration and any lexical detector change.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+
+for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
+    if str(_dir) not in sys.path:
+        sys.path.insert(0, str(_dir))
+
+import model_client as _model_client  # noqa: E402
+import primary_review_pass as _primary_review_pass  # noqa: E402
 
 # Fixed across every invariant and every call -- the ONLY thing that varies
 # per invoke() is the user prompt (invariant id/statement + review_context).
@@ -168,6 +189,8 @@ def judge_floor_invariants(
     model_client: Any,
     model_id: str,
     max_output_tokens: int = 1024,
+    review_id: str = "",
+    ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,
 ) -> FloorJudgment:
     """Judge every Floor invariant against `review_context`, one
     `model_client.invoke()` call per invariant (plus one bounded retry for
@@ -178,11 +201,22 @@ def judge_floor_invariants(
     is accepted but never sent to the model or echoed anywhere: the judge's
     task is scoped to `statement` only.
 
+    `ledger_write` (issue #479, default `None` -> a no-op): every judge
+    attempt -- success, retry, or terminal failure alike -- is ledgered via
+    this seam, exactly like the primary/critic passes' `finally`-path
+    ledgering (`primary_review_pass.run_primary_pass`,
+    `critic_review_pass.run_critic_pass`). `pass_name="floor"` distinguishes
+    these rows from `"primary"`/`"critic"`. `review_id` is required to
+    build a `ModelInvocationRecord` when `ledger_write` is given; the
+    default `""` keeps every existing direct caller (offline/unit tests
+    that pass no `ledger_write`) unaffected.
+
     Returns a `FloorJudgment`. Never raises on a judge failure -- an
     invalid-after-retry invariant lands in `unjudged` (fail-closed),
     exactly like `primary_review_pass`'s bounded-retry-then-terminal
     pattern, just scoped per-invariant instead of per-pass.
     """
+    ledger_write = ledger_write or (lambda record: None)
     verdicts: list[dict[str, Any]] = []
     unjudged: list[str] = []
 
@@ -195,18 +229,41 @@ def judge_floor_invariants(
 
         verdict: dict[str, Any] | None = None
         attempts_allowed = 1 + _MAX_RETRIES_PER_INVARIANT
-        for _attempt in range(1, attempts_allowed + 1):
-            raw_response = model_client.invoke(
-                model_id=model_id,
-                system_prompt=_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                max_output_tokens=max_output_tokens,
-            )
-            is_valid, parsed = _validate_judge_response(
-                raw_response, expected_invariant_id=invariant_id
-            )
-            if is_valid:
-                verdict = parsed
+        for attempt in range(1, attempts_allowed + 1):
+            raw_response = None
+            outcome = "failure"
+            try:
+                raw_response = model_client.invoke(
+                    model_id=model_id,
+                    system_prompt=_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    max_output_tokens=max_output_tokens,
+                )
+                is_valid, parsed = _validate_judge_response(
+                    raw_response, expected_invariant_id=invariant_id
+                )
+                if is_valid:
+                    outcome = "success"
+                    verdict = parsed
+                else:
+                    outcome = "retry" if attempt < attempts_allowed else "failure"
+            finally:
+                # LEDGER every attempt -- success, retry, or terminal failure
+                # alike -- mirroring the primary/critic passes' own
+                # finally-path ledgering.
+                ledger_write(
+                    _model_client.ModelInvocationRecord(
+                        review_id=review_id,
+                        pass_name="floor",
+                        model_id=model_id,
+                        attempt_number=attempt,
+                        outcome=outcome,
+                        input_tokens_est=_primary_review_pass.estimate_tokens(_SYSTEM_PROMPT)
+                        + _primary_review_pass.estimate_tokens(user_prompt),
+                        output_tokens_est=_primary_review_pass.estimate_tokens(raw_response or ""),
+                    )
+                )
+            if verdict is not None:
                 break
 
         if verdict is None:

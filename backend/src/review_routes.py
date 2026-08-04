@@ -66,9 +66,10 @@ src/upload_validation.py, and src/download.py already document):
                    "dev" -- not yet wired as an App Runner env var (see
                    infra/lib/nested/app-stack.ts's runtimeEnvironmentVariables
                    list, which also doesn't yet carry REVIEW_SUBMISSIONS_TABLE
-                   / DAILY_SPEND_TABLE / PLAYBOOKS_TABLE / STATE_MACHINE_ARN /
-                   S3_OUTPUTS_BUCKET -- that infra wiring is a separate,
-                   out-of-scope follow-up; #186 or later).
+                   / DAILY_SPEND_TABLE / PLAYBOOKS_TABLE / STATE_MACHINE_ARN --
+                   that infra wiring is a separate, out-of-scope follow-up;
+                   #186 or later). OUTPUTS_BUCKET (see src/download.py) is
+                   already wired there.
 """
 
 import hashlib

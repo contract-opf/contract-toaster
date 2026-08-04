@@ -122,6 +122,32 @@ class MeCapabilityRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["is_admin"], True)
 
+    # -- cognito_sub (issue #473): AdminUsers.tsx's `loadMe` uses this field
+    # for client-side "is this row me" self-recognition (LAST_ADMIN_TITLE
+    # confirm copy). A regression that drops or mis-sources it would silently
+    # disable that self-recognition while every other pinned field in this
+    # file (is_admin, no-branding) stayed green. -------------------------
+
+    def test_cognito_sub_matches_the_authenticated_callers_own_sub(self):
+        _seed_user(self.users, "sub-admin", is_admin=True)
+        self._authenticate_as("sub-admin")
+
+        resp = self.client.get("/api/me")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cognito_sub"], "sub-admin")
+
+    def test_cognito_sub_is_never_another_users_sub(self):
+        _seed_user(self.users, "sub-caller", is_admin=False)
+        _seed_user(self.users, "sub-other", is_admin=True)
+        self._authenticate_as("sub-caller")
+
+        resp = self.client.get("/api/me")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["cognito_sub"], "sub-caller")
+        self.assertNotEqual(resp.json()["cognito_sub"], "sub-other")
+
     # -- (2) non-admin identity -> 200 with is_admin: false, NOT 403 -------
 
     def test_non_admin_gets_200_not_403(self):

@@ -36,31 +36,56 @@ if str(BACKEND_SRC) not in sys.path:
 
 
 def _stub_third_party() -> None:
-    """Inject minimal stubs for boto3 and fastapi if absent."""
+    """Prefer the REAL fastapi/boto3 when they are importable -- both are
+    backend runtime dependencies, so they are always present in this repo's
+    dev venv (`tests/test_me_capability_route.py` and
+    `tests/test_users_projection_453.py` already import the real fastapi
+    directly) -- and fall back to a minimal in-file stub only when a module
+    is genuinely unavailable.
+
+    This is required for `TestPatchUserRouteReturns409OnWire` below (issue
+    #473 review finding #1), which drives the real `src.main.app` through
+    `fastapi.testclient.TestClient` and therefore needs the real `FastAPI`/
+    `Depends`/etc., not just the `HTTPException`/`status` surface the old
+    unconditional stub provided. Every other test in this file only ever
+    touches `HTTPException.status_code`/`.detail`, which the real class
+    provides identically, so preferring the real module changes nothing
+    about them.
+    """
     if "fastapi" not in sys.modules:
-        fastapi_mod = types.ModuleType("fastapi")
-
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str = "") -> None:
-                self.status_code = status_code
-                self.detail = detail
-                super().__init__(detail)
-
-        class status:  # noqa: N801
-            HTTP_200_OK = 200
-            HTTP_400_BAD_REQUEST = 400
-            HTTP_403_FORBIDDEN = 403
-            HTTP_404_NOT_FOUND = 404
-            HTTP_409_CONFLICT = 409
-            HTTP_503_SERVICE_UNAVAILABLE = 503
-
-        fastapi_mod.HTTPException = HTTPException
-        fastapi_mod.status = status
-        sys.modules["fastapi"] = fastapi_mod
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            _install_fake_fastapi()
 
     if "boto3" not in sys.modules:
-        boto3_mod = types.ModuleType("boto3")
-        sys.modules["boto3"] = boto3_mod
+        try:
+            import boto3  # noqa: F401
+        except ImportError:
+            boto3_mod = types.ModuleType("boto3")
+            sys.modules["boto3"] = boto3_mod
+
+
+def _install_fake_fastapi() -> None:
+    fastapi_mod = types.ModuleType("fastapi")
+
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str = "") -> None:
+            self.status_code = status_code
+            self.detail = detail
+            super().__init__(detail)
+
+    class status:  # noqa: N801
+        HTTP_200_OK = 200
+        HTTP_400_BAD_REQUEST = 400
+        HTTP_403_FORBIDDEN = 403
+        HTTP_404_NOT_FOUND = 404
+        HTTP_409_CONFLICT = 409
+        HTTP_503_SERVICE_UNAVAILABLE = 503
+
+    fastapi_mod.HTTPException = HTTPException
+    fastapi_mod.status = status
+    sys.modules["fastapi"] = fastapi_mod
 
 
 _stub_third_party()
@@ -74,6 +99,21 @@ os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 import users as _users_module  # noqa: E402
 
 HTTPException = sys.modules["fastapi"].HTTPException
+
+# ---------------------------------------------------------------------------
+# `src.main` for the TestClient route test below (issue #473 review finding
+# #1) -- a SEPARATE import of the app/users/auth stack from the top-level
+# `users` module imported above (backend on sys.path, vs. backend/src for
+# the plain `users` import), same convention as
+# tests/test_users_projection_453.py and tests/test_me_capability_route.py.
+# ---------------------------------------------------------------------------
+BACKEND_ROOT = REPO_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+import src.main as _backend_main  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +385,74 @@ class TestUpdateUser(unittest.TestCase):
             _users_module.update_user("no-such-sub", {"status": "suspended"}, self.admin, self.ddb)
         self.assertEqual(ctx.exception.status_code, 404)
 
-    def test_admin_cannot_modify_own_row_409(self):
+    # -- Issue #473: last-active-admin guard --------------------------------
+    #
+    # The old rule blocked ANY self-targeting update unconditionally. The
+    # rule that matters is narrower: never let the deployment reach zero
+    # active admins. With a single seeded admin ("admin-1"), self-targeting
+    # suspend/deprovision must still 409 with the exact ticket copy — but as
+    # soon as a second active admin exists, self-demotion (and self-suspend)
+    # must succeed and the second admin must retain access. There is no
+    # standalone "self-targeting is always blocked" test here anymore — that
+    # rule no longer exists, and it was fully subsumed by the sole-admin
+    # tests below, which pin the real (narrower) rule with the ticket's exact
+    # 409 copy.
+
+    def test_sole_admin_cannot_suspend_self_409(self):
+        with self.assertRaises(HTTPException) as ctx:
+            _users_module.update_user("admin-1", {"status": "suspended"}, self.admin, self.ddb)
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("only admin account", ctx.exception.detail)
+
+    def test_sole_admin_cannot_deprovision_self_409(self):
+        with self.assertRaises(HTTPException) as ctx:
+            _users_module.update_user("admin-1", {"status": "deprovisioned"}, self.admin, self.ddb)
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("only admin account", ctx.exception.detail)
+
+    def test_sole_admin_cannot_revoke_own_admin_flag_409(self):
+        with self.assertRaises(HTTPException) as ctx:
+            _users_module.update_user("admin-1", {"is_admin": False}, self.admin, self.ddb)
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("only admin account", ctx.exception.detail)
+
+    def test_sole_admin_can_still_reactivate_self_a_no_op(self):
+        # Setting status to its current value never strips admin access, so
+        # this must NOT be treated as a last-admin violation (nor did the old
+        # unconditional self-block have any principled reason to forbid it —
+        # it just happened to, as a side effect of blocking all self-targeting).
+        result = _users_module.update_user("admin-1", {"status": "active"}, self.admin, self.ddb)
+        self.assertEqual(result["status"], "active")
+
+    def test_two_admins_self_demotion_allowed_and_other_admin_retains_access(self):
+        _seed_user(self.users, "admin-2", "admin2@example.com", is_admin=True)
+
+        result = _users_module.update_user("admin-1", {"is_admin": False}, self.admin, self.ddb)
+
+        self.assertFalse(result["is_admin"])
+        admin2_row = _users_module.require_active_user("admin-2", self.ddb)
+        self.assertTrue(admin2_row["is_admin"])
+        self.assertEqual(admin2_row["status"], "active")
+
+    def test_two_admins_self_suspend_allowed(self):
+        _seed_user(self.users, "admin-2", "admin2@example.com", is_admin=True)
+
+        result = _users_module.update_user("admin-1", {"status": "suspended"}, self.admin, self.ddb)
+
+        self.assertEqual(result["status"], "suspended")
+
+    def test_two_admins_self_deprovision_allowed(self):
+        _seed_user(self.users, "admin-2", "admin2@example.com", is_admin=True)
+
+        result = _users_module.update_user("admin-1", {"status": "deprovisioned"}, self.admin, self.ddb)
+
+        self.assertEqual(result["status"], "deprovisioned")
+
+    def test_last_active_admin_guard_ignores_a_suspended_second_admin(self):
+        # A second admin ROW existing is not enough — they must be an ACTIVE
+        # admin. A suspended admin cannot backstop the sole active admin.
+        _seed_user(self.users, "admin-2", "admin2@example.com", is_admin=True, status_="suspended")
+
         with self.assertRaises(HTTPException) as ctx:
             _users_module.update_user("admin-1", {"is_admin": False}, self.admin, self.ddb)
         self.assertEqual(ctx.exception.status_code, 409)
@@ -368,6 +475,74 @@ class TestUpdateUser(unittest.TestCase):
         entry = next(iter(self.audit.items.values()))
         forbidden_keys = {"document", "content", "rationale", "clause_text", "prompt"}
         self.assertTrue(forbidden_keys.isdisjoint(entry.keys()))
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/users/{sub} over the wire (issue #473 review finding #1).
+#
+# Every test above calls `_users_module.update_user(...)` directly, which
+# proves the guard function raises the right HTTPException but nothing
+# about what the real HTTP route does with it -- FastAPI's exception
+# handling could, in principle, turn an unhandled exception type into a 500
+# instead of the intended 409. This class drives the real, shipped
+# `src.main.app` through `fastapi.testclient.TestClient` -- the same
+# pattern as tests/test_users_projection_453.py::TestPatchUserRoute and
+# tests/test_me_capability_route.py -- so the 409 (and the 200 once a
+# second active admin exists) is asserted against an actual HTTP response,
+# not the fake HTTPException class this file otherwise stubs in.
+# ---------------------------------------------------------------------------
+
+class TestPatchUserRouteReturns409OnWire(unittest.TestCase):
+    """Acceptance criterion 1 ('route test asserts 409'): the sole active
+    admin's self-suspend/self-deprovision/self-revoke-admin PATCH comes back
+    as a real HTTP 409 with the exact ticket copy, and the same PATCH
+    succeeds (200) once a second active admin row exists."""
+
+    def setUp(self):
+        self.ddb, self.users, self.audit, self.sync_status = _new_ddb()
+        _seed_user(self.users, "admin-1", "admin@example.com", is_admin=True)
+        self.client = TestClient(_backend_main.app)
+        _backend_main.app.dependency_overrides[_backend_main.get_dynamodb_resource] = (
+            lambda: self.ddb
+        )
+        _backend_main.app.dependency_overrides[_backend_main.get_current_user] = (
+            lambda: {"sub": "admin-1", "email": "admin@example.com", "token_use": "access"}
+        )
+
+    def tearDown(self):
+        _backend_main.app.dependency_overrides.clear()
+
+    def test_sole_admin_self_suspend_returns_409_on_wire(self):
+        response = self.client.patch("/api/users/admin-1", json={"status": "suspended"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "This is the only admin account — add another admin first.",
+        )
+
+    def test_sole_admin_self_deprovision_returns_409_on_wire(self):
+        response = self.client.patch("/api/users/admin-1", json={"status": "deprovisioned"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "This is the only admin account — add another admin first.",
+        )
+
+    def test_sole_admin_self_revoke_admin_returns_409_on_wire(self):
+        response = self.client.patch("/api/users/admin-1", json={"is_admin": False})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "This is the only admin account — add another admin first.",
+        )
+
+    def test_patch_returns_200_once_a_second_active_admin_exists(self):
+        _seed_user(self.users, "admin-2", "admin2@example.com", is_admin=True)
+
+        response = self.client.patch("/api/users/admin-1", json={"is_admin": False})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["is_admin"])
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +670,7 @@ def main() -> int:
     suite.addTests(loader.loadTestsFromTestCase(TestRequireActiveUser))
     suite.addTests(loader.loadTestsFromTestCase(TestListUsers))
     suite.addTests(loader.loadTestsFromTestCase(TestUpdateUser))
+    suite.addTests(loader.loadTestsFromTestCase(TestPatchUserRouteReturns409OnWire))
     suite.addTests(loader.loadTestsFromTestCase(TestSyncStatus))
     suite.addTests(loader.loadTestsFromTestCase(TestGetUser))
 

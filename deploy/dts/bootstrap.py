@@ -25,6 +25,13 @@ config.boto3_client_kwargs):
      activate-the-sample route or button any more; it goes through the same
      src.playbook_versions upload/activate functions an admin-uploaded
      version does, and is an ordinary playbook from then on.
+  6. Backfill `activated_at` (issue #462) onto any `playbook_versions` row
+     left over from before that attribute existed. `activate_playbook_
+     version` has stamped it on every row it activates since #462 landed,
+     but step 5 above only writes on a FRESH deployment -- a table carried
+     forward from an earlier deploy never gets a stamping pass otherwise,
+     which would make rollback (which now requires `activated_at`) refuse
+     every pre-existing version forever. See `backfill_activated_at_462`.
 
 Run: python3 deploy/dts/bootstrap.py   (PYTHONPATH must include backend/)
 """
@@ -43,7 +50,7 @@ _BACKEND = _APP_ROOT / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from src import config, demo_auth, sample_playbooks  # noqa: E402
+from src import config, demo_auth, playbook_versions, sample_playbooks  # noqa: E402
 
 # scripts/ for the registry that names WHICH playbook a deployment installs --
 # a registry field, never a playbook_id literal here (issue #289's
@@ -74,6 +81,14 @@ _TABLES = [
     ("AUTH_SETTINGS_TABLE", "setting_id", None, []),
     ("PLAYBOOKS_TABLE", "playbook_id", None, []),
     ("PLAYBOOK_VERSIONS_TABLE", "playbook_id", "version", []),
+    # Standing instructions (issue #482, epic #481) -- append-only,
+    # monotonically-versioned per-playbook free-text overrides. Unlike
+    # playbook_versions' admin-supplied string `version` (e.g. "1.0.0"),
+    # this table's `version` is a plain monotonic Number (see
+    # src/playbook_instructions.py) -- _RANGE_KEY_NUMERIC_TABLES below picks
+    # that up so this table's range key is provisioned as type N, matching
+    # infra/lib/nested/data-stack.ts's `dynamodb.AttributeType.NUMBER`.
+    ("PLAYBOOK_INSTRUCTIONS_TABLE", "playbook_id", "version", []),
     ("RETENTION_SETTINGS_TABLE", "setting_id", None, []),
     ("MODEL_SETTINGS_TABLE", "setting_id", None, []),
     ("SYNC_STATUS_TABLE", "sync_type", None, []),
@@ -92,15 +107,23 @@ def _s3_client():
     return boto3.client("s3", **config.boto3_client_kwargs("s3"))
 
 
-def _attr_defs(hash_attr, range_attr, gsis):
-    names = {hash_attr}
+# Tables whose RANGE key is a Number rather than this helper's default
+# String -- every other table's range key (e.g. playbook_versions' admin-
+# supplied "1.0.0" string, audit's "epoch#event_id" string) is a String, so
+# this stays a short, explicit exception list rather than a new column on
+# every `_TABLES` tuple.
+_RANGE_KEY_NUMERIC_TABLES = {"PLAYBOOK_INSTRUCTIONS_TABLE"}
+
+
+def _attr_defs(hash_attr, range_attr, gsis, range_type="S"):
+    types = {hash_attr: "S"}
     if range_attr:
-        names.add(range_attr)
+        types[range_attr] = range_type
     for _, gh, gr in gsis:
-        names.add(gh)
+        types.setdefault(gh, "S")
         if gr:
-            names.add(gr)
-    return [{"AttributeName": n, "AttributeType": "S"} for n in sorted(names)]
+            types.setdefault(gr, "S")
+    return [{"AttributeName": n, "AttributeType": t} for n, t in sorted(types.items())]
 
 
 def _key_schema(hash_attr, range_attr):
@@ -191,9 +214,10 @@ def create_tables() -> None:
         if not name:
             print(f"  skip {env_var} (unset)")
             continue
+        range_type = "N" if env_var in _RANGE_KEY_NUMERIC_TABLES else "S"
         kwargs = {
             "TableName": name,
-            "AttributeDefinitions": _attr_defs(hash_attr, range_attr, gsis),
+            "AttributeDefinitions": _attr_defs(hash_attr, range_attr, gsis, range_type),
             "KeySchema": _key_schema(hash_attr, range_attr),
             "BillingMode": "PAY_PER_REQUEST",
         }
@@ -308,6 +332,79 @@ def seed_shipped_playbook() -> None:
         print(f"  shipped playbook {playbook_id!r} not installed ({result['reason']})")
 
 
+def backfill_activated_at_462() -> None:
+    """One-time convergence for issue #462: stamp a durable `activated_at`
+    fact onto any `playbook_versions` row written before that attribute
+    existed.
+
+    `activate_playbook_version` has stamped `activated_at` on every row it
+    activates since issue #462 landed, and `rollback_playbook_version` now
+    refuses a rollback target that lacks one (see docs/playbook-governance.md
+    "Gate 7 on rollback"). But `sample_playbooks.seed_shipped_playbook` only
+    ever writes on a FRESH deployment -- it returns
+    `_skip(..., "already_installed")` on every subsequent bootstrap -- so
+    nothing re-stamps a row that already existed before this change
+    deployed. Without this backfill, every pre-existing `active`/`retired`
+    row (the shipped v1.0.0, any admin-uploaded version activated before
+    today) would be permanently ineligible for rollback: rollback would go
+    from "silently ineffective" (the #462 bug) to "impossible" for every
+    version already on a live deployment.
+
+    `status in (active, retired)` is treated as "was previously active" for
+    a row with no `activated_at` -- both statuses are only ever reached via
+    `activate_playbook_version`, so this recovers the fact that attribute
+    would already record had it existed at the time, rather than guessing.
+    The stamped value is the time of this backfill (the true original
+    activation time was never recorded) -- only the attribute's presence,
+    not its exact value, is what rollback-eligibility and issue #476's
+    "show Roll back only when previously-activated" UI flag key off of.
+
+    Runs on every bootstrap. Idempotent: a row that already carries
+    `activated_at` (including one just stamped by step 5's fresh-install
+    path) is left untouched, and a race against a concurrent bootstrap is
+    resolved by the update's own conditional check, so re-running -- or
+    running against a table restored from an older backup -- is always
+    safe.
+    """
+    table_name = os.environ.get("PLAYBOOK_VERSIONS_TABLE")
+    if not table_name:
+        return
+    table = _ddb_resource().Table(table_name)
+
+    eligible_statuses = (playbook_versions.STATUS_ACTIVE, playbook_versions.STATUS_RETIRED)
+    now = int(time.time())
+    stamped = 0
+    scan_kwargs: dict = {}
+    while True:
+        page = table.scan(**scan_kwargs)
+        for item in page.get("Items", []):
+            if item.get("activated_at") is not None:
+                continue
+            if item.get("status") not in eligible_statuses:
+                continue
+            try:
+                table.update_item(
+                    Key={"playbook_id": item["playbook_id"], "version": item["version"]},
+                    UpdateExpression="SET activated_at = :now",
+                    ConditionExpression="attribute_not_exists(activated_at)",
+                    ExpressionAttributeValues={":now": now},
+                )
+                stamped += 1
+            except table.meta.client.exceptions.ConditionalCheckFailedException:
+                # Another bootstrap (or this one, on a later loop) already
+                # stamped it between the scan and this write -- fine.
+                pass
+        if "LastEvaluatedKey" not in page:
+            break
+        scan_kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+    if stamped:
+        print(
+            f"  backfilled activated_at onto {stamped} legacy playbook_versions "
+            "row(s) (issue #462)"
+        )
+
+
 def wait_for_services(timeout_seconds: Optional[int] = None) -> None:
     """Block until DynamoDB-Local and MinIO accept connections (the compose
     `depends_on: service_started` only waits for the container to start, not for
@@ -369,6 +466,7 @@ def main() -> int:
     seed_fixture()
     seed_users_and_playbook()
     seed_shipped_playbook()
+    backfill_activated_at_462()
     print("Docker Compose bootstrap: done.")
     return 0
 

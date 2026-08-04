@@ -60,6 +60,9 @@ os.environ.setdefault(
 )
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-routes430-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-routes430-test")
+# Issue #478: the upload route now persists the validated artifact to the
+# uploads S3 bucket before recording the version row.
+os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-routes430-test")
 
 import boto3  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -87,6 +90,29 @@ _BRAND_TOKEN_UPPER = _BRAND_TOKEN.upper()
 
 def _expected_hash(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+# Issue #478: the upload route now parses/validates the bytes (OPF or legacy
+# v1 `playbooks/schema.json`), so a test that exercises the route can no
+# longer upload arbitrary garbage bytes and expect 200 -- it must upload
+# something that actually validates. `_valid_v1_bytes` builds a distinct,
+# schema-valid legacy v1 document per call by loading the repo's existing
+# synthetic v1 fixture (issue #410's brand-free replacement for the real
+# production playbook) and stamping `marker` into a free-form string field
+# (`playbook.created_by`) so different calls produce different (but always
+# valid) byte content -- exactly what these tests need to exercise re-upload/
+# hash-divergence/rollback-target behavior without caring what the content
+# actually says.
+_V1_FIXTURE_PATH = (
+    REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
+)
+
+
+def _valid_v1_bytes(marker: str) -> bytes:
+    with open(_V1_FIXTURE_PATH, encoding="utf-8") as f:
+        doc = json.load(f)
+    doc["playbook"]["created_by"] = f"test-marker:{marker}"
+    return json.dumps(doc).encode("utf-8")
 
 
 def _put_user(table, sub: str, is_admin: bool, status_: str = "active") -> None:
@@ -125,6 +151,12 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
             BillingMode="PAY_PER_REQUEST",
         )
         self.ddb.create_table(
+            TableName=os.environ["PLAYBOOKS_TABLE"],
+            KeySchema=[{"AttributeName": "playbook_id", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "playbook_id", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        self.ddb.create_table(
             TableName=os.environ["AUDIT_TABLE"],
             KeySchema=[
                 {"AttributeName": "partition", "KeyType": "HASH"},
@@ -137,8 +169,12 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
             BillingMode="PAY_PER_REQUEST",
         )
 
+        self.s3 = boto3.client("s3", region_name="us-east-1")
+        self.s3.create_bucket(Bucket=os.environ["UPLOADS_BUCKET"])
+
         self.users_table = self.ddb.Table(os.environ["USERS_TABLE"])
         self.versions_table = self.ddb.Table(os.environ["PLAYBOOK_VERSIONS_TABLE"])
+        self.playbooks_table = self.ddb.Table(os.environ["PLAYBOOKS_TABLE"])
         self.audit_table = self.ddb.Table(os.environ["AUDIT_TABLE"])
         _put_user(self.users_table, ADMIN_SUB, is_admin=True)
         _put_user(self.users_table, NON_ADMIN_SUB, is_admin=False)
@@ -147,6 +183,7 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
         backend_main.app.dependency_overrides[backend_main.get_dynamodb_resource] = (
             lambda: self.ddb
         )
+        backend_main.app.dependency_overrides[backend_main.get_s3_client] = lambda: self.s3
 
     def tearDown(self):
         backend_main.app.dependency_overrides.clear()
@@ -186,8 +223,12 @@ class PlaybookVersionRoutesTestBase(unittest.TestCase):
         this ticket's scope). Leaves v1 `retired` (a valid rollback target),
         v2 `active`."""
         self._authenticate_as(ADMIN_SUB)
-        self.assertEqual(self._upload_via_route("1.0.0", b"v1-content").status_code, 200)
-        self.assertEqual(self._upload_via_route("2.0.0", b"v2-content").status_code, 200)
+        self.assertEqual(
+            self._upload_via_route("1.0.0", _valid_v1_bytes("v1-content")).status_code, 200
+        )
+        self.assertEqual(
+            self._upload_via_route("2.0.0", _valid_v1_bytes("v2-content")).status_code, 200
+        )
         pv.activate_playbook_version(
             playbook_id=PLAYBOOK_ID,
             version="1.0.0",
@@ -240,7 +281,7 @@ class TestRoutesMounted(unittest.TestCase):
 class TestUpload(PlaybookVersionRoutesTestBase):
     def test_admin_upload_creates_draft_row_with_server_computed_hash(self):
         self._authenticate_as(ADMIN_SUB)
-        content = b'{"playbook":"synthetic","body":"x"}'
+        content = _valid_v1_bytes("upload-1")
         resp = self._upload_via_route("1.0.0", content)
         self.assertEqual(resp.status_code, 200, resp.text)
 
@@ -249,6 +290,7 @@ class TestUpload(PlaybookVersionRoutesTestBase):
         self.assertEqual(body["version"], "1.0.0")
         self.assertEqual(body["status"], pv.STATUS_DRAFT)
         self.assertEqual(body["content_hash"], _expected_hash(content))
+        self.assertEqual(body["artifact_kind"], "v1")
         self.assertEqual(body["uploaded_by"], ADMIN_SUB)
         self.assertIsInstance(body["uploaded_at"], int)
 
@@ -256,6 +298,7 @@ class TestUpload(PlaybookVersionRoutesTestBase):
         self.assertIsNotNone(row)
         self.assertEqual(row["status"], pv.STATUS_DRAFT)
         self.assertEqual(row["content_hash"], _expected_hash(content))
+        self.assertEqual(row["artifact_kind"], "v1")
         self.assertEqual(row["uploaded_by"], ADMIN_SUB)
         self.assertEqual(row["notes"], "")
 
@@ -267,10 +310,10 @@ class TestUpload(PlaybookVersionRoutesTestBase):
 
     def test_reupload_same_version_is_409_and_append_only(self):
         self._authenticate_as(ADMIN_SUB)
-        original = b"payload-v1"
+        original = _valid_v1_bytes("payload-v1")
         self.assertEqual(self._upload_via_route("1.0.0", original).status_code, 200)
 
-        resp = self._upload_via_route("1.0.0", b"different-bytes")
+        resp = self._upload_via_route("1.0.0", _valid_v1_bytes("different-bytes"))
         self.assertEqual(resp.status_code, 409)
 
         # The append-only row is untouched -- original uploader/hash preserved.
@@ -289,7 +332,7 @@ class TestUpload(PlaybookVersionRoutesTestBase):
 
     def test_client_supplied_hash_match_is_accepted(self):
         self._authenticate_as(ADMIN_SUB)
-        content = b"matching-bytes"
+        content = _valid_v1_bytes("matching-bytes")
         resp = self._upload_via_route(
             "1.0.0", content, content_hash=_expected_hash(content)
         )
@@ -308,10 +351,7 @@ class TestUpload(PlaybookVersionRoutesTestBase):
         # substring must never surface (this module's "never document
         # substance" posture -- makes the assertNotIn non-vacuous).
         self._authenticate_as(ADMIN_SUB)
-        brandy = (
-            b'{"body":"' + _BRAND_TOKEN.encode()
-            + b'-internal-DO-NOT-SHIP playbook substance"}'
-        )
+        brandy = _valid_v1_bytes(_BRAND_TOKEN + "-internal-DO-NOT-SHIP playbook substance")
         self.assertEqual(self._upload_via_route("1.0.0", brandy).status_code, 200)
         trail = json.dumps(self.client.get(VERSIONS_PATH).json())
         self.assertNotIn(_BRAND_TOKEN, trail)
@@ -380,7 +420,7 @@ class TestRollback(PlaybookVersionRoutesTestBase):
         resp = self.client.post(self._rollback_path("1.0.0"))
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["status"], pv.STATUS_ACTIVE)
-        self.assertEqual(resp.json()["content_hash"], _expected_hash(b"v1-content"))
+        self.assertEqual(resp.json()["content_hash"], _expected_hash(_valid_v1_bytes("v1-content")))
 
         self.assertEqual(self._row("1.0.0")["status"], pv.STATUS_ACTIVE)
         self.assertEqual(self._row("2.0.0")["status"], pv.STATUS_RETIRED)
@@ -406,8 +446,12 @@ class TestRollback(PlaybookVersionRoutesTestBase):
 
     def test_rollback_to_never_active_version_is_409(self):
         self._authenticate_as(ADMIN_SUB)
-        self.assertEqual(self._upload_via_route("1.0.0", b"a").status_code, 200)
-        self.assertEqual(self._upload_via_route("2.0.0", b"b").status_code, 200)
+        self.assertEqual(
+            self._upload_via_route("1.0.0", _valid_v1_bytes("a")).status_code, 200
+        )
+        self.assertEqual(
+            self._upload_via_route("2.0.0", _valid_v1_bytes("b")).status_code, 200
+        )
         # Activate only v1 -- v2 stays `draft` (never active), an invalid
         # rollback target.
         pv.activate_playbook_version(
@@ -434,7 +478,7 @@ class TestEndToEndAndBrandFree(PlaybookVersionRoutesTestBase):
         routes. Upload v1 (route) -> activate v1 -> upload v2 (route) ->
         activate v2 -> rollback to v1 (route) -> trail (route)."""
         self._authenticate_as(ADMIN_SUB)
-        c1, c2 = b"eiaa-v1", b"eiaa-v2"
+        c1, c2 = _valid_v1_bytes("eiaa-v1"), _valid_v1_bytes("eiaa-v2")
 
         self.assertEqual(self._upload_via_route("1.0.0", c1).status_code, 200)
         pv.activate_playbook_version(

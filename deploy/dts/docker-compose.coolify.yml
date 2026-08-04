@@ -67,6 +67,7 @@ x-resource-names: &resource-names
   AUTH_SETTINGS_TABLE: contract-toaster-auth-settings-dts
   PLAYBOOKS_TABLE: contract-toaster-playbooks-dts
   PLAYBOOK_VERSIONS_TABLE: contract-toaster-playbook-versions-dts
+  PLAYBOOK_INSTRUCTIONS_TABLE: contract-toaster-playbook-instructions-dts
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
@@ -119,6 +120,17 @@ services:
       DEPLOY_TARGET: dts
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password
+      # Issue #469: TRUST_PROXY_HEADERS is deliberately left UNSET here
+      # (unlike docker-compose.yml). This nginx (frontend service) sits
+      # behind Coolify's own Traefik reverse proxy in this topology, so its
+      # $remote_addr -- the value it forwards as X-Forwarded-For -- is
+      # Traefik's address, not the real client's (see deploy/dts/nginx.conf's
+      # /api/ comment). Backend/src/demo_auth.py::client_ip_from_request
+      # falls back to keying the login throttle on its direct peer instead,
+      # which is the same "one shared bucket per username" outcome as
+      # trusting that header would be here -- not worse, and not a header
+      # this nginx can itself verify against Traefik. Wiring Traefik's real
+      # client IP through is a follow-on.
       PIPELINE_RUNNER: inprocess
       STATE_MACHINE_ARN: "inprocess:contract-toaster-dts"
       # Version metadata (issue #424). VERSION and COMMIT_SHA are BAKED INTO

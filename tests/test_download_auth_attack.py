@@ -220,9 +220,29 @@ class _RealKeyShapeFakeDynamoDBClient:
         cond_expr = kwargs.get("ConditionExpression")
 
         # Only the single attribute this module actually writes needs to be
-        # modelled: dailyReviewCount_<day> via #day / :one / :zero.
+        # modelled: the per-day counter, carried WHOLE in the #day
+        # placeholder (`ExpressionAttributeNames={"#day":
+        # "dailyReviewCount_2026-08-03"}`).
+        #
+        # This fake used to require the literal substring
+        # "dailyReviewCount_#day" in the expression -- i.e. it asserted the
+        # SHAPE THAT DYNAMODB REJECTS. A "#name" placeholder is a complete
+        # path component, never a suffix on a literal prefix, so the real
+        # service answered that expression with ValidationException and the
+        # route turned it into a 503 on every authenticated download
+        # (issue #528). Pinning it here is what kept the suite green while
+        # the feature was broken for every deployment, so the check now
+        # requires the CORRECT shape instead: #day used alone, carrying the
+        # full attribute name. tests/test_download_daily_limit_528.py is the
+        # companion gate that runs this same function against moto, where
+        # the expression is genuinely parsed rather than pattern-matched.
         day_attr = expr_names.get("#day")
-        if day_attr is None or "dailyReviewCount_#day" not in update_expr:
+        if day_attr is None or not day_attr.startswith("dailyReviewCount_"):
+            raise AssertionError(
+                "#day must carry the whole attribute name "
+                f"(dailyReviewCount_<day>); got {day_attr!r}"
+            )
+        if "dailyReviewCount_#day" in update_expr or "#day" not in update_expr:
             raise AssertionError(
                 f"Unexpected UpdateExpression for this fake: {update_expr!r}"
             )
@@ -382,7 +402,7 @@ class TestPresignedUrlExpiry(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
+            {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
             response = generate_presigned_download_url(
                 review_id="00000000-0000-4000-a000-000000000001",
@@ -414,7 +434,7 @@ class TestPresignedUrlExpiry(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
+            {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
             response = generate_presigned_download_url(
                 review_id="00000000-0000-4000-a000-000000000001",
@@ -452,7 +472,7 @@ class TestPresignedUrlExpiry(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
+            {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
             with self.assertRaises(HTTPException) as ctx:
                 generate_presigned_download_url(
@@ -559,7 +579,7 @@ class TestKeyBoundToReviewId(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
+            {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
             with self.assertRaises(HTTPException) as ctx:
                 generate_presigned_download_url(
@@ -780,7 +800,7 @@ class TestPerUserLimits(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
+            {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
             with self.assertRaises(HTTPException) as ctx:
                 generate_presigned_download_url(

@@ -16,7 +16,12 @@ Endpoints:
   GET /api/me   — authenticated capability route (issue #235): the caller's
                   own resolved role, e.g. {"is_admin": bool}. Always 200 for
                   any active user (never 403s a non-admin), so the SPA can
-                  decide whether to render admin UI before it paints.
+                  decide whether to render admin UI before it paints. Also
+                  carries default_credentials_warning (#469).
+  POST /api/me/password — authenticated: change the CALLER'S OWN password
+                  (issue #469). Only valid for a username/password row (400
+                  for an SSO row); 401 if current_password is wrong, 400 if
+                  new_password is under demo_auth.MIN_PASSWORD_LENGTH chars.
 
   GET /api/users            — admin: the allowlist view (issue #92).
   POST /api/users           — admin: add a user, SSO or username/password (#232).
@@ -31,7 +36,14 @@ Endpoints:
                                 the demo auth feature, gated by the stored
                                 auth-mode setting (#232). Cognito SSO sign-in
                                 remains the separate, existing hosted-UI flow
-                                (unaffected by this route).
+                                (unaffected by this route). Sets an httpOnly/
+                                Secure/SameSite=Strict session cookie rather
+                                than returning the token in the body (#468).
+  POST /api/auth/logout      — unauthenticated: clears the password-mode
+                                session cookie set by /api/auth/login (#468).
+                                POST /api/auth/login also 429s a (username,
+                                source-IP) currently throttled/locked-out
+                                from repeated failures (#469).
 
   GET  /api/admin/retention                     — admin: retention settings (#94).
   POST /api/admin/retention                     — admin: request a retention change,
@@ -82,35 +94,83 @@ Endpoints:
                         failure (unknown floor_ref, stale
                         parent_section_digest, non-monotonic version, colliding
                         floor_additions id). Read-only: validation only, no
-                        persistence, no audit row — and zero runtime effect, as
-                        no live review consumes a v2 bundle yet. See
+                        persistence, no audit row — and zero runtime effect:
+                        no live review consumes a v2 pen-rules/posture
+                        *overrides* bundle (the document this route
+                        validates), even though issue #479 made the pipeline
+                        consume an activated OPF *document*. See
                         src.bundle_authoring.
 
   POST /api/admin/playbooks/{playbook_id}/versions
                       — admin: multipart upload of a new playbook version's
-                        content (#430). The content hash is computed
-                        server-side over the uploaded bytes and is the value
-                        recorded; a client-supplied `content_hash` form
-                        field, if present, is validated against it (400 on
-                        mismatch) but never trusted as the stored value. New
-                        rows land status="draft" (append-only — the version
-                        row is itself the upload audit record). A re-upload of
-                        an already-recorded (playbook_id, version) is 409.
+                        content (#430; parsing/validation/storage added by
+                        #478). Rejected outright (413) over
+                        `src.upload_validation.MAX_UPLOAD_SIZE_BYTES`, before
+                        anything parses the body. The content hash is
+                        computed server-side over the uploaded bytes and is
+                        the value recorded; a client-supplied `content_hash`
+                        form field, if present, is validated against it (400
+                        on mismatch) but never trusted as the stored value.
+                        The upload is detected (OPF `.opf.html` bundle / bare
+                        OPF `.json` / legacy v1 `.json`), schema-validated,
+                        agreement-type matched (OPF only), stub-basis
+                        watermark checked (refused unless
+                        `accept_stub_basis=true`), checked for a
+                        `(playbook_id, version)` conflict (409, read BEFORE
+                        either S3 write so a conflict can never orphan
+                        bytes), then persisted to the uploads S3 bucket —
+                        both at a content-addressed key and, for round-trip
+                        retrievability, at a second key holding the ORIGINAL
+                        uploaded bytes — BEFORE the version row is recorded.
+                        Any failure (413/400/409) names the failing check;
+                        nothing is written on any of them. New rows land
+                        status="draft" (append-only — the version row is
+                        itself the upload audit record).
                         Activation is the separate, Gate-7'd route above.
 
   GET /api/admin/playbooks/{playbook_id}/versions
                       — admin: the full version-upload trail for a playbook,
                         oldest first (#430) — playbook_id, version,
-                        uploaded_by, uploaded_at, notes only, never document
-                        substance. Empty list for a playbook with no uploads.
+                        uploaded_by, uploaded_at, notes, content_hash,
+                        artifact_kind, opf_content_hash, storage_key (#478,
+                        each absent when not recorded), accepted_stub_basis
+                        only, never document substance. Empty list for a
+                        playbook with no uploads.
 
   POST /api/admin/playbooks/{playbook_id}/versions/{version}/rollback
-                      — admin: roll back to a previously-active (now retired)
-                        version (#430) — restores it as active, demoting the
-                        current active version, and appends one
-                        release_bundle_rollback audit row. An unknown version
-                        is 404; a target that was never active (status not
-                        "retired") is 409.
+                      — admin: roll back to a previously-activated version
+                        (#430, resolver wiring fixed by #462) — restores it
+                        as active, demoting the current active version, and
+                        appends one release_bundle_rollback audit row. On
+                        success also writes playbooks.active_release_bundle_
+                        hash to the restored content_hash, the same write
+                        the activate route performs, so reviews.resolve_
+                        active_release_bundle_hash actually serves the
+                        rolled-back bundle. Does not re-run Gate 7 (docs/
+                        playbook-governance.md "Gate 7 on rollback"). An
+                        unknown version is 404; a target that has never
+                        been successfully activated is 409.
+
+  GET  /api/admin/playbooks/{playbook_id}/instructions
+                      — admin: the current standing-instructions version for
+                        a playbook plus its append-only history, newest
+                        first, capped ~50 (issue #482, epic #481). An
+                        unknown playbook_id is 404; a playbook with nothing
+                        ever saved returns current=null and an empty
+                        history.
+
+  POST /api/admin/playbooks/{playbook_id}/instructions
+                      — admin: save a new standing-instructions version
+                        (#482). Body: {"text": str, "expected_current_
+                        version": int | None}. Append-only — always creates
+                        version N+1, never edits a prior version.
+                        `expected_current_version` gives compare-and-set
+                        semantics: a stale page (or a losing concurrent
+                        save) gets HTTP 409 with the actual current version
+                        in the body, never a silent overwrite. HTTP 400 for
+                        text over 10,000 characters; 404 for an unknown
+                        playbook_id. Appends one audit row (identifiers +
+                        text length only, never the text itself).
 
   POST /api/corpus — admin: corpus ingestion (#197). Runs the real ingestion
                       pipeline (clause extraction, content-addressed
@@ -178,12 +238,13 @@ Security invariants:
 """
 
 import hashlib
+import logging
 import os
 import time
 from typing import Any
 
 import boto3
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path, UploadFile, status
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
 from src import config
@@ -192,11 +253,16 @@ from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
 from src.demo_auth import (
     add_user,
+    change_own_password,
+    clear_demo_session_cookie,
+    client_ip_from_request,
+    default_credentials_warning,
     get_auth_mode_settings,
     issue_demo_token,
     login_with_password,
     remove_user,
     set_auth_mode,
+    set_demo_session_cookie,
 )
 from src.model_settings import (
     clear_model_key,
@@ -204,6 +270,19 @@ from src.model_settings import (
     get_model_selection_settings,
     set_model_key,
     set_model_selection,
+)
+from src.playbook_instructions import (
+    PlaybookInstructionsConflictError,
+    PlaybookInstructionsTooLargeError,
+    get_current_instructions,
+    list_instructions_history,
+    save_instructions,
+)
+from src.playbook_upload import (
+    PlaybookUploadRejected,
+    original_artifact_key,
+    storage_key_for,
+    validate_playbook_upload,
 )
 from src.playbook_versions import (
     PlaybookVersionConflictError,
@@ -215,11 +294,13 @@ from src.playbook_versions import (
     record_playbook_version_upload,
     remove_playbook,
     rename_playbook,
-    rollback_playbook_version,
+    rollback_release_bundle,
     update_playbook_version_notes,
+    version_already_recorded,
 )
 from src.review_routes import router as review_router
 from src.reviews import RECENT_FAILURES_DEFAULT_LIMIT, list_recent_failures
+from src.upload_validation import MAX_UPLOAD_SIZE_BYTES
 from src.retention import (
     RETENTION_WINDOW_FOREVER,
     get_retention_settings,
@@ -230,6 +311,8 @@ from src.retention import (
     set_legal_hold,
 )
 from src.users import get_sync_status, list_users, require_active_user, update_user
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Application startup time — used to compute uptime_seconds in /version.
@@ -375,8 +458,61 @@ async def get_me(
     fetched by `get_active_user_row` -> `require_active_user`) via
     `src.users._is_admin` — never a JWT/Cognito claim (ARCHITECTURE.md ->
     "Group-naming misnomer"). No secrets or tokens are included.
+
+    `cognito_sub` (issue #473) is the caller's own primary key, already
+    known to them (it is the identity behind their own session) — it lets
+    the Users & access UI recognize "this row is me" client-side to
+    proactively disable/hide self-targeting actions the server would
+    refuse, without trusting any client-side claim of *privilege*.
+
+    `username` (issue #468) is present for a password-type row (`None` for
+    an SSO row, which has no `username` attribute) — the password-mode SPA
+    uses this to restore "Signed in as <username>" from the httpOnly
+    session cookie on page load/reload, without ever holding a token to
+    decode client-side.
+
+    `default_credentials_warning` (issue #469) is true when the caller is
+    STILL signed in with a shipped seed default (admin/admin, user/user) --
+    always false for an SSO row. Restoring this on every /api/me call (not
+    just the login response) is what makes the banner persist across a
+    reload and clear the instant the password is rotated (demo_auth.
+    change_own_password rewrites password_hash, so the very next check
+    against the seed default stops matching).
     """
-    return JSONResponse(content={"is_admin": _is_admin(caller_row)})
+    return JSONResponse(
+        content={
+            "is_admin": _is_admin(caller_row),
+            "cognito_sub": caller_row.get("cognito_sub", ""),
+            "username": caller_row.get("username"),
+            "default_credentials_warning": default_credentials_warning(caller_row),
+        }
+    )
+
+
+@app.post("/api/me/password", include_in_schema=True)
+async def post_me_password(
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Authenticated: change the CALLER'S OWN password (issue #469).
+
+    Body: {"current_password": str, "new_password": str}. Only valid for a
+    username/password-type row -- an SSO row has no password to change
+    (HTTP 400). Raises HTTP 401 if current_password does not match the
+    stored hash, 400 if new_password is under demo_auth.MIN_PASSWORD_LENGTH
+    characters. On success the row's password_hash is rotated (so the OLD
+    password stops working on the caller's next login) and one
+    `password_changed` audit row is appended -- identifiers only, never a
+    plaintext password or the hash itself.
+    """
+    result = change_own_password(
+        body.get("current_password", ""),
+        body.get("new_password", ""),
+        caller_row,
+        dynamodb_resource,
+    )
+    return JSONResponse(content=result)
 
 
 @app.get("/api/users", include_in_schema=True)
@@ -441,7 +577,9 @@ async def patch_user(
     Body may contain `is_admin` (bool) and/or `status`
     (active|suspended|deprovisioned). Every mutation is audited. Raises
     HTTP 403 for a non-admin caller, 400 for an invalid payload, 404 if the
-    target user does not exist, and 409 if an admin targets their own row.
+    target user does not exist, and 409 if the update would strip admin
+    access (suspend, deprovision, or revoke-admin) from the LAST active
+    admin, self-targeting or not.
     """
     updated = update_user(sub, updates, caller_row, dynamodb_resource)
     return JSONResponse(content=updated)
@@ -576,6 +714,7 @@ async def post_admin_model_selection(
 
 @app.post("/api/auth/login", include_in_schema=True)
 async def post_auth_login(
+    request: Request,
     body: dict[str, Any] = Body(...),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
 ) -> JSONResponse:
@@ -586,15 +725,39 @@ async def post_auth_login(
     hosted-UI SSO flow is unaffected by this route.
 
     Body: {"username": str, "password": str}. On success returns the user
-    summary plus a short-lived `token` the SPA presents as the Bearer on
-    subsequent /api/* requests (get_current_user verifies it in `password`/
-    `both` mode). Raises HTTP 403 if the stored mode does not permit password
-    sign-in, 401 for an unknown user or wrong password, 403 if the matched
-    row's lifecycle status is not active.
+    summary and sets a short-lived, httpOnly/Secure/SameSite=Strict session
+    cookie (issue #468) that get_current_user verifies on subsequent
+    /api/* requests in `password`/`both` mode — the token itself is never
+    present in the response body, so it is never reachable from page JS
+    (see demo_auth.py's session-cookie posture comment). Raises HTTP 403 if
+    the stored mode does not permit password sign-in, 429 if this (username,
+    source-IP) is currently throttled/locked out from repeated failures
+    (issue #469 — see demo_auth.py's login-throttle comment), 401 for an
+    unknown user or wrong password, 403 if the matched row's lifecycle
+    status is not active.
     """
-    result = login_with_password(body["username"], body["password"], dynamodb_resource)
-    result["token"] = issue_demo_token(result)
-    return JSONResponse(content=result)
+    result = login_with_password(
+        body["username"],
+        body["password"],
+        dynamodb_resource,
+        client_ip=client_ip_from_request(request),
+    )
+    token = issue_demo_token(result)
+    response = JSONResponse(content=result)
+    set_demo_session_cookie(response, token)
+    return response
+
+
+@app.post("/api/auth/logout", include_in_schema=True)
+async def post_auth_logout() -> JSONResponse:
+    """Unauthenticated: clears the password-mode session cookie (issue
+    #468). Safe to call with no session present (e.g. double sign-out, an
+    already-expired cookie) — always 200. Cognito/Amplify sign-out is a
+    separate client-side flow (Authenticator's own signOut) and is
+    unaffected by this route."""
+    response = JSONResponse(content={"signed_out": True})
+    clear_demo_session_cookie(response)
+    return response
 
 
 @app.get("/api/admin/retention", include_in_schema=True)
@@ -795,10 +958,13 @@ async def post_admin_playbook_version_upload(
     file: UploadFile = File(...),
     version: str = Form(...),
     content_hash: str | None = Form(None),
+    accept_stub_basis: bool = Form(False),
     caller_row: dict[str, Any] = Depends(get_active_user_row),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    s3_client: Any = Depends(get_s3_client),
 ) -> JSONResponse:
-    """Admin: upload a new playbook release-bundle version (issue #430).
+    """Admin: upload a new playbook release-bundle version (issue #430,
+    extended by issue #478 to parse, validate, and persist the bytes).
 
     Multipart upload of a new version's content. The content hash is computed
     server-side over the uploaded bytes (`"sha256:" + sha256(bytes)`) and is
@@ -811,12 +977,33 @@ async def post_admin_playbook_version_upload(
     separate, Gate-7-enforced admin action
     (`POST .../versions/{version}/activate` above).
 
+    Issue #478: the uploaded bytes are no longer dropped. The body is first
+    checked against `src.upload_validation.MAX_UPLOAD_SIZE_BYTES` (413 if
+    over-cap, before anything parses it), then detected (OPF 0.2/0.3
+    `.opf.html` bundle, bare OPF `.json`, or legacy v1 `.json`), validated
+    (`src.playbook_upload.validate_playbook_upload` -- schema,
+    `identity.content_hash`, injection scan, agreement-type match, stub-basis
+    watermark), and -- only once a `(playbook_id, version)` conflict has
+    already been ruled out -- persisted to the uploads S3 bucket at a
+    content-addressed key (`playbooks/{playbook_id}/{hash}.json`, plus the
+    ORIGINAL uploaded bytes at a second key for every artifact kind, so
+    `content_hash` always addresses a retrievable object) BEFORE the version
+    row is recorded. A file that fails any check is refused with HTTP
+    413/400/409 naming the failing check, and nothing is written -- the
+    conflict check runs as a read before either S3 write, precisely so a
+    409 never leaves orphaned bytes behind.
+
     Body (multipart/form-data): `file` (the version content), `version` (the
     new version identifier), optional `content_hash` (an integrity claim, the
-    full `"sha256:<hex>"` form). Raises HTTP 403 for a non-admin caller, 400
-    for a missing/blank `version` or a content-hash mismatch, 409 if
-    `(playbook_id, version)` was already uploaded (append-only -- re-uploads
-    must use a new version identifier).
+    full `"sha256:<hex>"` form), optional `accept_stub_basis` (default false
+    -- required to accept an OPF artifact watermarked
+    `compiler.stub_basis_present`). Raises HTTP 403 for a non-admin caller,
+    413 for a body over `MAX_UPLOAD_SIZE_BYTES`, 400 for a missing/blank
+    `version`, a content-hash mismatch, or any artifact-validation failure
+    (bad JSON, schema violation, hash mismatch, agreement-type mismatch, or
+    an un-accepted stub-basis watermark), 409 if `(playbook_id, version)` was
+    already uploaded (append-only -- re-uploads must use a new version
+    identifier).
     """
     if not _is_admin(caller_row):
         raise HTTPException(
@@ -829,6 +1016,19 @@ async def post_admin_playbook_version_upload(
             detail="Body must include a non-empty 'version' field.",
         )
     contents = await file.read()
+    # Size cap BEFORE anything else touches the bytes -- parsing, schema
+    # validation, canonicalization, and the injection scan all cost more
+    # than hashing, so an over-cap body must never reach them (issue #478
+    # fix round 1: this route previously read, JSON-parsed, and fully
+    # schema-validated an unbounded body before ever checking its size).
+    if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Upload exceeds the maximum allowed size of "
+                f"{MAX_UPLOAD_SIZE_BYTES} bytes."
+            ),
+        )
     # Server-computed hash is authoritative; a client-supplied hash is only
     # ever validated against it, never trusted as the value we record.
     computed_hash = "sha256:" + hashlib.sha256(contents).hexdigest()
@@ -841,6 +1041,61 @@ async def post_admin_playbook_version_upload(
                 "client-supplied hash is validated, never trusted)."
             ),
         )
+
+    try:
+        validated = validate_playbook_upload(
+            filename=file.filename or "",
+            contents=contents,
+            playbook_id=playbook_id,
+            accept_stub_basis=accept_stub_basis,
+        )
+    except PlaybookUploadRejected as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # Reject a (playbook_id, version) conflict BEFORE writing anything to
+    # S3 -- issue #478 fix round 1: writing the artifact first and only then
+    # discovering the version row already exists (via
+    # record_playbook_version_upload's ConditionExpression, below) orphaned
+    # the just-written bytes on every re-upload 409, since nothing pointed
+    # back at them. This is a plain read; the ConditionExpression on the
+    # eventual put_item remains the actual append-only enforcement (races
+    # this pre-check cannot see are still caught there).
+    if version_already_recorded(playbook_id, version, dynamodb_resource):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"playbook version already recorded: playbook_id={playbook_id!r} "
+                f"version={version!r} (append-only — re-uploads must use a new "
+                "version identifier)"
+            ),
+        )
+
+    # Persist the validated artifact to the uploads S3 bucket at a
+    # content-addressed key BEFORE recording the version row -- a row is
+    # never recorded for bytes that were not (or could not be) written.
+    storage_bytes = validated.storage_text.encode("utf-8")
+    storage_hash_hex = hashlib.sha256(storage_bytes).hexdigest()
+    storage_key = storage_key_for(playbook_id, storage_hash_hex)
+    uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
+    if not uploads_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="UPLOADS_BUCKET not configured.",
+        )
+    s3_client.put_object(Bucket=uploads_bucket, Key=storage_key, Body=storage_bytes)
+    # "...plus the original artifact" (issue #478 step 3): the raw uploaded
+    # bytes, kept alongside the canonical text above at a key that can never
+    # collide with it -- for EVERY artifact kind (not only `.opf.html`), so
+    # the row's `content_hash` (the hash of these exact raw bytes) always
+    # addresses a retrievable object (fix round 1, AC1's round-trip check).
+    s3_client.put_object(
+        Bucket=uploads_bucket,
+        Key=original_artifact_key(
+            playbook_id, hashlib.sha256(contents).hexdigest(), filename=file.filename or ""
+        ),
+        Body=contents,
+    )
+
     try:
         result = record_playbook_version_upload(
             playbook_id=playbook_id,
@@ -848,6 +1103,10 @@ async def post_admin_playbook_version_upload(
             uploader_identity=caller_row.get("cognito_sub", ""),
             dynamodb_resource=dynamodb_resource,
             content_hash=computed_hash,
+            artifact_kind=validated.artifact_kind,
+            opf_content_hash=validated.opf_content_hash,
+            storage_key=storage_key,
+            accepted_stub_basis=validated.accepted_stub_basis,
         )
     except PlaybookVersionConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -857,6 +1116,10 @@ async def post_admin_playbook_version_upload(
             "version": result.get("version"),
             "status": result.get("status"),
             "content_hash": result.get("content_hash"),
+            "artifact_kind": result.get("artifact_kind"),
+            "opf_content_hash": result.get("opf_content_hash"),
+            "storage_key": result.get("storage_key"),
+            "accepted_stub_basis": result.get("accepted_stub_basis", False),
             "uploaded_by": result.get("uploaded_by"),
             "uploaded_at": (
                 int(result["uploaded_at"]) if result.get("uploaded_at") is not None else None
@@ -903,19 +1166,26 @@ async def post_admin_playbook_version_rollback(
     caller_row: dict[str, Any] = Depends(get_active_user_row),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
 ) -> JSONResponse:
-    """Admin: roll back to a previously-active playbook version (issue #430).
+    """Admin: roll back to a previously-active playbook version (issue #430,
+    resolver wiring fixed by issue #462).
 
     Restores a version this module previously demoted from `active` to
     `retired` as the active bundle; any currently-active version is demoted to
     `retired` as part of the same rollback, and one append-only audit row
-    (`release_bundle_rollback`) is written -- see
-    `src.playbook_versions.rollback_playbook_version`. Rolling back to a
-    version that was never active is not a rollback (callers should activate
-    it instead).
+    (`release_bundle_rollback`) is written. On success also writes
+    `playbooks.active_release_bundle_hash` to the restored version's
+    `content_hash` -- the same resolver write `.../activate` performs -- so
+    `reviews.resolve_active_release_bundle_hash` actually serves the
+    rolled-back bundle instead of continuing to run reviews under the bundle
+    that was just rolled back -- see
+    `src.playbook_versions.rollback_release_bundle`. Rolling back to a
+    version that was never successfully activated is not a rollback (callers
+    should activate it instead); rollback itself deliberately does not
+    re-run Gate 7 (docs/playbook-governance.md "Gate 7 on rollback").
 
     Raises HTTP 403 for a non-admin caller, 404 for an unknown
-    `(playbook_id, version)`, and 409 if the target version was never active
-    (its status is not `retired`) -- there is nothing to roll back to.
+    `(playbook_id, version)`, and 409 if the target version has never been
+    successfully activated -- there is nothing to roll back to.
     """
     if not _is_admin(caller_row):
         raise HTTPException(
@@ -923,7 +1193,7 @@ async def post_admin_playbook_version_rollback(
             detail="Admin privilege required to roll back a playbook version.",
         )
     try:
-        result = rollback_playbook_version(
+        result = rollback_release_bundle(
             playbook_id=playbook_id,
             version=version,
             actor_identity=caller_row.get("cognito_sub", ""),
@@ -1027,9 +1297,14 @@ async def post_admin_playbook_pen_rules_validate(
 
     Read-only: validation only, **no persistence** and therefore no audit
     entry. Even a valid document has zero runtime effect — no live review
-    consumes a v2 bundle yet (`pipeline_runner._load_playbook_bundle` reads only
-    `entry.playbook_path`, never a v2 `bundle_path`); persist/activate is a
-    deliberate follow-up. Raises HTTP 403 for a non-admin caller and HTTP 400
+    consumes a v2 pen-rules/posture *overrides* bundle (the document this
+    route validates): `pipeline_runner._load_opf_bundle_if_active` hard-codes
+    `"overrides": None` on every OPF bundle it builds, so this route's output
+    is never read by `review_knowledge.resolve_knowledge`. This is narrower
+    than it used to be — issue #479 made the pipeline consume an activated
+    OPF *document* itself — but the overrides bundle stays unconsumed;
+    persist/activate is a deliberate follow-up. Raises HTTP 403 for a
+    non-admin caller and HTTP 400
     for a malformed body (missing/non-object `opf`, or a wrong-typed field). A
     well-formed document that fails a rule is a 200 with `valid: false`, not an
     HTTP error.
@@ -1050,6 +1325,146 @@ def _require_registered_playbook(playbook_id: str) -> None:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown playbook_id: {playbook_id!r}",
         )
+
+
+@app.get(
+    "/api/admin/playbooks/{playbook_id}/instructions",
+    include_in_schema=True,
+)
+async def get_admin_playbook_instructions(
+    playbook_id: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the current standing-instructions version for a playbook plus
+    its append-only history (issue #482, epic #481).
+
+    Returns `{"current": {version, text, saved_by, saved_at} | null,
+    "history": [...]}` — history newest-first, capped ~50 (see
+    `src.playbook_instructions.list_instructions_history`). A playbook with
+    nothing ever saved returns `current: null` and an empty history, never
+    an error.
+
+    Raises HTTP 403 for a non-admin caller, 404 for a playbook_id the
+    registry does not list.
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to view standing instructions.",
+        )
+    _require_registered_playbook(playbook_id)
+
+    current = get_current_instructions(playbook_id, dynamodb_resource)
+    history = list_instructions_history(playbook_id, dynamodb_resource)
+
+    def _shape(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": int(item["version"]),
+            "text": item.get("text", ""),
+            "saved_by": item.get("saved_by"),
+            "saved_at": int(item["saved_at"]) if item.get("saved_at") is not None else None,
+        }
+
+    return JSONResponse(
+        content={
+            "current": _shape(current) if current else None,
+            "history": [_shape(item) for item in history],
+        }
+    )
+
+
+@app.post(
+    "/api/admin/playbooks/{playbook_id}/instructions",
+    include_in_schema=True,
+)
+async def post_admin_playbook_instructions(
+    playbook_id: str = Path(...),
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: save a new standing-instructions version for a playbook
+    (issue #482, epic #481) — append-only, always creates version N+1.
+
+    Body: `{"text": str, "expected_current_version": int | None}`.
+    `expected_current_version` gives compare-and-set semantics: when
+    supplied and it no longer matches the actual current version (a stale
+    admin page, or a losing concurrent save), the save is refused with
+    HTTP 409 and the actual current version in the body, rather than
+    silently superseding a save the caller never saw — see
+    `src.playbook_instructions.save_instructions` for the full contract,
+    including the append-only conditional write that makes two concurrent
+    saves unable to both claim the same version number.
+
+    Text is trusted first-party admin input — the same trust class as
+    `toaster_guidance` (`src.review_routes.post_review`'s per-review
+    free-text box) — never logged in full: this route logs only
+    `playbook_id`/`version`/text length at INFO, never the text itself, and
+    the audit row `save_instructions` appends carries the same
+    identifiers-only shape.
+
+    Raises HTTP 403 for a non-admin caller, 400 if `text` is missing/not a
+    string or over 10,000 characters, 404 for an unknown playbook_id, and
+    409 for a version conflict (`{"detail": ..., "current_version": int}`).
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to save standing instructions.",
+        )
+    _require_registered_playbook(playbook_id)
+
+    text = body.get("text")
+    if not isinstance(text, str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Body must include a string 'text' field.",
+        )
+    expected_current_version = body.get("expected_current_version")
+    if expected_current_version is not None and not isinstance(expected_current_version, int):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'expected_current_version' must be an integer or null.",
+        )
+
+    actor_identity = caller_row.get("cognito_sub", "")
+    try:
+        result = save_instructions(
+            playbook_id=playbook_id,
+            text=text,
+            saved_by=actor_identity,
+            dynamodb_resource=dynamodb_resource,
+            expected_current_version=expected_current_version,
+        )
+    except PlaybookInstructionsTooLargeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except PlaybookInstructionsConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(exc),
+                "current_version": exc.current_version,
+            },
+        ) from exc
+
+    # Never the text itself — identifiers + length only (module docstring
+    # "Security invariants": CloudWatch must never log document content).
+    logger.info(
+        "PLAYBOOK_INSTRUCTIONS_SAVE: playbook_id=%s version=%s text_length=%s",
+        playbook_id,
+        result["version"],
+        len(text),
+    )
+
+    return JSONResponse(
+        content={
+            "playbook_id": playbook_id,
+            "version": int(result["version"]),
+            "saved_by": result.get("saved_by"),
+            "saved_at": int(result["saved_at"]) if result.get("saved_at") is not None else None,
+        }
+    )
 
 
 @app.patch("/api/admin/playbooks/{playbook_id}", include_in_schema=True)

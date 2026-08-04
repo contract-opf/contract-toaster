@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """
-CI gate for issue #387: DTS nginx CSP parity + locking test.
+CI gate for issue #387 (CSP parity) and issue #467 (Cache-Control policy):
+DTS nginx security- and cache-header locking test.
 
 The AWS Amplify target ships a strict Content-Security-Policy
 (infra/lib/nested/frontend-stack.ts:213) but deploy/dts/nginx.conf, the
 self-hosted Docker Compose (DTS) deploy target, previously set no CSP or
 other security headers at all. This test locks in the header set added to
 close that gap.
+
+Issue #467: deploy/dts/nginx.conf also shipped no Cache-Control headers at
+all, so browsers applied heuristic freshness to `index.html` and kept
+serving a stale bundle for hours-to-days after a redeploy. This test also
+locks in the Cache-Control policy added to fix that: `no-cache` by default
+(covers `/` and `/index.html`, the SPA fallback) and long-lived
+`immutable` caching for the content-hashed `/assets/` bundle -- driven by a
+`map` at server level (never a per-location `add_header`, for the same
+header-replacement reason as check 5 below).
 
 Checks (all must pass; exit 1 on any failure):
 
@@ -21,6 +31,16 @@ Checks (all must pass; exit 1 on any failure):
      REPLACES (does not merge with) inherited headers, so if any location
      block declares its own `add_header`, it must also re-declare the CSP
      line or the header would be silently dropped for that location.
+  6. A Cache-Control `map` is present, keyed on `$uri`, whose default arm is
+     `no-cache` (covers `/` and `/index.html`), whose `/assets/`-matching arm
+     contains both `max-age=31536000` and `immutable`, and whose
+     api/version/health/openapi.json arm is empty (so the reverse-proxied
+     backend's own Cache-Control, e.g. `no-store` on downloads, passes
+     through unmodified instead of getting a second header appended).
+  7. The Cache-Control header is applied via a server-level `add_header`
+     (never inside a `location` block, which would drop the #387 security
+     headers per check 5) referencing the exact map output variable from
+     check 6.
 
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
@@ -270,11 +290,154 @@ def check_5_no_location_drops_headers() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check 6 — Cache-Control map: no-cache default, immutable for /assets/
+# ---------------------------------------------------------------------------
+
+def extract_cache_control_map(
+    text: str,
+) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Return (source_var, output_var, default_value, assets_value,
+    proxied_value) from the Cache-Control `map` block.
+
+    `source_var`/`output_var` are the map's `$<source> $<output>` names
+    (without the leading `$`), captured so callers can verify the map is
+    keyed on the right variable (check 6) and that the `add_header` that
+    consumes it references the exact same output variable (check 7) --
+    a wildcard match on either would let the map be silently re-keyed or
+    disconnected from the header that is supposed to use it.
+
+    `proxied_value` is the arm matching the reverse-proxied backend prefixes
+    (api/, version, health, openapi.json); it must be present and empty so
+    nginx omits `add_header` for those responses and lets the backend's own
+    Cache-Control (e.g. `no-store` on downloads) pass through unmodified.
+    """
+    m = re.search(r"map\s+\$(\w+)\s+\$(\w+)\s*\{([^}]*)\}", text)
+    if m is None:
+        return None, None, None, None, None
+    source_var = m.group(1)
+    output_var = m.group(2)
+    body = m.group(3)
+
+    default_m = re.search(r'default\s+"([^"]*)"', body)
+    default_value = default_m.group(1) if default_m else None
+
+    assets_m = re.search(r'~\*?\^?/assets/[^\s"]*\s+"([^"]*)"', body)
+    assets_value = assets_m.group(1) if assets_m else None
+
+    proxied_m = re.search(
+        r'~\*?\^?/\([^)]*\bapi/[^)]*\)[^\s"]*\s+"([^"]*)"', body
+    )
+    proxied_value = proxied_m.group(1) if proxied_m else None
+
+    return source_var, output_var, default_value, assets_value, proxied_value
+
+
+def check_6_cache_control_map() -> tuple[list[str], str | None]:
+    print("\nCheck 6: Cache-Control map (no-cache default, immutable /assets/) …")
+    failures: list[str] = []
+
+    text = read(NGINX_CONF)
+    source_var, output_var, default_value, assets_value, proxied_value = (
+        extract_cache_control_map(text)
+    )
+
+    failures += check(
+        source_var == "uri",
+        "6c: map is keyed on $uri",
+        f"6c: map is keyed on ${source_var}, expected $uri -- any other "
+        "variable (e.g. $request_uri, $request_filename) has different "
+        "matching semantics after the SPA's internal /index.html redirect "
+        "and with query strings, and would silently change which paths "
+        "get which Cache-Control value",
+    )
+
+    failures += check(
+        default_value == "no-cache",
+        "6a: map default arm is \"no-cache\" (covers / and /index.html)",
+        f"6a: map default arm is {default_value!r}, expected \"no-cache\" -- "
+        "index.html must always revalidate or a redeploy leaves stale "
+        "sessions running the old bundle (issue #467)",
+    )
+
+    failures += check(
+        assets_value is not None
+        and "max-age=31536000" in assets_value
+        and "immutable" in assets_value,
+        "6b: map's /assets/ arm has max-age=31536000 and immutable",
+        f"6b: map's /assets/ arm is {assets_value!r}, expected it to contain "
+        "both max-age=31536000 and immutable -- Vite content-hashes every "
+        "built asset, so they are safe to cache forever",
+    )
+
+    failures += check(
+        proxied_value == "",
+        "6d: map has an empty-value arm for the proxied api/version/health/"
+        "openapi.json prefixes",
+        f"6d: map's proxied-prefix arm is {proxied_value!r}, expected \"\" -- "
+        "nginx omits `add_header` when the map value is empty, so this arm "
+        "must be empty or the server-level Cache-Control would also be "
+        "added to reverse-proxied backend responses (which set their own, "
+        "e.g. `no-store` on downloads), producing a duplicate header",
+    )
+
+    return failures, output_var
+
+
+# ---------------------------------------------------------------------------
+# Check 7 — Cache-Control applied via server-level add_header, not a location
+# ---------------------------------------------------------------------------
+
+def check_7_cache_control_server_level(map_output_var: str | None) -> list[str]:
+    print("\nCheck 7: Cache-Control add_header is at server level …")
+    failures: list[str] = []
+
+    text = read(NGINX_CONF)
+    server_level, location_blocks = extract_server_blocks_and_locations(text)
+
+    if map_output_var is None:
+        failures += fail(
+            "7a: no Cache-Control map found (see check 6) -- cannot verify "
+            "the add_header references its output variable"
+        )
+    else:
+        server_has_cache_control = bool(
+            re.search(
+                r"add_header\s+Cache-Control\s+\$" + re.escape(map_output_var) + r"\b",
+                server_level,
+            )
+        )
+        failures += check(
+            server_has_cache_control,
+            f"7a: Cache-Control add_header is declared at server level, "
+            f"referencing the map's output variable ${map_output_var}",
+            f"7a: no server-level `add_header Cache-Control ${map_output_var}` "
+            "directive found -- Cache-Control must be set outside every "
+            "location block, and must reference the exact variable the "
+            "map from check 6 assigns, or the map is unused",
+        )
+
+    offending = [
+        block.splitlines()[0].strip()
+        for block in location_blocks
+        if "Cache-Control" in block
+    ]
+    failures += check(
+        len(offending) == 0,
+        "7b: no location block re-declares Cache-Control",
+        f"7b: location block(s) re-declare Cache-Control, which would also "
+        f"drop the server-level security headers for that location "
+        f"(see check 5): {offending}",
+    )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    print("DTS nginx CSP parity + locking gate (issue #387)")
+    print("DTS nginx CSP parity (#387) + Cache-Control (#467) locking gate")
     print("=" * 70)
 
     all_failures: list[str] = []
@@ -284,6 +447,10 @@ def main() -> int:
     all_failures += check_4_nosniff_and_referrer_policy()
     all_failures += check_5_no_location_drops_headers()
 
+    check_6_failures, map_output_var = check_6_cache_control_map()
+    all_failures += check_6_failures
+    all_failures += check_7_cache_control_server_level(map_output_var)
+
     print("\n" + "=" * 70)
     if all_failures:
         print(
@@ -292,7 +459,7 @@ def main() -> int:
         )
         return 1
 
-    print("\nPASS: all DTS nginx CSP checks passed (issue #387).")
+    print("\nPASS: all DTS nginx CSP (#387) + Cache-Control (#467) checks passed.")
     return 0
 
 

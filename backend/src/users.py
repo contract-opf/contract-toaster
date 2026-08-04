@@ -121,6 +121,12 @@ PUBLIC_USER_FIELDS = (
     "admission",
     "created_at",
     "last_auth_at",
+    # Derived (issue #469), not a raw row field -- see the synthesis step in
+    # public_user_view below. Listed here anyway so this stays the single
+    # allowlist tests/test_users_projection_453.py's
+    # test_a_future_row_field_is_not_returned_unless_allowlisted checks
+    # every returned key against.
+    "default_credentials_warning",
 )
 
 
@@ -141,8 +147,26 @@ def public_user_view(row: dict[str, Any]) -> dict[str, Any]:
     Keys absent from the row stay absent from the projection (an SSO row has
     no `username`, a never-signed-in row may have no `last_auth_at`), so the
     wire shape is unchanged apart from the removal of non-allowlisted fields.
+
+    `default_credentials_warning` (issue #469) is the one DERIVED field: a
+    password-type row gets it synthesized here (true if its CURRENT
+    password_hash still verifies against the shipped seed default for its
+    username) so an admin can spot an unrotated admin/admin or user/user row
+    in the Users & access table. Deferred import -- `demo_auth` already
+    imports `public_user_view` from this module at load time, so importing
+    `demo_auth` back at module level here would be circular; by call time
+    both modules are fully loaded. Never the hash itself, so it stays inside
+    the "safe to return" boundary this function draws.
     """
-    return {field: json_safe(row[field]) for field in PUBLIC_USER_FIELDS if field in row}
+    projected_row: dict[str, Any] = row
+    if row.get("user_type") == "password":
+        try:
+            from src.demo_auth import default_credentials_warning
+        except ImportError:  # pragma: no cover
+            from demo_auth import default_credentials_warning  # type: ignore[no-redef]
+        projected_row = dict(row)
+        projected_row["default_credentials_warning"] = default_credentials_warning(row)
+    return {field: json_safe(projected_row[field]) for field in PUBLIC_USER_FIELDS if field in projected_row}
 
 
 # ---------------------------------------------------------------------------
@@ -329,10 +353,11 @@ def update_user(
       HTTPException(403) if the caller is not an admin.
       HTTPException(400) for an empty or invalid update payload.
       HTTPException(404) if the target user does not exist.
-      HTTPException(409) if the caller targets their own admin flag or
-        status — an admin must not be able to lock themselves out or
-        de-admin themselves as their last action (self-modification of
-        privilege/lifecycle is refused; use another admin or break-glass).
+      HTTPException(409) if the update would strip the target's admin
+        access (suspending/deprovisioning them, or revoking their admin
+        flag) while they are the LAST active admin on the deployment —
+        self-targeting or not (issue #473). With at least one other active
+        admin, self-demotion is allowed; the second admin retains access.
     """
     if not _is_admin(caller_user_row):
         raise HTTPException(
@@ -361,18 +386,48 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="is_admin must be a boolean.")
 
     caller_sub = caller_user_row.get("cognito_sub")
-    if target_sub == caller_sub:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An admin cannot change their own admin flag or lifecycle status. "
-            "Ask another admin, or use the break-glass procedure (see RUNBOOK.md).",
-        )
 
     table = _users_table(dynamodb_resource)
     resp = table.get_item(Key={"cognito_sub": target_sub})
     before = resp.get("Item")
     if not before:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    # Last-active-admin guard (issue #473). The old rule blocked ANY
+    # self-targeting update unconditionally, which also blocked legitimate
+    # self-demotion when a second active admin exists. The rule that
+    # actually matters is narrower and applies regardless of who the caller
+    # is: never let an update strip admin access from the target (suspend,
+    # deprovision, or revoke-admin) if that leaves the deployment with zero
+    # active admins. This covers self-demotion by the sole admin, reading
+    # the count fresh at update time rather than from an earlier request.
+    # It does NOT close the two-admins-demote-each-other race: this is a
+    # `scan()` read followed by an unconditional `update_item`, not a
+    # conditional write, so two concurrent PATCHes can each observe the
+    # other admin as active, both pass this check, and the deployment can
+    # still reach zero active admins. The issue explicitly accepts that
+    # residual race at this scale ("re-check inside the update, conditional
+    # write on the count if cheap, otherwise re-read-then-write is
+    # acceptable at this scale") — this is the re-read-then-write option,
+    # knowingly not race-free.
+    target_is_active_admin = bool(before.get("is_admin", False)) and before.get("status") == "active"
+    would_strip_admin_access = target_is_active_admin and (
+        ("status" in updates and updates["status"] != "active")
+        or ("is_admin" in updates and updates["is_admin"] is False)
+    )
+    if would_strip_admin_access:
+        other_active_admins = sum(
+            1
+            for item in table.scan().get("Items", [])
+            if item.get("cognito_sub") != target_sub
+            and bool(item.get("is_admin", False))
+            and item.get("status") == "active"
+        )
+        if other_active_admins == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This is the only admin account — add another admin first.",
+            )
 
     now = now_epoch if now_epoch is not None else time.time()
 

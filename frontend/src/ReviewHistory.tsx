@@ -52,7 +52,13 @@
  */
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { authorizedFetch, friendlyErrorMessage, triggerBrowserDownload } from './api';
+import {
+  authorizedFetch,
+  friendlyDownloadError,
+  friendlyErrorMessage,
+  readErrorDetail,
+  triggerBrowserDownload,
+} from './api';
 // Imported, never re-declared: the epoch-string→locale formatter is the same
 // one the Diagnostics table already uses (reviews rows store `created_at` as a
 // string of epoch seconds, and boto3 can hand back a number). A second copy
@@ -60,8 +66,17 @@ import { authorizedFetch, friendlyErrorMessage, triggerBrowserDownload } from '.
 // not — the same "one table, not two" rule AdminDiagnostics.tsx applies to
 // `REASON_EXPLANATIONS`.
 import { formatFailureTime as formatEpochSeconds } from './AdminDiagnostics';
+// Same hash-shortening convention AdminPlaybooks.tsx's version trail table
+// already uses (full value never dropped -- carried on the cell's `title`
+// so it stays readable/copyable from the tooltip, never truncated away).
+import { shortenHash } from './AdminPlaybooks';
+// The outcome chip's label AND variant — imported, never re-derived. Before
+// issue #470 this screen read the label off `row.decision || row.status`
+// and the variant off a separate `historyStatusVariant(row.status)`: two
+// independent reads of overlapping data that could (and did) disagree for
+// the same outcome. See outcome.ts's module docstring for the full history.
+import { describeOutcome } from './outcome';
 import { CtBanner, CtButton, CtCard, CtChip, CtProgress, CtTable, CtToolbar } from './ui/react';
-import type { CtChipVariant } from './ui/react';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/reviews.py's `_review_list_item` exactly.
@@ -83,6 +98,16 @@ export interface HistoryRow {
   policy_version?: number | null;
   /** Posture-override version (issue #294). Null when the bundle had none. */
   posture_version?: number | null;
+  /**
+   * The `playbook_versions` admin-facing version (e.g. "1.0.0") that gated
+   * this submission (issue #471) -- populated for the live, non-OPF
+   * playbook too, unlike `policy_version`/`posture_version` above (both
+   * OPF-v2-bundle-only). Null on a row with no matching `playbook_versions`
+   * row (a pre-#471 row, or a demo/dev environment seeded without one).
+   */
+  playbook_version?: string | null;
+  /** The content hash behind `playbook_version` above. Same null rule. */
+  playbook_content_hash?: string | null;
   /** The model that ran the primary pass. Null = not recorded, never a guess. */
   primary_model_id?: string | null;
   /** The model that ran the critic pass. Null = not recorded, never a guess. */
@@ -121,32 +146,21 @@ function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
- * Outcome → chip variant. `DONE` is the only success; the two documented
- * manual-review outcomes are warnings (work is queued for a person, not a
- * fault); anything else that reaches a terminal row is a fault. An unfinished
- * review (`PENDING`/`RUNNING`) is neutral — it has not gone wrong, it has not
- * finished.
- */
-export function historyStatusVariant(status: string): CtChipVariant {
-  if (status === 'DONE') {
-    return 'ok';
-  }
-  if (status === 'PENDING' || status === 'RUNNING') {
-    return 'info';
-  }
-  return status.includes('MANUAL_REVIEW_REQUIRED') ? 'warn' : 'danger';
-}
-
-/**
  * The governing-rules version for a row, as prose.
  *
- * Two independent version numbers can govern a review (the OPF 0.3 review
- * POLICY and the Posture override), and most historic rows carry neither —
+ * Three independent version signals can govern a review: the playbook
+ * itself (`playbook_version`, issue #471 — the one every review carries,
+ * OPF-bound or not), the OPF 0.3 review POLICY, and the Posture override
+ * (both OPF-v2-bundle-only, and absent for the live playbook). Most
+ * historic rows (everything before #471) carry none of the three —
  * hence an explicit "Version not recorded" rather than an empty cell, which
  * would read as "version 0" or "no rules".
  */
 export function describePlaybookVersion(row: HistoryRow): string {
   const parts: string[] = [];
+  if (row.playbook_version !== null && row.playbook_version !== undefined) {
+    parts.push(`v${row.playbook_version}`);
+  }
   if (row.policy_version !== null && row.policy_version !== undefined) {
     parts.push(`Policy v${row.policy_version}`);
   }
@@ -274,30 +288,30 @@ export default function ReviewHistory(): React.ReactElement {
         return;
       }
       if (!response.ok) {
+        // Same failure family as ReviewSubmission.tsx's fetchOutputUrl
+        // (issue #466): a 503 here carries server configuration in `detail`
+        // (an unset storage env var — #465's own failure mode), never
+        // something to show a reviewer, and this is a deterministic error a
+        // retry cannot fix — so route through the shared friendlyDownloadError
+        // rather than a raw detail or a "Please try again" that would be
+        // false for exactly this shape of failure.
+        const errorDetail = await readErrorDetail(response);
         throw new Error(
-          friendlyErrorMessage(
-            `GET /api/reviews/${reviewId}/${kind} returned HTTP ${response.status}`,
-            "We couldn't prepare that download. Please try again.",
+          friendlyDownloadError(
+            errorDetail ??
+              `GET /api/reviews/${reviewId}/${kind} returned HTTP ${response.status}`,
           ),
         );
       }
       const data = (await response.json()) as { url?: string };
       if (!data.url) {
-        throw new Error(
-          friendlyErrorMessage(
-            `GET /api/reviews/${reviewId}/${kind} returned no url`,
-            "We couldn't prepare that download. Please try again.",
-          ),
-        );
+        throw new Error(friendlyDownloadError(`GET /api/reviews/${reviewId}/${kind} returned no url`));
       }
       triggerBrowserDownload(data.url);
     } catch (err) {
       setActionMessage((current) => ({
         ...current,
-        [reviewId]:
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't prepare that download. Please try again."),
+        [reviewId]: err instanceof Error ? err.message : friendlyDownloadError(err),
       }));
     } finally {
       setBusy((current) => ({ ...current, [reviewId]: false }));
@@ -375,6 +389,7 @@ export default function ReviewHistory(): React.ReactElement {
                     const guidanceState = guidance[row.review_id];
                     const message = actionMessage[row.review_id];
                     const isBusy = Boolean(busy[row.review_id]);
+                    const outcomeChip = describeOutcome(row.status, row.decision);
                     return (
                       <Fragment key={row.review_id}>
                         <tr data-testid={`history-row-${row.review_id}`}>
@@ -387,12 +402,27 @@ export default function ReviewHistory(): React.ReactElement {
                           <td data-testid={`history-playbook-${row.review_id}`}>
                             <span className="ct-table__mono">{row.playbook_id || '—'}</span>
                             <br />
-                            <small className="ct-muted">{describePlaybookVersion(row)}</small>
+                            <small
+                              className="ct-muted"
+                              title={
+                                row.playbook_content_hash
+                                  ? `Content hash: ${row.playbook_content_hash}`
+                                  : undefined
+                              }
+                            >
+                              {describePlaybookVersion(row)}
+                              {row.playbook_content_hash ? (
+                                <>
+                                  {' '}
+                                  <span className="ct-table__mono">
+                                    ({shortenHash(row.playbook_content_hash)})
+                                  </span>
+                                </>
+                              ) : null}
+                            </small>
                           </td>
                           <td data-testid={`history-outcome-${row.review_id}`}>
-                            <CtChip variant={historyStatusVariant(row.status)}>
-                              {row.decision || row.status}
-                            </CtChip>
+                            <CtChip variant={outcomeChip.variant}>{outcomeChip.label}</CtChip>
                           </td>
                           {/*
                             Per-step model provenance. A row that predates the

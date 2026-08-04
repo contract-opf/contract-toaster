@@ -28,7 +28,7 @@ Security controls:
      the URL itself does not carry context parameters.
 
 Environment variables consumed:
-  S3_OUTPUTS_BUCKET      — name of the outputs S3 bucket
+  OUTPUTS_BUCKET         — name of the outputs S3 bucket
   AWS_REGION             — defaults to us-east-1
   S3_PUBLIC_ENDPOINT_URL — Docker Compose target only (issue #273): host-reachable
                            override for the S3 endpoint presigned URLs are
@@ -96,11 +96,22 @@ MAX_DAILY_REVIEWS = 20        # max download-URL requests per user per calendar 
 
 
 def _get_outputs_bucket() -> str:
-    bucket = os.environ.get("S3_OUTPUTS_BUCKET", "")
+    """The outputs bucket, for the redline-output download.
+
+    Named after the SAME env var `src/pipeline_runner.py`'s
+    `_copy_output_object` / `_write_real_output` write through, so the
+    download reads from exactly the bucket the pipeline wrote to; a
+    deployment that configured one and not the other fails loudly here
+    rather than presigning against the wrong data class (issue #465: this
+    used to read an S3-prefixed variant of this name that no writer or
+    deploy target ever set, while the pipeline and every deploy target used
+    this un-prefixed name — do not re-split the pair).
+    """
+    bucket = os.environ.get("OUTPUTS_BUCKET", "")
     if not bucket:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="S3_OUTPUTS_BUCKET not configured.",
+            detail="OUTPUTS_BUCKET not configured.",
         )
     return bucket
 
@@ -278,8 +289,23 @@ def _check_per_user_limits(
         HTTPException(429) if the daily limit is exceeded.
         HTTPException(503) if the DynamoDB check itself fails.
     """
-    table_name = f"contract-toaster-users-{env_name}"
-    today_key = time.strftime("%Y-%m-%d", time.gmtime())
+    # Same resource every other module names through USERS_TABLE
+    # (users.py, demo_auth.py). This used to be spelled out as
+    # f"contract-toaster-users-{env_name}"; the two happened to agree, but
+    # two names for one resource is exactly the drift that made the outputs
+    # bucket unreadable for every deployment (issue #465) -- so read the
+    # env var and keep the derived name only as the fallback for a caller
+    # that has not set it.
+    table_name = os.environ.get("USERS_TABLE") or f"contract-toaster-users-{env_name}"
+    # The counter is one attribute PER DAY, literally named
+    # "dailyReviewCount_2026-08-03". That whole string has to go in the
+    # ExpressionAttributeNames placeholder: a DynamoDB "#name" placeholder
+    # is a complete path component, never a suffix glued onto a literal
+    # prefix, so "dailyReviewCount_#day" is a syntax error the service
+    # rejects with ValidationException (issue #528 -- it 503'd every
+    # authenticated download, sitting directly behind the #465 bucket 503
+    # that used to fire first and hide it).
+    today_attr = "dailyReviewCount_" + time.strftime("%Y-%m-%d", time.gmtime())
 
     try:
         dynamodb_client.update_item(
@@ -289,19 +315,15 @@ def _check_per_user_limits(
             # limit is below its threshold.  The ConditionExpression is the
             # actual enforcement; the UpdateExpression increments the
             # counter so subsequent requests see the updated value.
-            UpdateExpression=(
-                "SET dailyReviewCount_#day = if_not_exists(dailyReviewCount_#day, :zero) + :one"
-            ),
-            ExpressionAttributeNames={"#day": today_key},
+            UpdateExpression="SET #day = if_not_exists(#day, :zero) + :one",
+            ExpressionAttributeNames={"#day": today_attr},
             ExpressionAttributeValues={
                 ":zero": {"N": "0"},
                 ":one": {"N": "1"},
                 ":maxDaily": {"N": str(MAX_DAILY_REVIEWS)},
             },
             # If the condition fails, DynamoDB raises ConditionalCheckFailedException.
-            ConditionExpression=(
-                "attribute_not_exists(dailyReviewCount_#day) OR dailyReviewCount_#day < :maxDaily"
-            ),
+            ConditionExpression="attribute_not_exists(#day) OR #day < :maxDaily",
         )
     except ClientError as exc:
         err_code = exc.response.get("Error", {}).get("Code", "")

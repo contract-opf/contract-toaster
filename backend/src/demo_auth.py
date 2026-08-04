@@ -46,6 +46,12 @@ Environment variables consumed:
   AUTH_SETTINGS_TABLE   DynamoDB auth-mode settings table name (PK: setting_id)
   AUDIT_TABLE           DynamoDB audit table name (append-only; PK: partition,
                         SK: timestamp#event_id) -- same table as src/users.py.
+  TRUST_PROXY_HEADERS   Issue #469: "1"/"true"/"yes" to trust a caller-supplied
+                        `X-Forwarded-For` for login-throttle IP bucketing
+                        (client_ip_from_request). Defaults to OFF -- unset
+                        anywhere the backend can be reached without going
+                        through a hop that sets this header trustworthily.
+                        See client_ip_from_request/_trust_proxy_headers.
 """
 
 import hashlib
@@ -57,7 +63,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, Response, status
 from jose import JWTError, jwt
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
@@ -303,15 +309,35 @@ def password_login_allowed(mode: str) -> bool:
 # Demo session tokens (Docker Compose deployment target).
 #
 # In the Docker Compose deployment there is no Cognito, so a successful password login
-# must mint a bearer token that backend/src/auth.py's get_current_user can
+# must mint a session token that backend/src/auth.py's get_current_user can
 # verify on subsequent /api/* requests. A short-lived HS256 JWT signed with
 # DEMO_TOKEN_SECRET carries the same `sub` the users-row lookup keys on
 # (`local:<username>`), plus is_admin/role/username. The distinct issuer lets
 # get_current_user route a token to the demo verifier vs Cognito in `both`
 # mode. NEVER carries or logs a password.
+#
+# Session-cookie posture (issue #468): the token above is set as an
+# httpOnly, Secure, SameSite=Strict cookie (`DEMO_SESSION_COOKIE_NAME`) by
+# POST /api/auth/login, rather than returned in the response body for the
+# SPA to hold in page-JS memory. The previous in-memory-Bearer approach was
+# framed as an XSS mitigation ("never localStorage/sessionStorage"), but an
+# in-memory token is exactly as readable by injected page JS as
+# localStorage is -- it is not actually stronger, and it forced a re-login
+# on every reload/tab-close, training users toward weak passwords on an
+# instance with no brute-force protection. An httpOnly cookie IS unreadable
+# by page JS (strictly better against XSS) and survives a reload (strictly
+# better UX); nothing beyond the cookie itself is persisted anywhere. CSRF
+# defense-in-depth comes from `SameSite=Strict` plus the API being
+# same-origin-only (nginx reverse-proxy, no CORS) plus the existing strict
+# CSP's `form-action 'self'` -- every state-changing route is a `fetch` with
+# JSON/multipart from the same origin, never a cross-site HTML form post, so
+# a dedicated CSRF token was judged not to add meaningfully more.
 # ---------------------------------------------------------------------------
 DEMO_TOKEN_ISSUER = "contract-toaster-demo"
 DEMO_TOKEN_TTL_SECONDS = int(os.environ.get("DEMO_TOKEN_TTL_SECONDS", str(12 * 3600)))
+
+# httpOnly session-cookie name password-mode login sets/clears (issue #468).
+DEMO_SESSION_COOKIE_NAME = "ct_session"
 
 
 def _demo_token_secret() -> str:
@@ -370,10 +396,246 @@ def verify_demo_token(token: str) -> dict[str, Any]:
         ) from exc
 
 
+def set_demo_session_cookie(response: Response, token: str) -> None:
+    """Attach the demo session token to `response` as the httpOnly/Secure/
+    SameSite=Strict cookie (issue #468) — called by POST /api/auth/login on
+    a successful sign-in, in place of returning the token in the response
+    body. `max_age` mirrors DEMO_TOKEN_TTL_SECONDS (the JWT's own `exp`),
+    so the cookie does not outlive the token it carries."""
+    response.set_cookie(
+        DEMO_SESSION_COOKIE_NAME,
+        token,
+        max_age=DEMO_TOKEN_TTL_SECONDS,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def clear_demo_session_cookie(response: Response) -> None:
+    """Clear the demo session cookie (issue #468) — called by POST
+    /api/auth/logout. Attributes must match `set_demo_session_cookie`'s or
+    the browser will not recognize it as the same cookie to clear."""
+    response.delete_cookie(
+        DEMO_SESSION_COOKIE_NAME,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Login throttle (issue #469): POST /api/auth/login has no brute-force
+# protection at all -- unlimited, fast, parallel guesses against the seeded
+# `admin`/`user` credentials. Failed attempts are tracked per (username,
+# source-IP) as a TTL'd item in AUTH_SETTINGS_TABLE (same table/style as the
+# auth-mode row above -- no new table, no infra change), keyed
+# `login_attempts:<username>:<client_ip>` so unrelated usernames (and
+# unrelated source IPs against the SAME username) never share a bucket.
+#
+# Below the soft threshold: no delay. From the 5th failure: an exponentially
+# growing delay. From the 10th: a flat hard-lockout window. A correct
+# password submitted while locked is still refused -- the throttle check
+# below runs BEFORE the row is even looked up, let alone the password
+# verified -- so lockout state, not credential correctness, gates the
+# response until `locked_until` passes.
+# ---------------------------------------------------------------------------
+_LOGIN_ATTEMPT_PREFIX = "login_attempts:"
+_THROTTLE_SOFT_FAIL_THRESHOLD = 5  # failures before any delay kicks in
+_THROTTLE_HARD_LOCKOUT_THRESHOLD = 10  # failures before the flat lockout
+_THROTTLE_HARD_LOCKOUT_SECONDS = 15 * 60
+_THROTTLE_BASE_DELAY_SECONDS = 2  # exponential backoff base, from the 5th failure
+
+
+def _login_attempt_setting_id(username: str, client_ip: str) -> str:
+    return f"{_LOGIN_ATTEMPT_PREFIX}{username}:{client_ip}"
+
+
+def _get_login_attempt_state(
+    dynamodb_resource: Any, username: str, client_ip: str
+) -> dict[str, int]:
+    table = _auth_settings_table(dynamodb_resource)
+    resp = table.get_item(Key={"setting_id": _login_attempt_setting_id(username, client_ip)})
+    item = resp.get("Item")
+    if not item:
+        return {"fail_count": 0, "locked_until": 0}
+    return {
+        "fail_count": int(item.get("fail_count", 0)),
+        "locked_until": int(item.get("locked_until", 0)),
+    }
+
+
+def _throttle_delay_seconds(fail_count: int) -> int:
+    """Seconds a caller must wait before their next attempt, given
+    `fail_count` failures so far. 0 below the soft threshold; an
+    exponentially growing delay from the soft threshold; the flat
+    hard-lockout window from the hard threshold on."""
+    if fail_count >= _THROTTLE_HARD_LOCKOUT_THRESHOLD:
+        return _THROTTLE_HARD_LOCKOUT_SECONDS
+    if fail_count >= _THROTTLE_SOFT_FAIL_THRESHOLD:
+        return _THROTTLE_BASE_DELAY_SECONDS * (2 ** (fail_count - _THROTTLE_SOFT_FAIL_THRESHOLD))
+    return 0
+
+
+def _enforce_login_throttle(dynamodb_resource: Any, username: str, client_ip: str) -> None:
+    state = _get_login_attempt_state(dynamodb_resource, username, client_ip)
+    now = int(time.time())
+    locked_until = state["locked_until"]
+    if locked_until > now:
+        retry_after = locked_until - now
+        logger.info(
+            "PASSWORD_LOGIN_DENY: username=%s reason=throttled retry_after=%s",
+            username,
+            retry_after,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed sign-in attempts. Try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _record_login_failure(dynamodb_resource: Any, username: str, client_ip: str) -> None:
+    """Atomically increments the (username, client_ip) failure counter and
+    derives the lockout window from the POST-increment count.
+
+    Deliberately an `update_item` with an `ADD` expression rather than the
+    read-then-`put_item` this used to be: the threat model is explicitly
+    "unlimited, fast, PARALLEL guesses" (issue #469), and a
+    read-modify-write here loses updates under concurrency -- N parallel
+    callers can each read the same `fail_count`, each compute the same
+    `+1`, and each `put_item` the same value, so N failures record as 1.
+    `ADD` is DynamoDB's atomic counter primitive: every call increments the
+    stored value by exactly 1 regardless of how many other calls race it,
+    so `fail_count` after N concurrent failures is always N.
+    """
+    now = int(time.time())
+    table = _auth_settings_table(dynamodb_resource)
+    # `locked_until`/`ttl` depend on the POST-increment fail_count, which we
+    # don't know until the ADD lands -- a single round trip via
+    # ReturnValues="ALL_NEW" gets us the authoritative count instead of a
+    # racy second read. `SET updated_at` in the same expression is safe
+    # alongside `ADD fail_count` (different attributes, single atomic item
+    # update); `locked_until`/`ttl` are computed from the returned count and
+    # written in a second, non-counting update below.
+    resp = table.update_item(
+        Key={"setting_id": _login_attempt_setting_id(username, client_ip)},
+        UpdateExpression="ADD fail_count :one SET updated_at = :now",
+        ExpressionAttributeValues={":one": 1, ":now": now},
+        ReturnValues="ALL_NEW",
+    )
+    fail_count = int(resp["Attributes"]["fail_count"])
+    delay = _throttle_delay_seconds(fail_count)
+    table.update_item(
+        Key={"setting_id": _login_attempt_setting_id(username, client_ip)},
+        UpdateExpression="SET locked_until = :locked_until, #ttl = :ttl",
+        ExpressionAttributeNames={"#ttl": "ttl"},
+        ExpressionAttributeValues={
+            ":locked_until": now + delay if delay else 0,
+            # DynamoDB TTL attribute -- best-effort cleanup if/when the table
+            # has TTL enabled on `ttl`. Application logic never relies on the
+            # sweep itself, only on comparing `locked_until` to wall-clock
+            # time above, so this is defense-in-depth against unbounded row
+            # growth, not a correctness dependency.
+            ":ttl": now + max(_THROTTLE_HARD_LOCKOUT_SECONDS, delay) + 3600,
+        },
+    )
+
+
+def _clear_login_attempts(dynamodb_resource: Any, username: str, client_ip: str) -> None:
+    table = _auth_settings_table(dynamodb_resource)
+    table.delete_item(Key={"setting_id": _login_attempt_setting_id(username, client_ip)})
+
+
+def _trust_proxy_headers() -> bool:
+    """Whether this process is allowed to honor a caller-supplied
+    `X-Forwarded-For` header at all.
+
+    Defaults to OFF. `X-Forwarded-For` is not something a FastAPI process
+    can validate cryptographically -- it is just a header, and ANY caller
+    that can open a TCP connection to the backend can set it to whatever
+    they like. Trusting it unconditionally (the pre-#469-fix-round-1
+    behavior) let a direct caller pick their own throttle bucket and
+    rotate it per request, making the brute-force protection this ticket
+    exists to add a no-op -- proved empirically: 60 rotating-XFF wrong-
+    password POSTs to a direct connection produced 0x 429 / 60x 401.
+
+    `TRUST_PROXY_HEADERS=1` is an explicit, deployment-scoped opt-in: set
+    it ONLY on the backend service in the nginx-fronted topology
+    (deploy/dts/docker-compose.yml), where deploy/dts/nginx.conf's
+    `/api/` location OVERWRITES (not appends) `X-Forwarded-For` with
+    nginx's own view of the peer (`$remote_addr`) before proxying to the
+    backend -- so a value reaching the backend from that hop is nginx's,
+    never a client's. Pairs with binding the backend's host port to
+    `127.0.0.1` (not `0.0.0.0`) in that same compose file, so the backend
+    is not additionally reachable directly from outside the host with the
+    flag on. Leave unset (the default) for any topology where the backend
+    can be reached without going through that trusted hop -- App Runner's
+    front door in particular APPENDS to `X-Forwarded-For` rather than
+    overwriting it, so a caller there can still prepend a spoofed value
+    ahead of the real one; this module does not treat App Runner as a
+    trusted hop.
+    """
+    return os.environ.get("TRUST_PROXY_HEADERS", "").strip().lower() in {"1", "true", "yes"}
+
+
+def client_ip_from_request(request: Request) -> str:
+    """The caller's IP for throttle bucketing (issue #469).
+
+    Only consults `X-Forwarded-For` when `_trust_proxy_headers()` says this
+    deployment is behind a hop that sets it trustworthily -- see that
+    function's docstring. Everywhere else (including the untrusted-direct-
+    caller case this ticket's finding is about, and the FastAPI TestClient
+    in unit tests) this returns the direct peer address, then a fixed
+    placeholder so throttling degrades to "one shared bucket" rather than
+    throwing when neither is present.
+    """
+    if _trust_proxy_headers():
+        forwarded = request.headers.get("x-forwarded-for", "").strip()
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Default-credentials warning (issue #469): the seeded admin/admin and
+# user/user rows are a known, published username list. If a row's CURRENT
+# password_hash still verifies against the shipped default, the caller (or,
+# for an admin looking at the Users & access table, every affected row)
+# should see a persistent warning until it is rotated.
+#
+# Deliberately named without "password"/"hash"/"secret"/"token" in the field
+# -- tests/test_users_projection_453.py's SECRET_FIELD_PATTERN scans every
+# key on a users-row response for exactly that pattern, and this value is
+# safe to return (a boolean, never the hash itself) but must not collide
+# with that credential-leak canary.
+# ---------------------------------------------------------------------------
+MIN_PASSWORD_LENGTH = 8
+
+
+def default_credentials_warning(user_row: dict[str, Any]) -> bool:
+    """True if `user_row`'s CURRENT password_hash still verifies against the
+    shipped seed default for its username. False for an SSO row (no
+    password_hash at all), a non-seeded username, or a row whose password
+    has been rotated away from the shipped default."""
+    if user_row.get("user_type") != USER_TYPE_PASSWORD:
+        return False
+    username = user_row.get("username")
+    seed = next((spec for spec in SEED_USERS if spec["username"] == username), None)
+    if seed is None:
+        return False
+    return _verify_password(seed["password"], user_row.get("password_hash", ""))
+
+
 def login_with_password(
     username: str,
     password: str,
     dynamodb_resource: Any,
+    client_ip: str = "unknown",
 ) -> dict[str, Any]:
     """POST /api/auth/login (unauthenticated -- this IS the login path).
 
@@ -384,9 +646,15 @@ def login_with_password(
     Raises:
       HTTPException(403) if the stored auth mode does not permit password
         sign-in (mode == `sso`).
+      HTTPException(429) if this (username, client_ip) is currently
+        throttled or hard-locked-out from prior failures (issue #469) --
+        checked before the row is even looked up, so a correct password
+        submitted mid-lockout is still refused.
       HTTPException(401) if the username is unknown, is not a password-type
-        row, or the password does not match.
+        row, or the password does not match. Counts as a throttle failure.
       HTTPException(403) if the row's lifecycle status is not `active`.
+        Does NOT count as a throttle failure -- the credentials themselves
+        were correct.
     """
     mode = _current_auth_mode(dynamodb_resource)
     if not password_login_allowed(mode):
@@ -396,16 +664,20 @@ def login_with_password(
             detail="Username/password sign-in is not enabled for your organization.",
         )
 
+    _enforce_login_throttle(dynamodb_resource, username, client_ip)
+
     table = _users_table(dynamodb_resource)
     resp = table.get_item(Key={"cognito_sub": local_user_sub(username)})
     user = resp.get("Item")
 
     invalid_detail = "Invalid username or password."
     if not user or user.get("user_type") != USER_TYPE_PASSWORD:
+        _record_login_failure(dynamodb_resource, username, client_ip)
         logger.info("PASSWORD_LOGIN_DENY: username=%s reason=no_such_user", username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=invalid_detail)
 
     if not _verify_password(password, user.get("password_hash", "")):
+        _record_login_failure(dynamodb_resource, username, client_ip)
         logger.info("PASSWORD_LOGIN_DENY: username=%s reason=bad_password", username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=invalid_detail)
 
@@ -415,6 +687,8 @@ def login_with_password(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access denied: user status is {user.get('status')!r}, not 'active'.",
         )
+
+    _clear_login_attempts(dynamodb_resource, username, client_ip)
 
     table.update_item(
         Key={"cognito_sub": user["cognito_sub"]},
@@ -429,7 +703,68 @@ def login_with_password(
         "username": user.get("username"),
         "role": user.get("role"),
         "is_admin": bool(user.get("is_admin", False)),
+        "default_credentials_warning": default_credentials_warning(user),
     }
+
+
+def change_own_password(
+    current_password: str,
+    new_password: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+) -> dict[str, Any]:
+    """POST /api/me/password (authenticated): rotate the CALLER'S OWN
+    password (issue #469) -- the only way to rotate a password before this
+    fix was deleting and re-adding the user.
+
+    Raises:
+      HTTPException(400) if the caller's row is not a username/password row
+        (nothing to change for an SSO row), or `new_password` is under
+        MIN_PASSWORD_LENGTH characters.
+      HTTPException(401) if `current_password` does not match the stored
+        hash.
+
+    Never logs or echoes plaintext, matching this module's existing
+    never-log-plaintext discipline. Appends one `password_changed` audit row
+    (identifiers only -- no plaintext, no hash).
+    """
+    if caller_user_row.get("user_type") != USER_TYPE_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password changes are not available for single sign-on accounts.",
+        )
+
+    if not _verify_password(current_password, caller_user_row.get("password_hash", "")):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+        )
+
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"New password must be at least {MIN_PASSWORD_LENGTH} characters.",
+        )
+
+    cognito_sub = caller_user_row["cognito_sub"]
+    table = _users_table(dynamodb_resource)
+    table.update_item(
+        Key={"cognito_sub": cognito_sub},
+        UpdateExpression="SET password_hash = :h",
+        ExpressionAttributeValues={":h": _hash_password(new_password)},
+    )
+
+    _write_audit_entry(
+        dynamodb_resource,
+        actor=cognito_sub,
+        action="password_changed",
+        target=cognito_sub,
+        target_type="user",
+        detail={},
+    )
+    logger.info("PASSWORD_CHANGED: actor=%s", cognito_sub)
+
+    return {"changed": True}
 
 
 # ---------------------------------------------------------------------------
@@ -574,8 +909,17 @@ def remove_user(
     """DELETE /api/users/{sub} (admin): remove a user row of EITHER type.
 
     Raises HTTPException(403) if the caller is not an admin, 404 if the
-    target does not exist, 409 if the caller targets their own row (same
-    self-modification guard as src/users.py::update_user).
+    target does not exist, 409 if the caller targets their own row.
+
+    This is an UNCONDITIONAL self-removal guard, on its own terms — an
+    admin can never delete their own row via this route, regardless of how
+    many other active admins exist. That is deliberately stricter than
+    src/users.py::update_user's last-active-admin guard (issue #473), which
+    now permits self-suspend/deprovision/revoke-admin once another active
+    admin exists: deletion is destructive (the row and its history are
+    gone, not just demoted) and has no reactivate path, so it stays blocked
+    for the caller's own row even when a second admin could otherwise
+    backstop them. Ask another admin to remove your row instead.
     """
     _require_admin(caller_user_row, "Admin privilege required to remove a user.")
 

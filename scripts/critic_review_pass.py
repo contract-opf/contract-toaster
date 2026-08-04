@@ -67,8 +67,11 @@ def run_critic_pass(
     model_id: str,
     ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],
     toaster_guidance: str = "",
+    instructions_text: str = "",
     max_output_tokens: int = MAX_OUTPUT_TOKENS,
     max_retries: int = MAX_RETRIES_PER_PASS,
+    system_blocks_override: list[dict[str, Any]] | None = None,
+    playbook_hash_override: str | None = None,
 ) -> dict[str, Any]:
     """Run the adversarial critic pass end-to-end (data-flow step 16, critic
     half).
@@ -87,16 +90,36 @@ def run_critic_pass(
     `model_client.ModelPolicyViolation` on a forbidden inference-profile
     prefix), identically to the primary pass.
 
-    `toaster_guidance` (issue #398, default `""`) is threaded through to
-    the SHARED `pp.assemble_system_blocks` exactly as the primary pass
-    does, so the critic's self-check reasons over the same per-review
-    guidance and the same judged-NL Floor obligations the primary pass saw
-    -- the critic can therefore catch a Floor violation, or a guidance
-    conflict, the primary pass missed.
+    `toaster_guidance` (issue #398, default `""`) and `instructions_text`
+    (issue #483, epic #481, default `""`) are threaded through to the
+    SHARED `pp.assemble_system_blocks` exactly as the primary pass does, so
+    the critic's self-check reasons over the same per-review guidance, the
+    same standing instructions, and the same judged-NL Floor obligations the
+    primary pass saw -- the critic can therefore catch a Floor violation, or
+    a guidance/instructions conflict, the primary pass missed.
+
+    `system_blocks_override` / `playbook_hash_override` (issue #479,
+    default `None`): the OPF digest-mode seam, mirroring
+    `primary_review_pass.run_primary_pass`'s own params of the same names
+    -- see that function's docstring. `scripts/review_spine.py::run_review`
+    passes the SAME composed blocks and hash to both passes, so primary and
+    critic always read identical OPF knowledge.
     """
     _model_client.enforce_single_region_native_model_id(model_id)
 
-    system_blocks = pp.assemble_system_blocks(playbook, toaster_guidance)
+    # Issue #479: see primary_review_pass.run_primary_pass's own comment at
+    # the identical line -- an OPF-shaped `playbook` bundle resolves no pen
+    # rules, so pass `None` and let
+    # `replacement_text_enforcement.resolve_pen_rules` fall through to the
+    # toaster-global defaults instead of silently skipping enforcement for
+    # every issue.
+    pen_rules_bundle = None if playbook.get("opf_bundle_v2") is not None else playbook
+
+    system_blocks = (
+        system_blocks_override
+        if system_blocks_override is not None
+        else pp.assemble_system_blocks(playbook, toaster_guidance, instructions_text)
+    )
     system_prompt_text = pp.render_system_prompt(system_blocks)
     user_prompt = pp.assemble_user_prompt_critic(
         diff_hunks=diff_hunks,
@@ -106,7 +129,11 @@ def run_critic_pass(
     # Issue #267: same projection as the primary pass -- assemble_system_blocks
     # is the single shared seam, so this hash is identical to the primary
     # pass's for the same playbook.
-    projected_hash = pp.projected_playbook_hash(pp.project_playbook_for_prompt(playbook))
+    projected_hash = (
+        playbook_hash_override
+        if playbook_hash_override is not None
+        else pp.projected_playbook_hash(pp.project_playbook_for_prompt(playbook))
+    )
 
     attempts_allowed = 1 + max_retries
     last_error: Any = None
@@ -131,7 +158,7 @@ def run_critic_pass(
                 # the SAME bounded-retry budget -- retry once, then demote
                 # the violating issue(s) to flag-only on the final attempt.
                 rt_failures = _rte.check_issues_replacement_text(
-                    _rte.collect_checkable_issues(parsed_or_error), playbook
+                    _rte.collect_checkable_issues(parsed_or_error), pen_rules_bundle
                 )
                 if rt_failures and attempt < attempts_allowed:
                     replacement_text_failures = [result.failure for _issue, result in rt_failures]

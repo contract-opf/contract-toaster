@@ -40,6 +40,17 @@ Environment variables consumed:
   DAILY_SPEND_TABLE          DynamoDB daily_spend counter table name
   PLAYBOOKS_TABLE            DynamoDB playbooks table name (PK: playbook_id;
                              active_release_bundle_hash attribute -- issue #194)
+  PLAYBOOK_VERSIONS_TABLE    DynamoDB playbook_versions table name (PK:
+                             playbook_id, SK: version) -- optional; when
+                             unset, `_resolve_playbook_version_lineage`
+                             (issue #471) resolves to None/None rather than
+                             raising
+  PLAYBOOK_INSTRUCTIONS_TABLE DynamoDB playbook_instructions table name (PK:
+                             playbook_id, SK: version [Number]) -- optional;
+                             when unset, `_resolve_instructions_lineage`
+                             (issue #482, epic #481) resolves to None/None
+                             rather than raising, same discipline as
+                             PLAYBOOK_VERSIONS_TABLE above
   STATE_MACHINE_ARN          ARN of the contract-toaster-{env} state machine
   DAILY_SPEND_CAP_USD_CENTS  daily spend ceiling in cents (default 2000 = $20)
 
@@ -219,6 +230,21 @@ STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     "model_key_rejected": "ERROR",
     "model_rate_limited": "ERROR",
     "model_unavailable": "ERROR",
+    # Issue #472: a missing/empty key, classified BEFORE any provider call
+    # (see model_client.ModelKeyMissingError) -- same "admin fix, not
+    # attorney work" reasoning, so the same generic `ERROR` status.
+    "model_key_missing": "ERROR",
+    # Issue #472: a request that timed out after exhausting retries (see
+    # model_client.ModelTimeoutError). Worth resubmitting -- an operator
+    # fix at most, never a document problem -- so it stays `ERROR` too.
+    "model_timeout": "ERROR",
+    # Issue #527: the model response itself was unusable, but the account,
+    # key and model are all fine -- worth resubmitting (a raised
+    # `reasoning_max_tokens` allowance or a bigger budget fixes it), never a
+    # document problem, so these stay `ERROR` too, same reasoning as the
+    # provider-condition tokens above.
+    "model_empty_content": "ERROR",
+    "model_output_truncated": "ERROR",
     # A DOCUMENT problem: the provider itself rejected the assembled prompt
     # as over the model's context window. This is the same condition the
     # step-14 pre-call estimate catches, and it is deliberately given the
@@ -1074,7 +1100,20 @@ def submit_review(
         # Retry: resume from recorded state rather than double-running.
         # ensure_execution_started is idempotent, so calling it again on an
         # already-started submission is a safe no-op.
-        execution_input_json = _build_execution_input_json(
+        #
+        # Issue #482 (fix round 2): prefer the PERSISTED execution_input
+        # over rebuilding it here. The submission record's execution_input
+        # is what the reviews row's instructions_version was stamped
+        # alongside (see resolve_and_submit_review's first-call branch
+        # below) -- rebuilding via _build_execution_input_json instead
+        # would re-resolve "current" standing instructions at retry time,
+        # which can have moved on (e.g. v2 -> v3) since the row was
+        # stamped, splitting the row's stamped version from what the
+        # pipeline actually runs on. Only fall back to the rebuild for
+        # pre-#482 submission records that predate execution_input being
+        # persisted at all (see create_submission_record / _build_execution_input_json's
+        # own docstring for that backward-compatibility case).
+        execution_input_json = existing.get("execution_input") or _build_execution_input_json(
             existing, playbook_id, toaster_guidance=toaster_guidance
         )
         existing = ensure_execution_started(
@@ -1091,6 +1130,26 @@ def submit_review(
     # Issue #287: v2-bundle OPF §8 lineage, resolved once alongside the
     # other submission-time facts -- None/absent for a v1 playbook.
     opf_lineage = _resolve_opf_lineage(playbook_id)
+    # Issue #471: the `playbook_versions` row (admin-facing version +
+    # content hash) behind the hash just resolved above -- populated for
+    # the live non-OPF playbook too, unlike opf_lineage.
+    playbook_version_lineage = _resolve_playbook_version_lineage(
+        playbook_id, active_release_bundle_hash, dynamodb_resource
+    )
+    # Issue #482: the standing-instructions version (+ text hash, + the text
+    # itself) governing THIS review, resolved once, alongside the
+    # playbook-version lineage above and BEFORE the review row is written --
+    # see `_resolve_instructions_lineage`'s docstring for why that ordering
+    # is what makes a mid-flight instructions save unable to split-brain
+    # what this row records. Merged into the same dict `_create_review_row`
+    # already threads through `_recorded_playbook_version_fields` -- no new
+    # parameter needed there. `_build_execution_input_json_from_parts` below
+    # reads the same dict (via `instructions_lineage`) so the pipeline
+    # receives the exact version/hash/text this resolution settled on too --
+    # never a second, independent read from inside the pipeline.
+    playbook_version_lineage.update(
+        _resolve_instructions_lineage(playbook_id, dynamodb_resource)
+    )
     execution_input_json = _build_execution_input_json_from_parts(
         review_id=review_id,
         owner_sub=owner_sub,
@@ -1099,6 +1158,7 @@ def submit_review(
         release_bundle_hash=active_release_bundle_hash,
         opf_lineage=opf_lineage,
         toaster_guidance=toaster_guidance,
+        instructions_lineage=playbook_version_lineage,
     )
 
     # Create the submission record (conditional write) BEFORE reserving
@@ -1130,6 +1190,7 @@ def submit_review(
         active_release_bundle_hash,
         dynamodb_resource,
         opf_lineage=opf_lineage,
+        playbook_version_lineage=playbook_version_lineage,
         toaster_guidance=toaster_guidance,
         upload_s3_key=upload_pointer,
     )
@@ -1296,11 +1357,23 @@ def _build_execution_input_json(
     """Pointer-only execution input (issue #19): S3 keys and hashes only,
     never document text.
 
-    Used on the retry path, where the submission record already exists but
-    may predate execution_input being persisted (backward compatibility);
-    otherwise the stored submission["execution_input"] (see
-    create_submission_record) is the source of truth and this function's
-    output must match it byte-for-byte for the same inputs.
+    Used on the retry path ONLY as a fallback for submission records that
+    predate execution_input being persisted (backward compatibility) --
+    the caller (resolve_and_submit_review's retry branch) checks
+    submission["execution_input"] FIRST and only calls this function when
+    that field is absent. The stored submission["execution_input"] (see
+    create_submission_record) is the source of truth whenever present,
+    because it is what the reviews row's lineage stamps (including
+    instructions_version, issue #482) were recorded alongside; this
+    function re-resolves lineage as of NOW, which can disagree with what
+    was stamped if e.g. standing instructions were edited between the
+    original call and this retry. When it does run, this function's
+    output must match the original submission["execution_input"]
+    byte-for-byte for the same inputs -- but note it does NOT thread
+    `instructions_lineage` through to
+    _build_execution_input_json_from_parts, so pre-#482 submission
+    records (which never had instructions_lineage to begin with) are the
+    only case where that omission is byte-for-byte correct.
 
     OPF lineage (issue #287) is re-resolved here from `playbook_id` via the
     registry's `bundle_path`, rather than read off `submission` -- it is
@@ -1334,6 +1407,7 @@ def _build_execution_input_json_from_parts(
     release_bundle_hash: str,
     opf_lineage: dict[str, str | int | None] | None = None,
     toaster_guidance: str = "",
+    instructions_lineage: dict[str, str | int | None] | None = None,
 ) -> str:
     """Pointer-only execution input (issue #19): S3 keys and hashes only,
     never document text.
@@ -1359,6 +1433,18 @@ def _build_execution_input_json_from_parts(
     fields, this is always included (never omitted at "") -- it is a plain
     review-input field like `playbook_id` above, not optional governance
     metadata.
+
+    `instructions_lineage` (issue #482): a `_resolve_instructions_lineage`
+    dict -- `instructions_version`, `instructions_content_hash`, and the
+    exact `instructions_text` that hash was computed over. Threaded through
+    so the pipeline runs on the SAME text the review row's
+    `instructions_version` stamp names, never a second, independent read of
+    "current standing instructions" from inside the pipeline -- that
+    second read is exactly the mid-flight-save split brain issue #482
+    forbids (see `_resolve_instructions_lineage`'s module docstring). Same
+    "absent, not null" filter as `opf_lineage`: nothing saved for the
+    playbook (or `PLAYBOOK_INSTRUCTIONS_TABLE` unset) omits all three
+    fields entirely.
     """
     import json
 
@@ -1371,8 +1457,38 @@ def _build_execution_input_json_from_parts(
         "toaster_guidance": toaster_guidance,
     }
     payload.update(_recorded_lineage_fields(opf_lineage))
+    payload.update(_recorded_instructions_execution_fields(instructions_lineage))
 
     return json.dumps(payload)
+
+
+# The instructions-specific fields threaded into `execution_input_json`
+# (issue #482) -- a DELIBERATELY separate list from
+# `_RECORDED_PLAYBOOK_VERSION_FIELDS` above (which also covers
+# `playbook_version` / `playbook_content_hash`, neither of which is part of
+# the execution input today): this filter only ever reads the three
+# `instructions_*` keys off whatever lineage dict it is given, so passing
+# the same merged `playbook_version_lineage` dict used for the review row
+# cannot leak the playbook-version fields into the execution input too.
+_RECORDED_INSTRUCTIONS_EXECUTION_FIELDS: tuple[str, ...] = (
+    "instructions_version",
+    "instructions_content_hash",
+    "instructions_text",
+)
+
+
+def _recorded_instructions_execution_fields(
+    instructions_lineage: dict[str, str | int | None] | None,
+) -> dict[str, Any]:
+    """The `_RECORDED_INSTRUCTIONS_EXECUTION_FIELDS` that actually
+    resolved, in declaration order -- same "absent, not null" filter as
+    `_recorded_lineage_fields` / `_recorded_playbook_version_fields`."""
+    lineage = instructions_lineage or {}
+    return {
+        field: lineage[field]
+        for field in _RECORDED_INSTRUCTIONS_EXECUTION_FIELDS
+        if lineage.get(field) is not None
+    }
 
 
 def _recorded_lineage_fields(
@@ -1386,6 +1502,193 @@ def _recorded_lineage_fields(
     return {
         field: lineage[field]
         for field in _RECORDED_LINEAGE_FIELDS
+        if lineage.get(field) is not None
+    }
+
+
+# ---------------------------------------------------------------------------
+# Playbook-version lineage (issue #471): WHICH `playbook_versions` row (the
+# admin-facing version string, e.g. "1.0.0", plus its content hash) gated a
+# submission -- distinct from `_resolve_opf_lineage` above, which resolves
+# the OPF Section 8 identity for a v2-BUNDLE playbook only (None/None for
+# the live, non-OPF `synthetic-nda-sample` playbook every review actually
+# runs against today, per the 2026-08-02 audit that opened this issue).
+#
+# `active_release_bundle_hash` is ALREADY the resolved, submission-time hash
+# (ARCHITECTURE.md step 3, reconciliation note #21) -- this resolver never
+# re-resolves which bundle is active; it only looks up the admin-facing
+# version identifier BEHIND the hash the caller already settled on, by
+# finding the `playbook_versions` row (PK playbook_id, SK version) whose
+# `content_hash` matches it.
+# ---------------------------------------------------------------------------
+
+_EMPTY_PLAYBOOK_VERSION_LINEAGE: dict[str, str | int | None] = {
+    "playbook_version": None,
+    "playbook_content_hash": None,
+    # Standing instructions epic (#481)'s own version stamp -- issue #482
+    # populates these two via `_resolve_instructions_lineage` below. Lives
+    # here (not in `_EMPTY_OPF_LINEAGE` above) because it is not an OPF
+    # Section 8 field either -- it is the operator's free-text
+    # instructions, which may supersede the playbook. Never a fabricated
+    # value when nothing has ever been saved for the playbook, or when
+    # PLAYBOOK_INSTRUCTIONS_TABLE is not configured for this deployment
+    # target -- same "absent, not null" discipline as every field here.
+    "instructions_version": None,
+    "instructions_content_hash": None,
+}
+
+_RECORDED_PLAYBOOK_VERSION_FIELDS: tuple[str, ...] = (
+    "playbook_version",
+    "playbook_content_hash",
+    "instructions_version",
+    "instructions_content_hash",
+)
+
+
+def _resolve_playbook_version_lineage(
+    playbook_id: str,
+    active_release_bundle_hash: str,
+    dynamodb_resource: Any,
+) -> dict[str, str | None]:
+    """Resolve the `playbook_versions` row whose `content_hash` matches the
+    ALREADY-RESOLVED `active_release_bundle_hash` -- the admin-facing
+    version string (e.g. "1.0.0") behind the hash a review actually ran
+    against.
+
+    Both fields resolve to None -- never a fabricated version, same
+    discipline as `_resolve_opf_lineage` -- when:
+
+      - `PLAYBOOK_VERSIONS_TABLE` is not configured for this deployment
+        target, or
+      - no `playbook_versions` row for `playbook_id` carries a matching
+        `content_hash` -- e.g. a demo/dev environment seeded only via
+        `scripts/seed_active_bundle.py`, which writes
+        `playbooks.active_release_bundle_hash` directly with no
+        `playbook_versions` row at all.
+
+    Never raises: like `_resolve_opf_lineage`, this is purely additive and
+    must never change submission behavior.
+    """
+    table_name = os.environ.get("PLAYBOOK_VERSIONS_TABLE")
+    if not table_name:
+        return dict(_EMPTY_PLAYBOOK_VERSION_LINEAGE)
+
+    from boto3.dynamodb.conditions import Key
+
+    try:
+        table = dynamodb_resource.Table(table_name)
+        resp = table.query(KeyConditionExpression=Key("playbook_id").eq(playbook_id))
+    except ClientError:
+        return dict(_EMPTY_PLAYBOOK_VERSION_LINEAGE)
+
+    for item in resp.get("Items", []):
+        if item.get("content_hash") == active_release_bundle_hash:
+            result = dict(_EMPTY_PLAYBOOK_VERSION_LINEAGE)
+            result["playbook_version"] = item.get("version")
+            result["playbook_content_hash"] = active_release_bundle_hash
+            return result
+
+    return dict(_EMPTY_PLAYBOOK_VERSION_LINEAGE)
+
+
+# ---------------------------------------------------------------------------
+# Standing-instructions lineage (issue #482, epic #481): WHICH standing-
+# instructions version (+ the text's sha256) governed a submission -- the
+# per-playbook free-text overrides `src/playbook_instructions.py` stores,
+# distinct from both `_resolve_opf_lineage` (OPF Section 8 identity) and
+# `_resolve_playbook_version_lineage` (the playbook_versions row) above.
+#
+# Resolved ONCE here, synchronously, before `_create_review_row` writes the
+# review row (same call site as `_resolve_playbook_version_lineage`) -- so a
+# standing-instructions save that lands AFTER this resolution (issue #482's
+# AC: "even if v3 is saved mid-review") can never change what THIS row
+# claims governed it. The version stamped is the version this function
+# actually read; the same resolved dict (version, text hash, AND the text
+# itself) is also threaded into `execution_input_json` by
+# `_build_execution_input_json_from_parts`'s `instructions_lineage` param,
+# so the pipeline runs on that same resolution too -- there is no separate
+# "read the text" step anywhere downstream for submission purposes, so
+# there is nothing left to split-brain.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_instructions_lineage(
+    playbook_id: str,
+    dynamodb_resource: Any,
+) -> dict[str, str | int | None]:
+    """Resolve the CURRENT standing-instructions version (+ text hash +
+    text) for `playbook_id`, if any.
+
+    All three fields resolve to None -- never a fabricated version, same
+    discipline as `_resolve_playbook_version_lineage` -- when:
+
+      - `PLAYBOOK_INSTRUCTIONS_TABLE` is not configured for this deployment
+        target, or
+      - nothing has ever been saved for `playbook_id` (no row at all).
+
+    `instructions_content_hash` is read off the saved row's own `text_hash`
+    attribute (written once, at save time, by
+    `playbook_instructions.save_instructions`) rather than recomputed here
+    -- every reader of "what hash governed this review" reads the exact
+    same value the save wrote, never a second independent hash computation
+    that could theoretically disagree with it. `instructions_text` is read
+    off that same row's `text` attribute, so the text later threaded into
+    `execution_input_json` is the literal text the hash was computed over.
+
+    Never raises: like the other lineage resolvers in this module, this is
+    purely additive and must never change submission behavior.
+    """
+    empty: dict[str, str | int | None] = {
+        "instructions_version": None,
+        "instructions_content_hash": None,
+        "instructions_text": None,
+    }
+
+    table_name = os.environ.get("PLAYBOOK_INSTRUCTIONS_TABLE")
+    if not table_name:
+        return dict(empty)
+
+    from boto3.dynamodb.conditions import Key
+
+    try:
+        table = dynamodb_resource.Table(table_name)
+        resp = table.query(
+            KeyConditionExpression=Key("playbook_id").eq(playbook_id),
+            ScanIndexForward=False,
+            Limit=1,
+        )
+    except ClientError:
+        return dict(empty)
+
+    items = resp.get("Items", [])
+    if not items:
+        return dict(empty)
+
+    current = items[0]
+    return {
+        "instructions_version": int(current["version"]),
+        "instructions_content_hash": current.get("text_hash"),
+        # Issue #482: the exact text this version's hash was computed over
+        # (see playbook_instructions.save_instructions), threaded alongside
+        # the version/hash into `execution_input_json` below so the version
+        # STAMPED on the row is also the text the pipeline actually runs
+        # with -- never a second, independent read of "current" from inside
+        # the pipeline, which is what would let a mid-flight save split
+        # brain what governed a review.
+        "instructions_text": current.get("text"),
+    }
+
+
+def _recorded_playbook_version_fields(
+    playbook_version_lineage: dict[str, str | None] | None,
+) -> dict[str, Any]:
+    """The `_RECORDED_PLAYBOOK_VERSION_FIELDS` that actually resolved, in
+    declaration order -- the same "absent, not null" filter
+    `_recorded_lineage_fields` applies to the OPF lineage fields."""
+    lineage = playbook_version_lineage or {}
+    return {
+        field: lineage[field]
+        for field in _RECORDED_PLAYBOOK_VERSION_FIELDS
         if lineage.get(field) is not None
     }
 
@@ -1434,6 +1737,7 @@ def _create_review_row(
     release_bundle_hash: str,
     dynamodb_resource: Any,
     opf_lineage: dict[str, str | int | None] | None = None,
+    playbook_version_lineage: dict[str, str | None] | None = None,
     toaster_guidance: str = "",
     upload_s3_key: str = "",
 ) -> None:
@@ -1464,6 +1768,14 @@ def _create_review_row(
     # editing a policy and re-binding leaves two reviews indistinguishable
     # in the record even though different rules governed them.
     item.update(_recorded_lineage_fields(opf_lineage))
+
+    # Issue #471: the `playbook_versions` admin-facing version + content
+    # hash behind the OPF-independent playbook every review actually runs
+    # against today. Same "absent, not null" filter as the OPF lineage
+    # fields directly above -- a row for a playbook with no matching
+    # `playbook_versions` row (e.g. the bare demo seed) stays byte-identical
+    # to the row this function wrote before this issue.
+    item.update(_recorded_playbook_version_fields(playbook_version_lineage))
 
     # Issue #431: the per-review free-text guidance this review actually ran
     # under, recorded on the row so "which instructions governed this
@@ -1501,6 +1813,7 @@ def record_stage_failure(
     reason: str,
     dynamodb_resource: Any,
     now_epoch: float | None = None,
+    model_ids: dict[str, str] | None = None,
 ) -> str:
     """Target-agnostic stage-failure recorder (issue #258).
 
@@ -1534,30 +1847,63 @@ def record_stage_failure(
     `MANUAL_REVIEW_REQUIRED` / `QUARANTINED` rows stay writable, so
     reclassifying an already-failed review is unaffected.
 
+    Also stamps `failed_at` (issue #472) -- the moment THIS failure was
+    recorded, distinct from `created_at` (when the review was submitted).
+    Two Diagnostics rows previously rendered a blank "Failed at" cell because
+    no such field existed at all and the column was quietly reading
+    `created_at` instead; this is the write side of the fix. Set to the same
+    epoch second as `updated_at`, and only ever written alongside a genuine
+    failure write -- the guard above means a row that is refused (already
+    `DONE`) gets no `failed_at` either, which is correct: it didn't fail.
+
     Returns the terminal status the row actually holds afterwards: the status
     written, or the untouched `REVIEW_STATUS_SUCCESS_TERMINAL` when the guard
     refused the write (callers log/branch on this and must not be told `ERROR`
     was recorded when it was not).
+
+    `model_ids` (issue #527) is `pipeline_runner._model_ids_for_run`'s dict
+    -- `{"primary_model_id": ..., "critic_model_id": ...}` -- whatever
+    subset was already known at the point of failure. Before this, an
+    unhandled exception from a model call (e.g. `ModelEmptyContentError`,
+    `ModelOutputTruncatedError`) landed on the ERROR row with a `reason`
+    code but NEITHER model id, unlike `_write_real_terminal`'s success path,
+    which has always stamped both -- so the one failure mode most worth
+    knowing "which model did this?" for carried the least provenance.
+    Omitted keys are simply not written, same "absent, never a null
+    placeholder" convention `_write_real_terminal` uses; defaults to `None`
+    so every pre-#527 caller (including the AWS error-handler Lambda, which
+    has no model concept) keeps writing a row byte-identical to before.
     """
     now_epoch = time.time() if now_epoch is None else now_epoch
+    now_str = str(int(now_epoch))
     terminal_status = STAGE_FAILURE_REASON_STATUS.get(reason, "ERROR")
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    set_clauses = [
+        "#status = :status",
+        "failing_stage = :stage",
+        "reason = :reason",
+        "failed_at = :failed_at",
+        "updated_at = :now",
+    ]
+    values: dict[str, Any] = {
+        ":status": terminal_status,
+        ":stage": stage_name,
+        ":reason": reason,
+        ":failed_at": now_str,
+        ":now": now_str,
+        ":succeeded": REVIEW_STATUS_SUCCESS_TERMINAL,
+    }
+    for index, (field, model_id) in enumerate(sorted((model_ids or {}).items())):
+        placeholder = f":m{index}"
+        set_clauses.append(f"{field} = {placeholder}")
+        values[placeholder] = model_id
     try:
         table.update_item(
             Key={"review_id": review_id},
-            UpdateExpression=(
-                "SET #status = :status, failing_stage = :stage, "
-                "reason = :reason, updated_at = :now"
-            ),
+            UpdateExpression="SET " + ", ".join(set_clauses),
             ConditionExpression="attribute_not_exists(#status) OR #status <> :succeeded",
             ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={
-                ":status": terminal_status,
-                ":stage": stage_name,
-                ":reason": reason,
-                ":now": str(int(now_epoch)),
-                ":succeeded": REVIEW_STATUS_SUCCESS_TERMINAL,
-            },
+            ExpressionAttributeValues=values,
         )
     except Exception as exc:  # noqa: BLE001 - only the guard is swallowed
         if not _is_conditional_check_failed(exc):
@@ -1720,6 +2066,27 @@ def get_review_detail(
         "opf_content_hash": item.get("opf_content_hash"),
         "opf_section_digests_hash": item.get("opf_section_digests_hash"),
         "opf_corpus_snapshot_hash": item.get("opf_corpus_snapshot_hash"),
+        # Issue #479 floor coverage: WHICH invariants were judged, which were
+        # violated, and which went unjudged. Projected alongside the lineage
+        # hashes above because the point of persisting the ids is that an
+        # operator looking at a quarantined row can see which invariant went
+        # unjudged, not merely that one did -- and a row-level attribute with
+        # no read surface cannot answer that. Absent-on-the-row -> None here,
+        # same faithful-projection convention as every other field.
+        "floor_judged_invariant_ids": item.get("floor_judged_invariant_ids"),
+        "floor_violated_invariant_ids": item.get("floor_violated_invariant_ids"),
+        "floor_unjudged_invariant_ids": item.get("floor_unjudged_invariant_ids"),
+        # Issue #471: the `playbook_versions` admin-facing version + content
+        # hash that gated this submission -- populated for the live,
+        # non-OPF playbook too (unlike the OPF-only fields above). Absent-
+        # on-the-row -> None here, same faithful-projection convention.
+        "playbook_version": item.get("playbook_version"),
+        "playbook_content_hash": item.get("playbook_content_hash"),
+        # Issue #482 (epic #481): the standing-instructions version + text
+        # hash that governed this review, if any -- same faithful-
+        # projection convention as every field above.
+        "instructions_version": item.get("instructions_version"),
+        "instructions_content_hash": item.get("instructions_content_hash"),
         # Issue #294: the review's governed Posture-version override, if
         # any. Absent-on-the-row -> None here too, same "faithful
         # projection" convention as the fields above.
@@ -1751,6 +2118,10 @@ _REVIEW_LIST_ITEM_FIELDS = (
     "posture_version",
     "primary_model_id",
     "critic_model_id",
+    # Issue #471 -- the playbook version + content hash that actually gated
+    # this submission, populated for the live non-OPF playbook too.
+    "playbook_version",
+    "playbook_content_hash",
 )
 
 
@@ -1887,6 +2258,12 @@ RECENT_FAILURES_MAX_LIMIT = 200
 _RECENT_FAILURE_FIELDS = (
     "review_id",
     "created_at",
+    # Issue #472: WHEN the failure was recorded, distinct from `created_at`
+    # (submission time). Written by `record_stage_failure` and the Docker
+    # Compose mock pipeline's own `_fail_review`; absent on a row that
+    # predates this field or was never a failure written through either
+    # path (e.g. QUARANTINED, written by verify_submission_time_bundle).
+    "failed_at",
     "failing_stage",
     "reason",
     "status",
@@ -1910,8 +2287,8 @@ def _resolve_failure_reason(item: dict[str, Any]) -> Any:
 
     This coalesces INTO the single `reason` output key. `quarantine_reason` is
     deliberately NOT added to `_RECENT_FAILURE_FIELDS`: the allowlist stays at
-    exactly five served fields, and the disclosure decision is unchanged --
-    every one of these values is an issue-#442 controlled token.
+    exactly the fields listed there, and the disclosure decision is unchanged
+    -- every one of these values is an issue-#442 controlled token.
     """
     return (
         item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")

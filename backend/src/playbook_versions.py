@@ -61,6 +61,19 @@ endpoint in `backend/src/main.py`. `activate_playbook_version` itself is
 unchanged; `activate_release_bundle` wraps it. The two-person rule and
 quarantine/supersede wiring remain deferred.
 
+Issue #462 closes the matching gap on the rollback side: rollback flipped
+`playbook_versions.status` but never wrote the resolver field, so a
+rollback was invisible to the review pipeline. `rollback_release_bundle`
+wraps `rollback_playbook_version` the same way `activate_release_bundle`
+wraps `activate_playbook_version`, and writes
+`playbooks.active_release_bundle_hash` through the shared
+`_write_active_release_bundle_hash` helper both wrappers now call. Per
+docs/playbook-governance.md "Gate 7 on rollback", rollback deliberately
+does NOT re-run Gate 7 — instead `rollback_playbook_version` restricts
+valid targets to versions carrying a durable `activated_at` fact, written
+by `activate_playbook_version` (so both `activate_release_bundle` and the
+deploy seed's direct call get it for free).
+
 ## The one mutable field (issue #411)
 
 Every attribute this module writes prior to issue #411 is either
@@ -138,11 +151,12 @@ class PlaybookVersionNotFoundError(Exception):
 
 class PlaybookVersionRollbackError(Exception):
     """Raised when `rollback_playbook_version` is asked to restore a
-    version that was never previously active (status != "retired"). Only a
-    version this module itself demoted from `active` to `retired` is a
-    valid rollback target — rolling back to a version that was never
-    active is just a (second) activation, and callers should use
-    `activate_playbook_version` for that."""
+    version that has never been successfully activated (no durable
+    `activated_at` record — see issue #462's "DECISION" section in this
+    ticket, written up in docs/playbook-governance.md "Gate 7 on
+    rollback"). Rolling back to a version that was never active is just a
+    (first) activation, and callers should use `activate_playbook_version`
+    / `activate_release_bundle` for that."""
 
 
 class PlaybookVersionGate7MismatchError(Exception):
@@ -201,6 +215,29 @@ def _write_audit_entry(
     table.put_item(Item=item)
 
 
+def version_already_recorded(
+    playbook_id: str,
+    version: str,
+    dynamodb_resource: Any,
+) -> bool:
+    """True iff `(playbook_id, version)` already has an audit row.
+
+    A plain read, used by the upload route (issue #478 fix round 1) as a
+    pre-check to reject a re-upload BEFORE writing anything to the uploads
+    S3 bucket -- a write-then-conditional-put ordering lets the S3 object
+    land, then orphans it the moment `record_playbook_version_upload`'s
+    `ConditionExpression` fires the 409 below, since nothing ever points
+    back at what was written. This is a read, not a substitute for that
+    ConditionExpression: a race between this check and the eventual
+    `record_playbook_version_upload` call is still resolved by the
+    conditional write (unchanged), which remains the sole source of truth
+    for append-only enforcement.
+    """
+    table = _playbook_versions_table(dynamodb_resource)
+    resp = table.get_item(Key={"playbook_id": playbook_id, "version": version})
+    return "Item" in resp
+
+
 def record_playbook_version_upload(
     playbook_id: str,
     version: str,
@@ -208,6 +245,10 @@ def record_playbook_version_upload(
     dynamodb_resource: Any,
     content_hash: str | None = None,
     now_epoch_value: float | None = None,
+    artifact_kind: str | None = None,
+    opf_content_hash: str | None = None,
+    storage_key: str | None = None,
+    accepted_stub_basis: bool = False,
 ) -> dict[str, Any]:
     """Append-only audit record for a playbook-version upload.
 
@@ -226,6 +267,24 @@ def record_playbook_version_upload(
     field, default empty at upload time; set/replaced later via
     `update_playbook_version_notes`).
 
+    Issue #478 adds four write-once fields, all optional (absent for a
+    caller that never parses/validates the artifact -- e.g. every test that
+    calls this function directly rather than through the HTTP route):
+      - `artifact_kind` -- `"opf-0.3"` / `"opf-0.2"` / `"v1"`
+        (`src.playbook_upload.validate_playbook_upload`'s classification).
+      - `opf_content_hash` -- the OPF document's own `identity.content_hash`,
+        distinct from `content_hash` above (which is the hash of the RAW
+        uploaded bytes, whatever their container). Absent for a `v1` upload,
+        which carries no `identity` block.
+      - `storage_key` -- the S3 key the validated artifact's canonical text
+        was persisted at (`src.playbook_upload.storage_key_for`).
+      - `accepted_stub_basis` -- True iff the upload carried the engine's
+        `compiler.stub_basis_present` watermark AND the caller explicitly
+        accepted it (`accept_stub_basis=true`); False (the default) for
+        every non-watermarked upload, never omitted, so the trail always
+        answers "was a stub-basis acceptance recorded here?" without an
+        absent-vs-false ambiguity.
+
     Returns the written item.
     """
     table = _playbook_versions_table(dynamodb_resource)
@@ -239,9 +298,16 @@ def record_playbook_version_upload(
         "uploaded_at": uploaded_at,
         "status": STATUS_DRAFT,
         "notes": "",
+        "accepted_stub_basis": accepted_stub_basis,
     }
     if content_hash is not None:
         item["content_hash"] = content_hash
+    if artifact_kind is not None:
+        item["artifact_kind"] = artifact_kind
+    if opf_content_hash is not None:
+        item["opf_content_hash"] = opf_content_hash
+    if storage_key is not None:
+        item["storage_key"] = storage_key
 
     try:
         table.put_item(
@@ -289,6 +355,23 @@ def _find_active_item(
     return None
 
 
+def get_active_version_record(
+    playbook_id: str,
+    dynamodb_resource: Any,
+) -> dict[str, Any] | None:
+    """Public read of the currently-active `playbook_versions` row for
+    `playbook_id`, or None if nothing is active -- issue #479's runtime OPF
+    bind: `backend/src/pipeline_runner.py::_load_playbook_bundle` calls this
+    to learn whether the active version's `artifact_kind` is an OPF artifact
+    (`opf-0.2` / `opf-0.3`) before deciding whether to load the stored,
+    validated artifact (`storage_key`, issue #478) instead of falling
+    through to the registry's on-disk v1 read. A thin public wrapper around
+    `_find_active_item` -- same query, exposed outside this module for a
+    caller that only needs to KNOW what is active, not mutate it.
+    """
+    return _find_active_item(playbook_id, dynamodb_resource)
+
+
 def activate_playbook_version(
     playbook_id: str,
     version: str,
@@ -311,6 +394,22 @@ def activate_playbook_version(
     Raises `PlaybookVersionNotFoundError` if `(playbook_id, version)` has
     no recorded upload row (nothing to activate).
 
+    Also stamps a durable `activated_at` fact (issue #462) onto the
+    activated row — the FIRST epoch second this version was ever activated,
+    preserved across any later re-activation or rollback (computed here,
+    from the row read at the top of this call, rather than via DynamoDB's
+    `if_not_exists()` in the `UpdateExpression` — kept as a plain `SET` so
+    this stays a single, ordinary conditionless write, matching every other
+    update in this module). Unlike `status` (mutated by every subsequent
+    lifecycle transition), `activated_at` never moves once set, which is
+    exactly what makes it the durable "was this version ever live?" fact
+    `rollback_playbook_version` gates on — see docs/playbook-governance.md
+    "Gate 7 on rollback". Both callers of this function get the stamp for
+    free: `activate_release_bundle` below, and `sample_playbooks.
+    seed_shipped_playbook`'s direct call for the shipped playbook (which
+    deliberately bypasses Gate 7 and so cannot go through
+    `activate_release_bundle`).
+
     Returns the activated row.
     """
     target = _get_version_item(playbook_id, version, dynamodb_resource)
@@ -322,6 +421,9 @@ def activate_playbook_version(
 
     now = now_epoch_value if now_epoch_value is not None else now_epoch()
     before_status = target.get("status")
+    activated_at = target.get("activated_at")
+    if activated_at is None:
+        activated_at = int(now)
 
     prior_active = _find_active_item(playbook_id, dynamodb_resource)
     table = _playbook_versions_table(dynamodb_resource)
@@ -336,9 +438,9 @@ def activate_playbook_version(
 
     table.update_item(
         Key={"playbook_id": playbook_id, "version": version},
-        UpdateExpression="SET #status = :active",
+        UpdateExpression="SET #status = :active, activated_at = :activated_at",
         ExpressionAttributeNames={"#status": "status"},
-        ExpressionAttributeValues={":active": STATUS_ACTIVE},
+        ExpressionAttributeValues={":active": STATUS_ACTIVE, ":activated_at": activated_at},
     )
 
     _write_audit_entry(
@@ -363,7 +465,32 @@ def activate_playbook_version(
 
     result = dict(target)
     result["status"] = STATUS_ACTIVE
+    result["activated_at"] = activated_at
     return result
+
+
+def _write_active_release_bundle_hash(
+    playbook_id: str,
+    content_hash: str,
+    dynamodb_resource: Any,
+) -> None:
+    """Point the resolver at `content_hash` for `playbook_id` — the ONE
+    write `reviews.resolve_active_release_bundle_hash` reads (issue #194).
+
+    Shared by `activate_release_bundle`, `rollback_release_bundle`, and
+    `sample_playbooks.seed_shipped_playbook` (the deploy-time seed) — every
+    caller in the tree that is allowed to change what the review pipeline
+    serves goes through this exact same write, never an independently
+    maintained copy of it (issue #462 — that drift, one path wired to the
+    resolver and others not, is the defect this function exists to make
+    impossible).
+    """
+    playbooks_table = dynamodb_resource.Table(os.environ["PLAYBOOKS_TABLE"])
+    playbooks_table.update_item(
+        Key={"playbook_id": playbook_id},
+        UpdateExpression="SET active_release_bundle_hash = :h",
+        ExpressionAttributeValues={":h": content_hash},
+    )
 
 
 def activate_release_bundle(
@@ -436,12 +563,7 @@ def activate_release_bundle(
         now_epoch_value=now_epoch_value,
     )
 
-    playbooks_table = dynamodb_resource.Table(os.environ["PLAYBOOKS_TABLE"])
-    playbooks_table.update_item(
-        Key={"playbook_id": playbook_id},
-        UpdateExpression="SET active_release_bundle_hash = :h",
-        ExpressionAttributeValues={":h": content_hash},
-    )
+    _write_active_release_bundle_hash(playbook_id, content_hash, dynamodb_resource)
 
     return activated
 
@@ -454,22 +576,31 @@ def rollback_playbook_version(
     now_epoch_value: float | None = None,
 ) -> dict[str, Any]:
     """Roll back to a previously-active playbook/release-bundle version —
-    restore it as active (issue #79 v1 scope).
+    restore it as active (issue #79 v1 scope, target-eligibility rule
+    superseded by issue #462).
 
-    A valid rollback target is a version this module previously demoted
-    from `active` to `retired` (i.e. it really was the active bundle at
-    some point) — rolling back to a version that was never active is not
-    a "rollback", it is a first activation; callers should use
-    `activate_playbook_version` for that. Any version currently `active`
-    is demoted to `retired` as part of the same rollback, exactly as in
+    A valid rollback target is a version that carries a durable
+    `activated_at` fact — i.e. it was, at some point, successfully
+    activated through `activate_playbook_version` (directly, via
+    `activate_release_bundle`, or via the deploy seed's
+    `sample_playbooks.seed_shipped_playbook`). Rolling back to a version
+    that has never been activated is not a "rollback", it is a first
+    activation; callers should use `activate_playbook_version` /
+    `activate_release_bundle` for that. `status` alone is NOT the
+    eligibility test — see docs/playbook-governance.md "Gate 7 on
+    rollback" for why the durable `activated_at` fact and not the mutable
+    `status` field is what gates this, and why rollback deliberately does
+    NOT re-run Gate 7 on the target. Any version currently `active` is
+    demoted to `retired` as part of the same rollback, exactly as in
     `activate_playbook_version`. Writes one append-only audit record
-    (action `release_bundle_rollback`) to the `audit` table.
+    (action `release_bundle_rollback`) to the `audit` table, recording
+    that Gate 7 was not re-run and why.
 
     Raises:
       `PlaybookVersionNotFoundError` if `(playbook_id, version)` has no
         recorded upload row.
-      `PlaybookVersionRollbackError` if the target version's current
-        status is not `retired` (never previously active).
+      `PlaybookVersionRollbackError` if the target version has no durable
+        `activated_at` record (never successfully activated).
 
     Returns the restored (now active) row.
     """
@@ -480,14 +611,14 @@ def rollback_playbook_version(
             f"version={version!r}"
         )
 
-    if target.get("status") != STATUS_RETIRED:
+    if target.get("activated_at") is None:
         raise PlaybookVersionRollbackError(
-            f"cannot roll back to playbook_id={playbook_id!r} version={version!r}: "
-            f"status is {target.get('status')!r}, not {STATUS_RETIRED!r} — only a "
-            "previously-active (now retired) version is a valid rollback target"
+            "That version has never been activated; there is nothing to roll "
+            f"back to. (playbook_id={playbook_id!r} version={version!r})"
         )
 
     now = now_epoch_value if now_epoch_value is not None else now_epoch()
+    before_status = target.get("status")
     prior_active = _find_active_item(playbook_id, dynamodb_resource)
     table = _playbook_versions_table(dynamodb_resource)
 
@@ -514,7 +645,7 @@ def rollback_playbook_version(
         detail={
             "playbook_id": playbook_id,
             "version": version,
-            "before_status": STATUS_RETIRED,
+            "before_status": before_status,
             "after_status": STATUS_ACTIVE,
             "prior_active_version": (
                 prior_active["version"]
@@ -522,6 +653,13 @@ def rollback_playbook_version(
                 else None
             ),
             "content_hash": target.get("content_hash"),
+            # Issue #462 DECISION: rollback never re-runs Gate 7 -- the
+            # restriction to previously-activated targets (see the
+            # PlaybookVersionRollbackError check above) is what makes that
+            # safe. Recorded explicitly so the trail states the omission
+            # rather than leaving it implicit.
+            "gate7_reevaluated": False,
+            "gate7_skip_reason": "previously_activated_target",
         },
         now_epoch_value=now,
     )
@@ -529,6 +667,83 @@ def rollback_playbook_version(
     result = dict(target)
     result["status"] = STATUS_ACTIVE
     return result
+
+
+def rollback_release_bundle(
+    playbook_id: str,
+    version: str,
+    actor_identity: str,
+    dynamodb_resource: Any,
+    now_epoch_value: float | None = None,
+) -> dict[str, Any]:
+    """Real playbook-rollback path (issue #462): rolls back to
+    `(playbook_id, version)` the same way `rollback_playbook_version` does
+    (issue #79's v1 slice), and closes the gap that left `activate_release_
+    bundle` (issue #242) as the ONLY lifecycle action that repointed
+    `playbooks.active_release_bundle_hash`. Before this, a rollback flipped
+    `playbook_versions.status` back to `active` but never touched the
+    resolver -- every review submitted after a rollback kept running under
+    the bundle that was just rolled back, while the admin screen, the
+    version trail, and the audit row all said the rollback succeeded.
+
+    Deliberately does NOT enforce Gate 7 -- see docs/playbook-governance.md
+    "Gate 7 on rollback" for the decision and its rationale. What makes
+    that safe is `rollback_playbook_version`'s target-eligibility check:
+    only a version with a durable `activated_at` fact (i.e. one that has
+    itself already cleared Gate 7, or was seeded, and was actually live at
+    some point) is a valid rollback target, so rollback can never confer
+    live status on a version that never earned it.
+
+    This wraps, and does not modify, `rollback_playbook_version` -- the
+    existing v1 rollback behavior (issue #79, including its own audit
+    trail write) is preserved unchanged for callers that still use it
+    directly.
+
+    Raises:
+      `PlaybookVersionNotFoundError` — no uploaded row for
+        `(playbook_id, version)`.
+      `PlaybookVersionRollbackError` — the target has never been
+        successfully activated (no `activated_at` record), or has no
+        recorded `content_hash` to repoint the resolver at.
+
+    Returns the restored (now active) row (same shape as
+    `rollback_playbook_version`).
+    """
+    # Checked up front, before any write, exactly like `activate_release_
+    # bundle` checks its own `content_hash` before calling `activate_
+    # playbook_version`: a target row with no `content_hash` (a legacy row
+    # predating that attribute, or any other row that reached
+    # `activated_at` without one) must never be allowed to null out
+    # `playbooks.active_release_bundle_hash`. Refusing here -- before
+    # `rollback_playbook_version` flips `status` or writes its audit row --
+    # keeps a refused rollback a true no-op instead of a rollback that
+    # "succeeded" at the status/audit layer while leaving the review
+    # pipeline pointed at nothing.
+    target = _get_version_item(playbook_id, version, dynamodb_resource)
+    if target is None:
+        raise PlaybookVersionNotFoundError(
+            f"no uploaded playbook version to roll back to: playbook_id={playbook_id!r} "
+            f"version={version!r}"
+        )
+    if not target.get("content_hash"):
+        raise PlaybookVersionRollbackError(
+            "That version has no recorded content hash; rollback cannot "
+            f"repoint the review pipeline at it. (playbook_id={playbook_id!r} "
+            f"version={version!r})"
+        )
+
+    restored = rollback_playbook_version(
+        playbook_id=playbook_id,
+        version=version,
+        actor_identity=actor_identity,
+        dynamodb_resource=dynamodb_resource,
+        now_epoch_value=now_epoch_value,
+    )
+
+    content_hash = restored.get("content_hash")
+    _write_active_release_bundle_hash(playbook_id, content_hash, dynamodb_resource)
+
+    return restored
 
 
 def update_playbook_version_notes(
@@ -782,6 +997,19 @@ def list_playbook_version_trail(
     independent of how the `version` sort-key strings happen to compare
     lexicographically.
 
+    Also carries `activated_at` (issue #462) — the durable "was this
+    version ever successfully activated?" fact `rollback_playbook_version`
+    gates on, absent for a version that has never been activated. This is
+    the server-side signal issue #476 asks for: a caller can show a
+    "Roll back" action for a version only when `activated_at` is present.
+
+    Also carries `artifact_kind` / `opf_content_hash` / `storage_key`
+    (issue #478, absent for a row that predates them or was written by a
+    caller that never parsed/validated the artifact) and
+    `accepted_stub_basis` (issue #478, always present -- see
+    `record_playbook_version_upload`'s docstring for why this one is never
+    omitted).
+
     This is the documented assertion point for the "your" (never
     tenant-brand strings) voicing rule on any surface that renders this trail.
     """
@@ -799,12 +1027,25 @@ def list_playbook_version_trail(
             "uploaded_at": int(item["uploaded_at"]),
             "status": item.get("status") or STATUS_DRAFT,
             "notes": item.get("notes") or "",
+            "accepted_stub_basis": bool(item.get("accepted_stub_basis", False)),
         }
         # Absent rather than present-and-null for rows that predate
         # content-hash recording — mirrors how the item itself is written.
         content_hash = item.get("content_hash")
         if content_hash is not None:
             row["content_hash"] = content_hash
+        activated_at = item.get("activated_at")
+        if activated_at is not None:
+            row["activated_at"] = int(activated_at)
+        artifact_kind = item.get("artifact_kind")
+        if artifact_kind is not None:
+            row["artifact_kind"] = artifact_kind
+        opf_content_hash = item.get("opf_content_hash")
+        if opf_content_hash is not None:
+            row["opf_content_hash"] = opf_content_hash
+        storage_key = item.get("storage_key")
+        if storage_key is not None:
+            row["storage_key"] = storage_key
         trail.append(row)
 
     return trail

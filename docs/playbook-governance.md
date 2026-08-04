@@ -332,6 +332,73 @@ expected hash of `playbooks/eiaa-v1.0.0.json`. If the canonical form or playbook
 `tests/test_canonicalize.py::test_golden_hash_fixture` fails. After an intentional playbook-content
 change, update the fixture with `python3 scripts/canonicalize.py --record` and commit it.
 
+### Gate 7 on rollback (issue #462) — normative
+
+**Rollback does NOT re-run Gate 7.** Instead, rollback is restricted to versions that have
+**previously been successfully activated** — a durable `activated_at` fact persisted on the
+`playbook_versions` row the first time it is ever activated (`playbook_versions.
+activate_playbook_version`), and never cleared by any later transition. `rollback_playbook_version`
+refuses (HTTP 409, "That version has never been activated; there is nothing to roll back to.") a
+target with no such record.
+
+Why the restriction is what makes skipping Gate 7 safe:
+
+- Rollback's whole purpose is to **restore a state the deployment has already run**. It can never
+  confer live status on a version that never earned it, so it cannot be used as a Gate 7 bypass —
+  there is no reachable target that has not already been active.
+- A version activated through the normal path already passed Gate 7 at its activation. Re-running
+  it later adds no safety and introduces a real failure mode — an approval record that has since
+  been rotated, superseded, or garbage-collected would make a known-good version permanently
+  un-rollback-to-able, exactly when rollback is most needed (i.e. during an incident).
+- A version activated through the deliberate seed path (`sample_playbooks.seed_shipped_playbook` →
+  `activate_playbook_version`, which bypasses Gate 7 by design so the shipped sample works out of
+  the box) is likewise restorable, because the deployment was already running it. Re-running Gate 7
+  here is the branch that would make the shipped sample un-rollback-to-able — the outcome this
+  decision exists to avoid.
+
+**`status` is not the eligibility test.** Prior to issue #462, a rollback target was any version
+whose `status` was `retired`. That field is mutated by later lifecycle actions and cannot answer
+"was this ever live?", so it was replaced with the durable `activated_at` fact.
+
+**Resolver wiring.** On an accepted rollback, `playbook_versions.rollback_release_bundle` repoints
+`playbooks.active_release_bundle_hash` at the target's `content_hash`, through the exact same write
+(`playbook_versions._write_active_release_bundle_hash`) `activate_release_bundle` uses — the two
+lifecycle actions that are allowed to change what the review pipeline serves can no longer drift
+apart. Before this fix, `POST .../rollback` flipped `playbook_versions.status` but never wrote the
+resolver field, so a rollback was invisible to `reviews.resolve_active_release_bundle_hash`: every
+review submitted after a rollback kept running under the bundle that was just rolled back, while
+the admin screen, the version trail, and the audit row all said the rollback succeeded.
+
+**Audit posture.** The `release_bundle_rollback` audit row records the rollback, the target version,
+and that Gate 7 was not re-run (`gate7_reevaluated: false`, `gate7_skip_reason:
+"previously_activated_target"`) — the omission is stated in the trail, never left implicit.
+
+**Admin surface.** `GET /api/admin/playbooks/{playbook_id}/versions` (`list_playbook_version_trail`)
+carries `activated_at` per version (absent for a version never activated) so the "Roll back" action
+can be shown only for eligible targets (issue #476).
+
+**Backfill for pre-existing rows.** Gating rollback on `activated_at` only works going forward
+unless every row written before this attribute existed gets one too — otherwise every version on a
+deployment that predates issue #462 (including the seeded, shipped playbook) would be permanently
+ineligible for rollback, which is worse than the bug being fixed (rollback goes from "silently
+ineffective" to "impossible"). `deploy/dts/bootstrap.py`'s `backfill_activated_at_462` runs on every
+bootstrap and stamps `activated_at` (to the time of the backfill, not the true original activation
+time, which was never recorded) onto any `playbook_versions` row whose `status` is `active` or
+`retired` and has no `activated_at` yet — both statuses are only ever reached through
+`activate_playbook_version`, so this recovers the fact that attribute would already carry had it
+existed at the time, rather than approximating it. Idempotent (a stamped row is left alone; a
+concurrent bootstrap's write loses a `ConditionExpression` race harmlessly) so re-running it, or
+running it against a table restored from an older backup, is always safe.
+
+**Resolver guard.** `rollback_release_bundle` refuses the rollback (`PlaybookVersionRollbackError`,
+before any write) when the target row has no `content_hash` — mirroring `activate_release_bundle`'s
+own refusal to activate a version with a falsy `content_hash`. A row can reach `activated_at`
+without a `content_hash` (a legacy row backfilled above; `content_hash` has been optional on upload
+since issue #223/#257 predates it) — rolling back to one would otherwise repoint
+`playbooks.active_release_bundle_hash` at `None`, taking the whole deployment out of service (every
+subsequent `reviews.resolve_active_release_bundle_hash` call raises 503 "no active playbook") while
+the rollback itself reports success.
+
 ## Schema versioning
 
 Every playbook instance declares `$schema: "https://contract-opf.github.io/playbooks/schema/v1.json"`.

@@ -1,21 +1,21 @@
 /**
  * PasswordLogin — username/password sign-in for the Docker Compose deployment target
  * (VITE_AUTH_MODE=password). Posts to POST /api/auth/login and, on success,
- * stores the returned demo session token in the in-memory auth module and
- * notifies the parent with the signed-in identity.
+ * notifies the parent with the signed-in identity. The session itself is an
+ * httpOnly cookie the backend sets on the response (issue #468) — this
+ * component (and the rest of the SPA) never sees or holds a token at all.
  *
  * There is no Cognito/Amplify here; this is the Docker Compose counterpart of the
  * <Authenticator> wrapper.
  *
  * Networking and error copy go through the shared api.ts helpers (issue #425)
- * like every other screen: `authorizedFetch` resolves VITE_API_BASE_URL and —
- * pre-login, where getToken() is the empty string — sends no Authorization
- * header at all, and `friendlyErrorMessage`/`readErrorDetail` guarantee that
- * only a server-supplied `detail` or a safe fallback reaches the DOM. The
+ * like every other screen: `authorizedFetch` resolves VITE_API_BASE_URL,
+ * sends `credentials: 'same-origin'` so the Set-Cookie on a successful login
+ * is stored, and `friendlyErrorMessage`/`readErrorDetail` guarantee that only
+ * a server-supplied `detail` or a safe fallback reaches the DOM. The
  * technical detail (endpoint, HTTP status) is logged to the console only.
  */
 import { useState } from 'react';
-import { setDemoToken } from './auth';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import { CtButton, CtBanner, CtCard, CtField } from './ui/react';
 
@@ -35,7 +35,6 @@ export interface DemoIdentity {
 }
 
 interface LoginResponse {
-  token: string;
   username: string;
   is_admin: boolean;
 }
@@ -71,7 +70,6 @@ export default function PasswordLogin({
         );
       }
       const data = (await response.json()) as LoginResponse;
-      setDemoToken(data.token);
       onAuthenticated({ username: data.username, isAdmin: Boolean(data.is_admin) });
     } catch (err) {
       setError(err instanceof Error ? err.message : friendlyErrorMessage(err, SIGN_IN_FALLBACK));

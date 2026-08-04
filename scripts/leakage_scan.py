@@ -87,8 +87,17 @@ Usage:
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import opf_prompt  # noqa: E402
+import review_knowledge  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Detection categories (stable strings -- used in audit rows and by callers
@@ -222,6 +231,107 @@ class ConfidentialCorpus:
             playbook_ngrams=playbook_ngrams,
             standard_clause_ngrams=standard_clause_ngrams,
             internal_precedent_ids=list(internal_precedent_ids or []),
+            counterparty_names=list(counterparty_names or []),
+            precedent_verbatim_spans=list(precedent_verbatim_spans or []),
+        )
+
+    @classmethod
+    def from_opf_document(
+        cls,
+        opf_doc: dict[str, Any],
+        *,
+        overrides: dict[str, Any] | None = None,
+        system_prompt_ngrams: list[str] | None = None,
+        counterparty_names: list[str] | None = None,
+        precedent_verbatim_spans: list[str] | None = None,
+    ) -> "ConfidentialCorpus":
+        """The OPF analogue of `from_playbook` (issue #479): an OPF-governed
+        review (`scripts/review_spine.py::run_review`, `bundle
+        ["opf_bundle_v2"]`) sends the model real confidential material --
+        Floor invariant statements/rationale, the digest's internal
+        precedent reasoning -- that `scripts/opf_prompt.py` composes into
+        the prompt in full. Before this, `run_review` always derived the
+        leakage-scan corpus via `from_playbook(bundle)`, and an OPF bundle
+        carries neither `topics` nor `hard_rejections`, so the leakage gate
+        ran with an EMPTY corpus on every OPF-governed review.
+
+        `playbook_ngrams` (blocked everywhere, including replacement text --
+        same discipline as a v1 `hard_rejections` rule's id/description):
+        every Floor invariant's `statement` + `rationale`
+        (`opf_prompt.resolve_floor_invariants`, so an
+        `overrides.floor_additions` entry is covered too -- the same union
+        the Binding block itself renders), plus each digest clause's
+        internal precedent reasoning that is NOT the tenant's own openly-
+        asked-for position: `concessions`/`unacceptable`/`exemplar_forms`
+        text_summary entries and `preferred_variations` if/to text -- the
+        same fields `scripts/opf_prompt.py::_digest_clause_block` sends to
+        the model. `preferred_variations` covers BOTH `oneOf` schema
+        branches: the object shape (`if`/`to`) and the legacy bare-string
+        shape, the latter rendered verbatim by `opf_prompt._fmt_preferred`.
+
+        `standard_clause_ngrams` (allowlisted for replacement text): each
+        digest clause's `our_standard.text` -- the contract position openly
+        asked for, exactly like a v1 topic's `our_standard` (see
+        `from_playbook`'s own docstring for why that one is allowlisted).
+
+        Also covers `posture.system_prompt` (issue #479 fix round 2):
+        `scripts/opf_prompt.py::_posture_block` renders it VERBATIM as the
+        first composed block of every OPF prompt both model passes read --
+        the most internal-strategy-shaped text an OPF document carries, the
+        direct analogue of a v1 `hard_rejections` `description`. Resolved
+        the SAME way it is composed -- override first, then the playbook's
+        own genesis text -- via `review_knowledge._posture_prose`, so the
+        corpus and the prompt never disagree about which posture prose is
+        actually in play. Blocked everywhere (`playbook_ngrams`, never
+        `standard_clause_ngrams`): posture is internal negotiating strategy,
+        not an openly-asked-for contract position.
+        """
+        playbook_ngrams: list[str] = []
+        standard_clause_ngrams: list[str] = []
+
+        posture_prose, _posture_source = review_knowledge._posture_prose(opf_doc, overrides)
+        if posture_prose:
+            playbook_ngrams.append(posture_prose)
+
+        for invariant in opf_prompt.resolve_floor_invariants(opf_doc, overrides):
+            statement = invariant.get("statement")
+            if statement:
+                playbook_ngrams.append(statement)
+            rationale = invariant.get("rationale")
+            if rationale:
+                playbook_ngrams.append(rationale)
+
+        digest = opf_doc.get("digest") or {}
+        for clause in digest.get("clauses") or []:
+            if not isinstance(clause, dict):
+                continue
+            our_standard = clause.get("our_standard")
+            if isinstance(our_standard, dict) and our_standard.get("text"):
+                standard_clause_ngrams.append(our_standard["text"])
+            for list_field in ("concessions", "unacceptable", "exemplar_forms"):
+                for entry in clause.get(list_field) or []:
+                    if isinstance(entry, dict) and entry.get("text_summary"):
+                        playbook_ngrams.append(entry["text_summary"])
+            for entry in clause.get("preferred_variations") or []:
+                if not isinstance(entry, dict):
+                    # The schema's other `oneOf` branch: a legacy
+                    # bare-string entry. `opf_prompt._fmt_preferred` renders
+                    # it into the prompt verbatim -- skipping it here would
+                    # leave that exact text uncovered by the corpus it is
+                    # otherwise scanned against.
+                    if isinstance(entry, str) and entry:
+                        playbook_ngrams.append(entry)
+                    continue
+                for key in ("if", "to"):
+                    value = entry.get(key)
+                    if value:
+                        playbook_ngrams.append(value)
+
+        return cls(
+            system_prompt_ngrams=list(system_prompt_ngrams or []),
+            playbook_ngrams=playbook_ngrams,
+            standard_clause_ngrams=standard_clause_ngrams,
+            internal_precedent_ids=[],
             counterparty_names=list(counterparty_names or []),
             precedent_verbatim_spans=list(precedent_verbatim_spans or []),
         )

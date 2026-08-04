@@ -182,6 +182,7 @@ export class DataStack extends cdk.NestedStack {
   readonly adminBootstrapTable: dynamodb.Table;
   readonly playbooksTable: dynamodb.Table;
   readonly playbookVersionsTable: dynamodb.Table;
+  readonly playbookInstructionsTable: dynamodb.Table;
   readonly reviewsTable: dynamodb.Table;
   readonly reviewSubmissionsTable: dynamodb.Table;
   readonly auditTable: dynamodb.Table;
@@ -841,6 +842,42 @@ export class DataStack extends cdk.NestedStack {
     cdk.Tags.of(this.playbookVersionsTable).add('contract-toaster:table', 'playbook_versions');
 
     // -----------------------------------------------------------------------
+    // playbook_instructions table — PK: playbook_id, SK: version (Number)
+    //
+    // Per-playbook "Standing instructions" store (issue #482, epic #481):
+    // append-only, monotonically-versioned free-text overrides an admin
+    // saves for a playbook — never edited in place, only superseded by a
+    // new version. Each row records:
+    //   - text: the instructions text (may be empty — an explicit clear is
+    //     itself a new, recorded version)
+    //   - saved_by, saved_at: author + timestamp (same `saved_by` shape as
+    //     playbook_versions' `uploaded_by`)
+    //   - text_hash: sha256 of `text`, computed once at save time so every
+    //     reader (including a review's lineage stamp) reads the same value
+    //   - supersedes: the version this replaces, or null for the first save
+    // Monotonicity is enforced by an append-only conditional write on the
+    // next version number (see backend/src/playbook_instructions.py), not a
+    // separate GSI/counter — no additional index is required here.
+    // -----------------------------------------------------------------------
+    this.playbookInstructionsTable = new dynamodb.Table(this, 'PlaybookInstructionsTable', {
+      tableName: `${appName}-playbook-instructions-${envName}`,
+      partitionKey: { name: 'playbook_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'version', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      encryption: ddbEncryption,
+      encryptionKey: dynamodbKeyEncryption,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    cdk.Tags.of(this.playbookInstructionsTable).add('contract-toaster:env', envName);
+    cdk.Tags.of(this.playbookInstructionsTable).add('contract-toaster:data-class', 'dynamodb');
+    cdk.Tags.of(this.playbookInstructionsTable).add(
+      'contract-toaster:table',
+      'playbook_instructions'
+    );
+
+    // -----------------------------------------------------------------------
     // reviews table — PK: review_id
     //
     // One row per review.  Attributes include:
@@ -1249,6 +1286,12 @@ export class DataStack extends cdk.NestedStack {
       value: this.playbookVersionsTable.tableName,
       description: `Playbook versions table name for ${envName}`,
       exportName: `ContractToaster-${envName}-playbookVersions-TableName`,
+    });
+
+    new cdk.CfnOutput(this, 'PlaybookInstructionsTableName', {
+      value: this.playbookInstructionsTable.tableName,
+      description: `Playbook standing-instructions table name for ${envName}`,
+      exportName: `ContractToaster-${envName}-playbookInstructions-TableName`,
     });
 
     new cdk.CfnOutput(this, 'ReviewsTableName', {

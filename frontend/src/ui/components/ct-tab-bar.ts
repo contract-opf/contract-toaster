@@ -31,6 +31,20 @@
  * `tabindex` won't flip to reflect the new `active` value until the
  * caller's prop update round-trips back down — `.focus()` doesn't require
  * `tabindex="0"`, only the browser's native Tab-key cycle does.
+ *
+ * Multiple independent tablists (issue #477): App.tsx renders two of these
+ * side by side (the primary Review/History row, and a labeled Admin group)
+ * so the standard "wrap inside a labeled section" pattern beats an
+ * eight-peer flat row wrapping an orphaned last tab. `active` is a single
+ * id shared across both instances, so at most one instance ever has a tab
+ * matching `active` at a time. `label` sets that instance's `aria-label`
+ * (defaults to "Sections" — the pre-#477 value — so the primary row's
+ * accessible name is unchanged). Roving tabindex still needs exactly one
+ * `tabindex="0"` PER INSTANCE for the native Tab key to ever reach it: if
+ * `active` belongs to the other group, none of this instance's tabs are
+ * "selected", so `_renderTab` falls back to index 0 rather than leaving
+ * every button at `tabindex="-1"` (which would silently drop the whole
+ * group from the Tab order the first time a user hasn't visited it yet).
  */
 import { LitElement, html, type PropertyValues } from 'lit';
 import { defineOnce } from '../define';
@@ -51,15 +65,18 @@ export class CtTabBar extends LitElement {
   static properties = {
     tabs: { type: Array, attribute: false },
     active: { type: String },
+    label: { type: String },
   };
 
   declare tabs: CtTabDef[];
   declare active: string;
+  declare label: string;
 
   constructor() {
     super();
     this.tabs = [];
     this.active = '';
+    this.label = 'Sections';
   }
 
   connectedCallback(): void {
@@ -79,16 +96,22 @@ export class CtTabBar extends LitElement {
   }
 
   render() {
+    // No tab in this instance is `active` when `active` belongs to the
+    // other tablist (see the class docstring) — fall back to treating
+    // index 0 as the roving-tabindex stop so this group stays reachable
+    // by Tab even before the user has visited it.
+    const hasActiveInGroup = this.tabs.some((t) => t.id === this.active);
     return html`
-      <div class="ct-tab-bar__track" role="tablist" aria-label="Sections" @keydown=${this._onKeyDown}>
-        ${this.tabs.map((tab) => this._renderTab(tab))}
+      <div class="ct-tab-bar__track" role="tablist" aria-label=${this.label} @keydown=${this._onKeyDown}>
+        ${this.tabs.map((tab, index) => this._renderTab(tab, index === 0 && !hasActiveInGroup))}
         <span class="ct-tab-bar__indicator" aria-hidden="true"></span>
       </div>
     `;
   }
 
-  private _renderTab(tab: CtTabDef) {
+  private _renderTab(tab: CtTabDef, tabbableFallback: boolean) {
     const selected = tab.id === this.active;
+    const tabbable = selected || tabbableFallback;
     return html`<button
       type="button"
       role="tab"
@@ -97,7 +120,7 @@ export class CtTabBar extends LitElement {
       class="ct-tab-bar__tab"
       aria-selected=${selected ? 'true' : 'false'}
       aria-controls="panel-${tab.id}"
-      tabindex=${selected ? '0' : '-1'}
+      tabindex=${tabbable ? '0' : '-1'}
       @click=${() => this._activate(tab.id, false)}
     >${tab.label}</button>`;
   }

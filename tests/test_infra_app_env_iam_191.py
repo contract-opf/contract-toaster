@@ -41,6 +41,15 @@ just the .ts source):
      it claims) and, even past that, would have presigned a URL signed by a
      principal with no read on `uploads/*` -- a browser GET that 403s. The
      PutObject grant must survive alongside it (regression guard).
+  G. The API task-role IAM policy grants s3:PutObject and s3:GetObject on
+     the UPLOADS bucket's `playbooks/*` prefix (issue #478, fix round 2).
+     `POST /api/admin/playbooks/{playbook_id}/versions` writes and reads
+     back `playbooks/{playbook_id}/{content_hash}(.original)?...` keys
+     (backend/src/playbook_upload.py's `storage_key_for` /
+     `original_artifact_key`) -- before this grant existed, every upload on
+     the AWS target got AccessDenied from the first `put_object` (the
+     Upload/DownloadInput/Download statements are scoped to `uploads/*` and
+     `outputs/*` only, never `playbooks/*`).
 
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
@@ -350,6 +359,62 @@ def check_f_uploads_read_grant(policy: dict[str, Any]) -> list[str]:
     return failures
 
 
+# ---------------------------------------------------------------------------
+# Check G -- the API task role can READ + WRITE the playbooks/* prefix of the
+# uploads bucket (issue #478, fix round 2).
+# ---------------------------------------------------------------------------
+
+PLAYBOOKS_PREFIX_ARN_FRAGMENT = "contract-toaster-uploads-dev/playbooks/*"
+
+
+def check_g_playbook_artifacts_grant(policy: dict[str, Any]) -> list[str]:
+    print("\nCheck G: API task-role IAM policy can read + write the uploads "
+          "bucket's playbooks/* prefix (POST /api/admin/playbooks/{playbook_id}"
+          "/versions, issue #478) …")
+    failures: list[str] = []
+
+    statements = policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
+    playbook_statements = _statements_for_resource_substring(
+        statements, PLAYBOOKS_PREFIX_ARN_FRAGMENT
+    )
+    failures += _assert(
+        len(playbook_statements) >= 1,
+        "a policy statement targets the uploads bucket's playbooks/* prefix",
+    )
+
+    playbook_actions: set[str] = set()
+    for s in playbook_statements:
+        playbook_actions |= _actions(s)
+
+    failures += _assert(
+        "s3:PutObject" in playbook_actions,
+        "playbooks/* grant includes s3:PutObject (persisting the validated artifact)",
+        f"got actions: {sorted(playbook_actions)} -- without PutObject every "
+        f"upload gets AccessDenied from the first put_object on the AWS target",
+    )
+    failures += _assert(
+        "s3:GetObject" in playbook_actions,
+        "playbooks/* grant includes s3:GetObject (the upload round-trip check)",
+        f"got actions: {sorted(playbook_actions)}",
+    )
+
+    # The grant must stay scoped to the playbooks PREFIX -- never the bucket root,
+    # and never widened to cover uploads/* or outputs/* as well.
+    for s in playbook_statements:
+        resource = s.get("Resource")
+        resources_list = resource if isinstance(resource, list) else [resource]
+        failures += _assert(
+            all(
+                isinstance(r, str) and r.endswith("/playbooks/*")
+                for r in resources_list
+            ),
+            f"playbooks statement {s.get('Sid')!r} stays scoped to the playbooks/* prefix",
+            f"got resources: {resources_list}",
+        )
+
+    return failures
+
+
 def main() -> int:
     all_failures: list[str] = []
 
@@ -374,6 +439,7 @@ def main() -> int:
     else:
         all_failures += check_cde_task_role_grants(policy)
         all_failures += check_f_uploads_read_grant(policy)
+        all_failures += check_g_playbook_artifacts_grant(policy)
 
     if all_failures:
         print(f"\n{len(all_failures)} check(s) failed:")
