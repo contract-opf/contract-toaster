@@ -266,14 +266,12 @@ def seed_shipped_playbook(
         playbook_id, _SEED_VERSION, actor_identity, dynamodb_resource
     )
 
-    # Resolver wiring -- the same write `playbook_versions.
-    # activate_release_bundle` performs after its Gate 7 check, done with
-    # `update_item` (never `put_item`) so an admin's `display_name` /
-    # `removed` attributes on this row survive.
-    dynamodb_resource.Table(os.environ["PLAYBOOKS_TABLE"]).update_item(
-        Key={"playbook_id": playbook_id},
-        UpdateExpression="SET active_release_bundle_hash = :h",
-        ExpressionAttributeValues={":h": content_hash},
+    # Resolver wiring -- routed through the same helper `activate_release_
+    # bundle` and `rollback_release_bundle` call (issue #462), so there is
+    # only ever one write of `playbooks.active_release_bundle_hash` in the
+    # tree, never a third independently-maintained copy of it.
+    playbook_versions._write_active_release_bundle_hash(
+        playbook_id, content_hash, dynamodb_resource
     )
 
     _write_audit_entry(

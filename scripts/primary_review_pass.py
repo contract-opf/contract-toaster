@@ -281,6 +281,58 @@ def projected_playbook_hash(projected_playbook: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Standing instructions (issue #483, epic #481): the playbook's per-playbook,
+# admin-authored "Standing instructions" text (issue #482's store), resolved
+# once at submission time and threaded read-only through
+# scripts/review_spine.py::run_review as `instructions_text`. TRUSTED,
+# first-party admin content -- the SAME trust class as `toaster_guidance`
+# below (issue #482's module docstring, "Size cap and injection posture") --
+# so it is deliberately never wrapped in the untrusted-input delimiter/
+# warning either.
+#
+# Precedence (epic #481's stated ladder: Floor > per-review guidance >
+# standing instructions > playbook positions): this block therefore sits
+# BEFORE the toaster-guidance block below -- the more specific per-review
+# layer reads later, nearer the binary-decision overlay -- so on conflict
+# between the two, the toaster-guidance block's own "GOVERNS" language
+# (stated there, not here) is the one that actually wins the model's
+# attention-order intuition. `STANDING_INSTRUCTIONS_INTRO` is the SINGLE
+# SOURCE for this precedence copy -- issue #483 AC3 requires it match the
+# epic's exact wording; any frontend hint (issue #484, the admin UI, out of
+# scope here) must either read this text via the API or be kept in sync with
+# a cross-referencing comment, never restate it independently.
+# ---------------------------------------------------------------------------
+
+STANDING_INSTRUCTIONS_INTRO = (
+    "These are standing instructions from the deployment's administrator "
+    "for this contract type. Follow them over the playbook's positions "
+    "wherever the two conflict. The instructions typed for this specific "
+    "review, if any, govern over these. Rules the playbook marks as hard "
+    "requirements override everything, including these instructions."
+)
+
+
+def render_standing_instructions_block(instructions_text: str) -> str | None:
+    """Render the standing-instructions system block, or None when there is
+    nothing to render.
+
+    "A block is absent or it has content" (same doctrine as
+    render_toaster_guidance_block below): never an empty
+    `<STANDING_INSTRUCTIONS>` header with nothing inside it.
+    `instructions_text` is trusted, first-party admin text (see module
+    comment above) -- deliberately not run through `_delimited_block`'s
+    untrusted-input warning.
+    """
+    text = (instructions_text or "").strip()
+    if not text:
+        return None
+    return (
+        f"{STANDING_INSTRUCTIONS_INTRO}\n\n"
+        f"<STANDING_INSTRUCTIONS>\n{text}\n</STANDING_INSTRUCTIONS>"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Toaster guidance (issue #398): optional, per-review free-text instructions
 # supplied at submission time (POST /api/reviews' optional `toaster_guidance`
 # field, threaded through scripts/review_spine.py::run_review). TRUSTED,
@@ -293,6 +345,11 @@ def projected_playbook_hash(projected_playbook: dict[str, Any]) -> str:
 # Per docs/planning/long-range-plan-2026-07-22.md D3: "Toaster guidance
 # trumps the playbook on conflict." That precedence statement is this
 # block's entire fixed prose -- the guidance TEXT itself is caller-supplied.
+#
+# Issue #483 (epic #481): this per-review layer is MORE specific than the
+# playbook-level standing instructions above, so it reads LATER (nearer the
+# binary-decision overlay) -- see STANDING_INSTRUCTIONS_INTRO's comment for
+# the full precedence ladder.
 # ---------------------------------------------------------------------------
 
 TOASTER_GUIDANCE_INTRO = (
@@ -394,32 +451,46 @@ def render_floor_block(playbook: dict[str, Any]) -> str | None:
 
 
 def assemble_system_blocks(
-    playbook: dict[str, Any], toaster_guidance: str = ""
+    playbook: dict[str, Any], toaster_guidance: str = "", instructions_text: str = ""
 ) -> list[dict[str, Any]]:
-    """(a) guidance -> [toaster guidance, if any] -> (b) binary overlay ->
-    [judged-NL Floor, if the playbook has hard_rejections] -> (c) PROJECTED
-    playbook JSON, in that order, with a prompt-cache breakpoint AFTER the
-    LAST block (issue #30) -- always the playbook block, since it is
-    appended last and every block ahead of it is either fixed or
-    conditional-but-earlier. Returned as Anthropic-message-API-shaped
-    content blocks so the cache breakpoint is a structural property
-    (`cache_control` on the playbook block) a caller/test can assert
-    directly, not prose to parse.
+    """(a) guidance -> [standing instructions, if any] -> [toaster guidance,
+    if any] -> (b) binary overlay -> [judged-NL Floor, if the playbook has
+    hard_rejections] -> (c) PROJECTED playbook JSON, in that order, with a
+    prompt-cache breakpoint AFTER the LAST block (issue #30) -- always the
+    playbook block, since it is appended last and every block ahead of it is
+    either fixed or conditional-but-earlier. Returned as Anthropic-message-
+    API-shaped content blocks so the cache breakpoint is a structural
+    property (`cache_control` on the playbook block) a caller/test can
+    assert directly, not prose to parse.
 
     The playbook block carries `project_playbook_for_prompt(playbook)`, not
     the raw playbook dict (issue #267) -- this is the single seam both the
     primary and critic passes go through, so the projection is identical for
     both (critic_review_pass.py calls this function directly).
 
+    `instructions_text` (issue #483, epic #481, default `""`) is the
+    playbook's resolved standing instructions (issue #482's store),
+    threaded from scripts/review_spine.py::run_review. It sits BEFORE the
+    `toaster_guidance` block -- the more specific per-review layer reads
+    later, nearer the decision overlay -- per the epic's precedence ladder:
+    Floor > per-review guidance > standing instructions > playbook. Empty
+    (the default) omits the block entirely -- see
+    render_standing_instructions_block.
+
     `toaster_guidance` (issue #398, default `""`) is the optional per-review
     free-text instructions threaded from POST /api/reviews through
     scripts/review_spine.py::run_review. Empty (the default) reproduces
     today's behavior for this block exactly -- see
     render_toaster_guidance_block. The Floor block's presence depends only
-    on the playbook's own `hard_rejections`, never on `toaster_guidance` --
-    it is a separate, unconditional addition -- see render_floor_block.
+    on the playbook's own `hard_rejections`, never on `toaster_guidance` or
+    `instructions_text` -- it is a separate, unconditional addition -- see
+    render_floor_block.
     """
     blocks: list[dict[str, Any]] = [{"type": "text", "text": REVIEW_GUIDANCE_BLOCK}]
+
+    standing_text = render_standing_instructions_block(instructions_text)
+    if standing_text is not None:
+        blocks.append({"type": "text", "text": standing_text})
 
     guidance_text = render_toaster_guidance_block(toaster_guidance)
     if guidance_text is not None:
@@ -576,6 +647,27 @@ def load_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
     return _OUTPUT_SCHEMA_CACHE
 
 
+class ModelResponseContractViolation(ValueError):
+    """Raised when a raw model-response body handed to `_extract_json_object`
+    is not a `str` (issue #527).
+
+    `model_client.BedrockModelClient.invoke` / `OpenRouterModelClient.invoke`
+    are contracted to return `str` (or raise -- never `None`/non-string), but
+    this module used to trust that contract without checking it: a client
+    implementation that violated it (the pre-#527 `OpenRouterModelClient`,
+    which returned `content` verbatim even when the provider sent back
+    `null`) reached `raw_text.find("{")` and crashed with a bare
+    `AttributeError` -- a crash indistinguishable in the logs from any other
+    bug, and NOT caught by `validate_model_response`'s
+    `(json.JSONDecodeError, TypeError)` clause (an `AttributeError` is
+    neither). This is defense in depth alongside the #527 fix that makes
+    `OpenRouterModelClient.invoke` itself fail closed
+    (`model_client.ModelEmptyContentError`) rather than ever returning
+    `None` -- a second client implementation, or a future regression in this
+    one, still cannot reach this function's body with anything but a `str`
+    without a named, caught exception."""
+
+
 def _extract_json_object(raw_text: str) -> str:
     """UNWRAP the outermost balanced ``{...}`` object from a raw model
     response that may carry a leading/trailing prose preamble and/or a
@@ -589,7 +681,14 @@ def _extract_json_object(raw_text: str) -> str:
     ``}`` inside a string value never miscounts the brace depth. Returns the
     input unchanged when no balanced object is found, preserving the existing
     ``invalid_json`` signal for a response that carries no JSON at all.
+
+    Raises `ModelResponseContractViolation` (issue #527) when `raw_text` is
+    not a `str` -- never a bare `AttributeError` on `.find`.
     """
+    if not isinstance(raw_text, str):
+        raise ModelResponseContractViolation(
+            f"Expected the model response body to be str, got {type(raw_text).__name__}."
+        )
     start = raw_text.find("{")
     if start < 0:
         return raw_text
@@ -671,6 +770,8 @@ def validate_model_response(
         parsed = json.loads(_extract_json_object(raw_text))
     except (json.JSONDecodeError, TypeError) as exc:
         return False, f"invalid_json: {exc}"
+    except ModelResponseContractViolation as exc:
+        return False, f"invalid_response_contract: {exc}"
     _stamp_pipeline_envelope(parsed, issue_provenance=issue_provenance)
     try:
         jsonschema.validate(instance=parsed, schema=load_output_schema())
@@ -698,10 +799,13 @@ def run_primary_pass(
     doc_text: str = "",
     doc_paragraphs: list[dict[str, Any]] | None = None,
     toaster_guidance: str = "",
+    instructions_text: str = "",
     max_input_tokens: int = MAX_INPUT_TOKENS,
     max_output_tokens: int = MAX_OUTPUT_TOKENS,
     max_retries: int = MAX_RETRIES_PER_PASS,
     full_doc_token_threshold: int = DEFAULT_FULL_DOC_TOKEN_THRESHOLD,
+    system_blocks_override: list[dict[str, Any]] | None = None,
+    playbook_hash_override: str | None = None,
 ) -> dict[str, Any]:
     """Run the primary review pass end-to-end (data-flow steps 14-15-17 for
     the primary pass).
@@ -723,13 +827,59 @@ def run_primary_pass(
     `model_client.ModelPolicyViolation` on a forbidden inference-profile
     prefix).
 
-    `toaster_guidance` (issue #398, default `""`) is threaded straight into
+    `toaster_guidance` (issue #398, default `""`) and `instructions_text`
+    (issue #483, default `""`) are threaded straight into
     `assemble_system_blocks` -- see that function's docstring for the
-    precedence contract. Empty reproduces today's behavior exactly.
+    precedence contract. Both empty reproduces today's behavior exactly.
+
+    `system_blocks_override` (issue #479, default `None`): when given, these
+    Anthropic-message-API-shaped blocks are sent VERBATIM instead of the
+    ones `assemble_system_blocks(playbook, toaster_guidance, instructions_text)`
+    would build -- the OPF digest-mode seam
+    (`scripts/review_spine.py`'s `_assemble_opf_system_blocks`, composed
+    from `scripts/review_knowledge.py::resolve_knowledge`), which reads its
+    knowledge from an OPF document rather than a v1 playbook dict and
+    therefore cannot go through this module's own v1-shaped assembler.
+    `playbook` is still passed to this call for `_rte`'s pen-rules
+    resolution below and for the leakage-scan corpus derivation upstream in
+    `review_spine.run_review`. An OPF-shaped `playbook`
+    (`{"opf_bundle_v2": ..., "playbook": {"metadata": ...}}`) has neither
+    `topics` nor `default`/`per_topic`, so passing it straight to
+    `_rte.check_issues_replacement_text` would hit
+    `replacement_text_enforcement.resolve_pen_rules`'s v1-passthrough
+    branch, which raises `ReplacementTextConfigError` for every issue --
+    caught and skipped, silently disabling ALL replacement-text enforcement
+    (max_chars bounds, must_not_introduce) on every OPF review. `pen_rules
+    _bundle` below resolves to `None` for an OPF-shaped `playbook` instead,
+    so `resolve_pen_rules` takes its `bundle is None` branch and
+    `playbooks/pen-rules.defaults.json`'s toaster-global defaults apply.
+    `None` (the default) reproduces today's v1 behavior exactly.
+
+    `playbook_hash_override` (issue #479, default `None`): the ledger's
+    `projected_playbook_hash` value when `system_blocks_override` is given
+    -- `project_playbook_for_prompt(playbook)` would otherwise hash an
+    empty projection for an OPF-shaped `playbook` (its
+    `PROMPT_KNOWLEDGE_KEYS` are v1 top-level keys), which is not what was
+    actually sent. Callers in digest mode pass
+    `review_knowledge.ReviewKnowledge.content_hash()` -- the hash of the
+    composed blocks that WERE sent, per that class's own "hash what was
+    SENT" doctrine.
     """
     _model_client.enforce_single_region_native_model_id(model_id)
 
-    system_blocks = assemble_system_blocks(playbook, toaster_guidance)
+    # Issue #479: an OPF-shaped `playbook` bundle carries no
+    # `topics`/`default`/`per_topic` for `resolve_pen_rules` to resolve
+    # against -- pass `None` so it falls through to
+    # `playbooks/pen-rules.defaults.json`'s toaster-global defaults rather
+    # than raising ReplacementTextConfigError (caught, skipped) for every
+    # issue. A v1 `playbook` is passed through unchanged.
+    pen_rules_bundle = None if playbook.get("opf_bundle_v2") is not None else playbook
+
+    system_blocks = (
+        system_blocks_override
+        if system_blocks_override is not None
+        else assemble_system_blocks(playbook, toaster_guidance, instructions_text)
+    )
     system_prompt_text = render_system_prompt(system_blocks)
     user_prompt = assemble_user_prompt_primary(
         diff_hunks=diff_hunks,
@@ -744,7 +894,11 @@ def run_primary_pass(
     # Issue #267 AC: the ledger records the projected view's hash alongside
     # the bundle's own playbook content_hash (recorded on the review row,
     # scripts/canonicalize.py).
-    projected_hash = projected_playbook_hash(project_playbook_for_prompt(playbook))
+    projected_hash = (
+        playbook_hash_override
+        if playbook_hash_override is not None
+        else projected_playbook_hash(project_playbook_for_prompt(playbook))
+    )
 
     # Step 14: the single authoritative failure point for oversized
     # documents. No model call is attempted if this fails.
@@ -783,7 +937,7 @@ def run_primary_pass(
                 # violating issue(s) to flag-only on the final attempt rather
                 # than failing the whole pass.
                 rt_failures = _rte.check_issues_replacement_text(
-                    _rte.collect_checkable_issues(parsed_or_error), playbook
+                    _rte.collect_checkable_issues(parsed_or_error), pen_rules_bundle
                 )
                 if rt_failures and attempt < attempts_allowed:
                     replacement_text_failures = [result.failure for _issue, result in rt_failures]

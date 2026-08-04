@@ -152,7 +152,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
+            {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
             clear=True,
         ):
             with patch(
@@ -185,7 +185,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {
-                "S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
+                "OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
                 "S3_ENDPOINT_URL": "http://minio:9000",
                 "S3_PUBLIC_ENDPOINT_URL": "http://localhost:9000",
                 "AWS_ACCESS_KEY_ID": "local",
@@ -226,7 +226,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {
-                "S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
+                "OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
                 "S3_PUBLIC_ENDPOINT_URL": "http://localhost:9000",
             },
             clear=True,
@@ -252,7 +252,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {
-                "S3_OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
+                "OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
                 "S3_PUBLIC_ENDPOINT_URL": "http://localhost:9000",
             },
             clear=True,

@@ -25,6 +25,7 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -383,12 +384,65 @@ class TestHttpSurface(DemoAuthTestBase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["username"], "user")
-        # The response carries a verifiable session token whose sub is the
-        # user's local:<username> row key (what get_current_user returns).
-        self.assertTrue(body.get("token"))
-        claims = demo_auth.verify_demo_token(body["token"])
+        # issue #468: the token is NEVER in the response body (page-JS-readable)
+        # -- it travels only as the httpOnly session cookie set below.
+        self.assertNotIn("token", body)
+
+        # The session cookie itself: httpOnly + Secure + SameSite=Strict,
+        # and its value verifies to the same identity the body describes.
+        set_cookie = response.headers.get("set-cookie", "")
+        self.assertIn(f"{demo_auth.DEMO_SESSION_COOKIE_NAME}=", set_cookie)
+        self.assertIn("HttpOnly", set_cookie)
+        self.assertIn("Secure", set_cookie)
+        self.assertIn("SameSite=strict", set_cookie.lower().replace("samesite", "SameSite"))
+        self.assertIn(demo_auth.DEMO_SESSION_COOKIE_NAME, response.cookies)
+        claims = demo_auth.verify_demo_token(response.cookies[demo_auth.DEMO_SESSION_COOKIE_NAME])
         self.assertEqual(claims["sub"], demo_auth.local_user_sub("user"))
         self.assertFalse(claims["is_admin"])
+
+        # And that cookie is what get_current_user accepts on a subsequent
+        # request in password mode -- no Authorization header at all. The
+        # stored (DynamoDB) auth-mode toggled above gates login_with_password;
+        # get_current_user's dispatch is the separate deployment-level
+        # AUTH_MODE env var (config.auth_mode(), backend/src/auth.py) --
+        # both must say "password" for a real Docker Compose deployment.
+        cookie_value = response.cookies[demo_auth.DEMO_SESSION_COOKIE_NAME]
+        with unittest.mock.patch.dict(os.environ, {"AUTH_MODE": "password"}):
+            whoami = self.client.get(
+                "/whoami", cookies={demo_auth.DEMO_SESSION_COOKIE_NAME: cookie_value}
+            )
+        self.assertEqual(whoami.status_code, 200, whoami.text)
+        self.assertEqual(whoami.json()["sub"], demo_auth.local_user_sub("user"))
+
+    def test_get_me_restores_username_via_session_cookie_after_login(self):
+        # issue #468 AC #1 ("Sign in -> reload -> still signed in"): the
+        # password-mode SPA's restore-on-mount probe is GET /api/me, not
+        # /whoami -- it reads the `username` field this test pins to decide
+        # whether to skip the login gate on reload. This is the real
+        # end-to-end round trip (POST /api/auth/login -> take the returned
+        # DEMO_SESSION_COOKIE_NAME cookie -> GET /api/me with ONLY that
+        # cookie, no Authorization header), not the /whoami proxy the
+        # sibling test above exercises.
+        demo_auth.seed_demo_users(self.ddb)
+        self._as(ADMIN_SUB, ADMIN["email"])
+        self.client.post("/api/admin/auth-mode", json={"auth_mode": "password"})
+
+        backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
+        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret"
+        login_response = self.client.post(
+            "/api/auth/login", json={"username": "user", "password": "user"}
+        )
+        self.assertEqual(login_response.status_code, 200, login_response.text)
+        cookie_value = login_response.cookies[demo_auth.DEMO_SESSION_COOKIE_NAME]
+
+        with unittest.mock.patch.dict(os.environ, {"AUTH_MODE": "password"}):
+            me_response = self.client.get(
+                "/api/me", cookies={demo_auth.DEMO_SESSION_COOKIE_NAME: cookie_value}
+            )
+        self.assertEqual(me_response.status_code, 200, me_response.text)
+        body = me_response.json()
+        self.assertEqual(body["username"], "user")
+        self.assertFalse(body["is_admin"])
 
     def test_post_auth_login_rejected_when_sso_only(self):
         demo_auth.seed_demo_users(self.ddb)
@@ -396,6 +450,43 @@ class TestHttpSurface(DemoAuthTestBase):
         backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
         response = self.client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
         self.assertEqual(response.status_code, 403, response.text)
+
+    def test_post_auth_logout_clears_the_session_cookie(self):
+        demo_auth.seed_demo_users(self.ddb)
+        self._as(ADMIN_SUB, ADMIN["email"])
+        self.client.post("/api/admin/auth-mode", json={"auth_mode": "password"})
+        backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
+        os.environ["DEMO_TOKEN_SECRET"] = "test-demo-secret"
+
+        login_response = self.client.post(
+            "/api/auth/login", json={"username": "user", "password": "user"}
+        )
+        self.assertIn(demo_auth.DEMO_SESSION_COOKIE_NAME, login_response.cookies)
+
+        logout_response = self.client.post("/api/auth/logout")
+        self.assertEqual(logout_response.status_code, 200, logout_response.text)
+        set_cookie = logout_response.headers.get("set-cookie", "")
+        self.assertIn(f"{demo_auth.DEMO_SESSION_COOKIE_NAME}=", set_cookie)
+        # clear_demo_session_cookie's own docstring (demo_auth.py) requires
+        # the clearing cookie's attributes to match set_demo_session_cookie's
+        # or "the browser will not recognize it as the same cookie to clear"
+        # -- pin them here the same way the login test above pins the set
+        # cookie's attributes, so an attribute mismatch on the delete path
+        # (which would leave the session live in a real browser even though
+        # httpx's more-forgiving jar still drops it, see below) fails loudly.
+        self.assertIn("HttpOnly", set_cookie)
+        self.assertIn("Secure", set_cookie)
+        self.assertIn("SameSite=strict", set_cookie.lower().replace("samesite", "SameSite"))
+        self.assertIn("Path=/", set_cookie)
+        # An expired/cleared cookie carries no value the client keeps -- httpx
+        # drops it from the jar once cleared this way.
+        self.assertNotIn(demo_auth.DEMO_SESSION_COOKIE_NAME, logout_response.cookies)
+
+    def test_post_auth_logout_is_safe_with_no_session(self):
+        # Idempotent: calling logout with nothing to clear still 200s.
+        backend_main.app.dependency_overrides.pop(backend_main.get_current_user, None)
+        response = self.client.post("/api/auth/logout")
+        self.assertEqual(response.status_code, 200, response.text)
 
 
 def main() -> int:

@@ -50,6 +50,7 @@ x-resource-names: &resource-names
   AUTH_SETTINGS_TABLE: contract-toaster-auth-settings-dts
   PLAYBOOKS_TABLE: contract-toaster-playbooks-dts
   PLAYBOOK_VERSIONS_TABLE: contract-toaster-playbook-versions-dts
+  PLAYBOOK_INSTRUCTIONS_TABLE: contract-toaster-playbook-instructions-dts
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
@@ -125,6 +126,15 @@ services:
       DEPLOY_TARGET: dts
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password
+      # Issue #469: the login-throttle IP key (client_ip_from_request in
+      # backend/src/demo_auth.py) only honors X-Forwarded-For when this is
+      # set. Safe HERE because deploy/dts/nginx.conf's /api/ location
+      # OVERWRITES X-Forwarded-For with $remote_addr (nginx's own view of
+      # the peer) rather than forwarding a client-supplied value, and the
+      # `ports:` binding below keeps this service unreachable from outside
+      # the host except through that hop. Do not copy this flag to a
+      # topology where either of those is not also true.
+      TRUST_PROXY_HEADERS: "1"
       PIPELINE_RUNNER: inprocess
       STATE_MACHINE_ARN: "inprocess:contract-toaster-dts"
       # Presigned download URLs are host-bound (issue #273): the backend's
@@ -144,7 +154,19 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      # Bound to loopback only (issue #469): container-to-container traffic
+      # (nginx -> backend:8080, e.g. the frontend service's /api/ proxy)
+      # reaches this port over the compose network regardless of this
+      # `ports:` binding, so this does not affect that path. What it DOES
+      # do is stop the backend from being reachable from outside the host
+      # on its published port -- previously "0.0.0.0:8080:8080" put the raw
+      # FastAPI app (no throttle-header trust boundary, no nginx security
+      # headers) directly on the open internet on any host without an
+      # additional firewall, which is exactly the exposure
+      # deploy/dts/README.md's "API: http://localhost:8080" note assumes
+      # away. README's documented direct-API access from the host machine
+      # itself still works via localhost.
+      - "127.0.0.1:8080:8080"
 
   frontend:
     build:

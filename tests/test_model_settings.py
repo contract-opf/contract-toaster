@@ -395,15 +395,24 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
         ctor.assert_called_once_with(api_key=OTHER_KEY)
 
     def test_no_key_anywhere_raises_rather_than_calling_with_empty(self):
-        """OpenRouterModelClient rejects an empty key at construction, which
-        run_real_pipeline turns into a terminal ERROR at
-        stage=build_model_client -- there is NO silent fall back to the mock
+        """_build_openrouter_client rejects an empty key itself (issue #472),
+        BEFORE ever constructing OpenRouterModelClient -- which
+        run_real_pipeline's classify_failure_reason maps to the
+        `model_key_missing` reason token, and turns into a terminal ERROR at
+        stage=build_model_client. There is NO silent fall back to the mock
         pipeline (deploy/dts/docker-compose.coolify.yml claimed otherwise
-        until this change)."""
+        until this change).
+
+        Was `assertRaises(ValueError)` pre-#472: the empty-key rejection used
+        to live inside `OpenRouterModelClient.__init__`'s own defensive
+        guard, a bare `ValueError` `classify_failure_reason` could not
+        recognise -- so this exact case recorded the uninformative
+        `unhandled_exception` for the single most common first-run mistake.
+        """
         import src.pipeline_runner as pipeline_runner
 
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(pipeline_runner.model_client.ModelKeyMissingError):
                 pipeline_runner._build_openrouter_client(self.ddb)
 
 

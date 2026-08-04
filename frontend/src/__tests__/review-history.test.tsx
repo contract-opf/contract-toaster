@@ -73,6 +73,29 @@ const HISTORIC: HistoryRow = {
   has_input: false,
 };
 
+// Issue #471: a review run against the live, non-OPF playbook — no
+// `policy_version`/`posture_version` (those are OPF-v2-bundle-only and
+// resolve to None for this playbook), but a real `playbook_version` +
+// `playbook_content_hash` recorded at submission time. This is the shape
+// that was rendering "Version not recorded" for every live review before
+// this issue, including ones run the same day.
+const LIVE_PLAYBOOK_VERSIONED: HistoryRow = {
+  review_id: 'rev-live-versioned',
+  playbook_id: 'synthetic-nda-sample',
+  status: 'DONE',
+  decision: 'REQUEST_CHANGE',
+  created_at: '1800000400',
+  updated_at: '1800000500',
+  policy_version: null,
+  posture_version: null,
+  playbook_version: '1.0.0',
+  playbook_content_hash: 'sha256:abcdef0123456789abcdef0123456789',
+  primary_model_id: 'vendor/primary-of-that-day',
+  critic_model_id: 'vendor/critic-of-that-day',
+  has_output: true,
+  has_input: true,
+};
+
 interface StubbedCall {
   status: number;
   body: unknown;
@@ -175,6 +198,26 @@ describe('History — the provenance record', () => {
     expect(historic.textContent?.toLowerCase()).toContain('not recorded');
   });
 
+  // Issue #471: the live, non-OPF playbook never populated
+  // policy_version/posture_version, so every row rendered "Version not
+  // recorded" even for a review run the same day. A row that recorded a
+  // real playbook_version must render it — and its content hash — never
+  // fall back to "not recorded".
+  it('shows the recorded playbook version and content hash for a live (non-OPF) review', async () => {
+    stubRoutes({ '/api/reviews': listOf(LIVE_PLAYBOOK_VERSIONED) });
+    render(<ReviewHistory />);
+
+    const cell = await screen.findByTestId('history-playbook-rev-live-versioned');
+    expect(cell.textContent).toContain('synthetic-nda-sample');
+    expect(cell.textContent).toContain('1.0.0');
+    expect(cell.textContent?.toLowerCase()).not.toContain('not recorded');
+    // The full content hash is preserved (never silently dropped) — carried
+    // on the tooltip, same convention as AdminPlaybooks.tsx's version trail.
+    expect(cell.querySelector('[title]')?.getAttribute('title')).toContain(
+      LIVE_PLAYBOOK_VERSIONED.playbook_content_hash,
+    );
+  });
+
   it('shows when each review was toasted', async () => {
     stubRoutes({ '/api/reviews': listOf(MODERN) });
     render(<ReviewHistory />);
@@ -182,6 +225,80 @@ describe('History — the provenance record', () => {
     const cell = await screen.findByTestId('history-toasted-rev-modern');
     expect(cell.textContent?.trim()).not.toBe('');
     expect(cell.textContent).not.toContain('Invalid Date');
+  });
+});
+
+// Issue #470 — the History outcome column used to render the raw enum
+// (`REQUEST_CHANGE`) as its label while deriving its chip color from a
+// DIFFERENT field (`status`), so two rows with the identical outcome could
+// (and, live on 2026-08-02, did) render two different colors. Both defects
+// are pinned here against the real component, not just outcome.ts's own
+// unit tests.
+describe('History — the outcome chip (issue #470)', () => {
+  it('never shows the raw enum — a reviewer sees prose, not a wire identifier', async () => {
+    stubRoutes({ '/api/reviews': listOf(MODERN, HISTORIC) });
+    render(<ReviewHistory />);
+
+    const modern = await screen.findByTestId('history-outcome-rev-modern');
+    expect(modern.textContent).toContain('Changes requested');
+    expect(modern.textContent).not.toContain('REQUEST_CHANGE');
+
+    const historic = screen.getByTestId('history-outcome-rev-historic');
+    expect(historic.textContent).toContain('Accepted');
+    expect(historic.textContent).not.toContain('ACCEPT');
+  });
+
+  it('renders the SAME label and chip variant for the same outcome, regardless of document/provenance state', async () => {
+    // Two REQUEST_CHANGE reviews shaped like the live bug report: same
+    // decision, but everything else that must NOT drive the chip differs —
+    // status, and whether a redline/input pointer was recorded.
+    const withOutput: HistoryRow = {
+      ...MODERN,
+      review_id: 'rev-request-change-a',
+      status: 'DONE',
+      decision: 'REQUEST_CHANGE',
+      has_output: true,
+      has_input: true,
+    };
+    const withoutOutput: HistoryRow = {
+      ...MODERN,
+      review_id: 'rev-request-change-b',
+      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      decision: 'REQUEST_CHANGE',
+      has_output: false,
+      has_input: false,
+    };
+    stubRoutes({ '/api/reviews': listOf(withOutput, withoutOutput) });
+    render(<ReviewHistory />);
+
+    const cellA = await screen.findByTestId(`history-outcome-${withOutput.review_id}`);
+    const cellB = await screen.findByTestId(`history-outcome-${withoutOutput.review_id}`);
+    const chipA = cellA.querySelector('ct-chip');
+    const chipB = cellB.querySelector('ct-chip');
+
+    expect(cellA.textContent).toBe(cellB.textContent);
+    expect(chipA?.getAttribute('variant')).toBe(chipB?.getAttribute('variant'));
+  });
+
+  it('shows QUARANTINED as the outcome, not the stale ACCEPT decision the pipeline already wrote', async () => {
+    // RUNBOOK.md: an operator quarantines a review that IS being relied on —
+    // i.e. a DONE row that already carries decision ACCEPT/REQUEST_CHANGE.
+    // The quarantine writer (backend/src/reviews.py) only sets status/
+    // quarantine_reason/quarantine_bundle_hash; it never clears `decision`.
+    // A reviewer must see "Quarantined" (red), never a clean "Accepted".
+    const quarantined: HistoryRow = {
+      ...MODERN,
+      review_id: 'rev-quarantined',
+      status: 'QUARANTINED',
+      decision: 'ACCEPT',
+    };
+    stubRoutes({ '/api/reviews': listOf(quarantined) });
+    render(<ReviewHistory />);
+
+    const cell = await screen.findByTestId(`history-outcome-${quarantined.review_id}`);
+    expect(cell.textContent).toContain('Quarantined');
+    expect(cell.textContent).not.toContain('Accepted');
+    expect(cell.querySelector('ct-chip')?.getAttribute('variant')).toBe('danger');
   });
 });
 
@@ -317,6 +434,35 @@ describe('History — re-downloading past work', () => {
     expect(screen.queryByTestId('history-download-output-rev-historic')).toBeNull();
     const actions = screen.getByTestId('history-actions-rev-historic');
     expect(actions.textContent?.toLowerCase()).toContain('no redline');
+  });
+
+  // Issue #466: a download 503's `detail` is server configuration (an unset
+  // storage env var — #465's own failure mode) — never something to show a
+  // reviewer — and this is a deterministic failure a retry cannot fix, so the
+  // row must show the same shared, no-"try again" copy the Review panel and
+  // auto-save use, never the raw detail. The env-var-shaped string below
+  // stands in for the real one without repeating it literally (the repo's
+  // own #465 gate greps the tree for that exact retired name).
+  const CONFIG_DETAIL = 'EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured.';
+
+  it('shows the shared friendly copy for a mis-configured backend, never the raw detail', async () => {
+    stubRoutes({
+      '/api/reviews?': listOf(MODERN),
+      '/output': { status: 503, body: { detail: CONFIG_DETAIL } },
+    });
+    render(<ReviewHistory />);
+
+    await screen.findByTestId('history-row-rev-modern');
+    fireEvent.click(screen.getByTestId('history-download-output-rev-modern'));
+
+    const message = await screen.findByTestId('history-action-message-rev-modern');
+    expect(message.textContent).not.toContain(CONFIG_DETAIL);
+    expect(message.textContent).not.toContain('EXAMPLE_STORAGE_BUCKET_ENV_VAR');
+    expect(message.textContent).not.toMatch(/HTTP\s*\d/i);
+    expect(message.textContent).not.toMatch(/\bstatus\s*\d{3}\b/i);
+    expect(message.textContent?.toLowerCase()).not.toContain('please try again');
+    expect(message.textContent).toContain("We couldn't prepare the download.");
+    expect(anchorClickSpy).not.toHaveBeenCalled();
   });
 
   it('renders a purged document as explicitly unavailable, and downloads nothing', async () => {

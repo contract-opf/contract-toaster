@@ -35,7 +35,7 @@ from functools import lru_cache
 from typing import Any
 
 import httpx
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Cookie, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
@@ -50,7 +50,7 @@ try:
 except ImportError:  # pragma: no cover — jose is always installed in prod
     raise
 
-_bearer = HTTPBearer(auto_error=True)
+_bearer = HTTPBearer(auto_error=False)
 
 
 def _get_cognito_pool_id() -> str:
@@ -227,31 +227,55 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Security(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
+    session_cookie: str | None = Cookie(default=None, alias=demo_auth.DEMO_SESSION_COOKIE_NAME),
 ) -> dict[str, Any]:
-    """FastAPI dependency: verify the Bearer token and return the claims.
+    """FastAPI dependency: verify the caller's credential and return the claims.
 
     Dispatches on the deployment-level AUTH_MODE (config.auth_mode()):
-      - `sso` (default, the AWS target): Cognito JWT verification only —
-        unchanged behavior.
-      - `password` (the Docker Compose target): demo session-token verification only.
-      - `both`: route by the token's issuer — a demo token to the demo
-        verifier, anything else to Cognito.
+      - `sso` (default, the AWS target): Cognito JWT verification via the
+        `Authorization: Bearer` header only — unchanged behavior.
+      - `password` (the Docker Compose target): demo session verification.
+        Since issue #468 the demo session travels as an httpOnly, Secure,
+        SameSite=Strict cookie (`demo_auth.DEMO_SESSION_COOKIE_NAME`, set by
+        POST /api/auth/login) rather than a page-JS-readable Bearer token —
+        that cookie is what a real browser sends. A Bearer-carried demo
+        token is still honored when present (e.g. a non-browser API
+        caller), same verifier either way.
+      - `both`: an `Authorization` header, when present, is routed exactly
+        as before this issue — a demo-issued token to the demo verifier,
+        anything else to Cognito (`looks_like_demo_token`). A request with
+        no header but a session cookie is routed to the demo verifier, so
+        the Cognito/Amplify header path is untouched by this dispatch.
+
+    `_bearer` is `auto_error=False` so a request with neither a header nor
+    a cookie reaches this function (as `None`/`None`) instead of the
+    HTTPBearer default 403 — this function raises HTTP 401 for that case
+    itself, uniformly across all three modes.
 
     The returned claims always carry `sub`, so the downstream
-    require_active_user lookup is identical for both paths. Raises HTTP
+    require_active_user lookup is identical for every path. Raises HTTP
     401/403 on any verification failure.
     """
-    token = credentials.credentials
     mode = config.auth_mode()
+    bearer_token = credentials.credentials if credentials is not None else None
 
     if mode == demo_auth.AUTH_MODE_PASSWORD:
+        token = bearer_token or session_cookie
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
         return demo_auth.verify_demo_token(token)
 
     if mode == demo_auth.AUTH_MODE_BOTH:
-        if demo_auth.looks_like_demo_token(token):
-            return demo_auth.verify_demo_token(token)
-        return _verify_cognito_token(token)
+        if bearer_token is not None:
+            if demo_auth.looks_like_demo_token(bearer_token):
+                return demo_auth.verify_demo_token(bearer_token)
+            return _verify_cognito_token(bearer_token)
+        if session_cookie:
+            return demo_auth.verify_demo_token(session_cookie)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
 
-    # Default / `sso`: Cognito only.
-    return _verify_cognito_token(token)
+    # Default / `sso`: Cognito only, via the Authorization header.
+    if bearer_token is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
+    return _verify_cognito_token(bearer_token)

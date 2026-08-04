@@ -114,6 +114,91 @@ class _Scan(NamedTuple):
 
 _WORD_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
+# Keywords after which a bare `/` starts a regex literal rather than acting
+# as the division operator (JS/TS grammar: a `/` is a regex literal unless
+# the previous significant token could end an expression on its own --
+# identifier, number, `)`, `]`, string/template/regex literal -- in which
+# case it is division). Used only to disambiguate `/` when the previous
+# significant character is itself a word character, e.g. `return /x/`.
+_REGEX_PRECEDING_KEYWORDS = {
+    "return", "typeof", "instanceof", "new", "delete", "void", "do", "else",
+    "in", "of", "yield", "throw", "case", "extends", "await", "default",
+}
+
+# Punctuation after which a bare `/` starts a regex literal. Deliberately
+# excludes `<`/`>`: this corpus renders JSX/HTML via tagged template
+# literals (`html`...``), and a closing tag's `/` (`</span>`) sitting right
+# after `<` is far more common here than a real `a < /regex/` comparison --
+# treating it as a regex opener risks swallowing real template content
+# (including a literal backtick) whenever an already-imperfect nested-
+# template-literal tracking momentarily desyncs into "code" mode.
+_REGEX_PRECEDING_PUNCT = set("([{,;:=!&|?+-*%^~")
+
+
+def _regex_literal_allowed_here(out: list[str]) -> bool:
+    """True if a `/` encountered right now would be a regex-literal opener
+    given what has been emitted so far, rather than the division operator.
+
+    Looks at the last significant (non-whitespace) character already
+    emitted. Punctuation from `_REGEX_PRECEDING_PUNCT`, or start-of-file/
+    expression, always allows a regex. A word character means the `/`
+    follows an identifier, number, or keyword -- allowed only if that
+    trailing word is itself one of `_REGEX_PRECEDING_KEYWORDS` (`return
+    /x/`, not `a / b`). Anything else (`)`, `]`, a closing quote) is
+    division.
+    """
+    j = len(out) - 1
+    while j >= 0 and out[j] in " \t\n":
+        j -= 1
+    if j < 0:
+        return True
+    ch = out[j]
+    if ch in _REGEX_PRECEDING_PUNCT:
+        return True
+    if ch not in _WORD_CHARS:
+        return False
+    end = j + 1
+    start = j
+    while start >= 0 and out[start] in _WORD_CHARS:
+        start -= 1
+    word = "".join(out[start + 1 : end])
+    return word in _REGEX_PRECEDING_KEYWORDS
+
+
+def _regex_literal_end(src: str, start: int, n: int) -> int | None:
+    """If a regex literal opens at `src[start]` (`==` '/'), return the index
+    just past its closing `/` plus any trailing flag letters (`g`, `i`, …).
+    Returns None if no valid closing `/` is found before a bare newline or
+    EOF -- the caller then falls back to treating `/` as an ordinary
+    character (division), since an actual regex literal never spans a raw
+    newline unescaped.
+
+    A `/` inside a `[...]` character class does not need escaping and does
+    not close the literal (e.g. `/[^\\s<>"']+/g`) -- exactly the construct
+    that motivated this function: a bare quote inside that class must never
+    be handed to the quote-tracking state machine as a string opener.
+    """
+    j = start + 1
+    in_class = False
+    while j < n:
+        c = src[j]
+        if c == "\n":
+            return None
+        if c == "\\" and j + 1 < n:
+            j += 2
+            continue
+        if c == "[":
+            in_class = True
+        elif c == "]":
+            in_class = False
+        elif c == "/" and not in_class:
+            j += 1
+            while j < n and src[j] in _WORD_CHARS:
+                j += 1
+            return j
+        j += 1
+    return None
+
 
 def _scan_ts(src: str) -> _Scan:
     """Scan `src`, stripping `//` and `/* */` comments.
@@ -131,6 +216,14 @@ def _scan_ts(src: str) -> _Scan:
     starts a string literal directly after an identifier or digit, so the rule
     costs nothing. `open_quote` is reported so callers can prove that no file
     in the corpus ends mid-string.
+
+    Regex literals (`/…/flags`) are recognized and passed through whole via
+    `_regex_literal_allowed_here` / `_regex_literal_end`, rather than parsed
+    character-by-character: an unescaped quote inside a regex's character
+    class (e.g. `/[^\\s<>"']+/g`) is regex syntax, not a string opener, and
+    treating it as one desyncs the quote-tracking state for the rest of the
+    file -- silently disabling comment stripping from that point on, the
+    same failure mode `'` disambiguation above exists to avoid.
     """
     out: list[str] = []
     template_lines: set[int] = set()
@@ -177,6 +270,12 @@ def _scan_ts(src: str) -> _Scan:
                 i += 1
             i += 2
             continue
+        if ch == "/" and _regex_literal_allowed_here(out):
+            regex_end = _regex_literal_end(src, i, n)
+            if regex_end is not None:
+                emit(src[i:regex_end])
+                i = regex_end
+                continue
         emit(ch)
         i += 1
 

@@ -120,6 +120,7 @@ def _review_row(
     created_at: Any,
     reason: str | None = None,
     failing_stage: str | None = None,
+    failed_at: Any = None,
     sensitive: bool = False,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
@@ -133,6 +134,9 @@ def _review_row(
         row["reason"] = reason
     if failing_stage is not None:
         row["failing_stage"] = failing_stage
+    # Issue #472: WHEN the failure was recorded, distinct from `created_at`.
+    if failed_at is not None:
+        row["failed_at"] = failed_at
     if sensitive:
         row.update(SENSITIVE_FIELDS)
     return row
@@ -452,7 +456,12 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
 
 
 # ---------------------------------------------------------------------------
-# 3. The negative assertion: nothing but the five fields crosses the boundary
+# 3. The negative assertion: nothing but the documented fields crosses the
+# boundary. Issue #472 deliberately WIDENS this from five fields to six
+# (adding `failed_at`) -- same "restate the invariant, don't just loosen it"
+# pattern as tests/test_stage_failure_taxonomy.py's own #442 update: the
+# allowlist is still an exhaustive, hand-maintained list, it just now lists
+# one more deliberate disclosure decision.
 # ---------------------------------------------------------------------------
 
 
@@ -467,18 +476,22 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
                 created_at="1700000000",
                 reason="model_account_out_of_credits",
                 failing_stage="run_review",
+                failed_at="1700000042",
                 sensitive=True,
             )
         ]
 
-    def test_row_shape_is_exactly_the_five_documented_fields(self) -> None:
+    def test_row_shape_is_exactly_the_six_documented_fields(self) -> None:
         row = self._get().json()["failures"][0]
         self.assertEqual(
             sorted(row.keys()),
-            sorted(["review_id", "created_at", "failing_stage", "reason", "status"]),
+            sorted(
+                ["review_id", "created_at", "failed_at", "failing_stage", "reason", "status"]
+            ),
         )
         self.assertEqual(row["reason"], "model_account_out_of_credits")
         self.assertEqual(row["failing_stage"], "run_review")
+        self.assertEqual(row["failed_at"], "1700000042")
         self.assertEqual(row["status"], "ERROR")
 
     def test_no_sensitive_field_appears_anywhere_in_the_response(self) -> None:

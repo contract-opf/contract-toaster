@@ -78,11 +78,13 @@ from typing import Any, Callable
 import boto3
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
-    from src import config, model_client, model_settings, reviews
+    from src import config, model_client, model_settings, playbook_upload, playbook_versions, reviews
 except ImportError:  # pragma: no cover
     import config  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
     import model_settings  # type: ignore[no-redef]
+    import playbook_upload  # type: ignore[no-redef]
+    import playbook_versions  # type: ignore[no-redef]
     import reviews  # type: ignore[no-redef]
 
 # scripts/review_spine.py (issue #239) composes the pipeline-stage modules
@@ -95,6 +97,7 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+import canonicalize  # noqa: E402
 import playbook_registry  # noqa: E402
 import review_spine  # noqa: E402
 
@@ -155,6 +158,31 @@ def classify_failure_reason(exc: BaseException) -> str:
         # measured by the provider, not estimated pre-call. Same terminal
         # status (see reviews.STAGE_FAILURE_REASON_STATUS).
         return "model_context_length_exceeded"
+    # Issue #472: both of these subclass ModelInvocationError, so they must
+    # be checked BEFORE the generic ModelInvocationError/status_code branch
+    # below -- exactly the same ordering reason ModelContextLengthExceededError
+    # is checked first above.
+    if isinstance(exc, model_client.ModelKeyMissingError):
+        # A PRE-CALL condition: no key was resolved, so no request was ever
+        # sent. Distinct from `model_key_rejected` (a provider 401/403 --
+        # a key WAS sent and refused).
+        return "model_key_missing"
+    if isinstance(exc, model_client.ModelTimeoutError):
+        return "model_timeout"
+    # Issue #527: both subclass ModelInvocationError, so -- same ordering
+    # reason as the branches above -- they must be checked BEFORE the
+    # generic ModelInvocationError/status_code branch below.
+    # ModelOutputTruncatedError is checked before ModelEmptyContentError
+    # because `OpenRouterModelClient.invoke` itself prefers the truncation
+    # classification whenever both are true (a truncated response whose
+    # content also happens to be empty): that ordering is enforced once,
+    # here, at the client -- these two `isinstance` checks below can never
+    # both be reachable for the SAME exception instance, but are kept in
+    # the same relative order for readability.
+    if isinstance(exc, model_client.ModelOutputTruncatedError):
+        return "model_output_truncated"
+    if isinstance(exc, model_client.ModelEmptyContentError):
+        return "model_empty_content"
     if isinstance(exc, model_client.ModelInvocationError):
         status_code = getattr(exc, "status_code", None)
         if isinstance(status_code, int):
@@ -448,13 +476,23 @@ def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
 
 def _fail_review(review_id: str, dynamodb_resource: Any) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    # Issue #472: stamp `failed_at` here too -- this is the mock pipeline's
+    # own ERROR write, parallel to (but not routed through)
+    # reviews.record_stage_failure, which stamps it for the real pipeline's
+    # exception path. Same value as `updated_at`; a distinct field so the
+    # Diagnostics tab can show WHEN a review failed rather than reusing
+    # `created_at` (when it was submitted) under a "Failed at" header.
+    now = str(int(time.time()))
     try:
         table.update_item(
             Key={"review_id": review_id},
-            UpdateExpression="SET #s = :e, failing_stage = :stage, updated_at = :now",
+            UpdateExpression=(
+                "SET #s = :e, failing_stage = :stage, failed_at = :failed_at, updated_at = :now"
+            ),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
-                ":e": "ERROR", ":stage": "inprocess_pipeline", ":now": str(int(time.time()))
+                ":e": "ERROR", ":stage": "inprocess_pipeline",
+                ":failed_at": now, ":now": now,
             },
         )
     except Exception:  # pragma: no cover - best effort
@@ -467,25 +505,210 @@ def _fail_review(review_id: str, dynamodb_resource: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _load_playbook_bundle(playbook_id: str) -> dict[str, Any]:
-    """Read `playbook_id`'s release-bundle body off disk (the checked-in
-    `playbooks/<id>.json` artifact `playbook_registry` resolves), mirroring
-    scripts/eval_harness.py's load_playbook.
+def _load_opf_bundle_if_active(
+    playbook_id: str, dynamodb_resource: Any, s3_client: Any
+) -> dict[str, Any] | None:
+    """Issue #479 step 1: if `playbook_id`'s ACTIVE `playbook_versions` row
+    (issue #478's upload+activate flow, distinct from the registry's static
+    `bundle_path`) carries an OPF artifact_kind, load and re-validate the
+    stored, content-addressed artifact and return an `opf_bundle_v2`-shaped
+    dict for `scripts/review_spine.py::run_review`. Returns `None` -- never
+    raises for a routine "nothing OPF here" outcome -- when there is no
+    active version row at all, or the active row is not an OPF artifact
+    (`artifact_kind` absent or `"v1"`): both cases fall through to
+    `_load_playbook_bundle`'s unchanged registry-disk read, exactly
+    reproducing today's behavior for every playbook that has never been
+    uploaded through the new flow (the shipped v1 sample) or was uploaded
+    as a v1 JSON document.
 
-    Issue #401 (empty-shell foundation): this function is deliberately NOT
-    the runtime-activation gate -- it is a dumb, unconditional read, exactly
-    as before. `run_real_pipeline` below is what turned "read whichever
-    playbook_id the payload named, no questions asked" into "only after
-    reviews.verify_submission_time_bundle has confirmed the runtime
-    activation record (PLAYBOOKS_TABLE.active_release_bundle_hash, issue
-    #194) still calls this playbook_id's bundle active" -- this helper never
-    reads playbooks/*.json without that gate having already passed. Raises
-    playbook_registry.PlaybookNotRegisteredError for an unregistered
-    playbook_id (e.g. "nda", not yet a real reviewable playbook) -- caught
-    by run_real_pipeline's fail-closed except block."""
+    Re-validates (rather than trusting the row) via
+    `src.playbook_upload._load_opf_from_bytes` -- the SAME tested,
+    Path-based `opf_load.load_opf_document` call the upload route itself
+    validated with (schema dispatch, `identity.content_hash` verification,
+    the injection scan, sibling-id uniqueness) -- reused rather than
+    re-implemented, so a byte later corrupted in object storage is caught
+    here exactly as it would be on re-upload, not trusted blindly at
+    review-run time.
+
+    Purely additive and never raises for a deployment target that has not
+    configured the `playbook_versions` upload flow at all -- mirrors
+    `backend/src/reviews.py::_resolve_playbook_version_lineage`'s own
+    "PLAYBOOK_VERSIONS_TABLE not configured -> nothing to resolve" guard,
+    for the same reason: a target that never set this env var (every test
+    fixture and deployment predating issue #478) must keep reading the
+    registry disk path exactly as before, not raise a KeyError on an env
+    var it never had reason to set.
+
+    `overrides` is always `None` here -- issue #479 DECISION (2026-08-04):
+    an earlier attempt threaded a `posture_override_system_prompt` field on
+    the active `playbook_versions` row into `overrides.posture
+    .system_prompt`, but nothing in the product ever writes that field (no
+    upload-route param, no admin UI), so the only place it was ever set was
+    a test hand-writing the DynamoDB item directly. That field is NOT
+    reinstated. An empty-posture activated artifact is a legitimate,
+    supported state (the real/public OPF playbooks ship `posture: {}` on
+    purpose) -- `scripts/review_knowledge.py::resolve_knowledge` composes it
+    using the playbook's own digest and, when supplied, the deployment's
+    standing instructions (issue #482/#483) threaded in by
+    `run_real_pipeline` below, never a posture override this function has
+    no way to obtain.
+
+    Raises (uncaught, fail-closed via `run_real_pipeline`'s own catch-all)
+    if the row claims `artifact_kind: opf-*` but carries no `storage_key`
+    (a write that should be impossible per `record_playbook_version_upload`,
+    but this function does not silently fall back to the registry for it --
+    that would run a review against content that is NOT what was activated)
+    or if the stored bytes fail re-validation.
+    """
+    if not os.environ.get("PLAYBOOK_VERSIONS_TABLE"):
+        return None
+    active_item = playbook_versions.get_active_version_record(playbook_id, dynamodb_resource)
+    if active_item is None:
+        return None
+    artifact_kind = active_item.get("artifact_kind") or ""
+    if not artifact_kind.startswith("opf-"):
+        return None
+    storage_key = active_item["storage_key"]
+    bucket = os.environ["UPLOADS_BUCKET"]
+    raw_bytes = s3_client.get_object(Bucket=bucket, Key=storage_key)["Body"].read()
+    opf_doc = playbook_upload._load_opf_from_bytes(raw_bytes, suffix=".json")
+    return {
+        "opf_bundle_v2": {
+            "opf": opf_doc,
+            "overrides": None,
+            # Issue #479 fix round 2: the activated row's own recorded
+            # operator decision (main.py's upload route -> `main.py`:1109 ->
+            # `playbook_versions.record_playbook_version_upload`) MUST ride
+            # along with the bundle it governs, or `review_knowledge
+            # .resolve_knowledge`'s `accept_stub_basis` defaults to False on
+            # every review and an artifact the operator explicitly accepted
+            # at upload time is refused forever, with no remedy, at
+            # review-composition time -- the exact "activated artifact the
+            # runtime refuses, no redline, ever" failure class the ticket's
+            # 2026-08-04 DECISION exists to eliminate, and worse: here the
+            # acceptance IS on record and was simply being dropped.
+            "accepted_stub_basis": bool(active_item.get("accepted_stub_basis", False)),
+        },
+        "playbook": {"metadata": {}},
+    }
+
+
+def _load_playbook_bundle(
+    playbook_id: str, dynamodb_resource: Any = None, s3_client: Any = None
+) -> dict[str, Any]:
+    """Resolve `playbook_id`'s review-governing bundle (issue #479 step 1).
+
+    An activated OPF artifact (`_load_opf_bundle_if_active`, issue #478's
+    upload flow) takes precedence when one is active; otherwise this reads
+    `playbook_id`'s release-bundle body off disk (the checked-in
+    `playbooks/<id>.json` artifact `playbook_registry` resolves), mirroring
+    scripts/eval_harness.py's load_playbook -- byte-identical to this
+    function's pre-#479 behavior, and the ONLY path taken when
+    `dynamodb_resource`/`s3_client` are omitted (every caller that has no
+    handle to either, e.g. scripts/eval_harness.py itself, keeps working
+    unchanged).
+
+    Issue #401 (empty-shell foundation): the registry-disk branch is
+    deliberately NOT the runtime-activation gate -- it is a dumb,
+    unconditional read, exactly as before. `run_real_pipeline` below is
+    what turned "read whichever playbook_id the payload named, no questions
+    asked" into "only after reviews.verify_submission_time_bundle has
+    confirmed the runtime activation record (PLAYBOOKS_TABLE
+    .active_release_bundle_hash, issue #194) still calls this playbook_id's
+    bundle active" -- this helper never reads playbooks/*.json (nor an OPF
+    artifact) without that gate having already passed. Raises
+    playbook_registry.PlaybookNotRegisteredError for a playbook_id with
+    neither an active OPF version nor a registry entry -- caught by
+    run_real_pipeline's fail-closed except block.
+    """
+    if dynamodb_resource is not None and s3_client is not None:
+        opf_bundle = _load_opf_bundle_if_active(playbook_id, dynamodb_resource, s3_client)
+        if opf_bundle is not None:
+            return opf_bundle
     entry = playbook_registry.resolve_playbook(playbook_id)
     with open(entry.playbook_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _opf_lineage_for_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Issue #479 step 5: `identity.content_hash` + a hash of
+    `identity.section_digests`, read straight off the OPF document
+    `_load_opf_bundle_if_active` just loaded -- empty for a v1 bundle (no
+    `opf_bundle_v2` key) or for an OPF document whose `identity` carries
+    neither field (schema-valid, since only `identity.content_hash` is load-
+    bearing for `load_opf_document`'s own hash-verification gate).
+
+    `opf_section_digests_hash` -- a hash of the digests, not the raw dict --
+    reuses the exact field-naming and hashing convention
+    `backend/src/reviews.py::_resolve_opf_lineage` already established for
+    the OTHER (registry `bundle_path`, issue #287) OPF-lineage source, so
+    `get_review_detail`'s existing generic `item.get("opf_content_hash")` /
+    `item.get("opf_section_digests_hash")` projection surfaces this
+    source's values with no reader-side change. That resolver stamps these
+    fields at SUBMISSION time from a registry `bundle_path` -- always None
+    for a playbook activated purely through the #478 upload flow, since it
+    has no registry `bundle_path` entry -- so this function stamping them
+    again at TERMINAL time from the actually-loaded artifact never
+    clobbers a value `_resolve_opf_lineage` already wrote; it is the first
+    (and only) writer for this source. Returned fields are "absent, never a
+    null placeholder" -- matching every other lineage resolver in this
+    codebase -- so `_write_real_terminal`'s SET clause below only ever adds
+    an attribute it has a real value for.
+    """
+    opf_bundle_v2 = bundle.get("opf_bundle_v2")
+    if opf_bundle_v2 is None:
+        return {}
+    identity = (opf_bundle_v2.get("opf") or {}).get("identity") or {}
+    lineage: dict[str, Any] = {}
+    content_hash = identity.get("content_hash")
+    if isinstance(content_hash, str):
+        lineage["opf_content_hash"] = content_hash
+    section_digests = identity.get("section_digests")
+    if section_digests:
+        lineage["opf_section_digests_hash"] = canonicalize.content_hash(section_digests)
+    return lineage
+
+
+def _floor_coverage_for_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Issue #479 finding (round-1 fix): an ids-only projection of
+    `review_spine.run_review`'s `floor_judgment`
+    (`{"verdicts": [...], "unjudged": [...]}`) safe to persist on the
+    reviews row.
+
+    Each `verdicts` entry also carries `evidence_quote` -- a short quote FROM
+    THE REVIEWED DOCUMENT -- which docs/data-handling.md classifies as
+    Confidential document substance, never something recorded outside
+    retention-governed S3/`analysis_report` storage. This function drops it
+    (and drops the invariant's own `statement`/rationale text, which
+    `review_spine.run_review` never even threads this far) and keeps only
+    `invariant_id` and its `violated` bool -- the same "opaque identifiers
+    only, no clause text" discipline docs/data-handling.md already applies to
+    retrieved `clause_ids`.
+
+    Absent (never a null/empty placeholder) whenever `result` carries no
+    `floor_judgment` key at all -- a v1 review, or an OPF review with an
+    empty Floor -- so `_write_real_terminal`'s SET clause below only ever
+    adds an attribute it has a real value for, matching `_opf_lineage_for_
+    bundle`'s own convention. A key with an empty list is never written
+    either (DynamoDB rejects an empty-list SET the same way it does an empty
+    string set), so a Floor with invariants but zero violations still omits
+    `floor_violated_invariant_ids` rather than writing `[]`.
+    """
+    floor_judgment = result.get("floor_judgment")
+    if not floor_judgment:
+        return {}
+    verdicts = floor_judgment.get("verdicts") or []
+    judged_ids = [v["invariant_id"] for v in verdicts]
+    violated_ids = [v["invariant_id"] for v in verdicts if v.get("violated")]
+    unjudged_ids = list(floor_judgment.get("unjudged") or [])
+    coverage: dict[str, Any] = {}
+    if judged_ids:
+        coverage["floor_judged_invariant_ids"] = judged_ids
+    if violated_ids:
+        coverage["floor_violated_invariant_ids"] = violated_ids
+    if unjudged_ids:
+        coverage["floor_unjudged_invariant_ids"] = unjudged_ids
+    return coverage
 
 
 def _bundle_with_openrouter_model_ids(
@@ -533,8 +756,23 @@ def _build_openrouter_client(dynamodb_resource: Any = None) -> "model_client.Ope
     restarting, while a deploy that only ever set the env var keeps working
     unchanged. Resolved per review rather than cached at import, so a
     rotation takes effect on the next review instead of the next restart.
+
+    Issue #472: a missing/empty key is classified HERE, pre-call, rather than
+    left to `OpenRouterModelClient.__init__`'s own defensive `ValueError` --
+    that ValueError isn't a `ModelInvocationError` at all, so
+    `classify_failure_reason` had no way to tell it apart from any other bug
+    and recorded the least-informative `unhandled_exception` for the single
+    most common first-run mistake (no key configured yet). Raising
+    `ModelKeyMissingError` here means the row instead records
+    `model_key_missing`, distinct from a provider-rejected key
+    (`model_key_rejected`) -- two different admin fixes, now two different
+    tokens.
     """
     api_key = model_settings.resolve_openrouter_api_key(dynamodb_resource)
+    if not api_key:
+        raise model_client.ModelKeyMissingError(
+            "No OpenRouter API key is configured for this deployment."
+        )
     return model_client.OpenRouterModelClient(api_key=api_key)
 
 
@@ -575,7 +813,9 @@ def _model_ids_for_run(bundle: dict[str, Any]) -> dict[str, str]:
 
 def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: str | None,
                           dynamodb_resource: Any,
-                          model_ids: dict[str, str] | None = None) -> None:
+                          model_ids: dict[str, str] | None = None,
+                          opf_lineage: dict[str, Any] | None = None,
+                          floor_coverage: dict[str, Any] | None = None) -> None:
     """Write the terminal reviews-row state from a ReviewResult dict
     (scripts/review_spine.py::run_review's return contract). Unlike
     reviews.record_stage_failure (used only for an actual raised
@@ -590,15 +830,54 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     written -- a caller that has none (the mock path, which invokes no model)
     leaves a row byte-identical to the one this function wrote before that
     issue, and the History tab renders "not recorded" rather than guessing.
+
+    `opf_lineage` (issue #479 step 5) is `_opf_lineage_for_bundle`'s dict:
+    `opf_content_hash` / `opf_section_digests_hash`, written under the SAME
+    field names `backend/src/reviews.py::_resolve_opf_lineage` already
+    established for its own (different-source) OPF lineage, so
+    `get_review_detail`'s existing generic projection surfaces them with no
+    reader-side change. Omitted (never a null placeholder) for a v1 review,
+    identically to `model_ids` above.
+
+    `floor_coverage` (issue #479 finding, round-1 fix) is
+    `_floor_coverage_for_result`'s ids-only dict: `floor_judged_invariant_
+    ids` / `floor_violated_invariant_ids` / `floor_unjudged_invariant_ids`.
+    Written on EVERY terminal call that has one -- including the
+    `floor_invariant_unjudged` quarantine, whose `result` carries
+    `floor_judgment` precisely so this survives that path too (that is the
+    whole point: an operator landing on a quarantined row must be able to
+    see WHICH invariant went unjudged, not just that one did). Omitted
+    (never a null placeholder) for a v1 review or an OPF review with an
+    empty Floor, identically to `opf_lineage` above.
+
+    Also stamps `failed_at` (issue #472) whenever `terminal` is not
+    `reviews.REVIEW_STATUS_SUCCESS_TERMINAL` -- same epoch-second string as
+    `updated_at`, same reasoning as `reviews.record_stage_failure`'s own
+    stamp: a row a Diagnostics reader lands on must carry the moment IT
+    failed, not the submission time it fell back to before this field
+    existed. A `DONE` row gets no `failed_at`, which is correct: it didn't
+    fail.
     """
     status_value = result["status"]
     terminal = "DONE" if status_value == "OK" else status_value
+    now_str = str(int(time.time()))
     set_clauses = ["#s = :s", "updated_at = :now"]
-    values: dict[str, Any] = {":s": terminal, ":now": str(int(time.time())), ":error": "ERROR"}
+    values: dict[str, Any] = {":s": terminal, ":now": now_str, ":error": "ERROR"}
+    if terminal != reviews.REVIEW_STATUS_SUCCESS_TERMINAL:
+        set_clauses.append("failed_at = :failed_at")
+        values[":failed_at"] = now_str
     for index, (field, model_id) in enumerate(sorted((model_ids or {}).items())):
         placeholder = f":m{index}"
         set_clauses.append(f"{field} = {placeholder}")
         values[placeholder] = model_id
+    for index, (field, lineage_value) in enumerate(sorted((opf_lineage or {}).items())):
+        placeholder = f":l{index}"
+        set_clauses.append(f"{field} = {placeholder}")
+        values[placeholder] = lineage_value
+    for index, (field, coverage_value) in enumerate(sorted((floor_coverage or {}).items())):
+        placeholder = f":fc{index}"
+        set_clauses.append(f"{field} = {placeholder}")
+        values[placeholder] = coverage_value
     if result.get("decision") is not None:
         set_clauses.append("decision = :d")
         values[":d"] = result["decision"]
@@ -684,6 +963,21 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
     """
     playbook_id = payload.get("playbook_id", "")
     stage = "mark_running"
+    # Issue #527: declared OUTSIDE the try so the fail-closed `except` below
+    # can always pass SOMETHING to `record_stage_failure` -- {} for a
+    # failure before `load_playbook` resolves it (no model was ever
+    # selected), the real pair once that stage has run. Previously
+    # `model_ids` only existed inside the try's local scope, so an
+    # unhandled exception (including one raised BY a model call) landed on
+    # the reviews row with neither `primary_model_id` nor `critic_model_id`
+    # recorded -- an ERROR row with no model provenance is unusable for a
+    # "which model did this?" Diagnostics follow-up.
+    model_ids: dict[str, str] = {}
+    # Issue #479 step 5: same "declared outside the try" reasoning as
+    # `model_ids` above -- {} before `load_playbook` resolves the bundle
+    # (nothing to stamp yet), the real OPF identity pair once it has, for
+    # whichever terminal write actually happens.
+    opf_lineage: dict[str, Any] = {}
     try:
         _mark_running(review_id, dynamodb_resource)
 
@@ -697,11 +991,14 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
 
         stage = "load_playbook"
         bundle = _bundle_with_openrouter_model_ids(
-            _load_playbook_bundle(playbook_id), dynamodb_resource
+            _load_playbook_bundle(playbook_id, dynamodb_resource, s3_client), dynamodb_resource
         )
         # Issue #449: capture the per-step model provenance for the terminal
         # write, from the bundle the spine is about to read it from.
         model_ids = _model_ids_for_run(bundle)
+        # Issue #479 step 5: capture the OPF identity lineage (empty for a
+        # v1 bundle) from the SAME bundle, before run_review consumes it.
+        opf_lineage = _opf_lineage_for_bundle(bundle)
 
         stage = "fetch_upload"
         docx_bytes = _fetch_upload_bytes(payload, s3_client)
@@ -718,6 +1015,16 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # older/hand-built payload degrades to the same "no guidance"
         # default as a genuinely absent key, never a TypeError downstream.
         toaster_guidance = payload.get("toaster_guidance") or ""
+        # Issue #483 (epic #481): the playbook's standing instructions, ALREADY
+        # resolved once at submission time (backend/src/reviews.py's
+        # _resolve_instructions_lineage, issue #482) and carried verbatim in
+        # this same execution-input payload -- never re-read from the
+        # instructions store here, which would reopen the mid-flight-save
+        # split brain #482 forbids. `.get(...) or ""` mirrors toaster_guidance
+        # above: an older payload (pre-#482) or a playbook with nothing ever
+        # saved has no `instructions_text` key at all, and degrades to the
+        # same "no standing instructions" default as an explicit empty string.
+        instructions_text = payload.get("instructions_text") or ""
         try:
             result = review_spine.run_review(
                 docx_bytes,
@@ -725,6 +1032,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 client,
                 review_id=review_id,
                 toaster_guidance=toaster_guidance,
+                instructions_text=instructions_text,
                 # Issue #447: publish the spine's real sub-stage
                 # (primary_pass -> critic_pass -> reconciliation -> redline)
                 # onto the reviews row as it happens, so the polling UI can
@@ -748,8 +1056,16 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
 
         stage = "persist_result"
         output_s3_key = _write_real_output(review_id, result, s3_client)
+        # Issue #479 finding (round-1 fix): the ids-only Floor-coverage
+        # projection of THIS result -- present for an OPF review that had
+        # invariants to judge, empty otherwise -- computed from `result`
+        # itself (never re-derived from `bundle`) so it reflects exactly
+        # what `run_review` actually judged for this run, including the
+        # `floor_invariant_unjudged` quarantine path.
+        floor_coverage = _floor_coverage_for_result(result)
         _write_real_terminal(
-            review_id, result, output_s3_key, dynamodb_resource, model_ids=model_ids
+            review_id, result, output_s3_key, dynamodb_resource,
+            model_ids=model_ids, opf_lineage=opf_lineage, floor_coverage=floor_coverage,
         )
         # Settling is deliberately the LAST thing, and deliberately cannot
         # throw (issue #446): by this point the redline is in object storage
@@ -770,7 +1086,14 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             stage,
             reason,
         )
-        reviews.record_stage_failure(review_id, stage, reason, dynamodb_resource)
+        # Issue #527: stamp whatever model provenance is known at the point
+        # of failure -- {} before `load_playbook` has run, the real pair
+        # after -- so an ERROR row (e.g. `model_empty_content`,
+        # `model_output_truncated`) still records WHICH models were in play,
+        # the same provenance a successful row gets via `_write_real_terminal`.
+        reviews.record_stage_failure(
+            review_id, stage, reason, dynamodb_resource, model_ids=model_ids
+        )
         _settle_reservation_safely(review_id, dynamodb_resource)
 
 

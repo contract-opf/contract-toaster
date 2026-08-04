@@ -19,16 +19,24 @@ all. Every lineage field still records a playbook as having governed it.
   - `review_knowledge.resolve_knowledge` is the ONE place refusals live, so it
     RAISES `KnowledgeRefusal` (checks 2-4).
 
-The unifying rule the refusal enforces: a review must carry prescriptive intent
-from a governed, hashed, human-approved artifact -- `posture.system_prompt` in
-playbook mode, the policy's rules in policy-only. When NEITHER exists there is
-nothing prescriptive at all, and no flag can make that a review.
+The unifying rule the refusal enforces (updated by issue #479's DECISION,
+2026-08-04): a review must carry SOME governed, hashed, human-approved
+content -- `posture.system_prompt`, a real digest of corpus precedent, or
+the policy's rules, any one of them is enough, in playbook mode; the
+policy's rules alone in policy-only mode. The operator's standing
+instructions are composed into the Guidance slot but are NOT a fourth
+candidate this rule checks -- `resolve_knowledge` never inspects
+`instructions_text` when deciding whether to refuse. A digest-less,
+posture-less document is caught by the SEPARATE no-digest refusal further
+down `opf_prompt.compose_opf_system_blocks` (`PromptCompositionError`), not
+by this module -- see test_stub_basis_refusal.py's check 3.
 
-`accept_empty_posture` exists because the real playbook + its policy is NOT
-intent-free: refusing it outright on day one would train operators to pass the
-flag reflexively, which is how a fail-closed becomes a formality. So the flag
-is scoped to exactly the "posture empty, policy present" case, and check 4
-asserts every use of it WRITES A RECORD.
+`accept_empty_posture` exists because the real playbook (with or without a
+policy) is NOT intent-free -- its digest is real, hashed, corpus-derived
+precedent: refusing it outright on day one would train operators to pass
+the flag reflexively, which is how a fail-closed becomes a formality. The
+flag is required whenever posture is empty, policy or no policy (checks 2
+and 3), and check 4 asserts every use of it WRITES A RECORD.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -92,8 +100,20 @@ def check_1_empty_posture_never_composes_an_empty_block() -> list[str]:
     return failures
 
 
-def check_2_refuses_when_posture_and_policy_are_both_empty() -> list[str]:
-    """Nothing prescriptive at all. Refuse UNCONDITIONALLY: no flag reaches this."""
+def check_2_empty_posture_with_no_policy_refuses_unless_accepted() -> list[str]:
+    """Issue #479 DECISION (2026-08-04): an empty-posture OPF artifact with
+    a real digest is a VALID artifact and must run -- the real/public OPF
+    playbooks ship posture: {} on purpose, and the digest is real, hashed,
+    corpus-derived precedent, not "nothing". Without the flag this still
+    refuses (an operator's call to make on the record, same as the
+    posture-empty-with-policy case in check 3 below); WITH the flag it must
+    compose, using the digest itself as the governed content -- there is no
+    longer a separate, unconditional, no-remedy refusal for "posture empty
+    AND policy empty" (that used to be this check's whole point; the digest
+    check further down `opf_prompt.compose_opf_system_blocks` is what still
+    catches the genuinely corpus-less case -- see
+    test_stub_basis_refusal.py's check 3, which is unaffected by this
+    change)."""
     failures = []
     doc = _load(REAL_SHAPE_FIXTURE)
     try:
@@ -103,28 +123,33 @@ def check_2_refuses_when_posture_and_policy_are_both_empty() -> list[str]:
             declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
         )
         failures.append(
-            "  [2] posture == {} AND no policy: composed a review with no prescriptive intent "
-            "from any governed artifact, instead of refusing"
+            "  [2] posture == {} AND no policy, with no accept_empty_posture flag: composed a "
+            "review without the operator's on-the-record acceptance"
         )
     except review_knowledge.KnowledgeRefusal:
         pass
 
-    # Not even with every escape hatch set: this refusal has no remedy flag,
-    # because there is nothing for a flag to accept.
-    try:
-        review_knowledge.resolve_knowledge(
-            bundle_v2=_bundle(doc),
-            policy=None,
-            declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
-            accept_empty_posture=True,
-            accept_stub_basis=True,
-        )
+    # ...but the flag IS a real remedy here too, not scoped only to
+    # "posture empty, policy present": the digest itself is real corpus
+    # precedent, so the review composes with posture_source="playbook".
+    knowledge = review_knowledge.resolve_knowledge(
+        bundle_v2=_bundle(doc),
+        policy=None,
+        declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
+        accept_empty_posture=True,
+        accept_stub_basis=True,
+    )
+    if not knowledge.system_blocks():
         failures.append(
-            "  [2] accept_empty_posture=True suppressed the no-intent-at-all refusal; that flag "
-            "is scoped to 'posture empty, policy present' and must not reach this case"
+            "  [2] accept_empty_posture=True (posture empty, no policy) resolved but composed "
+            "no blocks -- the digest should still have rendered"
         )
-    except review_knowledge.KnowledgeRefusal:
-        pass
+    record = knowledge.lineage_record()
+    if record.get("posture_source") != "playbook":
+        failures.append(
+            f"  [2] posture empty, no policy, accepted: expected posture_source='playbook' "
+            f"(the digest is the governing content), got {record.get('posture_source')!r}"
+        )
     return failures
 
 
@@ -249,7 +274,7 @@ def check_5_content_hash_covers_composed_blocks() -> list[str]:
 def main() -> int:
     checks = [
         ("1", "empty posture composes no empty-string block", check_1_empty_posture_never_composes_an_empty_block),
-        ("2", "posture AND policy both empty -> unconditional refusal", check_2_refuses_when_posture_and_policy_are_both_empty),
+        ("2", "posture AND policy both empty -> refuse unless accepted", check_2_empty_posture_with_no_policy_refuses_unless_accepted),
         ("3", "empty posture + policy -> refuse unless accepted", check_3_refuses_empty_posture_with_policy_unless_accepted),
         ("4", "every escape writes a positive record", check_4_every_escape_writes_a_record),
         ("5", "content_hash covers the composed blocks", check_5_content_hash_covers_composed_blocks),

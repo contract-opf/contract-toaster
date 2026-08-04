@@ -169,6 +169,16 @@ describe('completion handoff — automatic save', () => {
     // A plain download anchor — NOT showSaveFilePicker, which would throw
     // SecurityError here for want of transient user activation.
     expect(anchors[0]!.hasAttribute('download')).toBe(true);
+
+    // The announcement upgrades from "ready" to "saved" only once the fetch
+    // has actually resolved — the positive half of #466's contract (the
+    // negative half, that a failed or stale save must NOT say this, lives in
+    // resilience-a11y.test.tsx).
+    await waitFor(() =>
+      expect(screen.getByTestId('review-ready-announcement').textContent).toContain(
+        'saved to your downloads',
+      ),
+    );
   });
 
   it('does not save automatically when the review produced no output', async () => {
@@ -184,6 +194,105 @@ describe('completion handoff — automatic save', () => {
     );
     expect(fetchedPaths(fetchMock)).not.toContain('/api/reviews/rev-448/output');
     expect(anchorClickSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not let a stale save for a resubmitted-away review repaint the new review on screen', async () => {
+    // Review A's output fetch is left deliberately unresolved so it is still
+    // in flight when the attorney resubmits — the exact race #466's fix
+    // round 1 closes: handleSubmit resets state for review B before A's
+    // fetch settles, and the settle-time setters must check they still
+    // belong to the review on screen before touching it.
+    let rejectOutputA: ((reason?: unknown) => void) | undefined;
+    const outputAPromise = new Promise<Response>((_resolve, reject) => {
+      rejectOutputA = reject;
+    });
+    let submitCount = 0;
+    const PRESIGNED_URL_B = 'https://s3.example.test/outputs/rev-B/out.docx?sig=def';
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const pathname = new URL(url, 'http://localhost').pathname;
+      if (pathname.endsWith('.mp3')) {
+        return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
+      }
+      if (method === 'POST' && pathname === '/api/reviews') {
+        submitCount += 1;
+        const reviewId = submitCount === 1 ? 'rev-A' : 'rev-B';
+        return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
+      }
+      if (pathname === '/api/reviews/rev-A') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            review_id: 'rev-A',
+            status: 'DONE',
+            decision: 'REQUEST_CHANGE',
+            message: null,
+            has_output: true,
+          }),
+        } as Response;
+      }
+      if (pathname === '/api/reviews/rev-B') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            review_id: 'rev-B',
+            status: 'DONE',
+            decision: 'REQUEST_CHANGE',
+            message: null,
+            has_output: true,
+          }),
+        } as Response;
+      }
+      if (pathname === '/api/reviews/rev-A/output') {
+        return outputAPromise;
+      }
+      if (pathname === '/api/reviews/rev-B/output') {
+        return { ok: true, status: 200, json: async () => ({ url: PRESIGNED_URL_B, expires_in: 60 }) } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ReviewSubmission />);
+    fireEvent.change(screen.getByTestId('review-file-input'), {
+      target: { files: [docxFile()] },
+    });
+    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await screen.findByTestId('review-result');
+
+    // Review A's automatic save is now in flight, blocked on outputAPromise.
+    await waitFor(() =>
+      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-A/output'),
+    );
+
+    // Resubmit before it resolves — this is handleSubmit's reset racing the
+    // pending fetch's continuation.
+    fireEvent.change(screen.getByTestId('review-file-input'), {
+      target: { files: [docxFile()] },
+    });
+    fireEvent.click(screen.getByTestId('review-submit-button'));
+
+    // Review B lands and saves cleanly on its own.
+    await waitFor(() =>
+      expect(screen.getByTestId('review-ready-announcement').textContent).toContain(
+        'saved to your downloads',
+      ),
+    );
+
+    // Now let review A's stale save fail, well after review B is on screen.
+    rejectOutputA?.(new Error('stale network failure'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // A's failure must not repaint review B's already-successful result: no
+    // download-error banner, and the announcement still reads "saved".
+    expect(screen.queryByTestId('review-download-error')).toBeNull();
+    expect(screen.getByTestId('review-ready-announcement').textContent).toContain(
+      'saved to your downloads',
+    );
   });
 });
 

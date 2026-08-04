@@ -30,6 +30,12 @@ that:
      CDK token/cross-stack reference, not a literal string).
   3. The app's `CustomRules` contains a SPA rewrite rule: a non-asset path
      pattern targeting `/index.html`.
+  4. Issue #467: `CustomHeaders` sets `Cache-Control: no-cache` on the
+     catch-all pattern (covers index.html and every SPA-routed path) and a
+     `/assets/**` pattern overriding it to `max-age=31536000, immutable`
+     (Vite content-hashes every built asset) — mirroring the policy added
+     to the DTS nginx target for the same issue, so this deploy target
+     isn't left exposed to the same stale-bundle-after-redeploy bug.
 
 It must FAIL on the pre-fix tree (`connect-src 'self'` hardcoded at
 frontend-stack.ts:181-ish; no SPA rewrite rule) and PASS after the fix.
@@ -244,6 +250,76 @@ def check_connect_src_allows_cognito_and_api() -> list[str]:
     return failures
 
 
+def check_cache_control_headers() -> list[str]:
+    """
+    Issue #467: the DTS nginx target got a Cache-Control policy (no-cache
+    default, immutable for content-hashed /assets/) so a redeploy can't
+    leave browsers serving a stale index.html indefinitely. This asserts
+    the Amplify/CloudFront target -- the other deploy target the same
+    issue's Fix section calls out -- mirrors that policy instead of being
+    left with no Cache-Control at all.
+    """
+    print(
+        "\nCheck 4: CustomHeaders sets Cache-Control (no-cache default, "
+        "immutable /assets/**) …"
+    )
+    failures: list[str] = []
+
+    template = _load_frontend_template()
+    if template is None:
+        return _assert(False, "Synthesized FrontendStack template available (prerequisite)")
+
+    found_app = _find_amplify_app(template)
+    if found_app is None:
+        return _assert(False, "AWS::Amplify::App resource found (prerequisite)")
+
+    _logical_id, amplify_app = found_app
+    custom_headers = amplify_app.get("Properties", {}).get("CustomHeaders")
+    if custom_headers is None:
+        return _assert(False, "AWS::Amplify::App has a CustomHeaders property (prerequisite)")
+
+    rendered = "".join(_flatten_strings(custom_headers))
+    # Collapse all whitespace (real newlines/indentation from the joined YAML
+    # string) so the assertions below don't depend on exact line breaks or
+    # indentation -- only that a Cache-Control key is immediately followed by
+    # the expected value, mirroring how `key:`/`value:` pairs are emitted for
+    # every other header in this file (see customHeaders in frontend-stack.ts).
+    collapsed = " ".join(rendered.split())
+
+    has_no_cache = 'key: "Cache-Control" value: "no-cache"' in collapsed
+    failures += _assert(
+        has_no_cache,
+        "CustomHeaders sets Cache-Control: no-cache on the catch-all pattern",
+        "index.html and every SPA-routed path must always revalidate or a "
+        "redeploy leaves stale sessions running the old bundle (issue #467).",
+    )
+
+    has_assets_pattern = 'pattern: "/assets/**"' in collapsed
+    failures += _assert(
+        has_assets_pattern,
+        "CustomHeaders has a dedicated /assets/** pattern",
+        "Expected a `pattern: \"/assets/**\"` entry to carry the long-lived "
+        "cache override for Vite's content-hashed built assets.",
+    )
+
+    has_immutable = bool(
+        __import__("re").search(
+            r'key:\s*"Cache-Control"\s*value:\s*"[^"]*max-age=31536000[^"]*immutable[^"]*"',
+            collapsed,
+        )
+    )
+    failures += _assert(
+        has_immutable,
+        "CustomHeaders sets a max-age=31536000 immutable Cache-Control value "
+        "somewhere in the template",
+        "Expected a Cache-Control value containing both max-age=31536000 and "
+        "immutable -- Vite content-hashes every built asset, so assets/** is "
+        "safe to cache forever.",
+    )
+
+    return failures
+
+
 def check_spa_rewrite_rule_present() -> list[str]:
     print("\nCheck 3: Amplify app has a SPA rewrite rule (404 → /index.html) …")
     failures: list[str] = []
@@ -320,6 +396,7 @@ def main() -> int:
     # the checks below fail cleanly if it's absent.
     all_failures += check_connect_src_allows_cognito_and_api()
     all_failures += check_spa_rewrite_rule_present()
+    all_failures += check_cache_control_headers()
 
     print("\n" + "=" * 60)
     if all_failures:
