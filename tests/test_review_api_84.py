@@ -75,7 +75,7 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-test")
-os.environ.setdefault("S3_OUTPUTS_BUCKET", "contract-toaster-outputs-test")
+os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
 
@@ -310,7 +310,7 @@ class ReviewApiTestBase(unittest.TestCase):
 
         self.s3 = boto3.client("s3", region_name="us-east-1")
         self.s3.create_bucket(Bucket=os.environ["UPLOADS_BUCKET"])
-        self.s3.create_bucket(Bucket=os.environ["S3_OUTPUTS_BUCKET"])
+        self.s3.create_bucket(Bucket=os.environ["OUTPUTS_BUCKET"])
 
         self.ddb = FakeDynamoDBResource()
         self.sfn = FakeSfnClient()
@@ -575,7 +575,7 @@ class TestDownloadAudit(ReviewApiTestBase):
         # -- AC2 IDOR / path-traversal defence), not outputs/<owner_sub>/<review_id>/.
         output_key = f"outputs/{review_id}/out.docx"
         self.s3.put_object(
-            Bucket=os.environ["S3_OUTPUTS_BUCKET"], Key=output_key, Body=b"redline bytes"
+            Bucket=os.environ["OUTPUTS_BUCKET"], Key=output_key, Body=b"redline bytes"
         )
         self._reviews_table().items[review_id] = {
             "review_id": review_id,

@@ -205,6 +205,27 @@ export class FrontendStack extends cdk.NestedStack {
       //   localStorage.  The CSP is a defense-in-depth layer; the primary control
       //   is that model-generated text and all document-derived text are rendered
       //   as escaped text only — no dangerouslySetInnerHTML anywhere in the app.
+      //
+      // Cache-Control (issue #467): mirrors the DTS nginx target's policy
+      // (deploy/dts/nginx.conf) so this deploy target isn't left exposed to
+      // the same bug class -- Amplify Hosting shipped NO Cache-Control at
+      // all before this change, so browsers applied heuristic freshness to
+      // index.html and could keep serving a stale bundle for hours-to-days
+      // after a redeploy.
+      //   - The `**/*` pattern (same one carrying the security headers
+      //     above) also sets `Cache-Control: no-cache`, so index.html and
+      //     every SPA-routed path (e.g. /history, /?code=...&state=... --
+      //     anything the customRules rewrite below sends to index.html)
+      //     always revalidates.
+      //   - The more specific `/assets/**` pattern below overrides that to
+      //     long-lived `immutable` caching, since Vite content-hashes every
+      //     built asset under assets/ (assets/index-<hash>.js) -- safe to
+      //     cache forever because a new deploy ships a new filename.
+      //     Per AWS Amplify Hosting's customHeaders semantics, when more
+      //     than one pattern matches a request, a header set by a more
+      //     specific, later-listed pattern overrides the same header set by
+      //     an earlier, broader pattern -- so the more specific pattern
+      //     must be listed after the catch-all for this override to apply.
       customHeaders: [
         '  customHeaders:',
         '    - pattern: "**/*"',
@@ -217,6 +238,12 @@ export class FrontendStack extends cdk.NestedStack {
         '          value: "DENY"',
         '        - key: "Referrer-Policy"',
         '          value: "strict-origin-when-cross-origin"',
+        '        - key: "Cache-Control"',
+        '          value: "no-cache"',
+        '    - pattern: "/assets/**"',
+        '      headers:',
+        '        - key: "Cache-Control"',
+        '          value: "public, max-age=31536000, immutable"',
       ].join('\n'),
 
       // SPA rewrite rule (issue #226).

@@ -15,7 +15,10 @@
  *             (PasswordLogin.tsx only — App.tsx uses ct-app-shell, issue
  *             #390; the pre-auth login screen has its own nameplate
  *             instead, issue #391)
- *   Tabs      .ct-tabpanel (the tab STRIP itself is ct-tab-bar, issue #390)
+ *   Tabs      .ct-tabpanel  .ct-tab-group  .ct-tab-group__label (the tab
+ *             STRIP itself is ct-tab-bar, issue #390; the group wrapper is
+ *             app chrome around a second labeled `<ct-tab-bar>` instance,
+ *             issue #477 — see App.tsx)
  *   Sections  .ct-section  .ct-section-title
  *   Status    .ct-muted  .ct-mono
  *   Layout    .ct-row  .ct-stack  .ct-actions
@@ -62,6 +65,32 @@
    carry this class; the tab STRIP itself is now ct-tab-bar.css. */
 .ct-tabpanel {
   padding-top: 0.25rem;
+}
+
+/* Admin tab group (issue #477) — the six admin-only tabs render as a SECOND
+   labeled `<ct-tab-bar>` instance (App.tsx) rather than joining the primary
+   row as flat peers. `.ct-tab-group` and `.ct-tab-group__label` are app
+   chrome wrapped AROUND that instance, not part of the ct-tab-bar element
+   itself, so they live here rather than in ct-tab-bar.css.
+   `.ct-tab-group__label` is the sighted-user counterpart to the second
+   instance's `aria-label="Admin"` (ct-tab-bar.ts's `label` prop) — visible
+   text is `aria-hidden` to avoid the two being announced back to back.
+   Wrapping stays the default `flex-wrap: wrap` behavior of
+   `.ct-tab-bar__track` (ct-tab-bar.css); this only adds the label and a
+   little breathing room so a wrap here reads as an intentional section, not
+   an accident (the whole point of #477). */
+.ct-tab-group {
+  margin-top: var(--ct-space-2);
+}
+.ct-tab-group__label {
+  display: block;
+  font-family: var(--ct-font-sans);
+  font-size: var(--ct-text-xs);
+  font-weight: 600;
+  color: var(--ct-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 var(--ct-space-1);
 }
 
 /* --------------------------------------------------------------- Sections */

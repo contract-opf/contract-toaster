@@ -131,6 +131,39 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
             m.assert_called_once_with(cognito_like)
             self.assertEqual(claims["sub"], "c")
 
+    def test_sso_mode_does_not_accept_demo_session_cookie(self) -> None:
+        # A demo session cookie with no Authorization header must still be
+        # rejected in sso mode, and must never reach the Cognito verifier
+        # (the cookie counterpart of test_sso_mode_does_not_accept_demo_token).
+        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "sso"}, clear=True):
+            token = demo_auth.issue_demo_token(ADMIN_ROW)
+            with patch.object(auth, "_verify_cognito_token") as m:
+                with self.assertRaises(HTTPException) as ctx:
+                    auth.get_current_user(credentials=None, session_cookie=token)
+            m.assert_not_called()
+            self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_no_credentials_rejected_in_every_mode(self) -> None:
+        # Regression test for the HTTPBearer(auto_error=False) flip: with no
+        # Authorization header and no session cookie, get_current_user must
+        # be the sole 401 gate in every AUTH_MODE.
+        for mode in ("sso", "password", "both"):
+            with self.subTest(mode=mode):
+                with patch.dict(
+                    "os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": mode}, clear=True
+                ):
+                    with self.assertRaises(HTTPException) as ctx:
+                        auth.get_current_user(credentials=None, session_cookie=None)
+                    self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_both_mode_cookie_only_routes_to_demo_verifier(self) -> None:
+        with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "both"}, clear=True):
+            token = demo_auth.issue_demo_token(USER_ROW)
+            with patch.object(auth, "_verify_cognito_token") as m:
+                claims = auth.get_current_user(credentials=None, session_cookie=token)
+            m.assert_not_called()
+            self.assertEqual(claims["sub"], "local:alice")
+
 
 def _run_tests() -> int:
     loader = unittest.TestLoader()

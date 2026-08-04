@@ -222,6 +222,37 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
     expect(panel).toHaveTextContent(/split it into smaller documents/i);
   });
 
+  it('explains an OPF playbook the tool could not honestly compose (#479)', async () => {
+    await submitAndFail(null, 'opf_knowledge_refused', 'MANUAL_REVIEW_REQUIRED');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/cannot honestly turn into review instructions/i);
+    expect(panel).toHaveTextContent(/an admin needs to check/i);
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
+      'opf_knowledge_refused',
+    );
+  });
+
+  it('explains a playbook missing its digest, distinctly from a refusal (#479)', async () => {
+    await submitAndFail(null, 'opf_digest_missing', 'MANUAL_REVIEW_REQUIRED');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/missing the reference material/i);
+    expect(panel).toHaveTextContent(/fix or re-upload/i);
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent('opf_digest_missing');
+  });
+
+  it('explains an unjudged Floor invariant as a fail-closed stop, not a document problem (#479)', async () => {
+    await submitAndFail('run_review', 'floor_invariant_unjudged', 'MANUAL_REVIEW_REQUIRED');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/required rules could not be checked/i);
+    expect(panel).toHaveTextContent(/worth submitting again/i);
+    expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
+      'floor_invariant_unjudged',
+    );
+  });
+
   it('never surfaces a raw status code, endpoint, or provider name (#425)', async () => {
     const tokens = [
       'model_account_out_of_credits',
@@ -229,6 +260,8 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
       'model_rate_limited',
       'model_unavailable',
       'model_context_length_exceeded',
+      'model_empty_content',
+      'model_output_truncated',
     ];
     for (const token of tokens) {
       cleanup();

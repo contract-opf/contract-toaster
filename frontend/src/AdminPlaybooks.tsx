@@ -23,7 +23,7 @@
  * The catalog read is the only call here any authenticated user may make;
  * every other route 403s a non-admin caller server-side. A 403 from any of
  * them is the sole signal to hide this panel — the same defense-in-depth
- * posture as AdminUsers/AdminRetention/AdminModel/AdminPenRules, with no
+ * posture as AdminUsers/AdminRetention/AdminModel/AdminInstructions, with no
  * client-side "am I an admin" claim to keep in sync (App.tsx's /api/me probe
  * decides whether this component mounts at all; the server stays
  * authoritative for every action it offers).
@@ -41,10 +41,17 @@
  *      replaced with a generic failure string.
  *   2. **Rollback only accepts a `retired` target.** `rollback_playbook_version`
  *      rejects a version that was never active ("rolling back to a version
- *      that was never active is just a (second) activation"). The button is
- *      disabled with an explanatory tooltip for a draft/active row as a
- *      hint only — the authority is still the backend's 409, whose message
- *      is rendered if it comes back.
+ *      that was never active is just a (second) activation"). Since only
+ *      activate/rollback ever write `retired`, that status IS the "has
+ *      something to roll back to" signal — so a draft or the currently-
+ *      active row offers no Roll back button at all (hidden, not disabled;
+ *      issue #476) rather than a dead one with nowhere to go. The backend's
+ *      409 is still the authority and is rendered verbatim if it disagrees.
+ *
+ * Activate is likewise hidden — not merely disabled — on the row that is
+ * already `active` (issue #476): re-running activation on the active
+ * version is a no-op an admin can't distinguish from "something happened".
+ * A quiet "Currently active" note takes its place.
  *
  * Removal is a ONE-WAY DOOR (`remove_playbook` writes a tombstone nothing in
  * this codebase clears — see that function's docstring), which is why it is
@@ -58,6 +65,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { linkifyText } from './linkify';
 import {
   CtBanner,
   CtButton,
@@ -163,7 +171,22 @@ function versionChipVariant(status: PlaybookVersionStatus): CtChipVariant {
   }
 }
 
-export default function AdminPlaybooks(): React.ReactElement | null {
+export interface AdminPlaybooksProps {
+  /**
+   * Issue #464: called after any mutation that can change what
+   * GET /api/playbooks returns (rename, remove, activate, rollback, notes —
+   * `notes` is part of the catalog response too, see `_load_playbook_catalog`).
+   * App.tsx wires this to bump a refresh signal ReviewSubmission's dial
+   * listens on, so a rename/remove lands there without a reload. Optional so
+   * this panel still works standalone (every existing test renders it with
+   * no props).
+   */
+  onCatalogChange?: () => void;
+}
+
+export default function AdminPlaybooks({
+  onCatalogChange,
+}: AdminPlaybooksProps = {}): React.ReactElement | null {
   const [playbooks, setPlaybooks] = useState<PlaybookCatalogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -320,8 +343,11 @@ export default function AdminPlaybooks(): React.ReactElement | null {
     (playbookId: string) => {
       void loadPlaybooks();
       void loadVersions(playbookId);
+      // Activate/rollback/notes-save can all change the catalog's `status`
+      // or `notes` (issue #464) — see this callback's call sites.
+      onCatalogChange?.();
     },
-    [loadPlaybooks, loadVersions],
+    [loadPlaybooks, loadVersions, onCatalogChange],
   );
 
   const activateVersion = useCallback(
@@ -379,9 +405,12 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         onSuccess: () => {
           setRenamingId(null);
           void loadPlaybooks();
+          // Issue #464: the dial elsewhere in the app shows this same
+          // display_name and has no way to know it changed on its own.
+          onCatalogChange?.();
         },
       }),
-    [loadPlaybooks, runAction],
+    [loadPlaybooks, onCatalogChange, runAction],
   );
 
   const removePlaybook = useCallback(
@@ -398,9 +427,12 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           setSelectedPlaybookId((current) => (current === playbookId ? null : current));
           setVersions((current) => (selectedPlaybookId === playbookId ? null : current));
           void loadPlaybooks();
+          // Issue #464: a removed playbook must stop being a selectable
+          // option on the dial, not just disappear from this table.
+          onCatalogChange?.();
         },
       }),
-    [loadPlaybooks, runAction, selectedPlaybookId],
+    [loadPlaybooks, onCatalogChange, runAction, selectedPlaybookId],
   );
 
   const submitUpload = useCallback(
@@ -706,7 +738,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                           {catalogStatusLabel(entry.status)}
                         </CtChip>
                       </td>
-                      <td>{entry.notes === '' ? '—' : entry.notes}</td>
+                      <td>{entry.notes === '' ? '—' : linkifyText(entry.notes)}</td>
                       <td>
                         <div className="ct-actions" role="group">
                           <CtButton
@@ -851,7 +883,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                             </div>
                           ) : (
                             <div className="ct-stack">
-                              <span>{row.notes === '' ? '—' : row.notes}</span>
+                              <span>{row.notes === '' ? '—' : linkifyText(row.notes)}</span>
                               <CtButton
                                 type="button"
                                 variant="ghost"
@@ -870,39 +902,53 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                         </td>
                         <td>
                           <div className="ct-actions" role="group">
-                            <CtButton
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              data-testid={`playbook-version-activate-${row.version}`}
-                              disabled={
-                                pendingAction === `activate:${row.version}` ||
-                                row.status === 'active'
-                              }
-                              onClick={() => void activateVersion(row.playbook_id, row.version)}
-                            >
-                              Activate
-                            </CtButton>
-                            {/* Hint only — the backend is the authority and
-                                its refusal is rendered if it disagrees. */}
-                            <CtButton
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              data-testid={`playbook-version-rollback-${row.version}`}
-                              title={
-                                row.status === 'retired'
-                                  ? ''
-                                  : 'Only a version that was active before can be rolled back to. Activate this one instead.'
-                              }
-                              disabled={
-                                pendingAction === `rollback:${row.version}` ||
-                                row.status !== 'retired'
-                              }
-                              onClick={() => void rollBackVersion(row.playbook_id, row.version)}
-                            >
-                              Roll back
-                            </CtButton>
+                            {row.status === 'active' ? (
+                              // Activating the already-active version can't
+                              // mean anything — no button to click, not a
+                              // disabled one (issue #476). The status chip
+                              // already says "active"; this is a quiet
+                              // acknowledgement in the actions column so an
+                              // admin isn't left wondering where the button
+                              // went.
+                              <span
+                                className="ct-muted"
+                                data-testid={`playbook-version-active-note-${row.version}`}
+                              >
+                                Currently active
+                              </span>
+                            ) : (
+                              <CtButton
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                data-testid={`playbook-version-activate-${row.version}`}
+                                disabled={pendingAction === `activate:${row.version}`}
+                                onClick={() => void activateVersion(row.playbook_id, row.version)}
+                              >
+                                Activate
+                              </CtButton>
+                            )}
+                            {/* Only a `retired` row was ever actually active
+                                (activate/rollback are the sole writers of
+                                that status — see playbook_versions.py), so
+                                it is the sole authoritative "has something to
+                                roll back to" signal; a draft or the active
+                                row itself offers no Roll back at all rather
+                                than a disabled button with nowhere to go
+                                (issue #476). The backend's own 409 is still
+                                what is rendered if it disagrees. */}
+                            {row.status === 'retired' && (
+                              <CtButton
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                data-testid={`playbook-version-rollback-${row.version}`}
+                                disabled={pendingAction === `rollback:${row.version}`}
+                                onClick={() => void rollBackVersion(row.playbook_id, row.version)}
+                              >
+                                Roll back
+                              </CtButton>
+                            )}
                           </div>
                         </td>
                       </tr>

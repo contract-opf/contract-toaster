@@ -167,6 +167,38 @@ def openrouter_selectable_model_ids(policy: dict[str, Any] | None = None) -> set
     return {str(entry["model_id"]) for entry in openrouter_selectable_models(policy)}
 
 
+def openrouter_reasoning_max_tokens(model_id: str, policy: dict[str, Any] | None = None) -> int:
+    """The per-model reasoning-token allowance (issue #527) for `model_id`,
+    read from model-policy/openrouter.json's optional `reasoning_max_tokens`
+    field on `models.primary`, `models.critic`, or a `selectable` entry.
+
+    `max_tokens` in an OpenRouter Chat Completions request is a COMBINED
+    ceiling across a reasoning-class model's `reasoning` AND `content`
+    tokens (the live-probe root cause behind this issue: Kimi K3 and Gemini
+    3.1 Pro spend some of that budget on `reasoning` before `content`, so a
+    budget sized only for content can starve `content` to empty). This
+    returns the allowance `OpenRouterModelClient.invoke` ADDS on top of the
+    caller's `max_output_tokens` -- never carved out of it -- when building
+    the request for that model.
+
+    Defaults to `0` for a model_id the policy pins no allowance for --
+    including every currently-known non-reasoning model, and an override
+    id (an explicit `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`) that has no
+    entry in this file at all. `0` keeps `max_tokens` byte-identical to
+    before this issue landed, which is exactly why every existing prompt
+    fixture stays unaffected."""
+    policy = policy if policy is not None else load_openrouter_policy()
+    models = policy.get("models") or {}
+    for role in ("primary", "critic"):
+        entry = models.get(role)
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            return int(entry.get("reasoning_max_tokens") or 0)
+    for entry in policy.get("selectable") or []:
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            return int(entry.get("reasoning_max_tokens") or 0)
+    return 0
+
+
 def _resolved_admin_model_id(
     admin_model_id: str | None, role: str, policy: dict[str, Any] | None = None
 ) -> str | None:
@@ -494,6 +526,73 @@ class ModelContextLengthExceededError(ModelInvocationError):
     `ModelInvocationError`."""
 
 
+class ModelKeyMissingError(ModelInvocationError):
+    """Raised when no usable API key was resolved for this review, so no
+    request was ever sent to the provider (issue #472).
+
+    Deliberately its OWN token, distinct from `model_key_rejected` (issue
+    #442, a provider 401/403): that one means the provider looked at a key
+    and refused it -- a PROVIDER decision, made after a real HTTP call. This
+    one means there was nothing to send in the first place -- a PRE-CALL
+    condition the backend already knows the moment
+    `model_settings.resolve_openrouter_api_key` comes back empty
+    (`backend/src/pipeline_runner.py::_build_openrouter_client`). The two are
+    different admin fixes ("add a key" vs. "the key you added doesn't work")
+    and used to be indistinguishable -- both landed on the generic
+    `unhandled_exception` reason. `status_code` is always `None`: no HTTP
+    call happened, so there is no status to carry."""
+
+
+class ModelTimeoutError(ModelInvocationError):
+    """Raised when a request to the provider exceeded its timeout budget
+    after exhausting retries (issue #472), instead of the generic
+    `ModelInvocationError` a transport failure otherwise raises. A timeout is
+    a specific, actionable, plausibly-transient condition -- worth its own
+    reason token (`model_timeout`) rather than folding into the
+    catch-all `unhandled_exception` a connection reset or DNS failure still
+    gets. Carries no response body -- same discipline as
+    `ModelInvocationError`."""
+
+
+class ModelEmptyContentError(ModelInvocationError):
+    """Raised when a 200 OpenRouter response's `choices[0].message.content`
+    is null or empty (issue #527), instead of returning `None`/`""` to the
+    caller. `invoke()` used to hand back whatever was in `content` verbatim
+    -- a reasoning-class model (e.g. Kimi K3) that spent its whole
+    `max_tokens` budget on `reasoning` and never emitted `content` returned
+    `None`, and the caller (`scripts/primary_review_pass.py::
+    _extract_json_object`) crashed with a bare `AttributeError` on
+    `raw_text.find`, indistinguishable in the logs from any other bug.
+
+    Deliberately its OWN token (`model_empty_content`), distinct from
+    `ModelOutputTruncatedError`'s `model_output_truncated`: a `finish_reason
+    == "length"` response is ALWAYS classified as truncation first (see
+    `invoke()`), even when its `content` also happens to be empty -- the
+    truncation is the more specific, more actionable fact (raise the
+    model's reasoning budget). This error is only raised for an empty
+    `content` the provider considered COMPLETE (`finish_reason` something
+    other than `"length"`), a genuinely malformed/empty answer rather than a
+    budget problem."""
+
+
+class ModelOutputTruncatedError(ModelInvocationError):
+    """Raised when a 200 OpenRouter response reports `finish_reason ==
+    "length"` (issue #527): the provider stopped generating because the
+    request's `max_tokens` budget ran out before the model finished --
+    reasoning tokens on a reasoning-class model, or content tokens on any
+    model given too small a budget for the response it was producing.
+
+    Deliberately its OWN token (`model_output_truncated`), distinct from a
+    schema-invalid or malformed response: those mean the model finished and
+    produced something the pipeline could not use, while this means the
+    model was CUT OFF before it could finish at all -- an operator fix (a
+    per-model `reasoning_max_tokens` allowance in
+    model-policy/openrouter.json, or a larger `max_output_tokens`), not a
+    document or prompt problem. Checked before `ModelEmptyContentError`
+    (above) precisely so a truncated-and-therefore-empty response is
+    recorded as the more specific, more actionable truncation cause."""
+
+
 # Bounded-retry policy (issue #270): a fresh `httpx.Client` per call has no
 # connection reuse, and there was previously no in-client retry for a
 # transient failure -- the only retry was the pass-level schema retry
@@ -716,10 +815,22 @@ class OpenRouterModelClient:
         user_prompt: str,
         max_output_tokens: int,
     ) -> str:
+        # Loaded once and reused below for both the policy-pin assertion and
+        # the reasoning-budget lookup, rather than reading the file twice.
+        policy = load_openrouter_policy()
+
         # Runtime policy-pin assertion (issue #269): refuse (or, for an
         # explicit env override, loudly log) a model_id that does not match
         # model-policy/openrouter.json before spending a request on it.
-        enforce_openrouter_policy_model_id(model_id)
+        enforce_openrouter_policy_model_id(model_id, policy)
+
+        # Issue #527: `max_tokens` is a COMBINED ceiling across a reasoning-
+        # class model's `reasoning` and `content` tokens -- the allowance is
+        # ADDED on top of the caller's content budget, never carved out of
+        # it, and defaults to 0 for every model the policy pins no allowance
+        # for, so `max_tokens` here stays byte-identical to before this
+        # issue landed for every non-reasoning model.
+        reasoning_allowance = openrouter_reasoning_max_tokens(model_id, policy)
 
         payload = {
             "model": model_id,
@@ -727,7 +838,7 @@ class OpenRouterModelClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": max_output_tokens,
+            "max_tokens": max_output_tokens + reasoning_allowance,
             # Sampling params (temperature/top_p/top_k) deliberately omitted --
             # request contract (model-policy/openrouter.json).
             #
@@ -755,6 +866,20 @@ class OpenRouterModelClient:
                 if not is_last_attempt:
                     self._sleep(self._backoff_delay(attempt_index))
                     continue
+                # Issue #472: a timeout gets its own token (`model_timeout`)
+                # rather than falling into the generic transport-failure
+                # bucket below -- it is a specific, actionable condition
+                # (retryable, no config to fix), unlike a connection reset or
+                # DNS failure. Detected by TYPE (httpx's own exception
+                # hierarchy), never by parsing this message -- the same
+                # discipline `classify_failure_reason` uses for status codes.
+                import httpx  # lazy: keep the module importable without httpx
+
+                if isinstance(exc, httpx.TimeoutException):
+                    raise ModelTimeoutError(
+                        f"OpenRouter request timed out after {attempts_allowed} "
+                        "attempt(s)."
+                    ) from exc
                 raise ModelInvocationError(
                     f"OpenRouter request failed at transport level: {type(exc).__name__}"
                 ) from exc
@@ -763,11 +888,44 @@ class OpenRouterModelClient:
             if status == 200:
                 try:
                     data = response.json()
-                    content = data["choices"][0]["message"]["content"]
-                except (KeyError, IndexError, TypeError, ValueError) as exc:
+                    choice = data["choices"][0]
+                    content = choice["message"]["content"]
+                    # `.get`, not `[...]`: `finish_reason` is genuinely absent
+                    # from some canned/older fixtures and is not itself part
+                    # of the "malformed response" contract this try/except
+                    # guards -- a missing finish_reason simply means "not
+                    # truncated" (None never equals the "length" sentinel
+                    # checked below).
+                    finish_reason = choice.get("finish_reason")
+                except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
                     raise ModelInvocationError(
                         "OpenRouter response missing choices[0].message.content."
                     ) from exc
+
+                # Issue #527: `finish_reason == "length"` means the provider
+                # stopped generating because `max_tokens` ran out before the
+                # model finished -- checked BEFORE the empty-content check
+                # below so a truncated-and-therefore-empty response is
+                # recorded as the more specific, more actionable truncation
+                # cause rather than a generic empty answer.
+                if finish_reason == "length":
+                    raise ModelOutputTruncatedError(
+                        "OpenRouter truncated the response before it finished "
+                        f"(finish_reason={finish_reason!r}, HTTP {status}).",
+                        status_code=status,
+                    )
+
+                # Issue #527: fail closed on a null/empty `content` instead of
+                # returning it verbatim -- a caller (e.g.
+                # scripts/primary_review_pass.py::_extract_json_object) that
+                # assumes a string crashes with a bare AttributeError on
+                # `None`, indistinguishable in the logs from any other bug.
+                if not content:
+                    raise ModelEmptyContentError(
+                        f"OpenRouter returned an empty response body (HTTP {status}).",
+                        status_code=status,
+                    )
+
                 # Real usage capture (issue #268) -- best-effort: a provider
                 # that omits `usage` (or ships a malformed one) must not fail
                 # the call over a non-substantive accounting field.

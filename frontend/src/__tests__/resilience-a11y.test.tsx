@@ -127,7 +127,62 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
     await vi.runAllTimersAsync();
 
     expect(getCalls).toBeGreaterThanOrEqual(2);
-    expect(screen.getByTestId('review-status').textContent).toContain('DONE');
+    // The retried poll reached the terminal state — asserted via the
+    // outcome chip's friendly label (issue #470), not the raw `DONE` enum
+    // this screen no longer renders verbatim.
+    expect(screen.getByTestId('review-status').textContent).toContain('Accepted');
+  });
+
+  // Issue #470: this screen's status line used to render the raw enum
+  // verbatim (`<strong>{detail?.status}</strong>`) — MANUAL_REVIEW_REQUIRED,
+  // observed live, is the terminal status that actually leaked. Pinned
+  // separately from the DONE/ACCEPT happy path above.
+  it('shows a friendly outcome for a MANUAL_REVIEW_REQUIRED review, never the raw token', async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const pathname = new URL(url, 'http://localhost').pathname;
+
+      if (method === 'POST' && pathname === '/api/reviews') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ review_id: 'rev-manual', resumed: false }),
+        } as Response;
+      }
+
+      if (pathname === '/api/reviews/rev-manual') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            review_id: 'rev-manual',
+            status: 'MANUAL_REVIEW_REQUIRED',
+            decision: null,
+            message: null,
+            has_output: false,
+          }),
+        } as Response;
+      }
+
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ReviewSubmission />);
+    fireEvent.change(screen.getByTestId('review-file-input'), {
+      target: { files: [docxFile()] },
+    });
+    fireEvent.click(screen.getByTestId('review-submit-button'));
+
+    await vi.runAllTimersAsync();
+
+    const statusEl = screen.getByTestId('review-status');
+    expect(statusEl.textContent).toContain('Needs manual review');
+    expect(statusEl.textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
+    expect(screen.getByTestId('review-outcome').textContent).toBe('Needs manual review');
   });
 });
 
@@ -201,6 +256,67 @@ describe('friendly errors — no raw technical strings', () => {
 
     const errorEl = await screen.findByTestId('review-download-error');
     assertFriendly(errorEl.textContent ?? '');
+  });
+
+  // Issue #466: a download 503's `detail` is server configuration (an unset
+  // storage env var — #465's own failure mode), not a message meant for a
+  // reviewer — the raw-string policy above must hold even when the server
+  // DOES send a `detail`, unlike other endpoints where a legitimate
+  // server-supplied detail is shown. The env-var-shaped string below stands
+  // in for the real retired name without repeating it literally (the repo's
+  // own #465 gate greps the tree for that exact string).
+  it('never renders the raw server `detail` for a download failure, even when one is sent', async () => {
+    const CONFIG_DETAIL = 'EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured.';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const pathname = new URL(url, 'http://localhost').pathname;
+      if (method === 'POST' && pathname === '/api/reviews') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ review_id: 'rev-cfg', resumed: false }),
+        } as Response;
+      }
+      if (pathname === '/api/reviews/rev-cfg') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            review_id: 'rev-cfg',
+            status: 'DONE',
+            decision: 'REQUEST_CHANGE',
+            message: null,
+            has_output: true,
+          }),
+        } as Response;
+      }
+      if (pathname === '/api/reviews/rev-cfg/output') {
+        return { ok: false, status: 503, json: async () => ({ detail: CONFIG_DETAIL }) } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ReviewSubmission />);
+    fireEvent.change(screen.getByTestId('review-file-input'), {
+      target: { files: [docxFile()] },
+    });
+    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await screen.findByTestId('review-result');
+
+    // The automatic save (issue #448) fires on its own here — no click
+    // needed — and its failure must be just as honest as the button's.
+    const errorEl = await screen.findByTestId('review-download-error');
+    assertFriendly(errorEl.textContent ?? '');
+    expect(document.body.textContent).not.toContain(CONFIG_DETAIL);
+    expect(document.body.textContent).not.toContain('EXAMPLE_STORAGE_BUCKET_ENV_VAR');
+
+    // And the "ready" announcement must never have claimed the save
+    // succeeded — the fetch it depended on failed.
+    const announcement = screen.getByTestId('review-ready-announcement');
+    expect(announcement.textContent).not.toContain('Saving it to your downloads');
+    expect(announcement.textContent).not.toContain('saved to your downloads');
   });
 
   it('shows friendly copy for a version-fetch failure in App.tsx', async () => {

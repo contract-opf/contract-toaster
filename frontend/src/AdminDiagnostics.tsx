@@ -16,8 +16,8 @@
  *   GET /api/admin/diagnostics/recent-failures?limit=N
  *
  * which returns a bounded, newest-first list of recent non-OK terminal
- * reviews, each carrying exactly five fields: `review_id`, `created_at`,
- * `failing_stage`, `reason`, `status`.
+ * reviews, each carrying exactly six fields: `review_id`, `created_at`,
+ * `failed_at`, `failing_stage`, `reason`, `status`.
  *
  * ## What this screen is NOT, deliberately
  *
@@ -32,6 +32,12 @@
  *
  * It also offers **no "retry this review" action**: re-running spends money
  * and belongs in a deliberate, separately-designed flow.
+ *
+ * The Review column deliberately does not LINK to the History tab (issue
+ * #472 fix item 4): History is scoped `mine`, so a link to another user's
+ * review would 404 for the admin viewing it here. One-click copy is the
+ * fallback the ticket names instead — the id itself stays plain, selectable
+ * text either way.
  *
  * ## One token→prose table, not two
  *
@@ -53,9 +59,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+// The outcome chip's label AND variant — imported, never re-derived (issue
+// #470's shared map). This screen used to render the raw `status` enum as
+// the chip's own text while a local `failureStatusVariant` derived the
+// color from the same field separately — one shared source now drives both.
+import { describeOutcome } from './outcome';
 import { explainFailure } from './ReviewSubmission';
-import { CtBanner, CtButton, CtCard, CtChip, CtProgress, CtTable, CtToolbar } from './ui/react';
-import type { CtChipVariant } from './ui/react';
+import { CtBanner, CtButton, CtCard, CtChip, CtIconButton, CtProgress, CtTable, CtToolbar } from './ui/react';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/reviews.py's `_RECENT_FAILURE_FIELDS` exactly.
@@ -67,6 +77,12 @@ export interface RecentFailure {
   /** Epoch seconds. Written as a string by `_create_review_row`; a number if
    *  the row was stored numerically (boto3 Decimals are coerced server-side). */
   created_at?: string | number | null;
+  /** Epoch seconds THE FAILURE was recorded (issue #472) — distinct from
+   *  `created_at` (when the review was submitted). Written by
+   *  `reviews.record_stage_failure` and the Docker Compose mock pipeline's
+   *  own `_fail_review`. Null on a row that predates this field, or one
+   *  whose terminal write never went through either path (e.g. QUARANTINED). */
+  failed_at?: string | number | null;
   /** The pipeline stage that failed, e.g. `run_review`. Null on a row that
    *  predates the stage taxonomy. */
   failing_stage?: string | null;
@@ -109,24 +125,46 @@ export function formatFailureTime(createdAt: string | number | null | undefined)
   return new Date(epochSeconds * 1000).toLocaleString();
 }
 
-/**
- * Terminal status → chip variant.
- *
- * `MANUAL_REVIEW_REQUIRED` / `ERROR_MANUAL_REVIEW_REQUIRED` are the two
- * DOCUMENTED manual-review outcomes: work is queued for a person, which is a
- * warning, not a fault. Everything else that reaches this table (`ERROR`,
- * `QUARANTINED`) is a fault. An unrecognised status is treated as a fault
- * rather than quietly downgraded — this table only ever contains failures.
- */
-export function failureStatusVariant(status: string): CtChipVariant {
-  return status.includes('MANUAL_REVIEW_REQUIRED') ? 'warn' : 'danger';
-}
-
 export default function AdminDiagnostics(): React.ReactElement | null {
   const [load, setLoad] = useState<LoadState<RecentFailure[]>>({ status: 'loading' });
   // A 403 from the route is the sole signal to hide this panel — no
   // client-side "am I an admin" claim to keep in sync or spoof.
   const [isForbidden, setIsForbidden] = useState(false);
+  // Issue #472 fix item 4: this screen deliberately does NOT link a review
+  // id to the History tab — History is scoped `mine` (issue #443's own
+  // module docstring), so an admin reading another user's failed review has
+  // nowhere for that link to resolve to. One-click copy is the fallback the
+  // ticket names: the id stays plain text, and this only changes what
+  // pressing the button next to it does.
+  const [copiedReviewId, setCopiedReviewId] = useState<string | null>(null);
+
+  const copyReviewId = useCallback((reviewId: string) => {
+    // `navigator.clipboard` is a secure-context-only API: on a plain HTTP
+    // origin that isn't localhost (the DTS Docker Compose target, reached at
+    // `http://<lan-ip>:<port>`) it is `undefined`, and dereferencing
+    // `.writeText` on it throws synchronously, before any promise exists.
+    // Guard it so that case is a no-op rather than an uncaught throw in the
+    // click handler.
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) {
+      // Clipboard unavailable (non-secure context, older browser). The id is
+      // still selectable as plain text, so there is nothing further to do
+      // here.
+      return;
+    }
+    void clipboard
+      .writeText(reviewId)
+      .then(() => {
+        setCopiedReviewId(reviewId);
+        window.setTimeout(() => {
+          setCopiedReviewId((current) => (current === reviewId ? null : current));
+        }, 2000);
+      })
+      .catch(() => {
+        // Clipboard permission denied. The id is still selectable as plain
+        // text, so there is nothing further to do here.
+      });
+  }, []);
 
   const loadFailures = useCallback(async () => {
     try {
@@ -246,17 +284,36 @@ export default function AdminDiagnostics(): React.ReactElement | null {
                     // first, the failing stage as fallback. Never re-derived
                     // here (see this file's header).
                     const explanation = explainFailure(failure);
+                    const outcomeChip = describeOutcome(failure.status);
                     return (
                       <tr
                         key={failure.review_id}
                         data-testid={`failure-row-${failure.review_id}`}
                       >
-                        <td className="ct-table__mono">{failure.review_id}</td>
-                        <td className="ct-table__mono">{formatFailureTime(failure.created_at)}</td>
+                        <td className="ct-table__mono">
+                          <span data-testid={`review-id-text-${failure.review_id}`}>
+                            {failure.review_id}
+                          </span>{' '}
+                          <CtIconButton
+                            type="button"
+                            label={`Copy review id ${failure.review_id}`}
+                            data-testid={`copy-review-id-${failure.review_id}`}
+                            onClick={() => copyReviewId(failure.review_id)}
+                          >
+                            {copiedReviewId === failure.review_id ? '✓' : '⧉'}
+                          </CtIconButton>
+                        </td>
+                        {/* Issue #472: the real failure timestamp, when one was
+                            recorded, falling back to created_at for a row
+                            written before this field existed (or whose
+                            terminal write never went through
+                            record_stage_failure / _fail_review) rather than
+                            regressing to a blank cell it didn't have before. */}
+                        <td className="ct-table__mono">
+                          {formatFailureTime(failure.failed_at ?? failure.created_at)}
+                        </td>
                         <td>
-                          <CtChip variant={failureStatusVariant(failure.status)}>
-                            {failure.status}
-                          </CtChip>
+                          <CtChip variant={outcomeChip.variant}>{outcomeChip.label}</CtChip>
                         </td>
                         <td className="ct-table__mono">{failure.failing_stage || '—'}</td>
                         <td data-testid={`failure-cause-${failure.review_id}`}>

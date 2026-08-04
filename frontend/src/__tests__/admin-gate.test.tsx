@@ -57,7 +57,7 @@ const ADMIN_CHROME_TESTIDS = [
   'admin-users-panel',
   'admin-retention-panel',
   'admin-model-panel',
-  'admin-pen-rules-panel',
+  'admin-instructions-panel',
   'admin-playbooks-panel',
   'admin-diagnostics-panel',
   'sync-status-panel',
@@ -151,9 +151,10 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
     expect(await screen.findByTestId('admin-users-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-retention-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-model-panel')).toBeInTheDocument();
-    // The pen-rules panel fetches nothing on mount (the #432 route is
-    // POST-only, fired on submit), so it needs no stubbed route above.
-    expect(await screen.findByTestId('admin-pen-rules-panel')).toBeInTheDocument();
+    // The instructions panel fetches GET /api/playbooks on mount (stubbed
+    // to an empty catalog above), renders its zero-installed empty state,
+    // and needs no per-playbook instructions route stubbed.
+    expect(await screen.findByTestId('admin-instructions-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-playbooks-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-diagnostics-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('break-glass-note')).toBeInTheDocument();

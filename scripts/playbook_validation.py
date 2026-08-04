@@ -115,12 +115,22 @@ def topic_missing_standard_text(topic: dict[str, Any]) -> bool:
 
 
 def describe_missing_standard_text(topic: dict[str, Any]) -> str:
+    """Value-free (issue #478 fix round 2, finding 4): `section_anchors`
+    entries are ordinary `type: string` schema fields with no `pattern`
+    constraint (unlike `id`'s kebab-case pattern) -- an uploaded document
+    could set them to anything, including injected/sensitive text. This
+    message therefore reports only the COUNT of covering anchors, never
+    the anchor strings themselves, so it stays safe to surface to an HTTP
+    caller verbatim (see backend/src/playbook_upload.py's "No document
+    content in errors" discipline, which this function's callers feed
+    into unmodified)."""
     real_anchors = [a for a in (topic.get("section_anchors") or []) if a != SEC_NEW]
+    noun = "anchor" if len(real_anchors) == 1 else "anchors"
     return (
         f"topic {topic.get('id')!r} ({topic.get('section_ref')!r}) covers "
-        f"{real_anchors!r} but has no standard position text (our_standard) "
-        "-- refusing to silently substitute the heading text or an empty "
-        "paragraph."
+        f"{len(real_anchors)} standard-form section {noun} but has no standard "
+        "position text (our_standard) -- refusing to silently substitute the "
+        "heading text or an empty paragraph."
     )
 
 

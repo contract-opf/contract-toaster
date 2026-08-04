@@ -24,15 +24,34 @@ it recreates the exact shape the refusal exists to prevent.
 
 ## The unifying rule
 
-A review must carry prescriptive intent from a governed, hashed,
-human-approved artifact: `posture.system_prompt` in playbook mode, the policy's
-rules in policy-only. When NEITHER exists, there is nothing prescriptive at all,
-and no flag can make that a review -- so that refusal has no remedy parameter.
+A review must carry SOME governed, hashed, human-approved content: in
+playbook mode, that is `posture.system_prompt` OR a real digest of corpus
+precedent (`digest.clauses`) OR the review policy's rules -- any one of them
+is enough. In policy-only mode there is no digest at all, so the policy's
+rules are the ONLY candidate; when it has none, there is nothing
+prescriptive at all, and no flag can make that a review -- that refusal has
+no remedy parameter.
 
-The narrower "posture is empty but a policy exists" case IS remediable, on the
-record, because the real playbook plus its policy is emphatically not
-intent-free. A blanket refusal there would trip on day one, and a fail-closed
-that trips on day one is one an operator learns to wave through by reflex.
+Standing instructions (issue #482/#483) are composed into the SAME Guidance
+slot as the policy's `should`-rules once one of the three candidates above
+has already satisfied this rule -- see `resolve_knowledge`'s
+`instructions_text` param below. They are NOT a fourth candidate this rule
+checks: `resolve_knowledge` never inspects `instructions_text` when deciding
+whether to refuse, so a bundle with no posture, no digest and no policy
+rules still refuses even when standing instructions are present.
+
+An empty `posture` in playbook mode is NOT "nothing prescriptive" by
+itself: the digest is real, hashed, corpus-derived precedent (issue #479
+DECISION, 2026-08-04 -- "an empty-posture OPF artifact is a VALID artifact
+and must run"; the real and public OPF playbooks ship `posture: {}` on
+purpose). So an empty posture with no digest at all is caught by
+`opf_prompt.compose_opf_system_blocks`'s own no-digest refusal
+(`PromptCompositionError`) further down this function, never by this
+module -- and an empty posture WITH a digest is remediable via
+`accept_empty_posture`: the real playbook plus its digest is emphatically
+not intent-free, so requiring the flag (never inferring it) keeps the
+decision on the record without training operators to wave a reflexive flag
+through a fail-closed that trips on day one.
 
 ## Hashing what was SENT
 
@@ -185,6 +204,7 @@ def resolve_knowledge(
     declared_mode: str,
     accept_stub_basis: bool = False,
     accept_empty_posture: bool = False,
+    instructions_text: str = "",
 ) -> ReviewKnowledge:
     """Resolve one review's knowledge, or refuse.
 
@@ -193,6 +213,15 @@ def resolve_knowledge(
     policy-only from an absent digest is exactly how a misconfigured playbook
     becomes a silently corpus-less review that still records a governing
     playbook.
+
+    `instructions_text` (issue #479/#482/#483, default `""`): the playbook's
+    resolved standing instructions, already resolved once by the caller
+    (`backend/src/reviews.py`) and threaded read-only through
+    `scripts/review_spine.py::run_review`. Composed into the SAME position
+    `opf_prompt.compose_opf_system_blocks` composes the policy's `should`-rule
+    Guidance block -- see that function's own docstring. Included in
+    `content_hash()`/`lineage_record()` for free, since both are functions of
+    `self.blocks`, which now includes it.
 
     Raises `KnowledgeRefusal` per the module docstring, or
     `opf_prompt.PromptCompositionError` when a declared playbook-mode document
@@ -247,30 +276,41 @@ def resolve_knowledge(
                 "a bare model call in fact."
             )
     else:
+        # Issue #479 DECISION (2026-08-04): an empty posture is NOT "nothing
+        # prescriptive from any governed artifact" by itself -- the digest is
+        # real, hashed, corpus-derived precedent, and the real/public OPF
+        # playbooks ship `posture: {}` on purpose. A document with no digest
+        # AT ALL (the genuinely corpus-less case) is caught below by
+        # `opf_prompt.compose_opf_system_blocks`'s own `PromptCompositionError`,
+        # never here -- this module no longer special-cases "posture empty AND
+        # rule_count == 0" as an unconditional, no-remedy refusal (that used to
+        # be this branch's `elif rule_count == 0` case; folding it into the
+        # remediable case below is this ticket's fix for "no redline, ever"
+        # against a shipped, published playbook whose only sin is an empty
+        # posture).
         prose, source = _posture_prose(opf_doc, overrides)
         if prose:
             posture_source = source
-        elif rule_count == 0:
-            # Nothing prescriptive from ANY governed artifact. No remedy flag
-            # reaches this: there is nothing for one to accept.
-            raise KnowledgeRefusal(
-                "this playbook's posture is empty AND no review policy was supplied, so the "
-                "review would carry no prescriptive intent from any governed, hashed, "
-                "human-approved artifact -- only the model's own judgement, recorded as though a "
-                "playbook governed it. Supply an approved policy, or compile a posture."
-            )
         elif not accept_empty_posture:
             raise KnowledgeRefusal(
                 f"this playbook's posture is empty; the review's prescriptive intent would come "
-                f"entirely from the review policy ({rule_count} rule(s)). That may well be "
-                f"correct, but it is an operator's call to make on the record: pass "
-                f"accept_empty_posture=True and lineage will record posture_source='policy'."
+                f"from the review policy ({rule_count} rule(s)), any standing instructions "
+                f"supplied, and/or the playbook's own digest of governed precedent. That may well "
+                f"be correct -- the real, published OPF playbooks ship posture: {{}} on purpose -- "
+                f"but it is an operator's call to make on the record: pass "
+                f"accept_empty_posture=True and lineage will record where the review's intent "
+                f"came from."
             )
         else:
             accepted_empty_posture = True
+            # Positive record of where the review's intent came from: the
+            # approved policy's rules when it has any, otherwise the
+            # playbook's own digest (never a bare "we accepted an escape" with
+            # no further detail).
+            posture_source = "policy" if rule_count > 0 else "playbook"
 
     blocks = opf_prompt.compose_opf_system_blocks(
-        opf_doc, overrides, policy=policy, mode=declared_mode
+        opf_doc, overrides, policy=policy, mode=declared_mode, instructions_text=instructions_text
     )
 
     return ReviewKnowledge(

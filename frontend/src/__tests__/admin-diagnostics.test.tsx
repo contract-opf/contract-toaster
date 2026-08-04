@@ -30,10 +30,17 @@
  *
  * Fully offline — fetch is stubbed, no network.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import AdminDiagnostics, { RecentFailure } from '../AdminDiagnostics';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import AdminDiagnostics, { formatFailureTime, RecentFailure } from '../AdminDiagnostics';
 import { REASON_EXPLANATIONS } from '../ReviewSubmission';
+
+/** The "Failed at" cell is the row's second `<td>` (Review, Failed at,
+ *  Outcome, Stage, Cause, What to do) — there is no dedicated data-testid on
+ *  it, so read it positionally the same way the row itself is addressed. */
+function failedAtCellText(row: HTMLElement): string {
+  return within(row).getAllByRole('cell')[1].textContent ?? '';
+}
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -82,8 +89,18 @@ function stubDiagnosticsSequence(
 }
 
 describe('AdminDiagnostics — recent failures, with a cause per row', () => {
+  // Object.assign(navigator, { clipboard: ... }) mutates the shared jsdom
+  // `navigator` directly — vi.unstubAllGlobals() doesn't touch it, so a test
+  // that sets navigator.clipboard has to put it back or the stub leaks into
+  // every test that runs after it in this file.
+  const originalClipboard = navigator.clipboard;
+
   beforeEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    Object.assign(navigator, { clipboard: originalClipboard });
   });
 
   it('hides itself entirely on a 403 rather than rendering an empty table', async () => {
@@ -264,6 +281,232 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain('/api/admin/diagnostics/recent-failures');
     expect(url).toMatch(/[?&]limit=\d+/);
+  });
+
+  it('renders the outcome chip as prose, never the raw underscored status (issue #470)', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({ review_id: 'r-manual', status: 'MANUAL_REVIEW_REQUIRED' }),
+          failure({ review_id: 'r-quarantined-outcome', status: 'QUARANTINED' }),
+        ],
+      },
+    });
+    render(<AdminDiagnostics />);
+
+    const manualRow = await screen.findByTestId('failure-row-r-manual');
+    expect(manualRow.textContent).toContain('Needs manual review');
+    expect(manualRow.textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
+
+    const quarantinedRow = screen.getByTestId('failure-row-r-quarantined-outcome');
+    expect(quarantinedRow.textContent).toContain('Quarantined');
+  });
+
+  it('renders failed_at, not created_at, when the two differ (issue #472)', async () => {
+    // Fixed reference so the assertion is against the ACTUAL rendered
+    // string, not just "not the created_at string" — a row whose failed_at
+    // fallback silently regressed to created_at would still differ from a
+    // wrong-but-plausible string, so this pins the true value.
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({
+            review_id: 'r-failed-at',
+            created_at: '1700000000',
+            failed_at: '1700003600',
+          }),
+        ],
+      },
+    });
+
+    render(<AdminDiagnostics />);
+    const row = await screen.findByTestId('failure-row-r-failed-at');
+
+    expect(failedAtCellText(row)).toBe(formatFailureTime('1700003600'));
+    expect(failedAtCellText(row)).not.toBe(formatFailureTime('1700000000'));
+  });
+
+  it('falls back to created_at (not an em dash) when a row has no failed_at', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({ review_id: 'r-no-failed-at', created_at: '1700000000', failed_at: null }),
+        ],
+      },
+    });
+
+    render(<AdminDiagnostics />);
+    const row = await screen.findByTestId('failure-row-r-no-failed-at');
+
+    expect(failedAtCellText(row)).toBe(formatFailureTime('1700000000'));
+    expect(failedAtCellText(row)).not.toBe('—');
+  });
+
+  it('renders the model_key_missing explanation, not the run_review stage shrug', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({
+            review_id: 'r-key-missing',
+            reason: 'model_key_missing',
+            failing_stage: 'run_review',
+          }),
+        ],
+      },
+    });
+
+    render(<AdminDiagnostics />);
+    await screen.findByTestId('failure-cause-r-key-missing');
+
+    expect(screen.getByTestId('failure-cause-r-key-missing')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_key_missing.cause,
+    );
+    expect(screen.getByTestId('failure-fix-r-key-missing')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_key_missing.fix,
+    );
+    expect(screen.getByTestId('failure-fix-r-key-missing')).not.toHaveTextContent(
+      /exact cause was not identified/i,
+    );
+  });
+
+  it('renders the model_timeout explanation, not the run_review stage shrug', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({
+            review_id: 'r-timeout',
+            reason: 'model_timeout',
+            failing_stage: 'run_review',
+          }),
+        ],
+      },
+    });
+
+    render(<AdminDiagnostics />);
+    await screen.findByTestId('failure-cause-r-timeout');
+
+    expect(screen.getByTestId('failure-cause-r-timeout')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_timeout.cause,
+    );
+    expect(screen.getByTestId('failure-fix-r-timeout')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_timeout.fix,
+    );
+    expect(screen.getByTestId('failure-fix-r-timeout')).not.toHaveTextContent(
+      /exact cause was not identified/i,
+    );
+  });
+
+  it('renders the model_empty_content explanation, not the run_review stage shrug', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({
+            review_id: 'r-empty-content',
+            reason: 'model_empty_content',
+            failing_stage: 'run_review',
+          }),
+        ],
+      },
+    });
+
+    render(<AdminDiagnostics />);
+    await screen.findByTestId('failure-cause-r-empty-content');
+
+    expect(screen.getByTestId('failure-cause-r-empty-content')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_empty_content.cause,
+    );
+    expect(screen.getByTestId('failure-fix-r-empty-content')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_empty_content.fix,
+    );
+    expect(screen.getByTestId('failure-fix-r-empty-content')).not.toHaveTextContent(
+      /exact cause was not identified/i,
+    );
+  });
+
+  it('renders the model_output_truncated explanation, not the run_review stage shrug', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          failure({
+            review_id: 'r-output-truncated',
+            reason: 'model_output_truncated',
+            failing_stage: 'run_review',
+          }),
+        ],
+      },
+    });
+
+    render(<AdminDiagnostics />);
+    await screen.findByTestId('failure-cause-r-output-truncated');
+
+    expect(screen.getByTestId('failure-cause-r-output-truncated')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_output_truncated.cause,
+    );
+    expect(screen.getByTestId('failure-fix-r-output-truncated')).toHaveTextContent(
+      REASON_EXPLANATIONS.model_output_truncated.fix,
+    );
+    expect(screen.getByTestId('failure-fix-r-output-truncated')).not.toHaveTextContent(
+      /exact cause was not identified/i,
+    );
+  });
+
+  it('offers one-click copy for the review id (issue #472 fix item 4)', async () => {
+    // History is scoped `mine` (this file's own docstring), so an admin
+    // reading another user's row has nowhere for a link to resolve to —
+    // copy is the documented fallback. The id itself must stay visible as
+    // plain text either way.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    stubDiagnosticsFetch({
+      status: 200,
+      body: { failures: [failure({ review_id: 'r-copy-me' })] },
+    });
+
+    render(<AdminDiagnostics />);
+    const copyButton = await screen.findByTestId('copy-review-id-r-copy-me');
+
+    expect(screen.getByTestId('review-id-text-r-copy-me')).toHaveTextContent('r-copy-me');
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('r-copy-me');
+    });
+    // Still plain, selectable text after the copy — the id was never
+    // replaced by a link or removed from the DOM.
+    expect(screen.getByTestId('review-id-text-r-copy-me')).toHaveTextContent('r-copy-me');
+  });
+
+  it('degrades to a no-op when navigator.clipboard is unavailable (non-secure context)', async () => {
+    // navigator.clipboard is undefined on a plain http:// origin that isn't
+    // localhost — the DTS Docker Compose target reached at
+    // http://<lan-ip>:<port>. Dereferencing `.writeText` on it must not
+    // throw synchronously inside the click handler.
+    Object.assign(navigator, { clipboard: undefined });
+
+    stubDiagnosticsFetch({
+      status: 200,
+      body: { failures: [failure({ review_id: 'r-no-clipboard' })] },
+    });
+
+    render(<AdminDiagnostics />);
+    const copyButton = await screen.findByTestId('copy-review-id-r-no-clipboard');
+
+    expect(() => fireEvent.click(copyButton)).not.toThrow();
+
+    // The id stays visible as plain, selectable text — the documented
+    // fallback when copy itself isn't available.
+    expect(screen.getByTestId('review-id-text-r-no-clipboard')).toHaveTextContent(
+      'r-no-clipboard',
+    );
   });
 
   it('offers no re-run action — re-running a review spends money and is out of scope', async () => {

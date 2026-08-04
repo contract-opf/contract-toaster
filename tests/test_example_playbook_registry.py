@@ -70,7 +70,6 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-test")
-os.environ.setdefault("S3_OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")

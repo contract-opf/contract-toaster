@@ -418,6 +418,43 @@ export class AppStack extends cdk.NestedStack {
               },
             },
           }),
+          // playbook artifacts — uploads bucket, playbooks/* prefix only
+          // (issue #478: POST /api/admin/playbooks/{playbook_id}/versions
+          // persists the validated artifact to
+          // `playbooks/{playbook_id}/{content_hash}.json` plus an
+          // `.original` copy — backend/src/main.py's
+          // `post_admin_playbook_version_upload`, backend/src/
+          // playbook_upload.py's `storage_key_for` /
+          // `original_artifact_key`). The route also GETs the stored
+          // artifact back for the upload-round-trip guarantee (AC1). Every
+          // other statement on this bucket is scoped to `uploads/*`
+          // (Upload) or `outputs/*` (Download) — neither covers
+          // `playbooks/*`, so this route needs its own grant, same
+          // separately-auditable-prefix rationale as DownloadInput above.
+          new iam.PolicyStatement({
+            sid: 'PlaybookArtifacts',
+            effect: iam.Effect.ALLOW,
+            actions: ['s3:PutObject', 's3:GetObject'],
+            resources: [
+              `arn:aws:s3:::contract-toaster-uploads-${envName}/playbooks/*`,
+            ],
+            conditions: {
+              // Same subset-semantics caveat as every other statement in this
+              // policy: this constrains WHICH encryption-context keys may
+              // appear, not that any are present. Presence-and-value
+              // enforcement (where applicable) is the uploads CMK key-policy
+              // DENY in KmsKeysStack.
+              // NOTE: the set-qualifier and operator must be a single key
+              // "ForAllValues:StringEquals" — two separate keys would be
+              // non-existent operators and cause MalformedPolicyDocument on deploy.
+              'ForAllValues:StringEquals': {
+                'kms:EncryptionContextKeys': [
+                  'contract-toaster:data-class',
+                  'contract-toaster:review-id',
+                ],
+              },
+            },
+          }),
           // download — outputs bucket prefix only (issue #71 presigned URL path).
           // Presigned URLs are generated only after owner/admin check passes;
           // Cache-Control: no-store is set in the API response headers.

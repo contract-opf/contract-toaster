@@ -88,6 +88,7 @@ confidential contract text; this module never surfaces that string
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -192,6 +193,41 @@ class OpfExtractError(OpfValidationError):
     canonical OPF JSON block (wraps opf_html.OpfHtmlExtractError)."""
 
 
+class OpfDuplicateIdError(OpfValidationError):
+    """Raised when an OPF document repeats an id within one of the four
+    sibling sets OPF spec section 3.13 makes normative:
+    `evidence.clauses[].id`, `evidence.clause_library[].concept_id`,
+    `floor.invariants[].id`, and `corpus.documents[].document_id`.
+
+    Parity with the playbook-engine's fail-closed validator rule
+    (playbook_engine/validator.py::_check_duplicate_ids, engine commit
+    390a259, 2026-07-29): sibling-id uniqueness shipped as a blocking rule
+    with no schema change and no version bump, so JSON Schema validation
+    alone cannot catch it -- a document the engine now refuses to produce
+    would otherwise load here. Undetected, the id-keyed lookups the runtime
+    relies on (digest `clauses[].id` <-> evidence ids, floor invariant ids
+    for floor_refs and the floor judge) would silently resolve to the first
+    match instead of failing loudly.
+
+    The message names the JSON Pointer to the offending sibling array,
+    including the index of the duplicate occurrence -- value-free and
+    sufficient on its own to locate the problem. The vendored schemas do
+    NOT constrain these four id fields (`clausePosition.id`,
+    `clauseConcept.concept_id`, `floor.invariants[].id`,
+    `corpus.documents[].document_id` are each bare `{"type": "string"}`,
+    with no `pattern` or `maxLength` -- unlike `agreement_type.id` and
+    `posture.*.entries[].id`, which the schema does pin to
+    `^[a-z0-9_-]+$`). That means an id here is arbitrary, unbounded,
+    uploader-controlled text, and this check runs BEFORE the injection
+    scan (see `_validate_doc`), so it must not assume the value is safe to
+    echo. The id is only ever included in the message when it independently
+    matches `^[a-z0-9_-]+$` and is within the length cap (see
+    `_safe_id_repr`); otherwise it is omitted and the pointer/index is all
+    that's shown, preserving the no-document-content-in-errors discipline
+    (module docstring).
+    """
+
+
 def _load_schema(version: str) -> dict:
     if version not in _SCHEMA_CACHE:
         with open(OPF_SCHEMA_PATHS[version], encoding="utf-8") as f:
@@ -268,17 +304,99 @@ def resolve_digest_version(doc: dict) -> Optional[str]:
     return version
 
 
+# (JSON Pointer to the sibling array, dotted path to reach it from the
+# document root, id field name) for each of the four sets OPF spec section
+# 3.13 makes normative -- parity with the engine's _check_duplicate_ids.
+_SIBLING_ID_SETS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("/evidence/clauses", ("evidence", "clauses"), "id"),
+    ("/evidence/clause_library", ("evidence", "clause_library"), "concept_id"),
+    ("/floor/invariants", ("floor", "invariants"), "id"),
+    ("/corpus/documents", ("corpus", "documents"), "document_id"),
+)
+
+# Only ids that already look like machine identifiers -- and are short --
+# are safe to echo in an error message. The vendored schemas do NOT pin
+# clausePosition.id / clauseConcept.concept_id / floor.invariants[].id /
+# corpus.documents[].document_id to this shape (see OpfDuplicateIdError
+# docstring), so this is a defensive filter this module applies itself,
+# not a guarantee inherited from the schema. `^[a-z0-9_-]+$` mirrors the
+# pattern the schema DOES use elsewhere (agreement_type.id, posture ids);
+# the length cap is this module's own sane bound, not a schema value.
+_SAFE_ID_PATTERN = re.compile(r"^[a-z0-9_-]+$")
+_SAFE_ID_MAX_LEN = 100
+
+
+def _safe_id_repr(item_id: str) -> str:
+    """Return a quoted, echo-safe form of `item_id`, or "" if the value does
+    not look like a machine identifier. Never echoes document content --
+    this check runs before the injection scan (_validate_doc), so an id
+    that fails the safety filter has never been injection-scanned."""
+    if len(item_id) <= _SAFE_ID_MAX_LEN and _SAFE_ID_PATTERN.match(item_id):
+        return f" {item_id!r}"
+    return ""
+
+
+def _check_duplicate_sibling_ids(doc: dict) -> None:
+    """Raise OpfDuplicateIdError if any of the four OPF section 3.13 sibling
+    sets repeats an id. Must run AFTER schema validation, which is what
+    guarantees each set here is shaped as an array of objects carrying the
+    named id field as a string -- this function does not re-derive that,
+    it only walks what schema validation already proved well-formed
+    (defensive isinstance checks are still here since a caller could, in
+    principle, invoke this on an unvalidated doc).
+
+    The error message always names the offending array index in the JSON
+    Pointer (e.g. `/corpus/documents/1`) -- value-free, and enough on its
+    own to locate the duplicate. The id value itself is only appended when
+    `_safe_id_repr` judges it safe to echo; these four id fields are
+    uploader-controlled, schema-unconstrained strings (see
+    OpfDuplicateIdError docstring), not guaranteed-safe machine tokens.
+    """
+    for pointer, path, id_field in _SIBLING_ID_SETS:
+        node: Any = doc
+        for key in path:
+            if not isinstance(node, dict):
+                node = None
+                break
+            node = node.get(key)
+        if not isinstance(node, list):
+            continue
+        seen: set[str] = set()
+        for index, item in enumerate(node):
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get(id_field)
+            if not isinstance(item_id, str):
+                continue
+            if item_id in seen:
+                raise OpfDuplicateIdError(
+                    f"OPF validation failed at {pointer}/{index}: duplicate {id_field}"
+                    f"{_safe_id_repr(item_id)} "
+                    "(OPF spec section 3.13 requires ids to be unique among siblings)"
+                )
+            seen.add(item_id)
+
+
 def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
     """Schema-validate, hash-verify, and injection-scan an in-memory OPF doc.
 
     Order is deliberate: versions first (both of them), then structure (schema),
-    then artifact integrity (content_hash), then content safety (injection
-    scan). Dispatching on a version before validating against a shape is what
-    turns "failed the 'oneOf' check at /digest/clauses/3/preferred_variations/0"
-    into "unsupported digest version" -- and it is the only check that can see a
+    then sibling-id uniqueness (OPF spec section 3.13 -- schema-shaped but not
+    schema-checkable, see OpfDuplicateIdError), then artifact integrity
+    (content_hash), then content safety (injection scan). Dispatching on a
+    version before validating against a shape is what turns "failed the
+    'oneOf' check at /digest/clauses/3/preferred_variations/0" into
+    "unsupported digest version" -- and it is the only check that can see a
     semantic version change that leaves the shape intact (module docstring).
-    The scan runs even on a hash-verified document -- a faithfully-compiled
-    playbook can still carry injected text mined out of the corpus.
+    The duplicate-id check runs right after schema validation because it
+    depends on the shape guarantees schema validation just proved (each
+    sibling set is an array of objects carrying its id field as a string)
+    and, like the schema check, it is about structural validity rather than
+    the document's own content -- it belongs before the content_hash check,
+    which is about whether the (structurally valid) bytes were tampered
+    with after compilation. The scan runs even on a hash-verified document --
+    a faithfully-compiled playbook can still carry injected text mined out
+    of the corpus.
     """
     version = resolve_opf_version(doc)
     resolve_digest_version(doc)  # independent version; see module docstring
@@ -287,6 +405,8 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
         jsonschema.validate(instance=doc, schema=_load_schema(version))
     except jsonschema.ValidationError as exc:
         raise OpfValidationError(_describe(exc)) from None
+
+    _check_duplicate_sibling_ids(doc)
 
     identity = doc.get("identity")
     has_identity = isinstance(identity, dict) and isinstance(identity.get("content_hash"), str)
