@@ -252,7 +252,7 @@ Scaffold the React SPA and wire it to Amplify Hosting. The app at this stage sho
 - [ ] Cognito hosted-UI sign-in works end-to-end.
 - [ ] Header shows the signed-in user's email.
 - [ ] Footer shows the version from the authenticated `/version` endpoint (the backend will return a stub for now). `/health` stays public/liveness-only.
-- [ ] Amplify Hosting app defined in `infra/lib/frontend-stack.ts`. **Branch auto-build/auto-publish on push to `main` is allowed in the DEV account only.** The **prod** Amplify app does **not** auto-publish on merge — prod is advanced by a **deliberate promotion of a specific built frontend artifact**, consistent with the digest-pinned backend (see ARCHITECTURE.md → Frontend / Infrastructure). The frontend is legal-facing (it renders the attorney-approval watermark and the ACCEPT framing), so a merge to `main` must not silently change prod presentation.
+- [ ] Amplify Hosting app defined in `infra/lib/frontend-stack.ts`. **Branch auto-build/auto-publish on push to `main` is allowed in the DEV account only.** The **prod** Amplify app does **not** auto-publish on merge — prod is advanced by a **deliberate promotion of a specific built frontend artifact**, consistent with the digest-pinned backend (see ARCHITECTURE.md → Frontend / Infrastructure). The frontend is legal-facing (it renders the ACCEPT framing), so a merge to `main` must not silently change prod presentation.
 - [ ] CI build produces the frontend artifact; the dev URL is reachable on push, and prod requires an explicit promotion step.
 
 ## Out of scope

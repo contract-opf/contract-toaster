@@ -48,31 +48,86 @@ For each revision attached to a paragraph:
   | Revision type    | status                  | Disposition                                      |
   |-------------------|--------------------------|---------------------------------------------------|
   | tracked_change    | accepted                 | ACCEPT -- resulting_text is the operative text    |
-  | tracked_change    | unresolved / rejected,   | ACCEPT-ALL -- the pending revision IS the proposal |
-  |                    | single revision, one     | under review; resulting_text becomes the          |
-  |                    | author, not inside a     | operative text; disposition recorded in a         |
-  |                    | field code               | normalization note                                |
-  | tracked_change    | unresolved / rejected,   | REJECT CLOSED -- genuinely ambiguous: cannot       |
-  |                    | AMBIGUOUS (see below)    | silently compose or order multiple dispositions    |
+  | tracked_change    | unresolved / rejected    | ACCEPT-ALL -- the pending revision(s) ARE the      |
+  |                    | (any cluster/author      | proposal under review; resulting_text becomes the |
+  |                    | count -- issue #563;     | operative text; disposition recorded in a         |
+  |                    | inside a field code or   | normalization note, naming cluster/author counts   |
+  |                    | not -- issue #530)       | when more than one is present, or the field's      |
+  |                    |                          | resolved text when inside a field code             |
   | comment            | any (open or resolved)  | Comments NEVER gate normalization by themselves --|
   |                    |                          | see "Comments never gate" below                    |
   | hidden_text        | n/a                      | STRIP -- never reaches the clean body              |
   | field               | n/a                     | RESOLVE -- replaced by its literal `field_result`  |
 
-A pending tracked change is "AMBIGUOUS" (still fails closed) when any of the
-following genuinely-ambiguous structures is present on the paragraph:
+A pending tracked change is "AMBIGUOUS" (still fails closed) when the
+following remains true. Issue #563 narrowed this from four conditions to
+two, and issue #530 narrows it further to just this one -- see "Multi-
+cluster / multi-author acceptance" and "Field code resolution" below for why
+more than one pending cluster/author, or a pending change inside a field
+code, no longer gate on their own:
 
-  1. Nested/conflicting revisions -- more than one pending tracked_change on
-     the same paragraph. The pipeline cannot silently decide how multiple
-     pending edits compose or order relative to one another.
-  2. Multiple revision authors interleaved -- a special case of (1): pending
-     revisions from more than one distinct author on the same paragraph.
-  3. Revisions inside field codes -- a pending tracked_change whose
-     `inside_field_code` is true. Which literal field result is operative is
-     itself in question; accepting blind is a guess.
-  4. Malformed records -- a pending (or accepted) tracked_change with no
+  1. Malformed records -- a pending (or accepted) tracked_change with no
      `resulting_text` cannot be accepted into anything; the operative text is
-     unknown.
+     unknown. This is the ONE condition that still fails closed: there is
+     genuinely no text to read, and no amount of model intelligence helps a
+     truncated or corrupt revision record.
+
+### Multi-cluster / multi-author acceptance (issue #563)
+
+Before issue #563, more than one pending tracked_change on a single
+paragraph -- nested/conflicting clusters, or the same split across more than
+one author -- failed the WHOLE DOCUMENT closed: the stated reasoning was that
+the pipeline "cannot silently decide how multiple pending edits compose or
+order." That reasoning does not actually hold for how these revisions reach
+this function in the real pipeline: `resulting_text` on EVERY cluster's
+revision record for a paragraph is already the SAME value -- the whole
+paragraph's accept-all text, computed once from every cluster combined
+(`extraction_normalization_stage._build_paragraph_record`) and stamped onto
+each cluster's entry -- so there is nothing left to compose or order between
+clusters; accepting the first pending revision's `resulting_text` accepts
+every cluster on the paragraph at once, same as accepting a single cluster
+does today. What changes with more than one cluster or author is
+DISCLOSURE, not ambiguity: the normalization note names the paragraph's
+heading and how many pending clusters/authors were folded into the operative
+text, so an attorney sees that multiple pending edits were combined rather
+than the document being silently accepted -- or refused outright, defeating
+the flagship multi-cluster/multi-author counterparty-markup scenario the
+same way issue #199 found the single-cluster case defeated it.
+
+Accepting the paragraph TEXT this way is only half of issue #563: the
+paragraph's own `.docx` bytes still carry the raw `<w:ins>`/`<w:del>`
+markup at this point. `extraction_normalization_stage.materialize_accept_all`
+physically applies the SAME disposition to the OOXML itself, so every
+downstream consumer -- the text the model reads, quote-locate, patch-apply,
+and the delivered redline -- operates on one canonical, already-accepted
+document, never a text/bytes mismatch.
+
+### Field code resolution (issue #530)
+
+Before issue #530, a pending tracked change whose `inside_field_code` is
+true (a cross-reference, auto-numbering, or date field the counterparty is
+live-editing) failed the WHOLE DOCUMENT closed: the stated reasoning was
+that which literal field result is operative is itself ambiguous, and
+accepting blind would be a guess. Owner decision 2026-08-09 found that
+reasoning did not survive contact with how the extractor actually resolves
+one: `extraction_normalization_stage._process_fld_simple` bubbles a pending
+change inside a field's result region up as an ORDINARY pending-revision
+cluster (`inside_field_code=True` is a flag on that cluster, not a
+different revision shape), and that cluster's `resulting_text` is already
+the field's own resolved display text -- exactly the value accept-all
+already knows how to fold into the operative draft for any other pending
+revision. There is no separate "which field result wins" decision left to
+make; the field code case resolves the SAME way an ordinary pending change
+does, and is disclosed explicitly (naming the field's resolved text, not
+folded silently into the generic accept-all note) because "which field
+result is operative" was the exact question this branch used to refuse to
+answer.
+
+The one condition this does NOT touch is a malformed record with no
+`resulting_text` -- there being no text at all is a different problem than
+"the field text is fine, but which field's text applies", and that branch
+keeps failing closed regardless of whether it also happens to sit inside a
+field code (see `build_unnormalizable_report`'s message for that path).
 
 ### Comments never gate
 
@@ -196,45 +251,29 @@ def _normalize_paragraph(paragraph: dict) -> dict:
         return {"normalizable": True, "clean_text": clean_text}
 
     # --- Pending tracked change(s): accept-all unless genuinely ambiguous ---
+    #
+    # Only ONE condition still fails closed (issue #563 narrowed this from
+    # four to two; issue #530 narrows it further to just this one -- see
+    # module docstring, "Multi-cluster / multi-author acceptance" and "Field
+    # code resolution"): a malformed record with no resulting_text. Neither
+    # more than one pending cluster/author, nor a pending change inside a
+    # field code, fail closed on their own any more.
 
     inside_field_code = [
         rev for rev in pending_tracked_changes if rev.get("inside_field_code")
     ]
-    if inside_field_code:
-        return {
-            "normalizable": False,
-            "note": (
-                f"Paragraph '{heading}': a pending tracked change occurs "
-                f"inside a field code -- which literal field result is "
-                f"operative is itself ambiguous; cannot accept-all."
-            ),
-        }
 
-    if len(pending_tracked_changes) > 1:
-        authors = {rev.get("author") for rev in pending_tracked_changes}
-        if len(authors) > 1:
-            return {
-                "normalizable": False,
-                "note": (
-                    f"Paragraph '{heading}': pending tracked changes from "
-                    f"multiple authors ({sorted(a for a in authors if a)}) "
-                    f"are interleaved on this paragraph -- ambiguous which "
-                    f"disposition is operative; cannot silently compose them."
-                ),
-            }
-        return {
-            "normalizable": False,
-            "note": (
-                f"Paragraph '{heading}': multiple nested/conflicting pending "
-                f"tracked changes on this paragraph -- ambiguous how they "
-                f"compose or order relative to one another; cannot silently "
-                f"resolve."
-            ),
-        }
-
-    # A single, unambiguous pending revision -- ACCEPT-ALL. Per issue #199,
-    # the pending counterparty revision IS the proposal under review; the
-    # downstream standard-form diff recovers what changed.
+    # ACCEPT-ALL. Per issue #199, the pending counterparty revision IS the
+    # proposal under review; the downstream standard-form diff recovers what
+    # changed. Per issue #563, more than one pending cluster/author accepts
+    # the SAME way: every cluster's resulting_text is identical for a given
+    # paragraph (see module docstring), so the first one already IS the
+    # whole paragraph's operative text regardless of how many clusters or
+    # authors contributed pending edits to it. Per issue #530, a pending
+    # change inside a field code accepts the SAME way too: its
+    # resulting_text is already the field's own resolved display text (see
+    # module docstring, "Field code resolution") -- there is no separate
+    # "which field result wins" decision left to make.
     rev = pending_tracked_changes[0]
     resulting_text = rev.get("resulting_text")
     if not resulting_text:
@@ -247,11 +286,41 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             ),
         }
     clean_text = resulting_text
-    note = (
-        f"Paragraph '{heading}': pending tracked change "
-        f"(author: {rev.get('author', 'unknown')}, status: {rev.get('status')}) "
-        f"accepted-all into the operative draft."
-    )
+
+    if inside_field_code:
+        # Named explicitly (issue #530) rather than folded into the generic
+        # accept-all note below: "which field result is operative" was the
+        # exact question this branch used to refuse to answer, so the
+        # disclosure states what it resolved to, not just that something
+        # pending was accepted. Two sentences, deliberately: the FIRST ends
+        # with the exact "accepted-all into the operative draft." tail every
+        # other accept-all note ends with (frontend/src/toaster/receipt.ts's
+        # `acceptedChangesSummary` counts sentences by that literal tail),
+        # so a field-code disposition is never silently absent from that
+        # count-consistency check the way an entirely different tail would
+        # be -- it correctly trips the "parsed fewer than the tail count"
+        # safeguard and drops the compact summary rather than under-
+        # reporting how many dispositions actually happened. The SECOND
+        # sentence, not part of that established template, is what actually
+        # names what the field resolved to.
+        note = (
+            f"Paragraph '{heading}': pending tracked change inside a field "
+            f"code accepted-all into the operative draft. The field now "
+            f"resolves to '{resulting_text}'."
+        )
+    elif len(pending_tracked_changes) > 1:
+        authors = {rev.get("author") for rev in pending_tracked_changes}
+        note = (
+            f"Paragraph '{heading}': {len(pending_tracked_changes)} pending "
+            f"tracked changes from {len(authors)} author(s) accepted-all "
+            f"into the operative draft."
+        )
+    else:
+        note = (
+            f"Paragraph '{heading}': pending tracked change "
+            f"(author: {rev.get('author', 'unknown')}, status: {rev.get('status')}) "
+            f"accepted-all into the operative draft."
+        )
     return {"normalizable": True, "clean_text": clean_text, "note": note}
 
 

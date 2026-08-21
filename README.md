@@ -33,9 +33,9 @@ observability surface RUNBOOK.md describes.
 
 A human attorney reviews and approves before anything goes back to the
 counterparty. This tool produces drafts and analysis; it does not give legal
-advice and does not constitute approval. Every output is a **tool
-recommendation only; attorney approval required** — an ACCEPT means "no
-requested changes identified by the tool", not "no action needed".
+advice and does not constitute approval — approval happens outside this tool.
+An ACCEPT means "no requested changes identified by the tool", not "no action
+needed".
 
 ## What this is not
 

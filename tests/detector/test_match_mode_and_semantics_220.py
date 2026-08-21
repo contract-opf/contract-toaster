@@ -39,9 +39,12 @@ This test verifies the #220 fix in scripts/detector_common:
      reads both.
   5. Regression: the existing no-exos-indemnity gold fixtures (hand-authored
      for #212, exercising both the plain 'hold harmless' trigger and the
-     regex 'exos shall indemnify' trigger) still score PASS through
-     scripts/eval_harness.py end-to-end after the trigger_terms /
-     regex_trigger_terms split.
+     regex 'exos shall indemnify' trigger) still fire/no_fire as expected
+     after the trigger_terms / regex_trigger_terms split -- checked via a
+     direct detector_common call per fixture (issue #400: relocated from
+     scripts/eval_harness.score_all(), which no longer scores detector-
+     shaped fixtures; the shared detector module now imported here is the
+     same one every gold-fixture-scoring call site delegates to).
 
 Run with: python3 tests/detector/test_match_mode_and_semantics_220.py
 Exit codes: 0 = pass, 1 = fail
@@ -61,7 +64,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import detector_common  # noqa: E402
-import eval_harness  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -358,25 +360,53 @@ NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS = {
 }
 
 
-def test_no_exos_indemnity_fixtures_still_pass() -> None:
-    # Explicit eiaa fixtures_dir/playbook_path (issue #343 repointed
-    # eval_harness's module-level default FIXTURES_PATH/PLAYBOOK_PATH to the
-    # public "sample-agreement" sample playbook) -- these fixtures live in
-    # tests/gold-fixtures/, eiaa's directory.
-    results = {
-        r.case_id: r
-        for r in eval_harness.score_all(fixtures_dir=REPO_ROOT / "tests" / "gold-fixtures", playbook_path=PLAYBOOK_PATH)
-    }
-    missing = NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS - set(results)
-    _check(not missing, f"expected no-exos-indemnity gold fixtures not found: {sorted(missing)}")
+GOLD_FIXTURES_DIR = REPO_ROOT / "tests" / "gold-fixtures"
 
-    for case_id in sorted(NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS & set(results)):
-        result = results[case_id]
-        _check(
-            result.passed,
-            f"{case_id}: eval_harness scored FAIL after the trigger_terms/"
-            f"regex_trigger_terms split: {result.reasons!r}",
+
+def test_no_exos_indemnity_fixtures_still_pass() -> None:
+    # These fixtures live in tests/gold-fixtures/ (the "synthetic-generic"
+    # playbook_id's registered fixtures_dir).
+    playbook = load_playbook()
+    rules_by_id = {r["id"]: r for r in playbook.get("hard_rejections", [])}
+
+    found_case_ids: set[str] = set()
+    for fixture_path in sorted(GOLD_FIXTURES_DIR.glob("*.json")):
+        with open(fixture_path, encoding="utf-8") as f:
+            fixture = json.load(f)
+        case_id = fixture.get("case_id", fixture_path.stem)
+        if case_id not in NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS:
+            continue
+        found_case_ids.add(case_id)
+
+        expectation = fixture["detector_expectation"]
+        expected_result = expectation["expected_result"]
+        rule_id = expectation["rule_id"]
+        variation = fixture["planted_variation"]
+        rule = rules_by_id[rule_id]
+
+        fires = detector_common.check_on_insert_rule_fires(
+            rule, variation["inserted_hunk"], variation.get("topic_id", "")
         )
+        fired_rule_ids = {f["rule_id"] for f in fires}
+
+        if expected_result == "fire":
+            _check(
+                rule_id in fired_rule_ids,
+                f"{case_id}: expected {rule_id!r} to fire after the "
+                f"trigger_terms/regex_trigger_terms split; actual fires: "
+                f"{sorted(fired_rule_ids) or 'none'}",
+            )
+        elif expected_result == "no_fire":
+            _check(
+                rule_id not in fired_rule_ids,
+                f"{case_id}: expected {rule_id!r} NOT to fire after the "
+                f"trigger_terms/regex_trigger_terms split, but it fired.",
+            )
+        else:
+            _check(False, f"{case_id}: unrecognized detector_expectation.expected_result: {expected_result!r}")
+
+    missing = NO_EXOS_INDEMNITY_FIXTURE_CASE_IDS - found_case_ids
+    _check(not missing, f"expected no-exos-indemnity gold fixtures not found: {sorted(missing)}")
 
 
 def main() -> int:

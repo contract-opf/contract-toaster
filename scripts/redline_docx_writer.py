@@ -78,16 +78,20 @@ writer:
   Footnote ids are computed once by `_compute_footnotes()` and reused by
   both `word/document.xml` (the reference) and `word/footnotes.xml` (the
   definition), so the two parts can never disagree on numbering.
-- **Export marker.** `include_marker=True` (the default -- "the marker
-  remains the default on every generated redline", docs/output-contract.md
-  -> "Export marker") adds the internal-only / export-warning marker
-  redundantly: a first-page cover note (`word/document.xml`, before the
-  tracked-change body, followed by an explicit page break) plus a running
-  every-page header and footer (`word/header1.xml`, `word/footer1.xml`,
-  wired via `word/_rels/document.xml.rels` + `<w:headerReference>`/
-  `<w:footerReference>` on `<w:sectPr>`). Pass `include_marker=False` only
-  for the deliberate de-marking / clean-copy path (issue #39); every
-  ordinary redline call site leaves it on.
+- **Export marker.** `include_marker=True` (this function's own default)
+  adds the internal-notes marker redundantly: a first-page cover note
+  (`word/document.xml`, before the tracked-change body, followed by an
+  explicit page break) plus a running every-page header and footer
+  (`word/header1.xml`, `word/footer1.xml`, wired via
+  `word/_rels/document.xml.rels` + `<w:headerReference>`/
+  `<w:footerReference>` on `<w:sectPr>`). The marker is no longer
+  unconditional at the product level (issue #513): a live caller passes
+  `include_marker` based on whether THIS review's notes mode actually
+  carries internal-audience content -- see
+  `redline_generate.inject_export_marker_and_footnotes`'s `include_marker`
+  parameter, which is the live first-party path's equivalent seam. A
+  review with no internal notes gets a `.docx` with no marker in any part;
+  there is no manual de-marking step to run afterward.
 """
 
 import datetime
@@ -106,14 +110,19 @@ ET.register_namespace("r", REL_NS)
 
 DEFAULT_AUTHOR = "contract-toaster"
 
-# Internal-only / export-warning marker text (docs/output-contract.md ->
-# "Export marker", ARCHITECTURE.md -> "Export / misuse marker"). Matches the
-# SPA result-view watermark verbatim -- this is the baked-into-the-document
-# half of that same misuse-prevention control.
-MARKER_TEXT = (
-    "tool recommendation only — attorney approval required; do not "
-    "send externally before attorney approval"
-)
+# Internal-notes marker text (docs/output-contract.md -> "Export marker",
+# ARCHITECTURE.md -> "Export / misuse marker"). Issue #513 retired the
+# attorney-approval framing this string used to carry everywhere -- the
+# premise that justified it (a haste-prone reviewer distinct from an
+# approving attorney) was withdrawn; see docs/threat-model.md ->
+# "External-communication guardrail". The marker's only remaining job is an
+# honest signpost: this document carries internal-audience notes, so it is
+# not the version to send externally. It is present on a generated document
+# iff that review's notes mode actually included internal content --
+# `include_marker` on this module's writer functions, and
+# `redline_generate.inject_export_marker_and_footnotes`'s `include_marker`
+# parameter on the live first-party path -- never unconditional.
+MARKER_TEXT = "contains internal notes — not for external transmission"
 
 FOOTNOTES_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
@@ -446,10 +455,11 @@ def build_tracked_changes_docx(
     `footnote_text_by_anchor` (anchor -> `external_rationale_for_footnote`
     text) adds a footnoted rationale to each matching patch's paragraph
     (issue #83 AC: "footnoted rationales"). `include_marker=True` (default)
-    bakes in the redundant internal-only / export-warning marker -- cover
-    note plus every-page header/footer (issue #83 AC: "Marker placement per
-    spec"); pass `include_marker=False` only for the deliberate de-marking
-    / clean-copy export path (issue #39).
+    bakes in the redundant internal-notes marker -- cover note plus
+    every-page header/footer (issue #83 AC: "Marker placement per spec").
+    The caller decides `include_marker` based on this review's notes mode
+    (issue #513: present iff internal notes are included); this function
+    has no opinion of its own beyond the default.
 
     Returns raw `.docx` bytes -- an actual document, never an S3 pointer or
     a reference to any pre-baked/canned fixture. Callers persist these

@@ -12,10 +12,11 @@ reliable locator. This test drives the real `scripts/quote_locate.py`
 module (which does not exist before this slice -- this file FAILS on
 import until it does) over small, hand-built OOXML fixtures reproducing the
 documented divergence cases between what the model quotes and the raw
-OOXML: a clean single paragraph, a multi-`<w:p>` logical paragraph joined
-by a space (`extraction_normalization_stage.py`), a paragraph carrying a
-pending tracked change resolved via accept-all (`normalize_input.py:
-116-196`), a field-result paragraph, and a paragraph containing a `w:tab`.
+OOXML: a clean single paragraph, a multi-`<w:p>` logical paragraph whose
+siblings are joined by a newline (`extraction_normalization_stage.py`;
+issue #564 -- see Case B below), a paragraph carrying a pending tracked
+change resolved via accept-all (`normalize_input.py:116-196`), a
+field-result paragraph, and a paragraph containing a `w:tab`.
 
 ## What this test asserts (mirrors the issue's Acceptance criteria)
 
@@ -24,8 +25,11 @@ pending tracked change resolved via accept-all (`normalize_input.py:
   2. Returns `ambiguous` when the quote appears in 2+ paragraphs; `not_
      found` when absent.
   3. Whitespace-variant quotes (extra spaces / a newline vs. the doc, a
-     space standing in for a `w:tab`) still locate in the clean and
-     multi-`<w:p>` cases.
+     space standing in for a `w:tab`) still locate in the clean case; in
+     the multi-`<w:p>` case (Case B), a quote spanning the physical join
+     locates but classifies as `spans_paragraph_break` (issue #564), not
+     `found` -- `docx_editor` cannot write a tracked change across two
+     physical paragraphs even though the text is genuinely present.
   4. A per-case locate-rate table is printed (this issue's harness
      requirement).
 
@@ -51,6 +55,7 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "quote_locate"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 
+import extraction_normalization_stage  # type: ignore  # noqa: E402
 import quote_locate  # type: ignore  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -222,7 +227,10 @@ def test_clean_single_paragraph(failures: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Case B: multi-<w:p> logical paragraph joined by a space
+# Case B: multi-<w:p> logical paragraph, siblings joined by a newline
+# (issue #564: was a single space before this issue -- the whitespace-
+# collapse matcher below treats the two identically, so this changes no
+# locate outcome, only the returned classification of a spanning match).
 # ---------------------------------------------------------------------------
 
 _CONFIDENTIALITY_P1 = "The Receiving Party shall protect Confidential Information using reasonable care."
@@ -238,21 +246,36 @@ def _generate_multi_physical_paragraph_fixture() -> Path:
     return path
 
 
-def test_multi_physical_paragraph_joined_by_space(failures: list[str]) -> None:
-    case = "multi_physical_paragraph_joined_by_space"
+def test_multi_physical_paragraph_joined_by_newline(failures: list[str]) -> None:
+    case = "multi_physical_paragraph_joined_by_newline"
     docx_bytes = _generate_multi_physical_paragraph_fixture().read_bytes()
 
+    # A quote fully inside ONE physical sibling still locates as "found" --
+    # the ordinary case, unaffected by issue #564's classification.
     _check(
-        failures, case, "quote spanning the physical-paragraph join locates",
+        failures, case, "quote inside the first physical sibling still locates as found",
         docx_bytes,
-        "using reasonable care. Any breach shall be reported within five business days.",
+        _CONFIDENTIALITY_P1,
         "found", expected_para_index=0,
     )
+
+    # A quote spanning the physical-paragraph join is genuinely present (the
+    # whitespace-collapse matcher treats the "\n" join as elastic
+    # whitespace, same as any other run) but `docx_editor` -- which edits
+    # PHYSICAL paragraphs -- has nowhere to write a tracked change spanning
+    # two of them. Issue #529/#564: this is REASON_SPANS_PARAGRAPH_BREAK,
+    # never "found" and never "not_found".
     _check(
-        failures, case, "whitespace-variant quote (newline at the join) still locates",
+        failures, case, "quote spanning the physical-paragraph join classifies as spans_paragraph_break",
+        docx_bytes,
+        "using reasonable care. Any breach shall be reported within five business days.",
+        quote_locate.REASON_SPANS_PARAGRAPH_BREAK, expected_para_index=0,
+    )
+    _check(
+        failures, case, "whitespace-variant quote (literal newline at the join) still classifies the same way",
         docx_bytes,
         "using reasonable care.\nAny breach shall be reported within five business days.",
-        "found", expected_para_index=0,
+        quote_locate.REASON_SPANS_PARAGRAPH_BREAK, expected_para_index=0,
     )
 
 
@@ -399,16 +422,127 @@ def test_ambiguous_when_quote_in_two_or_more_paragraphs(failures: list[str]) -> 
 
 
 # ---------------------------------------------------------------------------
+# Case G: typographic punctuation (measured against the real corpus)
+#
+# Word autocorrects a typed apostrophe to U+2019 and typed quotes to U+201C/
+# U+201D, so real counterparty paper is full of them: 15 of the 16 normalizable
+# documents in the real EIAA corpus carry curly punctuation (doc01 alone: 45x
+# U+2019, 20x U+201C, 20x U+201D). Models reliably ASCII-fold it when copying a
+# `source_quote` back out -- measured 2026-08-05 on a real review, where BOTH
+# of the model's quotes located `not_found` and the whole redline died with
+# `quote_patches_not_applied`:
+#
+#   Section 8  quote matched 393/522 chars, stopping at `Institution's`  vs `Institution’s`
+#   Section 16 quote matched  78/539 chars, stopping at `"Confidential"` vs `“Confidential”`
+#
+# This is the same class of divergence as the whitespace case this module
+# already tolerates -- a faithful copy that differs only in how a character is
+# encoded, never a semantic edit -- so it belongs in the comparison-only form
+# rather than in a fuzzy matcher. Word content and casing must still match
+# exactly, and the returned span still points into the paragraph's REAL text
+# (curly punctuation intact), which the last assertion below pins.
+# ---------------------------------------------------------------------------
+
+_CURLY_INDEMNITY_TEXT = (
+    "The Institution’s indemnity covers the acts and omissions of the "
+    "Institution’s employees, agents and volunteers while acting on the "
+    "Institution’s behalf."
+)
+_CURLY_CONFIDENTIALITY_TEXT = (
+    "The Institution shall not disclose any “Confidential Information” "
+    "of the Company – including any protected health information "
+    "(“PHI”) – to any third party."
+)
+
+
+def _generate_typographic_punctuation_fixture() -> Path:
+    FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
+    path = FIXTURES_DIR / "typographic-punctuation.SYNTHETIC.docx"
+    if not path.exists():
+        body = (
+            _heading_p("Indemnification")
+            + _body_p(_CURLY_INDEMNITY_TEXT)
+            + _heading_p("Confidentiality")
+            + _body_p(_CURLY_CONFIDENTIALITY_TEXT)
+        )
+        path.write_bytes(_build_docx_bytes(body))
+    return path
+
+
+def test_typographic_punctuation(failures: list[str]) -> None:
+    case = "typographic_punctuation"
+    docx_bytes = _generate_typographic_punctuation_fixture().read_bytes()
+
+    _check(
+        failures, case, "an ASCII-folded apostrophe still locates the curly original",
+        docx_bytes,
+        _CURLY_INDEMNITY_TEXT.replace("’", "'"),
+        "found",
+        0,
+    )
+    _check(
+        failures, case, "ASCII-folded double quotes and dashes still locate",
+        docx_bytes,
+        _CURLY_CONFIDENTIALITY_TEXT.replace("“", '"').replace("”", '"').replace("–", "-"),
+        "found",
+        1,
+    )
+    _check(
+        failures, case, "a partial quote ending mid-apostrophe locates its own span",
+        docx_bytes,
+        "acts and omissions of the Institution's employees",
+        "found",
+        0,
+    )
+    _check(
+        failures, case, "the curly original still locates unchanged",
+        docx_bytes,
+        _CURLY_INDEMNITY_TEXT,
+        "found",
+        0,
+    )
+    _check(
+        failures, case, "folding punctuation does not make unrelated word content match",
+        docx_bytes,
+        "The Institution's indemnity covers nothing whatsoever.",
+        "not_found",
+    )
+
+    # The span must point into the paragraph's REAL text: the redline quotes
+    # the document, never the model's ASCII-folded transcription of it. This
+    # is the whole reason the fold is comparison-only.
+    result = quote_locate.locate_quote(
+        docx_bytes, "acts and omissions of the Institution's employees"
+    )
+    passed, total = CASE_STATS.setdefault(case, [0, 0])
+    total += 1
+    located = ""
+    if result.get("status") == "found":
+        norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+        start, end = result["span"]
+        located = norm["paragraphs"][result["para_index"]]["text"][start:end]
+    if located == "acts and omissions of the Institution’s employees":
+        passed += 1
+    else:
+        failures.append(
+            f"[{case}] the returned span must carry the document's own U+2019, "
+            f"not the model's ASCII fold; got {located!r}"
+        )
+    CASE_STATS[case] = [passed, total]
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
 TESTS = [
     test_clean_single_paragraph,
-    test_multi_physical_paragraph_joined_by_space,
+    test_multi_physical_paragraph_joined_by_newline,
     test_tracked_change_accept_all,
     test_field_result,
     test_tabs,
     test_ambiguous_when_quote_in_two_or_more_paragraphs,
+    test_typographic_punctuation,
 ]
 
 

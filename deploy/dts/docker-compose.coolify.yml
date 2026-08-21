@@ -71,6 +71,7 @@ x-resource-names: &resource-names
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
+  MODEL_INVOCATIONS_TABLE: contract-toaster-model-invocations-dts
   UPLOADS_BUCKET: contract-toaster-uploads-dts
   OUTPUTS_BUCKET: contract-toaster-outputs-dts
 
@@ -118,6 +119,14 @@ services:
     environment:
       <<: [*aws-emulator-env, *resource-names]
       DEPLOY_TARGET: dts
+      # Issue #509: the retention purge cadence. The sweep itself has been
+      # correct since #454, but nothing on this target ever invoked it -- an
+      # operator saw a healthy PREVIEW while uploaded contracts and outputs
+      # accumulated in MinIO forever. backend/src/purge_scheduler.py runs it
+      # on this interval; the AWS target is unaffected (its Lambda owns the
+      # cadence there). Set PURGE_SWEEP_ENABLED=0 to turn it off without
+      # editing code.
+      PURGE_SWEEP_INTERVAL_SECONDS: "${PURGE_SWEEP_INTERVAL_SECONDS:-3600}"
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password
       # Issue #469: TRUST_PROXY_HEADERS is deliberately left UNSET here

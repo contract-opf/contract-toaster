@@ -277,7 +277,7 @@ class TestDetailProjectsModelProvenance(unittest.TestCase):
 
 class TestListCarriesHistoryProvenance(unittest.TestCase):
     def test_list_item_carries_provenance_and_availability(self) -> None:
-        items = reviews_module.list_reviews(_row(OWNER), _resource(MODERN_ROW))
+        items = reviews_module.list_reviews(_row(OWNER), _resource(MODERN_ROW))['items']
         self.assertEqual(len(items), 1)
         item = items[0]
 
@@ -305,7 +305,7 @@ class TestListCarriesHistoryProvenance(unittest.TestCase):
         """Availability is a boolean on the list; the object keys stay
         server-side (the same discipline `get_review_detail` already applies
         with `has_output`)."""
-        items = reviews_module.list_reviews(_row(OWNER), _resource(MODERN_ROW))
+        items = reviews_module.list_reviews(_row(OWNER), _resource(MODERN_ROW))['items']
         blob = repr(items[0])
 
         self.assertNotIn("output_s3_key", items[0])
@@ -314,7 +314,7 @@ class TestListCarriesHistoryProvenance(unittest.TestCase):
         self.assertNotIn(f"uploads/{OWNER}/rev-modern/in.docx", blob)
 
     def test_historic_row_lists_as_not_recorded(self) -> None:
-        items = reviews_module.list_reviews(_row(OWNER), _resource(HISTORIC_ROW))
+        items = reviews_module.list_reviews(_row(OWNER), _resource(HISTORIC_ROW))['items']
         item = items[0]
 
         self.assertIsNone(item["primary_model_id"])
@@ -330,7 +330,7 @@ class TestOwnerScoping(unittest.TestCase):
     def test_reviewer_never_sees_another_users_review(self) -> None:
         items = reviews_module.list_reviews(
             _row(OWNER), _resource(MODERN_ROW, OTHER_USERS_ROW)
-        )
+        )['items']
         ids = {i["review_id"] for i in items}
 
         self.assertEqual(ids, {"rev-modern"})
@@ -343,7 +343,7 @@ class TestOwnerScoping(unittest.TestCase):
             _row(ADMIN, is_admin=True),
             _resource(MODERN_ROW, OTHER_USERS_ROW),
             owner_scoped=True,
-        )
+        )['items']
         ids = {i["review_id"] for i in items}
 
         self.assertNotIn("rev-modern", ids)
@@ -355,7 +355,7 @@ class TestOwnerScoping(unittest.TestCase):
         is NOT changed by this ticket -- only opted out of."""
         items = reviews_module.list_reviews(
             _row(ADMIN, is_admin=True), _resource(MODERN_ROW, OTHER_USERS_ROW)
-        )
+        )['items']
         ids = {i["review_id"] for i in items}
 
         self.assertEqual(ids, {"rev-modern", "rev-someone-else"})

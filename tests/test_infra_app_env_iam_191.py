@@ -50,6 +50,14 @@ just the .ts source):
      the AWS target got AccessDenied from the first `put_object` (the
      Upload/DownloadInput/Download statements are scoped to `uploads/*` and
      `outputs/*` only, never `playbooks/*`).
+  H. The App Runner CfnService's RuntimeEnvironmentVariables includes
+     REQUOTE_ENABLED (issue #569, review round 3 fix) -- pipeline-stack.ts
+     already threads this flag to the settlement-side Lambda mirrors'
+     `compute_worst_case_reservation_usd_cents()`; this app-stack.ts service
+     is where the reserve side of that same function actually runs
+     (backend/src/reviews.py::reserve_spend), and had never been given the
+     same var, so turning the flag on at deploy time would permanently
+     desync reserve and settle by one primary-priced pass per review.
 
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
@@ -415,6 +423,51 @@ def check_g_playbook_artifacts_grant(policy: dict[str, Any]) -> list[str]:
     return failures
 
 
+# ---------------------------------------------------------------------------
+# Check H -- REQUOTE_ENABLED reaches the RESERVE side (issue #569, review
+# round 3 fix). backend/src/reviews.py::compute_worst_case_reservation_usd_
+# cents() is flag-aware (config.requote_enabled(), which reads this exact env
+# var), and pipeline-stack.ts already threads it to the SETTLE side's two
+# Lambda mirrors (persistFn's stageEnv, the orphan reconciler's environment)
+# -- but this App Runner service, where reserve_spend actually runs, was
+# never given the same var. With the flag on at deploy time, reserve
+# (App Runner, env-blind -> always the flag-off figure) and settle (the two
+# Lambdas, flag-aware) would permanently disagree by one primary-priced pass
+# on every review, drifting daily_spend.reserved_usd_cents forever -- the
+# exact drift tests/test_spend_reservation_settlement.py's cross-module
+# parity test proves at the Python level but cannot see, since it patches
+# os.environ inside one process rather than covering the CDK env-threading
+# gap between two independently-synthesized stacks.
+# ---------------------------------------------------------------------------
+
+
+def check_h_requote_enabled_reaches_app_runner(service: dict[str, Any]) -> list[str]:
+    print("\nCheck H: App Runner RuntimeEnvironmentVariables includes "
+          "REQUOTE_ENABLED (the RESERVE-side flag pipeline-stack.ts already "
+          "threads to the SETTLE-side Lambda mirrors) …")
+    failures: list[str] = []
+
+    image_config = (
+        service.get("Properties", {})
+        .get("SourceConfiguration", {})
+        .get("ImageRepository", {})
+        .get("ImageConfiguration", {})
+    )
+    env_vars = image_config.get("RuntimeEnvironmentVariables", [])
+    by_name = {e.get("Name"): e.get("Value") for e in env_vars}
+
+    failures += _assert(
+        "REQUOTE_ENABLED" in by_name,
+        "RuntimeEnvironmentVariables includes REQUOTE_ENABLED",
+        f"present names: {sorted(by_name.keys())} -- without this, the App "
+        f"Runner service (the reserve side) can never agree with the "
+        f"settlement-side Lambda mirrors on the worst-case reservation "
+        f"whenever the flag is turned on.",
+    )
+
+    return failures
+
+
 def main() -> int:
     all_failures: list[str] = []
 
@@ -432,6 +485,7 @@ def main() -> int:
         all_failures += _assert(False, "AWS::AppRunner::Service resource found in App template")
     else:
         all_failures += check_b_runtime_env_vars(service)
+        all_failures += check_h_requote_enabled_reaches_app_runner(service)
 
     policy = _api_task_role_policy(resources)
     if policy is None:

@@ -16,7 +16,16 @@
     "",
     "Quarterly recertification: re-run the eval harness gold set, confirm quota figures",
     "are still accurate, update recertification.recertified_at and gold_set_run_id.",
-    "See RUNBOOK.md → Model recertification."
+    "See RUNBOOK.md → Model recertification.",
+    "",
+    "CAPABILITY DESCRIPTOR (issue #562): `structured_outputs` / `prompt_caching`",
+    "on models.primary / models.critic below are read by",
+    "backend/src/model_client.py::bedrock_model_capabilities. Both are `true`",
+    "for the pinned Anthropic-native models (Claude Opus 4.8 / Sonnet 4.6 on",
+    "Bedrock support structured outputs and prompt caching); models.embedding",
+    "(Titan, not a chat model) deliberately declares neither, so it fails",
+    "closed to false for both -- absence, not a guess, is the correct answer",
+    "for a model outside the Claude chat matrix."
   ],
   "schema_version": "1",
   "region": "us-east-1",
@@ -52,6 +61,8 @@
       "approx_tokens_per_review_output": 8000,
       "cost_per_million_input_usd": 5.00,
       "cost_per_million_output_usd": 25.00,
+      "structured_outputs": true,
+      "prompt_caching": true,
       "request_contract": {
         "omit_sampling_params": ["temperature", "top_p", "top_k"],
         "extended_thinking": "adaptive-only"
@@ -74,6 +85,8 @@
       "approx_tokens_per_review_output": 5000,
       "cost_per_million_input_usd": 3.00,
       "cost_per_million_output_usd": 15.00,
+      "structured_outputs": true,
+      "prompt_caching": true,
       "request_contract": {
         "omit_sampling_params": ["temperature", "top_p", "top_k"],
         "extended_thinking": "adaptive-only"

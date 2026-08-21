@@ -700,7 +700,7 @@ export function buildTokensSection(): HTMLElement {
 
   const typeSpecimens: Array<{ font: string; label: string; sample: string; size: string }> = [
     { font: '--ct-font-display', label: 'Display — Space Grotesk', sample: 'Contract Toaster', size: '--ct-text-2xl' },
-    { font: '--ct-font-sans', label: 'Sans — Instrument Sans', sample: 'Attorney approval required.', size: '--ct-text-md' },
+    { font: '--ct-font-sans', label: 'Sans — Instrument Sans', sample: 'Redline saved to your downloads.', size: '--ct-text-md' },
     { font: '--ct-font-mono', label: 'Mono — IBM Plex Mono', sample: 'rev_8f2a1c9d', size: '--ct-text-sm' },
   ];
   const typeSection = exampleGroup(

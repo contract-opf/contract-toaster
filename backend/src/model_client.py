@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+import jsonschema
+
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -106,6 +108,58 @@ def critic_model_id(policy: dict[str, Any] | None = None) -> str:
     model_id = policy["models"]["critic"]["model_id"]
     enforce_single_region_native_model_id(model_id)
     return model_id
+
+
+# ---------------------------------------------------------------------------
+# Capability descriptor (issue #562): Bedrock and OpenRouter are both
+# first-class, deployment-selected model providers -- the pipeline never
+# branches on adapter identity, only on this queryable descriptor. Every
+# client class (LiveBedrockModelClient, OpenRouterModelClient,
+# FakeBedrockClient -- the injectable test double the rest of this codebase
+# calls "the mock model client") exposes `capabilities(model_id) -> dict`
+# with this SAME two-key shape. This is the seam the structured-outputs and
+# prompt-caching tickets build on -- no request behavior changes here, only
+# the descriptor consumers will read.
+#
+# FAIL CLOSED, always: an unrecognized model_id, or a policy entry that
+# simply omits a key, both resolve to False for that key -- never a
+# KeyError, and never an assumed capability the policy artifact did not
+# actually declare.
+# ---------------------------------------------------------------------------
+
+CAPABILITY_KEYS = ("structured_outputs", "prompt_caching")
+
+
+def _capability_dict(entry: dict[str, Any] | None) -> dict[str, bool]:
+    """Normalize a policy model entry (or None) into the full two-key
+    capability dict, defaulting every key not present on `entry` to False.
+    Shared by the Bedrock and OpenRouter lookups below, and by
+    `FakeBedrockClient` (which normalizes its injected `capabilities` dict
+    through the same function, so a partial dict passed in a test behaves
+    identically to a partial policy entry)."""
+    entry = entry or {}
+    return {key: bool(entry.get(key, False)) for key in CAPABILITY_KEYS}
+
+
+def bedrock_model_capabilities(
+    model_id: str, policy: dict[str, Any] | None = None
+) -> dict[str, bool]:
+    """Capability descriptor for a Bedrock `model_id`, read from
+    model-policy/bedrock-us-east-1.json's per-model `structured_outputs` /
+    `prompt_caching` fields (models.primary / models.critic /
+    models.embedding). Reuses `load_model_policy` -- no parallel config
+    path. A `model_id` the policy does not pin (or an entry that omits a
+    key) fails closed to False for that key -- never a KeyError. A falsy
+    `model_id` (e.g. `None`) never matches, even against a policy entry
+    that itself omits `model_id` -- fail closed, not a coincidental match
+    on two absent values."""
+    if not model_id:
+        return _capability_dict(None)
+    policy = policy if policy is not None else load_model_policy()
+    for entry in (policy.get("models") or {}).values():
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            return _capability_dict(entry)
+    return _capability_dict(None)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +253,55 @@ def openrouter_reasoning_max_tokens(model_id: str, policy: dict[str, Any] | None
     return 0
 
 
+def openrouter_model_capabilities(
+    model_id: str, policy: dict[str, Any] | None = None
+) -> dict[str, bool]:
+    """Capability descriptor (issue #562) for an OpenRouter `model_id`,
+    read from model-policy/openrouter.json's optional per-model
+    `structured_outputs` / `prompt_caching` fields on `models.primary`,
+    `models.critic`, `models.preflight`, or a `selectable` entry -- the
+    SAME lookup shape `openrouter_reasoning_max_tokens` above already uses
+    for its own per-model field. Fails closed to False for a `model_id` the
+    policy does not declare a field for, including one this file otherwise
+    pins or lists as selectable -- absence is never treated as an assumed
+    capability. A falsy `model_id` (e.g. `None`) never matches, even
+    against a policy entry that itself omits `model_id`.
+
+    Issue #491 fix round 1: `preflight` is scanned here too -- it used to
+    resolve True for the shipped policy only by coincidence (the pinned
+    preflight model, `deepseek/deepseek-v4-pro`, also happens to be a
+    `selectable` entry), which would silently fail closed and drop
+    `output_schema` the moment an `OPENROUTER_PREFLIGHT_MODEL_ID` override
+    (or a future pin outside `selectable`) pointed anywhere else.
+
+    Issue #499: `cover_note` is scanned here for the identical reason. Its
+    pin (`anthropic/claude-sonnet-5`) also happens to appear as a
+    `selectable` entry, but the role loop runs and returns FIRST -- so for
+    that model_id, the PIN's capability fields are what govern, always,
+    for every caller who reaches that same id (including an admin who
+    picked it as their `primary` or `critic` model, not just a `cover_note`
+    request). That the two entries in the shipped policy currently agree
+    on every capability field is coincidence, not a guarantee this loop
+    provides; the pin winning is the intended, load-bearing behavior.
+    (Contrast `openrouter_reasoning_max_tokens` below, which does NOT
+    name `cover_note` in its role scan -- reasoning-token lookup for this
+    same model_id already resolves through the `selectable` entry instead.
+    The two functions disagree about which entry governs the same id.)
+    """
+    if not model_id:
+        return _capability_dict(None)
+    policy = policy if policy is not None else load_openrouter_policy()
+    models = policy.get("models") or {}
+    for role in ("primary", "critic", "preflight", "cover_note"):
+        entry = models.get(role)
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            return _capability_dict(entry)
+    for entry in policy.get("selectable") or []:
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            return _capability_dict(entry)
+    return _capability_dict(None)
+
+
 def _resolved_admin_model_id(
     admin_model_id: str | None, role: str, policy: dict[str, Any] | None = None
 ) -> str | None:
@@ -260,11 +363,50 @@ def openrouter_critic_model_id(
     return policy["models"]["critic"]["model_id"]
 
 
+def openrouter_preflight_model_id(policy: dict[str, Any] | None = None) -> str:
+    """The pinned preflight-classifier model id (issue #491).
+
+    Deliberately NOT run through `_resolved_admin_model_id` -- unlike
+    `openrouter_primary_model_id` / `openrouter_critic_model_id`, this role
+    has no admin-selection precedence at all. The preflight check is a
+    cheap, fast, every-upload advisory pass; an admin who picks a stronger
+    (and pricier) primary/critic model must never silently repoint this
+    check onto it too. `OPENROUTER_PREFLIGHT_MODEL_ID` remains available as
+    an ops/testing override, mirroring the primary/critic override
+    convention, then falls back to model-policy/openrouter.json's
+    `models.preflight.model_id` pin.
+    """
+    override = os.environ.get("OPENROUTER_PREFLIGHT_MODEL_ID", "").strip()
+    if override:
+        return override
+    policy = policy if policy is not None else load_openrouter_policy()
+    return policy["models"]["preflight"]["model_id"]
+
+
+def openrouter_cover_note_model_id(policy: dict[str, Any] | None = None) -> str:
+    """The pinned cover-note-drafter model id (issue #499).
+
+    Deliberately NOT run through `_resolved_admin_model_id` -- same posture
+    as `openrouter_preflight_model_id` above: "Butter it" drafts a short
+    cover note from an already-finished review's own analysis artifact, not
+    a judgment call, so an admin's primary/critic selection must never
+    silently repoint this onto something stronger (and pricier) than it
+    needs. `OPENROUTER_COVER_NOTE_MODEL_ID` is the ops/testing override,
+    mirroring the primary/critic/preflight override convention, then falls
+    back to model-policy/openrouter.json's `models.cover_note.model_id` pin.
+    """
+    override = os.environ.get("OPENROUTER_COVER_NOTE_MODEL_ID", "").strip()
+    if override:
+        return override
+    policy = policy if policy is not None else load_openrouter_policy()
+    return policy["models"]["cover_note"]["model_id"]
+
+
 class OpenRouterModelPolicyViolation(ValueError):
     """Raised when a model ID passed to OpenRouterModelClient.invoke matches
     neither a policy-pinned model id (model-policy/openrouter.json), nor an
     entry on that file's `selectable` admin allowlist, nor an active
-    OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID override env var."""
+    OPENROUTER_{PRIMARY,CRITIC,PREFLIGHT}_MODEL_ID override env var."""
 
 
 def enforce_openrouter_policy_model_id(
@@ -297,8 +439,16 @@ def enforce_openrouter_policy_model_id(
     policy = policy if policy is not None else load_openrouter_policy()
     pinned_primary = policy["models"]["primary"]["model_id"]
     pinned_critic = policy["models"]["critic"]["model_id"]
+    # Issue #491: the preflight role's pin. Read defensively (`.get`) so an
+    # older/test policy artifact with no `preflight` block still resolves
+    # (to None, which cannot match a real model_id) rather than raising here.
+    pinned_preflight = (policy.get("models") or {}).get("preflight", {}).get("model_id")
+    # Issue #499: the cover-note role's pin. Same defensive `.get` read, for
+    # the same reason -- an older/test policy artifact with no `cover_note`
+    # block resolves to None rather than raising here.
+    pinned_cover_note = (policy.get("models") or {}).get("cover_note", {}).get("model_id")
 
-    if model_id in (pinned_primary, pinned_critic):
+    if model_id in (pinned_primary, pinned_critic, pinned_preflight, pinned_cover_note):
         return
 
     if model_id in openrouter_selectable_model_ids(policy):
@@ -324,12 +474,35 @@ def enforce_openrouter_policy_model_id(
         )
         return
 
+    preflight_override = os.environ.get("OPENROUTER_PREFLIGHT_MODEL_ID", "").strip()
+    if preflight_override and model_id == preflight_override:
+        logger.warning(
+            "OpenRouter preflight model id override in effect: invoking %r "
+            "(policy pin is %r). Explicit OPENROUTER_PREFLIGHT_MODEL_ID override.",
+            model_id,
+            pinned_preflight,
+        )
+        return
+
+    cover_note_override = os.environ.get("OPENROUTER_COVER_NOTE_MODEL_ID", "").strip()
+    if cover_note_override and model_id == cover_note_override:
+        logger.warning(
+            "OpenRouter cover-note model id override in effect: invoking %r "
+            "(policy pin is %r). Explicit OPENROUTER_COVER_NOTE_MODEL_ID override.",
+            model_id,
+            pinned_cover_note,
+        )
+        return
+
     raise OpenRouterModelPolicyViolation(
         f"Model id {model_id!r} matches neither the policy-pinned OpenRouter "
-        f"model ids ({pinned_primary!r} primary / {pinned_critic!r} critic, "
+        f"model ids ({pinned_primary!r} primary / {pinned_critic!r} critic / "
+        f"{pinned_preflight!r} preflight / {pinned_cover_note!r} cover_note, "
         "model-policy/openrouter.json), nor that file's `selectable` admin "
         "allowlist, nor an active OPENROUTER_PRIMARY_MODEL_ID / "
-        "OPENROUTER_CRITIC_MODEL_ID override. Refusing to invoke an unpinned model."
+        "OPENROUTER_CRITIC_MODEL_ID / OPENROUTER_PREFLIGHT_MODEL_ID / "
+        "OPENROUTER_COVER_NOTE_MODEL_ID override. Refusing to invoke an "
+        "unpinned model."
     )
 
 
@@ -372,6 +545,82 @@ class ModelInvocationRecord:
     # attempt with no violation. Defaults to an empty list so existing
     # positional/keyword construction elsewhere in this chain is unaffected.
     replacement_text_failures: list[str] = field(default_factory=list)
+    # Issue #514 -- the RESPONSE side of the same question `model_id` answers
+    # from the request side. `model_id` is what this attempt asked for;
+    # `served_model_id` is what the provider said it ran, and `generation_id`
+    # is the provider's own handle for that generation. Keeping both on the
+    # same row is what makes requested-vs-served reconcilable per attempt
+    # rather than per review. Default "" (not None) so the ledger's existing
+    # string-typed columns are unaffected, and so every construction site in
+    # #81/#82/#204 keeps working unchanged.
+    served_model_id: str = ""
+    generation_id: str = ""
+    # Issue #414 -- the ACTUAL counterparts to `input_tokens_est` /
+    # `output_tokens_est` above: real usage the provider reported for THIS
+    # attempt (`OpenRouterModelClient.last_usage`, issue #268) and how long
+    # the invoke() call itself took. `None` (never 0) whenever the CLIENT
+    # cannot report usage at all (an offline fake with no `last_usage`
+    # attribute) or the attempt's invoke() raised before returning anything
+    # to measure usage from -- so a persisted-cost query never double-counts
+    # a failed attempt's spend as if it were a prior attempt's. This is
+    # narrower than "genuinely zero tokens vs. not measured": a REAL
+    # OpenRouter response that omits or malforms its `usage` block is still
+    # recorded as 0, not None -- `parse_openrouter_usage` (this module,
+    # below) defaults a missing/malformed block to 0 and `last_usage` is
+    # assigned unconditionally on every successful call, so that case is
+    # indistinguishable from genuinely zero here. Defaults to None so every
+    # existing positional/keyword construction elsewhere in this chain
+    # (#81/#82/#204/#514) is unaffected. `duration_ms` alone defaults to
+    # None rather than 0 for the same "not measured" reason, even though
+    # every real caller (primary/critic pass) always supplies it -- only a
+    # hand-built record in a test might omit it.
+    actual_input_tokens: int | None = None
+    actual_output_tokens: int | None = None
+    duration_ms: int | None = None
+    # Issue #568 -- prompt-cache usage the provider reported for THIS
+    # attempt, when it reported any (`_cache_usage_fields`, this module):
+    # `cache_read_input_tokens` (tokens served from an existing cache entry)
+    # and `cache_creation_input_tokens` (tokens written to a NEW cache
+    # entry this call created). `None` (never 0) whenever the client cannot
+    # report usage at all, the attempt's invoke() raised before returning
+    # anything, OR the provider genuinely did not report caching for this
+    # call -- same "not measured" discipline as `actual_input_tokens` /
+    # `actual_output_tokens` above, and the same reason `duration_ms`
+    # defaults to None rather than 0. Defaults to None so every existing
+    # positional/keyword construction elsewhere in this chain
+    # (#81/#82/#204/#414/#514/#567) is unaffected.
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    # Issue #567 -- whether THIS attempt's invoke() call was given a
+    # provider-native structured-output schema to enforce (the pass-level
+    # `output_schema` kwarg was non-None, per
+    # `scripts/primary_review_pass.py::run_primary_pass` /
+    # `scripts/critic_review_pass.py::run_critic_pass`'s own capability-
+    # gated resolution). This is REQUESTED, not GRANTED: the client
+    # (model_client.py) still independently re-checks capability before
+    # honoring it in the actual request, so a True here means "we asked",
+    # not "the provider necessarily complied" -- the belt-and-suspenders
+    # post-hoc `validate_model_response` check is what actually proves the
+    # response was schema-conformant either way. Defaults to False (never
+    # None) so every existing positional/keyword construction elsewhere in
+    # this chain (#81/#82/#204/#414/#514) is unaffected and every ledgered
+    # row has an unambiguous boolean rather than a third "unknown" state.
+    schema_enforcement_requested: bool = False
+    # Issue #573 (Slice A): the fixed-vocabulary TOKEN half of THIS attempt's
+    # own `last_error`/`correction` string -- e.g. "invalid_json",
+    # "schema_invalid", "replacement_text_violation", "model_output_truncated",
+    # "invalid_response_contract", "context_length_exceeded" -- never the
+    # ": detail" remainder (`primary_review_pass.validate_model_response`'s
+    # own "TOKEN: detail" convention). That remainder can echo a jsonschema
+    # validator's offending instance value, which would widen this dataclass
+    # past `backend/src/invocation_ledger.py`'s documented METADATA-ONLY
+    # invariant (`_record_to_item` persists every field here verbatim via
+    # `dataclasses.asdict`) -- a closed, fixed-vocabulary token is exactly as
+    # safe as `outcome` itself, the raw message is not. Empty ("", never
+    # None) on a successful attempt, since nothing failed on it. Defaults to
+    # "" so every existing positional/keyword construction elsewhere in this
+    # chain (#81/#82/#204/#293/#414/#514/#567/#568) is unaffected.
+    error_token: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -394,14 +643,130 @@ class BedrockModelClient(Protocol):
         *,
         model_id: str,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
+        tool_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> str:
         """Return the model's raw text response. Expected to be a JSON
         document conforming to playbooks/output-schema-v1.json for a
         well-formed fixture -- or, deliberately, not, for a
-        schema-invalid-response fixture exercising the retry path."""
+        schema-invalid-response fixture exercising the retry path.
+
+        `tool_spec` (issue #418, default None): the model-facing output
+        JSON Schema (see scripts/model_output_schema.py), forwarded only
+        when the caller has `OPENROUTER_STRUCTURED_OUTPUT=1`
+        (`backend/src/config.py::structured_output_enabled`). Every
+        implementation of this Protocol accepts the kwarg for signature
+        parity; only `OpenRouterModelClient` acts on it --
+        `LiveBedrockModelClient` accepts and ignores it (the Bedrock path
+        is dormant).
+
+        `output_schema` (issue #567, default None): the provider-safe
+        projected schema (`scripts/model_output_schema.py::
+        project_output_schema_for_provider`) enforced AT THE PROVIDER
+        LAYER -- Bedrock's `output_config.format.schema`, OpenRouter's
+        `response_format.json_schema.schema`. Every implementation accepts
+        this kwarg for signature parity; each one honors it ONLY when its
+        OWN `capabilities(model_id)["structured_outputs"]` is True --
+        `output_schema is not None` alone is never sufficient, so a caller
+        may pass it unconditionally and rely on the client to fail closed
+        for a model the policy has not declared the capability for. This
+        is independent of `tool_spec` above: distinct request fields, a
+        distinct (capability-gated, not env-flagged) trigger, and either,
+        neither, or in principle both may be set on the same call.
+
+        `user_prompt` (issue #568): a plain `str`, exactly as every call
+        before this issue -- passed straight through unchanged, regardless
+        of capability, so every existing caller and test is byte-identical
+        -- OR a list of Anthropic-message-API-shaped content blocks (issue
+        #568's cached-document form, `scripts/primary_review_pass.py::
+        build_document_cached_user_content`). A list is sent AS-IS
+        (`cache_control` reaching the wire) ONLY when this client's OWN
+        `capabilities(model_id)["prompt_caching"]` is True -- same
+        independent per-client re-check discipline as `output_schema`
+        above. Capability False flattens a list to a plain string (joining
+        each block's `text` in order) rather than sending a content-block
+        array to a model that cannot use it."""
         ...
+
+    def capabilities(self, model_id: str) -> dict[str, bool]:
+        """Capability descriptor (issue #562): at minimum
+        `{"structured_outputs": bool, "prompt_caching": bool}` for
+        `model_id`. Fails closed to all-False for an unrecognized
+        `model_id` -- never a KeyError."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Structured (cache-block) user content (issue #568): the ONE seam every
+# `invoke()` implementation routes a possibly-list-shaped `user_prompt`
+# through before it reaches the wire, so the capability-gated
+# pass-through-or-flatten decision cannot drift between adapters.
+# ---------------------------------------------------------------------------
+
+
+def _prepare_message_content(
+    content: str | list[dict[str, Any]], prompt_caching_capable: bool
+) -> str | list[dict[str, Any]]:
+    """The wire-bound `content` value for a user message (issue #568).
+
+    A plain `str` -- every call before this issue, and every call for a
+    capability-False model afterward -- passes through COMPLETELY
+    UNCHANGED, regardless of `prompt_caching_capable`: byte-identical
+    request, exactly as issue #568's own acceptance criteria require.
+
+    A list of content blocks (`scripts/primary_review_pass.py::
+    build_document_cached_user_content`, built ONLY when the caller's own
+    capability descriptor already said `prompt_caching: True`) is sent
+    AS-IS when `prompt_caching_capable` is True here too -- `cache_control`
+    on the doc block reaches the wire and the provider can honor it.
+
+    `prompt_caching_capable=False` with list content -- never actually
+    produced by this repo's own pipeline today (it only builds a list when
+    the SAME capability was already True), but exercised directly by this
+    ticket's own tests, and a hedge against a future caller that does not
+    check first -- FLATTENS to a plain string by joining each block's
+    `text` in order, rather than sending a content-block array (and an
+    unsupported `cache_control` key) to a model that never asked for it.
+    This is defense-in-depth identical in spirit to `output_schema`'s own
+    independent per-client capability re-check (issue #567): the caller
+    may pass structured content unconditionally and rely on the client to
+    fail closed.
+    """
+    if isinstance(content, str):
+        return content
+    if prompt_caching_capable:
+        return content
+    return "\n\n".join(str(block.get("text", "")) for block in content)
+
+
+# ---------------------------------------------------------------------------
+# Prompt-cache usage fields (issue #568): both providers report the SAME
+# Anthropic-native field names for this -- `cache_read_input_tokens` /
+# `cache_creation_input_tokens` (docs/evaluation.md's per-run cache-hit-rate
+# derivation already names these off a live Bedrock response; OpenRouter
+# passes them through verbatim for an Anthropic-family model routed through
+# it). Shared so the two adapters' usage parsers cannot drift on the one
+# thing they have identically shaped -- only the BASE token-count key names
+# differ (`input_tokens`/`output_tokens` on Bedrock vs `prompt_tokens`/
+# `completion_tokens` on OpenRouter), which each parser's own caller already
+# knows.
+# ---------------------------------------------------------------------------
+
+
+def _cache_usage_fields(usage: dict[str, Any]) -> dict[str, int]:
+    """Returns a dict containing ONLY the cache-usage keys the provider
+    actually reported (never a `0` placeholder) -- absence here means "the
+    provider did not report caching for this call", not "zero cache
+    activity", the same "None/absent vs 0" discipline `ModelInvocationRecord`
+    already applies to `actual_input_tokens`/`actual_output_tokens`."""
+    fields: dict[str, int] = {}
+    for key in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int):
+            fields[key] = value
+    return fields
 
 
 class FakeBedrockClientExhausted(RuntimeError):
@@ -424,19 +789,44 @@ class FakeBedrockClient:
     bodies`, each ordinarily the on-disk contents of a
     `tests/fixtures/model_responses/*.json` fixture, returned in order on
     successive `invoke()` calls for that `model_id`.
+
+    `capabilities` (issue #562, default `None` -> all-False): this is the
+    mock model client per the repo's fixture-fidelity doctrine -- it must
+    expose the SAME `capabilities(model_id) -> dict` signature and the
+    SAME fail-closed default as `LiveBedrockModelClient` /
+    `OpenRouterModelClient`, so a test seeding this class cannot grant a
+    capability the real clients would deny. A partial dict (e.g. only
+    `{"structured_outputs": True}`) is normalized through the same
+    `_capability_dict` helper the real clients' policy lookups use, so an
+    omitted key still defaults to False rather than being dropped.
+    `model_id` is accepted for signature parity but ignored -- this double
+    returns the SAME capabilities regardless of which model_id it is
+    asked about; a test that needs per-model_id variance constructs one
+    `FakeBedrockClient` per model_id.
     """
 
-    def __init__(self, responses: dict[str, list[str]]):
+    def __init__(
+        self,
+        responses: dict[str, list[str]],
+        *,
+        capabilities: dict[str, Any] | None = None,
+    ):
         self._queues: dict[str, list[str]] = {k: list(v) for k, v in responses.items()}
         self.calls: list[dict[str, Any]] = []
+        self._capabilities = _capability_dict(capabilities)
+
+    def capabilities(self, model_id: str) -> dict[str, bool]:  # noqa: ARG002 - signature parity
+        return dict(self._capabilities)
 
     def invoke(
         self,
         *,
         model_id: str,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
+        tool_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> str:
         queue = self._queues.get(model_id)
         if not queue:
@@ -446,12 +836,70 @@ class FakeBedrockClient:
                 f"expects another attempt."
             )
         response_text = queue.pop(0)
+        # Issue #567 fix round 3, finding 2: when this fake's OWN declared
+        # capabilities say `structured_outputs: True` and a caller passed a
+        # schema, a real strict-mode provider is CONTRACTUALLY required to
+        # emit a conforming response -- so a seeded fixture that does not
+        # conform is not something the real client could ever return, the
+        # "fake accepts what the real dependency rejects" antipattern this
+        # repo's fixture-fidelity doctrine exists to catch. Gated on this
+        # fake's OWN `self._capabilities`, never on the caller-supplied
+        # `output_schema` alone, so a capability-False test seeding a
+        # non-conforming fixture (the fallback/no-enforcement path, where
+        # nothing constrains the response this tightly) is unaffected.
+        if output_schema is not None and self._capabilities.get("structured_outputs"):
+            try:
+                parsed_response = json.loads(response_text)
+            except json.JSONDecodeError as exc:
+                raise AssertionError(
+                    f"FakeBedrockClient: the response seeded for "
+                    f"model_id={model_id!r} is not valid JSON, but "
+                    f"capabilities={{'structured_outputs': True}} plus an "
+                    f"output_schema were both given for this call -- a real "
+                    f"strict-mode provider could not have returned this. Fix "
+                    f"the fixture, not this check."
+                ) from exc
+            try:
+                jsonschema.validate(instance=parsed_response, schema=output_schema)
+            except jsonschema.ValidationError as exc:
+                location = "/".join(str(part) for part in exc.absolute_path)
+                suffix = f" (at {location})" if location else ""
+                raise AssertionError(
+                    f"FakeBedrockClient: the response seeded for "
+                    f"model_id={model_id!r} does not satisfy the "
+                    f"output_schema this call was given, but "
+                    f"capabilities={{'structured_outputs': True}} means a "
+                    f"real strict-mode provider is contractually required to "
+                    f"emit a conforming response -- this fixture is not "
+                    f"something the real client could produce: "
+                    f"{exc.message}{suffix}. Fix the fixture, not this check."
+                ) from exc
         self.calls.append(
             {
                 "model_id": model_id,
                 "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
+                # Issue #568: recorded AFTER the SAME capability-gated
+                # pass-through-or-flatten `_prepare_message_content` the real
+                # clients apply -- so `self.calls[-1]["user_prompt"]`
+                # reflects exactly what a real client would have put on the
+                # wire for this fake's own declared capabilities, per the
+                # fixture-fidelity doctrine (mirrors issue #567's identical
+                # `output_schema` guard above: a fake must never accept, or
+                # silently forward, something the real dependency would
+                # have rejected or transformed).
+                "user_prompt": _prepare_message_content(
+                    user_prompt, self._capabilities.get("prompt_caching", False)
+                ),
                 "max_output_tokens": max_output_tokens,
+                # Issue #418: recorded (not acted on -- this fake never
+                # branches its canned response on it) so a test can assert
+                # a caller passed the model-facing schema through, or that
+                # it stayed absent when the flag is off.
+                "tool_spec": tool_spec,
+                # Issue #567: recorded verbatim; ALSO validated against
+                # `self._capabilities` above when structured_outputs is True
+                # (fix round 3, finding 2) -- see that block's comment.
+                "output_schema": output_schema,
                 "response_text": response_text,
             }
         )
@@ -475,15 +923,51 @@ def parse_openrouter_usage(data: dict[str, Any]) -> dict[str, int]:
     double supplies a partial one) defaults each count to 0 rather than
     raising -- usage is a non-substantive accounting field, never worth
     failing an otherwise-successful call over.
+
+    Issue #568: the returned dict also carries `cache_read_input_tokens` /
+    `cache_creation_input_tokens` when the (Anthropic-family) model routed
+    through OpenRouter reported them on `usage` -- see `_cache_usage_fields`.
+    These two keys are OMITTED (never defaulted to 0) when the provider did
+    not report caching for this call, unlike the two base counts above.
     """
     usage = data.get("usage") or {}
     if not isinstance(usage, dict):
         usage = {}
     input_tokens = usage.get("prompt_tokens", 0)
     output_tokens = usage.get("completion_tokens", 0)
-    return {
+    result: dict[str, int] = {
         "input_tokens": input_tokens if isinstance(input_tokens, int) else 0,
         "output_tokens": output_tokens if isinstance(output_tokens, int) else 0,
+    }
+    result.update(_cache_usage_fields(usage))
+    return result
+
+
+def parse_openrouter_provenance(data: dict[str, Any]) -> dict[str, str | None]:
+    """Extract RESPONSE-side provenance from a parsed OpenRouter body:
+    `model` (the model the provider says it actually served -- providers
+    resolve aliases and fall back) and `id` (OpenRouter's generation id).
+
+    Issue #514. Everything else this system records about which model ran is
+    the REQUEST side -- the admin selection, the bundle metadata, the literal
+    JSON body, `primary_model_id` on the review row. All of it is our own
+    claim about what we asked for. If the provider ever served something
+    else, no record would have shown it, which is exactly the question that
+    could not be answered from the deployment's own data on 2026-08-02.
+
+    Best-effort in the same way `parse_openrouter_usage` is: a provider that
+    omits either field, or ships a non-string, yields None rather than
+    raising. Provenance is an accounting fact, never worth failing an
+    otherwise-successful call over -- and a coerced `str({'weird': True})` in
+    the ledger would be worse than an honest absence.
+    """
+
+    def _text(value: Any) -> str | None:
+        return value if isinstance(value, str) and value else None
+
+    return {
+        "served_model": _text(data.get("model")),
+        "generation_id": _text(data.get("id")),
     }
 
 
@@ -636,6 +1120,26 @@ OPENROUTER_PROVIDER_ROUTING: dict[str, Any] = {
     "require_parameters": True,
 }
 
+# Issue #418: the forced-tool-use function name, under
+# OPENROUTER_STRUCTURED_OUTPUT=1. Fixed (not derived from anything
+# per-review) -- this is a request-shape constant, the same tool on every
+# call, the same way OPENROUTER_PROVIDER_ROUTING above is.
+STRUCTURED_OUTPUT_TOOL_NAME = "submit_review"
+
+# Issue #567: the provider-native structured-output schema name, sent in
+# OpenRouter's `response_format.json_schema.name` whenever `invoke()` is
+# given an `output_schema` AND the model's capability descriptor (#562)
+# says `structured_outputs: True`. A DIFFERENT constant from
+# `STRUCTURED_OUTPUT_TOOL_NAME` above on purpose: that one names a forced
+# TOOL CALL (issue #418's env-flagged fallback mechanism, unchanged by this
+# issue); this one names a JSON SCHEMA on a `response_format`-shaped
+# request -- the two are independent request fields that happen to be able
+# to coexist on the same call (env flag on AND capability True), and giving
+# them the same literal name would make a captured request payload's
+# `tools[0].function.name` vs. `response_format.json_schema.name`
+# indistinguishable at a glance when both are present.
+STRUCTURED_OUTPUT_SCHEMA_NAME = "contract_review_response"
+
 # OpenAI-compatible (OpenRouter) providers signal an oversized request as
 # HTTP 413, or HTTP 400 with an `error.code`/`error.message` naming the
 # context-length limit. These substrings are matched against the LOWERCASED
@@ -704,6 +1208,19 @@ class OpenRouterModelClient:
     expects. This is additive: `invoke()`'s signature and return type
     (the response text) are unchanged, so every existing caller (the
     `BedrockModelClient.invoke` Protocol) is unaffected.
+
+    `cumulative_usage` (issue #415) is the RUNNING total across every
+    successful `invoke()` on this instance -- same `{"input_tokens": int,
+    "output_tokens": int}` shape as `last_usage` (so it drops straight into
+    `compute_actual_usd_cents_from_usage`), but ACCUMULATED rather than
+    overwritten. One client instance already spans the primary and critic
+    passes of a review, including any transport-level retries within each
+    (issue #270) -- so the instance total IS the review total, readable
+    once at settlement time instead of requiring a read after every
+    individual pass the way `last_usage` does. Starts at `{"input_tokens":
+    0, "output_tokens": 0}` (never None) so a caller can always sum it
+    without a null check, and is safe to read after `close()` -- it is a
+    plain instance attribute, not a transport call.
     """
 
     def __init__(
@@ -719,6 +1236,7 @@ class OpenRouterModelClient:
         backoff_max_seconds: float = OPENROUTER_DEFAULT_BACKOFF_MAX_SECONDS,
         backoff_jitter_seconds: float = OPENROUTER_DEFAULT_BACKOFF_JITTER_SECONDS,
         sleep_fn: Any = None,
+        cancel_checkpoint: Any = None,
     ) -> None:
         if not api_key:
             raise ValueError("OpenRouterModelClient requires a non-empty api_key.")
@@ -733,7 +1251,35 @@ class OpenRouterModelClient:
         self._backoff_max_seconds = backoff_max_seconds
         self._backoff_jitter_seconds = backoff_jitter_seconds
         self._sleep = sleep_fn or time.sleep
+        # Optional callable that raises when the caller no longer wants this
+        # work done. Consulted before each transport attempt (see `invoke`) so
+        # a cancelled review stops paying for retries against a wedged
+        # provider instead of burning its whole backoff budget first. Typed
+        # `Any` and defaulted to None so every existing construction site --
+        # and every test -- is unaffected.
+        self._cancel_checkpoint = cancel_checkpoint
         self.last_usage: dict[str, int] | None = None
+        # Issue #415 -- the running total across every successful invoke()
+        # on this instance; see the class docstring's `cumulative_usage`
+        # paragraph. Never None (unlike last_usage) so a settlement caller
+        # can always sum it.
+        self.cumulative_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        # Issue #514 -- response-side provenance from the most recent
+        # successful call, reset per call (never sticky: attributing one
+        # generation's ids to the next call is worse than recording nothing).
+        self.last_served_model: str | None = None
+        self.last_generation_id: str | None = None
+
+    def capabilities(self, model_id: str) -> dict[str, bool]:
+        """Capability descriptor (issue #562): reads
+        `openrouter_model_capabilities(model_id)` -- model-policy/
+        openrouter.json's per-model `structured_outputs` / `prompt_caching`
+        fields on `models.primary`, `models.critic`, or a `selectable`
+        entry. Fails closed to all-False for an unpinned/unlisted
+        `model_id`, same as `enforce_openrouter_policy_model_id` refuses to
+        invoke one -- this method never raises, it just reports nothing is
+        known to be supported."""
+        return openrouter_model_capabilities(model_id)
 
     def _get_client(self) -> Any:
         """Lazily create -- ONCE -- and reuse the owned `httpx.Client` across
@@ -812,11 +1358,14 @@ class OpenRouterModelClient:
         *,
         model_id: str,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
+        tool_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> str:
-        # Loaded once and reused below for both the policy-pin assertion and
-        # the reasoning-budget lookup, rather than reading the file twice.
+        # Loaded once and reused below for the policy-pin assertion, the
+        # reasoning-budget lookup, AND (issue #567/#568) the capability
+        # checks -- rather than reading the file up to three/four times.
         policy = load_openrouter_policy()
 
         # Runtime policy-pin assertion (issue #269): refuse (or, for an
@@ -832,11 +1381,21 @@ class OpenRouterModelClient:
         # issue landed for every non-reasoning model.
         reasoning_allowance = openrouter_reasoning_max_tokens(model_id, policy)
 
+        # Issue #568: capability-gated pass-through-or-flatten for a
+        # possibly-list-shaped `user_prompt` -- see `_prepare_message_
+        # content`'s own docstring. Reuses the SAME already-loaded `policy`
+        # (no second file read), mirroring `output_schema`'s identical
+        # reuse below.
+        user_content = _prepare_message_content(
+            user_prompt,
+            openrouter_model_capabilities(model_id, policy).get("prompt_caching", False),
+        )
+
         payload = {
             "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_content},
             ],
             "max_tokens": max_output_tokens + reasoning_allowance,
             # Sampling params (temperature/top_p/top_k) deliberately omitted --
@@ -848,6 +1407,51 @@ class OpenRouterModelClient:
             # the module-level policy out from under a later call.
             "provider": dict(OPENROUTER_PROVIDER_ROUTING),
         }
+        # Issue #418: forced tool-use structured output, ONLY when the
+        # caller supplies `tool_spec` (`OPENROUTER_STRUCTURED_OUTPUT=1` --
+        # see backend/src/config.py::structured_output_enabled and the two
+        # review passes that thread this kwarg). `tool_spec` is the
+        # model-facing JSON Schema (scripts/model_output_schema.py) used
+        # verbatim as the tool's `parameters` -- OpenAI-compatible shape,
+        # which OpenRouter translates for an Anthropic-family model.
+        # `tool_spec is None` (the default, and every call before this
+        # issue) adds NEITHER key -- the payload stays byte-identical to
+        # today.
+        if tool_spec is not None:
+            payload["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": STRUCTURED_OUTPUT_TOOL_NAME,
+                        "parameters": tool_spec,
+                    },
+                }
+            ]
+            payload["tool_choice"] = {
+                "type": "function",
+                "function": {"name": STRUCTURED_OUTPUT_TOOL_NAME},
+            }
+        # Issue #567: provider-native structured output, gated on THIS
+        # client's own capability descriptor for `model_id` -- never on
+        # `output_schema is not None` alone. A caller (the two review
+        # passes) may pass the projected schema unconditionally; this is
+        # the fail-closed enforcement point, matching #562's "the pipeline
+        # never branches on adapter identity, only on the capability
+        # descriptor" seam. Capability False -> the payload carries neither
+        # `response_format` key at all, byte-identical to a call that never
+        # passed `output_schema` in the first place. Reuses the SAME
+        # already-loaded `policy` (no second file read).
+        if output_schema is not None and openrouter_model_capabilities(
+            model_id, policy
+        ).get("structured_outputs", False):
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": STRUCTURED_OUTPUT_SCHEMA_NAME,
+                    "strict": True,
+                    "schema": output_schema,
+                },
+            }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -860,6 +1464,15 @@ class OpenRouterModelClient:
 
         for attempt_index in range(attempts_allowed):
             is_last_attempt = attempt_index == attempts_allowed - 1
+            # Ask before spending, not after. With the default 3 retries and a
+            # 120s request timeout, a provider that has stopped answering keeps
+            # this loop busy for the better part of ten minutes -- exactly the
+            # window in which a reviewer gives up and looks for a stop button.
+            # Whatever this raises propagates untouched: it is the caller's
+            # control-flow signal, not a transport failure, so it must not be
+            # caught by the `except Exception` below and retried.
+            if self._cancel_checkpoint is not None:
+                self._cancel_checkpoint()
             try:
                 response = client.post(url, json=payload, headers=headers)
             except Exception as exc:  # transport error -- never echo request body
@@ -889,7 +1502,25 @@ class OpenRouterModelClient:
                 try:
                     data = response.json()
                     choice = data["choices"][0]
-                    content = choice["message"]["content"]
+                    message = choice["message"]
+                    # Issue #418: under forced tool-use (tool_spec was set
+                    # above), the provider returns the review object as
+                    # `tool_calls[0].function.arguments` -- a JSON STRING,
+                    # the same shape `content` always was, so everything
+                    # downstream of `invoke()` (validate_model_response's
+                    # unwrap-then-parse) is unaffected. Falls back to
+                    # `message.content` when there are no tool_calls -- both
+                    # because tool_spec was never set (the flag-off path,
+                    # unchanged) AND as the documented fallback for a
+                    # tool-mode call that (illegally) comes back as plain
+                    # content anyway: a provider ignoring `tool_choice` must
+                    # not be treated as a malformed response when the prose
+                    # path would have parsed it fine.
+                    tool_calls = message.get("tool_calls") or []
+                    if tool_calls:
+                        content = tool_calls[0]["function"]["arguments"]
+                    else:
+                        content = message["content"]
                     # `.get`, not `[...]`: `finish_reason` is genuinely absent
                     # from some canned/older fixtures and is not itself part
                     # of the "malformed response" contract this try/except
@@ -899,7 +1530,8 @@ class OpenRouterModelClient:
                     finish_reason = choice.get("finish_reason")
                 except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
                     raise ModelInvocationError(
-                        "OpenRouter response missing choices[0].message.content."
+                        "OpenRouter response missing choices[0].message.content "
+                        "(and no usable tool_calls[0].function.arguments)."
                     ) from exc
 
                 # Issue #527: `finish_reason == "length"` means the provider
@@ -932,6 +1564,20 @@ class OpenRouterModelClient:
                 # parse_openrouter_usage defaults missing/malformed counts to
                 # 0 rather than raising.
                 self.last_usage = parse_openrouter_usage(data)
+                # Issue #415: accumulate onto the running instance total --
+                # see the class docstring's `cumulative_usage` paragraph.
+                # Additive, never overwritten, so a retry that eventually
+                # succeeds still counts every attempt that genuinely reached
+                # the provider and got billed, not just the last one.
+                self.cumulative_usage["input_tokens"] += self.last_usage["input_tokens"]
+                self.cumulative_usage["output_tokens"] += self.last_usage["output_tokens"]
+                # Issue #514: what the provider says it SERVED, next to what
+                # we asked for. Assigned unconditionally (both keys are None
+                # when absent) so a provider that reports ids on one call and
+                # not the next cannot leave the previous call's ids behind.
+                provenance = parse_openrouter_provenance(data)
+                self.last_served_model = provenance["served_model"]
+                self.last_generation_id = provenance["generation_id"]
                 return content
 
             if self._is_context_length_rejection(status, response):
@@ -1005,6 +1651,15 @@ class LiveBedrockModelClient:
     ) -> None:
         self._region_name = region_name
         self._client = bedrock_runtime_client
+        # Issue #568: real usage the provider reported for the most recent
+        # successful `invoke()` call, INCLUDING prompt-cache fields when
+        # reported -- mirrors `OpenRouterModelClient.last_usage` (issue
+        # #268) so `ModelInvocationRecord`'s ledger read
+        # (`getattr(model_client, "last_usage", None)`) works identically
+        # regardless of which adapter ran the call. `None` (never a stale
+        # value) whenever this client has not yet completed a successful
+        # call, or the response carried no usable `usage` block.
+        self.last_usage: dict[str, int] | None = None
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -1014,25 +1669,63 @@ class LiveBedrockModelClient:
             self._client = boto3.client("bedrock-runtime", **kwargs)
         return self._client
 
+    def capabilities(self, model_id: str) -> dict[str, bool]:
+        """Capability descriptor (issue #562): reads
+        `bedrock_model_capabilities(model_id)` -- model-policy/
+        bedrock-us-east-1.json's per-model `structured_outputs` /
+        `prompt_caching` fields. Fails closed to all-False for a `model_id`
+        the policy does not pin -- never a KeyError."""
+        return bedrock_model_capabilities(model_id)
+
     def invoke(
         self,
         *,
         model_id: str,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
+        tool_spec: dict[str, Any] | None = None,  # noqa: ARG002 - Bedrock path is dormant
+        output_schema: dict[str, Any] | None = None,
     ) -> str:
+        # Issue #418: `tool_spec` is accepted for signature parity with the
+        # invoke() Protocol / OpenRouterModelClient, and deliberately
+        # ignored -- the Bedrock InvokeModel payload below is unaffected.
+        # That issue's own structured-output request field is superseded by
+        # #567's `output_schema` below.
         enforce_single_region_native_model_id(model_id)
+
+        # Issue #568: capability-gated pass-through-or-flatten for a
+        # possibly-list-shaped `user_prompt` -- see `_prepare_message_
+        # content`'s own docstring. Reuses `self.capabilities(model_id)`,
+        # the same call `output_schema`'s gate below already makes.
+        user_content = _prepare_message_content(
+            user_prompt, self.capabilities(model_id).get("prompt_caching", False)
+        )
 
         payload = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_output_tokens,
             "system": system_prompt,
-            "messages": [{"role": "user", "content": user_prompt}],
+            "messages": [{"role": "user", "content": user_content}],
             # Sampling params (temperature/top_p/top_k) deliberately omitted,
             # and no manually-set extended-thinking budget -- request
             # contract (ARCHITECTURE.md -> Model-selection policy).
         }
+        # Issue #567: provider-native structured output, gated on THIS
+        # client's own capability descriptor for `model_id` -- never on
+        # `output_schema is not None` alone (same fail-closed contract as
+        # OpenRouterModelClient.invoke's identical gate). Capability False
+        # -> the payload carries no `output_config` key at all, byte-
+        # identical to a call that never passed `output_schema`.
+        if output_schema is not None and self.capabilities(model_id).get(
+            "structured_outputs", False
+        ):
+            payload["output_config"] = {
+                "format": {
+                    "type": "json_schema",
+                    "schema": output_schema,
+                }
+            }
 
         client = self._get_client()
         try:
@@ -1051,9 +1744,37 @@ class LiveBedrockModelClient:
         try:
             body_bytes = response["body"].read()
             data = json.loads(body_bytes)
-            return data["content"][0]["text"]
+            text = data["content"][0]["text"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             # Do NOT include the response body -- it may echo prompt substance.
             raise ModelInvocationError(
                 "Bedrock InvokeModel response missing content[0].text."
             ) from exc
+
+        # Issue #568: real usage capture, INCLUDING prompt-cache fields when
+        # the provider reports them -- best-effort, same as OpenRouter's
+        # `parse_openrouter_usage`: a missing/malformed `usage` block must
+        # never fail an otherwise-successful call over a non-substantive
+        # accounting field.
+        usage = data.get("usage") if isinstance(data, dict) else None
+        if isinstance(usage, dict):
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            self.last_usage = {
+                "input_tokens": input_tokens if isinstance(input_tokens, int) else 0,
+                "output_tokens": output_tokens if isinstance(output_tokens, int) else 0,
+                **_cache_usage_fields(usage),
+            }
+        else:
+            # Issue #568 fix round 1: assigned unconditionally on the success
+            # path, mirroring `last_served_model`/`last_generation_id`'s own
+            # "Assigned unconditionally ... so a provider that reports ids on
+            # one call and not the next cannot leave the previous call's ids
+            # behind" discipline (see OpenRouterModelClient.invoke above). A
+            # successful response with no (or a malformed) `usage` block must
+            # reset `last_usage` to None, not silently keep a PRIOR call's
+            # value -- otherwise a caller reading this attribute after a
+            # genuinely un-metered call attributes the previous attempt's
+            # numbers to this one.
+            self.last_usage = None
+        return text

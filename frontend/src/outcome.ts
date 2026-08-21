@@ -67,7 +67,8 @@ export type ReviewOutcome =
   | 'ERROR_MANUAL_REVIEW_REQUIRED'
   | 'ERROR'
   | 'QUARANTINED'
-  | 'SUPERSEDED';
+  | 'SUPERSEDED'
+  | 'CANCELLED';
 
 export interface OutcomeChip {
   label: string;
@@ -104,6 +105,12 @@ export const OUTCOME_CHIPS: Record<ReviewOutcome, OutcomeChip> = {
   // An administrative overlay (ARCHITECTURE.md), not a failure — see
   // backend/src/reviews.py's `_DIAGNOSTIC_NON_FAILURE_STATUSES`.
   SUPERSEDED: { label: 'Superseded', variant: 'muted' },
+  // The reviewer stopped this run on purpose. `muted`, never `danger`: it
+  // belongs with SUPERSEDED (an administrative outcome) and emphatically not
+  // with ERROR — the #458 lesson is that a safe outcome rendered as a fault
+  // sends people chasing a bug that isn't there, and nowhere is that more
+  // obviously wrong than for an outcome the user themselves chose.
+  CANCELLED: { label: 'Stopped', variant: 'muted' },
 };
 
 const KNOWN_OUTCOMES = new Set<string>(Object.keys(OUTCOME_CHIPS));

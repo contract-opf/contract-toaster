@@ -601,6 +601,14 @@ def run_purge_sweep_now(
     uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
     outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
 
+    # One purged_at stamp for every row this sweep run purges -- NOT a fresh
+    # now_epoch() per row. Mirrors infra/lambda/purge_worker/handler.py's
+    # run_purge_sweep exactly: the two purge implementations must stay
+    # identical in how they stamp as well as in what they clear, or a
+    # cross-target comparison of "when was this purged" reads differently
+    # for no reason.
+    purged_at = str(int(now_epoch()))
+
     deleted: list[str] = []
     eligible: list[str] = []
     failed: list[str] = []
@@ -648,7 +656,70 @@ def run_purge_sweep_now(
 
         reviews_table.update_item(
             Key={"review_id": review_id},
-            UpdateExpression="REMOVE verdict_summary, issue_rationale_text",
+            # Issue #563: normalization_notes names the paragraph heading a
+            # pending tracked change was accepted-all on -- counterparty
+            # clause text, same Confidential-substance reasoning as summary
+            # (docs/data-handling.md field table). Mirrors
+            # infra/lambda/purge_worker/handler.py's SUBSTANCE_FIELDS list
+            # exactly -- this function's own docstring says the two purge
+            # implementations must stay identical.
+            #
+            # Issue #486: attorney_disposition_note is the same shape --
+            # docs/data-handling.md's field table has classified it
+            # Confidential / "Expires with the document" since before this
+            # field had a writer at all. Wiring `record_disposition` behind
+            # a real route (this issue) is what turns that from a
+            # theoretical gap into a live one: a real attorney note can now
+            # land on the row, and a purge that deleted the document while
+            # leaving this note behind would not be a purge.
+            #
+            # Issue #499 adds cover_note_draft -- model-written prose
+            # summarizing the counterparty's document, the same Confidential-
+            # substance shape as summary (docs/data-handling.md field table).
+            # A purge that deleted the document and left this prose behind
+            # would not be a purge.
+            #
+            # `summary`, NOT `verdict_summary`: the narrative summary is
+            # persisted under the attribute name `summary` by all three
+            # writers (`pipeline_runner._write_terminal` /
+            # `._write_real_terminal` and infra/lambda/persist/handler.py) --
+            # `scripts/review_spine.py` renames the model's `verdict_summary`
+            # key to `summary` when it assembles the result. Nothing has ever
+            # written an attribute literally called `verdict_summary`, so
+            # this clause was a NO-OP for the field it was supposed to be
+            # clearing: the single most substance-bearing prose field on the
+            # row survived every purge sweep since the field shipped, on both
+            # deployment targets. `tests/test_summary_attribute_roundtrip.py`
+            # now drives the real writer into the real sweep so this can
+            # never silently regress to a name nothing writes.
+            #
+            # `issue_rationale_text` is GONE, not renamed: no writer has ever
+            # produced an attribute by that literal name, on any deployment
+            # target, in the entire history of this repo. Keeping a phantom
+            # name in a purge list is exactly the bug this change removes --
+            # it clears nothing while reading as if it does. The real
+            # per-issue rationale is `issues[].external_rationale_for_
+            # footnote`, and it does not live on this row at all: it is
+            # persisted only in the S3 analysis artifact
+            # (`outputs/{review_id}/analysis.json`), which the prefix-scan
+            # delete above already destroys wholesale. Same reasoning is why
+            # `issues` and `critic_delta` are deliberately NOT REMOVE targets
+            # here: nothing ever writes them to this row either (commit
+            # 8b17028, `reviews.load_analysis_artifact`), so naming them
+            # would repeat the same mistake for a second and third field.
+            #
+            # `toaster_guidance` (issue #398) is added here: the submitter's
+            # own free-text per-review prose, Confidential per
+            # docs/data-handling.md's field table, IS written to this row
+            # (`reviews._create_review_row`) and was in NEITHER purge list --
+            # unlike `issue_rationale_text` above, this was a real retention
+            # leak, not a phantom-name no-op.
+            UpdateExpression=(
+                "SET purged_at = :now REMOVE summary, original_filename, "
+                "normalization_notes, attorney_disposition_note, "
+                "cover_note_draft, toaster_guidance"
+            ),
+            ExpressionAttributeValues={":now": purged_at},
         )
         deleted.append(review_id)
 
@@ -819,8 +890,8 @@ def release_legal_hold(
 
 # Fields the hold-list view is allowed to return. Deliberately excludes any
 # Confidential document-substance field on the reviews row (e.g.
-# verdict_summary, issue_rationale_text -- docs/data-handling.md field
-# table) -- the hold list is an identifiers/hold-metadata view, not a
+# summary, issue_rationale_text, original_filename (#518) --
+# docs/data-handling.md field table) -- the hold list is an identifiers/hold-metadata view, not a
 # review-detail view, and this is exactly the surface the "malicious admin
 # or compromised session" threat model (threat-model.md) targets: a
 # compromised admin session must not be able to exfiltrate document
@@ -845,8 +916,8 @@ def list_legal_holds(
 
     Returns only hold-relevant identifiers/metadata (see
     `_HOLD_LIST_FIELDS`) -- never the full reviews row, which carries
-    Confidential document-substance fields (verdict_summary,
-    issue_rationale_text) that have no business being served through a
+    Confidential document-substance fields (`summary`,
+    `issue_rationale_text`) that have no business being served through a
     hold-list panel (docs/data-handling.md purge invariant 5;
     threat-model.md "Malicious admin or compromised session").
 

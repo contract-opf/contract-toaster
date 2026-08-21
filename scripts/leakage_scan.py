@@ -31,6 +31,7 @@ Scanned fields (per the output-contract.md scope table):
   - counterparty_change_summary       (per issue, reviewer UI)
   - proposed_replacement_text         (per issue, generated .docx redline)
   - critic_delta contested-replacement critic_objection / suggested text
+  - critic_delta rationale_objections[].objection   (issue #517)
   - critic_delta added_issues (each scanned the same as a primary issue)
 
 NOT scanned (deliberately, per output-contract.md: "n/a (stripped)"):
@@ -39,6 +40,9 @@ NOT scanned (deliberately, per output-contract.md: "n/a (stripped)"):
     legitimately carries an internal precedent id, so scanning it as a
     human-surfaced field would produce a false positive on data the field
     is expressly permitted to hold.
+  - critic_delta rationale_objections[].section_ref -- a locator ("Section
+    8"), not prose. Scanning it would false-positive on any playbook whose
+    topic ids or rule descriptions happen to contain a section number.
 
 ## Mechanism (deterministic layer; not a model call)
 
@@ -52,11 +56,14 @@ text.
 
 **Residual risk — paraphrase (documented, not a silent miss).** A model
 that rephrases a playbook position rather than quoting it verbatim will not
-be caught by this layer. This is covered by two independent controls that
-live outside this module: the internal-only watermark on every output, and
-the attorney-approval gate (the human-in-the-loop check before anything
-reaches a counterparty). See docs/threat-model.md -> "Residual risk —
-paraphrase (known limitation)".
+be caught by this layer. Residual coverage lives outside this module: the
+attorney's own review before anything reaches a counterparty is the backstop
+for the ordinary review, and the internal-notes export marker (issue #513;
+present iff a review's notes mode put internal-audience content in scope,
+never a general-purpose leak control) at least flags a document carrying
+content beyond the ordinary counterparty-facing footnote when applicable.
+See docs/threat-model.md -> "Residual risk — paraphrase (known
+limitation)".
 
 ## Positive-detection routing (issue #73 AC)
 
@@ -626,6 +633,39 @@ def _scan_critic_delta_fields(
                     rule_id=result.rule_id,
                     confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
                 )
+
+    # Issue #517: `rationale_objections[].objection` is model-generated prose
+    # that reaches the reviewer detail view, and docs/output-contract.md's
+    # scope table has always promised `critic_delta` rationale coverage. It
+    # was never scanned.
+    #
+    # The shape is what made this matter rather than being merely untidy: per
+    # that same doc, a `rationale_objections` entry can exist ON ITS OWN -- no
+    # contested replacement, no added issue -- and deliberately does not
+    # degrade the confidence band either. On that exact review the critic's
+    # only prose output reached a human with nothing else in the delta to
+    # catch a leak by accident.
+    #
+    # `section_ref` is deliberately not scanned: it is a locator ("Section 8"),
+    # not prose, and scanning it would false-positive on any playbook whose
+    # topic ids or rule descriptions happen to contain a section number.
+    for objection_entry in critic_delta.get("rationale_objections", []) or []:
+        text = objection_entry.get("objection")
+        if not text:
+            continue
+        result = scanner.scan(
+            text,
+            field_name="critic_delta.rationale_objections.objection",
+            current_counterparty_name=current_counterparty_name,
+        )
+        if result.blocked:
+            return ScanOutcome(
+                blocked=True,
+                field_name="critic_delta.rationale_objections.objection",
+                category=result.category,
+                rule_id=result.rule_id,
+                confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+            )
 
     for added_issue in critic_delta.get("added_issues", []) or []:
         outcome = _scan_issue_fields(added_issue, scanner, current_counterparty_name)

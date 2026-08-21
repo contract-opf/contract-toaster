@@ -109,6 +109,8 @@ export interface AppStackProps extends cdk.NestedStackProps {
  *  5. Least-privilege task role policy additions:
  *       - start-review: sfn:StartExecution on the review state machine.
  *       - read-status:  sfn:DescribeExecution on the review state machine.
+ *       - stop-review:  sfn:StopExecution on this env's executions (the
+ *                       cancel route aborts the running review).
  *       - upload:       s3:PutObject on the uploads bucket prefix.
  *       - download:     s3:GetObject on the outputs bucket prefix (scoped;
  *                       full scoped pre-signed download wired in #71).
@@ -270,6 +272,7 @@ export class AppStack extends cdk.NestedStack {
     // Capabilities (split per AC, issue #71):
     //   start-review   — sfn:StartExecution on the review state machine.
     //   read-status    — sfn:DescribeExecution on the review state machine.
+    //   stop-review    — sfn:StopExecution on this env's executions (cancel).
     //   upload         — s3:PutObject on the uploads bucket prefix.
     //                    KMS encryption-context: {"contract-toaster:data-class":"uploads","contract-toaster:review-id":"<id>"}
     //                    enforced via kms:EncryptionContext condition key so the
@@ -313,7 +316,7 @@ export class AppStack extends cdk.NestedStack {
       policyName: `contract-toaster-api-task-policy-${envName}`,
       document: new iam.PolicyDocument({
         statements: [
-          // start-review + read-status
+          // start-review + read-status + stop-review
           new iam.PolicyStatement({
             sid: 'StartReview',
             effect: iam.Effect.ALLOW,
@@ -326,6 +329,24 @@ export class AppStack extends cdk.NestedStack {
             sid: 'ReadStatus',
             effect: iam.Effect.ALLOW,
             actions: ['states:DescribeExecution', 'states:GetExecutionHistory'],
+            resources: [
+              `arn:aws:states:*:*:execution:contract-toaster-${envName}:*`,
+            ],
+          }),
+          // stop-review — POST /api/reviews/{id}/cancel aborts the execution
+          // running the review (backend/src/reviews.py::stop_running_execution).
+          // Scoped to EXECUTION ARNs of this environment's state machine, and
+          // deliberately a statement of its own rather than a third action on
+          // ReadStatus above: stopping a review is a mutation, and the two
+          // read-only status actions there are granted on a very different
+          // basis. Without this the cancel route fails AccessDenied in
+          // production while every offline test passes — which is why
+          // tests/test_review_cancel_aws_target.py asserts it against the
+          // SYNTHESIZED template rather than against this source.
+          new iam.PolicyStatement({
+            sid: 'StopReview',
+            effect: iam.Effect.ALLOW,
+            actions: ['states:StopExecution'],
             resources: [
               `arn:aws:states:*:*:execution:contract-toaster-${envName}:*`,
             ],
@@ -627,6 +648,21 @@ export class AppStack extends cdk.NestedStack {
       {
         name: 'OUTPUTS_BUCKET',
         value: `contract-toaster-outputs-${envName}`,
+      },
+      // Issue #569 (review round 3 fix): this service is the RESERVE side
+      // of the worst-case spend reservation (backend/src/reviews.py::
+      // reserve_spend -> compute_worst_case_reservation_usd_cents, gated on
+      // config.requote_enabled() which reads this same env var) — it must
+      // read the identical REQUOTE_ENABLED value pipeline-stack.ts already
+      // threads to the SETTLE side's two Lambda mirrors (persistFn's
+      // stageEnv, the orphan reconciler's environment), or reserve and
+      // settle permanently disagree by one primary-priced pass whenever the
+      // flag is on, drifting `daily_spend.reserved_usd_cents` forever. Empty
+      // string (unset) preserves pre-#569 behavior exactly, same
+      // default-OFF convention as the flag itself.
+      {
+        name: 'REQUOTE_ENABLED',
+        value: process.env.REQUOTE_ENABLED ?? '',
       },
     ];
 

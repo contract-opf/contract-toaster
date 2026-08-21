@@ -59,7 +59,9 @@ export interface ContractToasterStackProps extends cdk.StackProps {
  *  - Hostile-file AV: upload scanning in #63.
  *  - Pointer-only payloads: Step Functions inputs carry S3/DDB refs only (#59).
  *  - No doc substance in logs: enforced in Lambda/task configurations (#55+).
- *  - Watermark: every reviewer output carries attorney-approval watermark (#59).
+ *  - Internal-notes marker: a generated redline .docx carries an internal-notes
+ *    export marker iff that review's notes mode put internal-audience content
+ *    in scope -- never unconditional, no approval semantics (#513).
  */
 export class ContractToasterStack extends cdk.Stack {
   readonly envKmsKey: kms.Key;

@@ -377,6 +377,23 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
     key in the UI must change which key the review pipeline authenticates
     with. Everything else here could pass while this silently didn't."""
 
+    def _assert_constructed_with_key(self, ctor, expected_key):
+        """Assert WHICH KEY the client was built with -- and only that.
+
+        These two tests exist to prove key resolution, not to freeze
+        `OpenRouterModelClient`'s constructor signature. An
+        `assert_called_once_with(api_key=...)` does both, so the first
+        unrelated parameter the client legitimately grows fails them for a
+        reason that has nothing to do with what they are testing (it did:
+        `cancel_checkpoint` landed with review cancellation and broke both).
+        Asserting on the one kwarg under test keeps the failure honest.
+        """
+        ctor.assert_called_once()
+        self.assertEqual(ctor.call_args.kwargs.get("api_key"), expected_key)
+        # The key must never be smuggled in positionally either -- that would
+        # pass the check above while defeating the point of naming it.
+        self.assertEqual(ctor.call_args.args, ())
+
     def test_build_client_uses_the_admin_set_key(self):
         import src.pipeline_runner as pipeline_runner
 
@@ -384,7 +401,7 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):
             with patch.object(pipeline_runner.model_client, "OpenRouterModelClient") as ctor:
                 pipeline_runner._build_openrouter_client(self.ddb)
-        ctor.assert_called_once_with(api_key=FAKE_KEY)
+        self._assert_constructed_with_key(ctor, FAKE_KEY)
 
     def test_build_client_falls_back_to_env(self):
         import src.pipeline_runner as pipeline_runner
@@ -392,7 +409,7 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):
             with patch.object(pipeline_runner.model_client, "OpenRouterModelClient") as ctor:
                 pipeline_runner._build_openrouter_client(self.ddb)
-        ctor.assert_called_once_with(api_key=OTHER_KEY)
+        self._assert_constructed_with_key(ctor, OTHER_KEY)
 
     def test_no_key_anywhere_raises_rather_than_calling_with_empty(self):
         """_build_openrouter_client rejects an empty key itself (issue #472),

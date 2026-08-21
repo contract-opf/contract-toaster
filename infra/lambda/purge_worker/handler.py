@@ -16,10 +16,10 @@ docs/data-handling.md -> "Document retention and purge safety":
   3. Legal hold overrides everything -- a review (or corpus document) under
      an active `legal_hold` is never purged, regardless of window or age.
   4. Documents, then matched substance fields -- deleting a document also
-     clears the Confidential substance fields (`verdict_summary`,
-     `issue_rationale_text`) on the matching terminal `reviews` row; the
-     non-substantive audit-bearing fields (review_id, status, cost, hashes,
-     timestamps, owner_sub) remain untouched.
+     clears the Confidential substance fields (`summary`,
+     `issue_rationale_text`) on the matching terminal `reviews` row; the non-substantive
+     audit-bearing fields (review_id, status, cost, hashes, timestamps,
+     owner_sub) remain untouched.
   5. Dual-control or mandatory delay for retroactive reductions -- lowering
      the global retention window below its current value requires either a
      second admin's confirmation or a 72-hour pending delay (with a GC
@@ -80,11 +80,70 @@ TERMINAL_REVIEW_STATUSES = {
     "MANUAL_REVIEW_REQUIRED",
     "QUARANTINED",
     "SUPERSEDED",
+    # Mirrors backend/src/reviews.py's REVIEW_STATUSES_TERMINAL. A cancelled
+    # review is terminal, so it must be PURGEABLE: leaving it out would mean a
+    # review the user stopped keeps its uploaded contract past the retention
+    # window forever, precisely because they stopped it.
+    "CANCELLED",
 }
 
 # Invariant 4: Confidential substance fields cleared on purge (never the
 # non-substantive audit-bearing fields alongside them).
-SUBSTANCE_FIELDS = ["verdict_summary", "issue_rationale_text"]
+# Issue #518 adds `original_filename`. A contract filename routinely names the
+# counterparty -- "Mutual NDA - Acme.docx" is the ordinary case -- so it is
+# Confidential substance, not Internal metadata. A purge that deleted the
+# document and left the counterparty's name on the row would not be a purge.
+# Issue #563 adds `normalization_notes` -- it names the paragraph heading a
+# pending tracked change was accepted-all on, which is counterparty clause
+# text, the same reasoning that makes summary Confidential rather than
+# Internal (docs/data-handling.md field table).
+# Issue #486 adds `attorney_disposition_note` -- docs/data-handling.md's
+# field table classified it Confidential / "Expires with the document"
+# before it had any writer at all; that issue wires `record_disposition`
+# behind a real route, so a real attorney note can now land on the row and
+# this list must clear it exactly like the substance fields above (mirrored
+# in backend/src/retention.py::run_purge_sweep_now -- the two purge
+# implementations must stay identical).
+# Issue #499 adds `cover_note_draft` -- model-written prose summarizing the
+# counterparty's document, the same Confidential-substance shape as summary
+# (docs/data-handling.md field table). A purge that deleted the document and
+# left this prose behind would not be a purge.
+# `summary`, NOT `verdict_summary`: the narrative summary is persisted under
+# the attribute name `summary` by every writer -- backend/src/pipeline_runner
+# .py's `_write_terminal`/`_write_real_terminal` and infra/lambda/persist/
+# handler.py -- because scripts/review_spine.py renames the model's
+# `verdict_summary` output key to `summary` when assembling the result.
+# Nothing has ever written an attribute literally called `verdict_summary`, so
+# listing that name here cleared nothing: the most substance-bearing prose
+# field on the row survived every purge on this (the AWS) target too. Kept
+# byte-identical to backend/src/retention.py's REMOVE clause, per the
+# must-stay-identical rule above.
+#
+# `issue_rationale_text` is GONE, not renamed: no writer has ever produced an
+# attribute by that literal name, on any deployment target, in the entire
+# history of this repo. Keeping a phantom name in a purge list is exactly the
+# bug this change removes -- it clears nothing while reading as if it does.
+# The real per-issue rationale is `issues[].external_rationale_for_footnote`,
+# and it does not live on this row at all: it is persisted only in the S3
+# analysis artifact (`outputs/{review_id}/analysis.json`), destroyed wholesale
+# by this handler's own prefix-scan delete. The same reasoning is why `issues`
+# and `critic_delta` are deliberately NOT in this list: nothing ever writes
+# them to this row either (commit 8b17028, `reviews.load_analysis_artifact`),
+# so listing them would repeat the same mistake for a second and third field.
+#
+# `toaster_guidance` (issue #398) is added here: the submitter's own
+# free-text per-review prose, Confidential per docs/data-handling.md's field
+# table, IS written to this row (`reviews._create_review_row`) and was in
+# NEITHER purge list -- unlike `issue_rationale_text` above, this was a real
+# retention leak, not a phantom-name no-op.
+SUBSTANCE_FIELDS = [
+    "summary",
+    "original_filename",
+    "normalization_notes",
+    "attorney_disposition_note",
+    "cover_note_draft",
+    "toaster_guidance",
+]
 
 
 def now_epoch() -> float:
@@ -429,12 +488,19 @@ def _delete_review_documents(
     return _surviving_targets(targets)
 
 
-def _clear_substance_fields(review_id: str) -> None:
+def _clear_substance_fields(review_id: str, purged_at: str) -> None:
+    """Clear every SUBSTANCE_FIELDS attribute and stamp `purged_at` in the
+    SAME update -- the durable, checkable fact that this row was purged
+    (epoch-seconds string, same convention as `created_at`/`updated_at`).
+    `purged_at` is threaded in by the caller (one stamp per sweep run)
+    rather than read from anywhere here, so this function never has a
+    reason to read the row it is about to clear."""
     table = _ddb().Table(REVIEWS_TABLE)
     remove_expr = "REMOVE " + ", ".join(SUBSTANCE_FIELDS)
     table.update_item(
         Key={"review_id": review_id},
-        UpdateExpression=remove_expr,
+        UpdateExpression=f"SET purged_at = :purged_at {remove_expr}",
+        ExpressionAttributeValues={":purged_at": purged_at},
     )
 
 
@@ -461,6 +527,11 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
     settings = _apply_ready_pending_reduction(settings)
 
     reviews_table = _ddb().Table(REVIEWS_TABLE)
+
+    # One purged_at stamp for every row this sweep run actually purges --
+    # not a fresh now_epoch() per row, so every review swept in the same run
+    # reads back the same purge timestamp.
+    purged_at = str(int(now_epoch()))
 
     deleted: list[str] = []
     eligible: list[str] = []
@@ -526,7 +597,7 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
                 failed.append(review_id)
                 continue
 
-            _clear_substance_fields(review_id)
+            _clear_substance_fields(review_id, purged_at)
             deleted.append(review_id)
 
         exclusive_start_key = resp.get("LastEvaluatedKey")

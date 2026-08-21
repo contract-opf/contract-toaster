@@ -75,6 +75,95 @@ def model_provider() -> str:
     return os.environ.get("MODEL_PROVIDER", "mock").strip().lower()
 
 
+def structured_output_enabled() -> bool:
+    """Issue #418: forces the OpenRouter request to carry the review object
+    as a tool call (forced `tool_choice`) instead of prose JSON, making the
+    prose-preamble / markdown-fence failure mode `_extract_json_object`
+    exists to paper over (#382) structurally impossible.
+
+    Default OFF: `OPENROUTER_STRUCTURED_OUTPUT` unset (or set to anything
+    other than `1`/`true`/`yes`) keeps `OpenRouterModelClient.invoke`'s
+    request byte-identical to today -- no `tools`/`tool_choice` fields, no
+    `tool_spec` kwarg reaches the client at all (see
+    `scripts/primary_review_pass.py::run_primary_pass` /
+    `scripts/critic_review_pass.py::run_critic_pass`, which thread this only
+    when True).
+
+    Flipping the default ON is a HUMAN step, tracked on the epic, taken only
+    after a live smoke run against real OpenRouter traffic -- OpenRouter's
+    Anthropic tool-use pass-through cannot be proven from an offline test
+    suite (see this issue's Notes). This function's default must not change
+    without that verification.
+    """
+    return os.environ.get("OPENROUTER_STRUCTURED_OUTPUT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def requote_enabled() -> bool:
+    """Issue #569: gates the bounded re-quote repair pass
+    (`scripts/requote_repair.py`, wired into `scripts/review_spine.py`'s
+    stage 5) -- ONE extra model call, made only when at least one
+    `REQUEST_CHANGE` patch failed to locate (`not_found` / `ambiguous` /
+    `spans_paragraph_break`), asking the model to correct just the quoted
+    ADDRESS of an already-decided edit, never the judgment behind it.
+
+    Default OFF: `REQUOTE_ENABLED` unset (or set to anything other than
+    `1`/`true`/`yes`) keeps `run_review`'s behavior byte-identical to
+    before this issue -- no extra model call, no `requote` key on the
+    result, every existing test untouched. Read once at this module seam
+    (the same live-env-read convention as `structured_output_enabled`
+    above), never cached, so a test can flip it per-case with
+    `patch.dict(os.environ, ...)`.
+
+    Flipping the default ON is a deployment-config decision made AFTER
+    issue #566's human-executed quote-fidelity measurement against a real
+    corpus -- this function's default must not change without that
+    evidence, exactly like `structured_output_enabled` above.
+    """
+    return os.environ.get("REQUOTE_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def notes_mode_enabled() -> bool:
+    """Issue #572: the kill switch that makes epic #519's "ship all of A-G
+    together, or none" deploy gate a real mechanism instead of a human
+    promise. Gates ACCEPTANCE of the `internal` / `both` notes modes at
+    `src.reviews.resolve_notes_mode` -- while this is off, a submission
+    requesting either is refused with a `ValueError` (routed to a 400 by
+    `src.review_routes`), never silently downgraded to `external`.
+
+    Default OFF: `NOTES_MODE_ENABLED` unset (or set to anything other than
+    `1`/`true`/`yes`) keeps `resolve_notes_mode`'s behavior byte-identical to
+    today -- `none` and `external` are unaffected (they cannot surface
+    internal reasoning, so they carry none of the risk this gate exists
+    for), and `internal`/`both` are refused exactly as an unrecognized value
+    already is. Read once at this module seam (the same live-env-read
+    convention as `structured_output_enabled` / `requote_enabled` above),
+    never cached, so a test can flip it per-case with
+    `patch.dict(os.environ, ...)`.
+
+    Flipping the default ON is a deployment-config decision made AFTER
+    every one of #516, #521, #522, #523, #513 and #524 has landed and been
+    verified -- landing any subset while this stays off is exactly the
+    incremental-and-safe shape the epic calls for; flipping it early would
+    let internal reasoning reach counterparty-facing footnotes before the
+    audience-aware leakage scan (#521) exists to stop it. This function's
+    default must not change without that evidence, exactly like
+    `structured_output_enabled` and `requote_enabled` above.
+    """
+    return os.environ.get("NOTES_MODE_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def endpoint_url(service: str) -> str | None:
     """The endpoint override for a boto3 service, or None for the real AWS
     endpoint. Checks the per-service var first (e.g. `S3_ENDPOINT_URL`), then
