@@ -194,6 +194,37 @@ def test_overlay_instructs_source_quote_in_key_set(failures: list[str]) -> None:
         failures.append("[1k] The overlay must explicitly forbid fabricating/approximating a source_quote.")
 
 
+# ---------------------------------------------------------------------------
+# Issue #564: the PREVENTIVE half of the paragraph-boundary rule. Reporting a
+# located-but-boundary-crossing quote (REASON_SPANS_PARAGRAPH_BREAK) is only
+# the fallback path -- the overlay itself must also tell the model, up front,
+# that a newline in the shown document text marks a physical-paragraph
+# boundary and that "source_quote" must not cross one. Without this sentence
+# pinned, a future overlay edit can silently drop the instruction: the schema
+# and the classification path would still be green, but models would resume
+# emitting cross-paragraph quotes and every one of them would regress from
+# "applied" to "flag-only" -- exactly the failure mode #564 exists to fix.
+# ---------------------------------------------------------------------------
+
+
+def test_overlay_instructs_paragraph_boundary_rule(failures: list[str]) -> None:
+    overlay = pp.BINARY_DECISION_OVERLAY_BLOCK
+
+    if "paragraph boundary" not in overlay.lower():
+        failures.append(
+            "[1l] BINARY_DECISION_OVERLAY_BLOCK must tell the model that a "
+            "newline in the shown document text marks a paragraph boundary "
+            "-- issue #564's preventive half, not just the reporting half."
+        )
+    if "must not cross" not in overlay.lower():
+        failures.append(
+            "[1m] BINARY_DECISION_OVERLAY_BLOCK must instruct that "
+            "\"source_quote\" MUST NOT cross a paragraph boundary -- the "
+            "sentence that actually prevents cross-paragraph quotes, as "
+            "opposed to merely classifying them after the fact."
+        )
+
+
 def test_primary_user_prompt_block_order_full_doc(failures: list[str]) -> None:
     prompt = pp.assemble_user_prompt_primary(
         diff_hunks=_sample_diff_hunks(),
@@ -816,6 +847,7 @@ def test_cost_model_constants_match_reviews_module(failures: list[str]) -> None:
 TESTS = [
     test_system_blocks_order_and_cache_breakpoint,
     test_overlay_instructs_source_quote_in_key_set,
+    test_overlay_instructs_paragraph_boundary_rule,
     test_primary_user_prompt_block_order_full_doc,
     test_primary_user_prompt_outline_above_threshold,
     test_critic_user_prompt_manifest,

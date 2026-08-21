@@ -24,6 +24,11 @@
  * of an asset URL can fail. Every access is lazy and try/catch guarded, so if
  * audio can't initialize each exported function is a silent no-op rather than
  * throwing. A sound must never break the review flow.
+ *
+ * MUTE PERSISTENCE (issue #489): unlike everything else in this module, the
+ * `muted` flag is persisted — see `MUTE_STORAGE_KEY` and the module-level
+ * state comment below for why a sound preference (unlike a token) is fine to
+ * keep in localStorage.
  */
 import { useCallback, useState } from 'react';
 import leverUrl from '../assets/sounds/lever.mp3';
@@ -51,15 +56,6 @@ const SOUND_GAIN: Record<SoundKind, number> = {
   pop: 0.9,
 };
 
-// --- Module-level state (in-memory only; never persisted) -------------------
-let ctx: AudioContext | null = null;
-let tickingTimer: ReturnType<typeof setInterval> | null = null;
-let muted: boolean = defaultMuted();
-/** Decoded clips, populated by `loadAll`. A missing entry just means "not
- *  ready yet" — callers no-op rather than wait. */
-const buffers: Partial<Record<SoundKind, AudioBuffer>> = {};
-let loadStarted = false;
-
 // --- Preference detection ---------------------------------------------------
 function prefersReducedMotion(): boolean {
   try {
@@ -73,10 +69,76 @@ function prefersReducedMotion(): boolean {
   }
 }
 
-/** Default to muted when the user prefers reduced motion, else unmuted. */
-function defaultMuted(): boolean {
-  return prefersReducedMotion();
+// Namespaced localStorage key for the mute flag (issue #489) — the same
+// shape `toaster/notify.ts` documents for its own opt-in flag: a single
+// boolean preference, never a token, never anything about a review's
+// content. `'1'`/`'0'` rather than `true`/`false` so a raw
+// `localStorage.getItem` in devtools reads unambiguously.
+//
+// Declared (with the two helpers and `defaultMuted` below) BEFORE the
+// `let muted: boolean = defaultMuted();` module-state line further down —
+// `const`/`function` bindings a top-level call reaches into must already be
+// initialized when that call runs, not merely hoisted; a `const` is not
+// until its own declaration executes. Getting this ordering wrong doesn't
+// throw where anyone would notice it: `readStoredMuted`'s own try/catch
+// swallows the resulting ReferenceError and returns `null`, so `muted`
+// would silently seed from `prefersReducedMotion()` on EVERY load, as if
+// nothing had ever been stored.
+export const MUTE_STORAGE_KEY = 'contract-toaster:muted';
+
+/** Best-effort read: any Storage failure (private-mode quirks, a
+ *  locked-down embed with no `window.localStorage`) just means "nothing
+ *  stored" — never a reason to break audio. `null` (as opposed to `false`)
+ *  distinguishes "never set" from "explicitly unmuted", so a caller can
+ *  fall back to the reduced-motion default only in the former case. */
+function readStoredMuted(): boolean | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(MUTE_STORAGE_KEY);
+    if (raw === '1') return true;
+    if (raw === '0') return false;
+    return null;
+  } catch {
+    return null;
+  }
 }
+
+/** Best-effort write; same failure posture as the read above. */
+function writeStoredMuted(value: boolean): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(MUTE_STORAGE_KEY, value ? '1' : '0');
+  } catch {
+    /* best-effort persistence only */
+  }
+}
+
+/** The mute flag's default at module load: whatever was last stored, or —
+ *  when nothing was ever stored — reduced-motion's own default. A stored
+ *  `false` is a real, explicit choice and must win over reduced-motion,
+ *  which is only ever a fallback for a reviewer who never touched the
+ *  toggle at all. */
+function defaultMuted(): boolean {
+  const stored = readStoredMuted();
+  return stored !== null ? stored : prefersReducedMotion();
+}
+
+// --- Module-level state -------------------------------------------------
+// `ctx`/`tickingTimer`/`buffers`/`loadStarted` stay in-memory only — none of
+// them is a user preference, and a decoded AudioBuffer has no business in
+// localStorage. `muted` is the one exception (issue #489, item 3): it is
+// seeded from the namespaced localStorage key above (falling back to the
+// reduced-motion default when nothing is stored) and every `setMuted` write
+// persists it, so a reviewer who mutes the toaster stays muted across a
+// reload instead of re-muting every day. Nothing else about a review ever
+// rides along on this key — see MUTE_STORAGE_KEY's own comment.
+let ctx: AudioContext | null = null;
+let tickingTimer: ReturnType<typeof setInterval> | null = null;
+let muted: boolean = defaultMuted();
+/** Decoded clips, populated by `loadAll`. A missing entry just means "not
+ *  ready yet" — callers no-op rather than wait. */
+const buffers: Partial<Record<SoundKind, AudioBuffer>> = {};
+let loadStarted = false;
 
 // --- AudioContext plumbing --------------------------------------------------
 function getAudioContextCtor(): AudioContextCtor | null {
@@ -194,12 +256,39 @@ export function playPop(): void {
   play('pop');
 }
 
+/** The low clunk on a failed review (issue #501) — deliberately NOT the pop.
+ *
+ *  The pop is the sound of a finished piece of work and must never play when
+ *  nothing was produced; a cheerful chime on a failure is the machine lying
+ *  about its own state. This reuses `lever.mp3`, which is already a low
+ *  mechanical ka-chunk from the same appliance, rather than adding a fourth
+ *  sound with no entry in `assets/sounds/SOURCES.md`. Mute-respecting like
+ *  every other sound. */
+export function playClunk(): void {
+  if (muted) return;
+  play('lever');
+}
+
+/** One detent click as the browning control moves a stop (issue #495).
+ *
+ *  Deliberately the SAME `tick.mp3` recording the running timer uses, played
+ *  once instead of on an interval: it is a real mechanical tick from the same
+ *  appliance, so the two sounds belong to one object rather than to a library.
+ *  Inventing a synthesized click would have meant a fourth sound with no
+ *  source — see `assets/sounds/SOURCES.md`. Respects mute like every other
+ *  sound, because it routes through the same `play` seam. */
+export function playDetent(): void {
+  if (muted) return;
+  play('tick');
+}
+
 export function isMuted(): boolean {
   return muted;
 }
 
 export function setMuted(next: boolean): void {
   muted = next;
+  writeStoredMuted(next);
   if (muted) stopTicking();
 }
 

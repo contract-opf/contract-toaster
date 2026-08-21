@@ -1,7 +1,8 @@
 # Output contract
 
 Architecture lives in [ARCHITECTURE.md](../ARCHITECTURE.md). This document is the authoritative home for
-**what the tool emits and how it is framed** — the binary legal decision, the attorney-approval framing,
+**what the tool emits and how it is framed** — the binary legal decision, the tool-recommendation
+framing (see [Tool-recommendation framing and the internal-notes export marker](#tool-recommendation-framing-and-the-internal-notes-export-marker-issue-513)),
 the citation/footnote rules, and the internal system-status that is never surfaced as a legal verdict.
 It is referenced by [playbooks/schema.json](../playbooks/schema.json) (`output_format`). The security
 controls that *enforce* these rules (the pre-render leakage scan, output escaping) live in
@@ -158,7 +159,7 @@ The top-level **`confidence_band`** field surfaces the pipeline's internal confi
 in the result view, pre-download**. It is null when `confidence_state` is `OK`. It mirrors
 `confidence_state` as a UI-surface label and must be rendered as a distinct **system status** —
 visually separate from the legal decision (`ACCEPT | REQUEST_CHANGE`) and clearly labeled as a
-pipeline / system signal, not a legal opinion. This is consistent with the attorney-approval framing
+pipeline / system signal, not a legal opinion. This is consistent with the tool-recommendation framing
 rule that `MANUAL_REVIEW_REQUIRED` is a system status, never a third legal category.
 
 ### Critic-delta confidence merge rule
@@ -191,6 +192,20 @@ The merge rule:
 - **`confidence_band` always mirrors the merged `confidence_state`**: null when `OK`, else the
   `confidence_state` string itself — same rule as the unmerged case above.
 
+### Outline-only-input confidence degrade (issue #419)
+
+`reconcile()` applies a second, independent degrade after the critic-delta merge above: when the
+primary pass reviewed a section outline rather than the full counterparty document text
+(`input_mode="section_outline"` — the document estimated over
+`primary_review_pass.DEFAULT_FULL_DOC_TOKEN_THRESHOLD` tokens, default 60,000), `confidence_state`
+is degraded **one further level** (stacking with the critic-delta degrade when both apply — a
+review that is both outline-only *and* critic-contested is worse than either alone), and a fixed,
+substance-free sentence (no document content — a static string) is appended to `verdict_summary`
+saying the review was outline-only due to document size. `input_mode` is pipeline-derived metadata,
+not part of the model's own `output-schema-v1`/`v2` response — it is not a schema field, and is
+surfaced separately on `scripts/review_spine.py::run_review`'s result dict. A `"full_document"`
+review is unaffected: no degrade, no sentence.
+
 ## Critic-delta presentation
 
 The adversarial critic pass can produce two types of delta that the attorney must see before
@@ -204,9 +219,9 @@ the delta indicator visible.
 
 For each entry in `critic_delta.contested_replacements`, the result view renders a
 **"critic flagged this replacement" badge** inline with the primary's proposed replacement text
-for that section. The badge is distinct from the binary `ACCEPT | REQUEST_CHANGE` decision and
-from the attorney-approval watermark; it is a trust-calibration signal, not an additional legal
-decision. The badge text is drawn from `critic_objection` on the contested-replacement entry.
+for that section. The badge is distinct from the binary `ACCEPT | REQUEST_CHANGE` decision; it is
+a trust-calibration signal, not an additional legal decision. The badge text is drawn from
+`critic_objection` on the contested-replacement entry.
 
 **Side-by-side alternatives.** When a critic-suggested replacement is present
 (`critic_suggested_replacement` is non-null), the result view presents the primary replacement
@@ -243,7 +258,7 @@ is visible in the rendered view. Concretely:
 
 This is consistent with the confidence-band pre-download framing rule: both the confidence band
 and critic-delta indicators are trust-calibration signals that the attorney sees **before** they
-act on the result, without changing the binary legal decision or the attorney-approval framing.
+act on the result, without changing the binary legal decision or the tool-recommendation framing.
 
 ## Oversized-document user message (single failure point)
 
@@ -340,7 +355,7 @@ All three fail-closed paths set:
 
 `MANUAL_REVIEW_REQUIRED` is the correct status because the pipeline could not complete the redline
 automatically; a human (the legal admin or the reviewing attorney) must complete the work. This is a
-**system status**, never a legal decision — the attorney-approval watermark is displayed alongside it.
+**system status**, never a legal decision.
 The manual-review SLA and daily triage procedure apply (see
 [docs/output-contract.md → Manual-review states: user-facing next-step copy](#manual-review-states-user-facing-next-step-copy)
 and [RUNBOOK.md → Manual-review filter: owner and SLA](../RUNBOOK.md#manual-review-filter-owner-and-sla)).
@@ -356,43 +371,54 @@ depending on whether a partial redline also exists:
 | A partial redline `.docx` exists (`applied_patches` non-empty) alongside the analysis report | **"We applied the changes we could safely verify and flagged the rest — here is the partial redline and the analysis for the remaining section(s) to apply by hand. A legal admin will follow up with you."** |
 
 Both are displayed as a `MANUAL_REVIEW_REQUIRED` system-status message (distinct from
-`ACCEPT | REQUEST_CHANGE`), with the attorney-approval watermark. The download affordance for the
+`ACCEPT | REQUEST_CHANGE`). The download affordance for the
 analysis report — and, in the partial-redline case, a separate download affordance for the
 `.docx` — is shown alongside the message so the attorney can retrieve everything needed to finish
 the review.
 
-## Attorney-approval framing (a misuse-prevention control, not cosmetic)
+## Tool-recommendation framing and the internal-notes export marker (issue #513)
 
-- Every output and UI state is watermarked **"tool recommendation only — attorney approval required."**
+The attorney-approval framing this section used to describe is retired: the premise that justified
+an always-on marker — a haste-prone reviewer distinct from an approving attorney (see
+[docs/threat-model.md → External-communication guardrail](threat-model.md#external-communication-guardrail))
+— is explicitly withdrawn. **The actual user of this tool is the attorney, or is highly trained.**
+Nothing in this product enforces, requires, gates on, or records attorney approval; approval happens
+in your organization's own review process, entirely outside this tool.
+
 - An `ACCEPT` is rendered as **"no requested changes identified by tool"**, never "no action needed" —
-  a clean tool pass is a tool result, not legal sign-off.
+  a clean tool pass is a tool result, not a legal opinion.
 - `MANUAL_REVIEW_REQUIRED` is shown as a **distinct system status**, visually separate from the
   `ACCEPT | REQUEST_CHANGE` legal decisions, so a pipeline outcome is never mistaken for a legal opinion.
-- The generated redline `.docx` carries an **internal-only / export-warning marker**, placed redundantly
-  (first-page cover note + every-page header/footer) so a routine accept-all does not silently strip it.
-  This is misuse *friction*, not an export control or an approval workflow (see
-  [docs/threat-model.md → External-communication guardrail](threat-model.md#external-communication-guardrail)).
+- The generated redline `.docx` carries an **internal-notes export marker** iff this review's notes
+  mode actually put internal-audience content in scope (`internal`/`both`) — see
+  [docs/threat-model.md → External-communication guardrail](threat-model.md#external-communication-guardrail).
+  It is not an approval gate and it is not unconditional: a review with no internal notes produces a
+  document with no marker in any part.
 
-Approval happens **outside** this tool; the tool records the attorney disposition (accepted/edited/
-rejected) only as a quality signal (see [docs/evaluation.md](evaluation.md)).
+The tool separately records the attorney disposition (accepted/edited/rejected) as a quality-loop
+signal only (see [docs/evaluation.md](evaluation.md)) — this feeds evaluation, and is never a gate
+on anything the tool itself does.
 
-### Export marker: default on every redline; clean copy is the deliberate approval exit
+### Export marker: conditional on notes mode, not a de-marking ritual
 
-**The marker remains the default** on every generated redline — the tool always produces a marked
-document. The clean copy (de-marked version) is **not** the default download; it is the
-**deliberate approval exit**: the intended path for a document that has received explicit attorney
-approval and is ready for transmission to the counterparty.
+The marker is present **iff** internal notes are in scope for this review (`internal`/`both`
+notes mode — today unreachable while issue #572's `NOTES_MODE_ENABLED` kill switch is off, so every
+review currently in production produces a document with **no marker in any part**). When present,
+it says exactly what it means: **"contains internal notes — not for external transmission."** It
+carries no approval semantics — it is a signpost that a document holds internal-audience content,
+not a nag to seek sign-off.
 
-This distinction matters for the misuse-friction posture: if clean export were the default, the
-marker's protective value would be lost (every document would arrive at the attorney's desk already
-stripped). The marker must be the default so that any document reaching the counterparty without
-the marker has been deliberately de-marked after attorney approval.
+Placement differs by generation path (see [ARCHITECTURE.md → Redlining](../ARCHITECTURE.md#redlining--owned-docx-library)
+for the code-level detail): the live first-party redline path places the marker in the running
+every-page header/footer only; the standalone writer (used for third-party paper and fixture
+generation) additionally places it as a first-page cover note.
 
-Because the tool does not own the approval workflow (approval happens outside this tool), it does
-not automate marker removal. After an attorney approves a redline, they follow the documented
-de-marking procedure in **[RUNBOOK.md → Removing the export marker from an approved redline](../RUNBOOK.md#removing-the-export-marker-from-an-approved-redline)** to produce a
-clean copy. That procedure covers removing both the first-page cover note and the every-page
-header/footer marker, and recording the action in the attorney's review record.
+There is deliberately **no manual de-marking procedure**. Stripping the marker text would not
+remove the internal-audience content the notes mode actually put in the document (the footnotes and
+rationale text), so editing a marked `.docx` to look external-safe would be actively misleading, not
+a fix. If a generated `.docx` carries the marker, that specific export is not for external
+transmission — full stop. See
+[RUNBOOK.md → Internal-notes marker on a generated redline](../RUNBOOK.md#internal-notes-marker-on-a-generated-redline).
 
 ## Manual-review states: user-facing next-step copy
 
@@ -405,9 +431,9 @@ state is required; the canonical text is below.
 | `MANUAL_REVIEW_REQUIRED` | **"Your document could not be automatically reviewed — a legal admin will review it and follow up with you. No action is needed on your part right now."** |
 | `ERROR_MANUAL_REVIEW_REQUIRED` | **"A pipeline error prevented automatic review of your document — a legal admin will review it and follow up with you. No action is needed on your part right now."** |
 
-Both messages are system-status copy only. They must never imply a legal decision, and the
-attorney-approval watermark ("tool recommendation only — attorney approval required") is shown
-alongside them as with all other result states.
+Both messages are system-status copy only. They must never imply a legal decision, and nothing in
+this product enforces, requires, gates on, or records attorney approval — these states carry no
+watermark or approval framing, same as every other result state.
 
 **Who acts on manual-review states.** The legal admin checks the manual-review filter in the admin
 UI daily and triages each entry. The `contract-toaster-manual-review-stale` alarm fires if any review remains
@@ -450,6 +476,21 @@ and keeps today's exact-match, fail-closed patching behavior unchanged.
 rendered in the UI, written to a `.docx`, or stored in a context reachable by a non-admin user. The
 scan scope is not limited to fields that feed the generated redline. It explicitly covers:
 
+**Field-name note (canonical).** The names in this document are the **model's** output vocabulary.
+`scripts/review_spine.py` renames two of them when it assembles the review result, and the renamed
+names are what actually get persisted:
+
+| This document says | Persisted as | Where it lands |
+|---|---|---|
+| `verdict_summary` | `summary` | the `reviews` DynamoDB row |
+| `issues` | `findings` | the analysis artifact `outputs/{review_id}/analysis.json` — **never the row** |
+
+Both renames have already caused production bugs: readers written against the model-side name read an
+attribute nothing writes and silently got `null` on every real review (and, for `summary`, a purge
+clause that cleared nothing). `GET /api/reviews/{id}` still *returns* `verdict_summary` and `issues`
+as its response keys — the rename is a storage-layer fact, not an API one. See
+[docs/data-handling.md](data-handling.md)'s field dictionary for the storage side of each.
+
 | Field | Where rendered | Scan required |
 |---|---|---|
 | `verdict_summary` (ACCEPT path) | Reviewer UI on the ACCEPT result page; realistically copy-pasted into email | Yes |
@@ -457,8 +498,22 @@ scan scope is not limited to fields that feed the generated redline. It explicit
 | `external_rationale_for_footnote` | Generated `.docx` footnotes | Yes |
 | `counterparty_change_summary` | Reviewer UI (per-issue summary) | Yes |
 | `proposed_replacement_text` | Generated `.docx` redline | Yes |
-| `critic_delta` rationale / contested replacement | Admin view; reviewer detail view | Yes |
+| `critic_delta.contested_replacements[].critic_objection` / `.critic_suggested_replacement` | Admin view; reviewer detail view | Yes |
+| `critic_delta.rationale_objections[].objection` | Admin view; reviewer detail view | Yes |
+| `critic_delta.rationale_objections[].section_ref` | Admin view; reviewer detail view | n/a (a locator, not prose — see below) |
+| `critic_delta.added_issues[]` | Admin view; reviewer detail view | Yes (each scanned as a primary issue) |
+| `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes |
 | `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) |
+
+The `critic_delta` rows are enumerated field by field rather than summarised as one line, because
+the summary is what hid issue #517: the table said "`critic_delta` rationale / contested
+replacement — Yes" while `rationale_objections[].objection` was never actually scanned. A
+`rationale_objections` entry can exist on its own (no contested replacement, no added issue) and
+deliberately does not degrade the confidence band, so on that exact review shape the critic's only
+prose output reached a human unscanned. A field this table promises is covered but isn't is worse
+than one known to be uncovered — a reader reasonably assumes cover. `section_ref` is excluded
+explicitly for the same reason: it is a locator ("Section 8"), not prose, and scanning it would
+false-positive on any playbook whose topic ids or rule descriptions contain a section number.
 
 A positive leakage detection on **any** of these fields routes the review to
 `ERROR_MANUAL_REVIEW_REQUIRED` regardless of which path (ACCEPT or REQUEST_CHANGE) the review is on.

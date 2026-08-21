@@ -35,6 +35,16 @@ reconciliation":
     The merge is monotonic: the critic can only degrade the band, never
     raise it back toward `OK`. A rationale objection alone does not trigger
     this degradation.
+  - **Outline-only input degrades the confidence band too.** When the
+    primary pass reviewed a section outline rather than the full document
+    text (`input_mode="section_outline"`, issue #419 -- the document was
+    over `primary_review_pass.DEFAULT_FULL_DOC_TOKEN_THRESHOLD`),
+    `confidence_state` is degraded one FURTHER level (stacking with any
+    critic-disagreement degrade above) and a fixed, substance-free sentence
+    is appended to `verdict_summary` saying so -- see
+    `OUTLINE_MODE_SUMMARY_NOTICE` below. A model reviewing a table of
+    contents and returning a confident-looking decision is exactly the
+    silent-degrade this issue exists to end.
 
 `reconcile()` is a pure function: no I/O, no model calls, deterministic
 given its inputs -- so it is unit-testable as a table
@@ -59,6 +69,31 @@ _CONFIDENCE_LEVELS = (
     "LOW_CONFIDENCE",
     "MANUAL_REVIEW_REQUIRED",
     "ERROR_MANUAL_REVIEW_REQUIRED",
+)
+
+# ---------------------------------------------------------------------------
+# Outline-only input degrade (issue #419). `input_mode` is
+# `primary_review_pass.run_primary_pass`'s own observability field -- see
+# that module's `resolve_input_mode` / `INPUT_MODE_SECTION_OUTLINE`. The
+# literal below is a DUPLICATE of that constant, not an import: this module
+# is deliberately dependency-free (no I/O, no model calls, no cross-module
+# imports -- see the module docstring), the same "each module owns its own
+# copy of small shared sentinels" convention primary_review_pass.py's own
+# MAX_INPUT_TOKENS comment documents. tests/test_full_doc_threshold.py
+# cross-checks the two literals so they cannot silently drift.
+INPUT_MODE_SECTION_OUTLINE = "section_outline"
+
+# The fixed, substance-free sentence appended to `verdict_summary` whenever
+# `input_mode == INPUT_MODE_SECTION_OUTLINE` (issue #419 AC: "a fixed
+# sentence... contains no document content"). Static string only -- never
+# interpolated with anything document-derived, so it needs no leakage-scan
+# consideration beyond what verdict_summary already gets.
+# Release voicing: "your document" phrasing, no internal-org name, no
+# jargon (project de-brand rule; see docs -> "Release voicing").
+OUTLINE_MODE_SUMMARY_NOTICE = (
+    "Your document was too large for a full-text review, so this result is "
+    "based on a section outline rather than the full document text -- "
+    "treat it with extra caution."
 )
 
 
@@ -87,6 +122,7 @@ def reconcile(
     primary_result: dict[str, Any],
     critic_result: dict[str, Any] | None = None,
     detector_fires: list[dict[str, Any]] | None = None,
+    input_mode: str = "full_document",
 ) -> dict[str, Any]:
     """Deterministically merge the primary pass output, the critic pass
     output, and deterministic detector fires into the final review result.
@@ -108,6 +144,18 @@ def reconcile(
     concluded, and regardless of ordering (both-models-silent is the
     common case -- detectors are deterministic pre-model-call checks the
     models are not guaranteed to also restate).
+
+    `input_mode` (issue #419, default `"full_document"`): the ORCHESTRATION
+    wrapper's own field (`primary_pass_result["input_mode"]` -- NOT part of
+    `primary_result`/the schema-valid response dict itself, since it is
+    pipeline-derived metadata the model never emits). `run_two_pass_review`
+    below reads it off `primary_pass_result` and passes it straight through.
+    When it equals `INPUT_MODE_SECTION_OUTLINE`, `confidence_state` (and its
+    mirrored `confidence_band`) is degraded one FURTHER level beyond
+    whatever the critic-delta merge above already produced, and
+    `OUTLINE_MODE_SUMMARY_NOTICE` is appended to `verdict_summary` -- see
+    the module docstring's "Outline-only input degrades the confidence band
+    too" bullet. The default reproduces pre-#419 behavior exactly.
 
     Returns a merged `output-schema-v1`-shaped dict.
     """
@@ -185,6 +233,34 @@ def reconcile(
         if critic_contests_output
         else primary_confidence_state
     )
+
+    # Outline-only input degrade (issue #419): a SEPARATE, independent
+    # degrade from the critic-delta one above -- the two stack (a review
+    # that is both outline-only AND critic-contested is worse than either
+    # alone) -- applied last so it always reflects the critic-merged state,
+    # never gets silently overwritten by it.
+    verdict_summary = primary_result.get("verdict_summary")
+    is_outline_only = input_mode == INPUT_MODE_SECTION_OUTLINE
+    if is_outline_only:
+        confidence_state = _degrade_confidence_state(confidence_state)
+        if verdict_summary:
+            # Bound the merged string to the schema's 2000-char maximum
+            # (playbooks/output-schema-v1.json / -v2.json's
+            # `verdict_summary.oneOf[1].maxLength`) -- a schema-valid
+            # <=2000-char model summary must not become a >2000-char merged
+            # one just because this notice got appended. OUTLINE_MODE_
+            # SUMMARY_NOTICE is the load-bearing user signal here, so it is
+            # NEVER truncated; the model's own summary is elided instead to
+            # make room for the separator + fixed notice.
+            _separator = "\n\n"
+            _max_model_summary_len = 2000 - len(_separator) - len(OUTLINE_MODE_SUMMARY_NOTICE)
+            if len(verdict_summary) > _max_model_summary_len:
+                _ellipsis = "..."
+                verdict_summary = verdict_summary[: _max_model_summary_len - len(_ellipsis)] + _ellipsis
+            verdict_summary = f"{verdict_summary}{_separator}{OUTLINE_MODE_SUMMARY_NOTICE}"
+        else:
+            verdict_summary = OUTLINE_MODE_SUMMARY_NOTICE
+
     confidence_band = None if confidence_state == "OK" else confidence_state
 
     return {
@@ -194,7 +270,7 @@ def reconcile(
         "confidence_band": confidence_band,
         "issues": final_issues,
         "critic_delta": critic_delta_record if has_critic_delta else None,
-        "verdict_summary": primary_result.get("verdict_summary"),
+        "verdict_summary": verdict_summary,
     }
 
 
@@ -224,6 +300,11 @@ def run_two_pass_review(
       {"status": "OK", "result": {...}}
         -- both passes succeeded; `result` is `reconcile()`'s merged
         output-schema-v1-shaped dict.
+
+    `primary_pass_result["input_mode"]` (issue #419, absent on a pre-#419
+    caller/fixture) is read here and passed to `reconcile()` -- see that
+    function's own `input_mode` docstring. Absent defaults to
+    `"full_document"`, reproducing pre-#419 behavior exactly.
     """
     if primary_pass_result.get("status") != "OK":
         return dict(primary_pass_result)
@@ -240,5 +321,6 @@ def run_two_pass_review(
         primary_result=primary_pass_result["response"],
         critic_result=critic_pass_result["response"],
         detector_fires=detector_fires,
+        input_mode=primary_pass_result.get("input_mode", "full_document"),
     )
     return {"status": "OK", "result": reconciled}

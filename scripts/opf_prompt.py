@@ -38,9 +38,12 @@ module emits is bounded by the artifact, not by hope. The real playbook measures
 
 What the digest deliberately omits -- every observation's `full_text`, and (as
 of digest_version 2) each preferred variation's compiler-written `rationale` --
-is NOT lost: `scripts/opf_clause_lookup.py` is the model's tool for fetching it
-on demand. Summaries by default, detail where the decision needs it. That
-trade is the entire reason the prompt fits.
+is not lost from the corpus: `scripts/opf_clause_lookup.py` implements a
+drill-down tool that could fetch it on demand. That tool is not wired to the
+model today -- no tool loop sends it, so nothing in the running system can
+call it (#580 tracks restoring the instruction and the tool together).
+Summaries by default is the trade that lets the prompt fit; detail-on-demand
+is not yet a live path.
 
 So: if a future change is tempted to inline `full_text`, or to "just include the
 evidence section too", it is re-proposing the 1M-token design. Add a lookup, not
@@ -137,7 +140,6 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import opf_clause_lookup  # noqa: E402
 import opf_terminology  # noqa: E402
 import primary_review_pass  # noqa: E402
 
@@ -189,13 +191,21 @@ def _omit(kind: str, where: str) -> None:
 
 
 @contextmanager
-def _recording_omissions() -> Iterator[None]:
-    """Collect omissions, then report them, one aggregated line per kind."""
+def _recording_omissions() -> Iterator[dict[str, list]]:
+    """Collect omissions, then report them, one aggregated line per kind.
+
+    Yields the SAME dict `_omit` mutates in place (`{kind: [count, where]}`),
+    so a caller that keeps the yielded reference (e.g.
+    `compose_opf_system_blocks`'s `omissions_out` param below) still has its
+    final contents after the `with` block exits and the module-level
+    `_omissions` pointer has already been restored -- the dict object
+    itself outlives the scope that names it.
+    """
     global _omissions
     outer = _omissions
     _omissions = {}
     try:
-        yield
+        yield _omissions
     finally:
         collected, _omissions = _omissions, outer
         _report_omissions(collected or {})
@@ -272,9 +282,11 @@ DIGEST_INTRO = (
     "Weigh it by n -- the number of corpus observations behind an entry "
     "(bands: often n>=10, sometimes n=2-9, rare n=1). A position held across many "
     "deals is strong evidence; a single instance is weak.\n"
-    "These are SUMMARIES. Each entry cites its source; use the "
-    f"{opf_clause_lookup.TOOL_NAME} tool to read the full clause text or a "
-    "variation's full rationale before relying on it for exact language."
+    "These are SUMMARIES, not the corpus's exact wording. Each entry cites "
+    "its source, but the full clause text and a variation's full rationale "
+    "are not included here -- do not present drafted language as quoted "
+    "from the corpus; weigh it as precedent, never as text to reproduce "
+    "verbatim."
 )
 
 class PromptCompositionError(ValueError):
@@ -309,13 +321,13 @@ def _fmt_n(entry: dict, where: str) -> str:
 
 
 def _fmt_cite(ref: Any, where: str) -> str:
-    """`[doc@v §path]` — compact, and enough for the lookup tool to resolve.
+    """`[doc@v §path]` — grounds the summary in a real corpus location.
 
-    Dropping the citation strands the entry: DIGEST_INTRO promises the model it
-    can look every summary up, and an uncited entry is one it cannot.
+    Dropping the citation strands the entry: DIGEST_INTRO tells the model each
+    summary cites its source, and an uncited entry is one that does not.
     """
     if ref is None:
-        _omit("citation — entry has no ref, so the model cannot look this summary up", where)
+        _omit("citation — entry has no ref, so it reaches the model ungrounded, with no corpus location an operator or auditor can resolve it to", where)
         return ""
     if not isinstance(ref, dict):
         _omit(f"citation — ref is a {type(ref).__name__}, not an object; not rendered", where)
@@ -547,6 +559,25 @@ def _binding_block(
     invariants = resolve_floor_invariants(opf_doc, overrides)
     must_rules = policy_rules_by_strength(policy, "must")
     if not invariants and not must_rules:
+        # Issue #582 (Defect 2/3 follow-up): the real playbook ships
+        # `floor: {}` BY DESIGN (issue #479 DECISION), and `policy` is
+        # `None` for every review today (nothing in this deployment stores
+        # a review-policy artifact reachable at review time -- see
+        # `backend/src/pipeline_runner.py::run_real_pipeline`, which never
+        # passes `policy=` to `review_spine.run_review`). So this branch is
+        # not a hypothetical: it is what EVERY production OPF review
+        # composes today. Before this, that fact was invisible -- this
+        # function just returned `None` with nothing recorded, unlike
+        # `_posture_block`'s equivalent "nothing here" case just above.
+        # Recording it is what lets `review_knowledge.resolve_knowledge`'s
+        # `lineage_record()` say, honestly, that a review whose
+        # `posture_source` reads "playbook" carried no Binding content
+        # either -- never inferred silently from an absent block.
+        _omit(
+            "binding — the review carries NO Binding block; neither a Floor "
+            "invariant nor a policy `must` rule reaches the model",
+            "binding",
+        )
         return None
 
     lines = [BINDING_INTRO]
@@ -583,6 +614,15 @@ def _guidance_block(policy: Optional[dict] = None) -> str | None:
     """
     should_rules = policy_rules_by_strength(policy, "should")
     if not should_rules:
+        # Same "record the nothing-here case" fix as `_binding_block` above
+        # -- `policy` is `None` for every review today (see that block's
+        # comment), so this is the routine case, not an edge case, and was
+        # previously invisible to `_report_omissions`/`lineage_record()`.
+        _omit(
+            "guidance — the review carries NO Guidance block; no policy "
+            "`should` rule reaches the model",
+            "guidance",
+        )
         return None
     lines = [GUIDANCE_INTRO]
     lines.extend(f"  - [policy:{rule.get('id', '')}] {rule['text']}" for rule in should_rules)
@@ -628,6 +668,7 @@ def compose_opf_system_blocks(
     policy: Optional[dict] = None,
     mode: str = MODE_PLAYBOOK_DIGEST,
     instructions_text: str = "",
+    omissions_out: Optional[dict[str, list]] = None,
 ) -> list[str]:
     """Compose an OPF document's knowledge into review system-prompt blocks.
 
@@ -675,8 +716,18 @@ def compose_opf_system_blocks(
     The only I/O is diagnostic — every value a fail-soft guard dropped is
     reported to stderr as an aggregated `WARNING:` (see the module docstring);
     the returned blocks are unaffected by it.
+
+    `omissions_out` (optional, default `None`): when given, this function
+    populates it (in place, via `dict.update`) with the SAME `{kind: [count,
+    where]}` mapping the stderr warning is built from, so a caller that
+    needs the omission record as DATA -- not merely as a diagnostic line --
+    can persist it (`scripts/review_knowledge.py::resolve_knowledge` is the
+    one caller that does, onto `ReviewKnowledge.lineage_record()`) without
+    scraping stderr or re-deriving what was dropped. Never mutates the
+    returned `blocks`, and a caller that omits this parameter (every caller
+    before this one existed) sees no behavior change at all.
     """
-    with _recording_omissions():
+    with _recording_omissions() as omissions:
         blocks: list[str] = []
         for block in (
             _posture_block(opf_doc, overrides),
@@ -688,4 +739,6 @@ def compose_opf_system_blocks(
         ):
             if block is not None:
                 blocks.append(block)
+    if omissions_out is not None:
+        omissions_out.update(omissions)
     return blocks

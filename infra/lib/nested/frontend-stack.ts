@@ -58,11 +58,12 @@ export interface FrontendStackProps extends cdk.NestedStackProps {
  *    OAuth callback deep-link) rewrite to /index.html instead of 404ing.
  *  - Model-generated text rendered as escaped text only — never as innerHTML
  *    (frontend code convention; enforced via code review).
- *  - The attorney-approval watermark is present on every output state
- *    (ARCHITECTURE.md § Frontend).
+ *  - The internal-notes marker is present on a generated redline .docx iff
+ *    that review's notes mode put internal-audience content in scope --
+ *    never unconditional, no approval semantics (ARCHITECTURE.md § Frontend).
  *  - PROD does NOT auto-publish on merge: a merge to main must not silently
  *    change prod presentation.  The frontend is legal-facing (renders the
- *    attorney-approval watermark and the ACCEPT framing).
+ *    internal-notes marker when present and the ACCEPT framing).
  *
  * Build configuration:
  *  - `npm run build` in frontend/ runs `vite build` and outputs to `dist/`.

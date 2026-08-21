@@ -26,9 +26,26 @@ threat model, the order is:
      external-entity resolution disabled, defeating XXE and "billion laughs"
      entity-expansion at the parser level, before any relationship/content
      inspection that would otherwise require trusting the XML parser.
-  7. External-relationship / embedded-object / macro-template checks — the
+  7. Attached-template sanitization — every .rels part is scanned for a
+     relationship whose Type ends in /attachedTemplate (the Word template a
+     document was DRAFTED FROM; carried by essentially every real-world
+     .docx produced from a firm/organization template) and, together with
+     the word/settings.xml <w:attachedTemplate r:id="..."/> element that
+     references it by Id, it is STRIPPED from the archive rather than
+     rejecting the whole upload — see docs/threat-model.md -> "Hostile file
+     uploads". Unlike an external image, subdocument, or OLE link, an
+     attached-template reference contributes nothing to document CONTENT,
+     so removing it cannot silently change what the document says. The
+     sanitization is recorded via audit_write. This step is a no-op
+     (returns the original bytes, unchanged) for the overwhelmingly common
+     case of a document with no attachedTemplate relationship at all.
+  8. External-relationship / embedded-object / macro-template checks — the
      package relationships are scanned; external relationships (remote
-     targets), embedded OLE objects, and macro-enabled parts are rejected.
+     targets) and embedded OLE objects are rejected, and macro-enabled
+     parts are rejected. (Attached templates were already sanitized in step
+     7 above, so this step no longer sees them in the normal case; the
+     rejection branch for that relationship type remains here only as a
+     defense-in-depth fail-safe.)
 
 A file that fails any check does not produce an approximate result: the
 caller (run_upload_gauntlet) raises HostileFileError with a stable
@@ -38,6 +55,9 @@ FastAPI-facing entry point converts HostileFileError to an HTTPException via
 to_http_exception() so the client gets a clear error (see
 docs/threat-model.md: "the review transitions to a system error state and
 is surfaced to the uploader as a rejected input, not as a legal decision").
+The one exception to "rejects or passes through unchanged" is step 7 above:
+a sanitized upload proceeds, but with different bytes than what was
+uploaded — see run_upload_gauntlet's docstring for the exact contract.
 
 Reconciliation with the 2026-06-11 architecture review (#25, #32):
   - Extraction (owned by the pipeline, not this module) uses an explicit
@@ -59,6 +79,8 @@ tests/test_review_submission_e2e.py).
 
 from __future__ import annotations
 
+import io
+import re
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
@@ -523,6 +545,14 @@ def _check_relationships(zf: zipfile.ZipFile) -> None:
                             f"resource: {rel.get('target', '<unknown>')!r}."
                         ),
                     )
+            # Defense-in-depth only: run_upload_gauntlet calls
+            # _sanitize_attached_template_relationships BEFORE this
+            # function, which strips every attachedTemplate relationship
+            # from the archive this function actually sees. In normal
+            # operation this branch is therefore unreachable — it exists
+            # so that if the sanitizer is ever bypassed or misses one,
+            # the upload still fails closed instead of silently admitting
+            # an unsanitized external template reference.
             if rel_type.endswith(ATTACHED_TEMPLATE_RELATIONSHIP_SUFFIX):
                 raise HostileFileError(
                     reason_code="external_relationship",
@@ -555,6 +585,302 @@ def _extract_relationships(rels_xml: bytes) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Stage 7 (input side only, see module docstring) — attached-template
+# sanitization.
+#
+# An attached-template relationship names the local Word template a
+# document was drafted from (e.g. a firm's standard letterhead .dotx); it
+# is carried by essentially every real-world .docx produced from an
+# organization template and contributes nothing to document CONTENT. So,
+# unlike every other relationship class this module rejects, it is safe to
+# strip rather than refuse the whole upload over. Two places must agree:
+# the .rels Relationship element AND the referencing
+# word/settings.xml <w:attachedTemplate r:id="..."/> element (matched by
+# Id) — removing only one leaves either an orphan relationship or a
+# dangling r:id that can make Word show a repair prompt on open.
+#
+# NOTE: this is the INPUT-side gauntlet only. docs/threat-model.md's output
+# OOXML scan (generated redlines) intentionally does NOT share this
+# sanitizer — a generated .docx containing an attached-template reference
+# would be a genuine defect in our own output pipeline, not a drafter's
+# template, and must keep routing to ERROR_MANUAL_REVIEW_REQUIRED.
+# ---------------------------------------------------------------------------
+
+_RELS_MARKER = "/_rels/"
+
+# Matches one whole <Relationship .../> element. Per the OPC spec a
+# Relationship element is always empty (self-closing) — it never has child
+# content — so this pattern alone is sufficient to isolate one element for
+# surgical removal without touching any sibling element's bytes.
+_RELATIONSHIP_ELEMENT_RE = re.compile(rb"<Relationship\b[^>]*?/>")
+_RELATIONSHIP_ID_ATTR_RE = re.compile(rb'\bId\s*=\s*"([^"]*)"')
+_RELATIONSHIP_TYPE_ATTR_RE = re.compile(rb'\bType\s*=\s*"([^"]*)"')
+
+# Matches one whole <[prefix:]attachedTemplate .../> element, any namespace
+# prefix (or none). CT_RelId carries no child content, so a producer writes
+# this element either self-closed (`<w:attachedTemplate r:id="rId1"/>`, what
+# Word itself emits) or in paired start/end-tag form
+# (`<w:attachedTemplate r:id="rId1"></w:attachedTemplate>`, what an XML
+# serializer that does not special-case empty elements emits). BOTH spellings
+# are the same element and both must be matched: stripping the .rels side
+# while leaving one of these behind is precisely the dangling r:id this
+# module promises never to leave, and Word raises an "unreadable content"
+# repair prompt on a document carrying one.
+#
+# The paired branch permits only whitespace between the tags -- CT_RelId has
+# no child content, so anything else is not this element and must NOT be
+# silently deleted (the residual-reference check in
+# _sanitize_attached_template_relationships fails such a package closed
+# instead).
+_ATTACHED_TEMPLATE_ELEMENT_RE = re.compile(
+    rb"<(?:[A-Za-z0-9_.]+:)?attachedTemplate\b[^>]*?"
+    rb"(?:/>|>\s*</(?:[A-Za-z0-9_.]+:)?attachedTemplate\s*>)"
+)
+# The relationship-id attribute on that element is conventionally "r:id"
+# (bound to the OOXML relationships namespace), but the prefix bound to
+# that namespace is a per-document choice, not a fixed string — match any
+# prefix (or none) on an "id" local name rather than hard-coding "r:id".
+_GENERIC_ID_ATTR_RE = re.compile(rb'(?:^|\s)(?:[A-Za-z0-9_.]+:)?id\s*=\s*"([^"]*)"')
+
+
+def _owner_part_for_rels_part(rels_part: str) -> str:
+    """Map a .rels part name to the part it describes, per the OPC
+    convention that "<dir>/_rels/<name>.rels" describes "<dir>/<name>" (and
+    a root-level "_rels/<name>.rels" describes "<name>"). Returns "" if
+    rels_part doesn't have that shape — callers treat "" as "no owner part
+    to look in" rather than guessing."""
+    idx = rels_part.rfind(_RELS_MARKER)
+    if idx == -1:
+        if not rels_part.startswith("_rels/"):
+            return ""
+        prefix, tail = "", rels_part[len("_rels/") :]
+    else:
+        prefix, tail = rels_part[:idx], rels_part[idx + len(_RELS_MARKER) :]
+    if not tail.endswith(".rels"):
+        return ""
+    tail = tail[: -len(".rels")]
+    return f"{prefix}/{tail}" if prefix else tail
+
+
+def _find_attached_template_relationship_ids(rels_xml: bytes) -> set[str]:
+    """Return the Id of every Relationship element in rels_xml whose Type
+    ends in ATTACHED_TEMPLATE_RELATIONSHIP_SUFFIX — regardless of
+    TargetMode, mirroring the unconditional match _check_relationships uses
+    to reject on today."""
+    ids: set[str] = set()
+    for match in _RELATIONSHIP_ELEMENT_RE.finditer(rels_xml):
+        element = match.group(0)
+        type_match = _RELATIONSHIP_TYPE_ATTR_RE.search(element)
+        if type_match is None:
+            continue
+        if not type_match.group(1).decode("utf-8").endswith(ATTACHED_TEMPLATE_RELATIONSHIP_SUFFIX):
+            continue
+        id_match = _RELATIONSHIP_ID_ATTR_RE.search(element)
+        if id_match is not None:
+            ids.add(id_match.group(1).decode("utf-8"))
+    return ids
+
+
+def _strip_relationship_elements_by_id(rels_xml: bytes, ids_to_strip: set[str]) -> bytes:
+    """Remove each <Relationship .../> element whose Id is in ids_to_strip.
+    Byte-level and surgical: every other Relationship element in the same
+    part — including a coexisting external hyperlink — is left exactly as
+    it was, and no other part is touched at all."""
+
+    def _repl(match: re.Match[bytes]) -> bytes:
+        element = match.group(0)
+        id_match = _RELATIONSHIP_ID_ATTR_RE.search(element)
+        if id_match is None:
+            return element
+        return b"" if id_match.group(1).decode("utf-8") in ids_to_strip else element
+
+    return _RELATIONSHIP_ELEMENT_RE.sub(_repl, rels_xml)
+
+
+def _strip_attached_template_elements_by_id(
+    owner_xml: bytes, ids_to_strip: set[str]
+) -> tuple[bytes, set[str]]:
+    """Remove each <w:attachedTemplate .../> element whose id attribute is
+    in ids_to_strip, leaving no dangling r:id behind. Returns the (possibly
+    unchanged) bytes plus the subset of ids_to_strip that were actually
+    found and removed — the caller uses this to tell "no matching element"
+    apart from "matched and removed" for the audit record."""
+    removed: set[str] = set()
+
+    def _repl(match: re.Match[bytes]) -> bytes:
+        element = match.group(0)
+        id_match = _GENERIC_ID_ATTR_RE.search(element)
+        if id_match is None:
+            return element
+        rid = id_match.group(1).decode("utf-8")
+        if rid not in ids_to_strip:
+            return element
+        removed.add(rid)
+        return b""
+
+    new_xml = _ATTACHED_TEMPLATE_ELEMENT_RE.sub(_repl, owner_xml)
+    return new_xml, removed
+
+
+def _rewrite_zip_with_replacements(file_bytes: bytes, replacements: dict[str, bytes]) -> bytes:
+    """Re-zip file_bytes with the given part replacements, preserving every
+    OTHER entry's bytes, compression type, and archive order exactly — no
+    part is dropped, [Content_Types].xml is untouched, and entries are not
+    reordered. Never called on the no-replacement path; see
+    _sanitize_attached_template_relationships, which returns the original
+    bytes object unchanged when there is nothing to strip."""
+    src = zipfile.ZipFile(io.BytesIO(file_bytes))
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w") as dst:
+        for info in src.infolist():
+            data = replacements.get(info.filename, None)
+            if data is None:
+                data = src.read(info.filename)
+            new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
+            new_info.compress_type = info.compress_type
+            new_info.external_attr = info.external_attr
+            new_info.internal_attr = info.internal_attr
+            new_info.create_system = info.create_system
+            dst.writestr(new_info, data)
+    return out_buf.getvalue()
+
+
+def _sanitize_attached_template_relationships(
+    file_bytes: bytes, zf: zipfile.ZipFile
+) -> tuple[bytes, list[dict[str, Any]]]:
+    """Strip every attachedTemplate relationship — and its referencing
+    w:attachedTemplate element, matched by Id — from the package, in place
+    of rejecting the whole upload for it (docs/threat-model.md -> Hostile
+    file uploads). Every other relationship class is untouched here;
+    _check_relationships (run by the caller immediately after this) still
+    rejects those.
+
+    Returns (file_bytes, []) — the SAME bytes object, not a re-zipped copy
+    — when no .rels part declares an attachedTemplate relationship (the
+    overwhelmingly common case). Otherwise returns (sanitized_bytes,
+    records), one record per stripped relationship:
+      {"rels_part", "owner_part", "relationship_id", "element_removed"}
+    Records carry only part names, relationship ids, and a bool — never
+    document text or the raw external Target path — so they are safe to
+    hand to the audit trail unfiltered.
+
+    Defense in depth: each replacement part is re-parsed with the same
+    hardened parser used elsewhere in this module before being accepted,
+    so a sanitizer bug that somehow produced malformed XML fails closed
+    (HostileFileError) instead of shipping a broken .docx.
+    """
+    replacements: dict[str, bytes] = {}
+    records: list[dict[str, Any]] = []
+    part_names = set(zf.namelist())
+
+    for rels_part in _iter_relationship_parts(zf):
+        rels_xml = zf.read(rels_part)
+        attached_ids = _find_attached_template_relationship_ids(rels_xml)
+        if not attached_ids:
+            continue
+
+        replacements[rels_part] = _strip_relationship_elements_by_id(rels_xml, attached_ids)
+
+        owner_part = _owner_part_for_rels_part(rels_part)
+        owner_xml = None
+        if owner_part and owner_part in part_names:
+            owner_xml = replacements.get(owner_part, zf.read(owner_part))
+
+        removed_from_owner: set[str] = set()
+        if owner_xml is not None:
+            new_owner_xml, removed_from_owner = _strip_attached_template_elements_by_id(
+                owner_xml, attached_ids
+            )
+            if removed_from_owner:
+                replacements[owner_part] = new_owner_xml
+            # Fail closed rather than ship a dangling reference. Reaching
+            # here means this .rels part DID declare an attachedTemplate
+            # relationship (so it is being stripped), yet the owner part
+            # still spells "attachedTemplate" somewhere after the removal
+            # pass -- an element form _ATTACHED_TEMPLATE_ELEMENT_RE does not
+            # recognize, or a reference to an id that never had a
+            # relationship. Either way the stored/extracted document would
+            # point at a relationship that no longer exists, and Word would
+            # show the attorney a repair prompt on a file THIS pipeline
+            # produced. A rejection is honest and visible; a silently
+            # corrupted document is neither.
+            if b"attachedTemplate" in new_owner_xml:
+                raise HostileFileError(
+                    reason_code="attached_template_sanitize_failed",
+                    detail=(
+                        f"Stripped an attachedTemplate relationship from "
+                        f"'{rels_part}', but '{owner_part}' still references "
+                        f"one -- refusing to store a document with a dangling "
+                        f"relationship id."
+                    ),
+                )
+
+        for rid in sorted(attached_ids):
+            records.append(
+                {
+                    "rels_part": rels_part,
+                    "owner_part": owner_part,
+                    "relationship_id": rid,
+                    "element_removed": rid in removed_from_owner,
+                }
+            )
+
+    if not replacements:
+        return file_bytes, []
+
+    for part_name, new_bytes in replacements.items():
+        try:
+            _parse_xml_hardened(new_bytes)
+        except HostileFileError as exc:
+            raise HostileFileError(
+                reason_code="attached_template_sanitize_failed",
+                detail=(
+                    f"Sanitizing the attached-template reference in "
+                    f"'{part_name}' produced invalid XML: {exc.detail}"
+                ),
+            ) from exc
+
+    sanitized_bytes = _rewrite_zip_with_replacements(file_bytes, replacements)
+    return sanitized_bytes, records
+
+
+def _write_sanitization_audit(
+    audit_write: AuditWrite | None,
+    *,
+    review_id: str | None,
+    filename: str,
+    records: list[dict[str, Any]],
+) -> None:
+    """Write an audit row recording that an upload was SANITIZED — not
+    rejected — before storage/extraction. The input-side counterpart to
+    _write_rejection_audit: a sanitization is not a failure (the upload
+    proceeds), but the stored artifact is not byte-identical to what the
+    user uploaded, and an operator reading the audit trail must be able to
+    tell that. detail is substance-free: part names, relationship ids, and
+    whether a referencing element was found — never document text or the
+    raw external template path.
+    """
+    if audit_write is None or not records:
+        return
+    parts_detail = "; ".join(
+        f"{record['rels_part']} (rId={record['relationship_id']}, "
+        f"owner={record['owner_part'] or '<none>'}, "
+        f"element_removed={record['element_removed']})"
+        for record in records
+    )
+    audit_write(
+        action="upload_sanitized",
+        review_id=review_id,
+        filename=filename,
+        reason_code="attached_template_stripped",
+        detail=(
+            f"Stripped {len(records)} attachedTemplate relationship(s) "
+            f"before storage/extraction: {parts_detail}"
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -580,12 +906,28 @@ def run_upload_gauntlet(
       5. MIME verification ([Content_Types].xml WordprocessingML check) —
          the first check that decompresses a part
       6. XML-entity hardening on every XML/.rels part
-      7. external-relationship / embedded-object / macro-template checks
+      7. attached-template sanitization — runs only after every check above
+         has established that the archive is safe to touch at all (not a
+         bomb, not XXE, not macro-enabled). Strips any attachedTemplate
+         relationship + its referencing w:attachedTemplate element in
+         place of rejecting the upload for it.
+      8. external-relationship / embedded-object / macro-template checks —
+         run against the (possibly sanitized) archive from step 7, so an
+         attachedTemplate relationship stripped in step 7 is no longer
+         present to reject here.
 
-    Returns the original file_bytes unchanged on success (the caller then
-    proceeds to write them to the uploads bucket / hand them to extraction).
-    Raises HostileFileError on any failure and writes an audit row via
-    audit_write; never returns partially-validated bytes.
+    Returns file_bytes on success:
+      - the ORIGINAL bytes object, unchanged, in the overwhelmingly common
+        case where the archive contains no attachedTemplate relationship;
+      - otherwise, SANITIZED bytes with every attachedTemplate relationship
+        (and its referencing w:attachedTemplate element) stripped, and the
+        sanitization recorded via audit_write (action="upload_sanitized").
+        The caller MUST treat this returned value — not the bytes it
+        passed in — as the artifact to store and to extract from; storing
+        one and extracting the other is a provenance bug (the stored
+        object would no longer match what was actually parsed).
+    Raises HostileFileError on any OTHER failure and writes a rejection
+    audit row via audit_write; never returns partially-validated bytes.
     """
     try:
         _check_size(file_bytes)
@@ -612,6 +954,18 @@ def run_upload_gauntlet(
 
         _check_all_xml_parts_are_entity_safe(zf)
         _check_no_macro_enabled_parts(zf)
+
+        # Sanitize BEFORE the relationship check below, so that a stripped
+        # attachedTemplate relationship is no longer present to trip it.
+        # Only reopens the archive (from the sanitized bytes) when a
+        # sanitization record was actually produced — the no-op path never
+        # pays for a second zip open.
+        file_bytes, sanitization_records = _sanitize_attached_template_relationships(
+            file_bytes, zf
+        )
+        if sanitization_records:
+            zf = _open_zip_or_reject(file_bytes)
+
         _check_relationships(zf)
 
     except HostileFileError as exc:
@@ -624,4 +978,10 @@ def run_upload_gauntlet(
         )
         raise
 
+    _write_sanitization_audit(
+        audit_write,
+        review_id=review_id,
+        filename=filename,
+        records=sanitization_records,
+    )
     return file_bytes

@@ -16,11 +16,23 @@
    three tabs ended up painted entirely off-screen and unreachable by pointer.
    `minmax(0, 1fr)` lets the track shrink to the viewport and leaves the
    overflow where it belongs, inside ct-table's own `overflow-x: auto`. */
+/* Track sizing: the BRAND is `auto` and the identity cluster is the flexible
+   one, not the other way round. The nameplate is a fixed, known phrase; the
+   identity cluster grows with whatever it is asked to hold. When the flexible
+   track was the brand's, anything wide landing in `identity` starved it --
+   a full-width warning banner rendered inside the identity cluster squeezed
+   "Contract Toaster Review Tool" down to its min-content width and stacked it
+   one word per line. Sizing them this way round means the nameplate keeps its
+   natural width and the identity cluster wraps instead, which is what it is
+   already `flex-wrap: wrap` for. Anything genuinely full-width belongs in the
+   `notice` row below, never in `identity`. */
 ct-app-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas:
     'brand    identity'
+    'rule     rule'
+    'notice   notice'
     'tabs     tabs'
     'content  content'
     'footer   footer';
@@ -31,17 +43,31 @@ ct-app-shell {
   background: var(--ct-bg);
 }
 
+/* ONE hairline under the whole nameplate band, not one per cell.
+   `border-bottom` on the brand and the identity cluster separately drew two
+   rules with the `column-gap` punched out between them -- a broken-looking
+   seam right under the product name. A pseudo-element on the grid container
+   is itself a grid item, so it can occupy a full-width row of its own and
+   draw the rule edge to edge. */
+ct-app-shell::before {
+  content: '';
+  grid-area: rule;
+  border-bottom: 1px solid var(--ct-border);
+  margin-bottom: var(--ct-space-3);
+}
+
 .ct-app-shell__brand {
   grid-area: brand;
   display: flex;
   align-items: center;
+  /* The nameplate is one phrase, not a paragraph. Without this it is free to
+     break at any space the moment its track is under pressure. */
+  white-space: nowrap;
   font-family: var(--ct-font-display);
   font-weight: 700;
   font-size: var(--ct-text-lg);
   color: var(--ct-text);
   padding-bottom: var(--ct-space-3);
-  margin-bottom: var(--ct-space-3);
-  border-bottom: 1px solid var(--ct-border);
 }
 
 ct-app-shell > [slot='identity'] {
@@ -49,13 +75,32 @@ ct-app-shell > [slot='identity'] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-self: end;
+  justify-content: flex-end;
+  /* Baseline-align the controls with the nameplate rather than centring them
+     in a taller row: the cluster is a caption to the brand, not a peer. */
+  align-self: end;
   gap: var(--ct-space-2);
   padding-bottom: var(--ct-space-3);
-  margin-bottom: var(--ct-space-3);
-  border-bottom: 1px solid var(--ct-border);
   font-size: var(--ct-text-sm);
   color: var(--ct-text-muted);
+}
+
+/* Account-level notices (issue #469's default-password warning, and anything
+   like it): full width, under the nameplate hairline, above the tabs. This
+   row exists so such a notice never has to be smuggled into the identity
+   cluster, where it is both visually wrong -- a block-level alert inline
+   between "Sign out" and the page edge -- and structurally destructive to the
+   header's track sizing. Empty by default: with no notice rendered the row
+   collapses to nothing and the header is unchanged. */
+ct-app-shell > [slot='notice'] {
+  grid-area: notice;
+  margin-bottom: var(--ct-space-3);
+}
+
+/* ct-banner's own top margin is for stacking inside a panel; in this row the
+   grid gap already does that work. */
+ct-app-shell > [slot='notice'] > ct-banner {
+  margin-top: 0;
 }
 
 ct-app-shell > [slot='tabs'] {
@@ -90,11 +135,23 @@ ct-app-shell > :not([slot]):not(.ct-app-shell__brand):not([hidden]) {
     grid-template-areas:
       'brand'
       'identity'
+      'rule'
+      'notice'
       'tabs'
       'content'
       'footer';
   }
   ct-app-shell > [slot='identity'] {
+    align-self: start;
+  }
+  /* Stacked, the nameplate has the full width to itself and no longer needs
+     protecting from the identity cluster -- so let it wrap rather than run
+     off a 375px screen, which `white-space: nowrap` would otherwise force. */
+  .ct-app-shell__brand {
+    white-space: normal;
+  }
+  ct-app-shell > [slot='identity'] {
     justify-self: start;
+    justify-content: flex-start;
   }
 }

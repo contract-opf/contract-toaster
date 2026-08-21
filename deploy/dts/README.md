@@ -81,13 +81,43 @@ the local Phase 1 quickstart this README covers.
 ## What the bootstrap does
 
 `bootstrap.py` (a one-shot compose service the backend waits on) creates the
-DynamoDB tables (+ the `reviews.owner_sub-index` GSI), the uploads/outputs
-buckets, seeds the mock eiaa redline fixture into MinIO, seeds the demo users,
-and seeds a minimal active eiaa playbook bundle.
+DynamoDB tables (+ the `reviews.owner_sub-index` GSI) and the uploads/outputs
+buckets, seeds any registry-declared mock-pipeline redline fixture into MinIO,
+seeds the demo users, and installs + activates the playbook the image ships
+with — **Synthetic NDA Sample**, the only contract type a fresh deployment
+serves.
+
+It seeds no other playbook row. Issue #515 removed a hardcoded, tenant-named
+orphan row that every fresh deployment used to write: the catalog is
+registry-filtered so it was never served, but it sat in `PLAYBOOKS_TABLE` of
+the one path a public adopter copies and runs, and this README used to promise
+it as a contract type that was not actually there.
+
+Any other playbook — including a tenant's own — arrives through the ordinary
+install/upload path in the admin UI, never through a bootstrap seed.
+
+## Retention purge cadence
+
+The backend runs the retention purge sweep on a timer on this target (issue
+#509, `backend/src/purge_scheduler.py`). It calls the same
+`retention.run_purge_sweep_now` the admin API drives — no separate purge logic
+— so each review's own snapshotted window and its legal hold are honoured
+exactly as they are everywhere else.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PURGE_SWEEP_INTERVAL_SECONDS` | `3600` | How often to sweep. Retention windows are measured in days, so an hour is fine enough that "purged on schedule" is true to within a rounding error; sweeping more often just re-scans the table. |
+| `PURGE_SWEEP_ENABLED` | `1` | Set to `0` to stop the cadence without editing code. |
+
+It does **not** run on the AWS target, where
+`infra/lambda/purge_worker/handler.py` owns the cadence — starting both would
+double-sweep the same rows.
+
+Before this landed, nothing on this target ever invoked the sweep, so an
+operator who set a retention window saw the *preview* work and reasonably
+concluded data was being purged. It was not.
 
 ## Not yet included (follow-ups)
 
-- **Retention purge scheduler** (APScheduler tick calling the existing retention
-  logic) — not on the Phase 1 upload→download path; add before real data.
 - **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend
   model.

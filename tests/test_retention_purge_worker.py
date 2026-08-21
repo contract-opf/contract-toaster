@@ -20,9 +20,13 @@ Covers the five purge invariants from docs/data-handling.md ->
      objects and substance fields are never deleted, regardless of age
      or a 0-day window.
   4. Documents, then matched substance fields -- deleting a document also
-     clears the Confidential substance fields (`verdict_summary`,
-     `issue_rationale_text`) on the matching terminal `reviews` row; the
-     non-substantive fields (review_id, status, cost, hashes) remain.
+     clears the Confidential substance fields (`summary` -- the attribute
+     the model's `verdict_summary` is persisted under --
+     `normalization_notes`, `attorney_disposition_note`, `cover_note_draft`,
+     `toaster_guidance`) on the matching terminal `reviews` row, and stamps
+     `purged_at`; the non-substantive fields (review_id, status, cost,
+     hashes) remain. (`issue_rationale_text` is not in this list: no writer
+     has ever produced it -- see tests/test_summary_attribute_roundtrip.py.)
   5. Dual-control / delay for retroactive reductions -- a single-admin
      retroactive reduction is rejected; a valid second-admin confirmation
      or an expired 72h delay is required before the sweep is allowed to
@@ -126,26 +130,47 @@ class FakeTable:
         vals = ExpressionAttributeValues or {}
         names = ExpressionAttributeNames or {}
 
-        # REMOVE clause support (substance-field clearing).
-        if UpdateExpression.strip().upper().startswith("REMOVE"):
-            fields = [f.strip() for f in UpdateExpression[len("REMOVE"):].split(",")]
-            for f in fields:
-                attr = names.get(f, f)
-                item.pop(attr, None)
-            return
+        # DynamoDB allows a single UpdateExpression to carry both a SET and
+        # a REMOVE clause (`SET purged_at = :now REMOVE summary, ...`) --
+        # the purge worker's purged_at stamp uses exactly that shape. Split
+        # on the clause keywords rather than assuming the expression starts
+        # with one or the other, so either clause alone, or both together
+        # in either order, all parse correctly.
+        expr = UpdateExpression.strip()
+        set_part = ""
+        remove_part = ""
+        upper = expr.upper()
+        if upper.startswith("SET"):
+            remove_idx = upper.find(" REMOVE ")
+            if remove_idx == -1:
+                set_part = expr[len("SET"):]
+            else:
+                set_part = expr[len("SET"):remove_idx]
+                remove_part = expr[remove_idx + len(" REMOVE "):]
+        elif upper.startswith("REMOVE"):
+            remove_part = expr[len("REMOVE"):]
 
         # SET clause support (generic key=value assignment interpreter,
         # good enough for the small set of expressions handler.py issues).
-        set_part = UpdateExpression.split("SET", 1)[-1]
-        assignments = [a.strip() for a in set_part.split(",")]
-        for assignment in assignments:
-            if "=" not in assignment:
-                continue
-            lhs, rhs = [p.strip() for p in assignment.split("=", 1)]
-            attr = names.get(lhs, lhs)
-            rhs_key = rhs.strip()
-            if rhs_key in vals:
-                item[attr] = vals[rhs_key]
+        if set_part.strip():
+            assignments = [a.strip() for a in set_part.split(",")]
+            for assignment in assignments:
+                if "=" not in assignment:
+                    continue
+                lhs, rhs = [p.strip() for p in assignment.split("=", 1)]
+                attr = names.get(lhs, lhs)
+                rhs_key = rhs.strip()
+                if rhs_key in vals:
+                    item[attr] = vals[rhs_key]
+
+        # REMOVE clause support (substance-field clearing).
+        if remove_part.strip():
+            fields = [f.strip() for f in remove_part.split(",")]
+            for f in fields:
+                if not f:
+                    continue
+                attr = names.get(f, f)
+                item.pop(attr, None)
 
     def scan(self, FilterExpression=None, ExpressionAttributeNames=None,
               ExpressionAttributeValues=None, ExclusiveStartKey=None):
@@ -299,8 +324,41 @@ class PurgeWorkerTestCase(unittest.TestCase):
             "created_at": str(int(created_at)),
             "retention_window_at_creation": retention_window_at_creation,
             "legal_hold": legal_hold,
-            "verdict_summary": "some substantive summary",
-            "issue_rationale_text": "some substantive rationale",
+            # The narrative summary is persisted under the attribute name
+            # `summary` -- scripts/review_spine.py renames the model's
+            # `verdict_summary` output key, and every writer
+            # (pipeline_runner._write_terminal / ._write_real_terminal /
+            # infra/lambda/persist/handler.py) writes `summary`. This
+            # fixture previously seeded `verdict_summary`, a name nothing
+            # writes, and the purge list named the same phantom -- so the
+            # two agreed and this test passed while the real field
+            # survived every sweep in production. See
+            # tests/test_summary_attribute_roundtrip.py, which drives the
+            # real writer instead of hand-seeding this field at all.
+            #
+            # `issue_rationale_text` is deliberately NOT seeded here: no
+            # writer has ever produced an attribute by that name (the
+            # per-issue rationale lives in `issues[].external_rationale_for_
+            # footnote`, inside the S3 analysis artifact, never on this
+            # row), and it was removed from both purge lists for exactly
+            # that reason -- see backend/src/retention.py's REMOVE clause
+            # and tests/test_summary_attribute_roundtrip.py.
+            "summary": "some substantive summary",
+            # Issue #563: also a Confidential substance field (names a
+            # paragraph heading from the counterparty document) -- must
+            # clear on purge exactly like summary.
+            "normalization_notes": "Paragraph 'Limitation on Liability': ...",
+            # Issue #486: the attorney's free-text disposition note -- same
+            # Confidential-substance reasoning, same REMOVE/SUBSTANCE_FIELDS list.
+            "attorney_disposition_note": "Narrowed the indemnification carve-out further.",
+            # Issue #499: the drafted counterparty cover email -- same
+            # Confidential-substance reasoning, same REMOVE/SUBSTANCE_FIELDS list.
+            "cover_note_draft": "Attached is our markup of the agreement.",
+            # toaster_guidance (issue #398): the submitter's own free-text
+            # per-review prose, Confidential per docs/data-handling.md --
+            # was in NEITHER purge list before this fix, a real retention
+            # leak (unlike issue_rationale_text above, a phantom name).
+            "toaster_guidance": "Be lenient on the payment terms for this one.",
             "owner_sub": owner_sub,
         }
         if record_pointer:
@@ -384,9 +442,33 @@ class PurgeWorkerTestCase(unittest.TestCase):
         self.assertIn("review-held", result["skipped_hold"])
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         self.assertEqual(
-            reviews_table.items["review-held"]["verdict_summary"],
+            reviews_table.items["review-held"]["summary"],
             "some substantive summary",
             "Substance fields on a held review must not be cleared.",
+        )
+        self.assertIn(
+            "normalization_notes", reviews_table.items["review-held"],
+            "normalization_notes on a held review must not be cleared.",
+        )
+        self.assertIn(
+            "attorney_disposition_note", reviews_table.items["review-held"],
+            "attorney_disposition_note on a held review must not be cleared "
+            "(issue #486 follow-up).",
+        )
+        self.assertIn(
+            "cover_note_draft", reviews_table.items["review-held"],
+            "cover_note_draft on a held review must not be cleared "
+            "(issue #499 follow-up).",
+        )
+        self.assertIn(
+            "toaster_guidance", reviews_table.items["review-held"],
+            "toaster_guidance on a held review must not be cleared -- same "
+            "Confidential-substance reasoning as the fields above.",
+        )
+        self.assertNotIn(
+            "purged_at", reviews_table.items["review-held"],
+            "a held review was never purged, so it must not carry the "
+            "purged_at marker either.",
         )
         self.assertFalse(
             self.s3.objects[(os.environ["UPLOADS_BUCKET"], self._upload_key("review-held"))]["deleted"]
@@ -425,12 +507,19 @@ class PurgeWorkerTestCase(unittest.TestCase):
 
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         row = reviews_table.items["review-clear"]
-        self.assertNotIn("verdict_summary", row)
-        self.assertNotIn("issue_rationale_text", row)
+        self.assertNotIn("summary", row)
+        self.assertNotIn("normalization_notes", row)
+        self.assertNotIn("attorney_disposition_note", row)
+        self.assertNotIn("cover_note_draft", row)
+        self.assertNotIn("toaster_guidance", row)
         # Non-substantive audit-bearing fields remain.
         self.assertEqual(row["review_id"], "review-clear")
         self.assertEqual(row["status"], "DONE")
         self.assertEqual(row["owner_sub"], "user-1")
+        # purged_at -- the durable marker THAT this row was purged -- is
+        # stamped in the same update as the substance-field clear.
+        self.assertIn("purged_at", row)
+        self.assertIsNotNone(row["purged_at"])
 
     def test_purged_review_documents_actually_deleted_from_s3(self):
         self._seed_default_settings(window_days=0)

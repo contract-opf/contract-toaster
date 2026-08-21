@@ -15,7 +15,7 @@
  * (vi.mock below) and `fetch` is stubbed per test — no live AWS/Cognito/
  * network is touched.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -200,14 +200,37 @@ describe('source posture (regression guard)', () => {
   const srcDir = path.dirname(fileURLToPath(import.meta.url)); // .../src/__tests__
   const componentsDir = path.resolve(srcDir, '..');
 
+  // Recursive walk of the whole `src/` tree (issue #497 fix round 1):
+  // the previous version of this guard called `fs.readdirSync(componentsDir)`
+  // with no recursion, so it only ever saw files sitting directly in `src/`
+  // — anything under `src/toaster/`, `src/ui/`, `src/ui/components/`, etc.
+  // was invisible to it. `__tests__` itself is excluded: this guard polices
+  // "any top-level component or module", not test files, which legitimately
+  // construct their own mock Storage/DOM and call its `setItem` to drive
+  // assertions (see e.g. `notify-preference-497.test.tsx`).
+  function collectSourceFiles(dir: string): string[] {
+    const files: string[] = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '__tests__') continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...collectSourceFiles(fullPath));
+      } else if (
+        entry.isFile() &&
+        (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) &&
+        !entry.name.endsWith('.d.ts')
+      ) {
+        files.push(fullPath);
+      }
+    }
+    return files;
+  }
+
   function readComponentSources(): { file: string; content: string }[] {
-    return fs
-      .readdirSync(componentsDir)
-      .filter((name) => (name.endsWith('.ts') || name.endsWith('.tsx')) && !name.endsWith('.d.ts'))
-      .map((name) => ({
-        file: name,
-        content: fs.readFileSync(path.join(componentsDir, name), 'utf-8'),
-      }));
+    return collectSourceFiles(componentsDir).map((fullPath) => ({
+      file: path.relative(componentsDir, fullPath),
+      content: fs.readFileSync(fullPath, 'utf-8'),
+    }));
   }
 
   it('contains no dangerouslySetInnerHTML in any top-level component or module', () => {
@@ -218,11 +241,104 @@ describe('source posture (regression guard)', () => {
     }
   });
 
-  it('contains no localStorage/sessionStorage writes in any top-level component or module', () => {
+  it('contains no localStorage/sessionStorage writes outside the allowed preference keys', () => {
+    const SETITEM_RE = /(localStorage|sessionStorage)\.setItem/;
+    // The complete, explicitly-allowed call sites, each a single boolean-or-
+    // id user preference — never a token, never anything about a review's
+    // content (issue #489's own acceptance criterion, "Nothing sensitive
+    // lands in localStorage"):
+    //   - toaster/notify.ts    — issue #497's opt-in "notify me" flag.
+    //   - toaster/sounds.ts    — issue #489 item 3, the sound-mute flag.
+    //   - lastPlaybook.ts      — issue #489 item 4, the last-selected
+    //                            contract-type id.
+    // Recording the allowance HERE — rather than loosening the regex or
+    // skipping these files — keeps this guard's teeth: any OTHER file that
+    // starts writing to storage, in ANY subdirectory, still fails this test;
+    // and if any of the three grows a SECOND call site, the exact-one-match
+    // assertion below fails too.
+    const ALLOWED_SETITEM_FILES = ['toaster/notify.ts', 'toaster/sounds.ts', 'lastPlaybook.ts'];
+    const filesChecked = new Set<string>();
+
     for (const { file, content } of readComponentSources()) {
+      const matchCount = (content.match(new RegExp(SETITEM_RE, 'g')) ?? []).length;
+      if (ALLOWED_SETITEM_FILES.includes(file)) {
+        filesChecked.add(file);
+        expect(matchCount, `${file} must have exactly one setItem call site`).toBe(1);
+        continue;
+      }
       expect(content, `${file} must not write to localStorage/sessionStorage`).not.toMatch(
-        /(localStorage|sessionStorage)\.setItem/,
+        SETITEM_RE,
       );
     }
+
+    for (const allowed of ALLOWED_SETITEM_FILES) {
+      expect(filesChecked.has(allowed), `${allowed} was not found by the scan`).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #489's own acceptance criterion, checked dynamically rather than
+// only by the static source scan above: "Nothing sensitive lands in
+// localStorage (only the mute flag and a playbook id — assert in a test
+// that the auth token never does)." The two allowed writers are exercised
+// for real and the resulting storage is inspected — not just "no setItem
+// call site exists elsewhere" (the source-scan test above), but "what these
+// two call sites actually write is never token-shaped".
+// ---------------------------------------------------------------------------
+describe('localStorage content posture (issue #489)', () => {
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.resetModules();
+  });
+
+  // A real Amplify id/access token is a three-segment JWT: long, and
+  // dot-delimited. Neither of the two allowed values below can ever collide
+  // with that shape — a mute flag is a single bit and a playbook id is a
+  // short slug — but this pins the actual runtime shape rather than trusting
+  // that description.
+  function looksLikeAToken(value: string): boolean {
+    return value.length > 60 || value.includes('.');
+  }
+
+  it('the mute flag (toaster/sounds.ts) persists only "0"/"1", never a token', async () => {
+    window.localStorage.clear();
+    const { MUTE_STORAGE_KEY, setMuted } = await import('../toaster/sounds');
+
+    setMuted(true);
+    expect(window.localStorage.getItem(MUTE_STORAGE_KEY)).toBe('1');
+    expect(looksLikeAToken(window.localStorage.getItem(MUTE_STORAGE_KEY) as string)).toBe(false);
+
+    setMuted(false);
+    expect(window.localStorage.getItem(MUTE_STORAGE_KEY)).toBe('0');
+  });
+
+  it('the last-selected playbook id (lastPlaybook.ts) persists only the id, never a token', async () => {
+    window.localStorage.clear();
+    const { LAST_PLAYBOOK_STORAGE_KEY, writeLastPlaybookId } = await import('../lastPlaybook');
+
+    writeLastPlaybookId('eiaa');
+    expect(window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY)).toBe('eiaa');
+    expect(
+      looksLikeAToken(window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY) as string),
+    ).toBe(false);
+  });
+
+  it('using both allowed preferences together writes exactly those two keys, nothing else', async () => {
+    window.localStorage.clear();
+    const { MUTE_STORAGE_KEY, setMuted } = await import('../toaster/sounds');
+    const { LAST_PLAYBOOK_STORAGE_KEY, writeLastPlaybookId } = await import('../lastPlaybook');
+
+    setMuted(true);
+    writeLastPlaybookId('sample-agreement');
+
+    expect(window.localStorage.length).toBe(2);
+    const values = [
+      window.localStorage.getItem(MUTE_STORAGE_KEY),
+      window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY),
+    ];
+    expect(values.every((value) => typeof value === 'string' && !looksLikeAToken(value))).toBe(
+      true,
+    );
   });
 });

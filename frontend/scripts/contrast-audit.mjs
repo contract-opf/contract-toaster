@@ -172,6 +172,47 @@ const PAIRS = [
     bg: '--ct-bg',
     min: 3.0,
   },
+  // Issue #492: the outcome headline (`.ct-outcome-headline`,
+  // ReviewSubmission.tsx) paints its text in one of these five status
+  // tokens via OUTCOME_HEADLINE_COLOR_VAR, on whichever of the app's two
+  // surfaces it ends up rendered against — pinned at the text threshold
+  // (4.5:1), not the 3:1 UI-affordance one, since this is the panel's
+  // largest run of text, not a control.
+  { label: '--ct-ok vs --ct-bg (outcome headline)', fg: '--ct-ok', bg: '--ct-bg', min: 4.5 },
+  { label: '--ct-ok vs --ct-surface (outcome headline)', fg: '--ct-ok', bg: '--ct-surface', min: 4.5 },
+  { label: '--ct-warn vs --ct-bg (outcome headline)', fg: '--ct-warn', bg: '--ct-bg', min: 4.5 },
+  {
+    label: '--ct-warn vs --ct-surface (outcome headline)',
+    fg: '--ct-warn',
+    bg: '--ct-surface',
+    min: 4.5,
+  },
+  { label: '--ct-danger vs --ct-bg (outcome headline)', fg: '--ct-danger', bg: '--ct-bg', min: 4.5 },
+  {
+    label: '--ct-danger vs --ct-surface (outcome headline)',
+    fg: '--ct-danger',
+    bg: '--ct-surface',
+    min: 4.5,
+  },
+  { label: '--ct-accent vs --ct-bg (outcome headline)', fg: '--ct-accent', bg: '--ct-bg', min: 4.5 },
+  {
+    label: '--ct-accent vs --ct-surface (outcome headline)',
+    fg: '--ct-accent',
+    bg: '--ct-surface',
+    min: 4.5,
+  },
+  {
+    label: '--ct-text-muted vs --ct-bg (outcome headline)',
+    fg: '--ct-text-muted',
+    bg: '--ct-bg',
+    min: 4.5,
+  },
+  {
+    label: '--ct-text-muted vs --ct-surface (outcome headline)',
+    fg: '--ct-text-muted',
+    bg: '--ct-surface',
+    min: 4.5,
+  },
 ];
 
 // ------------------------------------------------------------------ Main

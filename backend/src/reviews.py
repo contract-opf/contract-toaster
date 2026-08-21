@@ -64,7 +64,9 @@ step-10 verification against that same table -- see each function's
 docstring.
 """
 
+import base64
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -180,6 +182,14 @@ REVIEW_STATUSES_TERMINAL = {
     "MANUAL_REVIEW_REQUIRED",
     "QUARANTINED",
     "SUPERSEDED",
+    # The reviewer asked for this run to stop. Deliberately its OWN terminal
+    # status rather than an ERROR with a reason token: nothing failed, and a
+    # review the user stopped on purpose must not read -- in the result panel,
+    # in History, or in Diagnostics -- like a tool malfunction they should
+    # report. Cancellation is cooperative (see pipeline_runner's cancel
+    # checkpoints), so a review can also finish normally while the request is
+    # in flight; whichever terminal write lands first wins.
+    "CANCELLED",
 }
 
 # The one terminal status that means "this review SUCCEEDED and its result is
@@ -542,6 +552,23 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     sequence of attempts within that budget cannot overshoot the reservation
     — only the settled actual spend (ledgered after every model attempt,
     including failures) can come in under it.
+
+    Issue #569: when the bounded re-quote repair pass is on
+    (`config.requote_enabled()`), the reservation also covers its ONE extra
+    model call — priced at the PRIMARY pass's own rate (the model id
+    `scripts/review_spine.py` hands `requote_repair.run_requote_repair`)
+    and bounded by the SAME per-pass token ceilings, but deliberately NOT
+    multiplied by `attempts_per_pass`: that repair call carries no retry
+    budget of its own ("one pass ever", `scripts/requote_repair.py`'s own
+    docstring). This is a generous over-estimate — the repair prompt is
+    just the failed issues' rationale/reasons plus a target paragraph each,
+    far smaller than a full-document review — which is the correct
+    direction for a WORST-CASE reservation. Added only when the flag is on,
+    so a deployment that never turns it on reserves exactly what it always
+    has; settlement needs no matching change, since the repair call shares
+    the SAME model-client instance the primary/critic passes use and its
+    real usage is already folded into that client's own `cumulative_usage`
+    total (`backend/src/pipeline_runner.py::_actual_cents_from_client`).
     """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
@@ -554,6 +581,8 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
         critic_input_rate / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (critic_output_rate / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
+    if config.requote_enabled():
+        usd += primary_usd
     return int(round(usd * 100))
 
 
@@ -742,6 +771,230 @@ def settle_spend(
 
 
 # ---------------------------------------------------------------------------
+# Preflight spend (issue #491) -- a direct ledger write, not the
+# reserve/settle two-phase dance the rest of this module uses.
+#
+# Preflight runs the moment a file is chosen, before any review_id or
+# submission record exists -- there is no reservation to make and, per the
+# issue's own wording, nothing is persisted except this ledger row (and,
+# optionally, a stamp onto the review row IF the user goes on to submit).
+# `reserve_spend`/`settle_spend`'s reservation dance exists to bound a
+# review's WORST-CASE cost against the daily cap before an expensive
+# multi-pass pipeline runs; preflight is a single cheap-model call with a
+# short timeout and no retry budget (see `backend/src/review_routes.py`'s
+# preflight route) -- reserving worst-case for that would buy nothing a
+# straight settle-after-the-fact does not already give for a fraction of
+# the code. Preflight also never enforces the daily cap: it is advisory and
+# "never blocks a submission" per the issue's Context, and a check running
+# on every file selection (including ones a reviewer abandons) is exactly
+# the kind of traffic a hard cap should not be exposed to.
+# ---------------------------------------------------------------------------
+
+
+def compute_preflight_actual_usd_cents(usage: dict[str, int] | None) -> int:
+    """The actual settled cost, in USD cents, of one preflight cheap-model
+    call, priced against model-policy/openrouter.json's `models.preflight`
+    rates -- the SAME real-usage-based pricing `compute_actual_usd_cents_
+    from_usage` uses for the primary/critic passes, but against the
+    preflight role's own (Budget-tier) rates rather than the primary/critic
+    ones, since the preflight role is never admin-selectable (see
+    `model_client.openrouter_preflight_model_id`'s docstring).
+
+    `usage` is `None` for a skipped or failed cheap-model call (no request
+    was ever billed) -- returns `0` rather than raising, so a caller can
+    call this unconditionally regardless of how the preflight attempt went.
+    """
+    if not usage:
+        return 0
+    policy = model_client.load_openrouter_policy()
+    entry = (policy.get("models") or {}).get("preflight") or {}
+    input_rate = float(entry.get("cost_per_million_input_usd", 0.0))
+    output_rate = float(entry.get("cost_per_million_output_usd", 0.0))
+    total_usd = usage.get("input_tokens", 0) * (input_rate / 1_000_000)
+    total_usd += usage.get("output_tokens", 0) * (output_rate / 1_000_000)
+    return int(round(total_usd * 100))
+
+
+def record_preflight_spend(
+    usd_cents: int,
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+) -> None:
+    """Ledger one preflight check's actual settled cost directly onto the
+    day's `settled_usd_cents` total -- no reservation, no cap check (see the
+    module comment above for why). `usd_cents <= 0` (a skipped, failed, or
+    genuinely free-to-round cheap-model call) is a deliberate no-op: a
+    preflight that degraded to stats-only never debits a ledger it never
+    actually spent from, and there is nothing to reconcile later the way a
+    review's worst-case reservation needs `settle_spend` to reverse.
+    """
+    if usd_cents <= 0:
+        return
+    table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
+    table.update_item(
+        Key={"spend_date": spend_date},
+        UpdateExpression=(
+            "SET settled_usd_cents = if_not_exists(settled_usd_cents, :zero) + :amount"
+        ),
+        ExpressionAttributeValues={":zero": 0, ":amount": usd_cents},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cover-note spend + cache (issue #499, "Butter it") -- same direct-settle,
+# no-reservation, no-cap-check shape as the preflight spend above, and for
+# the same reason: this is a single cheap-to-mid prose call on an ALREADY
+# FINISHED review, not a worst-case multi-pass pipeline run, so a
+# reservation would buy nothing a straight settle-after-the-fact does not
+# already give for a fraction of the code.
+# ---------------------------------------------------------------------------
+
+
+def compute_cover_note_actual_usd_cents(usage: dict[str, int] | None) -> int:
+    """The actual settled cost, in USD cents, of one cover-note generation,
+    priced against model-policy/openrouter.json's `models.cover_note`
+    rates -- the SAME real-usage-based pricing
+    `compute_preflight_actual_usd_cents` uses for the preflight role, but
+    against the cover_note role's own rates, since that role is also never
+    admin-selectable (see `model_client.openrouter_cover_note_model_id`'s
+    docstring).
+
+    `usage` is `None` for a skipped or failed call (no request was ever
+    billed) -- returns `0` rather than raising, so a caller can call this
+    unconditionally regardless of how the generation attempt went."""
+    if not usage:
+        return 0
+    policy = model_client.load_openrouter_policy()
+    entry = (policy.get("models") or {}).get("cover_note") or {}
+    input_rate = float(entry.get("cost_per_million_input_usd", 0.0))
+    output_rate = float(entry.get("cost_per_million_output_usd", 0.0))
+    total_usd = usage.get("input_tokens", 0) * (input_rate / 1_000_000)
+    total_usd += usage.get("output_tokens", 0) * (output_rate / 1_000_000)
+    return int(round(total_usd * 100))
+
+
+def record_cover_note_spend(
+    usd_cents: int,
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+) -> None:
+    """Ledger one cover-note generation's actual settled cost directly onto
+    the day's `settled_usd_cents` total -- no reservation, no cap check (see
+    the module comment above). `usd_cents <= 0` (a failed generation that
+    was never cached or billed) is a deliberate no-op, same convention
+    `record_preflight_spend` documents for its own field."""
+    if usd_cents <= 0:
+        return
+    table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
+    table.update_item(
+        Key={"spend_date": spend_date},
+        UpdateExpression=(
+            "SET settled_usd_cents = if_not_exists(settled_usd_cents, :zero) + :amount"
+        ),
+        ExpressionAttributeValues={":zero": 0, ":amount": usd_cents},
+    )
+
+
+def cover_note_daily_cap_reached(
+    dynamodb_resource: Any,
+    now_epoch: float | None = None,
+) -> bool:
+    """True once today's total COMMITTED spend -- `reserved_usd_cents`
+    (in-flight review reservations) PLUS `settled_usd_cents` (preflight and
+    cover-note actuals already ledgered, including any prior cover-note
+    generations this same day) -- has reached the configured daily cap.
+
+    Post-landing review of issue #499 ("Butter it"): a cover note is NOT
+    like preflight. Preflight is advisory, "never blocks a submission", and
+    fires on every file selection including ones a reviewer abandons -- the
+    module comment above `record_preflight_spend` explains why THAT role
+    deliberately never cap-checks. A cover note has none of those excuses:
+    it is a user-initiated, explicitly priced (the UI shows a priced
+    "Regenerate (~$0.03)" button), REPEATABLE action, and nothing on the
+    route rate-limits it. Because `record_cover_note_spend` only ever
+    settles -- it never reserves, matching the shape it was modeled on --
+    this spend never enters `reserved_usd_cents` at all, so `reserve_spend`'s
+    own conditional cap check (which reads ONLY that attribute) never sees
+    it; an authenticated owner could otherwise loop `{"regenerate": true}`
+    indefinitely with zero cap interaction.
+
+    This is a plain read-then-compare, not a conditional write: unlike
+    `reserve_spend`'s single atomic UpdateExpression, two concurrent
+    cover-note requests racing this check can both read "under the cap" and
+    both proceed, so it does not close that race the way review submission's
+    reservation does. That is an accepted, narrower gap than the one being
+    closed here -- an unbounded, unlimited-concurrency, no-cap-at-all spend
+    path becomes a spend path bounded by the same daily ceiling every other
+    role already respects. Closing the race too would mean giving cover-note
+    spend a real reservation/settlement lifecycle, which is a bigger change
+    than a post-landing review finding warrants.
+
+    Deliberately mirrors `reserve_spend`'s own budget arithmetic: the cap
+    compared against is the value FRESHLY read from
+    `DAILY_SPEND_CAP_USD_CENTS` (env) each call, not the `daily_cap_usd_cents`
+    value stored on the row -- that stored value is metadata `reserve_spend`
+    seeds for visibility/its own documented mid-day-change caveat, never
+    what its own ConditionExpression budget is computed against.
+    """
+    table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
+    now_epoch = time.time() if now_epoch is None else now_epoch
+    spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
+    resp = table.get_item(Key={"spend_date": spend_date})
+    row = resp.get("Item") or {}
+    daily_cap_cents = int(
+        os.environ.get("DAILY_SPEND_CAP_USD_CENTS", str(DAILY_SPEND_CAP_USD_CENTS_DEFAULT))
+    )
+    committed_cents = row.get("reserved_usd_cents", 0) + row.get("settled_usd_cents", 0)
+    return committed_cents >= daily_cap_cents
+
+
+def record_cover_note_draft(
+    review_id: str,
+    draft_text: str,
+    cost_usd_cents: int,
+    served_model_id: str,
+    dynamodb_resource: Any,
+    *,
+    generated_at: str | None = None,
+) -> None:
+    """Cache a freshly generated cover-note draft onto the `reviews` row
+    (issue #499 AC: "cached draft renders free on revisit"; "regenerate ...
+    a new ledger row; cached draft renders free on revisit"). Only ever
+    called on a SUCCESSFUL generation -- `backend/src/review_routes.py`'s
+    route never calls this on a failed/degraded attempt, so a failed
+    regenerate leaves the previously cached draft (if any) untouched rather
+    than clobbering it with nothing, the same "don't destroy a good value
+    with a failed write" discipline issue #486's disposition-note fix
+    established for this row.
+
+    Overwrites any previously cached draft -- there is exactly one cached
+    draft per review, the most recent generation, matching the Design
+    section's "the card stays a faithful record of what was generated"
+    (of the LATEST generation, not a history of every one; every
+    generation is still ledgered separately via the spend functions above
+    and `backend/src/invocation_ledger.py`)."""
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    generated_at = generated_at if generated_at is not None else str(int(time.time()))
+    table.update_item(
+        Key={"review_id": review_id},
+        UpdateExpression=(
+            "SET cover_note_draft = :draft, cover_note_generated_at = :at, "
+            "cover_note_cost_usd_cents = :cost, cover_note_served_model_id = :model"
+        ),
+        ExpressionAttributeValues={
+            ":draft": draft_text,
+            ":at": generated_at,
+            ":cost": cost_usd_cents,
+            ":model": served_model_id or "",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Retry-safe "ensure execution started"
 # ---------------------------------------------------------------------------
 
@@ -875,8 +1128,8 @@ def _read_active_release_bundle_hash(
     dynamodb_resource: Any,
 ) -> str | None:
     """Read `playbooks.active_release_bundle_hash` for `playbook_id`, then
-    validate the ON-DISK playbook body that hash is supposed to identify
-    (issue #266: runtime validation of the active bundle -- previously
+    validate the artifact that hash is supposed to identify (issue #266:
+    runtime validation of the active bundle -- previously
     `playbooks/schema.json` was CI-only, so every reader of this attribute
     trusted the artifact blindly). Returns None -- the SAME "no active
     bundle" signal a genuinely-empty row produces -- if:
@@ -885,13 +1138,67 @@ def _read_active_release_bundle_hash(
         bundle (the documented no-active-bundle state -- e.g. after a
         deactivate action, or before this playbook's first bundle has
         ever been activated), OR
-      - the row DOES carry a hash, but the current on-disk playbook body
-        for `playbook_id` fails runtime validation (schema-invalid, or a
-        covering topic is missing its `our_standard` standard-form text
-        -- see `scripts/playbook_validation.py::load_and_validate_playbook`).
-        An invalid playbook must never resolve as active: fail closed to
-        the exact same refusal a missing bundle produces, never a
-        partial/invalid load.
+      - the active bundle is a v1 registry artifact (no active,
+        OPF-artifact-kind `playbook_versions` row -- see the OPF branch
+        below) and the current ON-DISK playbook body for `playbook_id`
+        fails runtime validation (schema-invalid, or a covering topic is
+        missing its `our_standard` standard-form text -- see
+        `scripts/playbook_validation.py::load_and_validate_playbook`), OR
+      - the active bundle IS an OPF artifact (issue #478's upload flow)
+        but its activation record is internally inconsistent (see below).
+
+    An invalid playbook must never resolve as active: fail closed to the
+    exact same refusal a missing bundle produces, never a partial/invalid
+    load.
+
+    ## OPF branch (issue #485 blocker 3)
+
+    `load_and_validate_playbook` reads and schema-validates
+    `playbooks/<playbook_id>.json` off disk via the v1 registry
+    (`scripts/playbook_registry.py`). For a playbook activated through
+    issue #478's upload flow -- an OPF artifact stored content-addressed in
+    S3, `storage_key` on its `playbook_versions` row -- that on-disk v1 body
+    is not the thing being served, and validating it is not merely
+    redundant, it is WRONG: for a playbook_id that has no registry entry at
+    all (every playbook created via `POST /api/admin/playbooks`, issue
+    #485's blocker 1, since a DB-created playbook_id is never added to
+    `playbooks/registry.json`, which is baked into the image), it doesn't
+    validate the wrong document either: `load_and_validate_playbook` itself
+    catches `playbook_registry.PlaybookNotRegisteredError` and re-raises
+    `PlaybookValidationError`, which THIS function already caught (below)
+    and turned into a bare `None` -- "no active bundle" -- indistinguishable
+    from a genuinely inactive playbook, so the submission route refused
+    with HTTP 503 "no active playbook" for a playbook an admin had, in
+    fact, just activated. So: when the active `playbook_versions` row for this
+    playbook_id carries an OPF `artifact_kind` (`opf-0.2` / `opf-0.3`), the
+    v1 on-disk read is skipped entirely -- it is never reached, and never
+    the thing validated.
+
+    Skipping that read is not a blind pass, though (fail-closed still
+    applies): this function instead checks that the activation record
+    itself is internally consistent -- the row's OWN `content_hash` must
+    equal the `active_hash` `playbooks.active_release_bundle_hash` names
+    (otherwise activation and the resolver have drifted, and serving either
+    hash blind would be wrong), and it must name a `storage_key` a run can
+    actually load from. Either check failing returns None, same as any
+    other "cannot resolve an active bundle" outcome here.
+
+    What this function deliberately does NOT do is re-fetch and re-validate
+    the OPF artifact's bytes from S3 on every read (schema, `identity.
+    content_hash`, the injection scan): that full re-validation already
+    happens where the content is actually consumed --
+    `pipeline_runner._load_opf_bundle_if_active`, read ITS docstring for the
+    contract -- called again at execution time via `verify_submission_time_
+    bundle` (which reads through this same function). Duplicating an
+    S3-fetching check on every resolver read (this function is called once
+    per submission AND once per execution start) would not add safety -- a
+    byte corrupted between here and execution start would still need to be
+    (and is) caught there -- only cost, and would require threading an
+    `s3_client` through every caller of this function and `resolve_active_
+    release_bundle_hash` (a submission-time HTTP route, easy) as well as
+    `verify_submission_time_bundle` (already has one) and every one of this
+    function's existing test callers that construct it with only
+    `(playbook_id, dynamodb_resource)`.
 
     Never raises, never resolves-and-caches: this is a bare read. Callers
     decide what "no active bundle" means for their step --
@@ -908,6 +1215,42 @@ def _read_active_release_bundle_hash(
     active_hash = item.get("active_release_bundle_hash") or None
     if not active_hash:
         return None
+
+    if os.environ.get("PLAYBOOK_VERSIONS_TABLE"):
+        # `ClientError` (e.g. `ResourceNotFoundException`) is caught, not
+        # propagated: this function's contract is "never raises" (see
+        # above), and plenty of existing callers/tests set the
+        # PLAYBOOK_VERSIONS_TABLE env var (a common boilerplate default
+        # across this repo's test files) without ever provisioning that
+        # table, because their scenario never otherwise touches it. A read
+        # failure here just means "the version-row layer isn't usable for
+        # this check" -- falls through to the v1 disk path below exactly as
+        # if the env var were unset, never a 500 in place of the documented
+        # None/hash outcomes.
+        # Imported here, not at module scope: `playbook_versions` reaches
+        # `boto3.dynamodb.conditions`, and this module is imported by tests
+        # that stub `boto3` as a bare module (not a package). Same reason the
+        # `Key` imports in this file are function-local.
+        try:  # production runs `src.main`; tests put backend/src on sys.path
+            from src import playbook_versions
+        except ImportError:  # pragma: no cover
+            import playbook_versions  # type: ignore[no-redef]
+
+        try:
+            active_version = playbook_versions.get_active_version_record(
+                playbook_id, dynamodb_resource
+            )
+        except ClientError:
+            active_version = None
+        if active_version is not None:
+            artifact_kind = active_version.get("artifact_kind") or ""
+            if artifact_kind.startswith("opf-"):
+                if (
+                    active_version.get("content_hash") != active_hash
+                    or not active_version.get("storage_key")
+                ):
+                    return None
+                return active_hash
 
     try:
         playbook_validation.load_and_validate_playbook(playbook_id)
@@ -1038,6 +1381,69 @@ def verify_submission_time_bundle(
 # POST /api/reviews (stub) and GET /api/reviews/{id}
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Notes mode (issue #520, epic #519 item A)
+#
+# Which audience a review's footnotes are written for. Captured at submission
+# because the PROMPT changes by mode -- issue #516 (landed) gates the
+# toaster-guidance block's deviation-narration instruction on this value:
+# `primary_review_pass._render_toaster_guidance_intro` appends it only when
+# the mode puts internal content in scope (`internal`/`both`), so in
+# `none`/`external` the model is never told to narrate a playbook deviation
+# into `verdict_summary` / `external_rationale_for_footnote` at all. That is
+# a PROMPT gate, deliberately not a post-hoc strip: stripping would mean
+# internal reasoning was generated into a counterparty-bound field and merely
+# filtered on the way out, which is the posture the leakage scan exists to
+# prevent.
+#
+# So this is a pipeline INPUT, and it has to be known before the model call.
+# ---------------------------------------------------------------------------
+
+NOTES_MODES = ("none", "external", "internal", "both")
+
+# Today's behaviour. An older client, a hand-built request, or a blank field
+# all land here, and `external` reproduces the current output exactly -- which
+# is what makes item A landable ahead of the items that make the modes differ.
+DEFAULT_NOTES_MODE = "external"
+
+
+def resolve_notes_mode(value: str | None) -> str:
+    """The effective notes mode for a submission.
+
+    Absent, empty and whitespace-only resolve to `external`. Anything else
+    that is not one of the four raises `ValueError`, which the route turns
+    into a 400.
+
+    The refusal is the point. Silently downgrading a typo'd `internal` to
+    `external` would hand someone counterparty-facing output when they asked
+    for internal notes -- a quiet wrong answer, which is worse than a loud
+    one, and undetectable from the review row afterwards.
+
+    Issue #572: while `config.notes_mode_enabled()` is off (the default),
+    `internal` and `both` are refused with that same `ValueError` -> 400
+    path -- never silently downgraded to `external` -- because the
+    audience-aware leakage scan (#521) that makes internal reasoning safe to
+    generate does not exist on `main` yet. `none` and `external` stay
+    accepted regardless of the flag: neither can surface internal reasoning,
+    so neither carries the risk the gate exists for.
+    """
+    if value is None:
+        return DEFAULT_NOTES_MODE
+    normalized = value.strip().lower()
+    if not normalized:
+        return DEFAULT_NOTES_MODE
+    if normalized not in NOTES_MODES:
+        raise ValueError(
+            f"notes_mode must be one of {', '.join(NOTES_MODES)}; got {value!r}"
+        )
+    if normalized in ("internal", "both") and not config.notes_mode_enabled():
+        raise ValueError(
+            f"notes_mode {normalized!r} is not available: NOTES_MODE_ENABLED "
+            "is unset (or off) in this deployment"
+        )
+    return normalized
+
+
 def submit_review(
     owner_sub: str,
     playbook_id: str,
@@ -1049,6 +1455,8 @@ def submit_review(
     client_supplied_idempotency_key: str | None = None,
     review_id: str | None = None,
     toaster_guidance: str = "",
+    original_filename: str = "",
+    notes_mode: str = DEFAULT_NOTES_MODE,
 ) -> dict[str, Any]:
     """POST /api/reviews (stub is fine per issue #59 AC).
 
@@ -1158,6 +1566,7 @@ def submit_review(
         release_bundle_hash=active_release_bundle_hash,
         opf_lineage=opf_lineage,
         toaster_guidance=toaster_guidance,
+        notes_mode=notes_mode,
         instructions_lineage=playbook_version_lineage,
     )
 
@@ -1193,6 +1602,8 @@ def submit_review(
         playbook_version_lineage=playbook_version_lineage,
         toaster_guidance=toaster_guidance,
         upload_s3_key=upload_pointer,
+        original_filename=original_filename,
+        notes_mode=notes_mode,
     )
 
     ensure_execution_started(submission, execution_input_json, dynamodb_resource, sfn_client)
@@ -1407,6 +1818,7 @@ def _build_execution_input_json_from_parts(
     release_bundle_hash: str,
     opf_lineage: dict[str, str | int | None] | None = None,
     toaster_guidance: str = "",
+    notes_mode: str = DEFAULT_NOTES_MODE,
     instructions_lineage: dict[str, str | int | None] | None = None,
 ) -> str:
     """Pointer-only execution input (issue #19): S3 keys and hashes only,
@@ -1456,6 +1868,15 @@ def _build_execution_input_json_from_parts(
         "release_bundle_hash": release_bundle_hash,
         "toaster_guidance": toaster_guidance,
     }
+    # Issue #520: recorded only when it is NOT the default, following the same
+    # "absent, never a placeholder" convention as every other optional field in
+    # this payload -- so a submission that says nothing about notes mode
+    # produces a byte-identical payload to before this landed. Safe in the
+    # direction that matters: `external` and absent both mean
+    # counterparty-facing only, and `internal` is never the default, so an
+    # internal request can never be lost to omission.
+    if notes_mode and notes_mode != DEFAULT_NOTES_MODE:
+        payload["notes_mode"] = notes_mode
     payload.update(_recorded_lineage_fields(opf_lineage))
     payload.update(_recorded_instructions_execution_fields(instructions_lineage))
 
@@ -1740,6 +2161,8 @@ def _create_review_row(
     playbook_version_lineage: dict[str, str | None] | None = None,
     toaster_guidance: str = "",
     upload_s3_key: str = "",
+    original_filename: str = "",
+    notes_mode: str = DEFAULT_NOTES_MODE,
 ) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
@@ -1767,7 +2190,33 @@ def _create_review_row(
     # issues, never a null placeholder. This is the audit trail: without it,
     # editing a policy and re-binding leaves two reviews indistinguishable
     # in the record even though different rules governed them.
+    # Issue #520: the audience this review's footnotes were written for.
+    # Recorded only when it is NOT the default, on the same "absent, never a
+    # null placeholder" terms as every field around it -- a submission that
+    # says nothing produces a row byte-identical to before this landed.
+    #
+    # The asymmetry is deliberate and safe: `external` and absent both mean
+    # counterparty-facing only, so conflating them costs nothing, while
+    # `internal` and `both` are never defaults and are therefore always
+    # recorded. The mode that could do harm if lost cannot be lost.
+    if notes_mode and notes_mode != DEFAULT_NOTES_MODE:
+        item["notes_mode"] = notes_mode
+
     item.update(_recorded_lineage_fields(opf_lineage))
+
+    # Issue #518: the name the uploader's document arrived under, so the
+    # redline can be downloaded under a name that identifies it rather than
+    # `out.docx`. Recorded on the same "absent, never a null placeholder"
+    # terms as everything above.
+    #
+    # CLASSIFICATION: this is Confidential, not Internal. A contract filename
+    # routinely names the counterparty -- "Mutual NDA - Acme.docx" is the
+    # ordinary case, not a corner one -- so it is listed with the substance
+    # fields retention clears on purge (backend/src/retention.py,
+    # infra/lambda/purge_worker/handler.py). A purge that deleted the document
+    # and left the counterparty's name on the row would not be a purge.
+    if original_filename and original_filename.strip():
+        item["original_filename"] = original_filename.strip()
 
     # Issue #471: the `playbook_versions` admin-facing version + content
     # hash behind the OPF-independent playbook every review actually runs
@@ -1955,6 +2404,14 @@ STATUS_USER_MESSAGES: dict[str, str] = {
         "a legal admin will review it and follow up with you. No action is "
         "needed on your part right now."
     ),
+    # Says what happened and what is true now, with no apology and no
+    # troubleshooting: the reviewer chose this, so treating it as an incident
+    # to explain away would be both wrong and patronising. It does say there
+    # is no redline, because that is the one consequence they might not expect.
+    "CANCELLED": (
+        "You stopped this review, so no redline was produced. You can submit "
+        "the document again whenever you're ready."
+    ),
 }
 
 
@@ -1964,10 +2421,98 @@ def _is_admin_caller(caller_user_row: dict[str, Any]) -> bool:
     return bool(caller_user_row.get("is_admin", False))
 
 
+def load_analysis_artifact(item: dict[str, Any], s3_client: Any) -> dict[str, Any] | None:
+    """Read this review's persisted analysis artifact
+    (`outputs/{review_id}/analysis.json`, written by
+    `pipeline_runner._write_real_analysis`), if one exists.
+
+    This is the ONLY place `findings` / `critic_delta` are ever produced
+    (issue #416's `_ANALYSIS_FIELDS`). No writer has ever put either on the
+    `reviews` row itself -- not `pipeline_runner._write_terminal`, not
+    `._write_real_terminal`, not `infra/lambda/persist/handler.py` -- so
+    `get_review_detail` reading `item.get("issues")` /
+    `item.get("critic_delta")` returned None on every real review, and the
+    cover-note route's 409 gate (`item.get("issues") or []`) never saw a
+    real review's findings either.
+
+    Deliberately NOT persisted to DynamoDB instead of fixed by adding a
+    writer: the data already lives in S3 and is already destroyed by the
+    purge's `outputs/{review_id}/` prefix scan (asserted in
+    tests/test_analysis_artifact_persisted.py). Writing the prose-heaviest
+    payload on the review into a store with a 35-day PITR retention floor
+    (docs/data-handling.md -> "Accepted limitation -- DynamoDB PITR tail")
+    would open a new Confidential-substance surface for no gain.
+
+    Sourced from the row's OWN `analysis_s3_key` attribute
+    (`pipeline_runner._write_real_terminal` ~L1139-1141) -- never a
+    reconstructed path. Bucket is `os.environ["OUTPUTS_BUCKET"]`.
+
+    On the Step Functions target's persist Lambda
+    (`infra/lambda/persist/handler.py`), which per its own docstring writes
+    only the mock pipeline's terminal result pending issues #80-#83, no
+    analysis artifact is ever written and `analysis_s3_key` is simply
+    absent -- this degrades to None exactly as it does for a review that
+    predates the field. That is a gap in that Lambda's own scope, not a bug
+    here; the in-process runner (the live deployment target,
+    `config.pipeline_runner() == "inprocess"`) is the one this function
+    restores.
+
+    Degrades to None and NEVER raises: `s3_client` is None (this review's
+    `get_review_detail` caller didn't construct one --
+    `request_cancel`'s two internal calls only need `status` and pass
+    none), the row carries no `analysis_s3_key`, the S3 object is missing,
+    or the body is not valid JSON. An artifact read must never fail the
+    detail route, the same way a missing redline never fails it.
+    """
+    if s3_client is None:
+        return None
+    key = item.get("analysis_s3_key")
+    if not key:
+        return None
+    try:
+        obj = s3_client.get_object(Bucket=os.environ["OUTPUTS_BUCKET"], Key=key)
+        body = obj["Body"].read()
+    except Exception as exc:  # noqa: BLE001 -- deliberately total
+        # Deliberately broader than ClientError: a missing object, a denied
+        # read, an endpoint/connection failure and a malformed response are
+        # all the same event here -- "no artifact" -- and this function
+        # promises never to fail the detail route. Same posture, and the
+        # same noqa, as review_routes.py's "never leak a raw model/network
+        # error" handler. Naming botocore's exception hierarchy explicitly
+        # would also break the six test files that stub `botocore.exceptions`
+        # with ClientError alone.
+        logger.warning(
+            "ANALYSIS_ARTIFACT: could not read %s for review_id=%s: %s",
+            key, item.get("review_id"), exc,
+        )
+        return None
+    try:
+        document = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+        logger.warning(
+            "ANALYSIS_ARTIFACT: malformed JSON body at %s for review_id=%s: %s",
+            key, item.get("review_id"), exc,
+        )
+        return None
+    if not isinstance(document, dict):
+        # Valid JSON is not the same as a usable artifact. A truncated or
+        # rewritten object that parses to a list/scalar would sail past the
+        # decode guard above and then blow up on `.get(...)` in the caller
+        # -- turning "artifact unreadable" into a 500 on the detail route,
+        # which is precisely what this function promises never to do.
+        logger.warning(
+            "ANALYSIS_ARTIFACT: %s for review_id=%s parsed to %s, not an object",
+            key, item.get("review_id"), type(document).__name__,
+        )
+        return None
+    return document
+
+
 def get_review_detail(
     review_id: str,
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
+    s3_client: Any = None,
 ) -> dict[str, Any]:
     """GET /api/reviews/{id} (issue #84): status + the full result payload
     -- provenance (carried per-issue on `issues[].provenance`), critic
@@ -1988,6 +2533,14 @@ def get_review_detail(
     output onto this row yet) are simply absent/null -- this function is a
     faithful, read-only projection of whatever the `reviews` row currently
     holds, never a computation of pipeline state.
+
+    `s3_client` (optional, default None): when provided, `issues` /
+    `critic_delta` below are read through `load_analysis_artifact` off the
+    row's `analysis_s3_key` -- see that function's docstring for why (issue
+    #416's `findings`/`critic_delta` are never written to the `reviews` row
+    itself). Callers that only need `status` (`request_cancel`'s two
+    internal `get_review_detail` calls) pass no `s3_client` and get exactly
+    today's behavior -- None for both fields, no S3 round trip.
     """
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     resp = table.get_item(Key={"review_id": review_id})
@@ -2003,15 +2556,51 @@ def get_review_detail(
     status_value = item.get("status", "PENDING")
     reason = item.get("reason") or item.get("quarantine_reason") or item.get("analysis_report_reason")
 
+    # `findings`/`critic_delta` are produced by the pipeline
+    # (`pipeline_runner._ANALYSIS_FIELDS`, issue #416) but no writer has
+    # EVER put either onto the
+    # `reviews` row -- they live only in `outputs/{review_id}/analysis.json`.
+    # `item.get("issues")` / `item.get("critic_delta")` therefore returned
+    # None on every real review; read through the artifact instead of
+    # adding a DynamoDB writer (see `load_analysis_artifact`'s docstring for
+    # the retention rationale).
+    analysis = load_analysis_artifact(item, s3_client)
+
     return {
         "review_id": review_id,
         "status": status_value,
         "decision": item.get("decision"),
         "confidence_state": item.get("confidence_state"),
         "confidence_band": item.get("confidence_band"),
-        "issues": item.get("issues"),
-        "critic_delta": item.get("critic_delta"),
-        "verdict_summary": item.get("verdict_summary"),
+        "issues": analysis.get("findings") if analysis is not None else None,
+        "critic_delta": analysis.get("critic_delta") if analysis is not None else None,
+        # The RESPONSE key stays `verdict_summary` (the documented public
+        # field name, and the model-output vocabulary docs/output-contract.md
+        # specifies) but the DynamoDB ATTRIBUTE it reads is `summary`.
+        # `scripts/review_spine.py`'s result dict deliberately renames the
+        # model's `verdict_summary` to `summary` (see that file's result
+        # assembly and the note at scripts/primary_review_pass.py), and all
+        # three writers persist it under that name:
+        # `pipeline_runner._write_terminal` / `._write_real_terminal` and the
+        # AWS Step Functions persist Lambda (infra/lambda/persist/handler.py).
+        # Nothing has EVER written an attribute called `verdict_summary` --
+        # confirmed against the full history -- so this read returned None on
+        # every real review from the day the field shipped, and no test caught
+        # it because every fixture hand-seeds a row with the reader's key
+        # instead of going through a writer.
+        "verdict_summary": item.get("summary"),
+        # Issue #563: disclosure that stage 1 accepted one or more pending
+        # tracked changes (single or multi-cluster/multi-author) into the
+        # operative draft before review -- names the paragraph heading and
+        # cluster/author counts, never silent. Absent-on-the-row -> None
+        # here, same faithful-projection convention as every other field.
+        "normalization_notes": item.get("normalization_notes"),
+        # Issue #569: the bounded re-quote repair pass's outcome, when that
+        # pass has run (attempted/recovered/still_failed). Absent-on-the-row
+        # -> None here, same faithful-projection convention as every other
+        # field -- renders correctly whether or not #569 has landed, since
+        # nothing ever writes this key until it does.
+        "requote": item.get("requote"),
         "reason": reason,
         # Target-agnostic stage-failure taxonomy (issue #258): the specific
         # pipeline stage a failure occurred in, when
@@ -2038,6 +2627,12 @@ def get_review_detail(
         # the pointer was recorded; that is a truthful "not recorded", not a
         # claim that the document is gone.
         "has_input": bool(item.get("upload_s3_key")),
+        # Issue #499 ("Butter it"): whether a cover-note draft is already
+        # cached on this row -- a boolean pointer, never the draft text
+        # itself, same discipline as `has_output`/`has_input` above. Lets
+        # the UI show "cached, free to view" without a billed round trip
+        # just to find out.
+        "has_cover_note_draft": bool(item.get("cover_note_draft")),
         "playbook_id": item.get("playbook_id"),
         # Issue #449: WHICH MODELS RAN THIS REVIEW. Written at terminal-write
         # time by pipeline_runner._write_real_terminal from the bundle metadata
@@ -2050,12 +2645,23 @@ def get_review_detail(
         # models). "Not recorded" is the honest answer; a guess is not.
         "primary_model_id": item.get("primary_model_id"),
         "critic_model_id": item.get("critic_model_id"),
+        # Issue #508/#514: what the PROVIDER said it served, beside what was
+        # asked for. Absent on every review predating the field, on the mock
+        # pipeline, and wherever the provider omitted it -- and absent is NOT
+        # a mismatch, which the reader-side comparison has to honour or the
+        # whole history of the product reads as suspicious.
+        "served_primary_model_id": item.get("served_primary_model_id"),
+        "served_critic_model_id": item.get("served_critic_model_id"),
         # Issue #431: the per-review free-text guidance this review was
         # submitted with, so the Review tab can show back (read-only) which
         # instructions governed it. None for a review submitted without any
         # -- and for every review created before that field was recorded --
         # the same faithful-projection convention as every field above.
         "toaster_guidance": item.get("toaster_guidance"),
+        # Issue #520: None on a review predating the field -- which is the
+        # honest answer, not a back-filled "external" that would claim the
+        # review was submitted under a mode nobody chose.
+        "notes_mode": item.get("notes_mode"),
         "owner_sub": owner_sub,
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
@@ -2098,7 +2704,272 @@ def get_review_detail(
         "policy_version": item.get("policy_version"),
         "policy_hash": item.get("policy_hash"),
         "policy_approval_status": item.get("policy_approval_status"),
+        # Whether a stop has been asked for and not yet taken effect. The UI
+        # needs this to say "stopping…" instead of leaving the reviewer
+        # pressing a button that looks like it did nothing: cancellation is
+        # cooperative, so the gap between the request and the terminal write
+        # is real and must be visible rather than hidden.
+        "cancel_requested": bool(item.get("cancel_requested_at")),
+        # Issue #486: the reviewer's OPTIONAL disposition capture -- NOT an
+        # approval gate (owner correction 2026-08-02: a lightweight "what
+        # happened with this one" record for the negotiating-history / eval
+        # feedback loop, never something this product enforces or nags
+        # about). `record_disposition` never touches `status`/`decision`
+        # above; these five keys are a faithful projection of whatever the
+        # row currently holds -- None on a review with nothing recorded yet,
+        # same convention as every field above.
+        #
+        # The issue's "What to build" asks for the disposition as "(value,
+        # who, when)"; this projects value + when
+        # (`attorney_disposition_recorded_at`) but deliberately no "who" --
+        # this route is owner-scoped (a caller can only ever record a
+        # disposition on their OWN review, or as an admin acting on someone
+        # else's), so "who recorded this" is never in question for the
+        # common case the way it would be on a shared/team surface. The
+        # actual actor IS captured, in the one place cross-user visibility
+        # matters: `review_routes.post_review_disposition`'s audit row
+        # (`actor=caller_sub`). This is a decision, not a miss -- adding
+        # `attorney_disposition_by` here would duplicate what the audit
+        # trail already answers authoritatively.
+        "attorney_disposition": item.get("attorney_disposition"),
+        "attorney_disposition_reason_codes": item.get("attorney_disposition_reason_codes"),
+        "attorney_disposition_topic_ids": item.get("attorney_disposition_topic_ids"),
+        "attorney_disposition_note": item.get("attorney_disposition_note"),
+        "attorney_disposition_recorded_at": item.get("attorney_disposition_recorded_at"),
+        "legal_triage_status": item.get("legal_triage_status"),
     }
+
+
+class ReviewNotCancellableError(Exception):
+    """Raised by `request_review_cancel` when the review has already reached a
+    terminal status. Carries that status so the caller can say WHICH terminal
+    it landed on rather than a bare refusal -- "this review already finished"
+    and "this review already failed" are different things to be told."""
+
+    def __init__(self, message: str, *, status: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def request_review_cancel(
+    review_id: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+) -> dict[str, Any]:
+    """Ask a running review to stop (owner-or-admin, same scoping as
+    `get_review_detail` -- a non-owner gets its 404, never a 403 that would
+    confirm the id exists).
+
+    This RECORDS A REQUEST; it does not stop anything itself. The review runs
+    on a worker thread inside a model call that cannot be interrupted from
+    here, so the runner polls `cancel_requested` at its own checkpoints and
+    stops at the next one (see pipeline_runner). Writing an intent and letting
+    the owner of the work act on it is the only honest shape: the alternative
+    -- marking the row CANCELLED immediately -- would tell the reviewer the
+    run had stopped while it was still spending their money.
+
+    The conditional write is what keeps this race-safe: a review that reached
+    a terminal status between the caller's read and this update fails the
+    condition and raises, rather than stamping a cancel request onto a
+    finished review.
+    """
+    detail = get_review_detail(review_id, caller_user_row, dynamodb_resource)
+    current_status = detail.get("status") or ""
+    if current_status in REVIEW_STATUSES_TERMINAL:
+        raise ReviewNotCancellableError(
+            f"Review {review_id} is already {current_status}.", status=current_status
+        )
+
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    now = str(int(time.time()))
+    try:
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET cancel_requested_at = :now, updated_at = :now",
+            ConditionExpression="attribute_exists(review_id) AND #s IN (:pending, :running)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":now": now,
+                ":pending": "PENDING",
+                ":running": "RUNNING",
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            # It finished under us. Re-read rather than guessing which terminal.
+            settled = get_review_detail(review_id, caller_user_row, dynamodb_resource)
+            raise ReviewNotCancellableError(
+                f"Review {review_id} is already {settled.get('status')}.",
+                status=str(settled.get("status") or ""),
+            ) from exc
+        raise
+
+    return {"review_id": review_id, "status": current_status, "cancel_requested": True}
+
+
+def cancel_requested(review_id: str, dynamodb_resource: Any) -> bool:
+    """Has a stop been asked for? Consulted by the runner at its checkpoints.
+
+    Consistent read: the whole point is to observe a write made moments ago by
+    a different request thread, which is exactly the case DynamoDB's default
+    eventual consistency is allowed to miss. A read failure returns False --
+    an unreachable table must not abort a review that is running fine, and the
+    next checkpoint will ask again.
+    """
+    try:
+        table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+        response = table.get_item(
+            Key={"review_id": review_id},
+            ConsistentRead=True,
+            ProjectionExpression="cancel_requested_at",
+        )
+    except Exception:  # noqa: BLE001 - a failed poll must never fail the review
+        logger.warning(
+            "Could not read the cancel flag for review %s; treating it as not "
+            "cancelled. The review is UNAFFECTED.",
+            review_id,
+            exc_info=True,
+        )
+        return False
+    return bool((response.get("Item") or {}).get("cancel_requested_at"))
+
+
+def mark_cancelled(review_id: str, dynamodb_resource: Any) -> None:
+    """Terminal write for a review the reviewer stopped.
+
+    Guarded the same way `record_stage_failure` is (issue #446): a review that
+    reached a terminal status first keeps it. A run that completed
+    successfully in the window between the cancel request and the runner's
+    next checkpoint is DONE, with a redline the reviewer can still download --
+    relabelling that CANCELLED would destroy real, paid-for work over a race.
+    """
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    now = str(int(time.time()))
+    try:
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET #s = :cancelled, cancelled_at = :now, updated_at = :now",
+            ConditionExpression="attribute_exists(review_id) AND #s IN (:pending, :running)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":cancelled": "CANCELLED",
+                ":pending": "PENDING",
+                ":running": "RUNNING",
+                ":now": now,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return
+        raise
+
+
+# A Step Functions execution ARN starts with `arn:`. The in-process Docker
+# Compose runner records its own `inprocess:<execution-name>` pseudo-ARN
+# (pipeline_runner.InProcessStepFunctionsClient.start_execution), which names
+# no AWS resource at all -- so the prefix is what distinguishes "there is a
+# real execution to stop" from "this review is running on a worker thread and
+# stops via the cooperative checkpoints instead".
+#
+# Deliberately keyed on the DATA rather than on `config.deploy_target()`: the
+# runner that started a review is a fact recorded on its own row, and reading
+# it there cannot go stale or disagree with a redeployed env var.
+_STEP_FUNCTIONS_ARN_PREFIX = "arn:"
+
+
+def stop_running_execution(
+    review_id: str,
+    dynamodb_resource: Any,
+    sfn_client: Any,
+) -> bool:
+    """Abort the Step Functions execution running `review_id`, if there is one.
+
+    Returns True when a real execution was stopped, False when there is
+    nothing to stop -- no ARN recorded yet (a cancel that raced submission),
+    or an in-process pseudo-ARN.
+
+    This is the AWS target's answer to cancellation, and it is a STRONGER
+    guarantee than the in-process one: Step Functions stops scheduling states
+    immediately, so no further pipeline stage runs at all. (The stage already
+    executing runs to its own completion -- Step Functions cannot kill a
+    Lambda mid-invocation any more than the in-process runner can abort a
+    blocking HTTP call -- which is why `infra/lambda/persist/handler.py`
+    refuses to overwrite a CANCELLED row.)
+
+    The abandoned execution leaks nothing: the concurrency semaphore's slots
+    carry a TTL lease precisely so "a hard-killed execution's slot self-
+    expires even if the release state never runs" (infra/lib/nested/
+    pipeline-stack.ts), and the caller settles the spend reservation.
+
+    Errors PROPAGATE. A swallowed StopExecution is the whole bug this exists
+    to fix: the reviews row would say a stop was requested, the UI would show
+    "Stopping…", and the pipeline would run happily to completion.
+    """
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    response = table.get_item(
+        Key={"review_id": review_id},
+        ConsistentRead=True,
+        ProjectionExpression="execution_arn",
+    )
+    execution_arn = (response.get("Item") or {}).get("execution_arn") or ""
+    if not execution_arn.startswith(_STEP_FUNCTIONS_ARN_PREFIX):
+        return False
+
+    sfn_client.stop_execution(
+        executionArn=execution_arn,
+        cause="Cancelled by the review owner.",
+    )
+    return True
+
+
+def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> None:
+    """Credit back the unspent worst-case spend reservation for a cancelled
+    review.
+
+    On the AWS target the persist stage is what ordinarily settles the
+    reservation, and an aborted execution never reaches it -- so without this
+    a stopped review would hold its slice of the daily spend cap until UTC
+    midnight, and stopping reviews would quietly starve the cap. Mirrors the
+    orphan reconciler's dead-execution settlement (infra/lambda/
+    orphan_reconciler/handler.py::_release_reservation), including its
+    `reservation_released` idempotency guard so a race with persist cannot
+    credit the same reservation twice.
+
+    Settles at 0 actual cents: the ledger, not this function, is the record of
+    what was really spent before the stop.
+    """
+    submissions = dynamodb_resource.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
+    submission = _find_submission_row_for_review(submissions, review_id)
+    if not submission or not submission.get("spend_reservation_id"):
+        return
+    if submission.get("reservation_released"):
+        return
+    settle_spend(review_id, submission["spend_reservation_id"], 0, dynamodb_resource)
+    submissions.update_item(
+        Key={"idempotency_key": submission["idempotency_key"]},
+        UpdateExpression="SET reservation_released = :true, updated_at = :now",
+        ExpressionAttributeValues={":true": True, ":now": str(int(time.time()))},
+    )
+
+
+def _find_submission_row_for_review(table: Any, review_id: str) -> dict[str, Any] | None:
+    """The submission row for `review_id`, via the review_id GSI when the
+    table has one and a scan otherwise -- same shape as
+    pipeline_runner._find_submission_by_review_id."""
+    try:
+        from boto3.dynamodb.conditions import Key
+
+        resp = table.query(
+            IndexName="review_id-index",
+            KeyConditionExpression=Key("review_id").eq(review_id),
+        )
+    except Exception:  # noqa: BLE001 - no GSI (or a fake without query): fall back
+        resp = table.scan(
+            FilterExpression="review_id = :rid",
+            ExpressionAttributeValues={":rid": review_id},
+        )
+    items = resp.get("Items", [])
+    return items[0] if items else None
 
 
 _REVIEW_LIST_ITEM_FIELDS = (
@@ -2118,16 +2989,27 @@ _REVIEW_LIST_ITEM_FIELDS = (
     "posture_version",
     "primary_model_id",
     "critic_model_id",
+    # Issue #508/#514 -- the response side of the same question, so the
+    # History table can answer "asked X, served Y" from the row rather than
+    # from a support ticket.
+    "served_primary_model_id",
+    "served_critic_model_id",
     # Issue #471 -- the playbook version + content hash that actually gated
     # this submission, populated for the live non-OPF playbook too.
     "playbook_version",
     "playbook_content_hash",
+    # Issue #486 -- the reviewer's OPTIONAL "what happened with this one"
+    # capture (ACCEPTED/EDITED/REJECTED), so History can render a Disposition
+    # column without a second per-row detail fetch. None on a review with
+    # nothing recorded yet -- the UI renders that as "Not recorded", never a
+    # guess, same convention as every other field in this tuple.
+    "attorney_disposition",
 )
 
 
 def _review_list_item(item: dict[str, Any]) -> dict[str, Any]:
     """Lean summary shape for the list view -- confidential per-review
-    content (verdict_summary, issues, critic_delta, toaster_guidance) is
+    content (summary, issues, critic_delta, toaster_guidance) is
     reserved for the single-review detail route, not the list.
 
     Issue #449 adds the two DOWNLOAD-AVAILABILITY booleans the History table
@@ -2140,6 +3022,10 @@ def _review_list_item(item: dict[str, Any]) -> dict[str, Any]:
     projection = {field: item.get(field) for field in _REVIEW_LIST_ITEM_FIELDS}
     projection["has_output"] = bool(item.get("output_s3_key"))
     projection["has_input"] = bool(item.get("upload_s3_key"))
+    # Issue #499: same boolean-pointer-only convention as has_output/
+    # has_input directly above -- History's row action needs to know
+    # whether a cached draft exists without a billed round trip.
+    projection["has_cover_note_draft"] = bool(item.get("cover_note_draft"))
     return projection
 
 
@@ -2176,11 +3062,134 @@ def _list_reviews_for_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
     return [i for i in _scan_all_reviews(table) if i.get("owner_sub") == owner_sub]
 
 
+# Pagination (issue #488). The listing was unbounded on both axes: every row
+# ever written, in one response, sorted in memory -- so the History tab's
+# first fetch got heavier every week and the admin path scanned the whole
+# table on every load. The cap is not advisory; a caller-supplied `limit` is
+# clamped into [1, MAX], so no request can turn this back into a full dump.
+# Same posture as the diagnostics route next door.
+REVIEWS_PAGE_DEFAULT_LIMIT = 25
+REVIEWS_PAGE_MAX_LIMIT = 100
+
+
+def encode_page_token(last_key: dict[str, Any] | None) -> str | None:
+    """DynamoDB's `LastEvaluatedKey` as an opaque string.
+
+    Opaque to the CALLER, not secret: it is a key from a table the caller is
+    already authorized to read a page of, and every page re-applies the same
+    owner scoping. What the encoding buys is that the client cannot construct
+    one by hand and cannot depend on its shape.
+    """
+    if not last_key:
+        return None
+    return base64.urlsafe_b64encode(
+        json.dumps(last_key, sort_keys=True, default=str).encode("utf-8")
+    ).decode("ascii")
+
+
+def decode_page_token(token: str | None) -> dict[str, Any] | None:
+    """The inverse. A token that is not one raises 400 rather than being
+    ignored -- silently starting from page one would look to a paging client
+    like an endless stream of the same first page."""
+    if not token:
+        return None
+    try:
+        decoded = json.loads(base64.urlsafe_b64decode(token.encode("ascii")))
+    except Exception:  # noqa: BLE001 - any malformed token is the same answer
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That page token is not valid. Reload the list to start again.",
+        ) from None
+    if not isinstance(decoded, dict) or not decoded:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That page token is not valid. Reload the list to start again.",
+        )
+    return decoded
+
+
+def _clamp_limit(limit: int | None) -> int:
+    if limit is None:
+        return REVIEWS_PAGE_DEFAULT_LIMIT
+    return max(1, min(int(limit), REVIEWS_PAGE_MAX_LIMIT))
+
+
+def _page_for_owner(
+    table: Any, owner_sub: str, limit: int, start_key: dict[str, Any] | None
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """One page of an owner's reviews, newest first.
+
+    The `owner_sub-index` GSI is partitioned on `owner_sub` with `created_at`
+    as its SORT KEY (infra/lib/nested/data-stack.ts), so `ScanIndexForward=
+    False` gives newest-first from the index itself. That is what makes paging
+    correct rather than merely bounded: the old in-memory sort could only
+    order rows it had already fetched, which is the same thing as fetching
+    them all.
+
+    The scan fallback is for a lightweight test stand-in without `.query()`
+    (same convention as `_list_reviews_for_owner`). It pages the SCAN and
+    filters after, so a page can come back short and still have more behind
+    it -- which is exactly how a filtered DynamoDB read behaves. Keeping that
+    behaviour identical on both paths is deliberate: a fake that never returns
+    a short page would hide the one bug this code can have.
+    """
+    if hasattr(table, "query"):
+        from boto3.dynamodb.conditions import Key
+
+        kwargs: dict[str, Any] = {
+            "IndexName": "owner_sub-index",
+            "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
+            "ScanIndexForward": False,
+            "Limit": limit,
+        }
+        if start_key:
+            kwargs["ExclusiveStartKey"] = start_key
+        resp = table.query(**kwargs)
+        return resp.get("Items", []), resp.get("LastEvaluatedKey")
+
+    items: list[dict[str, Any]] = []
+    key = start_key
+    while len(items) < limit:
+        kwargs = {"Limit": limit}
+        if key:
+            kwargs["ExclusiveStartKey"] = key
+        resp = table.scan(**kwargs)
+        items.extend(i for i in resp.get("Items", []) if i.get("owner_sub") == owner_sub)
+        key = resp.get("LastEvaluatedKey")
+        if not key:
+            break
+    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return items[:limit], key
+
+
+def _page_all(
+    table: Any, limit: int, start_key: dict[str, Any] | None
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """One page of the admin-wide listing.
+
+    A table scan has no global order, so this is bounded but NOT globally
+    newest-first: rows are sorted within the page only. That limitation is
+    stated rather than papered over -- the honest fix is an index over the
+    whole table, which is a schema change in two deploy targets. The
+    user-facing History tab asks for `scope=mine` and takes the exact,
+    index-ordered path above, so nothing a person actually reads is affected.
+    """
+    kwargs: dict[str, Any] = {"Limit": limit}
+    if start_key:
+        kwargs["ExclusiveStartKey"] = start_key
+    resp = table.scan(**kwargs)
+    items = resp.get("Items", [])
+    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return items, resp.get("LastEvaluatedKey")
+
+
 def list_reviews(
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
     owner_scoped: bool = False,
-) -> list[dict[str, Any]]:
+    limit: int | None = None,
+    next_token: str | None = None,
+) -> dict[str, Any]:
     """GET /api/reviews (issue #84): the caller's own reviews, newest first;
     an admin sees every review (ARCHITECTURE.md Routes table: "List my
     reviews (admin: all reviews)").
@@ -2193,17 +3202,27 @@ def list_reviews(
     table) and is explicitly out of scope for that ticket. Nothing about the
     default is changed: an admin calling GET /api/reviews without the
     parameter still sees everything, exactly as documented.
+
+    Issue #488: PAGED. Returns `{"items": [...], "next_token": str | None}`
+    rather than a bare list -- a page's worth of rows plus the token for the
+    next page, or None when there is nothing behind it. The listing used to
+    be unbounded on both axes, so it grew linearly forever; `limit` is
+    clamped into [1, REVIEWS_PAGE_MAX_LIMIT] and cannot be opted out of.
     """
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    page_size = _clamp_limit(limit)
+    start_key = decode_page_token(next_token)
 
     if _is_admin_caller(caller_user_row) and not owner_scoped:
-        items = _scan_all_reviews(table)
+        items, last_key = _page_all(table, page_size, start_key)
     else:
         owner_sub = caller_user_row.get("cognito_sub", "")
-        items = _list_reviews_for_owner(table, owner_sub)
+        items, last_key = _page_for_owner(table, owner_sub, page_size, start_key)
 
-    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
-    return [_review_list_item(i) for i in items]
+    return {
+        "items": [_review_list_item(i) for i in items],
+        "next_token": encode_page_token(last_key),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2242,8 +3261,8 @@ RECENT_FAILURES_MAX_LIMIT = 200
 #
 # This is an ALLOWLIST, and it is the whole reason the Diagnostics tab is not
 # a log viewer. A reviews row carries Confidential document substance
-# (`verdict_summary`, `issues`, `issue_rationale_text`, the per-review
-# `toaster_guidance` the submitter typed) and deployment internals
+# (`summary`, `issues`, the per-review `toaster_guidance` the submitter
+# typed) and deployment internals
 # (`output_s3_key`, execution names). None of it may reach an operator's
 # browser through a diagnostics panel -- the same rule
 # `retention._HOLD_LIST_FIELDS` applies to the legal-hold list view, for the

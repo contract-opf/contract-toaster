@@ -21,15 +21,22 @@ This test:
      fix (and would NOT fire under the old hunk-wide semantics -- see
      _hunk_wide_is_exempted below, which intentionally re-implements the
      PRE-FIX buggy behavior so the regression is pinned, not just the fix).
-  2. Asserts scripts/eval_harness.py, tests/lint-gold-fixtures.py, and
-     tests/lint-acceptable-variations.py all import their on_insert
-     exemption logic from detector_common (issue #212's "pick one
-     implementation ... make the lints import it" requirement), so the
-     three call sites cannot silently re-diverge into hunk-wide copies.
+  2. Asserts tests/lint-gold-fixtures.py and tests/lint-acceptable-
+     variations.py import their on_insert exemption logic from
+     detector_common (issue #212's "pick one implementation ... make the
+     lints import it" requirement), so those two call sites cannot silently
+     re-diverge into hunk-wide copies. (Issue #400: scripts/eval_harness.py
+     was a third call site here; it is now the LLM-native evaluation
+     harness and no longer imports detector_common at all -- see step 3
+     below for where its former coverage of these fixtures moved.)
   3. Runs the four adversarial gold fixtures added alongside this test
      (tests/gold-fixtures/reject-combined-hunk-*-212.json's siblings)
-     through scripts/eval_harness.score_all() end-to-end and asserts they
-     PASS.
+     directly through detector_common.check_on_insert_rule_fires() end-to-
+     end and asserts each fires its expected rule_id -- relocated from
+     scripts/eval_harness.score_all() (issue #400: that module no longer
+     scores detector-shaped fixtures at all; this is the same assertion,
+     against the same fixtures, via a direct call instead of through the
+     retired detector-gate scorer).
 
 On the pre-fix tree this test fails at step 1's import (scripts/
 detector_common.py does not exist yet) -- reproducing the Concern per the
@@ -55,7 +62,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import detector_common  # noqa: E402
-import eval_harness  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -160,7 +166,6 @@ def test_combined_hunks_fire_under_span_level_exemption() -> None:
 # ---------------------------------------------------------------------------
 
 CALL_SITES = {
-    "scripts/eval_harness.py": SCRIPTS_DIR / "eval_harness.py",
     "tests/lint-gold-fixtures.py": TESTS_DIR / "lint-gold-fixtures.py",
     "tests/lint-acceptable-variations.py": TESTS_DIR / "lint-acceptable-variations.py",
 }
@@ -183,7 +188,10 @@ def test_call_sites_import_shared_module() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 3. End-to-end: the adversarial gold fixtures score PASS via eval_harness
+# 3. End-to-end: the adversarial gold fixtures fire their expected rule,
+#    via a direct detector_common call (issue #400: relocated from
+#    scripts/eval_harness.score_all(), which no longer scores detector-
+#    shaped fixtures -- see module docstring step 3 above).
 # ---------------------------------------------------------------------------
 
 ADVERSARIAL_FIXTURE_CASE_IDS = {
@@ -193,31 +201,45 @@ ADVERSARIAL_FIXTURE_CASE_IDS = {
     "reject-combined-hunk-no-exclusivity-violation-first",
 }
 
+GOLD_FIXTURES_DIR = REPO_ROOT / "tests" / "gold-fixtures"
 
-def test_adversarial_fixtures_score_pass() -> None:
-    # Explicit eiaa fixtures_dir/playbook_path (issue #343 repointed
-    # eval_harness's module-level default FIXTURES_PATH/PLAYBOOK_PATH to the
-    # public "sample-agreement" sample playbook) -- these adversarial
-    # fixtures live in tests/gold-fixtures/, eiaa's directory.
-    results = {
-        r.case_id: r
-        for r in eval_harness.score_all(fixtures_dir=REPO_ROOT / "tests" / "gold-fixtures", playbook_path=PLAYBOOK_PATH)
-    }
-    missing = ADVERSARIAL_FIXTURE_CASE_IDS - set(results)
-    _check(not missing, f"adversarial gold fixtures not found by eval_harness: {sorted(missing)}")
 
-    for case_id in sorted(ADVERSARIAL_FIXTURE_CASE_IDS & set(results)):
-        result = results[case_id]
-        _check(
-            result.passed,
-            f"{case_id}: eval_harness scored FAIL: {result.reasons!r}",
+def test_adversarial_fixtures_fire_expected_rule() -> None:
+    playbook = load_playbook()
+    rules_by_id = {r["id"]: r for r in playbook.get("hard_rejections", [])}
+
+    found_case_ids: set[str] = set()
+    for fixture_path in sorted(GOLD_FIXTURES_DIR.glob("*.json")):
+        with open(fixture_path, encoding="utf-8") as f:
+            fixture = json.load(f)
+        case_id = fixture.get("case_id", fixture_path.stem)
+        if case_id not in ADVERSARIAL_FIXTURE_CASE_IDS:
+            continue
+        found_case_ids.add(case_id)
+
+        expectation = fixture["detector_expectation"]
+        rule_id = expectation["rule_id"]
+        variation = fixture["planted_variation"]
+        rule = rules_by_id[rule_id]
+
+        fires = detector_common.check_on_insert_rule_fires(
+            rule, variation["inserted_hunk"], variation.get("topic_id", "")
         )
+        fired_rule_ids = {f["rule_id"] for f in fires}
+        _check(
+            rule_id in fired_rule_ids,
+            f"{case_id}: expected {rule_id!r} to fire via detector_common."
+            f"check_on_insert_rule_fires; actual fires: {sorted(fired_rule_ids) or 'none'}",
+        )
+
+    missing = ADVERSARIAL_FIXTURE_CASE_IDS - found_case_ids
+    _check(not missing, f"adversarial gold fixtures not found in {GOLD_FIXTURES_DIR}: {sorted(missing)}")
 
 
 def main() -> int:
     test_combined_hunks_fire_under_span_level_exemption()
     test_call_sites_import_shared_module()
-    test_adversarial_fixtures_score_pass()
+    test_adversarial_fixtures_fire_expected_rule()
 
     if FAILURES:
         print("FAIL: span-level exemption slice test (issue #212):\n")

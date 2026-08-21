@@ -41,6 +41,7 @@ function stubFailedReview(
   failing_stage: string | null,
   reason = 'unhandled_exception',
   status = 'ERROR',
+  normalization_notes?: string | null,
 ): void {
   vi.stubGlobal(
     'fetch',
@@ -76,6 +77,7 @@ function stubFailedReview(
             has_output: false,
             failing_stage,
             reason,
+            normalization_notes,
           }),
         } as Response;
       }
@@ -88,8 +90,9 @@ async function submitAndFail(
   failing_stage: string | null,
   reason?: string,
   status?: string,
+  normalization_notes?: string | null,
 ): Promise<void> {
-  stubFailedReview(failing_stage, reason, status);
+  stubFailedReview(failing_stage, reason, status, normalization_notes);
   render(<ReviewSubmission />);
   // Wait for the playbook catalog so the submit button is live.
   await screen.findByTestId('review-file-input');
@@ -275,5 +278,37 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
       // route to the screen, and neither does a key or an endpoint port.
       expect(text).not.toMatch(/\d/);
     }
+  });
+});
+
+describe('unnormalizable_input no longer sends the reader to re-save a .docx (#530)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('names the unreadable tracked change, tells the reader to resolve it in Word, and surfaces the per-paragraph note', async () => {
+    const note =
+      "Paragraph 'Indemnification': pending tracked change has no resulting_text " +
+      '-- malformed revision record; cannot determine the operative text to accept.';
+    await submitAndFail(null, 'unnormalizable_input', 'MANUAL_REVIEW_REQUIRED', note);
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(
+      /a tracked change the tool could not safely read/i,
+    );
+    expect(panel).toHaveTextContent(/review that tracked change directly/i);
+    // The old, flatly-wrong copy must be gone.
+    expect(panel).not.toHaveTextContent(/could not be read as a word document/i);
+    expect(panel).not.toHaveTextContent(/saved by word/i);
+
+    expect(screen.getByTestId('review-failure-normalization-notes')).toHaveTextContent(note);
+  });
+
+  it('omits the per-paragraph note paragraph when the backend sent none', async () => {
+    await submitAndFail(null, 'unnormalizable_input', 'MANUAL_REVIEW_REQUIRED');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/a tracked change the tool could not safely read/i);
+    expect(screen.queryByTestId('review-failure-normalization-notes')).toBeNull();
   });
 });

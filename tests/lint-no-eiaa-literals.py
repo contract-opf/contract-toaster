@@ -66,7 +66,20 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TARGET_DIRS = ("backend/src", "scripts")
+# Issue #515: `deploy/` was NOT scanned, which is how a hardcoded tenant-named
+# playbook seed survived in `deploy/dts/bootstrap.py` through every gate. That
+# directory is the single most public-facing path in the repo -- it is exactly
+# what a public/beta adopter copies and runs -- so it is the last place tenant
+# naming should have been invisible.
+#
+# The brand-free gate did not catch it either: its vocabulary is the tenant's
+# corporate name and repo identity, and this literal is neither of those. Two
+# guards, one blind spot each, and the leak sat in the overlap.
+#
+# (Spelling those terms out here would itself trip that gate -- which is a
+# small demonstration that it works, and the reason this comment describes
+# them instead of listing them.)
+TARGET_DIRS = ("backend/src", "scripts", "deploy")
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "lint-no-eiaa-literals.allowlist.json"
 
 _NEEDLE = "eiaa"

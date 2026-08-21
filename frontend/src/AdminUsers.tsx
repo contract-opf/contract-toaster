@@ -35,6 +35,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import { CtBanner, CtButton, CtCard, CtChip, CtField, CtProgress, CtTable, CtToolbar } from './ui/react';
 import type { CtChipVariant } from './ui/react';
@@ -102,25 +103,10 @@ type AuthMode = 'sso' | 'password' | 'both';
 /** A user-creation type this screen can add (mirrors `demo_auth.USER_TYPE_*`). */
 type AddUserType = 'sso' | 'password';
 
-/**
- * An explicit three-state load, replacing the `T | null` sentinel this screen
- * used to key its loading branch off (issue #439).
- *
- * The shipped bug: a failed load set an error string and left the data at
- * `null`, so "has an error" and "is still loading" were both true at once and
- * the screen rendered a danger banner AND a permanent "Loading users…". This
- * shape makes that state unrepresentable — the failure message lives INSIDE
- * the failed state, so there is nowhere for an error to sit while the status
- * is still `loading`.
- *
- * `failed` is deliberately distinct from `ready` with empty data: an empty
- * workspace and a failed load are different claims, and collapsing them would
- * make a 500 render as "No users yet."
- */
-type LoadState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; data: T }
-  | { status: 'failed'; message: string };
+// The three-state load this screen introduced (issue #439) now lives in
+// ./loadState so the other admin screens use the SAME shape rather than a
+// near-copy each (issue #511). See that module for why `failed` carries its
+// own message and why it is not `ready` with empty data.
 
 function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
   return authorizedFetch(path, {

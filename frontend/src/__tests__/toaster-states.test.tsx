@@ -16,9 +16,10 @@
  *                            treatment; the existing designed copy is
  *                            untouched.
  *
- * Also locks in: the attorney-approval watermark renders on every terminal
- * state, and the illustration's stylesheet honors
- * `prefers-reduced-motion: reduce`.
+ * Also locks in: the outcome headline renders on every terminal state (issue
+ * #492 — no attorney-approval disclaimer any more, see
+ * review-terminal-distinctness.test.tsx for the removal itself), and the
+ * illustration's stylesheet honors `prefers-reduced-motion: reduce`.
  *
  * Fully offline: Amplify auth is mocked and fetch is stubbed per test.
  */
@@ -106,18 +107,30 @@ describe('toaster illustration — ReviewStatus visual states', () => {
     expect(screen.queryByTestId('toaster-state-progress')).toBeNull();
     expect(screen.queryByTestId('toaster-state-sober')).toBeNull();
 
-    // The #255/#271 download gate is untouched: confidence band, watermark,
-    // and download button all still render.
+    // The #255/#271 download gate is untouched: confidence band and download
+    // button still render. Issue #492 removed the attorney-approval
+    // disclaimer that used to render alongside them — asserted absent here,
+    // never present.
     expect(screen.getByTestId('review-confidence-band').textContent).toContain('HIGH_CONFIDENCE');
     expect(screen.getByTestId('review-download-button')).toBeInTheDocument();
-    expect(screen.getByTestId('review-result').textContent).toContain(
-      'Tool recommendation only — attorney approval required.',
+    // "Tool recommendation only" is the removed disclaimer's own lead-in —
+    // checked verbatim (not the phrase this file's own sweep target greps
+    // for) so this assertion doesn't itself show up as a hit.
+    expect(screen.getByTestId('review-result').textContent).not.toContain(
+      'Tool recommendation only',
     );
+    // The outcome headline (issue #492) renders instead — the same friendly
+    // label describeOutcome resolves everywhere else.
+    expect(screen.getByTestId('review-outcome').textContent).toBe('Changes requested');
   });
 
-  it.each(['ERROR', 'MANUAL_REVIEW_REQUIRED', 'ERROR_MANUAL_REVIEW_REQUIRED'])(
-    '%s renders the sober treatment, never the toast-up one, and still carries the watermark',
-    async (status) => {
+  it.each([
+    ['ERROR', 'Failed'],
+    ['MANUAL_REVIEW_REQUIRED', 'Needs manual review'],
+    ['ERROR_MANUAL_REVIEW_REQUIRED', 'Needs manual review'],
+  ])(
+    '%s renders the sober treatment (outcome headline %s), never the toast-up one, and no attorney-approval disclaimer',
+    async (status, outcomeLabel) => {
       stubFetch({
         'POST /api/reviews': { review_id: `rev-${status}`, resumed: false },
         [`GET /api/reviews/rev-${status}`]: {
@@ -135,8 +148,13 @@ describe('toaster illustration — ReviewStatus visual states', () => {
       expect(screen.getByTestId('toaster-state-sober')).toBeInTheDocument();
       expect(screen.queryByTestId('toaster-state-done')).toBeNull();
       expect(screen.queryByTestId('toaster-state-progress')).toBeNull();
-      expect(screen.getByTestId('review-result').textContent).toContain(
-        'Tool recommendation only — attorney approval required.',
+      // Issue #492: the outcome headline, never the removed disclaimer.
+      expect(screen.getByTestId('review-outcome').textContent).toBe(outcomeLabel);
+      // "Tool recommendation only" is the removed disclaimer's own lead-in —
+      // checked verbatim (not the phrase this file's own sweep target greps
+      // for) so this assertion doesn't itself show up as a hit.
+      expect(screen.getByTestId('review-result').textContent).not.toContain(
+        'Tool recommendation only',
       );
       // No download button when there is no output.
       expect(screen.queryByTestId('review-download-button')).toBeNull();

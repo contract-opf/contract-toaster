@@ -10,9 +10,10 @@ as spec", ahead of the code) and what is reachable now.
 An internal tool that reviews counterparty-modified contract drafts (EIAA —
 educational internship affiliation agreements) against a codified playbook and
 returns either an **ACCEPT** decision or a redlined `.docx` with tracked changes
-and footnoted rationales. Every output is watermarked **"tool recommendation
-only — attorney approval required"**; a human attorney approves before anything
-goes out. It produces drafts and analysis, not legal advice.
+and footnoted rationales. Nothing in the tool enforces, requires, gates on, or
+records attorney approval; approval happens outside this tool, in your
+organization's own review process. It produces drafts and analysis, not legal
+advice.
 
 ## Current state — read this first
 
@@ -96,6 +97,51 @@ downloads need) are in [deploy/dts/README.md](../deploy/dts/README.md).
   subset. Each `tests/*.py` is a self-contained script-style runner.
 - Frontend: `cd frontend && npm test` (vitest), `npm run typecheck`,
   `npm run build`.
+
+### Reading the gate's answer
+
+**The exit code is the answer, not the last line of output.** `scripts/check.sh`
+exits:
+
+| Code | Meaning | Final line |
+| --- | --- | --- |
+| 0 | every test file passed | `CHECK: ALL GREEN` |
+| 1 | a file failed its first run *and* its isolated re-run | `CHECK: FAILURES:<list>` |
+| 2 | a file failed and then passed alone, and `ALLOW_FLAKY` was not set | `CHECK: FLAKY-UNRESOLVED:<list>` |
+| 3 | another full gate run holds the repo-wide lock; **no tests ran** | `CHECK: LOCK BUSY` |
+
+A *pipeline* reports its last command's status, so `bash scripts/check.sh | tee
+gate.log` exits 0 whatever the gate found. Capture the code directly
+(`bash scripts/check.sh; rc=$?`) or use `set -o pipefail`. Grepping for
+`CHECK: ALL GREEN` is a safe cross-check — that line is printed on exit 0 and
+never on 1, 2, or 3.
+
+**A flaky test fails the gate.** The loop re-runs each failing file once, alone.
+A file that then passes lands in the FLAKY bucket, and that is red (exit 2), not
+green. Pass-on-re-run is not evidence the code is healthy: it is equally
+consistent with a genuine intermittent regression. Read the logs (the loop
+prints its log directory), re-run, and if you conclude it was noise, say so
+explicitly:
+
+```bash
+ALLOW_FLAKY=1 bash scripts/check.sh
+```
+
+That restores the lenient behaviour and names the files it waved through. CI
+never sets it.
+
+**Full runs are serialised across worktrees.** Infra tests shell out to `npx cdk
+synth`; git worktrees have no local `infra/node_modules`, so `npx` falls back to
+the `~/.npm/_npx` cache — which is shared by every worktree on the machine. Two
+concurrent full runs corrupt each other's synth. So a full run takes a lock
+anchored at the shared `git rev-parse --git-common-dir`, waits for it
+(`CHECK_LOCK_WAIT`, default 1800s), and exits 3 rather than running alongside
+another holder. `SKIP_INFRA=1` runs take no lock and stay fully parallel.
+`CHECK_NO_LOCK=1` bypasses it if you are certain nothing else is running.
+
+This is the concrete mechanism behind "a green gate is not evidence": on
+2026-08-20 two parallel worktree runs each produced `CHECK: ALL GREEN` / exit 0
+with real infra failures hidden in the FLAKY bucket.
 
 ## Next steps (roadmap for a reviewer)
 

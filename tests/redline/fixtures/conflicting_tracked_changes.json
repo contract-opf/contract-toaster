@@ -1,5 +1,5 @@
 {
-  "description": "STILL-FAIL-CLOSED (issue #199): the paragraph carries TWO pending (unresolved) tracked-change revisions from two DIFFERENT authors -- multiple revision authors interleaved on the same clause text. This is one of the genuinely-ambiguous structures issue #199 reserves fail-closed for: the pipeline cannot silently decide which author's pending edit (or what composition/order of both) is operative, unlike the single-pending-revision accept-all case. Must fail closed to reason=unnormalizable_input.",
+  "description": "MUST-NORMALIZE (issue #563, supersedes issue #199's fail-closed rule for this fixture): the paragraph carries TWO pending (unresolved) tracked-change revisions from two DIFFERENT authors -- multiple revision authors interleaved on the same clause text. Prior to issue #563 this was reserved fail-closed as genuinely ambiguous; #563 found that reasoning did not hold in the real pipeline (every cluster's resulting_text is the SAME whole-paragraph accept-all text, per `_build_paragraph_record`, which computes it once for the whole paragraph and stamps the identical value onto every cluster's revision record) and redefined this as ACCEPT-ALL with a disclosure note naming the cluster/author counts, same as a single-author pending revision. Both revision records below carry the SAME resulting_text, faithful to how the real extractor emits multi-author clusters. Only a malformed (no resulting_text) record still fails closed.",
   "paragraphs": [
     {
       "heading": "Limitation on Liability",
@@ -17,7 +17,7 @@
           "status": "unresolved",
           "author": "counterparty_second_reviewer",
           "original_text": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
-          "resulting_text": "Each party's aggregate liability under this Agreement shall not exceed $250,000."
+          "resulting_text": "Each party's liability under this Agreement shall be uncapped."
         }
       ]
     }

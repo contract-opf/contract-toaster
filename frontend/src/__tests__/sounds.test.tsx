@@ -13,7 +13,12 @@
  * down immediately with `stopTicking()`, so no interval leaks between tests.
  *
  * Each test re-imports the module through `vi.resetModules()` so its
- * module-level mute/context/buffer state never leaks across tests.
+ * module-level mute/context/buffer state never leaks across tests. Since
+ * issue #489, `muted` is ALSO seeded from real (jsdom) localStorage at
+ * import time — `vi.resetModules()` alone does not clear that, so the
+ * shared `afterEach` below also clears `window.localStorage`, and any test
+ * whose own assertion depends on the load-time default clears it again
+ * itself first, for a self-contained repro if it is ever run in isolation.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -109,6 +114,14 @@ afterEach(() => {
   setAudioContext(undefined);
   delete (window as unknown as Record<string, unknown>).matchMedia;
   vi.unstubAllGlobals();
+  // Issue #489: `muted` is now persisted to real localStorage (module-level
+  // state, read at import time), so a stray write from one test's
+  // `setMuted` call would otherwise leak into the NEXT test's fresh
+  // `loadModule()` — real jsdom Storage survives a module reset within the
+  // same test file. Every test below that cares about the mute default
+  // clears this itself first, but this backstop keeps a forgotten one from
+  // silently poisoning whatever runs after it.
+  window.localStorage.clear();
 });
 
 describe('sounds — graceful behaviour without AudioContext', () => {
@@ -118,6 +131,7 @@ describe('sounds — graceful behaviour without AudioContext', () => {
   });
 
   it('every export is a safe no-op when AudioContext is unavailable', async () => {
+    window.localStorage.clear();
     const sounds = await loadModule();
     expect(() => {
       sounds.primeAudio();
@@ -252,6 +266,7 @@ describe('sounds — with a mock AudioContext', () => {
 
 describe('sounds — reduced-motion default', () => {
   it('defaults to muted when prefers-reduced-motion: reduce matches', async () => {
+    window.localStorage.clear(); // nothing stored — this is the fallback path
     (window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({
       matches: query.includes('reduce'),
       media: query,
@@ -263,9 +278,61 @@ describe('sounds — reduced-motion default', () => {
   });
 });
 
+describe('sounds — mute persistence (issue #489)', () => {
+  it('setMuted writes the flag under the namespaced key, as "1"/"0"', async () => {
+    window.localStorage.clear();
+    const sounds = await loadModule();
+
+    sounds.setMuted(true);
+    expect(window.localStorage.getItem(sounds.MUTE_STORAGE_KEY)).toBe('1');
+
+    sounds.setMuted(false);
+    expect(window.localStorage.getItem(sounds.MUTE_STORAGE_KEY)).toBe('0');
+  });
+
+  it('a stored mute flag survives a "reload" (module re-import), overriding reduced-motion', async () => {
+    window.localStorage.clear();
+    // No reduced-motion preference at all — the reduced-motion default
+    // would otherwise leave this unmuted, so a true result here can only
+    // have come from the stored flag.
+    delete (window as unknown as Record<string, unknown>).matchMedia;
+    window.localStorage.setItem('contract-toaster:muted', '1');
+
+    const sounds = await loadModule();
+    expect(sounds.isMuted()).toBe(true);
+  });
+
+  it('a stored explicit "unmuted" wins over a reduced-motion preference', async () => {
+    window.localStorage.clear();
+    // Reduced motion alone would default to muted — an explicit prior
+    // "unmuted" choice (a real `false`, not just "nothing stored") must
+    // still win, per defaultMuted's own rule that a stored value always
+    // takes precedence over the reduced-motion fallback.
+    (window as unknown as Record<string, unknown>).matchMedia = () => ({
+      matches: true,
+      media: '',
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    window.localStorage.setItem('contract-toaster:muted', '0');
+
+    const sounds = await loadModule();
+    expect(sounds.isMuted()).toBe(false);
+  });
+
+  it('a fresh load with nothing stored still falls back to the reduced-motion default', async () => {
+    window.localStorage.clear();
+    delete (window as unknown as Record<string, unknown>).matchMedia;
+    const sounds = await loadModule();
+    // No matchMedia at all -> prefersReducedMotion() is false -> unmuted.
+    expect(sounds.isMuted()).toBe(false);
+  });
+});
+
 describe('useSoundMuted', () => {
   it('reflects the current mute state and toggles it', async () => {
     setAudioContext(undefined);
+    window.localStorage.clear();
     const sounds = await loadModule();
 
     function Probe(): JSX.Element {

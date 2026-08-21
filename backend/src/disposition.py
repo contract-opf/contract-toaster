@@ -3,9 +3,10 @@ Human-review-outcome capture — issue #74 (closes finding 51).
 
 Even though attorney approval stays **outside** this tool (see
 ARCHITECTURE.md -> "What we are explicitly not building" and
-docs/output-contract.md -> "Attorney-approval framing"), we get no quality
-feedback loop unless we record what the attorney did with the tool's
-output. This module is that lightweight capture.
+docs/output-contract.md -> "Tool-recommendation framing and the
+internal-notes export marker"), we get no quality feedback loop unless we
+record what the attorney did with the tool's output. This module is that
+lightweight capture.
 
 What this is NOT: an approval workflow, a legal gate, or anything that
 changes a review's pipeline `status` or `decision`. Recording a disposition
@@ -30,9 +31,16 @@ docs/data-handling.md -> "Metadata field classification":
                                           the issue AC); ACCEPTED never
                                           enters the queue.
 
-The disposition nag ("N reviews awaiting disposition") specified in
-ARCHITECTURE.md -> "Disposition nag" is served by
-`count_reviews_awaiting_disposition` below.
+`count_reviews_awaiting_disposition` below computes an awaiting-disposition
+count, but nothing calls it: the owner correction on issue #486 (2026-08-02)
+retired the "N reviews awaiting disposition" nag this function was written
+to serve, and ARCHITECTURE.md's "Disposition capture — optional, never a
+nag" bullet is now the governing spec -- disposition capture does not block
+access, gate anything, or push a reviewer toward recording an outcome, so
+there is no badge/banner/reminder for this function to feed. It is kept
+(rather than deleted) as a plain, tested, still-correct counting function in
+case a future *non-nagging* surface (e.g. an admin dashboard metric) wants
+it; see that function's own docstring.
 
 Environment variables consumed:
   REVIEWS_TABLE   DynamoDB reviews table name (same table reviews.py writes)
@@ -173,14 +181,21 @@ def count_reviews_awaiting_disposition(
     owner_sub: str,
     dynamodb_resource: Any,
 ) -> int:
-    """Feed the reviewer list-view disposition nag ("N reviews awaiting
-    disposition") specified in ARCHITECTURE.md -> "Disposition nag".
+    """Count of a reviewer's completed reviews with no `attorney_disposition`
+    recorded yet -- originally written to feed a reviewer list-view
+    "N reviews awaiting disposition" nag.
 
-    A review is "awaiting disposition" when it has reached a completed
-    (dispositionable) status but has no `attorney_disposition` recorded
-    yet. Scoped to the reviewer's own reviews (owner_sub), matching the
-    reviewer list view the nag is displayed on. The nag is informational
-    only — it never blocks access or changes pipeline state.
+    That nag is retired: the owner correction on issue #486 (2026-08-02)
+    replaced it with ARCHITECTURE.md's "Disposition capture — optional,
+    never a nag" bullet, and this function is INTENTIONALLY UNCALLED --
+    disposition capture never blocks access, gates anything, or pushes a
+    reviewer toward recording an outcome, so there is no badge, banner, or
+    reminder anywhere in the product for a count like this one to feed. It
+    is kept as a plain, tested counting function (a review is "awaiting
+    disposition" when it has reached a completed/dispositionable status but
+    has no `attorney_disposition` recorded yet, scoped to the reviewer's own
+    reviews via `owner_sub`) in case a future non-nagging surface (e.g. an
+    admin dashboard metric) wants it.
     """
     table = _reviews_table(dynamodb_resource)
     items = table.query_by_owner(owner_sub) if hasattr(table, "query_by_owner") else _scan_by_owner(table, owner_sub)

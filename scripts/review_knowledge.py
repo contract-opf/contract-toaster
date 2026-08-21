@@ -126,6 +126,18 @@ class ReviewKnowledge:
     posture_source: str = "playbook"
     accepted_empty_posture: bool = False
     accepted_stub_basis: bool = False
+    #: Substance-free (kinds and counts, never clause text) projection of
+    #: every `opf_prompt._omit()` call `compose_opf_system_blocks` recorded
+    #: while composing `blocks` -- e.g. `{"posture.system_prompt — ...": 1,
+    #: "binding — ...": 1}` for the real playbook's own `posture: {}` /
+    #: `floor: {}` shape. Was previously stderr-only (`opf_prompt
+    #: ._report_omissions`): a completed review's lineage could say
+    #: `posture_source: "playbook"` with nothing else on the record to say
+    #: the playbook actually supplied NO posture, NO Binding content, and NO
+    #: Guidance content. `{}` (never a missing key) when nothing was
+    #: dropped -- same "state what happened, not what's absent" doctrine as
+    #: `lineage_record()`'s own docstring.
+    prompt_omissions: dict[str, int] = field(default_factory=dict)
 
     def system_blocks(self) -> list[dict[str, Any]]:
         """Anthropic-message-API-shaped content blocks.
@@ -168,6 +180,15 @@ class ReviewKnowledge:
         Positive: it states what the review HAD, rather than leaving an
         operator to infer it from what is missing. `playbook_evidence: "none"`
         is a claim; a lineage with no evidence field is an ambiguity.
+
+        `prompt_omissions` (additive) is the exception to "positive, not
+        absence": `posture_source: "playbook"` alone reads as if the
+        playbook supplied negotiating intent even when it supplied none
+        (the real playbook's own `posture: {}`/`floor: {}` shape) --
+        `prompt_omissions` is what lets an operator tell the two cases
+        apart on the SAME record, rather than needing to re-run composition
+        and read stderr. Always present, `{}` when nothing was dropped
+        (never a missing key), same convention as every other field here.
         """
         return {
             "review_knowledge_mode": self.mode,
@@ -180,6 +201,7 @@ class ReviewKnowledge:
             "policy_id": (self.policy or {}).get("playbook_id"),
             "policy_version": (self.policy or {}).get("version"),
             "must_rule_ids": [r.get("id") for r in self.must_rules()],
+            "prompt_omissions": dict(self.prompt_omissions),
         }
 
 
@@ -309,8 +331,22 @@ def resolve_knowledge(
             # no further detail).
             posture_source = "policy" if rule_count > 0 else "playbook"
 
+    # `omissions` is populated in place by `compose_opf_system_blocks` with
+    # `{kind: [count, where]}` -- the same shape the stderr warning is built
+    # from. Only `count` is kept on the record (`prompt_omissions`,
+    # ReviewKnowledge's own docstring): "kind" is a fixed, static diagnostic
+    # sentence (never document/clause text), but "where" can name an OPF-
+    # internal id (e.g. a floor invariant id), and this record is meant to
+    # be safe to persist onto a review row unconditionally -- kinds and
+    # counts only.
+    omissions: dict[str, list] = {}
     blocks = opf_prompt.compose_opf_system_blocks(
-        opf_doc, overrides, policy=policy, mode=declared_mode, instructions_text=instructions_text
+        opf_doc,
+        overrides,
+        policy=policy,
+        mode=declared_mode,
+        instructions_text=instructions_text,
+        omissions_out=omissions,
     )
 
     return ReviewKnowledge(
@@ -322,4 +358,5 @@ def resolve_knowledge(
         posture_source=posture_source,
         accepted_empty_posture=accepted_empty_posture,
         accepted_stub_basis=accepted_stub_basis,
+        prompt_omissions={kind: count for kind, (count, _where) in omissions.items()},
     )
