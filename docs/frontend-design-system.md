@@ -124,12 +124,27 @@ did it wrong.
 ### 3.4 Behavioral invariants locked by tests
 - **All tabpanels stay mounted**, toggled via the `hidden` attribute —
   never conditionally unmount (`security-posture.test.tsx` +
-  polling-state survival; see `App.tsx:233-286` — corrected 2026-07-28,
-  was cited as `294-300`, which now falls inside the footer JSX as the
-  file has grown; re-verify the line range before citing it again).
-- **No web storage.** `localStorage.setItem`/`sessionStorage.setItem` are
-  banned by a source grep in `security-posture.test.tsx`; tokens and
-  mute state are in-memory only.
+  polling-state survival; see `App.tsx:523-610` — corrected 2026-08-12,
+  was cited as `233-286`, which now falls inside the hooks above `activeTab`
+  (declared at `App.tsx:393`) as the file has grown; re-verify the line
+  range before citing it again).
+- **No web storage, with three allowed call sites.** `localStorage.setItem`/
+  `sessionStorage.setItem` are banned by a source grep in
+  `security-posture.test.tsx`, which now walks `frontend/src` recursively
+  (excluding `__tests__`) and enforces exactly one `setItem` call site in
+  each of `ALLOWED_SETITEM_FILES` — the only files in the whole tree
+  permitted to call it at all:
+  - `frontend/src/toaster/notify.ts`, writing `contract-toaster:notify-on-done`
+    — a boolean opt-in flag for the "toast's ready" browser Notification
+    (issue #497).
+  - `frontend/src/toaster/sounds.ts`, writing `contract-toaster:muted` — the
+    sound-mute toggle (issue #489 item 3).
+  - `frontend/src/lastPlaybook.ts`, writing `contract-toaster:last-playbook`
+    — the last-selected playbook id, so the picker defaults to it on the
+    next visit (issue #489 item 4).
+
+  Nothing sensitive lands in any of the three: no token, no review content
+  — just those three small preference flags. Tokens remain in-memory only.
 - **No `dangerouslySetInnerHTML`** anywhere in `frontend/src` (same test
   + `tests/test_frontend_xss_posture.py`).
 - **No tenant-brand strings strings** in UI or code (white-label release;

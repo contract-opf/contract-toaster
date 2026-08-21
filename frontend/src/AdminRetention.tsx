@@ -40,6 +40,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import {
   CtBanner,
@@ -160,9 +161,18 @@ function clampDays(value: number): number {
 }
 
 export default function AdminRetention(): React.ReactElement | null {
-  const [settings, setSettings] = useState<RetentionSettings | null>(null);
-  const [holds, setHolds] = useState<LegalHoldRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Issue #511: two explicit three-state loads. They previously shared ONE
+  // `error` string with a `T | null` sentinel each, so a failure in either
+  // left the other's spinner running forever under a single banner, with no
+  // way to tell which had failed and no way to retry either.
+  const [settingsLoad, setSettingsLoad] = useState<LoadState<RetentionSettings>>({
+    status: 'loading',
+  });
+  const [holdsLoad, setHoldsLoad] = useState<LoadState<LegalHoldRow[]>>({ status: 'loading' });
+  // Derived views, so the render below reads exactly as it did. The STATE is
+  // the union; these are projections of it.
+  const settings = settingsLoad.status === 'ready' ? settingsLoad.data : null;
+  const holds = holdsLoad.status === 'ready' ? holdsLoad.data : null;
   const [actionError, setActionError] = useState<string | null>(null);
   const [isForbidden, setIsForbidden] = useState(false);
 
@@ -222,16 +232,19 @@ export default function AdminRetention(): React.ReactElement | null {
         );
       }
       const data = (await response.json()) as RetentionSettings;
-      setSettings(data);
+      setSettingsLoad({ status: 'ready', data });
       setSliderValue(data.retention_window_days);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the retention settings. Please try again."),
+      setSettingsLoad(
+        failedLoad(err, "We couldn't load the retention settings. Please try again."),
       );
     }
   }, []);
+
+  const retryLoadSettings = useCallback(() => {
+    setSettingsLoad({ status: 'loading' });
+    void loadSettings();
+  }, [loadSettings]);
 
   const loadHolds = useCallback(async () => {
     try {
@@ -249,31 +262,45 @@ export default function AdminRetention(): React.ReactElement | null {
         );
       }
       const data = (await response.json()) as { holds: LegalHoldRow[] };
-      setHolds(data.holds);
+      setHoldsLoad({ status: 'ready', data: data.holds });
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the legal holds. Please try again."),
-      );
+      setHoldsLoad(failedLoad(err, "We couldn't load the legal holds. Please try again."));
     }
   }, []);
 
-  // Best-effort: unlike loadSettings/loadHolds, a failure here never sets
-  // the panel-level `error` banner. Both feed enhancements (the picker's
-  // suggestions, human identities in the holds table) that this screen
-  // worked without before #475 -- degrading silently to the pre-#475
-  // paste-a-UUID behavior is correct, not a swallowed bug.
+  const retryLoadHolds = useCallback(() => {
+    setHoldsLoad({ status: 'loading' });
+    void loadHolds();
+  }, [loadHolds]);
+
+  // Best-effort: unlike loadSettings/loadHolds, a failure here never sets a
+  // panel-level error banner or blocks the screen. Both feed enhancements
+  // (the picker's suggestions, human identities in the holds table) that this
+  // screen worked without before #475, so degrading FUNCTIONALLY to the
+  // pre-#475 paste-a-UUID behaviour is correct.
+  //
+  // Issue #525: degrading SILENTLY is not. A picker that opens to nothing
+  // looks identical whether there are genuinely no reviews or the list failed
+  // to load, and those two need different reactions from the admin — one is
+  // "there is nothing to hold yet", the other is "try again or paste the id".
+  // So the failure is recorded and said out loud, without becoming a blocker.
+  const [reviewsFailed, setReviewsFailed] = useState(false);
+  const [usersFailed, setUsersFailed] = useState(false);
+
   const loadReviews = useCallback(async () => {
     try {
       const response = await jsonFetch('/api/reviews');
       if (!response.ok) {
+        setReviewsFailed(true);
         return;
       }
       const data = (await response.json()) as { reviews: ReviewSummary[] };
       setReviews(data.reviews);
+      setReviewsFailed(false);
     } catch {
-      // Leave `reviews` null -- the picker falls back to plain paste entry.
+      // `reviews` stays null -- the picker falls back to plain paste entry,
+      // and the hint below now says why.
+      setReviewsFailed(true);
     }
   }, []);
 
@@ -281,12 +308,15 @@ export default function AdminRetention(): React.ReactElement | null {
     try {
       const response = await jsonFetch('/api/users');
       if (!response.ok) {
+        setUsersFailed(true);
         return;
       }
       const data = (await response.json()) as { users: UserRow[] };
       setUsers(data.users);
+      setUsersFailed(false);
     } catch {
-      // Leave `users` null -- submitter cells fall back to the raw sub.
+      // `users` stays null -- submitter cells fall back to the raw sub.
+      setUsersFailed(true);
     }
   }, []);
 
@@ -503,10 +533,26 @@ export default function AdminRetention(): React.ReactElement | null {
     <section data-testid="admin-retention-panel" className="ct-section ct-stack">
       <CtToolbar title="Document retention & legal hold" />
 
-      {error && (
-        <CtBanner variant="danger" data-testid="admin-retention-error">
-          {error}
-        </CtBanner>
+      {/* A failed load is TERMINAL, and each loader now says which one failed
+          and offers its own retry (issue #511). One shared banner could not
+          do either. */}
+      {settingsLoad.status === 'failed' && (
+        <div className="ct-stack">
+          <CtBanner variant="danger" data-testid="admin-retention-error">
+            {settingsLoad.message}
+          </CtBanner>
+          <div className="ct-actions" role="group">
+            <CtButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="admin-retention-retry"
+              onClick={retryLoadSettings}
+            >
+              Try again
+            </CtButton>
+          </div>
+        </div>
       )}
       {actionError && (
         <CtBanner variant="danger" data-testid="admin-retention-action-error">
@@ -514,9 +560,9 @@ export default function AdminRetention(): React.ReactElement | null {
         </CtBanner>
       )}
 
-      {settings === null ? (
+      {settingsLoad.status === 'loading' ? (
         <CtProgress data-testid="admin-retention-loading" label="Loading retention settings…" />
-      ) : (
+      ) : settings === null ? null : (
         <CtCard data-testid="retention-slider-panel">
           <div className="ct-stack">
             <CtToolbar title="Retention window" />
@@ -710,9 +756,20 @@ export default function AdminRetention(): React.ReactElement | null {
               matched (by either path), its human context (date — submitter —
               outcome) renders below in `hold-review-id-match` -- the raw id
               is never the thing shown in place of "seeing a UUID". */}
+          {/* Issue #525: the hint tells the truth about which of the three
+              states the picker is actually in. Before this it always promised
+              a picker, including when the list had failed to load and the
+              dropdown opened to nothing at all. */}
           <CtField
             label="Pick a recent review"
-            hint="Selecting one shows its details below — no need to know its ID."
+            hint={
+              reviewsFailed
+                ? 'The recent-review list could not be loaded, so there is nothing to pick from. Paste a full review ID below instead.'
+                : reviews !== null && reviews.length === 0
+                  ? 'No reviews have been submitted yet, so there is nothing to pick from.'
+                  : 'Selecting one shows its details below — no need to know its ID.'
+            }
+            data-testid="hold-review-picker-field"
           >
             <select
               id="hold-review-select"
@@ -807,7 +864,37 @@ export default function AdminRetention(): React.ReactElement | null {
 
       <CtCard data-testid="legal-hold-list-panel">
         <CtToolbar title="Legal holds" />
-        {holds === null ? (
+        {/* Issue #525: the submitter column silently falls back to the raw
+            `owner_sub` when the user list fails to load. That fallback is
+            documented and correct; leaving it unexplained is not — an admin
+            reading a column of subs has no way to tell a directory failure
+            from a directory that genuinely has no entry for them. */}
+        {usersFailed && (
+          <p className="ct-muted" data-testid="legal-holds-identities-degraded">
+            <small>
+              The user directory could not be loaded, so submitters below are shown by
+              their account ID rather than by name.
+            </small>
+          </p>
+        )}
+        {holdsLoad.status === 'failed' ? (
+          <div className="ct-stack">
+            <CtBanner variant="danger" data-testid="legal-holds-error">
+              {holdsLoad.message}
+            </CtBanner>
+            <div className="ct-actions" role="group">
+              <CtButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="legal-holds-retry"
+                onClick={retryLoadHolds}
+              >
+                Try again
+              </CtButton>
+            </div>
+          </div>
+        ) : holds === null ? (
           <p data-testid="legal-holds-loading">Loading legal holds…</p>
         ) : (
           <CtTable>

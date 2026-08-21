@@ -168,9 +168,16 @@ def _three_issue_scenario() -> list:
     ]
 
 
-def _run_generate_redline(rg):
+def _run_generate_redline(rg, notes_mode="internal"):
     """The full 3-issue scenario used by AC1/AC2/AC4/AC5: sec-1 and sec-3
-    apply cleanly in place, sec-5 fails to locate."""
+    apply cleanly in place, sec-5 fails to locate.
+
+    `notes_mode` defaults to `"internal"` (issue #513: the export marker is
+    conditional on notes mode -- present iff internal notes are included)
+    so AC2's marker-presence assertions keep exercising the marker-present
+    case; AC1/AC4/AC5 don't inspect header/footer at all so the override is
+    harmless there. See `_check_marker_absent_without_internal_notes` for
+    the marker-absent-by-default case."""
     issues = _three_issue_scenario()
     reconciled = _reconciled(issues)
     corpus = rg.leakage_scan.ConfidentialCorpus()
@@ -180,6 +187,7 @@ def _run_generate_redline(rg):
         reconciled_result=reconciled,
         corpus=corpus,
         normalized_docx_bytes=draft_bytes,
+        notes_mode=notes_mode,
     )
     return draft_bytes, result
 
@@ -321,9 +329,10 @@ def _check_ac2(rg, failures: list) -> None:
             return
         header_bytes = zf.read("word/header1.xml")
         footer_bytes = zf.read("word/footer1.xml")
-        if b"attorney approval required" not in header_bytes:
+        marker_bytes = "contains internal notes".encode("utf-8")
+        if marker_bytes not in header_bytes:
             failures.append("[AC2-c] Marker text not found in word/header1.xml.")
-        if b"attorney approval required" not in footer_bytes:
+        if marker_bytes not in footer_bytes:
             failures.append("[AC2-d] Marker text not found in word/footer1.xml.")
 
         doc_root = ET.fromstring(zf.read(DOCUMENT_PART))
@@ -533,6 +542,39 @@ def _check_ac5(rg, failures: list) -> None:
             failures.append("[AC5-c] analysis_report contains a de-branding violation (tenant-brand strings).")
 
 
+def _check_marker_absent_without_internal_notes(rg, failures: list) -> None:
+    """Issue #513 AC: `notes_mode` values that carry no internal-audience
+    content (the default `"external"`, plus `"none"`) must produce a
+    `.docx` with NO export marker in any part -- no `word/header1.xml`, no
+    `word/footer1.xml`, no `<w:headerReference>`/`<w:footerReference>` --
+    unlike `_check_ac2` above, which explicitly opts into `notes_mode=
+    "internal"` to exercise the marker-present case."""
+    for notes_mode in ("external", "none"):
+        _draft_bytes, result = _run_generate_redline(rg, notes_mode=notes_mode)
+        docx_bytes = result.get("docx_bytes")
+        if not docx_bytes:
+            failures.append(
+                f"[AC513-a/{notes_mode}] Expected a partial redline docx to check "
+                f"marker absence on."
+            )
+            continue
+        with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
+            names = set(zf.namelist())
+            if "word/header1.xml" in names or "word/footer1.xml" in names:
+                failures.append(
+                    f"[AC513-b/{notes_mode}] Expected NO header1.xml/footer1.xml "
+                    f"with notes_mode={notes_mode!r}. Got: {sorted(names)}"
+                )
+            doc_root = ET.fromstring(zf.read(DOCUMENT_PART))
+            if doc_root.findall(f".//{_qn('headerReference')}") or doc_root.findall(
+                f".//{_qn('footerReference')}"
+            ):
+                failures.append(
+                    f"[AC513-c/{notes_mode}] <w:sectPr> should carry no header/footer "
+                    f"reference when no marker was injected."
+                )
+
+
 def main() -> int:
     failures: list = []
 
@@ -555,6 +597,7 @@ def main() -> int:
     _check_ac3(rg, redline_quote_apply_mod, failures)
     _check_ac4(rg, failures)
     _check_ac5(rg, failures)
+    _check_marker_absent_without_internal_notes(rg, failures)
 
     if failures:
         print("FAIL: in-place redline wiring gate (issue #379).\n")

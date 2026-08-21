@@ -54,6 +54,7 @@ x-resource-names: &resource-names
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
+  MODEL_INVOCATIONS_TABLE: contract-toaster-model-invocations-dts
   UPLOADS_BUCKET: contract-toaster-uploads-dts
   OUTPUTS_BUCKET: contract-toaster-outputs-dts
 
@@ -124,6 +125,14 @@ services:
       COMMIT_SHA:
       IMAGE_DIGEST:
       DEPLOY_TARGET: dts
+      # Issue #509: the retention purge cadence. The sweep itself has been
+      # correct since #454, but nothing on this target ever invoked it -- an
+      # operator saw a healthy PREVIEW while uploaded contracts and outputs
+      # accumulated in MinIO forever. backend/src/purge_scheduler.py runs it
+      # on this interval; the AWS target is unaffected (its Lambda owns the
+      # cadence there). Set PURGE_SWEEP_ENABLED=0 to turn it off without
+      # editing code.
+      PURGE_SWEEP_INTERVAL_SECONDS: "${PURGE_SWEEP_INTERVAL_SECONDS:-3600}"
       MODEL_PROVIDER: openrouter
       AUTH_MODE: password
       # Issue #469: the login-throttle IP key (client_ip_from_request in
@@ -149,6 +158,21 @@ services:
       # key" tab) takes precedence when present. Leave blank to manage the key
       # entirely from the admin UI.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Issue #418: forces the OpenRouter request to carry the review object
+      # as a tool call (forced tool_choice) instead of prose JSON. Default
+      # OFF (unset) -- behavior is byte-identical to today either way until
+      # a human flips this ON after a live smoke run against this
+      # deployment's actual OpenRouter traffic; OpenRouter's Anthropic
+      # tool-use pass-through cannot be proven from the offline test suite.
+      # See backend/src/config.py::structured_output_enabled.
+      # OPENROUTER_STRUCTURED_OUTPUT: "1"
+      # Issue #569: turns on the bounded re-quote repair pass (one extra
+      # model call to correct a flag-only patch's quote, see
+      # scripts/requote_repair.py's own docstring). Default OFF (unset) --
+      # behavior is byte-identical to today either way until a human flips
+      # this ON after fidelity is measured against this deployment's actual
+      # OpenRouter traffic. See backend/src/config.py::requote_enabled.
+      # REQUOTE_ENABLED: "1"
     depends_on:
       bootstrap:
         condition: service_completed_successfully

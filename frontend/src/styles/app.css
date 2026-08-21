@@ -19,8 +19,15 @@
  *             STRIP itself is ct-tab-bar, issue #390; the group wrapper is
  *             app chrome around a second labeled `<ct-tab-bar>` instance,
  *             issue #477 — see App.tsx)
- *   Sections  .ct-section  .ct-section-title
- *   Status    .ct-muted  .ct-mono
+ *   Sections  .ct-section  .ct-section-title  .ct-outcome-headline (issue
+ *             #492 — the result panel's biggest text, colored per the
+ *             outcome variant via an inline custom-property style rather
+ *             than a per-variant class, since ReviewSubmission.tsx already
+ *             resolves the variant through the shared outcome map)
+ *   Status    .ct-muted  .ct-mono  .ct-sr-only (issue #492 — announced,
+ *             never painted; standard clip-rect pattern, mirrors
+ *             ct-button.css's .ct-button__live and ct-file-drop.css's
+ *             .ct-file-drop__input)
  *   Layout    .ct-row  .ct-stack  .ct-actions
  *
  * Theme-aware via tokens.css (which mirrors prefers-color-scheme). Motion:
@@ -102,6 +109,15 @@
   margin: 0 0 0.75rem;
 }
 
+/* The result panel's outcome headline (issue #492) — an ordinary <h3>
+   already gets base.css's display-font, bold, --ct-text-lg treatment
+   ("the biggest text" the ticket calls for); this only tightens the
+   bottom margin so it reads as the FIRST line of the panel, not a
+   free-standing section heading with a full heading-sized gap under it. */
+.ct-outcome-headline {
+  margin: 0 0 var(--ct-space-2);
+}
+
 .ct-muted {
   color: var(--ct-text-muted);
   font-size: 0.85rem;
@@ -111,6 +127,37 @@
    system.md §4.5. */
 .ct-mono {
   font-family: var(--ct-font-mono);
+}
+
+/* Screen-reader-only (issue #492): present in the accessibility tree and
+   announced by assistive tech, but never painted. Standard clip-rect
+   pattern — mirrors ct-button.css's .ct-button__live and ct-file-drop.css's
+   .ct-file-drop__input, which solve the identical "announce, don't paint"
+   problem for their own components; this is the app-chrome-level copy for
+   plain markup that isn't a ct-* component (ReviewSubmission.tsx's
+   completion-handoff live region). Never display:none / visibility:hidden,
+   either of which would also hide it from assistive tech, not just sighted
+   users. */
+.ct-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Containing block for the .ct-sr-only completion-handoff region above
+   (ReviewSubmission.tsx) — load-bearing, not decoration, same reasoning as
+   ct-button.css's own `position: relative` comment: an absolutely-
+   positioned box is clipped by its CONTAINING BLOCK's overflow, not
+   whatever it happens to sit inside, so without this the region escapes
+   this section and can enlarge an ANCESTOR's scrollable area instead. */
+[data-testid='review-submission'] {
+  position: relative;
 }
 
 /* ----------------------------------------------------------- Layout utils */
@@ -138,6 +185,19 @@
 }
 .ct-actions button[type='submit'],
 .ct-actions [role='button'] { width: auto; }
+
+/* "Butter it" (issue #499) — a purely decorative animation target
+   (aria-hidden, no content) that `toaster/motion.ts`'s butterSlide()
+   travels across on a successful generation. Sized small and inline so it
+   never affects the surrounding stack's layout; motion.ts's own reduced-
+   motion rail governs whether it actually travels. */
+.ct-butter-pat {
+  width: 1.75rem;
+  height: 1rem;
+  border-radius: 0.2rem;
+  background: linear-gradient(180deg, var(--ct-butter-1), var(--ct-butter-2));
+  box-shadow: 0 1px 2px var(--ct-butter-shadow);
+}
 
 /* .ct-table-scroll (users/legal-holds table wrapper) was absorbed into
    ui/components/ct-table.css (issue #392) — AdminUsers.tsx /

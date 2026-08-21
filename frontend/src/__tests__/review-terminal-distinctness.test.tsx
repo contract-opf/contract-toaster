@@ -147,9 +147,12 @@ describe('A9 — MANUAL_REVIEW_REQUIRED vs DONE, as rendered', () => {
     expect(result).toContain('could not be automatically reviewed');
     expect(result).toContain('a legal admin will review it');
     expect(result).not.toContain('No requested changes identified by tool.');
-    // The watermark is on BOTH terminal states, so it is not a differentiator
-    // — pinned here only so a future edit can't quietly drop it from this one.
-    expect(result).toContain('attorney approval required');
+    // Issue #492 removed the attorney-approval disclaimer that used to sit
+    // on every terminal state — asserted absent here, not present, now that
+    // attorney/legal review is a policy that lives entirely outside this
+    // product. Checked via the disclaimer's own lead-in text rather than
+    // repeating the swept phrase verbatim in this file.
+    expect(result).not.toContain('Tool recommendation only');
   });
 
   it('offers nothing to download, because nothing was produced', async () => {

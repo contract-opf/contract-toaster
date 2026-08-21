@@ -154,6 +154,114 @@ def test_firm_overlay_names_the_envelope_fields(failures: list[str]) -> None:
             failures.append(f"[prompt] overlay must instruct on {needle!r}")
 
 
+# ---------------------------------------------------------------------------
+# confidence_state — the second instance of this file's root problem.
+#
+# The overlay pins an exact value for every other constrained field
+# (schema_version const, decision's two values, provenance "model") but named
+# `confidence_state` with NO values at all. A real model fills that blank with
+# the natural-language confidence word any reader would expect -- observed
+# 2026-08-04 against the real educational-affiliation playbook:
+#
+#   anthropic/claude-opus-4.8   -> "confidence_state":"medium"
+#   deepseek/deepseek-v4-pro    -> same failure, same field
+#
+# and the strict schema rejects it:
+#
+#   schema_invalid: 'medium' is not one of ['OK', 'LOW_CONFIDENCE',
+#                   'MANUAL_REVIEW_REQUIRED', 'ERROR_MANUAL_REVIEW_REQUIRED']
+#
+# so EVERY real review died at the primary pass with a well-formed, genuinely
+# useful review in hand. The suite stayed green because this file's own
+# `_model_body_without_envelope()` hand-authors `"confidence_state": "OK"` --
+# a legal value the prompt never asked the model to produce. That is the
+# fixture accepting what the real dependency rejects.
+#
+# ERROR_MANUAL_REVIEW_REQUIRED is deliberately NOT offered to the model: the
+# schema's own description reserves it for the pipeline ("the model must not
+# emit this value directly").
+# ---------------------------------------------------------------------------
+MODEL_EMITTABLE_CONFIDENCE_STATES = ("OK", "LOW_CONFIDENCE", "MANUAL_REVIEW_REQUIRED")
+
+
+def test_firm_overlay_pins_the_confidence_state_values(failures: list[str]) -> None:
+    overlay = pp.BINARY_DECISION_OVERLAY_BLOCK
+    for value in MODEL_EMITTABLE_CONFIDENCE_STATES:
+        if value not in overlay:
+            failures.append(
+                f"[confidence] overlay must name the legal confidence_state value {value!r} -- "
+                f"naming the field without its values is what elicited 'medium' from two "
+                f"different real models"
+            )
+
+
+def test_a_natural_language_confidence_word_is_still_rejected(failures: list[str]) -> None:
+    """The prompt fix must not be paired with a silent coercion.
+
+    `confidence_state` is a model judgment, not pipeline envelope metadata, so
+    `_stamp_pipeline_envelope` must never quietly rewrite a value the model
+    actually emitted -- an unrecognized one has to keep failing validation and
+    reach the retry (which, since #417, now says what was wrong).
+    """
+    body = _model_body_without_envelope()
+    body["confidence_state"] = "medium"
+    is_valid, err = pp.validate_model_response(json.dumps(body))
+    if is_valid:
+        failures.append("[confidence] 'medium' must not be silently coerced into a legal value")
+    elif "confidence_state" not in str(err) and "medium" not in str(err):
+        failures.append(f"[confidence] rejection must name the offending value; got: {err}")
+
+
+# ---------------------------------------------------------------------------
+# playbook_topic_id — the third instance, and the one that made the OPF path
+# unusable end to end.
+#
+# `playbook_topic_id`'s pattern (`^[a-z0-9]+(?:-[a-z0-9]+)*$`) and its
+# description ("the kebab-case topic id from the active playbook") both date
+# from the v1 playbook format, whose `topics[].id` values really were
+# kebab-case. An OPF 0.3 playbook names its topics with DOTTED ids --
+# `clause.confidentiality`, `clause.indemnification`, `clause.governing-law`
+# -- and the model, correctly citing the id the playbook it was given
+# actually uses, produced:
+#
+#   schema_invalid: 'clause.confidentiality' does not match
+#                   '^[a-z0-9]+(?:-[a-z0-9]+)*$' (at issues/1/playbook_topic_id)
+#
+# So the output contract forbade the vocabulary the input playbook defines:
+# every OPF-governed review failed the moment the model cited a topic
+# correctly. Observed 2026-08-04 against the real educational-affiliation
+# playbook (4 of its 10 ids are dotted).
+#
+# The pattern now accepts kebab-case segments joined by dots -- both formats,
+# neither loosened into "any string": whitespace, uppercase, and punctuation
+# that could smuggle structure into an audit field are still rejected.
+# playbooks/schema.json's own kebab-only constraint on a v1 playbook's
+# `topics[].id` is deliberately NOT touched; that gate governs how a v1
+# playbook may be authored, not which ids a review may cite.
+# ---------------------------------------------------------------------------
+def _body_with_topic_id(topic_id: str) -> str:
+    body = _model_body_without_envelope()
+    body["issues"][0]["playbook_topic_id"] = topic_id
+    return json.dumps(body)
+
+
+def test_opf_dotted_topic_ids_are_accepted(failures: list[str]) -> None:
+    for topic_id in ("clause.confidentiality", "clause.governing-law", "indemnification"):
+        is_valid, err = pp.validate_model_response(_body_with_topic_id(topic_id))
+        if not is_valid:
+            failures.append(
+                f"[topic] a review citing the active playbook's own topic id {topic_id!r} "
+                f"must validate; got: {err}"
+            )
+
+
+def test_topic_id_is_not_loosened_to_any_string(failures: list[str]) -> None:
+    for topic_id in ("Clause.Confidentiality", "clause confidentiality", "clause/../etc", ""):
+        is_valid, _err = pp.validate_model_response(_body_with_topic_id(topic_id))
+        if is_valid:
+            failures.append(f"[topic] {topic_id!r} must still be rejected as a topic id")
+
+
 TESTS = [
     test_bare_body_missing_envelope_is_stamped_and_valid,
     test_prose_preamble_is_unwrapped,
@@ -163,6 +271,10 @@ TESTS = [
     test_stamping_never_invents_model_judgment_fields,
     test_non_json_response_still_reports_invalid_json,
     test_firm_overlay_names_the_envelope_fields,
+    test_firm_overlay_pins_the_confidence_state_values,
+    test_a_natural_language_confidence_word_is_still_rejected,
+    test_opf_dotted_topic_ids_are_accepted,
+    test_topic_id_is_not_loosened_to_any_string,
 ]
 
 

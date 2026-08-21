@@ -529,6 +529,211 @@ describe('AdminPlaybooks — activate and roll back', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Approve for activation (issue #485 — Gate 7's missing write path)
+// ---------------------------------------------------------------------------
+
+describe('AdminPlaybooks — approve for activation', () => {
+  it('offers Approve on an unapproved version and sends back exactly its own content_hash', async () => {
+    stubRoutes();
+    await renderWithVersions();
+
+    // v1.0.0 in the shared TRAIL fixture carries a content_hash but no
+    // legal_approval_content_hash -- an upload that has never been
+    // approved, the normal state for a freshly-uploaded version.
+    const approveButton = screen.getByTestId('playbook-version-approve-v1.0.0');
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      expect(requestsMatching('POST', '/versions/v1.0.0/legal-approval')).toHaveLength(1);
+    });
+    const call = requestsMatching('POST', '/versions/v1.0.0/legal-approval')[0]!;
+    expect(call.body).toEqual({ content_hash: FULL_HASH });
+  });
+
+  it('shows a quiet "Approved" note instead of a button once approved, and re-reads the trail after approving', async () => {
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/synthetic-nda-sample/versions',
+        status: 200,
+        body: {
+          versions: [
+            {
+              ...TRAIL.versions[0],
+              legal_approval_content_hash: FULL_HASH,
+            },
+          ],
+        },
+      },
+    ]);
+    await renderWithVersions();
+
+    expect(screen.getByTestId('playbook-version-approved-note-v1.0.0').textContent).toBe(
+      'Approved',
+    );
+    expect(screen.queryByTestId('playbook-version-approve-v1.0.0')).toBeNull();
+  });
+
+  it('offers neither an Approve button nor an Approved note for a row with no content_hash at all', async () => {
+    stubRoutes();
+    await renderWithVersions();
+
+    // v3.0.0 in the shared TRAIL fixture has no content_hash (a row
+    // written before issue #478) -- nothing to approve.
+    expect(screen.queryByTestId('playbook-version-approve-v3.0.0')).toBeNull();
+    expect(screen.queryByTestId('playbook-version-approved-note-v3.0.0')).toBeNull();
+  });
+
+  it("surfaces the backend's mismatch refusal verbatim", async () => {
+    stubRoutes([
+      {
+        method: 'POST',
+        suffix: '/versions/v1.0.0/legal-approval',
+        status: 409,
+        body: { detail: 'content_hash mismatch: approval must name the exact bytes recorded' },
+      },
+    ]);
+    await renderWithVersions();
+
+    fireEvent.click(screen.getByTestId('playbook-version-approve-v1.0.0'));
+
+    const banner = await screen.findByTestId('admin-playbooks-action-error');
+    expect(banner.textContent).toContain('content_hash mismatch');
+    // A refused approval must not be shown as approved.
+    expect(screen.queryByTestId('playbook-version-approved-note-v1.0.0')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Create playbook (issue #485 — no operator-typed playbook_id)
+// ---------------------------------------------------------------------------
+
+describe('AdminPlaybooks — create playbook', () => {
+  async function openCreate(): Promise<void> {
+    fireEvent.click(screen.getByTestId('admin-playbooks-create-toggle'));
+    await screen.findByTestId('admin-playbooks-create-panel');
+  }
+
+  it('has no playbook_id field, and posts the file and version to POST /api/admin/playbooks', async () => {
+    stubRoutes([
+      {
+        method: 'POST',
+        suffix: '/api/admin/playbooks',
+        status: 200,
+        body: { playbook_id: 'educational-affiliation', version: '1.0.0' },
+      },
+    ]);
+    await renderPanel();
+    await openCreate();
+
+    // No playbook select/input anywhere in this panel.
+    expect(screen.queryByTestId('admin-playbooks-create-playbook')).toBeNull();
+
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-version'), {
+      target: { value: '1.0.0' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-file'), {
+      target: {
+        files: [new File(['{}'], 'playbook.opf.json', { type: 'application/json' })],
+      },
+    });
+    fireEvent.click(screen.getByTestId('admin-playbooks-create-submit'));
+
+    const success = await screen.findByTestId('admin-playbooks-create-success');
+    // The derived identity, read back from the server's own response, is
+    // what reaches the admin -- never a client-side guess.
+    expect(success.textContent).toContain('educational-affiliation');
+
+    const creates = requestsMatching('POST', '/api/admin/playbooks');
+    expect(creates).toHaveLength(1);
+    const form = creates[0]!.body as Record<string, unknown>;
+    expect(form.version).toBe('1.0.0');
+    expect(form.file).toBeInstanceOf(File);
+    expect(form.playbook_id).toBeUndefined();
+
+    // The newly-created (server-derived) playbook_id's trail is fetched,
+    // not something already on the page.
+    await waitFor(() => {
+      expect(
+        requestsMatching('GET', '/educational-affiliation/versions').length,
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  it('sends a typed note as its own notes call against the derived playbook_id', async () => {
+    stubRoutes([
+      {
+        method: 'POST',
+        suffix: '/api/admin/playbooks',
+        status: 200,
+        body: { playbook_id: 'educational-affiliation', version: '1.0.0' },
+      },
+    ]);
+    await renderPanel();
+    await openCreate();
+
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-version'), {
+      target: { value: '1.0.0' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-notes'), {
+      target: { value: 'A brand-new agreement type.' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-file'), {
+      target: { files: [new File(['{}'], 'playbook.opf.json')] },
+    });
+    fireEvent.click(screen.getByTestId('admin-playbooks-create-submit'));
+
+    await screen.findByTestId('admin-playbooks-create-success');
+    const notesCalls = requestsMatching('PATCH', '/educational-affiliation/versions/1.0.0/notes');
+    expect(notesCalls).toHaveLength(1);
+    expect(notesCalls[0]!.body).toEqual({ notes: 'A brand-new agreement type.' });
+  });
+
+  it('refuses to submit with no file chosen', async () => {
+    stubRoutes();
+    await renderPanel();
+    await openCreate();
+
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-version'), {
+      target: { value: '1.0.0' },
+    });
+    fireEvent.click(screen.getByTestId('admin-playbooks-create-submit'));
+
+    expect(await screen.findByTestId('admin-playbooks-create-error')).toBeInTheDocument();
+    expect(requestsMatching('POST', '/api/admin/playbooks')).toHaveLength(0);
+  });
+
+  it("surfaces the server's own identity-conflict refusal verbatim", async () => {
+    stubRoutes([
+      {
+        method: 'POST',
+        suffix: '/api/admin/playbooks',
+        status: 409,
+        body: {
+          detail:
+            "This document's agreement_type already matches the registered playbook_id " +
+            "'synthetic-generic'. Upload a new version onto that playbook_id instead.",
+        },
+      },
+    ]);
+    await renderPanel();
+    await openCreate();
+
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-version'), {
+      target: { value: '1.0.0' },
+    });
+    fireEvent.change(screen.getByTestId('admin-playbooks-create-file'), {
+      target: { files: [new File(['{}'], 'playbook.opf.json')] },
+    });
+    fireEvent.click(screen.getByTestId('admin-playbooks-create-submit'));
+
+    const banner = await screen.findByTestId('admin-playbooks-create-error');
+    expect(banner.textContent).toContain('synthetic-generic');
+    expect(screen.queryByTestId('admin-playbooks-create-success')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Rename / notes / remove
 // ---------------------------------------------------------------------------
 

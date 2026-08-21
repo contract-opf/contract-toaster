@@ -34,13 +34,69 @@ function resolveApiBase(): string {
  * it is a no-op for the Cognito/Amplify (sso) path, which authenticates via
  * the Authorization header instead and sets no cookie of its own.
  */
+/**
+ * Session expiry, handled once (issue #487).
+ *
+ * The session has a TTL, and nothing intercepted a 401. When it expired
+ * mid-session every panel independently started failing with whatever copy
+ * its own error path produced -- "We couldn't load the users list", "We
+ * couldn't load your playbooks" -- and none of them said the one thing that
+ * was actually true and actionable: you are signed out.
+ *
+ * This is a module-level notifier rather than a React context because
+ * `authorizedFetch` is called from modules that are not components (and from
+ * inside callbacks that have no hook access). One subscriber -- the app shell
+ * -- listens; everything else keeps calling `authorizedFetch` exactly as
+ * before and needs no change.
+ */
+type SessionExpiredListener = () => void;
+
+const sessionExpiredListeners = new Set<SessionExpiredListener>();
+
+/** Subscribe to "the server rejected our credentials". Returns an unsubscribe. */
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener);
+  return () => {
+    sessionExpiredListeners.delete(listener);
+  };
+}
+
+/** Test seam. Production code never calls this. */
+export function __resetSessionExpiredListeners(): void {
+  sessionExpiredListeners.clear();
+}
+
 export async function authorizedFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = await getToken();
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  return fetch(`${resolveApiBase()}${path}`, { ...init, headers, credentials: 'same-origin' });
+  const response = await fetch(`${resolveApiBase()}${path}`, {
+    ...init,
+    headers,
+    credentials: 'same-origin',
+  });
+  // A 401 from the LOGIN route is "wrong password", not "session expired", and
+  // it must not bounce the user to a screen they are already on. The
+  // distinction is the route, not the status: everything else behind
+  // `authorizedFetch` is a route that only an authenticated caller reaches.
+  if (response.status === 401 && !isUnauthenticatedRoute(path)) {
+    for (const listener of sessionExpiredListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener that throws must not turn an expired session into an
+        // unhandled rejection inside every caller's fetch.
+      }
+    }
+  }
+  return response;
+}
+
+/** Routes a signed-OUT caller legitimately hits, where 401 means "no". */
+function isUnauthenticatedRoute(path: string): boolean {
+  return path.startsWith('/api/auth/login') || path.startsWith('/api/auth/password');
 }
 
 /**

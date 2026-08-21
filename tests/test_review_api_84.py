@@ -49,6 +49,7 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
 import io
+import json
 import os
 import sys
 import time
@@ -161,8 +162,24 @@ class FakeTable:
             )
         self.items[key] = dict(Item)
 
-    def scan(self):
-        return {"Items": list(self.items.values())}
+    def scan(self, Limit=None, ExclusiveStartKey=None):  # noqa: N803 - boto3 kwarg names
+        """Real DynamoDB pages a scan with `Limit` + `ExclusiveStartKey` and
+        reports `LastEvaluatedKey` when more remains (issue #488). This fake
+        implements that rather than ignoring the kwargs: a stand-in that
+        always returns everything in one page cannot fail the way the real
+        table can, so paging bugs would be invisible here."""
+        keys = sorted(self.items)
+        start = 0
+        if ExclusiveStartKey is not None:
+            after = ExclusiveStartKey[self.key_name]
+            start = keys.index(after) + 1 if after in keys else 0
+        page = keys if Limit is None else keys[start : start + Limit]
+        if Limit is None:
+            page = keys[start:]
+        resp = {"Items": [dict(self.items[k]) for k in page]}
+        if page and (start + len(page)) < len(keys):
+            resp["LastEvaluatedKey"] = {self.key_name: page[-1]}
+        return resp
 
     def update_item(
         self,
@@ -196,6 +213,42 @@ class FakeTable:
 
         if "spend_reservation_id = :rid" in UpdateExpression:
             item["spend_reservation_id"] = vals[":rid"]
+            return
+
+        if "reserved_usd_cents = reserved_usd_cents + :delta" in UpdateExpression:
+            # reviews.settle_spend: reverses the worst-case reservation AND
+            # applies the actual settled cost in the SAME expression
+            # (":delta"/":actual"/":zero", no ":amount" at all). Matched on
+            # this exact substring, and checked BEFORE the
+            # "settled_usd_cents = if_not_exists" branch below, because that
+            # substring also appears in THIS expression -- without this
+            # branch coming first, settle_spend's own call would fall into
+            # record_preflight_spend's branch and KeyError on ":amount",
+            # which real DynamoDB would never raise.
+            item["reserved_usd_cents"] = item.get("reserved_usd_cents", 0) + vals[":delta"]
+            current_settled = item.get("settled_usd_cents", 0)
+            item["settled_usd_cents"] = current_settled + vals[":actual"]
+            return
+
+        if "settled_usd_cents = if_not_exists" in UpdateExpression:
+            # Issue #491's record_preflight_spend: a direct ledger credit
+            # with no reservation and no ConditionExpression (unlike the
+            # reserved_usd_cents branch above) -- settled_usd_cents simply
+            # accumulates. Reached only when the settle_spend branch above
+            # did not match, so this is unambiguously record_preflight_
+            # spend's own ":amount"-keyed shape.
+            current = item.get("settled_usd_cents", 0)
+            item["settled_usd_cents"] = current + vals[":amount"]
+            return
+
+        if "cover_note_draft = :draft" in UpdateExpression:
+            # Issue #499's record_cover_note_draft: overwrites the cached
+            # draft + its metadata unconditionally (latest generation wins,
+            # see that function's own docstring).
+            item["cover_note_draft"] = vals[":draft"]
+            item["cover_note_generated_at"] = vals[":at"]
+            item["cover_note_cost_usd_cents"] = vals[":cost"]
+            item["cover_note_served_model_id"] = vals[":model"]
             return
 
         # Generic fallback: no-op for anything else exercised indirectly.
@@ -514,6 +567,47 @@ class TestManualReviewRequiredMessage(ReviewApiTestBase):
 class TestResultPayloadSchema(ReviewApiTestBase):
     def test_detail_includes_provenance_critic_delta_confidence_band(self):
         review_id = "review-done-rich"
+        # `issues`/`critic_delta` are never written to the `reviews` row
+        # itself (no writer ever has -- see reviews.load_analysis_artifact's
+        # docstring); they live only in the persisted analysis artifact
+        # (`outputs/{review_id}/analysis.json`). Seed the SAME real S3
+        # object `get_review_detail` reads through `analysis_s3_key`,
+        # rather than hand-seeding `item["issues"]`/`item["critic_delta"]`
+        # directly on the row -- a direct seed would agree with the very
+        # bug (reader/writer key mismatch) this route's fix exists to close.
+        findings = [
+            {
+                "section_ref": "8 Limitation on Liability",
+                "section_title": "Limitation on Liability",
+                "counterparty_change_summary": "Cap removed.",
+                "decision": "REQUEST_CHANGE",
+                "external_rationale_for_footnote": "Standard cap required.",
+                "proposed_replacement_text": "...",
+                "playbook_topic_id": "liability-cap",
+                "internal_precedent_citation": None,
+                "provenance": "detector:liability-cap-removed",
+            }
+        ]
+        critic_delta = {
+            "added_issues": [],
+            "contested_replacements": [
+                {
+                    "section_ref": "8 Limitation on Liability",
+                    "primary_replacement_text": "...",
+                    "critic_objection": "Drifts from playbook position.",
+                }
+            ],
+            "rationale_objections": [],
+        }
+        analysis_key = f"outputs/{review_id}/analysis.json"
+        self.s3.put_object(
+            Bucket=os.environ["OUTPUTS_BUCKET"],
+            Key=analysis_key,
+            Body=json.dumps({"findings": findings, "critic_delta": critic_delta}).encode(
+                "utf-8"
+            ),
+            ContentType="application/json",
+        )
         self._reviews_table().items[review_id] = {
             "review_id": review_id,
             "owner_sub": "owner-rich",
@@ -521,30 +615,7 @@ class TestResultPayloadSchema(ReviewApiTestBase):
             "decision": "REQUEST_CHANGE",
             "confidence_state": "LOW_CONFIDENCE",
             "confidence_band": "LOW_CONFIDENCE",
-            "issues": [
-                {
-                    "section_ref": "8 Limitation on Liability",
-                    "section_title": "Limitation on Liability",
-                    "counterparty_change_summary": "Cap removed.",
-                    "decision": "REQUEST_CHANGE",
-                    "external_rationale_for_footnote": "Standard cap required.",
-                    "proposed_replacement_text": "...",
-                    "playbook_topic_id": "liability-cap",
-                    "internal_precedent_citation": None,
-                    "provenance": "detector:liability-cap-removed",
-                }
-            ],
-            "critic_delta": {
-                "added_issues": [],
-                "contested_replacements": [
-                    {
-                        "section_ref": "8 Limitation on Liability",
-                        "primary_replacement_text": "...",
-                        "critic_objection": "Drifts from playbook position.",
-                    }
-                ],
-                "rationale_objections": [],
-            },
+            "analysis_s3_key": analysis_key,
             "verdict_summary": None,
             "playbook_id": PLAYBOOK_ID,
             "created_at": "2000",
@@ -562,6 +633,56 @@ class TestResultPayloadSchema(ReviewApiTestBase):
             body["critic_delta"]["contested_replacements"][0]["critic_objection"],
             "Drifts from playbook position.",
         )
+
+    def test_detail_includes_normalization_notes_and_requote_when_recorded(self):
+        """Issue #570: the receipt's "what was assumed" lines read these two
+        fields off the detail projection. Both are absent-never-null, same
+        convention as every other field `get_review_detail` projects."""
+        review_id = "review-done-with-assumptions"
+        self._reviews_table().items[review_id] = {
+            "review_id": review_id,
+            "owner_sub": "owner-assumptions",
+            "status": "DONE",
+            "decision": "ACCEPT",
+            "normalization_notes": (
+                "Paragraph 'Term': pending tracked change (author: Jane Doe, "
+                "status: unresolved) accepted-all into the operative draft."
+            ),
+            "requote": {"attempted": 2, "recovered": 2, "still_failed": 0},
+            "playbook_id": PLAYBOOK_ID,
+            "created_at": "3000",
+            "updated_at": "3000",
+        }
+
+        self._authenticate_as("owner-assumptions")
+        resp = self.client.get(f"/api/reviews/{review_id}")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("Jane Doe", body["normalization_notes"])
+        self.assertEqual(body["requote"], {"attempted": 2, "recovered": 2, "still_failed": 0})
+
+    def test_detail_omits_normalization_notes_and_requote_when_not_recorded(self):
+        """The common case, and every review predating #563/#569: absent on
+        the row projects as None, never as a fabricated empty value."""
+        review_id = "review-done-plain"
+        self._reviews_table().items[review_id] = {
+            "review_id": review_id,
+            "owner_sub": "owner-plain",
+            "status": "DONE",
+            "decision": "ACCEPT",
+            "playbook_id": PLAYBOOK_ID,
+            "created_at": "4000",
+            "updated_at": "4000",
+        }
+
+        self._authenticate_as("owner-plain")
+        resp = self.client.get(f"/api/reviews/{review_id}")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIsNone(body["normalization_notes"])
+        self.assertIsNone(body["requote"])
 
 
 # -- (7) download writes an audit row; presigned URL is short-lived ---------

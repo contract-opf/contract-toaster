@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Issue #47: Low-severity UX cleanups — group naming, disposition nag, ACCEPT summary shape.
+Issue #47: Low-severity UX cleanups — group naming, ACCEPT summary shape.
 
-Three checks (all must pass; exit 1 on any failure):
+Two checks (all must pass; exit 1 on any failure):
 
 1. GROUP-NAMING DECISION CHECK (docs-lint flavour):
    ARCHITECTURE.md Authentication section (or RUNBOOK.md Onboarding section)
@@ -11,14 +11,7 @@ Three checks (all must pass; exit 1 on any failure):
    controlled separately by the in-app `is_admin` flag.  This prevents lifecycle
    mistakes caused by misreading the group name as "only admins belong here."
 
-2. DISPOSITION-NAG CHECK:
-   ARCHITECTURE.md or docs/output-contract.md must specify a disposition nag
-   ("N reviews awaiting disposition") in the reviewer's list view.  The nag
-   surfaces how many completed reviews are still missing an attorney
-   accepted/edited/rejected outcome, helping the eval feedback loop avoid
-   starvation.
-
-3. ACCEPT-SUMMARY-SHAPE CHECK:
+2. ACCEPT-SUMMARY-SHAPE CHECK:
    a. output-schema-v1.json must have a top-level `verdict_summary` property.
    b. docs/output-contract.md must document the `verdict_summary` shape and its
       source for the ACCEPT path (not just per-issue content for REQUEST_CHANGE).
@@ -208,67 +201,28 @@ def check_group_naming_decision(failures: list) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Check 2: Disposition nag in reviewer list view
+# Check 2 (formerly Check 2 "Disposition nag in reviewer list view") --
+# REMOVED, fix-round-1 on issue #486.
+#
+# This test originally required ARCHITECTURE.md or docs/output-contract.md
+# to specify a disposition nag ("N reviews awaiting disposition") in the
+# reviewer's list view. The owner corrected that on issue #486 (2026-08-02):
+# disposition capture is optional and this product never nags a reviewer to
+# record one -- see ARCHITECTURE.md -> "Disposition capture — optional,
+# never a nag" and docs/data-handling.md. A spec requiring the nag to exist
+# is therefore simply wrong now, and the check is removed rather than
+# inverted: the same substring-matching pattern that used to require nag
+# language would, if merely negated, choke on ARCHITECTURE.md's own
+# parenthetical explaining that the nag was retired (it necessarily quotes
+# the retired phrase) -- a fragile prose-matching problem, not a real
+# regression guard. Nothing asserts a nag spec must exist, or must not
+# exist; the product decision lives in ARCHITECTURE.md and
+# docs/data-handling.md, not in this docs-lint gate.
 # ---------------------------------------------------------------------------
-
-def check_disposition_nag(failures: list) -> None:
-    """
-    ARCHITECTURE.md or docs/output-contract.md must specify a nag count for
-    reviews awaiting attorney disposition (accepted/edited/rejected).
-    This surfaces low-compliance as a visible signal in the reviewer's list view
-    so the eval feedback loop does not starve quietly.
-    """
-    label = "DISPOSITION-NAG CHECK"
-
-    texts_to_search = []
-    for path in [ARCHITECTURE_PATH, OUTPUT_CONTRACT_PATH]:
-        if path.exists():
-            texts_to_search.append((path, path.read_text(encoding="utf-8")))
-
-    if not texts_to_search:
-        failures.append(
-            f"{label}: neither ARCHITECTURE.md nor docs/output-contract.md found."
-        )
-        return
-
-    # Must mention:
-    #   - a nag / reminder / badge / count (as a whole word)
-    #   - disposition (accepted/edited/rejected) or "awaiting disposition"
-    #   - in the reviewer list view or review list
-    has_nag = False
-    for path, text in texts_to_search:
-        # Look for "nag" (whole word) or "awaiting disposition" or "disposition count" etc.
-        nag_pattern = bool(re.search(
-            r"(?:\bnag\b|awaiting\s+disposition|disposition.*\bnag\b|\bnag\b.*disposition|"
-            r"disposition.*count|count.*disposition|"
-            r"reviews?\s+awaiting\s+disposition|disposition.*list\s+view|"
-            r"list\s+view.*disposition)",
-            text, re.IGNORECASE
-        ))
-        if nag_pattern:
-            has_nag = True
-            break
-
-    if not has_nag:
-        failures.append(
-            f"{label}: Neither ARCHITECTURE.md nor docs/output-contract.md specifies "
-            f"a disposition nag in the reviewer's list view. "
-            f"Add a spec for a nag state (e.g. 'N reviews awaiting disposition') "
-            f"in the reviewer's list view to surface low compliance with the "
-            f"attorney accepted/edited/rejected capture. "
-            f"This prevents the eval feedback loop from starving silently. "
-            f"Document this in ARCHITECTURE.md (reviewer flow or frontend section) "
-            f"or in docs/output-contract.md."
-        )
-    else:
-        print(
-            f"  PASS {label}: disposition nag specified "
-            f"(reviewer list view shows awaiting-disposition count)."
-        )
 
 
 # ---------------------------------------------------------------------------
-# Check 3: ACCEPT summary shape in schema and output-contract.md
+# Check 2: ACCEPT summary shape in schema and output-contract.md
 # ---------------------------------------------------------------------------
 
 def check_accept_summary_shape(failures: list) -> None:
@@ -393,11 +347,10 @@ def check_accept_summary_shape(failures: list) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    print("UX cleanups gate — issue #47 (group naming, disposition nag, ACCEPT summary)\n")
+    print("UX cleanups gate — issue #47 (group naming, ACCEPT summary)\n")
     failures = []
 
     check_group_naming_decision(failures)
-    check_disposition_nag(failures)
     check_accept_summary_shape(failures)
 
     print()

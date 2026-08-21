@@ -38,7 +38,7 @@ Local development runs against a **synthetic corpus and synthetic documents only
 
 The first deploy of an environment requires steps that won't be needed again.
 
-1. **Enable Bedrock model access and record granted quotas.** AWS Console → Bedrock → Model access → Manage model access → enable every model named by the current **model-policy matrix** ([ARCHITECTURE.md](ARCHITECTURE.md) → Model selection): today the pinned single-region **Anthropic Claude Opus 4.8** (primary reviewer), **Claude Sonnet 4.6** (adversarial critic — a deliberately *different* model), the pinned **embedding model** used by the Knowledge Base, plus any explicitly approved fallback model. Wait for status `Access granted`. One-time per-account action; do it in each account (dev and prod). This matrix is a **deliberate pin**, not an automatic "newest/best" selection; any newer model is adopted only after it clears recertification (see "Model recertification" below). Use the **single-region native model ID invoked against the regional endpoint** — verify the exact invocable ID at this step (AWS occasionally renames IDs / version suffixes differ by model). Do **not** use a cross-region inference profile: both `global.` and the geo `us.`/`eu.`/`apac.` profiles are forbidden for residency (a geo profile can route to another region). The request schema omits sampling params (`temperature`, `top_p`, `top_k`) that AWS no longer supports for this model generation.
+1. **Enable Bedrock model access and record granted quotas.** AWS Console → Bedrock → Model access → Manage model access → enable every model named by the current **model-policy matrix** ([ARCHITECTURE.md](ARCHITECTURE.md) → Model selection): today the pinned single-region **Anthropic Claude Opus 4.8** (primary reviewer), **Claude Sonnet 4.6** (adversarial critic — a deliberately *different* model), plus any explicitly approved fallback model. Wait for status `Access granted`. **An embedding model is NOT required**: retrieval is dormant by decision and nothing is embedded, so no Knowledge Base embedding access is needed — grant it only if retrieval is revived (see [docs/rag-dormant.md](docs/rag-dormant.md) §5.4). One-time per-account action; do it in each account (dev and prod). This matrix is a **deliberate pin**, not an automatic "newest/best" selection; any newer model is adopted only after it clears recertification (see "Model recertification" below). Use the **single-region native model ID invoked against the regional endpoint** — verify the exact invocable ID at this step (AWS occasionally renames IDs / version suffixes differ by model). Do **not** use a cross-region inference profile: both `global.` and the geo `us.`/`eu.`/`apac.` profiles are forbidden for residency (a geo profile can route to another region). The request schema omits sampling params (`temperature`, `top_p`, `top_k`) that AWS no longer supports for this model generation.
 
    **Record the granted on-demand quota** for each pinned model: AWS Console → Service Quotas → Amazon Bedrock → search for "Tokens per minute" and "Requests per minute" for `claude-opus-4-8` and `claude-sonnet-4-6`. Record the granted values in `model-policy/bedrock-us-east-1.json` under `models.primary.granted_tpm`, `models.primary.granted_rpm`, `models.critic.granted_tpm`, `models.critic.granted_rpm`. Then re-derive the `review_throughput_ceiling` and `max_eval_parallelism` fields (formulas are inline in the artifact). Commit the updated artifact in a PR (CODEOWNERS requires admin/GC approval). The eval harness reads `max_eval_parallelism` to set its token-bucket rate limit — an unrecorded or stale quota value causes the harness to throttle or under-utilize capacity. If the default quota is too low for the eval harness, request an increase via AWS Support before running CI evaluations.
 
@@ -420,7 +420,9 @@ Operationally this means: if a user reports "I submitted twice," expect to find 
 
 ### Model recertification (quarterly)
 
-The model is governed by an explicit **model-policy matrix** ([ARCHITECTURE.md](ARCHITECTURE.md) → Model selection), not an automatic "newest/best" choice. The pinned matrix (today Opus 4.8 primary, Sonnet 4.6 critic, the pinned embedding model, in `us-east-1`, with any fallback separately approved) is re-examined **every quarter**, and unconditionally whenever AWS announces a model change affecting our pin. Recertification covers the **embedding model** too — a change to it (or a re-embedding) requires admin (GC) approval and a new corpus snapshot version, because it changes retrieval and therefore legal output.
+The model is governed by an explicit **model-policy matrix** ([ARCHITECTURE.md](ARCHITECTURE.md) → Model selection), not an automatic "newest/best" choice. The pinned matrix (today Opus 4.8 primary, Sonnet 4.6 critic, in `us-east-1`, with any fallback separately approved) is re-examined **every quarter**, and unconditionally whenever AWS announces a model change affecting our pin.
+
+> **The embedding model is NOT part of this recurring obligation today.** Retrieval is dormant by decision and nothing is embedded, so there is no embedding model to recertify and no GC approval owed for one. The obligation **re-activates the moment retrieval is revived** — at which point a change to the embedding model (or any re-embedding) requires admin (GC) approval and a new corpus snapshot version, because it changes retrieval and therefore legal output. See [docs/rag-dormant.md](docs/rag-dormant.md) §5.4 and [ARCHITECTURE.md](ARCHITECTURE.md) → Retrieval status.
 
 1. Review what AWS now lists in Bedrock for the region. New entries do **not** auto-adopt — the current pin stays in force until a candidate clears this process.
 2. If considering a change, run the candidate through the evaluation harness / gold test set (see [ARCHITECTURE.md](ARCHITECTURE.md) and the eval docs) and compare decisions, false-positive rate, and redline-patch behavior against the incumbent. Recertification is a gated regression test, not a console toggle.
@@ -454,42 +456,35 @@ After conversion, open the `.docx` in Word, do a quick visual pass, and then upl
 **Counterparty sent a legacy `.doc` file (Word 97–2003).**
 The tool also rejects legacy `.doc` binary files with a tailored message. The fix is straightforward: open the `.doc` in Word, save it as `.docx` (File → Save As → Word Document), and re-upload. Tracked changes and most content should survive this conversion intact; verify visually before submitting.
 
-### Removing the export marker from an approved redline
+### Internal-notes marker on a generated redline
 
-Every generated redline `.docx` carries an **internal-only / export-warning marker** ("tool recommendation only — attorney approval required; do not send externally before attorney approval") placed redundantly in two locations:
+Issue #513 retired the attorney-approval framing this procedure used to describe, and the export
+marker is no longer unconditional. A generated redline `.docx` carries an **internal-notes export
+marker** — *"contains internal notes — not for external transmission"* — **iff** that review's
+notes mode actually put internal-audience content in scope (`internal`/`both`; today unreachable in
+production while issue #572's `NOTES_MODE_ENABLED` kill switch is off, so every review currently
+produces a document with no marker in any part). The marker carries no approval semantics: nothing
+in this product requires or enforces attorney approval, and the marker does not gate, sign, or
+record anything. Placement differs by generation path — the live first-party redline places it in
+the running every-page header/footer only; the standalone writer (third-party paper, fixture
+generation) additionally places it as a first-page cover note.
 
-1. A **first-page cover note** — a dedicated cover page at the front of the document.
-2. A **running every-page header/footer** — text in the header and footer of every page.
+**There is no de-marking procedure, and none is coming.** The marker is not decoration on top of an
+otherwise-safe document — it is a signal that the document's footnotes and rationale text actually
+carry internal-audience content, placed there because the notes mode asked for it. Deleting the
+marker text from the header/footer (or the cover note) would not delete that content; it would just
+make an internal-notes document LOOK external-safe while still carrying internal-audience commentary
+a counterparty was never meant to see. Do not edit a marked `.docx` to remove the marker and send it
+on.
 
-The redundant placement is intentional misuse friction: a routine accept-all-changes clears inline tracked-change paragraphs but does not strip the header/footer. An attorney cannot accidentally forward an unapproved document without the marker being visible.
+**If a generated redline carries this marker:** treat that specific export as not for external
+transmission, full stop. If the counterparty needs the substance of the review, that means a
+different export — one generated with a notes mode that excludes internal content in the first
+place — not an edited copy of the marked one. If you are unsure whether a document in hand carries
+internal notes, do not guess: check the notes mode the review was submitted with, or re-run the
+review with notes mode set to exclude internal content.
 
-**When to use this procedure.** Only after an attorney has approved the redline — reviewed it, made any necessary edits, and is ready to send the final version to the counterparty. Do not remove the marker from a document that has not received explicit attorney approval. The marker is the default on every generated redline; removal is the deliberate approval exit, not the routine download step.
-
-**Procedure:**
-
-1. **Confirm attorney approval.** Verify that the reviewing attorney has approved this specific redline (reviewed it and decided it is ready for the counterparty). If approval is unclear, obtain explicit sign-off before proceeding.
-
-2. **Open the `.docx` in Word.** Open the document that was downloaded from the Contract Toaster review tool.
-
-3. **Remove the cover page.** Delete the entire first-page cover note. The cover page is a standalone page at the front of the document containing the internal-only/export-warning notice. Select all content on that page (including any section break that follows it) and delete it.
-
-4. **Remove the header/footer marker.** Open the header and footer (double-click the header area, or Insert → Header & Footer). Delete the export-warning text from both the header and the footer. Check all header/footer sections — if the document has different first-page or odd/even page headers/footers, clear the marker from each distinct section. Close the header/footer editor.
-
-5. **Verify no marker fragments remain.** Use Word's Find (Ctrl+F / Cmd+F) to search for key phrases such as "tool recommendation only", "attorney approval required", and "do not send externally". Confirm zero matches. A missed fragment in a header/footer or a section break boundary is the most common error; scroll through the document to confirm.
-
-6. **Save the clean copy with a distinct filename.** Save the de-marked document as a new file (e.g., `<original-name>-approved-clean.docx`) so the original marked version is preserved alongside it. Do not overwrite the marked original — keep it so the review record remains intact.
-
-7. **Record the action.** Note in your review record (review disposition, email thread, matter management system, or equivalent) that you removed the export marker from review `<review-id>` on `<date>`, with the name of the approving attorney. This is the audit trail for the de-marking step: the tool does not automatically record marker removal, so the attorney's record is the authoritative log of the approval and clean-export action.
-
-**What not to do.**
-
-- Do not use accept-all-changes as the de-marking step: accept-all clears tracked-change markup but does not remove header/footer content. The every-page header/footer marker survives accept-all — this is intentional.
-- Do not edit the `.docx` while in tracked-changes mode if you can avoid it: stray tracked changes in the header/footer can leave the marker visible in some views even after deletion. Accept all changes first, then remove the marker.
-- Do not rely on the counterparty to not notice the marker and ignore it: the marker is prominent by design. If the document reaches the counterparty with the marker still present, the attorney must clarify that it was sent in error and resend a clean copy.
-
-**If you cannot locate the header/footer marker.** The document may have been generated by a version of the tool that placed the marker differently (e.g., only as a cover page with no header/footer). In that case, remove the cover page per step 3, run the Find check per step 5, and confirm visually that no marker text appears in any page header or footer. If you are uncertain whether the document has been fully de-marked, contact `legal-eng@company.com` before sending.
-
-See [docs/output-contract.md → Attorney-approval framing and export marker](docs/output-contract.md#attorney-approval-framing-a-misuse-prevention-control-not-cosmetic) for the policy rationale and [docs/threat-model.md → External-communication guardrail](docs/threat-model.md#external-communication-guardrail) for the threat framing.
+See [docs/output-contract.md → Tool-recommendation framing and the internal-notes export marker](docs/output-contract.md#tool-recommendation-framing-and-the-internal-notes-export-marker-issue-513) for the policy rationale and [docs/threat-model.md → External-communication guardrail](docs/threat-model.md#external-communication-guardrail) for the threat framing.
 
 ## Incident response
 

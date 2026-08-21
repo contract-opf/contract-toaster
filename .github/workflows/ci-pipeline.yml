@@ -120,6 +120,12 @@ jobs:
         # ran `python3 "$t" || exit 1` per file, stopping at the FIRST
         # failing test and hiding every failure after it; the shared script
         # continues past failures and reports the full list.
+        #
+        # ALLOW_FLAKY is deliberately NOT set here. A file that fails and then
+        # passes on its isolated re-run exits 2 and turns this gate red, which
+        # is the point: the FLAKY bucket used to be reported and ignored, so a
+        # green gate could be hiding a real intermittent regression. Only a
+        # human running locally may wave one through, and only explicitly.
         run: PYTHON=python3 bash scripts/collect_test_failures.sh .
 
   # ---------------------------------------------------------------------------
@@ -251,9 +257,12 @@ jobs:
           \`bash scripts/check.sh\` (or \`SKIP_INFRA=1 bash scripts/check.sh\`
           for the fast gate if the failure is not in the infra tests).
 
-          The gate loop already re-runs failures once in isolation, so a
-          known-flaky test passing on re-run does NOT trigger this issue —
-          treat this as a real breakage until proven otherwise.
+          The gate loop re-runs each failure once in isolation. A file that
+          then PASSES is reported as \`CHECK: FLAKY-UNRESOLVED\` and still
+          fails the gate (exit 2) — pass-on-re-run is not evidence of health,
+          it is equally consistent with a genuine intermittent regression.
+          CI never sets \`ALLOW_FLAKY\`, so treat this as a real breakage
+          until proven otherwise.
           EOF
 
           EXISTING=$(gh issue list \

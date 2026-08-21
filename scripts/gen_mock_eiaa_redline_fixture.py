@@ -12,9 +12,11 @@ file to serve; the CDK BucketDeployment in pipeline-stack.ts seeds it.
 
 This script is the source of truth for that committed fixture. It reuses the
 real, tested tracked-changes writer (scripts/redline_docx_writer.py) so the
-mock output is a genuine, valid .docx with real <w:ins>/<w:del> markup and
-the standard export marker -- not a hand-rolled stub -- but with obviously
-synthetic, non-legal placeholder content.
+mock output is a genuine, valid .docx with real <w:ins>/<w:del> markup --
+not a hand-rolled stub -- but with obviously synthetic, non-legal placeholder
+content. The mock review carries no internal notes, so the fixture is
+generated with no export marker (include_marker=False): the marker is a
+signpost for internal-audience content, and this fixture has none.
 
 Determinism: a fixed revision date is passed to the writer and the resulting
 ZIP is rewritten with a fixed entry timestamp, so re-running this script
@@ -65,7 +67,8 @@ _SYNTHETIC_PATCHES = [
         "anchor": "sec-mock-1",
         "new_text": (
             "SYNTHETIC MOCK REDLINE — replacement placeholder sentence. "
-            "Attorney approval required; do not rely on this document."
+            "Mock output for pipeline testing only; contains no real "
+            "contract text."
         ),
     }
 ]
@@ -98,7 +101,7 @@ def build_fixture_bytes() -> bytes:
         author="contract-toaster-mock",
         date=_FIXED_DATE,
         footnote_text_by_anchor=_SYNTHETIC_FOOTNOTES,
-        include_marker=True,
+        include_marker=False,
     )
     return _normalize_zip(docx_bytes)
 

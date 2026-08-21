@@ -1,54 +1,124 @@
 #!/usr/bin/env python3
 """
-CI gate for issue #39: Audited 'export clean copy' affordance for approved redlines.
+CI gate for issue #513: retire the attorney-approval framing and make the
+export marker conditional on notes mode.
 
-Because the clean-copy feature is deferred in v1, this issue delivers:
-  1. A RUNBOOK procedure for correctly de-marking an approved document
-     (so attorneys have a documented, safe path after approval).
-  2. docs/output-contract.md updated to state that the marker is the default
-     and clean export is the deliberate approval exit.
-  3. docs/threat-model.md external-communication section updated to reflect
-     the controlled exit path.
+## What this file used to gate (issue #39, now superseded)
 
-Three gates, matching the TDD plan and acceptance criteria:
+This file used to gate a documented "de-marking ritual" RUNBOOK procedure:
+the export marker was unconditional on every generated redline, framed as
+"tool recommendation only — attorney approval required", and an attorney
+who wanted to send an approved redline externally had to manually strip a
+first-page cover note plus a running header/footer from the `.docx` in
+Word.
 
-  GATE 1 — RUNBOOK: de-marking procedure exists
-    RUNBOOK.md must contain a named section (or clearly-labelled procedure)
-    describing how to correctly remove the export marker from an approved
-    document, with:
-      - reference to the cover page / every-page header+footer placement
-      - guidance that both locations must be removed to fully de-mark
-      - note that the document must have attorney approval before de-marking
-      - note that this is an audited step (or a reference to audit / recording)
+Issue #513 (owner decision, 2026-08-03) retired that framing wholesale.
+The premise that justified an always-on marker — a haste-prone reviewer
+distinct from an approving attorney — is explicitly withdrawn: the actual
+user of this tool is the attorney, or is highly trained. The marker's only
+remaining job is a narrower, honest one: a signpost that a generated
+document carries internal-audience notes (per-review notes mode) and is
+therefore not for external transmission. A review with no internal notes
+in scope produces a document with **no marker in any part**, and there is
+deliberately **no manual de-marking procedure** — stripping the marker
+text would not remove the internal-audience content the notes mode
+actually put in the document, so it would make an unsafe document merely
+LOOK safe.
 
-  GATE 2 — output-contract.md: marker is default; clean export is approval exit
-    docs/output-contract.md must state:
-      - the export-warning marker is the default on every generated redline
-      - the clean copy (or clean export / de-marked copy) is the deliberate
-        approval exit (i.e. the intended path for documents after attorney
-        approval), NOT the default
-      - a cross-reference to the RUNBOOK for the de-marking procedure (or an
-        explicit statement that the procedure lives there)
+## What this file gates now
 
-  GATE 3 — threat-model.md: controlled exit reflected
-    docs/threat-model.md external-communication guardrail section must:
-      - acknowledge that there is a controlled / deliberate removal path
-        after attorney approval (the "approval exit" or "clean exit")
-      - state that this is distinct from accidental or unauthorized removal
-        (i.e. the friction model is preserved; the approval exit is
-        explicitly different from "a determined user can still remove it")
+Four gates, matching issue #513's acceptance criteria:
+
+  GATE 1 — RUNBOOK.md: the internal-notes marker is documented accurately
+    - a named section describing the marker
+    - states the marker is conditional on notes mode / internal notes
+    - states there is no manual de-marking / marker-stripping procedure
+    - does not tie the marker (or anything else) to a requirement for
+      attorney approval
+    - the retired literal marker string is gone
+
+  GATE 2 — docs/output-contract.md: marker is conditional, not the default;
+    no approval semantics; cross-references RUNBOOK/threat-model
+    - states the marker is present iff internal notes are in scope
+    - states it carries no approval semantics / nothing is "required"
+    - cross-references RUNBOOK.md or docs/threat-model.md for detail
+    - the retired literal marker string is gone
+
+  GATE 3 — docs/threat-model.md: trained-user premise, conditional marker
+    - states the withdrawn haste-prone-reviewer premise / the actual user
+      being the attorney or highly trained
+    - describes the marker as conditional on notes mode
+    - the retired literal marker string is gone
+
+  GATE 4 — regression sweep across every other shipped AC1 surface (fix
+    round 1, issue #513): ARCHITECTURE.md, README.md, docs/REVIEW-GUIDE.md,
+    docs/phase-0-issues.md, playbooks/schema.json,
+    frontend/public/manifest.json, and the committed mock fixture
+    (infra/fixtures/mock-outputs/eiaa/pre-baked-redline.docx, unzipped) --
+    none of these may state or imply that the product requires or enforces
+    attorney approval, or carry the retired literal marker string. AC1 says
+    "UI, generated .docx, docs, RUNBOOK" -- Gates 1-3 only ever spot-checked
+    three docs, which is exactly how the attorney-approval framing survived
+    in the fixture .docx, the PWA manifest, two infra stack headers, and a
+    phase-0 issue doc through a prior fix round.
 
 Exit codes: 0 = pass, 1 = fail
 """
 
 import re
 import sys
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNBOOK_PATH = REPO_ROOT / "RUNBOOK.md"
 OUTPUT_CONTRACT_PATH = REPO_ROOT / "docs" / "output-contract.md"
 THREAT_MODEL_PATH = REPO_ROOT / "docs" / "threat-model.md"
+
+# Gate 4's widened surface set (fix round 1, issue #513 finding 8). Plain
+# text files are read directly; the fixture is a .docx (a zip of XML parts)
+# and is unzipped and text-extracted instead -- see _extract_docx_text.
+ARCHITECTURE_PATH = REPO_ROOT / "ARCHITECTURE.md"
+README_PATH = REPO_ROOT / "README.md"
+REVIEW_GUIDE_PATH = REPO_ROOT / "docs" / "REVIEW-GUIDE.md"
+PHASE_0_ISSUES_PATH = REPO_ROOT / "docs" / "phase-0-issues.md"
+PLAYBOOKS_SCHEMA_PATH = REPO_ROOT / "playbooks" / "schema.json"
+MANIFEST_PATH = REPO_ROOT / "frontend" / "public" / "manifest.json"
+FIXTURE_DOCX_PATH = (
+    REPO_ROOT / "infra" / "fixtures" / "mock-outputs" / "eiaa" / "pre-baked-redline.docx"
+)
+
+# The retired literal marker string (scripts/redline_docx_writer.py's old
+# MARKER_TEXT, pre-#513), plus its short form (the leading clause quoted on
+# its own elsewhere in these docs, e.g. the old attorney-approval watermark
+# copy). Its continued presence anywhere in these three docs would mean a
+# doc still quotes text the generated `.docx` no longer contains -- checked
+# as plain substrings (not regex) since it must match byte-for-byte or not
+# at all. Both the long two-clause form and the short form are checked in
+# both em-dash and hyphen spellings.
+_RETIRED_MARKER_STRINGS = (
+    "tool recommendation only — attorney approval required; do not send externally before attorney approval",
+    "tool recommendation only - attorney approval required; do not send externally before attorney approval",
+    "tool recommendation only — attorney approval required",
+    "tool recommendation only - attorney approval required",
+)
+
+# Gate 4's broader denylist (fix round 1, issue #513 finding 8). These are
+# not the one specific literal MARKER_TEXT string above -- they are the
+# other attorney-approval-requirement phrasings that actually shipped on
+# surfaces Gates 1-3 never look at: the fixture's tracked-change insertion
+# ("Attorney approval required; do not rely on this document."), the PWA
+# manifest description ("...that still needs attorney approval."), and the
+# infra stack-header/doc comments ("...carries attorney-approval watermark
+# ..." / "...attorney-approval watermark and the ACCEPT framing"). Checked
+# case-insensitively since capitalization varies by surface.
+_ATTORNEY_APPROVAL_REQUIREMENT_PHRASES = (
+    "attorney approval required",
+    "needs attorney approval",
+    "requires attorney approval",
+    "attorney-approval watermark",
+    "attorney approval watermark",
+)
 
 
 def read_text(path: Path) -> str:
@@ -57,250 +127,277 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _extract_docx_text(docx_path: Path) -> str:
+    """Unzip a .docx and concatenate the text content of every XML part
+    (document, headers, footers, footnotes, ...) with tags stripped, so
+    Gate 4 can substring-scan the fixture's actual rendered content rather
+    than trusting the generator script that produced it."""
+    if not docx_path.exists():
+        raise FileNotFoundError(f"Required file missing: {docx_path}")
+    with zipfile.ZipFile(docx_path, "r") as z:
+        parts = [
+            z.read(name).decode("utf-8", errors="replace")
+            for name in z.namelist()
+            if name.startswith("word/") and name.endswith(".xml")
+        ]
+    return "\n".join(re.sub(r"<[^>]+>", " ", part) for part in parts)
+
+
+def _check_retired_string_gone(text: str, doc_name: str) -> list[str]:
+    failures = []
+    for retired in _RETIRED_MARKER_STRINGS:
+        if retired in text:
+            failures.append(
+                f"  Retired-string check: {doc_name} still contains the retired literal "
+                f"marker string {retired!r}. The generated .docx no longer contains this "
+                f"text (issue #513) -- quoting it here is now simply false."
+            )
+    return failures
+
+
+def _check_no_approval_requirement_framing(text: str, doc_name: str) -> list[str]:
+    """Gate 4's broader check: doc_name must not state or imply, in any
+    phrasing, that the product requires or enforces attorney approval."""
+    failures = []
+    lowered = text.lower()
+    for phrase in _ATTORNEY_APPROVAL_REQUIREMENT_PHRASES:
+        if phrase in lowered:
+            failures.append(
+                f"  AC1 sweep: {doc_name} still contains the retired approval-requirement "
+                f"phrase {phrase!r} (issue #513 AC1: no shipped surface may state or imply "
+                f"the product requires or enforces attorney approval)."
+            )
+    return failures
+
+
 # ---------------------------------------------------------------------------
-# GATE 1 — RUNBOOK: de-marking procedure
+# GATE 1 — RUNBOOK.md: internal-notes marker documented accurately
 # ---------------------------------------------------------------------------
 
-# Pattern R1: RUNBOOK has a section/heading for de-marking / removing the marker
-# after attorney approval.
-RUNBOOK_DEMARK_SECTION_PATTERN = re.compile(
-    r"(?:###?\s+(?:Removing|Demark|De-mark|Clean.copy|Export.clean|Approved.redline"
-    r"|Removing.the.export.marker|Exporting.an.approved"
-    r"|After.attorney.approval"
-    r"|Clean.export))",
+# Pattern R1: RUNBOOK has a section/heading about the marker.
+RUNBOOK_MARKER_SECTION_PATTERN = re.compile(
+    r"(?:###?\s+(?:Internal.notes\s+marker|Export\s+marker|Removing\s+the\s+export\s+marker"
+    r"|The\s+export\s+marker))",
     re.IGNORECASE,
 )
 
-# Pattern R2: RUNBOOK mentions both the cover page AND the header/footer must be removed
-RUNBOOK_COVER_AND_HEADER_PATTERN = re.compile(
-    r"(?:cover\s+(?:page|note)|cover.page)"
-    r"(?:.|\n){0,800}"
-    r"(?:header|footer)",
+# Pattern R2: RUNBOOK ties the marker's presence to notes mode / internal notes.
+RUNBOOK_CONDITIONAL_PATTERN = re.compile(
+    r"(?:notes\s+mode)(?:.|\n){0,400}(?:internal)"
+    r"|(?:internal)(?:.|\n){0,400}(?:notes\s+mode)"
+    r"|iff(?:.|\n){0,120}internal\s+notes"
+    r"|internal\s+notes(?:.|\n){0,120}(?:in\s+scope|carries?\s+internal)",
     re.IGNORECASE,
 )
 
-# Pattern R3: RUNBOOK ties de-marking to attorney approval
-RUNBOOK_APPROVAL_REQUIRED_PATTERN = re.compile(
-    r"(?:attorney\s+approv|approv(?:al|ed)\s+(?:by\s+)?attorney|after\s+attorney\s+approv"
-    r"|attorney\s+has\s+approv|approv(?:al|ed).{0,80}(?:before|prior|required)"
-    r"|only\s+after\s+approv|must\s+be\s+approv)",
+# Pattern R3: RUNBOOK states there is NO manual de-marking / stripping procedure.
+RUNBOOK_NO_PROCEDURE_PATTERN = re.compile(
+    r"(?:no\s+(?:de.mark|manual\s+de.mark)|not\s+.{0,40}strip"
+    r"|no\s+de.marking\s+procedure|none\s+is\s+coming"
+    r"|do\s+not\s+edit\s+a\s+marked)",
     re.IGNORECASE,
 )
 
-# Pattern R4: RUNBOOK references audit / recording the step
-RUNBOOK_AUDIT_PATTERN = re.compile(
-    r"(?:audit|record(?:ed?)?|log(?:ged?)?)"
-    r"(?:.|\n){0,400}"
-    r"(?:de.mark|export.marker|clean.cop|cover.page.{0,200}header|export.approv)",
-    re.IGNORECASE,
-)
-
-# Alternate audit pattern: de-marking procedure is near audit language
-RUNBOOK_AUDIT_ALT_PATTERN = re.compile(
-    r"(?:de.mark|clean.cop|export.marker|removing.the.marker|cover.page)"
-    r"(?:.|\n){0,600}"
-    r"(?:audit|record(?:ed?)?|log(?:ged?)?)",
+# Pattern R4: RUNBOOK does not tie the marker (or anything) to a REQUIREMENT
+# for attorney approval. This is a positive statement that no such
+# requirement exists -- distinct from a bare absence check, which would also
+# reject an accurate NEGATION ("does not require attorney approval").
+RUNBOOK_NO_APPROVAL_REQUIREMENT_PATTERN = re.compile(
+    r"(?:no(?:thing)?\s+.{0,60}requires?\s+or\s+enforces?\s+attorney\s+approval"
+    r"|carries?\s+no\s+approval\s+semantics"
+    r"|does\s+not\s+(?:require|enforce)\s+attorney\s+approval)",
     re.IGNORECASE,
 )
 
 
 def gate_1_runbook(runbook_text: str) -> list[str]:
-    """RUNBOOK must contain a documented de-marking procedure."""
-    failures = []
+    """RUNBOOK.md must document the marker as a conditional, honest
+    signpost with no de-marking ritual and no approval requirement."""
+    failures = _check_retired_string_gone(runbook_text, "RUNBOOK.md")
 
-    if not RUNBOOK_DEMARK_SECTION_PATTERN.search(runbook_text):
+    if not RUNBOOK_MARKER_SECTION_PATTERN.search(runbook_text):
         failures.append(
-            "  Gate R1: RUNBOOK.md does not contain a named section for removing the\n"
-            "  export marker from an approved document (e.g., '### Removing the export\n"
-            "  marker from an approved redline' or '### Clean-copy export after approval').\n"
-            "  Required: a clearly-labelled RUNBOOK procedure for correctly de-marking\n"
-            "  an approved document.\n"
-            f"  Missing pattern: {RUNBOOK_DEMARK_SECTION_PATTERN.pattern[:120]!r}"
+            "  Gate R1: RUNBOOK.md does not contain a named section describing the\n"
+            "  export/internal-notes marker (e.g. '### Internal-notes marker on a\n"
+            "  generated redline').\n"
+            f"  Missing pattern: {RUNBOOK_MARKER_SECTION_PATTERN.pattern[:120]!r}"
         )
 
-    if not RUNBOOK_COVER_AND_HEADER_PATTERN.search(runbook_text):
+    if not RUNBOOK_CONDITIONAL_PATTERN.search(runbook_text):
         failures.append(
-            "  Gate R2: RUNBOOK.md de-marking procedure does not reference both the\n"
-            "  cover page AND the running header/footer that must be removed.\n"
-            "  Required: the procedure must guide the attorney to remove both the\n"
-            "  first-page cover note and the every-page header/footer marker.\n"
-            f"  Missing pattern: {RUNBOOK_COVER_AND_HEADER_PATTERN.pattern[:120]!r}"
+            "  Gate R2: RUNBOOK.md does not tie the marker's presence to notes mode /\n"
+            "  internal notes being in scope for the review.\n"
+            "  Required: state that the marker is present iff this review's notes mode\n"
+            "  put internal-audience content in scope.\n"
+            f"  Missing pattern: {RUNBOOK_CONDITIONAL_PATTERN.pattern[:160]!r}"
         )
 
-    if not RUNBOOK_APPROVAL_REQUIRED_PATTERN.search(runbook_text):
+    if not RUNBOOK_NO_PROCEDURE_PATTERN.search(runbook_text):
         failures.append(
-            "  Gate R3: RUNBOOK.md de-marking procedure does not tie de-marking to\n"
+            "  Gate R3: RUNBOOK.md does not state that there is no manual de-marking /\n"
+            "  marker-stripping procedure.\n"
+            "  Required: state that a marked document is never edited to look\n"
+            "  external-safe -- there is no supported de-marking ritual.\n"
+            f"  Missing pattern: {RUNBOOK_NO_PROCEDURE_PATTERN.pattern[:120]!r}"
+        )
+
+    if not RUNBOOK_NO_APPROVAL_REQUIREMENT_PATTERN.search(runbook_text):
+        failures.append(
+            "  Gate R4: RUNBOOK.md does not state that nothing requires or enforces\n"
             "  attorney approval.\n"
-            "  Required: the procedure must state that de-marking is only appropriate\n"
-            "  after attorney approval, to preserve the friction model for unapproved docs.\n"
-            f"  Missing pattern: {RUNBOOK_APPROVAL_REQUIRED_PATTERN.pattern[:120]!r}"
-        )
-
-    has_audit = (
-        RUNBOOK_AUDIT_PATTERN.search(runbook_text)
-        or RUNBOOK_AUDIT_ALT_PATTERN.search(runbook_text)
-    )
-    if not has_audit:
-        failures.append(
-            "  Gate R4: RUNBOOK.md de-marking procedure does not reference audit/recording\n"
-            "  of the de-marking step.\n"
-            "  Required: the procedure must note that the de-marking action should be\n"
-            "  audited or recorded (e.g., in the review disposition, the attorney's record,\n"
-            "  or by saving the clean copy with its review ID).\n"
-            f"  Missing patterns: {RUNBOOK_AUDIT_PATTERN.pattern[:120]!r}"
+            "  Required: an explicit statement that the marker (and the product) does\n"
+            "  not require or enforce attorney approval.\n"
+            f"  Missing pattern: {RUNBOOK_NO_APPROVAL_REQUIREMENT_PATTERN.pattern[:160]!r}"
         )
 
     return failures
 
 
 # ---------------------------------------------------------------------------
-# GATE 2 — output-contract.md: marker default + clean exit
+# GATE 2 — docs/output-contract.md: conditional marker, no approval semantics
 # ---------------------------------------------------------------------------
 
-# Pattern O1: marker is stated as the default on every generated redline
-OUTPUT_MARKER_DEFAULT_PATTERN = re.compile(
-    r"(?:marker\s+(?:is\s+)?(?:the\s+)?default|default.{0,80}marker"
-    r"|marker\s+remains?\s+(?:the\s+)?default|remains?\s+on\s+every"
-    r"|marker\s+on\s+every\s+generated|every\s+generated.{0,80}marker"
-    r"|default\s+(?:on|for)\s+(?:every|all)\s+generated)",
+# Pattern O1: marker present iff internal notes in scope (not the default).
+OUTPUT_CONDITIONAL_PATTERN = re.compile(
+    r"(?:iff|if\s+and\s+only\s+if)(?:.|\n){0,120}internal"
+    r"|conditional\s+on\s+notes\s+mode"
+    r"|present\s+iff",
     re.IGNORECASE,
 )
 
-# Pattern O2: clean export / clean copy is the approval exit
-OUTPUT_CLEAN_EXIT_PATTERN = re.compile(
-    r"(?:clean.(?:copy|export)|de.mark(?:ed)?\s+cop|export.without.marker"
-    r"|clean\s+version|marker.free)"
-    r"(?:.|\n){0,600}"
-    r"(?:approv(?:al|ed)|deliberate.{0,80}exit|approval\s+exit|exit\s+(?:path|point)"
-    r"|after\s+(?:attorney\s+)?approv|intended\s+(?:path|use))",
+# Pattern O2: no approval semantics.
+OUTPUT_NO_APPROVAL_SEMANTICS_PATTERN = re.compile(
+    r"no\s+approval\s+semantics"
+    r"|does\s+not\s+(?:require|enforce)\s+attorney\s+approval"
+    r"|nothing\s+.{0,60}(?:require|enforce|gate|record)s?\s+attorney\s+approval",
     re.IGNORECASE,
 )
 
-# Alternate: approval exit → clean export
-OUTPUT_CLEAN_EXIT_ALT_PATTERN = re.compile(
-    r"(?:approv(?:al|ed).{0,200}clean.(?:copy|export)"
-    r"|approval\s+exit.{0,200}clean"
-    r"|deliberate\s+(?:approval\s+)?exit.{0,200}clean"
-    r"|clean.(?:copy|export).{0,200}approv)",
-    re.IGNORECASE,
-)
-
-# Pattern O3: cross-reference to RUNBOOK for de-marking procedure
-OUTPUT_RUNBOOK_XREF_PATTERN = re.compile(
-    r"(?:RUNBOOK|runbook)"
-    r"(?:.|\n){0,400}"
-    r"(?:de.mark|clean.cop|export.marker|removing.the.marker|procedure)",
-    re.IGNORECASE,
-)
-
-# Alternate cross-reference pattern
-OUTPUT_RUNBOOK_XREF_ALT_PATTERN = re.compile(
-    r"(?:de.mark|clean.cop|export.marker|removing.the.marker)"
-    r"(?:.|\n){0,400}"
-    r"(?:RUNBOOK|see\s+RUNBOOK|procedure\s+in|documented\s+in)",
+# Pattern O3: cross-reference to RUNBOOK or threat-model for detail.
+OUTPUT_XREF_PATTERN = re.compile(
+    r"RUNBOOK\.md|threat-model\.md",
     re.IGNORECASE,
 )
 
 
 def gate_2_output_contract(output_contract_text: str) -> list[str]:
-    """docs/output-contract.md: marker is default; clean export is approval exit."""
-    failures = []
+    """docs/output-contract.md: marker is conditional, not the default; no
+    approval semantics; cross-referenced for detail."""
+    failures = _check_retired_string_gone(output_contract_text, "docs/output-contract.md")
 
-    if not OUTPUT_MARKER_DEFAULT_PATTERN.search(output_contract_text):
+    if not OUTPUT_CONDITIONAL_PATTERN.search(output_contract_text):
         failures.append(
-            "  Gate O1: docs/output-contract.md does not state that the export-warning\n"
-            "  marker is the default on every generated redline.\n"
-            "  Required: a statement that the marker remains the default (so clean export\n"
-            "  is not the default — it is the deliberate approval exit).\n"
-            f"  Missing pattern: {OUTPUT_MARKER_DEFAULT_PATTERN.pattern[:120]!r}"
+            "  Gate O1: docs/output-contract.md does not state that the marker is\n"
+            "  present iff internal notes are in scope (i.e. that it is conditional,\n"
+            "  not the default on every redline).\n"
+            f"  Missing pattern: {OUTPUT_CONDITIONAL_PATTERN.pattern[:160]!r}"
         )
 
-    has_clean_exit = (
-        OUTPUT_CLEAN_EXIT_PATTERN.search(output_contract_text)
-        or OUTPUT_CLEAN_EXIT_ALT_PATTERN.search(output_contract_text)
-    )
-    if not has_clean_exit:
+    if not OUTPUT_NO_APPROVAL_SEMANTICS_PATTERN.search(output_contract_text):
         failures.append(
-            "  Gate O2: docs/output-contract.md does not state that the clean copy /\n"
-            "  de-marked export is the deliberate approval exit path.\n"
-            "  Required: state that the clean export (marker-free version) is the\n"
-            "  intended / deliberate exit for approved documents — distinct from the\n"
-            "  default (marked) state.\n"
-            f"  Missing patterns: {OUTPUT_CLEAN_EXIT_PATTERN.pattern[:120]!r}\n"
-            f"               and: {OUTPUT_CLEAN_EXIT_ALT_PATTERN.pattern[:120]!r}"
+            "  Gate O2: docs/output-contract.md does not state that the marker (or the\n"
+            "  product generally) carries no approval semantics / does not require or\n"
+            "  enforce attorney approval.\n"
+            f"  Missing pattern: {OUTPUT_NO_APPROVAL_SEMANTICS_PATTERN.pattern[:160]!r}"
         )
 
-    has_xref = (
-        OUTPUT_RUNBOOK_XREF_PATTERN.search(output_contract_text)
-        or OUTPUT_RUNBOOK_XREF_ALT_PATTERN.search(output_contract_text)
-    )
-    if not has_xref:
+    if not OUTPUT_XREF_PATTERN.search(output_contract_text):
         failures.append(
-            "  Gate O3: docs/output-contract.md does not cross-reference the RUNBOOK\n"
-            "  for the de-marking / clean-copy procedure.\n"
-            "  Required: a cross-reference (e.g., 'see RUNBOOK.md → Removing the export\n"
-            "  marker') so attorneys and operators know where to find the procedure.\n"
-            f"  Missing patterns: {OUTPUT_RUNBOOK_XREF_PATTERN.pattern[:120]!r}\n"
-            f"               and: {OUTPUT_RUNBOOK_XREF_ALT_PATTERN.pattern[:120]!r}"
+            "  Gate O3: docs/output-contract.md does not cross-reference RUNBOOK.md or\n"
+            "  docs/threat-model.md for the marker's operational/threat detail.\n"
+            f"  Missing pattern: {OUTPUT_XREF_PATTERN.pattern[:120]!r}"
         )
 
     return failures
 
 
 # ---------------------------------------------------------------------------
-# GATE 3 — threat-model.md: controlled exit reflected
+# GATE 3 — docs/threat-model.md: trained-user premise, conditional marker
 # ---------------------------------------------------------------------------
 
-# Pattern T1: threat-model acknowledges a controlled/deliberate removal path
-# after attorney approval (the approval exit)
-THREAT_CONTROLLED_EXIT_PATTERN = re.compile(
-    r"(?:controlled\s+(?:exit|removal|path)|deliberate\s+(?:exit|removal)"
-    r"|approv(?:al|ed)\s+exit|clean\s+exit|clean.copy\s+exit"
-    r"|exit\s+path.{0,200}approv"
-    r"|approv.{0,200}(?:clean.cop|de.mark|remove.the.marker)"
-    r"|after\s+(?:attorney\s+)?approv.{0,200}(?:clean|de.mark|marker))",
+# Pattern T1: the withdrawn haste-prone-reviewer premise / trained-user framing.
+THREAT_TRAINED_USER_PATTERN = re.compile(
+    r"actual\s+user\s+of\s+this\s+tool\s+is\s+the\s+attorney"
+    r"|highly\s+trained"
+    r"|premise\s+is\s+explicitly\s+withdrawn"
+    r"|superseded\s+framing\s+withdrawn",
     re.IGNORECASE,
 )
 
-# Pattern T2: the controlled exit is distinct from unauthorized/accidental removal
-# (friction model is preserved)
-THREAT_FRICTION_PRESERVED_PATTERN = re.compile(
-    r"(?:distinct\s+from|not\s+the\s+same\s+as|separate\s+from"
-    r"|accidental.{0,200}(?:authorized|controlled|approved)"
-    r"|(?:authorized|controlled|approved).{0,200}accidental"
-    r"|friction.{0,400}(?:controlled|approv|authorized)"
-    r"|(?:controlled|approv|authorized).{0,400}friction)",
-    re.IGNORECASE,
-)
-
-# Alternate: the threat model just needs to say the clean/de-marked path is the
-# deliberate approval exit while keeping the friction for unapproved docs
-THREAT_APPROVAL_EXIT_ALT_PATTERN = re.compile(
-    r"(?:clean.cop|de.mark|clean\s+export|marker.free)"
-    r"(?:.|\n){0,600}"
-    r"(?:approv|deliberate|intended|attorney)",
+# Pattern T2: marker described as conditional on notes mode / internal notes.
+THREAT_CONDITIONAL_PATTERN = re.compile(
+    r"(?:iff|if\s+and\s+only\s+if)(?:.|\n){0,120}internal"
+    r"|notes\s+mode(?:.|\n){0,300}internal"
+    r"|internal(?:.|\n){0,300}notes\s+mode",
     re.IGNORECASE,
 )
 
 
 def gate_3_threat_model(threat_text: str) -> list[str]:
-    """docs/threat-model.md: controlled exit reflected in external-communication section."""
-    failures = []
+    """docs/threat-model.md: the trained-user premise replaces the withdrawn
+    haste-prone-reviewer framing, and the marker is described as
+    conditional on notes mode."""
+    failures = _check_retired_string_gone(threat_text, "docs/threat-model.md")
 
-    has_controlled_exit = (
-        THREAT_CONTROLLED_EXIT_PATTERN.search(threat_text)
-        or THREAT_APPROVAL_EXIT_ALT_PATTERN.search(threat_text)
-    )
-    if not has_controlled_exit:
+    if not THREAT_TRAINED_USER_PATTERN.search(threat_text):
         failures.append(
-            "  Gate T1: docs/threat-model.md external-communication guardrail does not\n"
-            "  reflect a controlled / deliberate removal path after attorney approval.\n"
-            "  Required: state that after attorney approval, there is a deliberate\n"
-            "  clean-copy / de-marking exit path (distinct from unauthorized removal),\n"
-            "  and that this path is documented in the RUNBOOK.\n"
-            f"  Missing patterns: {THREAT_CONTROLLED_EXIT_PATTERN.pattern[:120]!r}\n"
-            f"               and: {THREAT_APPROVAL_EXIT_ALT_PATTERN.pattern[:120]!r}"
+            "  Gate T1: docs/threat-model.md does not state the trained-user premise\n"
+            "  (the actual user of this tool is the attorney, or is highly trained) or\n"
+            "  that the earlier haste-prone-reviewer premise is withdrawn.\n"
+            f"  Missing pattern: {THREAT_TRAINED_USER_PATTERN.pattern[:160]!r}"
         )
+
+    if not THREAT_CONDITIONAL_PATTERN.search(threat_text):
+        failures.append(
+            "  Gate T2: docs/threat-model.md does not describe the export marker as\n"
+            "  conditional on notes mode / internal notes being in scope.\n"
+            f"  Missing pattern: {THREAT_CONDITIONAL_PATTERN.pattern[:160]!r}"
+        )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# GATE 4 — regression sweep across every other shipped AC1 surface
+# ---------------------------------------------------------------------------
+
+# (path, human-readable name) pairs for every plain-text surface Gate 4
+# sweeps, beyond the three docs Gates 1-3 already cover.
+_GATE_4_TEXT_SURFACES = (
+    (ARCHITECTURE_PATH, "ARCHITECTURE.md"),
+    (README_PATH, "README.md"),
+    (REVIEW_GUIDE_PATH, "docs/REVIEW-GUIDE.md"),
+    (PHASE_0_ISSUES_PATH, "docs/phase-0-issues.md"),
+    (PLAYBOOKS_SCHEMA_PATH, "playbooks/schema.json"),
+    (MANIFEST_PATH, "frontend/public/manifest.json"),
+)
+
+
+def gate_4_additional_surfaces() -> list[str]:
+    """AC1 says "UI, generated .docx, docs, RUNBOOK" -- sweep every other
+    shipped surface that AC1 covers but Gates 1-3 don't reach: the
+    remaining docs, the PWA manifest, and the committed mock fixture
+    (unzipped), for both the retired literal marker string and the broader
+    attorney-approval-requirement phrasing."""
+    failures: list[str] = []
+
+    for path, name in _GATE_4_TEXT_SURFACES:
+        try:
+            text = read_text(path)
+        except FileNotFoundError as e:
+            failures.append(f"  {e}")
+            continue
+        failures.extend(_check_retired_string_gone(text, name))
+        failures.extend(_check_no_approval_requirement_framing(text, name))
+
+    fixture_name = "infra/fixtures/mock-outputs/eiaa/pre-baked-redline.docx"
+    try:
+        fixture_text = _extract_docx_text(FIXTURE_DOCX_PATH)
+    except (FileNotFoundError, zipfile.BadZipFile, KeyError) as e:
+        failures.append(f"  {fixture_name}: could not read/unzip fixture -- {e}")
+    else:
+        failures.extend(_check_retired_string_gone(fixture_text, fixture_name))
+        failures.extend(_check_no_approval_requirement_framing(fixture_text, fixture_name))
 
     return failures
 
@@ -323,10 +420,11 @@ def main() -> int:
     g1 = gate_1_runbook(runbook_text)
     g2 = gate_2_output_contract(output_contract_text)
     g3 = gate_3_threat_model(threat_text)
+    g4 = gate_4_additional_surfaces()
 
     print(
-        "Gate 1: RUNBOOK — de-marking procedure exists (section, cover+header, "
-        "approval gate, audit)"
+        "Gate 1: RUNBOOK.md — internal-notes marker documented accurately "
+        "(section, conditional, no de-marking ritual, no approval requirement)"
     )
     if g1:
         for f in g1:
@@ -337,8 +435,8 @@ def main() -> int:
 
     print()
     print(
-        "Gate 2: docs/output-contract.md — marker is default; clean export is "
-        "approval exit; RUNBOOK xref"
+        "Gate 2: docs/output-contract.md — marker conditional, not default; "
+        "no approval semantics; cross-referenced"
     )
     if g2:
         for f in g2:
@@ -349,8 +447,8 @@ def main() -> int:
 
     print()
     print(
-        "Gate 3: docs/threat-model.md — controlled exit reflected in "
-        "external-communication guardrail"
+        "Gate 3: docs/threat-model.md — trained-user premise; marker conditional "
+        "on notes mode"
     )
     if g3:
         for f in g3:
@@ -360,14 +458,28 @@ def main() -> int:
         print("  PASS")
 
     print()
+    print(
+        "Gate 4: regression sweep (ARCHITECTURE.md, README.md, "
+        "docs/REVIEW-GUIDE.md, docs/phase-0-issues.md, playbooks/schema.json, "
+        "frontend/public/manifest.json, mock fixture .docx) — no retired "
+        "marker string, no approval-requirement framing"
+    )
+    if g4:
+        for f in g4:
+            print(f)
+        all_failures.extend(g4)
+    else:
+        print("  PASS")
+
+    print()
     if all_failures:
         print(
             f"FAIL: {len(all_failures)} issue(s) found. "
-            "See issue #39 for the full remediation plan."
+            "See issue #513 for the full remediation plan."
         )
         return 1
 
-    print("PASS: all clean-copy export / de-marking gates satisfied.")
+    print("PASS: attorney-approval framing retired; export marker is conditional (issue #513).")
     return 0
 
 

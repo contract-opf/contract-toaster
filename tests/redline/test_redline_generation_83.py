@@ -177,7 +177,11 @@ def _reconciled(issues: list, *, decision: str = "REQUEST_CHANGE", verdict_summa
 def _part_1_known_issue_list(rg, failures: list) -> None:
     """AC1: a known issue list carrying a `source_quote` -> correct
     `w:ins`/`w:del` around the quoted span, footnoted rationale, redundant
-    export marker on every page header/footer."""
+    export marker on every page header/footer. Marker presence is
+    conditional on notes mode (issue #513); this part passes
+    `notes_mode="internal"` explicitly to exercise the marker-present case
+    -- see `_part_6_marker_conditional_on_notes_mode` for the
+    marker-absent-by-default case."""
     issues = [
         _make_issue(
             "sec-8",
@@ -193,6 +197,7 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
         reconciled_result=reconciled,
         corpus=corpus,
         normalized_docx_bytes=_base_draft_docx_bytes(),
+        notes_mode="internal",
     )
 
     if result["status"] != "OK":
@@ -255,9 +260,10 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
         else:
             header_text = zf.read("word/header1.xml")
             footer_text = zf.read("word/footer1.xml")
-            if b"attorney approval required" not in header_text:
+            marker_bytes = "contains internal notes".encode("utf-8")
+            if marker_bytes not in header_text:
                 failures.append("[1k] Marker text not found in word/header1.xml.")
-            if b"attorney approval required" not in footer_text:
+            if marker_bytes not in footer_text:
                 failures.append("[1l] Marker text not found in word/footer1.xml.")
 
         # --- sectPr wires the header/footer relationship --------------------
@@ -572,6 +578,66 @@ def _part_5_word_round_trip(rg, failures: list) -> None:
                     failures.append(f"[5e] {name} failed to re-parse: {exc}")
 
 
+def _part_6_marker_conditional_on_notes_mode(rg, failures: list) -> None:
+    """Issue #513 AC: the export marker is conditional on this review's
+    notes mode -- present iff internal notes are included, absent
+    otherwise. `notes_mode="external"` (today's default, and the value
+    `_part_1` deliberately overrides to `"internal"` to test the
+    marker-present case above) and `notes_mode="none"` must both produce a
+    `.docx` with NO marker in any part: no `word/header1.xml`, no
+    `word/footer1.xml`, no `<w:headerReference>`/`<w:footerReference>` on
+    `<w:sectPr>` -- nothing to de-mark afterward. The OMITTED-notes_mode
+    call (no kwarg at all) must behave identically to the explicit
+    `"external"` default, since that IS the parameter's default value."""
+    issues = [
+        _make_issue(
+            "sec-8",
+            replacement="is uncapped",
+            rationale="Restores the standard liability cap.",
+            source_quote="shall not exceed $150,000",
+        )
+    ]
+    reconciled = _reconciled(issues)
+    corpus = rg.leakage_scan.ConfidentialCorpus()
+
+    def _assert_no_marker(case: str, docx_bytes) -> None:
+        with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
+            names = set(zf.namelist())
+            if "word/header1.xml" in names or "word/footer1.xml" in names:
+                failures.append(
+                    f"[6-{case}] Expected NO header1.xml/footer1.xml with no "
+                    f"internal notes in scope. Got parts: {sorted(names)}"
+                )
+            doc_root = ET.fromstring(zf.read("word/document.xml"))
+            if doc_root.findall(f".//{_qn('headerReference')}") or doc_root.findall(
+                f".//{_qn('footerReference')}"
+            ):
+                failures.append(
+                    f"[6-{case}] <w:sectPr> should carry no header/footer "
+                    f"reference when no marker was injected."
+                )
+            all_text = "".join(t.text or "" for t in doc_root.findall(f".//{_qn('t')}"))
+            if "internal notes" in all_text or "attorney approval" in all_text:
+                failures.append(f"[6-{case}] Marker text leaked into document.xml body.")
+
+    for case, kwargs in (
+        ("default-omitted", {}),
+        ("external-explicit", {"notes_mode": "external"}),
+        ("none", {"notes_mode": "none"}),
+    ):
+        result = rg.generate_redline(
+            reconciled_result=reconciled,
+            corpus=corpus,
+            normalized_docx_bytes=_base_draft_docx_bytes(),
+            **kwargs,
+        )
+        docx_bytes = result.get("docx_bytes")
+        if not docx_bytes:
+            failures.append(f"[6-{case}] Expected non-empty docx bytes, got {docx_bytes!r}")
+            continue
+        _assert_no_marker(case, docx_bytes)
+
+
 def main() -> None:
     failures: list = []
 
@@ -592,6 +658,7 @@ def main() -> None:
     _part_3_hostile_text_inert_literal_runs(redline_generate, failures)
     _part_4_leakage_gates_generation_and_accept(redline_generate, failures)
     _part_5_word_round_trip(redline_generate, failures)
+    _part_6_marker_conditional_on_notes_mode(redline_generate, failures)
 
     if failures:
         print("FAIL: redline generation gate (issue #83).\n")

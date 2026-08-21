@@ -155,7 +155,7 @@ class FakeS3:
 
         return {"Body": io.BytesIO(self._uploads[Key])}
 
-    def put_object(self, Bucket, Key, Body):
+    def put_object(self, Bucket, Key, Body, **_kwargs):
         pass
 
 

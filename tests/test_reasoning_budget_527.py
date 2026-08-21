@@ -380,7 +380,7 @@ class TestRunRealPipelineCapturesModelIdsOnFailure(unittest.TestCase):
                 import io
                 return {"Body": io.BytesIO(b"docx-bytes")}
 
-            def put_object(self, Bucket, Key, Body):
+            def put_object(self, Bucket, Key, Body, **_kwargs):
                 pass
 
         class InertModelClient:

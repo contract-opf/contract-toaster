@@ -12,8 +12,15 @@ already-authored rules as test fixtures, not a new legal judgment call."
 This script is idempotent and additive only: it never overwrites or
 deletes an existing fixture file (so hand-authored fixtures like
 reject-one-way-indemnify.json are left untouched), and it only
-generates a fixture for a rule that scripts/eval_harness.py's
+generates a fixture for a rule that this module's own
 missing_rule_coverage() reports as uncovered.
+
+Issue #400: this module used to import load_playbook()/missing_rule_
+coverage() from scripts/eval_harness.py. That module is now the LLM-native
+evaluation harness (issue #400) and no longer carries any detector-fixture-
+coverage bookkeeping -- this generator, which is purely about the RETIRED
+deterministic detector engine's gold-fixture corpus, now defines both
+functions locally instead, fully decoupled from eval_harness.py.
 
 For each uncovered rule:
   - kind == "on_insert": derive a minimal `inserted_hunk` that contains
@@ -46,11 +53,39 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from eval_harness import (  # noqa: E402
-    load_playbook,
-    missing_rule_coverage,
-)
 import playbook_registry  # noqa: E402
+
+
+def load_playbook(path: Path) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def rule_ids_with_detector_coverage(fixtures_dir: Path) -> set[str]:
+    """Rule IDs exercised by at least one detector-case gold fixture (any
+    expected_result) in `fixtures_dir`. A fixture with no
+    `detector_expectation` (e.g. this module's own generated cases carry
+    one; a non-detector fixture -- including an eval_harness.py llm-native-
+    v1 fixture sharing the same directory, issue #400 -- does not) is
+    skipped, not counted."""
+    covered: set[str] = set()
+    for fixture_path in sorted(fixtures_dir.glob("*.json")):
+        with open(fixture_path, encoding="utf-8") as f:
+            raw = json.load(f)
+        detector_expectation = raw.get("detector_expectation")
+        if not detector_expectation:
+            continue
+        rule_id = detector_expectation.get("rule_id")
+        if rule_id:
+            covered.add(rule_id)
+    return covered
+
+
+def missing_rule_coverage(fixtures_dir: Path, playbook_path: Path) -> list[str]:
+    playbook = load_playbook(playbook_path)
+    all_rule_ids = {r["id"] for r in playbook.get("hard_rejections", [])}
+    covered = rule_ids_with_detector_coverage(fixtures_dir)
+    return sorted(all_rule_ids - covered)
 
 # Pinned to "synthetic-generic" explicitly (not
 # eval_harness.PLAYBOOK_PATH/FIXTURES_PATH, which follow

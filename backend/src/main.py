@@ -65,6 +65,37 @@ Endpoints:
                       through it (the response is an explicit field
                       projection, see reviews.list_recent_failures).
 
+  POST /api/admin/playbooks
+                      — admin: create a brand-new playbook_id AND its first
+                        version, atomically (#485) — the only way, besides a
+                        `playbooks/registry.json` entry baked into the
+                        image, a new contract type can come to exist.
+                        Multipart upload of an OPF `.opf.html` bundle or
+                        bare `.opf.json` document (never a legacy v1 JSON,
+                        which carries no identity to derive); the new
+                        playbook_id is the document's own
+                        `agreement_type.id` (opf_load.agreement_type_keys),
+                        never operator free-text. Refused (409) if that
+                        identity already matches a registered playbook
+                        (opf_load.match_registry_playbook) or an
+                        already-created DB playbook — either way, the
+                        remedy is uploading a version onto that existing
+                        playbook_id instead. Otherwise behaves exactly like
+                        the versions-upload route below (same size cap,
+                        hash computation, schema/hash/injection validation,
+                        S3 writes, append-only version row).
+
+  POST /api/admin/playbooks/{playbook_id}/versions/{version}/legal-approval
+                      — admin: record legal approval of the EXACT
+                        content_hash named in the body for a version — the
+                        missing product path for Gate 7's step 2 (docs/
+                        playbook-governance.md "Gate 7"). A deliberate,
+                        audited operator act, never a side effect of
+                        uploading or activating. Body: {"content_hash":
+                        str}; a value that does not match the version's own
+                        recorded content_hash is refused (409), never
+                        silently recorded. An unknown version is 404.
+
   POST /api/admin/playbooks/{playbook_id}/versions/{version}/activate
                       — admin: activate a playbook release-bundle version,
                         Gate-7-enforced and wired to the resolver (#242).
@@ -237,6 +268,7 @@ Security invariants:
     uvicorn is started with --no-access-log to avoid logging request bodies.
 """
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -248,6 +280,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path, Req
 from fastapi.responses import JSONResponse
 
 from src import config
+from src import purge_scheduler
 from src.auth import get_current_user
 from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
@@ -278,6 +311,7 @@ from src.playbook_instructions import (
     list_instructions_history,
     save_instructions,
 )
+from src import playbook_upload as playbook_upload_module
 from src.playbook_upload import (
     PlaybookUploadRejected,
     original_artifact_key,
@@ -285,12 +319,14 @@ from src.playbook_upload import (
     validate_playbook_upload,
 )
 from src.playbook_versions import (
+    PlaybookVersionApprovalMismatchError,
     PlaybookVersionConflictError,
     PlaybookVersionGate7MismatchError,
     PlaybookVersionNotFoundError,
     PlaybookVersionRollbackError,
     activate_release_bundle,
     list_playbook_version_trail,
+    record_legal_approval,
     record_playbook_version_upload,
     remove_playbook,
     rename_playbook,
@@ -365,7 +401,40 @@ def _is_admin(caller_user_row: dict[str, Any]) -> bool:
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Start and stop the DTS retention purge cadence (issue #509).
+
+    The sweep itself has been correct since #454, but on the Docker Compose
+    target nothing invoked it — `preview_purge_sweep` was the only thing this
+    module imported, so an operator saw a healthy preview while uploaded
+    contracts and outputs accumulated forever.
+
+    `start_purge_scheduler` returns None on the AWS target, where the Lambda
+    owns the cadence and starting a second one would double-sweep the same
+    rows. That None is the ordinary outcome there, not a failure.
+
+    Building the clients here rather than taking the FastAPI dependencies is
+    deliberate: this runs outside any request, and the scheduler holds them for
+    the process's life.
+    """
+    handle = None
+    try:
+        handle = purge_scheduler.start_purge_scheduler(
+            s3_client=get_s3_client(),
+            dynamodb_resource=get_dynamodb_resource(),
+        )
+    except Exception:  # noqa: BLE001 - never let a cadence stop the API booting
+        logger.warning("PURGE_SWEEP: cadence could not be started; API continues")
+    try:
+        yield
+    finally:
+        if handle is not None:
+            handle.stop()
+
+
 app = FastAPI(
+    lifespan=_lifespan,
     title="ContractToaster Review API",
     description="Contract review tool API — App Runner backend (issue #55).",
     version=os.environ.get("VERSION", "dev"),
@@ -889,6 +958,309 @@ async def get_admin_diagnostics_recent_failures(
     """
     failures = list_recent_failures(caller_row, dynamodb_resource, limit=limit)
     return JSONResponse(content={"failures": failures})
+
+
+@app.post("/api/admin/playbooks", include_in_schema=True)
+async def post_admin_playbook_create(
+    file: UploadFile = File(...),
+    version: str = Form(...),
+    accept_stub_basis: bool = Form(False),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    s3_client: Any = Depends(get_s3_client),
+) -> JSONResponse:
+    """Admin: create a brand-new playbook_id AND its first version,
+    atomically (issue #485) — the missing counterpart to `POST .../
+    {playbook_id}/versions` below, which can only ever ADD a version to a
+    playbook_id that already exists (a `playbooks/registry.json` entry
+    baked into the image, or a playbook this very route already created).
+    Before this route, the only way a new playbook_id could come to exist
+    was a registry entry, which requires a new image.
+
+    Identity is READ FROM THE ARTIFACT, never taken as operator free-text:
+    the new playbook_id is the uploaded OPF document's own
+    `agreement_type.id` (`scripts/opf_load.py::agreement_type_keys(doc)`
+    puts the id ahead of any aliases, so `[0]` is always the id once the
+    document is schema-valid) — an operator cannot typo or choose a
+    different identity than the one the schema-validated, hash-verified
+    document itself declares. This is why creation accepts only an OPF
+    artifact: a legacy v1 playbook carries no `agreement_type` block at
+    all, so `opf_load.load_opf_document`'s own version check refuses it
+    with a legible "/opf_version: missing or unsupported version" — never a
+    bespoke branch here, the same failure any other OPF validation problem
+    produces.
+
+    Refuses (409) a document whose agreement_type already matches an
+    EXISTING playbook — registered (`opf_load.match_registry_playbook`,
+    previously dead code, wired here rather than reimplemented) or
+    DB-created (a `playbook_versions` row already exists for the derived
+    id) — naming the conflicting playbook_id: the correct action is
+    `POST .../{playbook_id}/versions` on that id, not a duplicate playbook.
+
+    Otherwise this is `POST .../{playbook_id}/versions` below's own flow,
+    reusing the exact same tested engine (`src.playbook_upload`) rather
+    than reimplementing any of it: the same size cap
+    (`MAX_UPLOAD_SIZE_BYTES`), the same server-computed
+    `"sha256:" + sha256(bytes)` content hash, the same schema/identity-hash/
+    injection-scan validation and stub-basis watermark gate
+    (`playbook_upload._finish_opf`), the same content-addressed S3 writes
+    (canonical text + original bytes), and the same append-only
+    `playbook_versions` row (`record_playbook_version_upload`) — see that
+    route's docstring for the shared mechanics this one only adds the
+    "derive + reserve the identity" step in front of.
+
+    Body (multipart/form-data): `file` (an OPF `.opf.html` bundle or bare
+    `.opf.json` document), `version` (the new version identifier), optional
+    `accept_stub_basis` (default false — required to accept an artifact
+    watermarked `compiler.stub_basis_present`). Raises HTTP 403 for a
+    non-admin caller, 413 over `MAX_UPLOAD_SIZE_BYTES`, 400 for a
+    missing/blank `version`, an unrecognized filename, or any artifact
+    validation failure (including a legacy v1 upload, which has no
+    `agreement_type` to derive identity from), 409 if the derived
+    playbook_id already exists (registered or DB-created) or if
+    `(playbook_id, version)` was already recorded.
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to create a playbook.",
+        )
+    if not version.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Body must include a non-empty 'version' field.",
+        )
+    contents = await file.read()
+    # Size cap BEFORE anything else touches the bytes -- same reasoning as
+    # the versions-upload route below (issue #478 fix round 1).
+    if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Upload exceeds the maximum allowed size of "
+                f"{MAX_UPLOAD_SIZE_BYTES} bytes."
+            ),
+        )
+    computed_hash = "sha256:" + hashlib.sha256(contents).hexdigest()
+
+    filename = file.filename or ""
+    lower_name = filename.lower()
+    is_html = (
+        lower_name.endswith(".opf.html")
+        or lower_name.endswith(".html")
+        or lower_name.endswith(".htm")
+    )
+    is_json = lower_name.endswith(".json")
+    if not is_html and not is_json:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unrecognized playbook upload filename {filename!r}: expected a "
+                ".json (OPF) or .opf.html/.html (OPF bundle) file."
+            ),
+        )
+
+    # Local import, same sys.path seam `_require_registered_playbook` below
+    # uses: `scripts/` was already added to sys.path by the `src.
+    # playbook_upload` / `src.playbook_versions` imports at the top of this
+    # module, both of which insert it idempotently at their own import time.
+    import opf_load
+
+    try:
+        doc = playbook_upload_module._load_opf_from_bytes(
+            contents, suffix=".opf.html" if is_html else ".json"
+        )
+    except opf_load.OpfValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Playbook creation requires a valid OPF artifact -- identity is "
+                f"derived from its agreement_type: {exc}"
+            ),
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Upload is not valid UTF-8 text: {exc}",
+        ) from exc
+
+    keys = opf_load.agreement_type_keys(doc)
+    if not keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "OPF validation failed at /agreement_type/id: a playbook document "
+                "must carry an agreement_type.id to derive a new playbook_id from."
+            ),
+        )
+    playbook_id = keys[0]
+
+    registry_match = opf_load.match_registry_playbook(doc)
+    if registry_match is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This document's agreement_type already matches the registered "
+                f"playbook_id {registry_match!r}. Upload a new version onto that "
+                f"playbook_id (POST /api/admin/playbooks/{registry_match}/versions) "
+                "instead of creating a duplicate."
+            ),
+        )
+    if list_playbook_version_trail(playbook_id, dynamodb_resource):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"playbook_id {playbook_id!r} already exists. Upload a new version "
+                f"onto it (POST /api/admin/playbooks/{playbook_id}/versions) instead "
+                "of creating a duplicate."
+            ),
+        )
+
+    try:
+        validated = playbook_upload_module._finish_opf(
+            doc,
+            playbook_id=playbook_id,
+            accept_stub_basis=accept_stub_basis,
+            source_was_html=is_html,
+        )
+    except PlaybookUploadRejected as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # Belt-and-suspenders re-check immediately before either S3 write --
+    # same ordering rationale as the versions-upload route's own pre-check
+    # (issue #478 fix round 1): a race between the DB read above and this
+    # write must still never orphan bytes in S3.
+    if version_already_recorded(playbook_id, version, dynamodb_resource):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"playbook version already recorded: playbook_id={playbook_id!r} "
+                f"version={version!r} (append-only — re-uploads must use a new "
+                "version identifier)"
+            ),
+        )
+
+    storage_bytes = validated.storage_text.encode("utf-8")
+    storage_hash_hex = hashlib.sha256(storage_bytes).hexdigest()
+    storage_key = storage_key_for(playbook_id, storage_hash_hex)
+    uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
+    if not uploads_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="UPLOADS_BUCKET not configured.",
+        )
+    s3_client.put_object(Bucket=uploads_bucket, Key=storage_key, Body=storage_bytes)
+    s3_client.put_object(
+        Bucket=uploads_bucket,
+        Key=original_artifact_key(
+            playbook_id, hashlib.sha256(contents).hexdigest(), filename=filename
+        ),
+        Body=contents,
+    )
+
+    try:
+        result = record_playbook_version_upload(
+            playbook_id=playbook_id,
+            version=version,
+            uploader_identity=caller_row.get("cognito_sub", ""),
+            dynamodb_resource=dynamodb_resource,
+            content_hash=computed_hash,
+            artifact_kind=validated.artifact_kind,
+            opf_content_hash=validated.opf_content_hash,
+            storage_key=storage_key,
+            accepted_stub_basis=validated.accepted_stub_basis,
+        )
+    except PlaybookVersionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return JSONResponse(
+        content={
+            "playbook_id": result.get("playbook_id"),
+            "version": result.get("version"),
+            "status": result.get("status"),
+            "content_hash": result.get("content_hash"),
+            "artifact_kind": result.get("artifact_kind"),
+            "opf_content_hash": result.get("opf_content_hash"),
+            "storage_key": result.get("storage_key"),
+            "accepted_stub_basis": result.get("accepted_stub_basis", False),
+            "uploaded_by": result.get("uploaded_by"),
+            "uploaded_at": (
+                int(result["uploaded_at"]) if result.get("uploaded_at") is not None else None
+            ),
+        }
+    )
+
+
+@app.post(
+    "/api/admin/playbooks/{playbook_id}/versions/{version}/legal-approval",
+    include_in_schema=True,
+)
+async def post_admin_playbook_version_legal_approval(
+    playbook_id: str = Path(...),
+    version: str = Path(...),
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: record legal approval of a specific (playbook_id, version,
+    content_hash) — the missing product path for Gate 7's step 2 (docs/
+    playbook-governance.md "Gate 7"). `playbook_versions.
+    activate_release_bundle` has enforced step 3
+    (`content_hash == legal_approval.content_hash`) since issue #242, but
+    nothing in the product ever wrote `legal_approval` — only a test, via a
+    raw `update_item`, ever had — so the shipped Activate button could
+    never succeed against a real upload.
+
+    A deliberate, audited operator act — separate from, and a precondition
+    for, activation; never a side effect of uploading or activating a
+    version (see `src.sample_playbooks`'s own Gate-7-bypass rationale,
+    which this route must not widen). Body: `{"content_hash": str}` — the
+    EXACT hash (as shown on this version's row) the caller is vouching for;
+    a value that does not match the version's own recorded `content_hash`
+    is refused (409), never silently recorded.
+
+    Raises HTTP 403 for a non-admin caller, 400 for a missing/non-string/
+    empty `content_hash`, 404 for an unknown `(playbook_id, version)`, 409
+    for a content_hash mismatch.
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to record legal approval for a playbook version.",
+        )
+    content_hash = body.get("content_hash")
+    if not isinstance(content_hash, str) or not content_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Body must include a non-empty string 'content_hash' field.",
+        )
+    actor_identity = caller_row.get("cognito_sub", "")
+    try:
+        result = record_legal_approval(
+            playbook_id=playbook_id,
+            version=version,
+            content_hash=content_hash,
+            actor_identity=actor_identity,
+            dynamodb_resource=dynamodb_resource,
+        )
+    except PlaybookVersionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PlaybookVersionApprovalMismatchError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    legal_approval = result.get("legal_approval") or {}
+    return JSONResponse(
+        content={
+            "playbook_id": result.get("playbook_id"),
+            "version": result.get("version"),
+            "content_hash": legal_approval.get("content_hash"),
+            "approved_by": legal_approval.get("approved_by"),
+            "approved_at": (
+                int(legal_approval["approved_at"])
+                if legal_approval.get("approved_at") is not None
+                else None
+            ),
+        }
+    )
 
 
 @app.post(

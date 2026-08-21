@@ -31,8 +31,11 @@ GATE 3 — Mechanism documented with residual-risk statement
        corpus n-grams)
     b) acknowledged paraphrase residual: the deterministic layer does not
        catch paraphrase; this gap is documented as a known residual risk
-       (not a silent miss) covered by the internal-only watermark and
-       attorney gate.
+       (not a silent miss) covered by (post-#513) the attorney's own review
+       as the backstop before anything reaches a counterparty, and the
+       internal-notes export marker when applicable (conditional on notes
+       mode, never the retired always-on watermark / attorney-approval
+       gate).
 
 GATE 4 — Leak fixtures: ACCEPT-path and critic-delta fixtures documented
   docs/threat-model.md or ARCHITECTURE.md must document that test fixtures
@@ -158,12 +161,28 @@ G3_PARAPHRASE_RESIDUAL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Pattern G3c: watermark + attorney gate named as residual coverage for paraphrase
-G3_RESIDUAL_COVERAGE_PATTERN = re.compile(
-    r"(?:watermark|attorney\s+(?:gate|approval|review)).{0,400}"
-    r"(?:residual|paraphrase|limitation|gap)"
-    r"|(?:residual|paraphrase|limitation|gap).{0,400}"
-    r"(?:watermark|attorney\s+(?:gate|approval|review))",
+# Pattern G3c (post-#513): the attorney's own review, named as the residual
+# backstop for paraphrase -- NOT the retired always-on watermark / unqualified
+# "attorney gate" framing, which issue #513 withdrew (docs/threat-model.md ->
+# "External-communication guardrail"). Requires the review to be tied to its
+# backstop role (final / before it leaves the org / human-in-the-loop), not
+# just the bare word "review" appearing anywhere near "residual".
+G3_ATTORNEY_REVIEW_BACKSTOP_PATTERN = re.compile(
+    r"attorney(?:'s)?\s+(?:own\s+)?review.{0,300}"
+    r"(?:backstop|final|before\s+(?:it|anything|sending)|human-in-the-loop)"
+    r"|(?:backstop|final|before\s+(?:it|anything|sending)|human-in-the-loop).{0,300}"
+    r"attorney(?:'s)?\s+(?:own\s+)?review",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Pattern G3d (post-#513): the internal-notes export marker named as
+# secondary residual coverage, but only when described as CONDITIONAL
+# (present iff notes mode includes internal content / "when applicable") --
+# never the retired unconditional/always-on watermark framing.
+G3_CONDITIONAL_MARKER_COVERAGE_PATTERN = re.compile(
+    r"(?:internal-notes?\s+(?:export\s+)?marker|export\s+marker).{0,300}"
+    r"(?:when\s+applicable|iff|conditional|notes\s+mode"
+    r"|internal\s+notes\s+(?:in\s+scope|are\s+in\s+scope))",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -330,7 +349,8 @@ SCANNER_FIXTURES = [
         "description": (
             "Paraphrase of playbook position — KNOWN LIMITATION of the deterministic "
             "layer; not caught (not a silent miss — documented residual risk covered by "
-            "watermark + attorney gate)"
+            "the attorney's own review, plus the internal-notes export marker when "
+            "applicable)"
         ),
     },
 ]
@@ -445,24 +465,33 @@ def gate3_mechanism_documented(arch_text: str, threat_text: str) -> list[str]:
         )
 
     has_paraphrase = G3_PARAPHRASE_RESIDUAL_PATTERN.search(combined)
-    has_residual_coverage = G3_RESIDUAL_COVERAGE_PATTERN.search(combined)
+    has_attorney_review_backstop = G3_ATTORNEY_REVIEW_BACKSTOP_PATTERN.search(combined)
+    has_conditional_marker_coverage = G3_CONDITIONAL_MARKER_COVERAGE_PATTERN.search(combined)
 
-    if not (has_paraphrase and has_residual_coverage):
+    if not (has_paraphrase and has_attorney_review_backstop and has_conditional_marker_coverage):
         missing_parts = []
         if not has_paraphrase:
             missing_parts.append(
                 f"    paraphrase limitation: {G3_PARAPHRASE_RESIDUAL_PATTERN.pattern[:120]!r}"
             )
-        if not has_residual_coverage:
+        if not has_attorney_review_backstop:
             missing_parts.append(
-                f"    residual coverage:     {G3_RESIDUAL_COVERAGE_PATTERN.pattern[:120]!r}"
+                f"    attorney-review backstop: {G3_ATTORNEY_REVIEW_BACKSTOP_PATTERN.pattern[:160]!r}"
+            )
+        if not has_conditional_marker_coverage:
+            missing_parts.append(
+                f"    conditional marker coverage: {G3_CONDITIONAL_MARKER_COVERAGE_PATTERN.pattern[:160]!r}"
             )
         failures.append(
             "  Gate 3b: The paraphrase residual is not documented as a known limitation\n"
-            "  with stated residual coverage (watermark + attorney gate).\n"
+            "  with the post-#513 residual coverage (issue #513 retired the always-on\n"
+            "  watermark / unqualified attorney-approval gate framing).\n"
             "  Required: document that the deterministic layer does not catch paraphrase;\n"
-            "  this is a known residual risk (not a silent miss) covered by the\n"
-            "  internal-only watermark and the attorney approval gate.\n"
+            "  this is a known residual risk (not a silent miss) covered by (1) the\n"
+            "  attorney's own review as the backstop before anything reaches a\n"
+            "  counterparty, and (2) the internal-notes export marker, present only when\n"
+            "  applicable (conditional on notes mode) -- never an always-on watermark or\n"
+            "  an unqualified attorney-approval gate.\n"
             "  Missing:\n" + "\n".join(missing_parts)
         )
 

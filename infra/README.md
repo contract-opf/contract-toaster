@@ -161,7 +161,7 @@ end-to-end minimal deploy on those two fronts.
 - **Pointer-only payloads**: Step Functions inputs carry only S3/DDB pointers (#59).
 - **No doc substance in logs**: CloudWatch must never log document content, rationales,
   or PII; enforced in Lambda/task configurations (#55+).
-- **Watermark**: Every reviewer output carries an attorney-approval watermark (#59).
+- **Internal-notes marker**: A generated redline `.docx` carries an internal-notes export marker iff that review's notes mode put internal-audience content in scope — never unconditional, no approval semantics (#513).
 
 ## Nested stack notes
 

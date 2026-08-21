@@ -69,7 +69,9 @@ Usage (FastAPI dependency injection):
 """
 
 import os
+import re
 import time
+from urllib.parse import quote
 from typing import Any
 
 import boto3
@@ -87,6 +89,124 @@ except ImportError:  # pragma: no cover
 # Short-lived so a leaked URL expires quickly; the caller must re-authenticate
 # and re-request if more time is needed.
 PRESIGNED_URL_TTL_SECONDS = 60
+
+# ---------------------------------------------------------------------------
+# Download filename (issue #518)
+#
+# Every redline used to arrive as `out.docx`, because the presign passed only
+# Bucket and Key and the browser derives the name from the key --
+# `outputs/{review_id}/out.docx`. A lawyer running three reviews in an
+# afternoon ended up with `out.docx`, `out (1).docx`, `out (2).docx`, with
+# nothing tying any of them to the agreement it came from. The redline is the
+# entire deliverable and it arrived anonymous.
+#
+# THE FILENAME IS COUNTERPARTY-SUPPLIED AND GOES INTO A RESPONSE HEADER. That
+# makes this a header-injection sink, which is why the sanitiser below is an
+# allowlist -- keep a known-safe set of characters -- rather than a blocklist
+# of the attacks anyone thought of. CR/LF would let an uploader append their
+# own headers; a quote would escape the quoted-string form; a semicolon would
+# start a new parameter.
+# ---------------------------------------------------------------------------
+
+# The ASCII-safe alphabet: word characters, space, dot, dash, underscore and
+# parens. Everything else -- path separators, traversal, control characters,
+# quotes, semicolons, CR/LF, non-ASCII -- is dropped. An ALLOWLIST, not a
+# blocklist of the attacks somebody thought of.
+_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9 ._()\-]")
+_DOT_RUN = re.compile(r"\.{2,}")
+
+# Long enough for any real agreement name, short enough that the header stays
+# comfortably inside every server's limit even after percent-encoding.
+MAX_DOWNLOAD_FILENAME_CHARS = 120
+
+REDLINE_SUFFIX = "-redline"
+
+
+def _basename_stem(original_filename: str | None) -> str:
+    """The uploaded name with its path and `.docx` extension removed.
+
+    The basename is taken FIRST: `../../etc/passwd.docx` has to lose its path
+    before anything else looks at it.
+    """
+    if not original_filename:
+        return ""
+    base = original_filename.replace("\\", "/").rsplit("/", 1)[-1]
+    if base.lower().endswith(".docx"):
+        base = base[: -len(".docx")]
+    return base
+
+
+def _ascii_stem(original_filename: str | None) -> str:
+    """The stem reduced to the safe ASCII alphabet, for the `filename=`
+    parameter that clients predating RFC 5987 read."""
+    stem = _FILENAME_SAFE.sub("", _basename_stem(original_filename))
+    return _DOT_RUN.sub(".", stem).strip(" .")[:MAX_DOWNLOAD_FILENAME_CHARS]
+
+
+def _unicode_stem(original_filename: str | None) -> str:
+    """The stem keeping the document's own letters, for `filename*`.
+
+    Percent-encoding is what makes this safe: every byte outside the
+    unreserved set becomes %XX, so a CR, a quote or a semicolon cannot survive
+    into the header as itself. The stripping here is therefore about the FILE
+    SYSTEM -- the path separators and traversal a browser would otherwise
+    honour -- and about unprintables, not about the header.
+    """
+    stem = "".join(ch for ch in _basename_stem(original_filename) if ch.isprintable())
+    return _DOT_RUN.sub(".", stem).strip(" .")[:MAX_DOWNLOAD_FILENAME_CHARS]
+
+
+def _content_disposition(ascii_name: str, unicode_name: str) -> str:
+    """Both parameters: `filename=` for clients that ignore RFC 5987, and
+    `filename*=UTF-8''…` carrying the real letters percent-encoded.
+
+    The plain parameter is always the SANITISED ASCII name, never the raw
+    original, so a client that reads only that one still cannot be fed
+    anything hostile.
+    """
+    encoded = quote(unicode_name, safe="")
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
+
+
+def redline_filename_for(original_filename: str | None, review_id: str) -> str:
+    """The ASCII name a downloaded redline is saved under.
+
+    `<stem>-redline.docx`, or `redline-<first 8 of review id>.docx` when there
+    is no usable original -- which covers a missing field, an empty one, and
+    one sanitised down to nothing. That last case is the one worth stating: a
+    filename made entirely of stripped characters must NOT produce an empty
+    name, because the browser then invents one and the anonymous download is
+    back through the side door.
+    """
+    stem = _ascii_stem(original_filename)
+    return f"{stem}{REDLINE_SUFFIX}.docx" if stem else f"redline-{review_id[:8]}.docx"
+
+
+def content_disposition_for(original_filename: str | None, review_id: str) -> str:
+    """The `Content-Disposition` for a REDLINE download."""
+    ascii_stem = _ascii_stem(original_filename)
+    unicode_stem = _unicode_stem(original_filename)
+    fallback = f"redline-{review_id[:8]}.docx"
+    return _content_disposition(
+        f"{ascii_stem}{REDLINE_SUFFIX}.docx" if ascii_stem else fallback,
+        f"{unicode_stem}{REDLINE_SUFFIX}.docx" if unicode_stem else fallback,
+    )
+
+
+def content_disposition_for_input(original_filename: str | None, review_id: str) -> str:
+    """The `Content-Disposition` for the INPUT document download.
+
+    No redline marker: the uploaded file is not a redline, and calling it one
+    would be the same class of lie as calling every redline `out.docx`. Same
+    sanitising, same fallback shape.
+    """
+    ascii_stem = _ascii_stem(original_filename)
+    unicode_stem = _unicode_stem(original_filename)
+    fallback = f"input-{review_id[:8]}.docx"
+    return _content_disposition(
+        f"{ascii_stem}.docx" if ascii_stem else fallback,
+        f"{unicode_stem}.docx" if unicode_stem else fallback,
+    )
 
 # DynamoDB per-user daily limit (enforced via ConditionExpression on UpdateItem).
 # Deliberately no concurrency counter here — see module docstring's
@@ -353,6 +473,7 @@ def generate_presigned_download_url(
     expected_key_prefix: str | None = None,
     bucket_name: str | None = None,
     require_object_exists: bool = False,
+    download_filename: str | None = None,
 ) -> JSONResponse:
     """Generate a short-lived presigned URL for an output file download.
 
@@ -505,13 +626,19 @@ def generate_presigned_download_url(
     if config.s3_public_endpoint_url():
         presigning_client = boto3.client("s3", **config.presigning_s3_client_kwargs())
 
+    # Issue #518: without this the browser derives the saved name from the S3
+    # KEY -- `outputs/{review_id}/out.docx` -- so every deliverable this
+    # product has ever produced arrived called `out.docx`. The value is built
+    # by `content_disposition_for`, which is where the header-injection
+    # sanitising lives; a caller passing None keeps the old behaviour exactly.
+    params: dict[str, Any] = {"Bucket": bucket, "Key": s3_key}
+    if download_filename:
+        params["ResponseContentDisposition"] = download_filename
+
     try:
         presigned_url = presigning_client.generate_presigned_url(
             "get_object",
-            Params={
-                "Bucket": bucket,
-                "Key": s3_key,
-            },
+            Params=params,
             ExpiresIn=PRESIGNED_URL_TTL_SECONDS,
         )
     except ClientError as exc:

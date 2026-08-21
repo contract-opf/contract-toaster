@@ -15,10 +15,12 @@ config.boto3_client_kwargs):
      was declared here would otherwise be skipped forever, which is how a live
      deployment ran without review_id-index and failed every spend settle.
   2. Create the uploads/outputs S3 buckets.
-  3. Seed the mock eiaa redline fixture into the outputs bucket at
-     mock-fixtures/eiaa/pre-baked-redline.docx (what the mock pipeline copies).
-  4. Seed the demo users (admin/admin, user/user) and a minimal active eiaa
-     playbook bundle so submit_review's active-bundle check passes.
+  3. Seed every registry-declared mock-pipeline redline fixture into the
+     outputs bucket (the keys `_mock_decision` copies from).
+  4. Seed the demo users (admin/admin, user/user). No playbook row is seeded
+     here: step 5 installs the registry-backed sample, which is what
+     submit_review's active-bundle check actually resolves (issue #515
+     removed a hardcoded tenant-named orphan row that nothing served).
   5. Install and activate the playbook the image ships with (issue #433), so a
      fresh deployment never comes up with an empty catalog. This is the ONLY
      way the shipped playbook gets installed -- there is no bespoke
@@ -62,8 +64,17 @@ if str(_SCRIPTS) not in sys.path:
 
 import playbook_registry  # noqa: E402
 
-FIXTURE_PATH = _APP_ROOT / "infra" / "fixtures" / "mock-outputs" / "eiaa" / "pre-baked-redline.docx"
-FIXTURE_KEY = "mock-fixtures/eiaa/pre-baked-redline.docx"
+# Issue #515: the mock-pipeline fixture key is resolved from the REGISTRY, not
+# spelled out here. It used to be two hardcoded tenant-named literals, in the
+# most public-facing path in the repo -- exactly what an adopter copies and
+# runs -- and neither of the two guards could see them: the brand-free gate
+# does not know that term, and the tenant-literal lint did not scan `deploy/`.
+# Two guards, one blind spot each, and the leak sat in the overlap.
+#
+# `backend/src/pipeline_runner.py::_mock_decision` already resolves this key
+# the same way, so the seeder and the consumer now read one source instead of
+# agreeing by hand.
+_MOCK_OUTPUT_ROOT = _APP_ROOT / "infra" / "fixtures" / "mock-outputs"
 
 # Table name (env var) -> key schema. `gsis` is a list of
 # (index_name, hash_attr, range_attr) tuples.
@@ -92,6 +103,11 @@ _TABLES = [
     ("RETENTION_SETTINGS_TABLE", "setting_id", None, []),
     ("MODEL_SETTINGS_TABLE", "setting_id", None, []),
     ("SYNC_STATUS_TABLE", "sync_type", None, []),
+    # Model-invocation ledger (issue #414) -- metadata-only record of every
+    # model-invocation attempt the primary/critic passes make. Sort key is a
+    # plain String (src/invocation_ledger.py's "{pass_name}#{attempt:02d}#
+    # {timestamp}"), so this needs no entry in _RANGE_KEY_NUMERIC_TABLES.
+    ("MODEL_INVOCATIONS_TABLE", "review_id", "record_id", []),
 ]
 
 
@@ -252,14 +268,47 @@ def create_buckets() -> None:
 
 
 def seed_fixture() -> None:
+    """Seed every registry-declared mock-pipeline fixture into the outputs
+    bucket (issue #515: registry-derived, never a playbook_id literal here).
+
+    Only entries that actually declare a `mock_output_key` are seeded, so a
+    playbook with no canned fixture is silently skipped rather than seeded
+    under a guessed key -- which is the same thing `_mock_decision` does with
+    the same field, from the other side.
+
+    The local path is derived from the key's own middle segment: the S3 layout
+    (`mock-fixtures/<name>/…`) and the on-disk layout
+    (`infra/fixtures/mock-outputs/<name>/…`) are two spellings of one
+    arrangement, and reading the name out of the key is what stops this file
+    needing to know any playbook's name.
+    """
     bucket = os.environ.get("OUTPUTS_BUCKET")
     if not bucket:
         return
-    if not FIXTURE_PATH.exists():
-        print(f"  WARNING: fixture not found at {FIXTURE_PATH}; eiaa downloads will 404")
+    try:
+        import playbook_registry
+    except ImportError:
+        print("  WARNING: playbook_registry unavailable; no mock fixtures seeded")
         return
-    _s3_client().put_object(Bucket=bucket, Key=FIXTURE_KEY, Body=FIXTURE_PATH.read_bytes())
-    print(f"  seeded {FIXTURE_KEY} into {bucket}")
+
+    seeded = 0
+    for playbook_id in playbook_registry.list_playbook_ids():
+        key = playbook_registry.resolve_playbook(playbook_id).mock_output_key
+        if not key:
+            continue
+        parts = key.split("/")
+        if len(parts) < 3:
+            print(f"  WARNING: unrecognised mock_output_key layout: {key}")
+            continue
+        source = _MOCK_OUTPUT_ROOT / parts[-2] / parts[-1]
+        if not source.exists():
+            print(f"  WARNING: fixture not found at {source}; mock downloads will 404")
+            continue
+        _s3_client().put_object(Bucket=bucket, Key=key, Body=source.read_bytes())
+        print(f"  seeded {key} into {bucket}")
+        seeded += 1
+    if seeded == 0:
+        print("  no registry entry declares a mock fixture; nothing seeded")
 
 
 def seed_users_and_playbook() -> None:
@@ -286,17 +335,19 @@ def seed_users_and_playbook() -> None:
         )
         print(f"  set auth-mode setting to '{login_mode}' (password login enabled)")
 
-    # Minimal active eiaa bundle so resolve_active_release_bundle_hash passes.
-    playbooks_table = os.environ.get("PLAYBOOKS_TABLE")
-    if playbooks_table:
-        ddb.Table(playbooks_table).put_item(
-            Item={
-                "playbook_id": "eiaa",
-                "active_release_bundle_hash": "dts-mock-bundle-v1",
-                "updated_at": str(int(time.time())),
-            }
-        )
-        print("  seeded active eiaa playbook bundle")
+    # Issue #515: the hardcoded tenant-named playbook row that used to be
+    # seeded here is GONE, with no replacement.
+    #
+    # It was vestigial. The catalog is registry-filtered, so `GET /api/playbooks`
+    # never served it -- the row simply sat in PLAYBOOKS_TABLE of every fresh
+    # deployment, tenant-named, in the path a public adopter copies and runs.
+    # `seed_shipped_playbook()` below installs and activates the real sample,
+    # which is what `resolve_active_release_bundle_hash` actually resolves.
+    #
+    # Owner decision 2026-08-03: the tenant's own playbook is a bonus that
+    # arrives through the ordinary install/upload path (#478/#485), from the
+    # playbook-engine repo. Nothing about it needs a bootstrap seed here, and
+    # the empty-shell architecture assumes it does not have one.
 
 
 def seed_shipped_playbook() -> None:

@@ -23,12 +23,35 @@ After the fix it PASSES by asserting the redefined rule:
   - A single, unambiguous pending tracked change (one author, not inside a
     field code) is ACCEPTED-ALL into the operative draft, and the
     disposition is recorded in a normalization note (never silent).
-  - Fail-closed is RESERVED for genuinely ambiguous structures: nested/
-    conflicting revisions, multiple interleaved authors, and revisions
-    inside field codes -- covered here by dedicated MUST-FAIL-CLOSED
-    fixtures, the inverse of the MUST-NORMALIZE case.
+  - Fail-closed is RESERVED for genuinely ambiguous structures: revisions
+    inside field codes, and malformed records with no resulting_text --
+    covered here by dedicated MUST-FAIL-CLOSED fixtures, the inverse of the
+    MUST-NORMALIZE case.
   - Comments never gate normalization by themselves, even alongside a
     pending tracked change that is itself accepted-all.
+
+## Updated for issue #563
+
+Nested/conflicting revisions (more than one pending cluster on a paragraph)
+and multiple interleaved authors used to be reserved fail-closed too --
+issue #563 found that reasoning did not hold in the real pipeline (every
+cluster's `resulting_text` is the SAME whole-paragraph accept-all text) and
+redefined both as ACCEPT-ALL with a disclosure note, exactly like the
+single-pending-revision case. `conflicting_tracked_changes.json` (multiple
+authors) and the new `multi_cluster_same_author_tracked_changes.json`
+(one author, two clusters) moved from the MUST-FAIL-CLOSED section below
+into MUST-NORMALIZE.
+
+## Updated for issue #530
+
+A pending change inside a field code was the last of the original four
+conditions still reserved fail-closed. Owner decision 2026-08-09 found the
+same reasoning gap issue #563 found for multi-cluster/multi-author: the
+field's own pending-revision cluster already carries the field's resolved
+`resulting_text`, so there is no separate "which field result wins"
+decision left to make. `pending_change_inside_field_code.json` moves from
+MUST-FAIL-CLOSED into MUST-NORMALIZE too; only `corrupt_structure.json`
+(a malformed record with no `resulting_text`) remains fail-closed.
 
 Exit codes: 0 = pass, 1 = fail
 """
@@ -111,34 +134,116 @@ def main():
             )
 
     # =========================================================================
-    # STILL-FAIL-CLOSED: genuinely ambiguous structures are reserved for
-    # fail-closed, per issue #199's suggested direction.
+    # MUST-NORMALIZE (issue #563): more than one pending cluster and/or
+    # author on a paragraph no longer fails the document closed -- every
+    # cluster's resulting_text is the SAME whole-paragraph accept-all text,
+    # so accepting the first one accepts them all. Disclosure, not
+    # ambiguity: the note names the paragraph and the cluster/author counts.
     # =========================================================================
 
-    # Nested/conflicting revisions -- multiple pending tracked changes from
-    # different (interleaved) authors on the same paragraph.
+    # Multiple pending tracked changes from DIFFERENT (interleaved) authors
+    # on the same paragraph.
     conflicting_doc = _load_fixture("conflicting_tracked_changes.json")
     conflicting_result = normalize_input.normalize(conflicting_doc)
-    if conflicting_result.get("normalizable") is not False:
+    if conflicting_result.get("normalizable") is not True:
         failures.append(
-            f"[STILL-FAIL-CLOSED 1] Multiple interleaved pending-revision "
-            f"authors on one paragraph must fail closed. Got: {conflicting_result}"
+            f"[MULTI-AUTHOR MUST-NORMALIZE 1] Pending tracked changes from "
+            f"multiple authors on one paragraph must accept-all, not fail "
+            f"closed (issue #563). Got: {conflicting_result}"
         )
-    if not conflicting_result.get("normalization_notes"):
+    conflicting_body = conflicting_result.get("clean_body", "")
+    if "uncapped" not in conflicting_body:
         failures.append(
-            f"[STILL-FAIL-CLOSED 2] Fail-closed result must carry "
-            f"normalization_notes describing the ambiguity. Got: {conflicting_result}"
+            f"[MULTI-AUTHOR MUST-NORMALIZE 2] The first pending cluster's "
+            f"resulting_text must become the operative text. Got clean_body="
+            f"{conflicting_body!r}"
+        )
+    conflicting_notes = conflicting_result.get("normalization_notes", "")
+    if not conflicting_notes:
+        failures.append(
+            "[MULTI-AUTHOR MUST-NORMALIZE 3] The accept-all disposition "
+            "must be recorded in normalization_notes, never silent. Got no "
+            f"notes. Full result: {conflicting_result}"
+        )
+    if conflicting_notes and "2" not in conflicting_notes:
+        failures.append(
+            f"[MULTI-AUTHOR MUST-NORMALIZE 4] normalization_notes should "
+            f"name the cluster/author counts (2 pending changes, 2 "
+            f"authors). Got: {conflicting_notes!r}"
         )
 
-    # Revisions inside field codes -- which literal field result is
-    # operative is itself in question.
+    # Multiple pending tracked-change CLUSTERS from the SAME author on the
+    # same paragraph -- the other half of the old "nested/conflicting
+    # revisions" rule (rule 1), distinct from interleaved authors (rule 2).
+    same_author_doc = _load_fixture("multi_cluster_same_author_tracked_changes.json")
+    same_author_result = normalize_input.normalize(same_author_doc)
+    if same_author_result.get("normalizable") is not True:
+        failures.append(
+            f"[MULTI-CLUSTER MUST-NORMALIZE 1] Multiple pending clusters "
+            f"from the SAME author on one paragraph must accept-all, not "
+            f"fail closed (issue #563). Got: {same_author_result}"
+        )
+    same_author_body = same_author_result.get("clean_body", "")
+    if "45 days" not in same_author_body or "EUR" not in same_author_body:
+        failures.append(
+            f"[MULTI-CLUSTER MUST-NORMALIZE 2] The pending cluster's "
+            f"resulting_text must become the operative text. Got clean_body="
+            f"{same_author_body!r}"
+        )
+    if not same_author_result.get("normalization_notes"):
+        failures.append(
+            "[MULTI-CLUSTER MUST-NORMALIZE 3] The accept-all disposition "
+            "must be recorded in normalization_notes, never silent. Got: "
+            f"{same_author_result}"
+        )
+
+    # =========================================================================
+    # MUST-NORMALIZE (issue #530): a pending tracked change inside a field
+    # code -- the last of the original four fail-closed conditions -- now
+    # accepts-all too. The field's own pending-revision cluster already
+    # carries the field's resolved resulting_text, so there is no separate
+    # "which field result wins" decision left to make; the disclosure note
+    # names what the field resolved to.
+    # =========================================================================
+
     field_code_doc = _load_fixture("pending_change_inside_field_code.json")
     field_code_result = normalize_input.normalize(field_code_doc)
-    if field_code_result.get("normalizable") is not False:
+    if field_code_result.get("normalizable") is not True:
         failures.append(
-            f"[STILL-FAIL-CLOSED 3] A pending tracked change inside a field "
-            f"code must fail closed. Got: {field_code_result}"
+            f"[FIELD-CODE MUST-NORMALIZE 1] A pending tracked change inside "
+            f"a field code must accept-all, not fail closed (issue #530). "
+            f"Got: {field_code_result}"
         )
+    field_code_body = field_code_result.get("clean_body", "")
+    if "New York" not in field_code_body:
+        failures.append(
+            f"[FIELD-CODE MUST-NORMALIZE 2] The field's resolved "
+            f"resulting_text must become the operative text. Got clean_body="
+            f"{field_code_body!r}"
+        )
+    if "Delaware" in field_code_body:
+        failures.append(
+            f"[FIELD-CODE MUST-NORMALIZE 3] The pre-edit field text must "
+            f"NOT be the operative text once the pending revision is "
+            f"accepted-all. Got clean_body={field_code_body!r}"
+        )
+    field_code_notes = field_code_result.get("normalization_notes", "")
+    if not field_code_notes:
+        failures.append(
+            "[FIELD-CODE MUST-NORMALIZE 4] The accept-all disposition must "
+            "be recorded in normalization_notes, never silent. Got no "
+            f"notes. Full result: {field_code_result}"
+        )
+    if field_code_notes and "New York" not in field_code_notes:
+        failures.append(
+            f"[FIELD-CODE MUST-NORMALIZE 5] normalization_notes must name "
+            f"what the field resolved to. Got: {field_code_notes!r}"
+        )
+
+    # =========================================================================
+    # STILL-FAIL-CLOSED: the one genuinely ambiguous structure left (issue
+    # #199, narrowed by issue #563 and issue #530 to just this one).
+    # =========================================================================
 
     # A malformed pending revision (no resulting_text) cannot be accepted
     # into anything -- still fails closed, distinct from the ordinary
@@ -151,11 +256,10 @@ def main():
             f"resulting_text) must still fail closed. Got: {corrupt_result}"
         )
 
-    # Both still-fail-closed paths map to the documented SYSTEM status, never
+    # The still-fail-closed path maps to the documented SYSTEM status, never
     # a legal decision.
     for label, fail_result in (
-        ("conflicting", conflicting_result),
-        ("field_code", field_code_result),
+        ("corrupt", corrupt_result),
     ):
         report = normalize_input.build_unnormalizable_report(fail_result)
         if report.get("report_type") != "analysis_report":

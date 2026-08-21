@@ -44,6 +44,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import { CtBanner, CtButton, CtCard, CtChip, CtField, CtProgress, CtToolbar } from './ui/react';
 
@@ -251,8 +252,22 @@ function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export default function AdminModel(): React.ReactElement | null {
-  const [settings, setSettings] = useState<ModelKeySettings | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Issue #511: an explicit three-state load, not a `T | null` sentinel plus a
+  // separate error string. Those two were both true at once on a failed fetch,
+  // so the screen rendered a danger banner AND a permanent "Loading model key
+  // settings…" with no way back — and on a password-mode deployment the only
+  // recovery was a reload, which signs the admin out (#468).
+  const [settingsLoad, setSettingsLoad] = useState<LoadState<ModelKeySettings>>({
+    status: 'loading',
+  });
+  // Derived so the render below reads exactly as it did. The STATE is the
+  // union; this is a view of it. Keeping the render unchanged is what makes
+  // this a fix rather than a rewrite of a working screen.
+  const settings = settingsLoad.status === 'ready' ? settingsLoad.data : null;
+  const setSettings = useCallback(
+    (data: ModelKeySettings) => setSettingsLoad({ status: 'ready', data }),
+    [],
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isForbidden, setIsForbidden] = useState(false);
@@ -260,8 +275,10 @@ export default function AdminModel(): React.ReactElement | null {
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const [selection, setSelection] = useState<ModelSelectionSettings | null>(null);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [selectionLoad, setSelectionLoad] = useState<LoadState<ModelSelectionSettings>>({
+    status: 'loading',
+  });
+  const selection = selectionLoad.status === 'ready' ? selectionLoad.data : null;
   const [selectionActionError, setSelectionActionError] = useState<string | null>(null);
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   // "" is a real, meaningful value here — "revert this pass to the default".
@@ -285,16 +302,22 @@ export default function AdminModel(): React.ReactElement | null {
       }
       setSettings((await response.json()) as ModelKeySettings);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the model key settings. Please try again."),
+      setSettingsLoad(
+        failedLoad(err, "We couldn't load the model key settings. Please try again."),
       );
     }
-  }, []);
+  }, [setSettings]);
+
+  // In-place retry (issue #511/#439). Returning to `loading` first is what
+  // makes the second attempt visibly an attempt rather than a banner that
+  // silently stops being true.
+  const retryLoadSettings = useCallback(() => {
+    setSettingsLoad({ status: 'loading' });
+    void loadSettings();
+  }, [loadSettings]);
 
   const applySelection = useCallback((data: ModelSelectionSettings) => {
-    setSelection(data);
+    setSelectionLoad({ status: 'ready', data });
     setDraft({
       primary: data.selected_primary_model_id ?? '',
       critic: data.selected_critic_model_id ?? '',
@@ -327,13 +350,14 @@ export default function AdminModel(): React.ReactElement | null {
       }
       applySelection(data);
     } catch (err) {
-      setSelectionError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the model choices. Please try again."),
-      );
+      setSelectionLoad(failedLoad(err, "We couldn't load the model choices. Please try again."));
     }
   }, [applySelection]);
+
+  const retryLoadSelection = useCallback(() => {
+    setSelectionLoad({ status: 'loading' });
+    void loadSelection();
+  }, [loadSelection]);
 
   useEffect(() => {
     void loadSettings();
@@ -480,10 +504,26 @@ export default function AdminModel(): React.ReactElement | null {
     <section data-testid="admin-model-panel" className="ct-section ct-stack">
       <CtToolbar title="Model & API key" />
 
-      {error && (
-        <CtBanner variant="danger" data-testid="admin-model-error">
-          {error}
-        </CtBanner>
+      {/* A failed load is TERMINAL: the banner carries the message and a
+          working retry, and the loader below is unreachable while it shows
+          (issue #511). */}
+      {settingsLoad.status === 'failed' && (
+        <div className="ct-stack">
+          <CtBanner variant="danger" data-testid="admin-model-error">
+            {settingsLoad.message}
+          </CtBanner>
+          <div className="ct-actions" role="group">
+            <CtButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="admin-model-retry"
+              onClick={retryLoadSettings}
+            >
+              Try again
+            </CtButton>
+          </div>
+        </div>
       )}
       {actionError && (
         <CtBanner variant="danger" data-testid="admin-model-action-error">
@@ -496,9 +536,9 @@ export default function AdminModel(): React.ReactElement | null {
         </CtBanner>
       )}
 
-      {settings === null ? (
+      {settingsLoad.status === 'loading' ? (
         <CtProgress data-testid="admin-model-loading" label="Loading model key settings…" />
-      ) : !settings.key_store_available ? (
+      ) : settings === null ? null : !settings.key_store_available ? (
         <CtCard data-testid="admin-model-unavailable">
           <div className="ct-stack">
             <p>
@@ -613,10 +653,23 @@ export default function AdminModel(): React.ReactElement | null {
         </CtCard>
       )}
 
-      {selectionError && (
-        <CtBanner variant="danger" data-testid="admin-model-selection-error">
-          {selectionError}
-        </CtBanner>
+      {selectionLoad.status === 'failed' && (
+        <div className="ct-stack">
+          <CtBanner variant="danger" data-testid="admin-model-selection-error">
+            {selectionLoad.message}
+          </CtBanner>
+          <div className="ct-actions" role="group">
+            <CtButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="admin-model-selection-retry"
+              onClick={retryLoadSelection}
+            >
+              Try again
+            </CtButton>
+          </div>
+        </div>
       )}
       {selectionActionError && (
         <CtBanner variant="danger" data-testid="admin-model-selection-action-error">
@@ -629,11 +682,9 @@ export default function AdminModel(): React.ReactElement | null {
         </CtBanner>
       )}
 
-      {selection === null ? (
-        !selectionError && (
-          <CtProgress data-testid="admin-model-selection-loading" label="Loading model choices…" />
-        )
-      ) : !selection.selection_store_available ? (
+      {selectionLoad.status === 'loading' ? (
+        <CtProgress data-testid="admin-model-selection-loading" label="Loading model choices…" />
+      ) : selection === null ? null : !selection.selection_store_available ? (
         <CtCard data-testid="admin-model-selection-unavailable">
           <div className="ct-stack">
             <p>

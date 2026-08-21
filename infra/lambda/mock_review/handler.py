@@ -40,11 +40,15 @@ Output shape (pointer-only):
     "reason": null | "playbook_coming_soon" | "unknown_playbook",
     "output_s3_key": null | "outputs/<review_id>/out.docx",
     "summary": "<short non-substantive summary string>",
-    "watermark": "tool recommendation only - attorney approval required",
     "semaphore_acquired": true,
     "semaphore_wait_attempts": 0,
     "semaphore_give_up": false
   }
+
+Note on the marker (issue #513): the internal-notes marker is present iff a
+review's notes mode actually put internal-audience content in scope. The
+mock pipeline never includes internal notes for any playbook_id, so its
+payload carries no `watermark` field at all -- there is nothing to signpost.
 
 Note on the last three fields (issue #190, review round 1): every stage
 LambdaInvoke in pipeline-stack.ts uses `outputPath: '$.Payload'` (no
@@ -65,8 +69,6 @@ from typing import Any
 # observable by the UI poll loop, same as a real (much longer) review would
 # be. Kept short so CI / local test executions stay fast.
 MOCK_REVIEW_DELAY_SECONDS = float(os.environ.get("MOCK_REVIEW_DELAY_SECONDS", "3"))
-
-WATERMARK = "tool recommendation only - attorney approval required"
 
 # Pre-baked tracked-changes redline staged in the outputs bucket ahead of
 # time for the eiaa mock path. Pointer only -- no document text lives here.
@@ -90,7 +92,6 @@ def _mock_eiaa_result(review_id: str) -> dict[str, Any]:
         "output_s3_key": f"outputs/{review_id}/out.docx",
         "pre_baked_source_key": PRE_BAKED_EIAA_REDLINE_KEY_TEMPLATE,
         "summary": "Mock review: canned REQUEST_CHANGE result (issue #59 mock boundary).",
-        "watermark": WATERMARK,
     }
 
 
@@ -102,7 +103,6 @@ def _mock_nda_result(review_id: str) -> dict[str, Any]:
         "reason": "playbook_coming_soon",
         "output_s3_key": None,
         "summary": "playbook coming soon - separate playbook later.",
-        "watermark": WATERMARK,
     }
 
 
@@ -113,7 +113,6 @@ def _mock_unknown_playbook_result(review_id: str, playbook_id: str) -> dict[str,
         "reason": "unknown_playbook",
         "output_s3_key": None,
         "summary": f"Unknown playbook_id '{playbook_id}'.",
-        "watermark": WATERMARK,
     }
 
 

@@ -106,6 +106,40 @@ as a separate outer control block -- so it is part of `knowledge
 `toaster_guidance` remains an outer control block for BOTH paths (v1 and
 OPF alike): it is the per-review, most-specific layer, and stays composed
 identically to the v1 path per `primary_review_pass.render_toaster_guidance_block`.
+
+## Re-quote repair (issue #569, env-flagged OFF)
+
+Stage 5 (redline generation) can leave one or more REQUEST_CHANGE patches
+flag-only because their `source_quote` failed to locate
+(`not_found`/`ambiguous`/`spans_paragraph_break` --
+`scripts/redline_quote_apply.py`'s own vocabulary). When
+`config.requote_enabled()` (env `REQUOTE_ENABLED`, default OFF -- ships
+dark until issue #566's human-executed quote-fidelity measurement decides
+whether to turn it on) is True and at least one such patch exists, this
+module runs `scripts/requote_repair.py::run_requote_repair` -- ONE bounded
+model call asking for a corrected ADDRESS only, never a re-judgment (see
+that module's own docstring for the full contract) -- and, if anything was
+actually corrected, re-runs `redline_generate.generate_redline` exactly
+once with the corrected patches merged onto the SAME `reconciled["issues"]`
+objects. The re-quote model's output is never leakage-scanned separately:
+the re-run redline call's own leakage gate (which runs before any quote
+patching) covers it, since the corrected text lives on the same issue
+objects the gate already scans. Flag OFF is the default and reproduces
+`run_review`'s behavior byte-identical to before this issue -- this block
+never even inspects `redline_result.get("flag_only")` in that case.
+
+The correction is staged, not final (issue #569 AC2, fix round 1): a
+patch whose corrected quote is STILL present in the retry's `flag_only`
+(i.e. the correction did not actually recover it) has its `_source_issue`
+reverted, via `requote_repair.revert_unrecovered`, back to its ORIGINAL
+`source_quote`/`proposed_replacement_text`, and `generate_redline` is
+re-run ONE more time (still deterministic, still no model spend) so the
+delivered `analysis_report`/`flag_only`/`findings` report the issue's
+ORIGINAL reason -- never one recomputed off a corrected-but-still-wrong
+quote. This never applies to the leakage-blocked retry outcome (no
+`flag_only` list to check membership against at all): that is a
+deliberate, different, already-established terminal outcome of its own,
+never something this reversion should "heal" away.
 """
 
 from __future__ import annotations
@@ -122,6 +156,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+import config as _config  # noqa: E402
 import critic_review_pass  # noqa: E402
 import extraction_normalization_stage  # noqa: E402
 import floor_judge  # noqa: E402
@@ -131,6 +166,7 @@ import opf_prompt  # noqa: E402
 import primary_review_pass  # noqa: E402
 import reconciliation  # noqa: E402
 import redline_generate  # noqa: E402
+import requote_repair  # noqa: E402
 import review_knowledge  # noqa: E402
 
 STATUS_OK = "OK"
@@ -186,6 +222,75 @@ REASON_OPF_KNOWLEDGE_REFUSED = "opf_knowledge_refused"
 REASON_OPF_DIGEST_MISSING = "opf_digest_missing"
 REASON_FLOOR_INVARIANT_UNJUDGED = "floor_invariant_unjudged"
 
+# `extraction_normalization_stage.py`'s own default for a paragraph with no
+# real heading (see `normalize_paragraphs`/`extract_document_paragraphs`) --
+# duplicated here as a literal rather than imported, matching this repo's own
+# "each module owning its own copy of small shared sentinels" convention
+# (see `primary_review_pass.py`'s `INPUT_MODE_SECTION_OUTLINE` comment).
+_UNTITLED_HEADING = "<untitled>"
+
+
+def document_text_for_review(paragraphs: list[dict[str, Any]]) -> str:
+    """The document text a full-document review sends the model: each
+    normalized paragraph's heading, in its document position, attached to
+    its own body text -- not a separate list.
+
+    Before this function existed, `run_review` joined `p.get("text", "")`
+    alone (`"\\n\\n".join(...)`): `heading` is a SEPARATE key on each
+    normalized paragraph record (`extraction_normalization_stage.py::
+    normalize_paragraphs`), so every clause title was silently dropped from
+    the text the model reviews. Measured on a real 30-paragraph target
+    document (every paragraph carrying a heading): 29 of 30 headings never
+    appeared anywhere in the joined text. Clause headings are exactly the
+    anchors that map a document onto a playbook's clauses, so this
+    regressed the accuracy of every full-document review.
+
+    A real heading renders on its OWN line, prefixed with "## " -- a
+    lightweight, unambiguous marker (models widely read Markdown-style
+    headings as structure, not prose) so the model does not read a title as
+    a sentence of the contract, immediately followed by the paragraph's own
+    body text on the next line. A paragraph with no real heading (missing
+    key, empty string, or the extraction stage's own `"<untitled>"`
+    sentinel -- see `_UNTITLED_HEADING` above) renders as bare body text,
+    byte-identical to before this function existed; rendering the sentinel
+    itself as a literal heading on every untitled paragraph would be noise,
+    not fidelity (`primary_review_pass.render_section_outline` treats the
+    same sentinel as absent-of-a-real-title for the SAME reason, via its
+    own `"(untitled)"` fallback).
+
+    A paragraph whose heading AND text are both empty contributes nothing
+    (not even a blank entry) to the join, so it can never produce a stray
+    blank-line run between its neighbors -- same discipline as
+    `extraction_normalization_stage.normalize_paragraphs`'s own
+    `physical_spans` join, which drops a physical paragraph with empty
+    clean text entirely rather than joining an empty string.
+
+    This is NOT the basis for any anchoring: quote-locate
+    (`scripts/quote_locate.py::locate_quote_in_paragraphs`) and the redline
+    patcher (`scripts/redline_quote_apply.py::_locate_patches`) both
+    re-derive their own paragraph list straight from
+    `extraction_normalization_stage.extract_and_normalize(docx_bytes)` --
+    never from character offsets into THIS joined string -- so changing
+    this join changes what the model reads without touching how a
+    `source_quote` is later located or patched back into the document.
+    """
+    blocks: list[str] = []
+    for paragraph in paragraphs:
+        heading = (paragraph.get("heading") or "").strip()
+        if heading == _UNTITLED_HEADING:
+            heading = ""
+        text = paragraph.get("text", "")
+        if heading and text:
+            block = f"## {heading}\n{text}"
+        elif heading:
+            block = f"## {heading}"
+        else:
+            block = text
+        if block:
+            blocks.append(block)
+    return "\n\n".join(blocks)
+
+
 
 def _assemble_opf_system_blocks(
     knowledge: "review_knowledge.ReviewKnowledge", toaster_guidance: str
@@ -234,11 +339,18 @@ def _terminal(
     analysis_report: Optional[dict[str, Any]] = None,
     detail: Optional[dict[str, Any]] = None,
     floor_judgment: Optional[dict[str, Any]] = None,
+    normalization_notes: Optional[str] = None,
 ) -> dict[str, Any]:
     """A fail-closed ReviewResult: no decision, no redline, no findings --
     per ARCHITECTURE.md/docs/output-contract.md, a SYSTEM status (MANUAL_
     REVIEW_REQUIRED / ERROR_MANUAL_REVIEW_REQUIRED) must never carry an
-    ACCEPT/REQUEST_CHANGE decision."""
+    ACCEPT/REQUEST_CHANGE decision.
+
+    `normalization_notes` (issue #563 follow-up): a fail-closed result can
+    still be reached AFTER stage 1 accepted one or more pending tracked
+    changes into the operative draft -- that disclosure must not be lost
+    just because the review terminated early. Same absent-never-null
+    convention as the success path below: set only when truthy."""
     result: dict[str, Any] = {
         "status": status,
         "decision": None,
@@ -252,6 +364,8 @@ def _terminal(
         result["detail"] = detail
     if floor_judgment is not None:
         result["floor_judgment"] = floor_judgment
+    if normalization_notes:
+        result["normalization_notes"] = normalization_notes
     return result
 
 
@@ -266,8 +380,10 @@ def run_review(
     current_counterparty_name: Optional[str] = None,
     toaster_guidance: str = "",
     instructions_text: str = "",
+    notes_mode: str = "external",
     on_progress: Optional[Callable[[str], None]] = None,
     policy: Optional[dict[str, Any]] = None,
+    cancel_checkpoint: Optional[Callable[[], None]] = None,
 ) -> dict[str, Any]:
     """Compose the full review pipeline: extract -> normalize -> primary ->
     critic -> reconcile -> leakage scan -> redline, with `model_client`
@@ -284,7 +400,61 @@ def run_review(
        "findings": [<Issue dict>, ...],
        "reason": str | None,
        "analysis_report": {...} | None,
+       "normalization_notes": str,  # present only when stage 1 accepted a
+                                     # pending tracked change (issue #563)
+       "requote": {"attempted": int, "recovered": int, "still_failed": int},
+                                     # present only when the bounded re-quote
+                                     # repair pass ran (issue #569)
+       "input_mode": "full_document" | "section_outline",
        "floor_judgment": {"verdicts": [...], "unjudged": [...]} | None}
+
+    `requote` (issue #569, `REQUOTE_ENABLED` env flag, default OFF) is
+    present only when `config.requote_enabled()` was True AND at least one
+    REQUEST_CHANGE patch failed to locate for a reason a corrected quote
+    could plausibly fix (`requote_repair.ELIGIBLE_REASONS`) -- absent
+    (never a null placeholder) when the flag is off, or nothing was
+    eligible to repair. `attempted` is how many such patches were sent back
+    to the model in the ONE bounded repair call; `recovered` is how many of
+    those now apply after the redline is re-run once with any corrected
+    addresses merged in; `still_failed` is `attempted - recovered`. This
+    never re-judges anything -- see `scripts/requote_repair.py`'s own
+    docstring for the full contract, including why `rationale` is
+    byte-identical before and after a repair.
+
+    `normalization_notes` (issue #563) discloses that stage 1
+    (`extraction_normalization_stage.extract_and_normalize`) accepted one or
+    more pending tracked changes -- single-cluster/single-author, or the
+    multi-cluster/multi-author case issue #563 stops refusing outright --
+    into the operative draft before review. When present, the SAME
+    disposition was also materialized into the docx bytes
+    (`extraction_normalization_stage.materialize_accept_all`) before quote-
+    locate, patch-apply, and the delivered redline ran, so all three (and
+    the model's own read of the document) agree on one canonical,
+    already-accepted document. Absent (never a null placeholder) when there
+    was nothing to accept.
+
+    On the `unnormalizable_input` refusal path (issue #530), this SAME field
+    instead carries WHY stage 1 refused -- the joined per-paragraph fail
+    note(s) `normalize_input.build_unnormalizable_report` already computes,
+    naming the offending paragraph's heading. Reusing the one field the
+    frontend already reads (rather than inventing a second channel) is what
+    lets a refusal tell the truth about which paragraph and why, instead of
+    a generic "could not be read as a Word document" that is wrong for a
+    genuine .docx with a malformed revision record.
+
+    `input_mode` (issue #419) is whether the primary pass reviewed the full
+    counterparty document text or a section outline (over
+    `primary_review_pass.DEFAULT_FULL_DOC_TOKEN_THRESHOLD` estimated
+    tokens) -- see `primary_review_pass.resolve_input_mode`. When
+    `"section_outline"`, `summary` already carries a fixed, substance-free
+    notice saying so, and the reconciled result's internal
+    `confidence_state`/`confidence_band` (`reconciliation.reconcile`) are
+    degraded one level from what the primary/critic passes alone would have
+    produced. Present only for a result that reached a resolved input mode
+    -- absent (not a null placeholder key) on every fail-closed terminal
+    path (`_terminal`: unnormalizable input, primary-pass failure, a floor
+    invariant left unjudged, critic failure), which never got far enough to
+    know which mode the primary pass would have used.
 
     `floor_judgment` (issue #479) is present only for an OPF review that
     actually had Floor invariants to judge -- absent (not a null
@@ -387,6 +557,12 @@ def run_review(
     opf_system_blocks: list[dict[str, Any]] | None = None
     opf_playbook_hash: str | None = None
     floor_invariants: list[dict[str, Any]] = []
+    # Issue #582 (Defect 3): `knowledge.lineage_record()` -- absent (never a
+    # null placeholder) for a v1 bundle, exactly like `floor_judgment`/
+    # `opf_lineage` above -- so an operator reading a completed OPF review
+    # can tell what actually governed it (`prompt_omissions`) rather than
+    # inferring it from an unqualified `posture_source`.
+    opf_knowledge_lineage: dict[str, Any] | None = None
     if opf_bundle_v2 is not None:
         try:
             knowledge = review_knowledge.resolve_knowledge(
@@ -423,16 +599,42 @@ def run_review(
         floor_invariants = opf_prompt.resolve_floor_invariants(
             knowledge.opf_doc or {}, knowledge.overrides
         )
+        opf_knowledge_lineage = knowledge.lineage_record()
 
     # Stage 1: extraction + normalization (issue #80).
     normalized = extraction_normalization_stage.extract_and_normalize(docx_bytes)
     if normalized["status"] != "normalized":
+        # Issue #530: the refusal path used to drop the paragraph-naming
+        # disclosure `normalize_input.build_unnormalizable_report` already
+        # computed -- it was embedded ONLY inside `analysis_report`
+        # ["normalization_notes"], a field this early return never surfaced
+        # on the RESULT's own top-level `normalization_notes` key (the one
+        # `_write_real_terminal` persists and the frontend reads). Threading
+        # it through `_terminal()`'s own `normalization_notes` kwarg carries
+        # the SAME per-paragraph text the success path already discloses
+        # (issue #563), on the refusal path too -- one channel, not a
+        # second one.
         return _terminal(
             status=STATUS_MANUAL_REVIEW_REQUIRED,
             reason="unnormalizable_input",
             analysis_report=normalized["analysis_report"],
+            normalization_notes=normalized["analysis_report"].get("normalization_notes"),
         )
     draft_paragraphs = normalized["paragraphs"]  # [{"heading": ..., "text": ...}, ...]
+    # Issue #563: when stage 1 accepted one or more pending tracked changes
+    # into the paragraph TEXT the model reads (`normalization_notes` present
+    # iff at least one accept-all disposition happened), the SAME
+    # disposition must be materialized into the docx BYTES so quote-locate,
+    # patch-apply, and the delivered redline (stage 5 below) all operate on
+    # ONE canonical, already-accepted document -- never text-space and
+    # byte-space disagreeing about what "the document" says. A no-op
+    # (`redline_docx_bytes` stays the original `docx_bytes`) whenever there
+    # is nothing to accept -- the common case, and byte-identical to before
+    # this issue for every document with no pending tracked changes.
+    normalization_notes = normalized.get("normalization_notes")
+    redline_docx_bytes = docx_bytes
+    if normalization_notes:
+        redline_docx_bytes = extraction_normalization_stage.materialize_accept_all(docx_bytes)
 
     # Stage 2: primary review pass (issue #81). No standard-form diff and no
     # deterministic detectors feed this any more (issue #380: the LLM is the
@@ -440,9 +642,11 @@ def run_review(
     # per this module's docstring "LLM-native review" section; the model
     # reads doc_text (the full counterparty document, or a section outline
     # over threshold) instead.
-    doc_text = "\n\n".join(p.get("text", "") for p in draft_paragraphs)
+    doc_text = document_text_for_review(draft_paragraphs)
     report_progress(PROGRESS_PRIMARY_PASS)
     primary_result = primary_review_pass.run_primary_pass(
+        cancel_checkpoint=cancel_checkpoint,
+        notes_mode=notes_mode,
         review_id=review_id,
         diff_hunks=[],
         anchored_clauses=[],
@@ -463,6 +667,7 @@ def run_review(
             status=primary_result["status"],
             reason=primary_result.get("reason"),
             detail=primary_result,
+            normalization_notes=normalization_notes,
         )
 
     # Stage 3: adversarial critic pass (issue #82) -- only ever invoked
@@ -473,6 +678,8 @@ def run_review(
     # did, so the critic's self-check reasons over the same digest.
     report_progress(PROGRESS_CRITIC_PASS)
     critic_result = critic_review_pass.run_critic_pass(
+        cancel_checkpoint=cancel_checkpoint,
+        notes_mode=notes_mode,
         review_id=review_id,
         diff_hunks=[],
         anchored_clauses=[],
@@ -523,6 +730,7 @@ def run_review(
                 reason=REASON_FLOOR_INVARIANT_UNJUDGED,
                 detail={"unjudged_count": len(judgment.unjudged)},
                 floor_judgment=floor_judgment_report,
+                normalization_notes=normalization_notes,
             )
         detector_fires = floor_judge.floor_fires(judgment)
 
@@ -541,24 +749,131 @@ def run_review(
             status=two_pass["status"],
             reason=two_pass.get("stage"),
             detail=two_pass,
+            normalization_notes=normalization_notes,
         )
     reconciled = two_pass["result"]
 
-    # Stage 5: leakage-gated redline generation (issue #26/#83). `docx_bytes`
-    # (this function's own param) is the normalized upload the pipeline
-    # reviewed, the same bytes `extract_and_normalize` read at stage 1. No
-    # more hunks/current_paragraphs_by_anchor (issue #380 retired the
-    # anchor-joined patch path); REQUEST_CHANGE now locates each issue's
-    # `source_quote` via the quote-based patcher (issue #379) -- see
-    # redline_generate.py's own docstring for the full result-shape contract.
+    # Stage 5: leakage-gated redline generation (issue #26/#83). `redline_docx_bytes`
+    # (computed at stage 1 above) is the original upload when there was
+    # nothing to accept, or the materialized accept-all bytes (issue #563:
+    # `extraction_normalization_stage.materialize_accept_all`) whenever
+    # `normalization_notes` is present -- never the raw `docx_bytes` param in
+    # that case, so quote-locate/patch-apply below agree with the document
+    # the model actually read. No more hunks/current_paragraphs_by_anchor
+    # (issue #380 retired the anchor-joined patch path); REQUEST_CHANGE now
+    # locates each issue's `source_quote` via the quote-based patcher (issue
+    # #379) -- see redline_generate.py's own docstring for the full
+    # result-shape contract.
     report_progress(PROGRESS_REDLINE)
     redline_result = redline_generate.generate_redline(
         reconciled_result=reconciled,
         corpus=corpus,
-        normalized_docx_bytes=docx_bytes,
+        normalized_docx_bytes=redline_docx_bytes,
         review_id=review_id,
         current_counterparty_name=current_counterparty_name,
+        notes_mode=notes_mode,
     )
+
+    # Stage 5.5: bounded re-quote repair pass (issue #569), env-flagged OFF
+    # by default (`config.requote_enabled`). A patch that failed to locate
+    # for a reason a corrected QUOTE could plausibly fix
+    # (`requote_repair.ELIGIBLE_REASONS` -- `not_found` / `ambiguous` /
+    # `spans_paragraph_break`; a writer-level `round_trip_verification_
+    # failed` is never eligible) goes back to the model ONCE for a
+    # corrected address, and the redline is re-run ONCE with the corrected
+    # patches merged. No new progress token is minted here -- this is still
+    # part of the "redline" stage the frontend already knows about
+    # (`PROGRESS_STAGES` is a wire contract, issue #447).
+    #
+    # Flag OFF (the default): `redline_result.get("flag_only")` is never
+    # even inspected, so this block is a complete no-op and `run_review`'s
+    # behavior is byte-identical to before this issue.
+    requote_report: dict[str, Any] | None = None
+    if _config.requote_enabled():
+        flag_only = redline_result.get("flag_only") or []
+        eligible_flag_only = [
+            entry for entry in flag_only if entry.get("reason") in requote_repair.ELIGIBLE_REASONS
+        ]
+        if eligible_flag_only:
+            # Issue #569 review round 3, finding 1: the SAME pen-rules-bundle
+            # resolution `primary_review_pass.py` uses
+            # (`primary_review_pass.resolve_pen_rules_bundle`, issue #573 --
+            # `None` for an OPF-shaped bundle, which carries no
+            # `topics`/`default`/`per_topic` for `resolve_pen_rules` to
+            # resolve against), so a repair correction is enforced against
+            # the identical rules the primary/critic passes already
+            # enforced, never a second divergent resolution.
+            pen_rules_bundle = primary_review_pass.resolve_pen_rules_bundle(playbook)
+            repair = requote_repair.run_requote_repair(
+                review_id=review_id,
+                flag_only=eligible_flag_only,
+                draft_paragraphs=draft_paragraphs,
+                model_client=model_client,
+                model_id=primary_model_id,
+                pen_rules_bundle=pen_rules_bundle,
+                ledger_write=ledger_write,
+                cancel_checkpoint=cancel_checkpoint,
+            )
+            # Only re-run the (deterministic, no-model-spend) redline
+            # generation when at least one issue was actually rewritten --
+            # otherwise the corrected result would be byte-identical to
+            # `redline_result` and re-running would just burn CPU to learn
+            # what is already known: nothing changed, nothing recovered.
+            if repair["corrected_count"] > 0:
+                redline_result = redline_generate.generate_redline(
+                    reconciled_result=reconciled,
+                    corpus=corpus,
+                    normalized_docx_bytes=redline_docx_bytes,
+                    review_id=review_id,
+                    current_counterparty_name=current_counterparty_name,
+                    notes_mode=notes_mode,
+                )
+                retry_flag_only_after_repair = redline_result.get("flag_only")
+                # `retry_flag_only_after_repair is None` means this retry
+                # never reached quote-patching at all (e.g. the corrected
+                # text tripped the leakage gate) -- a DELIBERATE, different,
+                # already-tested outcome (see requote_repair.py's own
+                # "Leakage" section) that must stand as computed, never
+                # "healed" by reverting the correction that caused it.
+                # Reverting only applies to the ordinary "still fails to
+                # locate" case, where `flag_only` is a real (possibly
+                # empty) list issue #569 AC2 covers.
+                if retry_flag_only_after_repair is not None and requote_repair.revert_unrecovered(
+                    eligible_flag_only, retry_flag_only_after_repair
+                ) > 0:
+                    # Issue #569 AC2 fix: at least one correction did NOT
+                    # recover its patch and has just been reverted to its
+                    # pre-repair `source_quote`/`proposed_replacement_text`
+                    # (`revert_unrecovered`'s own docstring) -- re-run once
+                    # more, deterministically, so the DELIVERED
+                    # `analysis_report`/`flag_only`/`findings` reflect the
+                    # reverted issue's ORIGINAL reason, never one recomputed
+                    # off the corrected-but-still-wrong quote.
+                    redline_result = redline_generate.generate_redline(
+                        reconciled_result=reconciled,
+                        corpus=corpus,
+                        normalized_docx_bytes=redline_docx_bytes,
+                        review_id=review_id,
+                        current_counterparty_name=current_counterparty_name,
+                        notes_mode=notes_mode,
+                    )
+            retry_flag_only = redline_result.get("flag_only")
+            # A retry that never reached quote-patching at all (e.g. the
+            # corrected text tripped the leakage gate, which runs BEFORE any
+            # patch is attempted -- see requote_repair.py's "Leakage" section)
+            # carries no `flag_only` key at all, distinct from an EMPTY one;
+            # count_recovered's own contract requires the caller to treat
+            # that as zero recovered, never as "everything recovered".
+            recovered = (
+                requote_repair.count_recovered(eligible_flag_only, retry_flag_only)
+                if retry_flag_only is not None
+                else 0
+            )
+            requote_report = {
+                "attempted": repair["attempted"],
+                "recovered": recovered,
+                "still_failed": repair["attempted"] - recovered,
+            }
 
     # A leakage-detected ERROR status means `reconciled["issues"]` itself
     # carries the field that leaked -- never surface it as "findings" on
@@ -578,7 +893,68 @@ def run_review(
         "findings": findings,
         "reason": redline_result.get("reason"),
         "analysis_report": redline_result.get("analysis_report"),
+        # Issue #563: disclosure that stage 1 accepted one or more pending
+        # tracked changes (single or multi-cluster/multi-author) into the
+        # operative draft -- computed above, never re-derived, so this can
+        # never drift from what stage 1 actually accepted. Absent, never a
+        # null placeholder, when there was nothing to accept.
+        **({"normalization_notes": normalization_notes} if normalization_notes else {}),
+        # Issue #569: the bounded re-quote repair pass's outcome -- absent
+        # (never a null placeholder) when the flag is off or there was
+        # nothing eligible to repair, exactly like `normalization_notes`
+        # above.
+        **({"requote": requote_report} if requote_report is not None else {}),
+        # Issue #419: "full_document" | "section_outline" -- whether the
+        # primary pass reviewed the full counterparty document text or a
+        # section outline (over primary_review_pass
+        # .DEFAULT_FULL_DOC_TOKEN_THRESHOLD). Read straight off the primary
+        # pass's own result (primary_review_pass.run_primary_pass's
+        # `input_mode` field) rather than re-derived here, so this can never
+        # drift from what the primary pass actually sent. Defaults to
+        # "full_document" only for defense-in-depth against a caller-supplied
+        # primary_result missing the key (every real run_primary_pass
+        # result carries it) -- never a null placeholder.
+        "input_mode": primary_result.get("input_mode", "full_document"),
+        # Issue #514: response-side model provenance, per pass, surfaced so
+        # the runner can stamp the review row next to the REQUESTED ids it
+        # already records. Absent keys, never null placeholders -- a client
+        # that cannot report what it served (every offline fake, the Bedrock
+        # path) leaves the row exactly as it was before this landed.
+        **{
+            key: value
+            for key, value in (
+                ("served_primary_model_id", primary_result.get("served_model_id")),
+                ("served_critic_model_id", critic_result.get("served_model_id")),
+            )
+            if value
+        },
+        # Issue #562: the capability descriptor each pass resolved for its
+        # own model_id, plumbed straight through -- nothing in this chain
+        # reads it yet (no behavior change; a later ticket is the
+        # consumer). Absent, never a null placeholder, when a pass's
+        # injected client had no `capabilities` method at all.
+        **{
+            key: value
+            for key, value in (
+                ("primary_model_capabilities", primary_result.get("model_capabilities")),
+                ("critic_model_capabilities", critic_result.get("model_capabilities")),
+            )
+            if value is not None
+        },
+        # Issue #567: whether each pass asked the provider to enforce the
+        # projected output schema -- read straight off each pass's own
+        # result (both passes always set this key to a real bool) rather
+        # than re-derived here, so this can never drift from what the pass
+        # actually requested.
+        "primary_schema_enforcement_requested": primary_result.get(
+            "schema_enforcement_requested", False
+        ),
+        "critic_schema_enforcement_requested": critic_result.get(
+            "schema_enforcement_requested", False
+        ),
     }
     if floor_judgment_report is not None:
         result["floor_judgment"] = floor_judgment_report
+    if opf_knowledge_lineage is not None:
+        result["opf_knowledge_lineage"] = opf_knowledge_lineage
     return result

@@ -100,6 +100,28 @@ module's "never document substance" audit posture (see "De-branding"
 below) for the one field that could otherwise carry stray content into
 the append-only `audit` table.
 
+## Gate 7's missing write path (`record_legal_approval`)
+
+Issue #242 landed Gate 7's READ side (`activate_release_bundle` asserts
+`content_hash == legal_approval.content_hash`), but nothing in the product
+ever WROTE `legal_approval` -- only a test, via a raw `update_item`, ever
+had. `record_legal_approval` below is that missing write path: an explicit,
+audited admin act that names the exact `content_hash` being approved and
+refuses (rather than silently recording a lie) if that hash does not match
+the version row's own. See its own docstring for the full contract,
+including why it is deliberately never called from `record_playbook_
+version_upload` or `activate_playbook_version` themselves -- either would
+turn Gate 7 into a rubber stamp.
+
+## Catalog union (`list_all_version_playbook_ids`)
+
+Issue #485/#490: a playbook created purely through `POST /api/admin/
+playbooks` has no `playbooks/registry.json` entry at all (that file is
+baked into the image). `list_all_version_playbook_ids` is the read
+`review_routes._load_playbook_catalog` unions with the registry so a
+DB-created playbook_id becomes a selectable contract type without an image
+rebuild.
+
 ## De-branding
 
 Per issue #79's release de-branding requirement, the serialized trail
@@ -167,6 +189,18 @@ class PlaybookVersionGate7MismatchError(Exception):
     playbook-governance.md "Gate 7 (approved hashes match the artifacts
     being promoted)", this means the bytes changed after approval (or were
     never approved) and the bundle cannot be activated."""
+
+
+class PlaybookVersionApprovalMismatchError(Exception):
+    """Raised by `record_legal_approval` when the `content_hash` a caller
+    names does not equal the target version's OWN, already-recorded
+    `content_hash` (including a target that carries no `content_hash` at
+    all). Per docs/playbook-governance.md "Gate 7" step 2 -- "The approver
+    reviews the playbook at the hash recorded [at upload] and records that
+    exact hash" -- approval names the exact bytes it vouches for; recording
+    a hash that does not match what is actually on the row would look like
+    an approval while approving nothing real (a typo, or an artifact that
+    changed since the approver looked at it)."""
 
 
 def _playbook_versions_table(dynamodb_resource: Any):
@@ -566,6 +600,110 @@ def activate_release_bundle(
     _write_active_release_bundle_hash(playbook_id, content_hash, dynamodb_resource)
 
     return activated
+
+
+def record_legal_approval(
+    playbook_id: str,
+    version: str,
+    content_hash: str,
+    actor_identity: str,
+    dynamodb_resource: Any,
+    now_epoch_value: float | None = None,
+) -> dict[str, Any]:
+    """Record legal approval of the EXACT bytes at `content_hash` for
+    `(playbook_id, version)` -- the missing product path for Gate 7's step 2
+    (docs/playbook-governance.md "Gate 7"). `activate_release_bundle` has
+    enforced step 3 (`content_hash == legal_approval.content_hash`) since
+    issue #242, but nothing in the product ever WROTE `legal_approval` --
+    only a test, via a raw `update_item`, ever had. Every real activation
+    therefore hit `PlaybookVersionGate7MismatchError` with no remedy: the
+    shipped Activate button could never succeed against a real upload.
+
+    This is a deliberate, explicit, AUDITED operator act -- never a side
+    effect of uploading or activating a version. Widening either of those
+    to write `legal_approval` on their own would delete Gate 7 rather than
+    satisfy it (an upload would then be self-approving). It is also
+    distinct from `sample_playbooks.seed_shipped_playbook`'s Gate-7 BYPASS
+    (that module's docstring): the seed activates WITHOUT ever calling this
+    function, because nobody with real legal authority reviewed shipped
+    sample content -- fabricating an approval record for it here would
+    widen that bypass rather than honor its reasoning. Nothing in this
+    module calls `record_legal_approval` from any other function in this
+    file.
+
+    The caller supplies the exact `content_hash` they are approving --
+    never "whatever the row currently has" -- and this function REFUSES
+    (`PlaybookVersionApprovalMismatchError`) unless that hash equals the
+    target row's own recorded `content_hash`. An approval record can
+    therefore never be created for a hash that does not match reality (a
+    typo, or bytes that changed since the approver looked at them) -- the
+    exact governance failure mode Gate 7 exists to catch, just moved one
+    step earlier, to the moment the approval itself is recorded rather than
+    left to be discovered at activation.
+
+    Appends one audit record (`playbook_version_legal_approval`) naming the
+    approver identity and the exact hash approved -- a content hash, from
+    which no document is recoverable, the same posture as every other hash
+    this module already writes into the audit table (see
+    `list_playbook_version_trail`'s docstring).
+
+    Raises `PlaybookVersionNotFoundError` if `(playbook_id, version)` has no
+    recorded upload row, `PlaybookVersionApprovalMismatchError` if
+    `content_hash` does not equal the row's own `content_hash`.
+
+    Returns the updated row.
+    """
+    target = _get_version_item(playbook_id, version, dynamodb_resource)
+    if target is None:
+        raise PlaybookVersionNotFoundError(
+            f"no uploaded playbook version to approve: playbook_id={playbook_id!r} "
+            f"version={version!r}"
+        )
+
+    actual_content_hash = target.get("content_hash")
+    if not content_hash or content_hash != actual_content_hash:
+        raise PlaybookVersionApprovalMismatchError(
+            "content_hash mismatch: approval must name the exact bytes recorded for "
+            f"this version (playbook_id={playbook_id!r} version={version!r}, "
+            f"supplied={content_hash!r}, recorded={actual_content_hash!r}) -- the "
+            "artifact may have changed, or the wrong hash was supplied."
+        )
+
+    now = now_epoch_value if now_epoch_value is not None else now_epoch()
+    approved_at = int(now)
+    table = _playbook_versions_table(dynamodb_resource)
+    table.update_item(
+        Key={"playbook_id": playbook_id, "version": version},
+        UpdateExpression="SET legal_approval = :approval",
+        ExpressionAttributeValues={
+            ":approval": {
+                "content_hash": content_hash,
+                "approved_by": actor_identity,
+                "approved_at": approved_at,
+            }
+        },
+    )
+
+    _write_audit_entry(
+        dynamodb_resource=dynamodb_resource,
+        actor=actor_identity,
+        action="playbook_version_legal_approval",
+        target=f"{playbook_id}#{version}",
+        detail={
+            "playbook_id": playbook_id,
+            "version": version,
+            "content_hash": content_hash,
+        },
+        now_epoch_value=now,
+    )
+
+    result = dict(target)
+    result["legal_approval"] = {
+        "content_hash": content_hash,
+        "approved_by": actor_identity,
+        "approved_at": approved_at,
+    }
+    return result
 
 
 def rollback_playbook_version(
@@ -1010,6 +1148,14 @@ def list_playbook_version_trail(
     `record_playbook_version_upload`'s docstring for why this one is never
     omitted).
 
+    Also carries `legal_approval_content_hash` -- the hash `record_legal_
+    approval` most recently approved for this row, absent when no approval
+    has ever been recorded. A caller can compute "is this version Gate-7-
+    ready?" by comparing it to `content_hash` above, exactly the check
+    `activate_release_bundle` itself makes -- surfaced so an admin UI can
+    show that state WITHOUT re-deriving it, never as a second source of
+    truth for the gate itself (activation still re-checks for real).
+
     This is the documented assertion point for the "your" (never
     tenant-brand strings) voicing rule on any surface that renders this trail.
     """
@@ -1046,6 +1192,55 @@ def list_playbook_version_trail(
         storage_key = item.get("storage_key")
         if storage_key is not None:
             row["storage_key"] = storage_key
+        legal_approval = item.get("legal_approval") or {}
+        approved_content_hash = legal_approval.get("content_hash")
+        if approved_content_hash is not None:
+            row["legal_approval_content_hash"] = approved_content_hash
         trail.append(row)
 
     return trail
+
+
+# ---------------------------------------------------------------------------
+# Catalog union: DB-only playbook_ids (issue #485/#490).
+#
+# `playbooks/registry.json` is baked into the image, so a playbook created
+# purely through `POST /api/admin/playbooks` (a brand-new playbook_id, no
+# registry entry at all) has no OTHER on-disk trace. This is the read
+# `review_routes._load_playbook_catalog` needs to find it anyway.
+# ---------------------------------------------------------------------------
+
+
+def list_all_version_playbook_ids(dynamodb_resource: Any) -> set[str]:
+    """Every DISTINCT playbook_id carrying at least one `playbook_versions`
+    row -- registered (`playbooks/registry.json`) or DB-created (issue
+    #485's `POST /api/admin/playbooks`) alike.
+
+    A full table scan: `playbook_versions` has no secondary index keyed by
+    playbook_id alone (its own key IS `(playbook_id, version)`), and this
+    table holds one row per uploaded version across every playbook this
+    deployment has ever seen -- small by the same reasoning `_find_active_
+    item`'s docstring already gives for a per-playbook query, just summed
+    across playbooks rather than scoped to one. Paginates via
+    `LastEvaluatedKey` rather than assuming a single `scan()` call returns
+    everything.
+    """
+    table = _playbook_versions_table(dynamodb_resource)
+    ids: set[str] = set()
+    # Project the one attribute this read needs. A scan pages on the volume
+    # of data it READS, so projecting `playbook_id` instead of whole version
+    # rows both cuts the read and makes a second page far less likely --
+    # `playbook_id` is not a DynamoDB reserved word, so it needs no
+    # ExpressionAttributeNames alias.
+    scan_kwargs: dict[str, Any] = {"ProjectionExpression": "playbook_id"}
+    while True:
+        resp = table.scan(**scan_kwargs)
+        for item in resp.get("Items", []):
+            playbook_id = item.get("playbook_id")
+            if playbook_id:
+                ids.add(playbook_id)
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
+    return ids

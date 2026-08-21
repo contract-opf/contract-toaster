@@ -14,11 +14,15 @@ new_text, rationale}` patches -- SPAN-level edits inside a paragraph, NOT the
 whole-paragraph replace `scripts/redline_inplace.py` performs for the
 anchor/hash-joined pipeline. For each patch:
 
-1. **Locate via #375** (`quote_locate.locate_quote_in_paragraphs`), against
-   the SAME normalized paragraph text the model was shown
+1. **Locate via #375/#564** (`quote_locate.locate_quote_in_paragraphs`),
+   against the SAME normalized paragraph text the model was shown
    (`extraction_normalization_stage.extract_and_normalize()`). `not_found`/
-   `ambiguous` (or an unnormalizable document) become flag-only immediately
-   -- this module never even opens the OOXML editor for those.
+   `ambiguous`/`spans_paragraph_break` (or an unnormalizable document) become
+   flag-only immediately -- this module never even opens the OOXML editor
+   for those. `spans_paragraph_break` (issue #564) is the located-but-not-
+   appliable case: the quote crosses a multi-`<w:p>` join, so no single
+   physical paragraph contains it for `docx_editor` to edit -- distinct from
+   `not_found`, and never reported as such.
 2. **Apply via `docx-editor`** (https://github.com/pablospe/docx-editor,
    MIT): the ACTUAL substring #375 found (`paragraph["text"][start:end]`,
    never the model's own possibly whitespace-collapsed `source_quote` --
@@ -164,14 +168,34 @@ import redline_inplace  # noqa: E402
 
 _w = redline_inplace._w
 
-# Not-found/ambiguous are #375's own vocabulary (`quote_locate.locate_quote_
-# in_paragraphs`'s `status`), reused verbatim here so a flag-only reason
-# always means the same thing regardless of which stage (the #375 pre-check
-# or `docx-editor`'s own re-locate) produced it. `ROUND_TRIP_FAILED` is this
-# module's own addition -- see module docstring, "Round-trip verification".
+# Not-found/ambiguous/spans-paragraph-break are #375/#564's own vocabulary
+# (`quote_locate.locate_quote_in_paragraphs`'s `status`), reused verbatim here
+# so a flag-only reason always means the same thing regardless of which stage
+# (the #375/#564 pre-check or `docx-editor`'s own re-locate) produced it.
+# `ROUND_TRIP_FAILED` is this module's own addition -- see module docstring,
+# "Round-trip verification".
 REASON_NOT_FOUND = "not_found"
 REASON_AMBIGUOUS = "ambiguous"
 REASON_ROUND_TRIP_FAILED = "round_trip_verification_failed"
+# Issue #564: the located quote is genuinely present but crosses a
+# multi-`<w:p>` logical-paragraph join, so `docx_editor` (which edits
+# PHYSICAL paragraphs) has nowhere to write the tracked change -- a
+# genuinely distinct outcome from `not_found`, computed by `quote_locate`
+# from `physical_spans` (real per-`<w:p>` data), never by re-parsing OOXML
+# here. Supersedes the never-merged PR #552's `_fits_in_one_physical_
+# paragraph` regex re-parse of `word/document.xml`; the token itself
+# (`"spans_paragraph_break"`) is kept unchanged from that PR's vocabulary.
+# Declared as an independent literal (matching REASON_NOT_FOUND/REASON_
+# AMBIGUOUS above), NOT a `quote_locate.REASON_SPANS_PARAGRAPH_BREAK`
+# attribute reference -- this module sits in a real import cycle with
+# `quote_locate` (`extraction_normalization_stage` -> `redline_generate` ->
+# `redline_quote_apply` -> `quote_locate` -> `extraction_normalization_
+# stage`), so resolving this name from the other module at IMPORT TIME is
+# only safe in one import order and breaks (`AttributeError: partially
+# initialized module`) whenever a caller imports `quote_locate` before
+# anything pulls in this module. A same-valued local literal has no such
+# order dependency.
+REASON_SPANS_PARAGRAPH_BREAK = "spans_paragraph_break"
 
 # `w16du:dateUtc` -- the OOXML "extensible date" `docx-editor` stamps
 # alongside `w:date` on every `<w:ins>`/`<w:del>` it creates (see module
@@ -184,17 +208,22 @@ _W16DU_DATE_ATTR = "{http://schemas.microsoft.com/office/word/2023/wordml/word16
 def _locate_patches(
     docx_bytes: bytes, patches: list[dict[str, Any]]
 ) -> tuple[list[tuple[dict[str, Any], str]], list[dict[str, Any]]]:
-    """Run issue #375's locator over every patch's `source_quote`, against
-    the document's NORMALIZED text (the same text the model was shown).
+    """Run issue #375/#564's locator over every patch's `source_quote`,
+    against the document's NORMALIZED text (the same text the model was
+    shown).
 
     Returns `(locatable, flag_only)`: `locatable` pairs each patch whose
-    quote located uniquely with the ACTUAL substring text
+    quote located uniquely AND fits inside one physical paragraph
+    (`loc["status"] == "found"`) with the ACTUAL substring text
     (`paragraph["text"][start:end]`, never the model's own quote -- see
     module docstring) to hand to `docx-editor`; `flag_only` carries every
-    patch #375 could not safely locate, each with a `"reason"` key added
-    (`"not_found"` | `"ambiguous"`). An unnormalizable document (no "text
-    shown to the model" to search at all) fails every patch the same way
-    `quote_locate.locate_quote` itself fails safe for that condition.
+    other patch, each with a `"reason"` key set to `quote_locate`'s own
+    `status` for that patch (`"not_found"` | `"ambiguous"` |
+    `"spans_paragraph_break"` -- issue #564: located, but the span crosses a
+    physical-paragraph join `docx_editor` cannot write a tracked change
+    across). An unnormalizable document (no "text shown to the model" to
+    search at all) fails every patch the same way `quote_locate.locate_quote`
+    itself fails safe for that condition.
     """
     norm_result = extraction_normalization_stage.extract_and_normalize(docx_bytes)
     locatable: list[tuple[dict[str, Any], str]] = []
@@ -209,6 +238,11 @@ def _locate_patches(
     for patch in patches:
         loc = quote_locate.locate_quote_in_paragraphs(paragraphs, patch["source_quote"])
         if loc["status"] != "found":
+            # Covers "not_found", "ambiguous", AND "spans_paragraph_break"
+            # (issue #564) uniformly -- `quote_locate`'s own `status` IS the
+            # reason token in every non-"found" case, so a quote that spans a
+            # physical-paragraph join joins this SAME flag-only path with its
+            # own honest reason, never relabeled as "not_found".
             flag_only.append(dict(patch, reason=loc["status"]))
             continue
         para_text = paragraphs[loc["para_index"]]["text"]
@@ -241,13 +275,9 @@ def _rewrite_revision_dates(docx_bytes: bytes, revision_ids: set, timestamp_iso:
 
     doc_xml_text = originals[redline_inplace.DOCUMENT_PART].decode("utf-8")
     original_root_open_tag = redline_inplace._root_open_tag(doc_xml_text)
-    for prefix, uri in redline_inplace._declared_namespaces_anywhere(doc_xml_text):
-        if not prefix:
-            continue
-        try:
-            ET.register_namespace(prefix, uri)
-        except ValueError:
-            continue
+    redline_inplace.register_declared_namespaces(
+        redline_inplace._declared_namespaces_anywhere(doc_xml_text)
+    )
 
     root = ET.fromstring(originals[redline_inplace.DOCUMENT_PART])
     for el in root.iter():
@@ -290,6 +320,7 @@ def apply_quote_patches(
     *,
     author: str,
     timestamp_iso: str,
+    include_marker: bool = True,
 ) -> dict[str, Any]:
     """Apply each `{source_quote, new_text, rationale}` patch to `docx_bytes`
     as a Word tracked change, per-issue fail-safe (see module docstring).
@@ -301,13 +332,20 @@ def apply_quote_patches(
     convention `redline_inplace.apply_tracked_changes_inplace` documents for
     the identical case.
 
+    `include_marker` (issue #513, default `True`) is threaded straight
+    through to `redline_generate.inject_export_marker_and_footnotes` --
+    `generate_redline` passes `False` whenever this review's notes mode
+    carries no internal-audience content, so the delivered `.docx` gets no
+    export marker in any part. Footnoted rationales are unaffected.
+
     Returns `{"docx_bytes": bytes | None, "applied": [...], "flag_only":
     [...]}`. Each `applied`/`flag_only` entry is the ORIGINAL patch dict
     (`source_quote`, `new_text`, `rationale`), with `flag_only` entries also
     carrying `"reason"` (`"not_found"` | `"ambiguous"` |
-    `"round_trip_verification_failed"`). `docx_bytes` is `None` unless at
-    least one patch applied AND the assembled document passed round-trip
-    verification -- never a partially-corrupt or unverified document.
+    `"spans_paragraph_break"` | `"round_trip_verification_failed"`).
+    `docx_bytes` is `None` unless at least one patch applied AND the
+    assembled document passed round-trip verification -- never a
+    partially-corrupt or unverified document.
     """
     offending = [patch.get("source_quote") for patch in patches if not patch.get("new_text")]
     if offending:
@@ -393,7 +431,10 @@ def apply_quote_patches(
 
     dated_bytes = _rewrite_revision_dates(edited_bytes, all_revision_ids, timestamp_iso)
     docx_bytes_out = redline_generate.inject_export_marker_and_footnotes(
-        dated_bytes, inplace_applied_patches, footnote_text_by_anchor
+        dated_bytes,
+        inplace_applied_patches,
+        footnote_text_by_anchor,
+        include_marker=include_marker,
     )
 
     try:

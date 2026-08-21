@@ -1,5 +1,5 @@
 {
-  "description": "STILL-FAIL-CLOSED (issue #199): a pending (unresolved) tracked-change revision occurs INSIDE a field code -- e.g. a cross-reference field whose displayed result is itself under a live counterparty edit. Which literal field result is operative is ambiguous independent of the accept-all rule for ordinary pending revisions. Must fail closed to reason=unnormalizable_input.",
+  "description": "MUST-NORMALIZE (issue #530, supersedes issue #199's fail-closed rule for this fixture): a pending (unresolved) tracked-change revision occurs INSIDE a field code -- e.g. a cross-reference field whose displayed result is itself under a live counterparty edit. Owner decision 2026-08-09: the revision's own resulting_text is already the field's resolved display text, so this accepts-all the same way an ordinary pending revision does, with a disclosure note naming what the field resolved to.",
   "paragraphs": [
     {
       "heading": "Governing Law",

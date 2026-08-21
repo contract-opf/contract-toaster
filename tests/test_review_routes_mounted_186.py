@@ -374,7 +374,20 @@ class TestPostReviewsEndToEnd(ReviewApiOnMainAppTestBase):
         obj = self.s3.get_object(
             Bucket=os.environ["UPLOADS_BUCKET"], Key=f"uploads/owner-186/{review_id}/in.docx"
         )
-        self.assertEqual(obj["Body"].read(), _valid_docx_bytes("Hello"))
+        # Semantic comparison, not byte-for-byte: `_valid_docx_bytes` builds
+        # its archive via `zipfile.writestr(name: str, ...)`, which
+        # synthesizes a `ZipInfo` stamped with `time.localtime()` at write
+        # time -- a DOS timestamp with 2-second resolution, embedded in
+        # every local-file header and central-directory entry. This call
+        # and the one `_submit` made moments earlier are two INDEPENDENT
+        # builds; if they straddle a tick, the resulting bytes differ even
+        # though the archives are semantically identical, making a raw
+        # `==` on them an intermittent flake rather than a real assertion.
+        # Read the content back out instead, same convention
+        # tests/test_quote_redline_e2e.py:341 uses for a delivered zip.
+        with zipfile.ZipFile(io.BytesIO(obj["Body"].read())) as zf:
+            document_xml = zf.read("word/document.xml").decode("utf-8")
+        self.assertIn("Hello", document_xml)
 
         # submit_review was called: a reviews row now exists for this id.
         self.assertIn(review_id, self._reviews_table().items)

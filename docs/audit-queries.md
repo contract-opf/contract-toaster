@@ -39,9 +39,10 @@ investigation runs into a dead end:
 **Answerable only inside the window** — gone once the review's own `retention_window_at_creation`
 elapses and the purge worker sweeps it (see [docs/data-handling.md](data-handling.md) → "Document
 retention and purge safety"):
-- *Which textual changes were accepted, and why* — `verdict_summary`, `issue_rationale_text` on
-  the `reviews` row are cleared by the purge worker (purge invariant 4). For an `ACCEPT`, this is
-  the **only** record of the reasoning; there is no separate output document to fall back on.
+- *Which textual changes were accepted, and why* — `summary` (the model's own output key for it is
+  `verdict_summary`) and `toaster_guidance` on the `reviews` row are cleared by the purge worker
+  (purge invariant 4). For an `ACCEPT`, this is the **only** record of the reasoning; there is no
+  separate output document to fall back on.
 - The uploaded document, the generated redline, and the standalone `analysis_report` — the
   underlying `uploads`/`outputs`/`analysis_report` S3 objects are deleted outright (unversioned,
   so the delete is immediate and real).

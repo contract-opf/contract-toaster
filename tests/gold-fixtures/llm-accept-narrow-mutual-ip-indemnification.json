@@ -1,0 +1,43 @@
+{
+  "case_id": "llm-accept-narrow-mutual-ip-indemnification",
+  "schema": "llm-native-v1",
+  "description": "Ported from tests/gold-fixtures/accept-narrow-mutual-ip-indemnification.json (issue #400): a narrow, mutual, Section-8-capped IP indemnification is an acceptable variation and must not produce a REQUEST_CHANGE issue.",
+  "document": {
+    "clauses": [
+      {
+        "heading": "10. Indemnification",
+        "text": "Each party shall indemnify the other solely for third-party intellectual-property infringement claims arising from that party's own materials, with total exposure capped at the amounts set forth in Section 8."
+      }
+    ]
+  },
+  "model_responses": {
+    "primary": [
+      {
+        "schema_version": "output-schema-v1",
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": null,
+        "verdict_summary": "No changes identified relative to your standard positions."
+      }
+    ],
+    "critic": [
+      {
+        "schema_version": "output-schema-v1",
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": null,
+        "verdict_summary": null
+      }
+    ]
+  },
+  "expected": {
+    "status": "OK",
+    "decision": "ACCEPT",
+    "min_issues": 0,
+    "max_issues": 0
+  }
+}

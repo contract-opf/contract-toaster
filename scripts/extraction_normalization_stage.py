@@ -102,6 +102,8 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import clause_boundaries  # noqa: E402
 import normalize_input  # noqa: E402
+import redline_generate  # noqa: E402
+import redline_inplace  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -158,13 +160,14 @@ class _ParaBuilder:
         # A cluster is a maximal run of CONTIGUOUS w:ins/w:del elements from
         # ONE author -- any intervening plain run (add_plain), hidden run
         # (add_hidden), or a DIFFERENT author's revision closes it and opens
-        # a new one. This makes "more than one cluster on a paragraph"
-        # exactly normalize_input.py's rule-1 ambiguity ("more than one
-        # pending tracked_change on the same paragraph"), whether the
-        # clusters share an author or not; two different authors editing
-        # back-to-back with no intervening plain text (rule 2, multi-author)
-        # must still surface as two distinct clusters, not silently merge
-        # into the first author seen.
+        # a new one. Two different authors editing back-to-back with no
+        # intervening plain text must still surface as two distinct
+        # clusters, not silently merge into the first author seen -- this is
+        # what lets `normalize_input.py`'s disclosure note report an
+        # accurate cluster/author count for the multi-cluster/multi-author
+        # accept-all case (issue #563), even though neither more than one
+        # cluster nor a cluster inside a field code (issue #530) gates
+        # normalization on its own any more.
         if (
             self._current_cluster is not None
             and author is not None
@@ -469,6 +472,182 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Accept-all materialization (issue #563)
+#
+# `normalize_paragraphs` (below) accepts a paragraph's pending tracked
+# changes in TEXT SPACE ONLY -- the `resulting_text` the model reads and
+# `quote_locate` searches. The uploaded `.docx` bytes themselves still carry
+# the raw `<w:ins>`/`<w:del>` markup at that point. `materialize_accept_all`
+# closes that gap: it applies the SAME accept-all disposition directly to
+# `word/document.xml`, so a caller (`scripts/review_spine.py`) can thread ONE
+# canonical, already-accepted document through quote-locate, patch-apply, and
+# the delivered redline, rather than text-space and byte-space ever
+# disagreeing about what "the document" says.
+# ---------------------------------------------------------------------------
+
+
+def _splice_accept_all(el: ET.Element) -> None:
+    """Mutates `el`'s children in place, accepting every pending tracked
+    change anywhere under them: each `<w:del>` child is removed ENTIRELY
+    (including its own subtree -- a rejected/superseded span never existed
+    once accepted), and each `<w:ins>` child is unwrapped -- its own
+    children (recursively processed FIRST) are spliced into `el` at the
+    `<w:ins>`'s position, and the now-empty wrapper itself is discarded.
+    Every other child is recursed into (so a `<w:ins>`/`<w:del>` nested
+    arbitrarily deep -- inside a `<w:tbl>`/`<w:tr>`/`<w:tc>`, or doubly
+    nested for an inserted-then-deleted span -- is still found and accepted)
+    but otherwise left completely untouched: no other tag, no attribute, is
+    ever read or modified (same "touches nothing else" discipline
+    `_walk_content` documents for extraction).
+
+    Nested markup (`<w:ins>` wrapping `<w:del>` -- text inserted, then
+    deleted, before ever being accepted) is handled correctly BY
+    CONSTRUCTION, with no special case: unwrapping the `<w:ins>` first
+    recurses into its own children, where the nested `<w:del>` is removed
+    outright (including its content) before anything is spliced back up --
+    so an inserted-then-deleted span contributes nothing to the materialized
+    document, mirroring `_walk_content`'s own mode-switching semantics for
+    the TEXT streams (`add_del` never contributes to `resulting_parts`,
+    regardless of what mode enclosed it) at the XML level instead.
+
+    KNOWN LIMITATION (issue #563 follow-up): a `<w:ins>`/`<w:del>` living
+    inside `<w:pPr><w:rPr>` does not wrap ordinary run content -- it is
+    Word's record of an inserted or deleted PARAGRAPH MARK (the pilcrow),
+    proposing to keep or remove the break between this `<w:p>` and the
+    next one. This function strips those markers exactly like any other
+    `<w:ins>`/`<w:del>` (by construction, since it recurses into `<w:pPr>`/
+    `<w:rPr>` like any other element), but does NOT apply their semantics:
+    accepting a deleted paragraph mark should MERGE this paragraph with the
+    next `<w:p>`, and this function never merges `<w:p>` siblings. The
+    materialized bytes therefore still show the paragraph split as two
+    `<w:p>` elements (with a vestigial empty `<w:pPr><w:rPr/></w:pPr>` where
+    the marker lived) even though `normalize_paragraphs`'s TEXT-space
+    reading already folds the two into one logical paragraph -- see
+    `materialize_accept_all`'s own docstring for how this can surface as a
+    spurious paragraph split in the delivered redline, and
+    `tests/test_accept_all_materializer.py` for the fixture pinning this as
+    current behavior.
+    """
+    original_children = list(el)
+    for child in original_children:
+        el.remove(child)
+    for child in original_children:
+        if child.tag == _w("del"):
+            continue  # accepted-away entirely, including all descendants
+        if child.tag == _w("ins"):
+            _splice_accept_all(child)  # accept nested content FIRST
+            for grandchild in list(child):
+                el.append(grandchild)
+            continue
+        _splice_accept_all(child)
+        el.append(child)
+
+
+def materialize_accept_all(docx_bytes: bytes) -> bytes:
+    """
+    Physically accept every pending tracked change in `word/document.xml`:
+    every `<w:del>` element is removed INCLUDING its content, and every
+    `<w:ins>` element is unwrapped (its children spliced into its parent,
+    the wrapper dropped) -- everywhere in the part, at any nesting depth.
+    Touches nothing else: every other zip entry is copied through
+    byte-for-byte, and no other tag or attribute in `word/document.xml` is
+    ever modified (`_splice_accept_all`'s own contract).
+
+    This is issue #563's physical half of accept-all: `normalize_paragraphs`
+    already accepts a paragraph's pending changes in TEXT SPACE (the
+    `resulting_text` the model reads and `quote_locate` searches); this
+    function applies the identical disposition to the BYTES, so a caller
+    threading its output through `redline_generate.generate_redline`'s
+    `normalized_docx_bytes` gets `redline_quote_apply.apply_quote_patches`
+    operating on a document that already carries no pending markup of its
+    own -- only the toaster's own new redline lands on top of it, matching
+    this issue's decided product posture ("the redline is delivered ON the
+    accepted document, and that fact is disclosed").
+
+    KNOWN LIMITATION (issue #563 follow-up): "operate on one canonical,
+    already-accepted document" is accurate for revisions to run CONTENT, but
+    not yet for an accepted deleted PARAGRAPH MARK (`<w:pPr><w:rPr><w:del/>
+    </w:rPr></w:pPr>`, Word's record of a proposed paragraph merge) --
+    `_splice_accept_all` strips that marker like any other `<w:ins>`/
+    `<w:del>` but does not merge the two `<w:p>` siblings it joined, so a
+    paragraph carrying both a content revision and a deleted paragraph mark
+    still materializes as TWO `<w:p>` elements, one logical paragraph short
+    of what `normalize_paragraphs`'s TEXT-space reading (and therefore what
+    the model reviewed) already treats as one. The delivered redline is
+    otherwise on the accepted document, but the attorney's own diff against
+    their original will show this one paragraph as a spurious split rather
+    than a clean merge. See `_splice_accept_all`'s own docstring for the
+    mechanism and `tests/test_accept_all_materializer.py` for the fixture
+    pinning this as current behavior.
+
+    Round-trips through `redline_generate.verify_docx_round_trip` before
+    returning -- raises `ValueError` (that function's own exception) rather
+    than ever handing a caller bytes that do not open.
+
+    Uses the SAME guarded `ET.register_namespace` discipline
+    `scripts/redline_inplace.py` established (issue #560/#561): a real
+    uploaded document can declare a namespace prefix ElementTree's own
+    serializer would refuse to register (`ns<digits>`, reserved for its own
+    auto-generated bindings) or declare a prefix on a non-root element that
+    ElementTree hoists to the root on serialization --
+    `redline_inplace.register_declared_namespaces` /
+    `_merge_hoisted_namespaces` handle both; reused here rather than
+    reimplemented so the two directions (in-place redline patch vs.
+    accept-all materialization) can never drift apart on this.
+    """
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
+        infos = zf.infolist()
+        originals = {info.filename: zf.read(info.filename) for info in infos}
+
+    if ALLOWED_DOCUMENT_PART not in originals:
+        raise ValueError(
+            f"Not a valid WordprocessingML .docx: {ALLOWED_DOCUMENT_PART} is missing."
+        )
+
+    original_document_xml = originals[ALLOWED_DOCUMENT_PART].decode("utf-8")
+    original_root_open_tag = redline_inplace._root_open_tag(original_document_xml)
+    # See redline_inplace.apply_tracked_changes_inplace's identical call:
+    # every prefix the document declares ANYWHERE (not just on the root) is
+    # registered so ElementTree picks matching prefixes for anything it
+    # re-serializes, guarded against the reserved `ns<digits>` pattern.
+    redline_inplace.register_declared_namespaces(
+        redline_inplace._declared_namespaces_anywhere(original_document_xml)
+    )
+
+    root = ET.fromstring(originals[ALLOWED_DOCUMENT_PART])
+    _splice_accept_all(root)
+
+    # Serialize the (mutated) tree, then splice the ORIGINAL root start tag
+    # back in verbatim, merged with any namespace the serializer hoisted --
+    # same "Preserve" technique redline_inplace.py documents at length.
+    serialized = ET.tostring(root, encoding="unicode")
+    auto_root_open_tag = redline_inplace._root_open_tag(serialized)
+    body_and_close = serialized[len(auto_root_open_tag) :]
+    root_open_tag = redline_inplace._merge_hoisted_namespaces(
+        original_root_open_tag, auto_root_open_tag
+    )
+    new_document_xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        + root_open_tag.encode("utf-8")
+        + body_and_close.encode("utf-8")
+    )
+
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zf_out:
+        for info in infos:
+            data = (
+                new_document_xml
+                if info.filename == ALLOWED_DOCUMENT_PART
+                else originals[info.filename]
+            )
+            zf_out.writestr(info, data)
+
+    materialized_bytes = out_buf.getvalue()
+    redline_generate.verify_docx_round_trip(materialized_bytes)
+    return materialized_bytes
+
+
+# ---------------------------------------------------------------------------
 # Normalization (delegates the documented rule to normalize_input.py)
 # ---------------------------------------------------------------------------
 
@@ -482,10 +661,12 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
 
     Unlike `normalize_input.normalize()`, this does NOT flatten the result
     into one joined `clean_body` string -- it returns a structured
-    paragraph list, `[{"heading": ..., "text": ...}, ...]`, matching the
-    `scripts/diff_standard_form.py` / `backend/src/corpus.py` draft-input
-    contract (see module docstring), so each paragraph stays independently
-    anchorable downstream.
+    paragraph list, `[{"heading": ..., "text": ..., "physical_spans": [...]},
+    ...]`, matching the `scripts/diff_standard_form.py` / `backend/src/
+    corpus.py` draft-input contract (see module docstring), so each
+    paragraph stays independently anchorable downstream. `physical_spans`
+    is ADDITIVE (issue #564): existing readers of `heading`/`text` alone
+    are unaffected.
 
     A document normalizes iff every paragraph normalizes -- one
     un-normalizable paragraph fails the whole document closed, same
@@ -501,6 +682,24 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     text under the same heading; the siblings' clean texts are only
     joined together AFTER each has normalized on its own.
 
+    Sibling clean texts are joined with `"\\n"` (issue #564; was `" "`
+    before this issue) -- `scripts/quote_locate.py`'s whitespace-collapse
+    matcher treats a newline exactly like a space, so this changes no
+    matching outcome, but it makes the physical-paragraph join visible in
+    TEXT space, distinct from the `"\\n\\n"` a caller (`review_spine.py`)
+    uses to join separate LOGICAL paragraphs together. `physical_spans` is
+    the `[start, end)` character range each physical paragraph's own clean
+    text occupies in the joined `text`, in order -- concatenating
+    `text[s:e]` for each span with `"\\n"` between reconstructs `text`
+    exactly. This is what lets `quote_locate.py` (issue #564) tell a quote
+    that stays within one physical `<w:p>` (`docx_editor` can turn it into
+    a tracked change) from one that spans a join (located, but nowhere for
+    `docx_editor` -- which edits PHYSICAL paragraphs -- to write the edit).
+    A physical paragraph whose own clean text is empty (e.g. one entirely
+    inside a `<w:ins>` still pending, or a hidden-text-only paragraph)
+    contributes no entry to `physical_spans` and no `"\\n"` join, same as
+    it always contributed nothing to the joined text.
+
     Returns:
       {"status": "normalized", "paragraphs": [...],
        "normalization_notes": "..."}   (notes key present only when one or
@@ -512,7 +711,7 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     """
     fail_notes: list[str] = []
     accept_notes: list[str] = []
-    clean_paragraphs: list[dict[str, str]] = []
+    clean_paragraphs: list[dict[str, Any]] = []
 
     for paragraph in raw_paragraphs:
         heading = paragraph.get("heading", "<untitled>")
@@ -540,7 +739,16 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
         if paragraph_failed:
             continue
 
-        clean_paragraphs.append({"heading": heading, "text": " ".join(clean_texts).strip()})
+        text = "\n".join(clean_texts)
+        physical_spans: list[list[int]] = []
+        pos = 0
+        for clean_text in clean_texts:
+            physical_spans.append([pos, pos + len(clean_text)])
+            pos += len(clean_text) + 1  # +1 for the "\n" join just written
+
+        clean_paragraphs.append(
+            {"heading": heading, "text": text, "physical_spans": physical_spans}
+        )
 
     if fail_notes:
         normalize_result = {

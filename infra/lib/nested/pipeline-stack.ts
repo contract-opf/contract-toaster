@@ -298,6 +298,16 @@ export class PipelineStack extends cdk.NestedStack {
       MAX_SECTIONS: String(MAX_SECTIONS),
       TOP_K: String(TOP_K),
       MAX_RETRIES: String(MAX_RETRIES),
+      // Issue #569: threaded through so the persist stage's mirrored
+      // compute_worst_case_reservation_usd_cents() (infra/lambda/persist/
+      // handler.py) reads the same flag backend/src/config.py's
+      // requote_enabled() gates in backend/src/reviews.py -- otherwise the
+      // reserve side (reviews.py, flag-aware) and this settlement mirror
+      // (flag-blind) permanently disagree by one primary-priced pass
+      // whenever the flag is on. Empty string (unset) preserves the
+      // pre-#569 reservation exactly, same default-OFF convention as the
+      // flag itself.
+      REQUOTE_ENABLED: process.env.REQUOTE_ENABLED ?? '',
     };
 
     // -----------------------------------------------------------------------
@@ -865,6 +875,11 @@ def handler(event, context):
         DAILY_SPEND_TABLE: dailySpendTable.tableName,
         STATE_MACHINE_ARN: this.stateMachine.stateMachineArn,
         STALE_PENDING_THRESHOLD_SECONDS: '120',
+        // Issue #569: same REQUOTE_ENABLED thread as persistFn's stageEnv
+        // above -- this Lambda's compute_worst_case_reservation_usd_cents()
+        // mirror must agree with reviews.py's flag-aware figure on the
+        // dead-execution settlement path too.
+        REQUOTE_ENABLED: process.env.REQUOTE_ENABLED ?? '',
       },
       logRetention: logs.RetentionDays.ONE_MONTH,
     });

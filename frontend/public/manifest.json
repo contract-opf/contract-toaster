@@ -1,7 +1,7 @@
 {
   "name": "Contract Toaster",
   "short_name": "Toaster",
-  "description": "Upload an agreement, review it against your negotiating playbook, and get an issue-by-issue redline back as a tool recommendation that still needs attorney approval.",
+  "description": "Upload an agreement, review it against your negotiating playbook, and get an issue-by-issue redline back as a tool recommendation.",
   "start_url": "/",
   "scope": "/",
   "display": "browser",

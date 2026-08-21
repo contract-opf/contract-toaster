@@ -520,6 +520,69 @@ class TestScanAllProseFields(unittest.TestCase):
         self.assertEqual(outcome.confidence_state, "ERROR_MANUAL_REVIEW_REQUIRED")
         self.assertIn("critic", outcome.field_name)
 
+    def test_rationale_objection_alone_is_scanned(self) -> None:
+        """Issue #517: `rationale_objections[].objection` is model prose the
+        docs' scope table promises is covered, and was not.
+
+        The shape matters. Per docs/output-contract.md a `rationale_objections`
+        entry can exist on its OWN -- no contested replacement, no added issue
+        -- and that shape deliberately does not degrade the confidence band
+        either. So on this exact review the critic's only prose output reached
+        the reviewer completely unscanned, with nothing else in the delta to
+        catch the leak by accident.
+
+        A field the docs promise is scanned but isn't is worse than one known
+        to be unscanned: a reader of the scope table reasonably assumes cover.
+        """
+        corpus = _build_test_corpus()
+        model_output = {
+            "decision": "ACCEPT",
+            "confidence_state": "OK",
+            "verdict_summary": "Acceptable, no issues.",
+            "issues": [],
+            "critic_delta": {
+                "contested_replacements": [],
+                "added_issues": [],
+                "rationale_objections": [
+                    {
+                        "section_ref": "8",
+                        "objection": f"The primary's reasoning ignores {HARD_REJECTION_RULE_ID}.",
+                    }
+                ],
+            },
+        }
+
+        outcome = ls.scan_model_output(model_output, corpus)
+
+        self.assertTrue(outcome.blocked)
+        self.assertEqual(outcome.confidence_state, "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(
+            outcome.field_name, "critic_delta.rationale_objections.objection"
+        )
+
+    def test_a_clean_rationale_objection_still_passes(self) -> None:
+        """Coverage must not become a blanket refusal: the critic disagreeing
+        with WHY an issue was raised is ordinary, expected output."""
+        corpus = _build_test_corpus()
+        model_output = {
+            "decision": "ACCEPT",
+            "confidence_state": "OK",
+            "verdict_summary": "Acceptable, no issues.",
+            "issues": [],
+            "critic_delta": {
+                "contested_replacements": [],
+                "added_issues": [],
+                "rationale_objections": [
+                    {
+                        "section_ref": "8",
+                        "objection": "This reads as over-flagging; the clause is ordinary.",
+                    }
+                ],
+            },
+        }
+
+        self.assertFalse(ls.scan_model_output(model_output, corpus).blocked)
+
     def test_clean_model_output_passes_and_is_not_blocked(self) -> None:
         corpus = _build_test_corpus()
         model_output = {

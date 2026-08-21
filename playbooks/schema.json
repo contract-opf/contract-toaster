@@ -198,7 +198,7 @@
             },
             "embedding_model_id": {
               "type": "string",
-              "description": "Pinned in-region Bedrock embedding model ID used by the Knowledge Base. A change here (or any re-embedding) changes which precedents are retrieved and therefore legal output, so it is governed: recorded on every review, recertified quarterly, and requires admin (GC) approval. A re-embedding produces a new corpus_snapshot_version."
+              "description": "INERT TODAY. Pinned in-region Bedrock embedding model ID for the Knowledge Base. Retrieval is dormant by decision and nothing is embedded, so this field is carried for a future revival only: no code reads it, it is not recorded on any review, and NO recertification or admin (GC) approval obligation is in force for it. On revival it becomes governed -- recorded on every review, recertified alongside the primary/critic matrix, and a change (or any re-embedding) requires admin (GC) approval and produces a new corpus_snapshot_version, because it changes which precedents are retrieved and therefore legal output. See docs/rag-dormant.md section 5.4."
             },
             "fallback_model_id": {
               "type": "string",
@@ -660,7 +660,7 @@
           "enum": [
             "ACCEPT | REQUEST_CHANGE"
           ],
-          "description": "The shape of the external legal decision label. Binary only. Note the required attorney-disposition framing handled at render time (see [docs/output-contract.md](../docs/output-contract.md)): an ACCEPT is rendered as 'no requested changes identified by tool', NOT 'no action needed', and every output is watermarked 'tool recommendation only; attorney approval required'."
+          "description": "The shape of the external legal decision label. Binary only. Note the render-time framing handled elsewhere (see [docs/output-contract.md](../docs/output-contract.md)): an ACCEPT is rendered as 'no requested changes identified by tool', NOT 'no action needed'. Nothing in the product enforces, requires, gates on, or records attorney approval."
         },
         "output_contract_version": {
           "type": "string",

@@ -32,6 +32,7 @@ const ALL_OUTCOMES: ReviewOutcome[] = [
   'ERROR',
   'QUARANTINED',
   'SUPERSEDED',
+  'CANCELLED',
 ];
 
 describe('OUTCOME_CHIPS — total over the outcome union', () => {

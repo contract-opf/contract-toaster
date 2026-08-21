@@ -70,6 +70,12 @@ const FRONTEND_SRC = path.resolve(__dirname, '../src');
 const HIDDEN_HELPER_OWNERS = {
   '.ct-button__live': 'ct-button',
   '.ct-file-drop__input': '.ct-file-drop__well',
+  // Issue #492: ReviewSubmission.tsx's completion-handoff live region
+  // (`review-ready-announcement`) is visually hidden via app.css's
+  // `.ct-sr-only` rather than plain muted text — its containing block is
+  // the component's root section, positioned via app.css's own
+  // `[data-testid='review-submission']` rule.
+  '.ct-sr-only': "[data-testid='review-submission']",
 };
 
 const failures = [];

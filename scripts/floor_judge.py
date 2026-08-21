@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -232,6 +233,15 @@ def judge_floor_invariants(
         for attempt in range(1, attempts_allowed + 1):
             raw_response = None
             outcome = "failure"
+            # Issue #414: same timing/usage seam as run_primary_pass /
+            # run_critic_pass (see those functions' identical comments) --
+            # `attempt_duration_ms` is captured the instant invoke()
+            # returns, before response validation, so it reflects the
+            # provider round-trip rather than this loop's own bookkeeping;
+            # `actual_usage` is only read when THIS attempt's invoke()
+            # genuinely returned, never borrowed from a prior attempt.
+            attempt_started_monotonic = time.monotonic()
+            attempt_duration_ms: int | None = None
             try:
                 raw_response = model_client.invoke(
                     model_id=model_id,
@@ -239,6 +249,7 @@ def judge_floor_invariants(
                     user_prompt=user_prompt,
                     max_output_tokens=max_output_tokens,
                 )
+                attempt_duration_ms = int((time.monotonic() - attempt_started_monotonic) * 1000)
                 is_valid, parsed = _validate_judge_response(
                     raw_response, expected_invariant_id=invariant_id
                 )
@@ -248,6 +259,9 @@ def judge_floor_invariants(
                 else:
                     outcome = "retry" if attempt < attempts_allowed else "failure"
             finally:
+                actual_usage = (
+                    getattr(model_client, "last_usage", None) if raw_response is not None else None
+                )
                 # LEDGER every attempt -- success, retry, or terminal failure
                 # alike -- mirroring the primary/critic passes' own
                 # finally-path ledgering.
@@ -261,6 +275,21 @@ def judge_floor_invariants(
                         input_tokens_est=_primary_review_pass.estimate_tokens(_SYSTEM_PROMPT)
                         + _primary_review_pass.estimate_tokens(user_prompt),
                         output_tokens_est=_primary_review_pass.estimate_tokens(raw_response or ""),
+                        actual_input_tokens=(actual_usage or {}).get("input_tokens"),
+                        actual_output_tokens=(actual_usage or {}).get("output_tokens"),
+                        duration_ms=(
+                            attempt_duration_ms
+                            if attempt_duration_ms is not None
+                            else int((time.monotonic() - attempt_started_monotonic) * 1000)
+                        ),
+                        # Issue #568 fix round 1: same seam as the primary/
+                        # critic passes -- prompt-cache usage the provider
+                        # reported for THIS attempt, if any, read off the
+                        # SAME `actual_usage` dict already in hand above.
+                        cache_read_input_tokens=(actual_usage or {}).get("cache_read_input_tokens"),
+                        cache_creation_input_tokens=(actual_usage or {}).get(
+                            "cache_creation_input_tokens"
+                        ),
                     )
                 )
             if verdict is not None:

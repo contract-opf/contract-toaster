@@ -7,7 +7,8 @@ on:
       - "tests/lint-*.py"
       - "tests/test_schema_hardening.py"
       - "tests/test_canonicalize.py"
-      - "tests/test_eval_harness_62.py"
+      - "tests/test_eval_harness.py"
+      - "tests/test_eval_budget.py"
       - "tests/gold-fixtures/**"
       - "scripts/canonicalize.py"
       - "scripts/eval_harness.py"
@@ -23,7 +24,8 @@ on:
       - "tests/lint-*.py"
       - "tests/test_schema_hardening.py"
       - "tests/test_canonicalize.py"
-      - "tests/test_eval_harness_62.py"
+      - "tests/test_eval_harness.py"
+      - "tests/test_eval_budget.py"
       - "tests/gold-fixtures/**"
       - "scripts/canonicalize.py"
       - "scripts/eval_harness.py"
@@ -48,11 +50,28 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install jsonschema
+          pip install -r backend/requirements.txt -r requirements-dev.txt
         # check_f_validator_rejects_hostile_fixtures in test_schema_hardening.py is
         # FAIL-CLOSED: it exits 1 (not skip) when jsonschema is absent.  This step
         # must precede the schema hardening gate so the validator-based AC1 guard
-        # is live in CI.
+        # is live in CI.  jsonschema comes in via requirements-dev.txt.
+        #
+        # This installs the FULL requirement set (same two files the
+        # `test-suite` job in ci-pipeline.yml installs), not just jsonschema.
+        # Before that: this job installed `jsonschema` alone, and went red on
+        # `main` from 89a195e (2026-08-07) onward with
+        # `ModuleNotFoundError: No module named 'docx_editor'` -- issue #400
+        # re-pointed `scripts/eval_harness.py` (run below) at the LLM-native
+        # review path, growing its module-level import chain to
+        # eval_harness -> quote_locate -> extraction_normalization_stage ->
+        # redline_generate -> redline_quote_apply -> docx_editor, a real
+        # declared third-party dependency (backend/requirements.txt:22,
+        # requirements-dev.txt:44) that this job never installed.
+        #
+        # Deliberately installing the deps rather than guarding the import:
+        # a gate that silently stops exercising its subject in CI is worse
+        # than no gate.  Pinning a narrower list would just re-create the
+        # same drift the next time an import chain grows.
 
       - name: Schema hardening — hostile fixture rejection and structural invariants
         run: |
@@ -78,28 +97,51 @@ jobs:
       - name: Lint — gold fixture detector expectations
         run: |
           python3 tests/lint-gold-fixtures.py
-        # For each gold fixture with a detector_expectation field, simulate the
-        # detector (on_insert via inserted_hunk, on_remove_or_alter via
-        # altered_hunk / required_tokens — issue #62) and assert the expected
-        # result (fire or no_fire). This enforces:
-        #   - ACCEPT gold cases with no_fire expectations stay green
-        #   - D2 planted-violation cases with fire expectations stay green
-        # Failure means either an acceptable-variation gold case fires a rule it
-        # should not, or a D2 planted violation no longer fires its expected rule.
+        # For each gold fixture with a detector_expectation field, simulate
+        # EVERY hard_rejection rule (on_insert via inserted_hunk,
+        # on_remove_or_alter via altered_hunk / required_tokens — issue #62)
+        # against that fixture's hunk and assert the expected result (fire or
+        # no_fire). This enforces:
+        #   - D1: ACCEPT / no_fire gold cases stay at zero fires, within
+        #     fp_tolerance, across every rule whose applies_to_topics admits
+        #     the fixture's topic_id — not just the fixture's own rule (a
+        #     rule scoped to a different topic is outside this sweep).
+        #   - D2: a planted-violation gold case fires its own expected rule,
+        #     and only it (within fp_tolerance, among topic-admitted rules)
+        #     — the cross-rule false-positive assertion.
+        #   - D2 topic coverage: every hard_rejections[].id in the playbook
+        #     has at least one gold-case detector fixture
+        #     (scripts/generate_gold_fixtures.py::missing_rule_coverage).
+        # Failure means either an acceptable-variation gold case fires a rule
+        # it should not (own or otherwise), a D2 planted violation no longer
+        # fires its expected rule (or also fires an unrelated one beyond
+        # fp_tolerance), or a hard_rejection rule has lost its only gold-case
+        # fixture.
 
-      - name: Evaluation harness — model-free runner/scorer + gold-set rule coverage
+      - name: Evaluation harness — LLM-native offline runner/scorer + CI eval budget
         run: |
           python3 scripts/eval_harness.py
-          python3 tests/test_eval_harness_62.py
-        # Issue #62 (BLOCKING GATE): the model-free harness skeleton scores every
-        # gold-set fixture against its detector_expectation and reports per-rule
-        # coverage; test_eval_harness_62.py additionally pins the runner/scorer
-        # API surface, on_remove_or_alter simulation correctness, synthetic-only
-        # fixture provenance, and CI eval budget fail-loud behavior (scripts/
-        # eval_budget.py) at the documented $200/run and $1,000/month ceilings.
-        # Failure means a hard_rejection rule lost gold-case coverage, a gold
-        # fixture regressed, or the CI eval budget plumbing no longer fails
-        # loudly when a run would exceed the documented ceiling.
+          python3 tests/test_eval_harness.py
+          python3 tests/test_eval_budget.py
+        # Issue #400 (BLOCKING GATE, supersedes #62): scripts/eval_harness.py
+        # now drives the real LLM-native pipeline (scripts/review_spine.py
+        # ::run_review) offline via canned model responses (FakeBedrockClient)
+        # and scores its output contract (decision fidelity, issue-count
+        # bounds, source_quote locatability, leakage blocking) against the
+        # ported tests/gold-fixtures/llm-*.json fixtures; tests/test_eval_
+        # harness.py pins that scorer API surface and proves it actually
+        # catches a broken fixture, not just passes everything by
+        # construction. tests/test_eval_budget.py pins CI eval budget
+        # fail-loud behavior (scripts/eval_budget.py) at the documented
+        # $200/run and $1,000/month ceilings, unaffected by this rewrite.
+        # The detector-only gold-set rule coverage AND cross-rule
+        # false-positive checks this step used to also report now live in the
+        # "Lint — gold fixture detector expectations" step above
+        # (tests/lint-gold-fixtures.py) — see that step's own comment for the
+        # restored D1/D2 detail. Failure means the LLM-native pipeline's
+        # output contract regressed, a ported fixture no longer scores as
+        # expected, or the CI eval budget plumbing no longer fails loudly
+        # when a run would exceed the documented ceiling.
 
       - name: Canonicalization — golden-hash fixture and stability tests
         run: |

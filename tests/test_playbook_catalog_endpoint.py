@@ -380,6 +380,94 @@ class RealCatalogShipsExactlyOneSampleTest(unittest.TestCase):
         self.assertIn("https://github.com/contract-opf/playbooks", entry["notes"])
 
 
+# -- issue #485/#490: DB-only playbooks join the catalog --------------------
+
+
+class PlaybookCatalogDbOnlyPlaybookTest(PlaybookCatalogEndpointTestBase):
+    """A playbook_id that exists ONLY via `playbook_versions` rows -- never
+    in `playbooks/registry.json` at all -- must still appear in the catalog.
+    Before the fix, `_load_playbook_catalog` iterated ONLY the registry
+    file's own ids, so a playbook created through `POST /api/admin/
+    playbooks` (issue #485's create-playbook route) could never appear as a
+    selectable contract type no matter what its `playbook_versions` rows or
+    activation state said."""
+
+    DB_ONLY_ID = "db-only-agreement-490"  # no registry.json entry anywhere in this test class
+
+    def test_db_only_playbook_appears_as_coming_soon(self):
+        self._put_version_row(self.DB_ONLY_ID, "1.0.0", status="draft")
+
+        response = self.client.get("/api/playbooks")
+        self.assertEqual(response.status_code, 200)
+        entries = {p["playbook_id"]: p for p in response.json()["playbooks"]}
+        self.assertIn(self.DB_ONLY_ID, entries)
+        self.assertEqual(entries[self.DB_ONLY_ID]["status"], "coming_soon")
+        self.assertEqual(entries[self.DB_ONLY_ID]["display_name"], self.DB_ONLY_ID.upper())
+        self.assertEqual(entries[self.DB_ONLY_ID]["notes"], "")
+
+    def test_db_only_playbook_resolves_active_once_activated(self):
+        """Simulates exactly what issue #485's create route + the real
+        legal-approval + activate routes do: a `playbook_versions` row with
+        an OPF `artifact_kind`, `status: active`, and `playbooks.
+        active_release_bundle_hash` pointed at its own `content_hash`."""
+        content_hash = "sha256:" + "ab" * 32
+        self.versions_table.put_item(
+            Item={
+                "playbook_id": self.DB_ONLY_ID,
+                "version": "1.0.0",
+                "status": "active",
+                "content_hash": content_hash,
+                "artifact_kind": "opf-0.3",
+                "storage_key": f"playbooks/{self.DB_ONLY_ID}/deadbeef.json",
+            }
+        )
+        playbooks_table = self.ddb.Table(os.environ["PLAYBOOKS_TABLE"])
+        playbooks_table.put_item(
+            Item={"playbook_id": self.DB_ONLY_ID, "active_release_bundle_hash": content_hash}
+        )
+
+        response = self.client.get("/api/playbooks")
+        entries = {p["playbook_id"]: p for p in response.json()["playbooks"]}
+        self.assertEqual(entries[self.DB_ONLY_ID]["status"], "active")
+
+    def test_removed_flag_omits_a_db_only_playbook_even_though_rows_still_exist(self):
+        """The `removed` tombstone check (issue #412) must apply to a
+        DB-only id exactly as it does to a registered one -- proven here
+        with the `playbook_versions` rows still present (unlike
+        `remove_playbook`, which also deletes them), isolating this one
+        rule."""
+        self._put_version_row(self.DB_ONLY_ID, "1.0.0", status="draft")
+        playbooks_table = self.ddb.Table(os.environ["PLAYBOOKS_TABLE"])
+        playbooks_table.put_item(Item={"playbook_id": self.DB_ONLY_ID, "removed": True})
+
+        response = self.client.get("/api/playbooks")
+        ids = [p["playbook_id"] for p in response.json()["playbooks"]]
+        self.assertNotIn(self.DB_ONLY_ID, ids)
+
+    def test_admin_display_name_override_wins_for_a_db_only_playbook(self):
+        self._put_version_row(self.DB_ONLY_ID, "1.0.0", status="draft")
+        playbooks_table = self.ddb.Table(os.environ["PLAYBOOKS_TABLE"])
+        playbooks_table.put_item(
+            Item={"playbook_id": self.DB_ONLY_ID, "display_name": "Custom Name"}
+        )
+
+        response = self.client.get("/api/playbooks")
+        entries = {p["playbook_id"]: p for p in response.json()["playbooks"]}
+        self.assertEqual(entries[self.DB_ONLY_ID]["display_name"], "Custom Name")
+
+    def test_registered_and_db_only_playbooks_coexist_sorted(self):
+        self._put_version_row(self.DB_ONLY_ID, "1.0.0", status="draft")
+
+        response = self.client.get("/api/playbooks")
+        ids = [p["playbook_id"] for p in response.json()["playbooks"]]
+        # ACTIVE_PLAYBOOK_ID / COMING_SOON_PLAYBOOK_ID come from the
+        # synthetic registry this test base installs; DB_ONLY_ID has none.
+        self.assertEqual(ids, sorted(ids))
+        self.assertIn(ACTIVE_PLAYBOOK_ID, ids)
+        self.assertIn(COMING_SOON_PLAYBOOK_ID, ids)
+        self.assertIn(self.DB_ONLY_ID, ids)
+
+
 def main() -> int:
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])

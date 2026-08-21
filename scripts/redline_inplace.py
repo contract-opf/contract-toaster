@@ -224,6 +224,42 @@ def _declared_namespaces(open_tag: str) -> list:
 _XMLNS_RE = re.compile(r"\sxmlns(?::([A-Za-z_][\w.-]*))?\s*=\s*(\"[^\"]*\"|'[^']*')")
 
 
+def register_declared_namespaces(namespace_pairs) -> None:
+    """`ET.register_namespace` every `(prefix, uri)` pair that can be
+    registered, skipping the ones that cannot.
+
+    TWO prefixes must be skipped, for different reasons.
+
+    The DEFAULT prefix (`""`, from `xmlns="uri"`): registering it would make
+    that URI the default for every element that has no prefix, which is not
+    what any caller here wants.
+
+    ElementTree's RESERVED `ns<digits>` format: it reserves that pattern for
+    its own auto-generated bindings and raises `ValueError` rather than
+    registering one. Real uploaded documents -- especially any that have been
+    round-tripped through another tool -- do carry such prefixes, so this must
+    not be fatal. And it needn't be: registering only stops the serializer
+    RENAMING a prefix on elements it writes. An unregistered prefix means the
+    serializer picks its own for that URI and declares it on the root, which
+    `_merge_hoisted_namespaces` carries across; a genuine prefix/URI collision
+    raises there rather than corrupting anything.
+
+    This exists as one shared function rather than three copies of the same
+    try/except because it was already TWO copies and one omission (issue
+    #560): `redline_generate.inject_export_marker_and_footnotes` looped over
+    the same pairs without the guard, and that single unguarded call raised on
+    65% of a real 31-agreement corpus -- turning a document that had located
+    every one of its patches into a review that produced nothing.
+    """
+    for prefix, uri in namespace_pairs:
+        if not prefix:
+            continue
+        try:
+            ET.register_namespace(prefix, uri)
+        except ValueError:
+            continue
+
+
 def _declared_namespaces_anywhere(xml_text: str) -> list:
     """`(prefix, uri)` for every `xmlns[:prefix]` declaration in `xml_text`,
     wherever it appears -- root or not. Order-preserving and de-duplicated on
@@ -588,23 +624,7 @@ def apply_tracked_changes_inplace(
     # output would still be correct -- prefixes carry no meaning in XML, and
     # `_merge_hoisted_namespaces` binds whatever the serializer picked -- but
     # preserving the document as authored is this module's whole intent.
-    for prefix, uri in _declared_namespaces_anywhere(original_document_xml):
-        if not prefix:
-            continue
-        try:
-            ET.register_namespace(prefix, uri)
-        except ValueError:
-            # ElementTree reserves the `ns<digits>` prefix format for its own
-            # auto-generated bindings and refuses to register one. Real
-            # uploaded documents do carry such prefixes on the root, so this
-            # must not be fatal -- and it isn't: registering only stops the
-            # serializer RENAMING a prefix on the elements it writes, and the
-            # root start tag is spliced back from the original bytes either
-            # way. An unregistered prefix means the serializer picks its own
-            # for that URI and declares it on the root, which
-            # `_merge_hoisted_namespaces` then carries across; a genuine
-            # prefix/URI collision raises there rather than corrupting.
-            continue
+    register_declared_namespaces(_declared_namespaces_anywhere(original_document_xml))
 
     root = ET.fromstring(originals[DOCUMENT_PART])
     body = root.find(_w("body"))
@@ -622,14 +642,19 @@ def apply_tracked_changes_inplace(
 
         # Locate is edge-whitespace-tolerant (issue #291 review finding 1):
         # in the real pipeline `source_text` is the NORMALIZED draft text
-        # `extraction_normalization_stage.normalize_paragraphs` produces
-        # (stripped -- see its final `" ".join(clean_texts).strip()`), while
-        # `_paragraph_text` above reads the RAW, unstripped `<w:t>`
-        # concatenation straight off the uploaded package. Comparing both
-        # sides stripped closes that gap for the common case of a paragraph
-        # whose own runs merely carry leading/trailing whitespace, without
-        # weakening the "exact content, no fuzzy match" invariant -- the
-        # text BETWEEN the edges is still compared character-for-character.
+        # `extraction_normalization_stage.normalize_paragraphs` produces,
+        # joined from per-physical-paragraph `clean_text`s via its
+        # `"\n".join(clean_texts)` (issue #564 -- no trailing `.strip()` on
+        # the join itself), while `_paragraph_text` above reads the RAW,
+        # unstripped `<w:t>` concatenation straight off the uploaded package.
+        # The comparison here still strips both sides edge-tolerantly, which
+        # stays correct: each physical clean_text is already edge-stripped
+        # upstream at `_build_paragraph_record` (original_text/resulting_text
+        # via `.strip()`), so the only edge whitespace `source_text` can
+        # still carry is on the joined record's outermost boundary, exactly
+        # what stripping here is for. The text BETWEEN the edges is still
+        # compared character-for-character -- the "exact content, no fuzzy
+        # match" invariant is unchanged.
         normalized_source = (source_text or "").strip()
         matches = [
             p for p in _body_paragraphs(body) if _paragraph_text(p).strip() == normalized_source

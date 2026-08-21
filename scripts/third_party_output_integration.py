@@ -129,6 +129,26 @@ OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v1.json"
 ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
 MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
 
+# Notes modes (epic #519 axis 1, `backend/src/reviews.py::NOTES_MODES`) in
+# which a review's document is allowed to carry internal-audience content --
+# and therefore the only modes in which the export marker belongs on the
+# generated third-party redline at all (issue #513: the marker is no longer
+# unconditional). Duplicated rather than imported -- same small constant as
+# `redline_generate._NOTES_MODES_WITH_INTERNAL_CONTENT` -- to keep this
+# module free of a dependency on that module's private surface for one
+# boolean.
+_NOTES_MODES_WITH_INTERNAL_CONTENT = ("internal", "both")
+
+
+def _notes_mode_includes_internal_content(notes_mode: str) -> bool:
+    """Whether `notes_mode` puts internal-audience content in scope for this
+    review, and therefore whether the export marker belongs on the
+    generated `.docx`. Same fail-closed direction as
+    `redline_generate._notes_mode_includes_internal_content`: an
+    unrecognized/blank value is treated as NOT including internal content."""
+    return (notes_mode or "").strip().lower() in _NOTES_MODES_WITH_INTERNAL_CONTENT
+
+
 _OUTPUT_SCHEMA_CACHE: dict[str, Any] | None = None
 
 
@@ -459,6 +479,7 @@ def generate_third_party_review_output(
     current_counterparty_name: Optional[str] = None,
     author: str = redline_docx_writer.DEFAULT_AUTHOR,
     date: Any = None,
+    notes_mode: str = "external",
 ) -> dict[str, Any]:
     """End-to-end issue #251 Slice-5 integration: #250 findings ->
     `output-schema-v1` response -> leakage gate -> (`REQUEST_CHANGE` only)
@@ -469,6 +490,16 @@ def generate_third_party_review_output(
     round-trip check (`redline_generate.run_output_ooxml_scan()` /
     `redline_generate.verify_docx_round_trip()`) rather than a second
     implementation.
+
+    `notes_mode` (issue #513, default `"external"` -- matches
+    `backend/src/reviews.py::DEFAULT_NOTES_MODE`): the review's notes mode,
+    which decides whether the generated `.docx` carries the internal-notes
+    export marker (`include_marker` on
+    `redline_docx_writer.build_tracked_changes_docx`) -- present iff
+    `notes_mode` puts internal-audience content in scope (`internal`/`both`,
+    see `_notes_mode_includes_internal_content` above), same as the live
+    first-party path (`redline_generate.py::generate_redline`'s own
+    `notes_mode` parameter). Never unconditional.
 
     `current_clause_text_by_id` is the UPLOADED document's clause text,
     re-read at patch time (never the segmentation-time snapshot) -- the
@@ -562,6 +593,7 @@ def generate_third_party_review_output(
             author=author,
             date=date,
             footnote_text_by_anchor=footnote_text_by_anchor,
+            include_marker=_notes_mode_includes_internal_content(notes_mode),
         )
 
         try:

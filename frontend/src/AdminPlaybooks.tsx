@@ -11,14 +11,16 @@
  *
  * ## What it talks to
  *
- *   GET    /api/playbooks                                   catalog (id, display name, active/not, active version's notes)
- *   GET    /api/admin/playbooks/{id}/versions               the append-only upload trail
- *   POST   /api/admin/playbooks/{id}/versions               multipart upload of a new version
- *   POST   /api/admin/playbooks/{id}/versions/{v}/activate  Gate-7-checked activation
- *   POST   /api/admin/playbooks/{id}/versions/{v}/rollback  restore a previously-active version
- *   PATCH  /api/admin/playbooks/{id}/versions/{v}/notes     the one mutable field on a version row
- *   PATCH  /api/admin/playbooks/{id}                        rename (catalog display name only)
- *   DELETE /api/admin/playbooks/{id}                        remove (tombstone; one-way door)
+ *   GET    /api/playbooks                                        catalog (id, display name, active/not, active version's notes) — issue #485/#490: a UNION of registry entries and DB-created playbooks
+ *   GET    /api/admin/playbooks/{id}/versions                    the append-only upload trail
+ *   POST   /api/admin/playbooks                                  create a brand-new playbook_id + its first version, atomically (issue #485) — identity comes from the uploaded OPF document, never a typed id
+ *   POST   /api/admin/playbooks/{id}/versions                    multipart upload of a new version onto an EXISTING playbook_id
+ *   POST   /api/admin/playbooks/{id}/versions/{v}/legal-approval  record legal approval of a version's exact content_hash (issue #485) — the precondition Activate checks
+ *   POST   /api/admin/playbooks/{id}/versions/{v}/activate        Gate-7-checked activation
+ *   POST   /api/admin/playbooks/{id}/versions/{v}/rollback        restore a previously-active version
+ *   PATCH  /api/admin/playbooks/{id}/versions/{v}/notes           the one mutable field on a version row
+ *   PATCH  /api/admin/playbooks/{id}                              rename (catalog display name only)
+ *   DELETE /api/admin/playbooks/{id}                              remove (tombstone; one-way door)
  *
  * The catalog read is the only call here any authenticated user may make;
  * every other route 403s a non-admin caller server-side. A 403 from any of
@@ -28,17 +30,26 @@
  * decides whether this component mounts at all; the server stays
  * authoritative for every action it offers).
  *
- * ## Two backend constraints this screen must not paper over
+ * ## Backend constraints this screen must not paper over
  *
- *   1. **Activation is Gate 7'd.** `activate_release_bundle` refuses a
- *      version whose `content_hash` does not equal its recorded
- *      `legal_approval.content_hash` — including the (normal, for a
- *      freshly-uploaded version) case where no approval was ever recorded.
- *      Nothing in this app records an approval, so an upload is not
- *      self-activating and this screen never pretends otherwise: the
- *      version-history card carries a permanent note saying so, and the
- *      server's own refusal message is surfaced verbatim rather than
- *      replaced with a generic failure string.
+ *   1. **Activation is Gate 7'd, and approval is now a real button, not a
+ *      dead end.** `activate_release_bundle` refuses a version whose
+ *      `content_hash` does not equal its recorded `legal_approval.
+ *      content_hash` — including the (normal, for a freshly-uploaded
+ *      version) case where no approval was ever recorded. Issue #485 added
+ *      the missing product path for recording one
+ *      (`POST .../legal-approval`): the version-history table offers an
+ *      "Approve for activation" action on any version that has a
+ *      `content_hash` and has not yet been approved for it, sending back
+ *      the EXACT hash already shown on that row (never operator free-text —
+ *      the server independently re-checks it matches anyway). Once
+ *      approved, the button is replaced with a quiet "Approved" note (issue
+ *      #476's hide-don't-disable convention), and the permanent banner
+ *      below still states the rule for the version that hasn't been
+ *      approved yet — an upload is not self-activating, and this screen
+ *      never pretends otherwise. The server's own refusal message is
+ *      surfaced verbatim rather than replaced with a generic failure
+ *      string.
  *   2. **Rollback only accepts a `retired` target.** `rollback_playbook_version`
  *      rejects a version that was never active ("rolling back to a version
  *      that was never active is just a (second) activation"). Since only
@@ -47,6 +58,13 @@
  *      active row offers no Roll back button at all (hidden, not disabled;
  *      issue #476) rather than a dead one with nowhere to go. The backend's
  *      409 is still the authority and is rendered verbatim if it disagrees.
+ *   3. **Creating a playbook never takes an operator-typed identifier.**
+ *      `POST /api/admin/playbooks` (issue #485) derives the new
+ *      playbook_id from the uploaded OPF document's own `agreement_type.id`
+ *      — the create form has no playbook_id field at all, only a file and a
+ *      version identifier, and the derived id is read back from the
+ *      response and shown to the admin (and used to select that playbook's
+ *      version history) rather than guessed client-side.
  *
  * Activate is likewise hidden — not merely disabled — on the row that is
  * already `active` (issue #476): re-running activation on the active
@@ -64,6 +82,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import { linkifyText } from './linkify';
 import {
@@ -107,6 +126,19 @@ export interface PlaybookVersionRow {
   notes: string;
   /** Absent on rows written before content hashes were recorded. */
   content_hash?: string;
+  /**
+   * The hash `record_legal_approval` most recently approved for this row
+   * (issue #485) — absent when no approval has ever been recorded. A row is
+   * Gate-7-ready for activation iff this equals `content_hash` above; that
+   * comparison is what `isApproved` below computes.
+   */
+  legal_approval_content_hash?: string;
+}
+
+/** Gate 7, mirrored client-side for display only — the server re-checks for
+ * real on every activate/approve call; this never gates anything itself. */
+export function isApproved(row: PlaybookVersionRow): boolean {
+  return row.content_hash !== undefined && row.legal_approval_content_hash === row.content_hash;
 }
 
 // Each admin screen keeps its own `jsonFetch` wrapper rather than sharing one
@@ -187,8 +219,14 @@ export interface AdminPlaybooksProps {
 export default function AdminPlaybooks({
   onCatalogChange,
 }: AdminPlaybooksProps = {}): React.ReactElement | null {
-  const [playbooks, setPlaybooks] = useState<PlaybookCatalogEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Issue #511: two explicit three-state loads. Both previously shared ONE
+  // `error` string alongside a `T | null` sentinel, so a failed catalog fetch
+  // left a permanent "Loading playbooks…" under a danger banner, and a failed
+  // version fetch was indistinguishable from one still in flight.
+  const [playbooksLoad, setPlaybooksLoad] = useState<LoadState<PlaybookCatalogEntry[]>>({
+    status: 'loading',
+  });
+  const playbooks = playbooksLoad.status === 'ready' ? playbooksLoad.data : null;
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   // Any admin route answering 403 hides the panel outright — no client-side
@@ -198,7 +236,11 @@ export default function AdminPlaybooks({
   // Version history is loaded for one playbook at a time (the trail route is
   // per-playbook), so the table below is scoped to this selection.
   const [selectedPlaybookId, setSelectedPlaybookId] = useState<string | null>(null);
-  const [versions, setVersions] = useState<PlaybookVersionRow[] | null>(null);
+  const [versionsLoad, setVersionsLoad] = useState<LoadState<PlaybookVersionRow[]>>({
+    status: 'loading',
+  });
+  // Derived views, so the render below reads exactly as it did.
+  const versions = versionsLoad.status === 'ready' ? versionsLoad.data : null;
 
   // Rename — inline on the row being renamed, never a second screen.
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -222,6 +264,19 @@ export default function AdminPlaybooks({
   // filename showing under an empty form.
   const [fileDropNonce, setFileDropNonce] = useState(0);
 
+  // Create-playbook form (issue #485) — deliberately separate from the
+  // upload form above, and with NO playbook_id field: identity comes from
+  // the uploaded OPF document itself (POST /api/admin/playbooks derives it
+  // server-side), never operator free-text.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createVersion, setCreateVersion] = useState('');
+  const [createFile, setCreateFile] = useState<File | null>(null);
+  const [createNotes, setCreateNotes] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createResult, setCreateResult] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createFileDropNonce, setCreateFileDropNonce] = useState(0);
+
   const loadPlaybooks = useCallback(async () => {
     try {
       const response = await jsonFetch('/api/playbooks');
@@ -238,18 +293,19 @@ export default function AdminPlaybooks({
         );
       }
       const data = (await response.json()) as { playbooks: PlaybookCatalogEntry[] };
-      setPlaybooks(data.playbooks);
+      setPlaybooksLoad({ status: 'ready', data: data.playbooks });
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load your playbooks. Please try again."),
-      );
+      setPlaybooksLoad(failedLoad(err, "We couldn't load your playbooks. Please try again."));
     }
   }, []);
 
+  const retryLoadPlaybooks = useCallback(() => {
+    setPlaybooksLoad({ status: 'loading' });
+    void loadPlaybooks();
+  }, [loadPlaybooks]);
+
   const loadVersions = useCallback(async (playbookId: string) => {
-    setVersions(null);
+    setVersionsLoad({ status: 'loading' });
     try {
       const response = await jsonFetch(
         `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions`,
@@ -267,15 +323,10 @@ export default function AdminPlaybooks({
         );
       }
       const data = (await response.json()) as { versions: PlaybookVersionRow[] };
-      setVersions(data.versions);
+      setVersionsLoad({ status: 'ready', data: data.versions });
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(
-              err,
-              "We couldn't load that playbook's version history. Please try again.",
-            ),
+      setVersionsLoad(
+        failedLoad(err, "We couldn't load that playbook's version history. Please try again."),
       );
     }
   }, []);
@@ -363,6 +414,27 @@ export default function AdminPlaybooks({
     [refreshAfterVersionChange, runAction],
   );
 
+  /**
+   * Records legal approval of EXACTLY the hash already shown on this row
+   * (issue #485) — never an operator-typed value. The server independently
+   * re-checks it against the row's own `content_hash` and 409s a mismatch,
+   * but this client never gives an admin a free-text field to get it wrong
+   * in the first place.
+   */
+  const approveVersion = useCallback(
+    (playbookId: string, version: string, contentHash: string) =>
+      runAction({
+        key: `approve:${version}`,
+        path: `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions/${encodeURIComponent(version)}/legal-approval`,
+        method: 'POST',
+        body: { content_hash: contentHash },
+        technical: `POST legal-approval ${playbookId}/${version}`,
+        fallback: "We couldn't record approval for that version. Please try again.",
+        onSuccess: () => refreshAfterVersionChange(playbookId),
+      }),
+    [refreshAfterVersionChange, runAction],
+  );
+
   const rollBackVersion = useCallback(
     (playbookId: string, version: string) =>
       runAction({
@@ -425,7 +497,9 @@ export default function AdminPlaybooks({
           // The removed playbook's trail is gone with it; drop the selection
           // rather than leaving a table of rows that no longer exist.
           setSelectedPlaybookId((current) => (current === playbookId ? null : current));
-          setVersions((current) => (selectedPlaybookId === playbookId ? null : current));
+          setVersionsLoad((current) =>
+            selectedPlaybookId === playbookId ? { status: 'loading' } : current,
+          );
           void loadPlaybooks();
           // Issue #464: a removed playbook must stop being a selectable
           // option on the dial, not just disappear from this table.
@@ -536,6 +610,108 @@ export default function AdminPlaybooks({
     [loadPlaybooks, loadVersions, uploadFile, uploadNotes, uploadPlaybookId, uploadVersion],
   );
 
+  /**
+   * Create a brand-new playbook_id + its first version (issue #485). Unlike
+   * `submitUpload` above, there is no target playbook_id to send: the
+   * server derives one from the uploaded OPF document and returns it, and
+   * THAT returned id (never a client guess) is what gets selected below.
+   */
+  const submitCreate = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      setCreateError(null);
+      setCreateResult(null);
+
+      const version = createVersion.trim();
+      if (version === '') {
+        setCreateError("Give this playbook's first version an identifier.");
+        return;
+      }
+      if (!createFile) {
+        setCreateError('Choose the OPF file this new playbook is compiled from.');
+        return;
+      }
+
+      setCreating(true);
+      try {
+        const form = new FormData();
+        form.append('file', createFile);
+        form.append('version', version);
+
+        // authorizedFetch directly, NOT jsonFetch: a multipart body needs
+        // the browser's own generated Content-Type boundary (same reason
+        // submitUpload above bypasses jsonFetch).
+        const response = await authorizedFetch('/api/admin/playbooks', {
+          method: 'POST',
+          body: form,
+        });
+        if (response.status === 403) {
+          setIsForbidden(true);
+          return;
+        }
+        if (!response.ok) {
+          const detail = await readErrorDetail(response);
+          throw new Error(
+            detail ??
+              friendlyErrorMessage(
+                'POST /api/admin/playbooks',
+                "We couldn't create that playbook. Please try again.",
+              ),
+          );
+        }
+        const created = (await response.json()) as { playbook_id: string; version: string };
+
+        // Same "note is a second, deliberate call" pattern as submitUpload:
+        // the create route records no note of its own.
+        const note = createNotes.trim();
+        if (note !== '') {
+          const notesResponse = await jsonFetch(
+            `/api/admin/playbooks/${encodeURIComponent(created.playbook_id)}/versions/${encodeURIComponent(created.version)}/notes`,
+            { method: 'PATCH', body: JSON.stringify({ notes: note }) },
+          );
+          if (notesResponse.status === 403) {
+            setIsForbidden(true);
+            return;
+          }
+          if (!notesResponse.ok) {
+            const detail = await readErrorDetail(notesResponse);
+            throw new Error(
+              detail ??
+                friendlyErrorMessage(
+                  `PATCH notes ${created.playbook_id}/${created.version}`,
+                  'The playbook was created, but its note could not be saved. Edit it from the version history below.',
+                ),
+            );
+          }
+        }
+
+        setCreateResult(
+          `Created "${created.playbook_id}". It is a draft until you approve and activate it — nothing about the live review flow has changed yet.`,
+        );
+        setCreateVersion('');
+        setCreateNotes('');
+        setCreateFile(null);
+        setCreateFileDropNonce((n) => n + 1);
+        // The identity was derived server-side, not chosen here — select
+        // whatever the server actually created, so the admin can go
+        // straight to approving/activating it.
+        setSelectedPlaybookId(created.playbook_id);
+        void loadPlaybooks();
+        void loadVersions(created.playbook_id);
+        onCatalogChange?.();
+      } catch (err) {
+        setCreateError(
+          err instanceof Error
+            ? err.message
+            : friendlyErrorMessage(err, "We couldn't create that playbook. Please try again."),
+        );
+      } finally {
+        setCreating(false);
+      }
+    },
+    [createFile, createNotes, createVersion, loadPlaybooks, loadVersions, onCatalogChange],
+  );
+
   if (isForbidden) {
     return null;
   }
@@ -547,6 +723,18 @@ export default function AdminPlaybooks({
     <section data-testid="admin-playbooks-panel" className="ct-section ct-stack">
       <CtToolbar title="Playbooks">
         <div slot="actions">
+          <CtButton
+            type="button"
+            variant="secondary"
+            data-testid="admin-playbooks-create-toggle"
+            onClick={() => {
+              setCreateResult(null);
+              setCreateError(null);
+              setCreateOpen((open) => !open);
+            }}
+          >
+            Create playbook
+          </CtButton>
           <CtButton
             type="button"
             variant="primary"
@@ -569,16 +757,112 @@ export default function AdminPlaybooks({
         </div>
       </CtToolbar>
 
-      {error && (
-        <CtBanner variant="danger" data-testid="admin-playbooks-error">
-          {error}
-        </CtBanner>
+      {/* A failed load is TERMINAL: the banner carries the message and a
+          working retry, and the loader below is unreachable while it shows
+          (issue #511). */}
+      {playbooksLoad.status === 'failed' && (
+        <div className="ct-stack">
+          <CtBanner variant="danger" data-testid="admin-playbooks-error">
+            {playbooksLoad.message}
+          </CtBanner>
+          <div className="ct-actions" role="group">
+            <CtButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="admin-playbooks-retry"
+              onClick={retryLoadPlaybooks}
+            >
+              Try again
+            </CtButton>
+          </div>
+        </div>
       )}
 
       {actionError && (
         <CtBanner variant="danger" data-testid="admin-playbooks-action-error">
           {actionError}
         </CtBanner>
+      )}
+
+      {createOpen && (
+        <CtCard data-testid="admin-playbooks-create-panel">
+          <form className="ct-stack" noValidate onSubmit={submitCreate}>
+            <CtToolbar title="Create a playbook" />
+
+            {/* No playbook_id field here at all (issue #485): identity is
+                derived server-side from the uploaded document's own
+                agreement_type, never typed by an operator. */}
+            <CtBanner variant="muted" data-testid="admin-playbooks-create-identity-note">
+              The playbook_id is read from the document itself — its
+              agreement_type — not typed here. If the file's agreement_type
+              already matches an existing playbook, the server refuses and
+              names it: upload a new version onto that one instead.
+            </CtBanner>
+
+            {createError && (
+              <CtBanner variant="danger" data-testid="admin-playbooks-create-error">
+                {createError}
+              </CtBanner>
+            )}
+            {createResult && (
+              <CtBanner variant="ok" data-testid="admin-playbooks-create-success">
+                {createResult}
+              </CtBanner>
+            )}
+
+            <CtField
+              label="Version identifier"
+              hint="The identifier for this playbook's first version."
+            >
+              <input
+                data-testid="admin-playbooks-create-version"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                className="ct-mono"
+                value={createVersion}
+                onChange={(e) => setCreateVersion(e.target.value)}
+              />
+            </CtField>
+
+            {/* OPF only — a legacy v1 playbook carries no agreement_type to
+                derive an identity from, so the create route refuses one
+                (unlike "Upload version" above, which also accepts v1 JSON
+                for an EXISTING playbook_id). */}
+            <CtFileDrop
+              key={createFileDropNonce}
+              data-testid="admin-playbooks-create-file"
+              label="Drop the OPF document (.opf.html or .opf.json) here or browse"
+              accept=".opf.html,.opf.json"
+              onFiles={(event) => setCreateFile(event.detail.files[0] ?? null)}
+            />
+
+            <CtField
+              label="Note (optional)"
+              hint="Free text stored against this first version — what it is, and why. You can edit it later."
+            >
+              <textarea
+                data-testid="admin-playbooks-create-notes"
+                rows={3}
+                value={createNotes}
+                onChange={(e) => setCreateNotes(e.target.value)}
+              />
+            </CtField>
+
+            <div className="ct-actions">
+              <CtButton
+                type="submit"
+                variant="primary"
+                data-testid="admin-playbooks-create-submit"
+                disabled={creating}
+                loading={creating}
+              >
+                {creating ? 'Creating…' : 'Create playbook'}
+              </CtButton>
+            </div>
+          </form>
+        </CtCard>
       )}
 
       {uploadOpen && (
@@ -666,9 +950,9 @@ export default function AdminPlaybooks({
         </CtCard>
       )}
 
-      {playbooks === null ? (
+      {playbooksLoad.status === 'loading' ? (
         <CtProgress data-testid="admin-playbooks-loading" label="Loading playbooks…" />
-      ) : (
+      ) : playbooks === null ? null : (
         <CtCard data-testid="admin-playbooks-table-panel">
           <CtTable>
             <table data-testid="playbooks-table">
@@ -800,7 +1084,24 @@ export default function AdminPlaybooks({
             same as putting a version in front of a counterparty.
           </CtBanner>
 
-          {versions === null ? (
+          {versionsLoad.status === 'failed' ? (
+            <div className="ct-stack">
+              <CtBanner variant="danger" data-testid="admin-playbooks-versions-error">
+                {versionsLoad.message}
+              </CtBanner>
+              <div className="ct-actions" role="group">
+                <CtButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  data-testid="admin-playbooks-versions-retry"
+                  onClick={() => selectedPlaybookId && void loadVersions(selectedPlaybookId)}
+                >
+                  Try again
+                </CtButton>
+              </div>
+            </div>
+          ) : versions === null ? (
             <CtProgress
               data-testid="admin-playbooks-versions-loading"
               label="Loading version history…"
@@ -902,6 +1203,46 @@ export default function AdminPlaybooks({
                         </td>
                         <td>
                           <div className="ct-actions" role="group">
+                            {/* Gate 7 (issue #485): a row with a
+                                content_hash that has never been approved
+                                for THAT exact hash offers "Approve for
+                                activation", sending back exactly the hash
+                                already shown in this row's own Content hash
+                                cell — never operator free-text. Once
+                                approved (content_hash/legal_approval are
+                                both immutable once set, so this can never
+                                go false again for the same row), the button
+                                is replaced with a quiet note, the same
+                                hide-don't-disable convention as Activate/
+                                Roll back below (issue #476). A row with no
+                                content_hash at all (written before issue
+                                #478) offers neither — there is nothing to
+                                approve. */}
+                            {row.content_hash && isApproved(row) ? (
+                              <span
+                                className="ct-muted"
+                                data-testid={`playbook-version-approved-note-${row.version}`}
+                              >
+                                Approved
+                              </span>
+                            ) : row.content_hash ? (
+                              <CtButton
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                data-testid={`playbook-version-approve-${row.version}`}
+                                disabled={pendingAction === `approve:${row.version}`}
+                                onClick={() =>
+                                  void approveVersion(
+                                    row.playbook_id,
+                                    row.version,
+                                    row.content_hash as string,
+                                  )
+                                }
+                              >
+                                Approve for activation
+                              </CtButton>
+                            ) : null}
                             {row.status === 'active' ? (
                               // Activating the already-active version can't
                               // mean anything — no button to click, not a

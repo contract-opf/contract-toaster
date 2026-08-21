@@ -2,7 +2,7 @@
 #                RUNBOOK prod-operability checks, phase-0 AC coverage check,
 #                OOXML hygiene both directions check,
 #                no-active-bundle state and deactivate action check,
-#                clean-copy export / de-marking procedure check
+#                internal-notes marker documentation check
 #
 # Runs on every PR that touches docs/, ARCHITECTURE.md, RUNBOOK.md, or
 # aws-access-request.md so the stale-term sweep and RUNBOOK operability checks
@@ -28,13 +28,14 @@
 #       · Deactivate action defined, audited, GC-gated, distinct from rollback
 #       · RUNBOOK suspend-intake procedure documented
 #       · docs/playbook-governance.md lifecycle updated
-#   J – Clean-copy export / de-marking procedure (issue #39):
-#       · RUNBOOK.md contains a named de-marking procedure with cover-page +
-#         header/footer guidance, approval gate, and audit-recording instruction
-#       · docs/output-contract.md states marker is default; clean copy is the
-#         deliberate approval exit; cross-references RUNBOOK for the procedure
-#       · docs/threat-model.md external-communication section reflects the
-#         controlled approval exit path
+#   J – Internal-notes marker documentation (issue #513):
+#       · RUNBOOK.md documents the marker as conditional on notes mode, with
+#         no manual de-marking procedure and no attorney-approval requirement
+#       · docs/output-contract.md states the marker is present iff internal
+#         notes are in scope, carries no approval semantics, and
+#         cross-references RUNBOOK.md / docs/threat-model.md for detail
+#       · docs/threat-model.md reflects the trained-user premise and
+#         describes the marker as conditional on notes mode
 #
 # Adding a new stale term: edit the DENYLIST in scripts/docs-lint.py and note
 # the term, reason, and date in a comment.  Review and update at each release.
@@ -160,7 +161,7 @@ jobs:
         # See: issue #41
 
   clean-copy-export-runbook:
-    name: Clean-copy export / de-marking procedure (issue #39)
+    name: Internal-notes marker documentation (issue #513)
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
@@ -171,18 +172,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Check clean-copy export and de-marking procedure
+      - name: Check internal-notes marker documentation
         run: python3 tests/test_clean_copy_export_runbook.py
-        # Three gates (see issue #39):
-        #   Gate 1 – RUNBOOK.md contains a named de-marking procedure with:
-        #            · guidance to remove both cover page and header/footer marker
-        #            · requirement that attorney approval precedes de-marking
-        #            · instruction to record/audit the de-marking action
+        # Three gates (see issue #513):
+        #   Gate 1 – RUNBOOK.md documents the marker accurately:
+        #            · a named section describing the internal-notes marker
+        #            · states the marker is conditional on notes mode / internal notes
+        #            · states there is no manual de-marking / marker-stripping procedure
+        #            · states nothing requires or enforces attorney approval
         #   Gate 2 – docs/output-contract.md states that:
-        #            · the marker is the default on every generated redline
-        #            · the clean copy is the deliberate approval exit (not the default)
-        #            · cross-references RUNBOOK.md for the procedure
-        #   Gate 3 – docs/threat-model.md external-communication guardrail reflects
-        #            the controlled approval exit path (clean copy after approval is
-        #            deliberate; distinct from accidental/unauthorized removal)
-        # See: issue #39
+        #            · the marker is present iff internal notes are in scope
+        #              (conditional, not the default on every generated redline)
+        #            · the marker carries no approval semantics
+        #            · cross-references RUNBOOK.md / docs/threat-model.md for detail
+        #   Gate 3 – docs/threat-model.md reflects the trained-user premise (the
+        #            withdrawn haste-prone-reviewer premise is superseded) and
+        #            describes the export marker as conditional on notes mode
+        # See: issue #513

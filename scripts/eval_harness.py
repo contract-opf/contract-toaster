@@ -1,60 +1,172 @@
 #!/usr/bin/env python3
 """
-Model-free evaluation-harness skeleton — issue #62.
+LLM-native evaluation harness -- issue #400.
 
-Per the issue #62 "Reconciliation with the 2026-06-11 architecture review"
-scope decision, this module builds the harness SKELETON that is buildable
-before the LLM pipeline stages (#80-#83) land:
+## Why this rewrite
 
-  1. A gold-case loader for the fixture schema documented in
-     docs/evaluation.md -> "What a gold case contains" (case_id, playbook_
-     version, expected_decision, expected_issues[], must_not_flag[],
-     fp_tolerance, redline_checks[], plus the detector-only
-     planted_variation / accept_variation / detector_expectation fields
-     used by the D1/D2 gates in tests/gold-fixtures/).
+Before this issue, this module scored gold fixtures against the RETIRED
+deterministic lexical hard-rejection detector engine and the standard-form
+line-diff module -- both retired from issue-generation by the 2026-07-22
+LLM-native architecture decision (issue #380, see `scripts/review_spine.py`'s
+own "LLM-native review" docstring section, which names the two retired
+modules explicitly). That left the project with NO instrument for review
+quality on the path actually in production: `scripts/review_spine.py
+::run_review()`, the composed extract -> primary -> critic -> reconcile ->
+leakage-scan -> redline chain.
 
-  2. A deterministic, model-free "runner" that submits a gold case to the
-     detector layer ONLY (no Bedrock call — the real primary/adversarial/
-     redline pipeline stages are mocked per infra/lambda/mock_review/
-     handler.py under the MVP pivot, epic #123) and captures actual
-     detector fires for the case's planted or accept variation.
+This module now drives THAT path, fully offline: each fixture supplies a
+synthetic document and a set of CANNED model responses (the
+`FakeBedrockClient` pattern, `backend/src/model_client.py` -- no live
+Bedrock, no network), and the harness scores the pipeline's OUTPUT CONTRACT
+(decision, issue-count bounds, quote locatability, leakage blocking)
+against the fixture's declared expectations. It does not re-implement any
+review RULE -- it judges what the composed pipeline actually produced,
+which is the only way to test the LLM-native path without smuggling
+detector logic back in through the back door.
 
-  3. A comparator/scorer that diffs actual vs. expected per the four
-     checks in docs/evaluation.md -> "What the harness verifies per case":
-     decision accuracy, missed-issue check, false-positive check (against
-     must_not_flag[] and fp_tolerance), each producing a per-case pass/fail
-     and a reason.
+A live judged-NL run against a real model (`docs/evaluation.md`'s "Full
+stochastic gate") remains a separate, human-executed step -- this harness
+proves the MECHANICAL contract holds (decision fidelity to what the canned
+model said, quotes locate, leakage blocks), not that a real model's
+judgment is good.
 
-This module does NOT invoke Bedrock, does NOT run retrieval, and does NOT
-run redline generation — those gates are explicitly deferred in the #62
-scope decision until #80-#83 / #89 land. What it DOES do is make the gold
-fixture set and the detector layer machine-checkably scored today, which
-is the model-free backstop the issue asks for.
+The two retired modules named above remain fully alive for their OTHER
+production consumers (`tests/lint-gold-fixtures.py`,
+`tests/lint-acceptable-variations.py`, `scripts/form_match_router.py`,
+`scripts/build_anchor_map.py`, `scripts/replacement_text_enforcement.py`,
+`scripts/third_party_position_findings.py`) -- this module no longer
+imports either one; see `scripts/review_spine.py`'s docstring for their
+exact module paths.
 
-Detector simulation supports both hard_rejection kinds:
-  - on_insert:          trigger_terms / match / exempt_terms over the
-                         fixture's planted_variation.inserted_hunk (or
-                         accept_variation.inserted_hunk / altered_hunk for
-                         a no-fire assertion).
-  - on_remove_or_alter: required_tokens / token_policy over the fixture's
-                         planted_variation.altered_hunk, asserting the
-                         hunk fails to retain a required token (fires) or
-                         retains all of them (does not fire).
+## Fixture shape (schema "llm-native-v1")
+
+Each gold fixture is a JSON file with:
+
+    {
+      "case_id": "<unique id>",
+      "schema": "llm-native-v1",
+      "document": {
+        "clauses": [
+          {"heading": "<optional section heading>", "text": "<clause prose>"},
+          ...
+        ]
+      },
+      "model_responses": {
+        "primary": [ <output-schema-v1 dict>, ... ],
+        "critic":  [ <output-schema-v1 dict>, ... ]
+      },
+      "expected": {
+        "status": "OK" | "MANUAL_REVIEW_REQUIRED" | "ERROR_MANUAL_REVIEW_REQUIRED",  # default "OK"
+        "reason": "<review_spine.run_review's reason token>",   # checked iff present
+        "decision": "ACCEPT" | "REQUEST_CHANGE" | null,   # checked iff present
+        "min_issues": <int>,                              # checked iff present
+        "max_issues": <int>,                               # checked iff present
+        "quotes_must_locate": <bool>                        # default true
+      }
+    }
+
+`document.clauses` is rendered into a minimal, dependency-free OOXML
+`.docx` (the same zipfile+ElementTree convention as
+`scripts/redline_docx_writer.py` / `tests/test_review_spine.py`) -- one
+heading paragraph (if given) and one body paragraph per clause. `model_
+responses.primary` / `.critic` are JSON-serialized in order into a
+`model_client.FakeBedrockClient` queue keyed by the scored playbook's own
+`primary_model_id` / `critic_model_id`, so a well-formed case needs exactly
+one canned response per pass (no retry).
+
+The scorer (`score_case`) then runs `review_spine.run_review(docx_bytes,
+playbook, fake_client, ...)` -- the REAL composed pipeline, unmodified --
+and checks the fixture's `expected` block against the actual `ReviewResult`:
+
+  - **Decision fidelity**: `status` / `decision` match `expected` exactly.
+  - **Issue-count bounds**: `len(findings)` within `[min_issues, max_issues]`.
+  - **Quote locatability**: every finding's `source_quote` locates in the
+    document via the SAME entry point the real pipeline patches from
+    (`scripts/quote_locate.py::locate_quote` -- a verification utility, not
+    a review rule) unless `quotes_must_locate` is explicitly `false`.
+  - **Floor obligations**: a fixture whose canned primary/critic output
+    marks a hard-rejection-shaped issue REQUEST_CHANGE must reconcile to a
+    final `decision="REQUEST_CHANGE"` -- this is the ordinary decision-
+    fidelity check above, exercised by the "reject-*" fixture category; the
+    Floor block a v1 review renders is soft, in-prompt guidance
+    (`primary_review_pass.render_floor_block`), so "the obligation was
+    violated" is exactly "the canned model said REQUEST_CHANGE for a
+    hard-rejection topic" -- there is no separate deterministic Floor gate
+    for a v1 bundle (that only exists for an OPF-governed review,
+    `scripts/floor_judge.py`, issue #479, out of scope for this offline
+    mechanical harness).
+  - **Leakage blocking**: a fixture whose canned output plants confidential
+    playbook text (a `hard_rejections[].description`, never surfaced to a
+    counterparty) into a human-surfaced field must reconcile to
+    `status="ERROR_MANUAL_REVIEW_REQUIRED"` -- `review_spine.run_review`'s
+    own leakage gate (`scripts/leakage_scan.py`) does the actual detection;
+    the harness asserts the fixture's expected terminal status was reached
+    AND, when the fixture also declares `expected.reason`, that the
+    SPECIFIC cause matches too (`reason="leakage_detected"` for a
+    leakage-planted fixture) -- `status` alone does not distinguish the
+    leakage gate from any other fail-closed path that lands on the same
+    terminal status, so a fixture proving leakage blocking must pin the
+    reason, not just the status.
+
+A JSON file in a scored `fixtures_dir` that does NOT carry
+`"schema": "llm-native-v1"` is not an eval_harness case -- `score_case`
+returns a trivial PASS with a "skipped" reason, exactly like a detector-era
+fixture that was skipped because it carried no `detector_expectation`. This
+is how the still-detector-shaped fixtures in `tests/gold-fixtures/`
+(scored by `tests/lint-gold-fixtures.py` and the `tests/detector/`
+conformance suite, see issue #219) coexist in the same directory as this
+issue's ported `llm-*.json` fixtures without either format interpreting
+the other's files.
+
+## Ported / retired fixtures
+
+Six representative scenarios were ported from the existing detector gold-
+fixture corpus into this new shape (`tests/gold-fixtures/llm-*.json`):
+a clean verbatim draft, an accepted narrow-mutual-IP-indemnification
+variation, a near-miss non-exclusivity restatement, a single planted
+uncapped-liability rejection, a two-issue interaction, and a leakage-
+planted case. The other ~34 fixtures in `tests/gold-fixtures/` are
+detector-mechanics fixtures with no LLM-native analogue (span-level
+exemption combined-hunk cases, match-mode/fire_on/match_surface probes,
+mechanically-generated one-trigger-term-per-rule cases) -- they are left
+completely alone, still scored by `tests/lint-gold-fixtures.py` and
+exercised directly by `tests/detector/test_span_level_exemption_212.py` /
+`tests/detector/test_match_mode_and_semantics_220.py` (issue #400 addendum:
+those two files call the shared detector module directly per fixture now,
+instead of through this module).
+
+## Playbook-profile-conditional CLI (issue #288, unchanged by this issue)
+
+`main()` still iterates every registered `playbook_id` and SKIPs a
+"knowledge" profile entry (no `anchor_map_path` / `section_config_path`) --
+that split was never really about detector-vs-LLM scoring, but
+`tests/test_registry_profiles.py` pins the exact "SKIP (knowledge
+profile)" print + exit-0 contract for this module's `main()`, so it is
+preserved unchanged here. The shipped default playbook ("synthetic-nda-
+sample") is a knowledge-profile entry and is therefore SKIPped by a bare
+`python3 scripts/eval_harness.py` run; the ported `llm-*.json` fixtures
+live under "synthetic-generic" (a "precision" profile, `test_only` entry),
+so the default self-run does exercise them. Use `--playbook-id <id>` to
+score one playbook_id explicitly regardless of its profile.
 
 CLI usage:
-    python3 scripts/eval_harness.py            # run all gold fixtures
-    python3 scripts/eval_harness.py --quiet     # summary line only
+    python3 scripts/eval_harness.py                       # every registered playbook_id
+    python3 scripts/eval_harness.py --quiet                # summary line only
+    python3 scripts/eval_harness.py --playbook-id synthetic-generic
 
-Exit codes: 0 = every case scored PASS, 1 = at least one case scored FAIL.
+Exit codes: 0 = every scored case PASSed, 1 = at least one case FAILed.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import sys
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape as _xml_escape
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -62,12 +174,9 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import detector_common  # noqa: E402
-import diff_standard_form  # noqa: E402
-import extraction_normalization_stage  # noqa: E402
 import playbook_registry  # noqa: E402
-import primary_review_pass  # noqa: E402
-import redline_patch  # noqa: E402
+import quote_locate  # noqa: E402
+import review_spine  # noqa: E402
 
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC_DIR) not in sys.path:
@@ -75,16 +184,104 @@ if str(BACKEND_SRC_DIR) not in sys.path:
 
 import model_client  # noqa: E402
 
-# Back-compat literals (issue #45-era): resolved for the default ("eiaa")
-# playbook_id, so existing callers that pass no arguments (or import these
-# names directly, e.g. scripts/generate_gold_fixtures.py) keep working
-# unchanged. A specific playbook_id's fixtures/playbook are resolved fresh
-# via playbook_registry -- see load_playbook()/load_gold_cases()/score_all()
-# below (issue #209: playbook_id is namespaced eval-suite data, not a
-# hard-coded path).
+# Back-compat literals: resolved for the DEFAULT playbook_id, so a caller
+# that passes no arguments (or imports these names directly) keeps working
+# unchanged -- see playbook_registry.py's DEFAULT_PLAYBOOK_ID docstring for
+# why this is late-resolved against the CURRENT registry rather than a
+# hard-coded path. A specific playbook_id's fixtures/playbook are resolved
+# fresh via playbook_registry -- see load_playbook()/load_gold_cases()/
+# score_all() below.
 _DEFAULT_ENTRY = playbook_registry.resolve_playbook(playbook_registry.DEFAULT_PLAYBOOK_ID)
 PLAYBOOK_PATH = _DEFAULT_ENTRY.playbook_path
 FIXTURES_PATH = _DEFAULT_ENTRY.fixtures_dir
+
+# The schema marker that distinguishes an eval_harness-owned fixture from a
+# detector-era fixture sharing the same directory -- see module docstring
+# "Fixture shape" above.
+SCHEMA_MARKER = "llm-native-v1"
+
+
+# ---------------------------------------------------------------------------
+# Minimal, dependency-free OOXML .docx builder -- same convention as
+# tests/test_review_spine.py / scripts/redline_docx_writer.py. No
+# python-docx needed to write a minimal valid body.
+# ---------------------------------------------------------------------------
+
+_CONTENT_TYPES_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Override PartName="/word/document.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    "</Types>"
+)
+
+_RELS_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+    'Target="word/document.xml"/>'
+    "</Relationships>"
+)
+
+_DOC_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+
+def _heading_p(text: str) -> str:
+    # Clause text is arbitrary fixture prose (routine contract language like
+    # "R&D costs" or "<sole> discretion" is common) and must be XML-escaped
+    # before interpolation into <w:t> -- an unescaped &, <, or > produces a
+    # malformed word/document.xml that raises xml.etree.ElementTree.ParseError
+    # deep inside review_spine.run_review's extraction stage instead of
+    # failing just this one case.
+    return f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>{_xml_escape(text)}</w:t></w:r></w:p>'
+
+
+def _body_p(text: str) -> str:
+    return f"<w:p><w:r><w:t>{_xml_escape(text)}</w:t></w:r></w:p>"
+
+
+def _build_docx_bytes(body_paragraphs_xml: str) -> bytes:
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f"<w:document {_DOC_NS}><w:body>{body_paragraphs_xml}<w:sectPr/></w:body></w:document>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", _CONTENT_TYPES_XML)
+        zf.writestr("_rels/.rels", _RELS_XML)
+        zf.writestr("word/document.xml", document_xml)
+    return buf.getvalue()
+
+
+def build_document(clauses: list[dict[str, Any]]) -> tuple[bytes, list[dict[str, Any]]]:
+    """Render a fixture's `document.clauses` into (docx_bytes, shown_paragraphs).
+
+    `shown_paragraphs` is one `{"heading": "", "text": ...}` entry per
+    `<w:p>` element written (a heading paragraph, if the clause has one,
+    then its body paragraph) -- the RAW pre-extraction view, useful for
+    asserting this function rendered a clause's text unmodified. It does
+    NOT match what `extraction_normalization_stage.extract_and_normalize`
+    shows the model: that stage merges a clause's heading and body into a
+    single paragraph (heading text becomes the `heading` field, section
+    number stripped) rather than keeping them as two separate entries. A
+    `source_quote` must therefore be verified via `quote_locate.locate_quote`
+    (which re-derives the real pipeline's paragraph list from `docx_bytes`
+    itself), never against `shown_paragraphs` -- see `score_case`.
+    """
+    parts: list[str] = []
+    shown: list[dict[str, Any]] = []
+    for clause in clauses:
+        heading = clause.get("heading") or ""
+        text = clause["text"]
+        if heading:
+            parts.append(_heading_p(heading))
+            shown.append({"heading": "", "text": heading})
+        parts.append(_body_p(text))
+        shown.append({"heading": "", "text": text})
+    return _build_docx_bytes("".join(parts)), shown
 
 
 # ---------------------------------------------------------------------------
@@ -93,52 +290,30 @@ FIXTURES_PATH = _DEFAULT_ENTRY.fixtures_dir
 
 @dataclass
 class GoldCase:
-    """A single gold fixture, per docs/evaluation.md -> 'What a gold case
-    contains'. Detector-only fields (planted_variation, accept_variation,
-    detector_expectation) are optional -- fixtures that only assert doc-level
-    hash invariants (e.g. canonicalize-golden-hash.json) are skipped by the
-    runner, not scored as cases.
-    """
+    """A single gold fixture. Only fixtures carrying `"schema": "llm-native-
+    v1"` (see module docstring) are eval_harness cases -- any other JSON
+    file in a scored fixtures_dir (e.g. a detector-era fixture) is loaded
+    but skipped by score_case(), never interpreted under this schema."""
 
     case_id: str
     path: Path
     raw: dict[str, Any]
 
     @property
-    def expected_decision(self) -> str | None:
-        return self.raw.get("expected_decision")
+    def is_eval_harness_case(self) -> bool:
+        return self.raw.get("schema") == SCHEMA_MARKER
 
     @property
-    def expected_issues(self) -> list[dict[str, Any]]:
-        return self.raw.get("expected_issues", [])
+    def clauses(self) -> list[dict[str, Any]]:
+        return self.raw.get("document", {}).get("clauses", [])
 
     @property
-    def must_not_flag(self) -> list[Any]:
-        return self.raw.get("must_not_flag", [])
+    def model_responses(self) -> dict[str, list[dict[str, Any]]]:
+        return self.raw.get("model_responses", {})
 
     @property
-    def fp_tolerance(self) -> int:
-        return int(self.raw.get("fp_tolerance", 0))
-
-    @property
-    def planted_variation(self) -> dict[str, Any] | None:
-        return self.raw.get("planted_variation")
-
-    @property
-    def accept_variation(self) -> dict[str, Any] | None:
-        return self.raw.get("accept_variation")
-
-    @property
-    def detector_expectation(self) -> dict[str, Any] | None:
-        return self.raw.get("detector_expectation")
-
-    @property
-    def is_detector_case(self) -> bool:
-        """True if this fixture carries the fields needed to run it through
-        the detector-simulation runner (item 1 of the #62 scope)."""
-        return bool(self.detector_expectation) and bool(
-            self.planted_variation or self.accept_variation
-        )
+    def expected(self) -> dict[str, Any]:
+        return self.raw.get("expected", {})
 
 
 def load_playbook(path: Path = PLAYBOOK_PATH) -> dict[str, Any]:
@@ -156,390 +331,27 @@ def load_gold_cases(fixtures_dir: Path = FIXTURES_PATH) -> list[GoldCase]:
     return cases
 
 
-def rules_by_id(playbook: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {r["id"]: r for r in playbook.get("hard_rejections", [])}
-
-
-# ---------------------------------------------------------------------------
-# Deterministic detector simulation (model-free)
-# ---------------------------------------------------------------------------
-
-def _normalize(text: str) -> str:
-    return detector_common.normalize(text)
-
-
-@dataclass
-class DetectorFire:
-    rule_id: str
-    trigger: str
-    reason: str
-
-
-def run_on_insert_rule(rule: dict[str, Any], hunk_text: str, topic_id: str) -> list[DetectorFire]:
-    """Simulate an on_insert hard_rejection rule over a single hunk of text.
-
-    Delegates to scripts/detector_common.check_on_insert_rule_fires -- the
-    single shared implementation (issue #212) also used by
-    tests/lint-gold-fixtures.py and tests/lint-acceptable-variations.py, so
-    every caller agrees on what "fires" means, including SPAN-level
-    exempt_terms semantics (a trigger match is suppressed only when that
-    match's own span falls inside an exempt-phrase span, not merely
-    because an exempt phrase appears somewhere else in the hunk).
-    """
-    match_type = rule.get("match", "word_boundary")
-    return [
-        DetectorFire(
-            rule_id=fire["rule_id"],
-            trigger=fire["trigger_term"],
-            reason=f"trigger_term {fire['trigger_term']!r} matched ({match_type}, unexempted span)",
-        )
-        for fire in detector_common.check_on_insert_rule_fires(rule, hunk_text, topic_id)
-    ]
-
-
-def run_on_remove_or_alter_rule(
-    rule: dict[str, Any], altered_hunk: str, topic_id: str
-) -> list[DetectorFire]:
-    """Simulate an on_remove_or_alter hard_rejection rule.
-
-    Delegates to scripts/detector_common.check_on_remove_or_alter_rule_fires
-    -- the single shared implementation (issue #213) also used by
-    tests/lint-gold-fixtures.py and tests/lint-acceptable-variations.py, so
-    every caller agrees on what "fires" means: `protects.required_tokens`
-    with token_policy 'any' fires when the altered/replacement hunk text is
-    MISSING any of the required tokens (the protected language was removed
-    or weakened); token_policy 'all' fires only when ALL required tokens
-    are missing.
-    """
-    token_policy = rule.get("protects", {}).get("token_policy", "any")
-    fires: list[DetectorFire] = []
-    for fire in detector_common.check_on_remove_or_alter_rule_fires(rule, altered_hunk, topic_id):
-        missing = fire["missing_tokens"]
-        reason = (
-            f"required_tokens missing (any-policy): {missing!r}"
-            if token_policy == "any"
-            else f"required_tokens all missing (all-policy): {missing!r}"
-        )
-        fires.append(DetectorFire(rule_id=fire["rule_id"], trigger=",".join(missing), reason=reason))
-    return fires
-
-
-def run_detectors_on_case(case: GoldCase, playbook: dict[str, Any]) -> list[DetectorFire]:
-    """Run every hard_rejection rule over a single gold case's variation
-    text and return the fires actually observed. This is the harness
-    'runner' step (item 1 of the #62 scope): submit a case, capture actual
-    output -- here, the detector-only actual output, since the LLM stages
-    are mocked/unbuilt per the #62 scope decision.
-    """
-    rules = playbook.get("hard_rejections", [])
-    variation = case.planted_variation or case.accept_variation
-    if not variation:
-        return []
-
-    topic_id = variation.get("topic_id", "")
-    inserted_hunk = variation.get("inserted_hunk")
-    altered_hunk = variation.get("altered_hunk")
-
-    fires: list[DetectorFire] = []
-    for rule in rules:
-        if rule.get("kind") == "on_insert" and inserted_hunk is not None:
-            fires.extend(run_on_insert_rule(rule, inserted_hunk, topic_id))
-        elif rule.get("kind") == "on_remove_or_alter" and altered_hunk is not None:
-            fires.extend(run_on_remove_or_alter_rule(rule, altered_hunk, topic_id))
-    return fires
-
-
-# ---------------------------------------------------------------------------
-# Document-level gold cases (issue #204): real extract -> normalize -> diff
-# -> detector chain over an actual `.docx` fixture, per docs/evaluation.md's
-# "What a gold case contains" -> `input_docx` field -- as opposed to
-# score_case() above, which simulates detector fires over a fixture's
-# already-isolated planted_variation/accept_variation text SNIPPET. A
-# document-level case instead supplies real `.docx` bytes; this section
-# extracts, normalizes, diffs against the canonical standard form, and runs
-# every hard_rejection rule over the hunks the diff actually produced --
-# the real pipeline path, not a tautological "regex matches the string it
-# was built from" check.
-# ---------------------------------------------------------------------------
-
-
-def build_anchor_topic_map(playbook: dict[str, Any]) -> dict[str, str]:
-    """anchor -> playbook_topic_id, from each topic's `section_anchors`.
-    Needed because a diff hunk only carries an `anchor`; hard_rejection
-    rules scope by `applies_to_topics`, so a hunk's topic_id must be
-    resolved before a rule can be checked against it."""
-    mapping: dict[str, str] = {}
-    for topic in playbook.get("topics", []):
-        for anchor in topic.get("section_anchors", []):
-            mapping[anchor] = topic["id"]
-    return mapping
-
-
-def run_detectors_on_hunks(hunks: list[dict[str, Any]], playbook: dict[str, Any]) -> list[DetectorFire]:
-    """Run every hard_rejection rule over a REAL diff's hunks (as produced
-    by scripts/diff_standard_form.py's diff_draft_against_standard()), the
-    document-level counterpart of run_detectors_on_case() above.
-
-    A hunk's `kind` determines which surface a rule reads:
-      - "inserted" / "modified_new": on_insert rules read the hunk's
-        current `text` (the counterparty's added/changed surface).
-      - "modified_new": on_remove_or_alter rules read the same current
-        `text`, alteration_kind="modify" (the protected token may have been
-        reworded away, not wholly deleted).
-      - "deleted": on_remove_or_alter rules read alteration_kind="delete"
-        with an EMPTY altered surface -- the hunk's own `text` field on a
-        "deleted" hunk is the OLD standard-side text (what got removed, for
-        DISPLAY), not the current/altered surface, so it must not be passed
-        as the text being checked for retained required_tokens.
-    """
-    anchor_topic = build_anchor_topic_map(playbook)
-    rules = playbook.get("hard_rejections", [])
-    fires: list[DetectorFire] = []
-
-    for hunk in hunks:
-        topic_id = anchor_topic.get(hunk.get("anchor", ""))
-        if not topic_id:
-            continue
-        kind = hunk.get("kind")
-        text = hunk.get("text", "") or ""
-
-        for rule in rules:
-            if rule.get("kind") == "on_insert" and kind in ("inserted", "modified_new"):
-                fires.extend(run_on_insert_rule(rule, text, topic_id))
-            elif rule.get("kind") == "on_remove_or_alter" and kind in ("modified_new", "deleted"):
-                altered_text = "" if kind == "deleted" else text
-                alteration_kind = "delete" if kind == "deleted" else "modify"
-                for fire in detector_common.check_on_remove_or_alter_rule_fires(
-                    rule, altered_text, topic_id, alteration_kind=alteration_kind
-                ):
-                    missing = fire["missing_tokens"]
-                    fires.append(
-                        DetectorFire(
-                            rule_id=fire["rule_id"],
-                            trigger=",".join(missing),
-                            reason=f"document-level: required_tokens missing ({kind}): {missing!r}",
-                        )
-                    )
-    return fires
-
-
-@dataclass
-class DocumentLevelResult:
-    case_id: str
-    passed: bool
-    reasons: list[str] = field(default_factory=list)
-    hunks: list[dict[str, Any]] = field(default_factory=list)
-    fired_rule_ids: list[str] = field(default_factory=list)
-
-
-def score_document_level_case(
-    case_raw: dict[str, Any],
-    docx_bytes: bytes,
-    playbook: dict[str, Any],
-    standard_paragraphs: list[dict[str, Any]],
-) -> DocumentLevelResult:
-    """Run a document-level gold case (docs/evaluation.md's `input_docx`
-    field) through the real pipeline stages -- extract, normalize, diff,
-    detect -- and score the four docs/evaluation.md checks: decision
-    accuracy, missed-issue, false-positive (checks 1-3; check 4, redline-
-    patch correctness, is check_redline_checks() below, since it needs a
-    model "issue" to join against, not just the detector fires).
-    """
-    case_id = case_raw.get("case_id", "<unknown>")
-    normalized = extraction_normalization_stage.extract_and_normalize(docx_bytes)
-    if normalized["status"] != "normalized":
-        return DocumentLevelResult(
-            case_id=case_id,
-            passed=False,
-            reasons=[f"input_docx failed to normalize: {normalized}"],
-        )
-
-    hunks = diff_standard_form.diff_draft_against_standard(
-        standard_paragraphs, normalized["paragraphs"]
-    )
-    fires = run_detectors_on_hunks(hunks, playbook)
-    fired_rule_ids = sorted({f.rule_id for f in fires})
-
-    expected_decision = case_raw.get("expected_decision")
-    expected_issues = case_raw.get("expected_issues", [])
-    fp_tolerance = int(case_raw.get("fp_tolerance", 0))
-    expected_hard_rule_ids = {
-        issue["rule_id"] for issue in expected_issues if issue.get("is_hard_rejection") and issue.get("rule_id")
-    }
-
-    actual_decision = "REQUEST_CHANGE" if fired_rule_ids else "ACCEPT"
-
-    reasons: list[str] = []
-    passed = True
-
-    # Check 1: decision accuracy.
-    if actual_decision != expected_decision:
-        passed = False
-        reasons.append(
-            f"decision mismatch: expected {expected_decision!r}, got "
-            f"{actual_decision!r} (fired_rule_ids={fired_rule_ids})"
-        )
-
-    # Check 2: missed-issue -- every expected hard rejection must fire.
-    missing = expected_hard_rule_ids - set(fired_rule_ids)
-    if missing:
-        passed = False
-        reasons.append(f"missed expected hard rejection(s): {sorted(missing)}")
-
-    # Check 3: false-positive -- unexpected fires beyond fp_tolerance.
-    unexpected = set(fired_rule_ids) - expected_hard_rule_ids
-    if len(unexpected) > fp_tolerance:
-        passed = False
-        reasons.append(
-            f"unexpected fire(s) beyond fp_tolerance={fp_tolerance}: {sorted(unexpected)}"
-        )
-
-    return DocumentLevelResult(
-        case_id=case_id, passed=passed, reasons=reasons, hunks=hunks, fired_rule_ids=fired_rule_ids
-    )
-
-
-def check_redline_checks(
-    case_raw: dict[str, Any],
-    hunks: list[dict[str, Any]],
-    standard_paragraphs: list[dict[str, Any]],
-) -> tuple[bool, list[str]]:
-    """Check 4 (docs/evaluation.md): for each `redline_checks[]` entry, (a)
-    the diff's own hunk at that anchor must carry the SAME
-    (anchor, source_text_hash) pin, and (b) a patch referencing that anchor
-    (server-side joined via redline_patch.join_patches_from_diff(), issue
-    #205 -- never model-transcribed) must actually APPLY against the
-    current canonical standard-form state -- i.e. the redline lands on the
-    right clause, not merely a plausible-looking one.
-    """
-    redline_checks = case_raw.get("redline_checks", [])
-    if not redline_checks:
-        return True, ["no redline_checks[] entries on this case; nothing to verify"]
-
-    hunks_by_anchor = {h["anchor"]: h for h in hunks}
-    current_paragraphs_by_anchor = {p["anchor"]: p["text"] for p in standard_paragraphs}
-
-    reasons: list[str] = []
-    passed = True
-
-    for check in redline_checks:
-        anchor = check.get("anchor")
-        expected_hash = check.get("source_text_hash")
-        hunk = hunks_by_anchor.get(anchor)
-
-        if hunk is None or hunk.get("source_text_hash") != expected_hash:
-            passed = False
-            reasons.append(
-                f"redline_checks anchor {anchor!r}: expected source_text_hash "
-                f"{expected_hash!r}, diff hunk has {hunk.get('source_text_hash') if hunk else 'NO HUNK'!r}"
-            )
-            continue
-
-        model_issue = {"anchor": anchor, "proposed_replacement_text": "placeholder replacement text."}
-        patches = redline_patch.join_patches_from_diff(hunks, [model_issue])
-        result = redline_patch.apply_patch(current_paragraphs_by_anchor, patches[0])
-        if not result["applied"]:
-            passed = False
-            reasons.append(f"redline_checks anchor {anchor!r}: patch failed to apply: {result}")
-
-    return passed, reasons
-
-
-# ---------------------------------------------------------------------------
-# Smoke-tier "model" pass (issue #204): drives the real primary-review-pass
-# assembly/validation code (scripts/primary_review_pass.py, issue #81)
-# through the injectable deterministic FakeBedrockClient + a RECORDED
-# response fixture (tests/fixtures/model_responses/*.json) -- NO live
-# Bedrock, no network. This proves the harness can measure decision
-# accuracy + missed-issue rate against a known answer end-to-end through
-# the actual model-invocation seam, not just the model-free detector layer.
-# The full stochastic gate (real Bedrock, many-sample statistics) stays a
-# human smoke test per ARCHITECTURE.md -- out of scope here.
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SmokeModelCaseResult:
-    case_id: str
-    passed: bool
-    reasons: list[str] = field(default_factory=list)
-    actual_decision: str | None = None
-
-
-def run_smoke_tier_model_pass(
-    *,
-    review_id: str,
-    diff_hunks: list[dict[str, Any]],
-    playbook: dict[str, Any],
-    model_client_instance: "model_client.BedrockModelClient",
-    model_id: str,
-) -> dict[str, Any]:
-    """Thin wrapper around primary_review_pass.run_primary_pass() with the
-    minimal manifest inputs a smoke-tier eval run needs (no anchored
-    clauses / retrieved precedent / raw doc text -- those are populated by
-    the real pipeline stages upstream, out of scope for this harness slice)."""
-    ledger: list[model_client.ModelInvocationRecord] = []
-    return primary_review_pass.run_primary_pass(
-        review_id=review_id,
-        diff_hunks=diff_hunks,
-        anchored_clauses=[],
-        retrieved_precedent=[],
-        playbook=playbook,
-        model_client=model_client_instance,
-        model_id=model_id,
-        ledger_write=ledger.append,
-        doc_text="",
-    )
-
-
-def score_smoke_tier_case(
-    case_id: str,
-    expected_decision: str,
-    expected_hard_topic_ids: set[str],
-    diff_hunks: list[dict[str, Any]],
-    playbook: dict[str, Any],
-    model_client_instance: "model_client.BedrockModelClient",
-    model_id: str,
-) -> SmokeModelCaseResult:
-    """Run one smoke-tier case through the FakeBedrockClient-driven primary
-    pass and score decision accuracy + missed-issue rate against the known
-    answer (docs/evaluation.md checks 1-2, at the model-invocation layer
-    this time rather than the detector layer)."""
-    result = run_smoke_tier_model_pass(
-        review_id=case_id,
-        diff_hunks=diff_hunks,
-        playbook=playbook,
-        model_client_instance=model_client_instance,
-        model_id=model_id,
-    )
-
-    if result.get("status") != "OK":
-        return SmokeModelCaseResult(
-            case_id=case_id, passed=False, reasons=[f"primary pass did not return OK: {result}"]
-        )
-
-    response = result["response"]
-    actual_decision = response.get("decision")
-    reasons: list[str] = []
-    passed = True
-
-    if actual_decision != expected_decision:
-        passed = False
-        reasons.append(f"decision mismatch: expected {expected_decision!r}, got {actual_decision!r}")
-
-    actual_topic_ids = {issue.get("playbook_topic_id") for issue in response.get("issues", [])}
-    missing_topics = expected_hard_topic_ids - actual_topic_ids
-    if missing_topics:
-        passed = False
-        reasons.append(f"missed expected topic(s) in model output: {sorted(missing_topics)}")
-
-    return SmokeModelCaseResult(
-        case_id=case_id, passed=passed, reasons=reasons, actual_decision=actual_decision
+def build_fake_model_client(
+    playbook: dict[str, Any], model_responses: dict[str, list[dict[str, Any]]]
+) -> "model_client.FakeBedrockClient":
+    """Queue a fixture's canned `model_responses.primary` / `.critic`
+    dicts, JSON-serialized in order, under the SCORED playbook's own
+    `primary_model_id` / `critic_model_id` -- exactly how `review_spine
+    .run_review` resolves which queue to pop from for each pass."""
+    metadata = playbook.get("playbook", {}).get("metadata", {})
+    primary_id = metadata.get("primary_model_id") or model_client.primary_model_id()
+    critic_id = metadata.get("critic_model_id") or model_client.critic_model_id()
+    return model_client.FakeBedrockClient(
+        {
+            primary_id: [json.dumps(r) for r in model_responses.get("primary", [])],
+            critic_id: [json.dumps(r) for r in model_responses.get("critic", [])],
+        }
     )
 
 
 # ---------------------------------------------------------------------------
-# Comparator / scorer
+# Comparator / scorer -- drives the REAL LLM-native pipeline
+# (scripts/review_spine.py::run_review), offline, via FakeBedrockClient.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -547,56 +359,107 @@ class CaseResult:
     case_id: str
     passed: bool
     reasons: list[str] = field(default_factory=list)
-    actual_fires: list[str] = field(default_factory=list)
 
 
 def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
-    """Score a single gold case against its detector_expectation (fire /
-    no_fire) per docs/evaluation.md -> 'What the harness verifies per
-    case': here restricted to the detector-only subset (missed-issue check
-    and false-positive check on the deterministic layer), since decision
-    accuracy and redline-patch correctness require the LLM pipeline stages
-    that #62 explicitly defers.
-    """
-    if not case.is_detector_case:
-        return CaseResult(case_id=case.case_id, passed=True, reasons=["not a detector case; skipped"])
+    """Score a single gold case: run it through `review_spine.run_review`
+    (the real, composed LLM-native pipeline) with a FakeBedrockClient
+    seeded from the fixture's canned responses, then check the fixture's
+    `expected` block against the actual result -- see module docstring
+    "Fixture shape" for the full contract."""
+    if not case.is_eval_harness_case:
+        return CaseResult(
+            case_id=case.case_id,
+            passed=True,
+            reasons=[f"not an eval_harness case (schema != {SCHEMA_MARKER!r}); skipped"],
+        )
 
-    expectation = case.detector_expectation or {}
-    expected_result = expectation.get("expected_result")
-    expected_rule_id = expectation.get("rule_id")
+    expected = case.expected
+    docx_bytes, shown_paragraphs = build_document(case.clauses)
+    fake_client = build_fake_model_client(playbook, case.model_responses)
 
-    fires = run_detectors_on_case(case, playbook)
-    fired_rule_ids = sorted({f.rule_id for f in fires})
-    actual_fires = [f"{f.rule_id} ({f.trigger!r})" for f in fires]
+    try:
+        result = review_spine.run_review(
+            docx_bytes, playbook, fake_client, review_id=case.case_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        # run_review is documented to fail closed to a MANUAL_REVIEW_
+        # REQUIRED-shaped result for an EXPECTED bad outcome, but a fixture
+        # whose canned response makes the pipeline RETRY a pass (e.g. a
+        # model-output validation failure) can exhaust the fixture's seeded
+        # FakeBedrockClient queue and raise model_client.
+        # FakeBedrockClientExhausted -- or any other unexpected exception --
+        # straight out of run_review. One malformed fixture must not abort
+        # scoring of every other fixture in the run; record this as a FAIL
+        # for this case alone and keep going.
+        return CaseResult(
+            case_id=case.case_id,
+            passed=False,
+            reasons=[f"run_review raised {type(exc).__name__}: {exc}"],
+        )
 
     reasons: list[str] = []
     passed = True
 
-    if expected_result == "fire":
-        if expected_rule_id not in fired_rule_ids:
-            passed = False
-            reasons.append(
-                f"expected rule {expected_rule_id!r} to fire; actual fires: {fired_rule_ids or 'none'}"
-            )
-        # False positive check: any OTHER rule firing beyond fp_tolerance.
-        unexpected = [r for r in fired_rule_ids if r != expected_rule_id]
-        if len(unexpected) > case.fp_tolerance:
-            passed = False
-            reasons.append(
-                f"unexpected extra rule fires beyond fp_tolerance={case.fp_tolerance}: {unexpected}"
-            )
-    elif expected_result == "no_fire":
-        if fired_rule_ids:
-            if len(fired_rule_ids) > case.fp_tolerance:
+    expected_status = expected.get("status", "OK")
+    if result.get("status") != expected_status:
+        passed = False
+        reasons.append(
+            f"status mismatch: expected {expected_status!r}, got "
+            f"{result.get('status')!r} (reason={result.get('reason')!r})"
+        )
+
+    # An optional `expected.reason` check (issue #400 fix-round-1): checking
+    # `status` alone means ANY cause of e.g. ERROR_MANUAL_REVIEW_REQUIRED
+    # satisfies a fixture whose whole point is proving ONE specific cause
+    # (e.g. the leakage gate, reason="leakage_detected") actually fired --
+    # the fixture staying green would silently stop proving that if some
+    # other, unrelated fail-closed path started producing the same status.
+    if "reason" in expected and result.get("reason") != expected["reason"]:
+        passed = False
+        reasons.append(
+            f"reason mismatch: expected {expected['reason']!r}, got "
+            f"{result.get('reason')!r} (status={result.get('status')!r})"
+        )
+
+    if "decision" in expected and result.get("decision") != expected["decision"]:
+        passed = False
+        reasons.append(
+            f"decision mismatch: expected {expected['decision']!r}, got "
+            f"{result.get('decision')!r}"
+        )
+
+    findings = result.get("findings") or []
+    min_issues = expected.get("min_issues")
+    max_issues = expected.get("max_issues")
+    if min_issues is not None and len(findings) < min_issues:
+        passed = False
+        reasons.append(f"expected >= {min_issues} issue(s), got {len(findings)}")
+    if max_issues is not None and len(findings) > max_issues:
+        passed = False
+        reasons.append(f"expected <= {max_issues} issue(s), got {len(findings)}")
+
+    if expected.get("quotes_must_locate", True):
+        for finding in findings:
+            quote = finding.get("source_quote")
+            if not quote:
+                continue
+            # issue #400 review-round-3 fix: locate against the PIPELINE's own
+            # view (re-extracted from docx_bytes), not `shown_paragraphs` --
+            # extraction_normalization_stage merges a clause's heading and
+            # body into one paragraph, so the two-entries-per-clause raw view
+            # `build_document` returns disagrees with what the model was
+            # actually shown, and disagrees with what
+            # scripts/redline_quote_apply.py's real locate call sees.
+            located = quote_locate.locate_quote(docx_bytes, quote)
+            if located["status"] != "found":
                 passed = False
                 reasons.append(
-                    f"expected no_fire for {expected_rule_id!r}; actual fires: {fired_rule_ids}"
+                    f"source_quote does not locate in the shown document text "
+                    f"(status={located['status']!r}): {quote!r}"
                 )
-    else:
-        passed = False
-        reasons.append(f"unrecognized detector_expectation.expected_result: {expected_result!r}")
 
-    return CaseResult(case_id=case.case_id, passed=passed, reasons=reasons, actual_fires=actual_fires)
+    return CaseResult(case_id=case.case_id, passed=passed, reasons=reasons)
 
 
 def score_all(
@@ -608,78 +471,40 @@ def score_all(
 
 
 # ---------------------------------------------------------------------------
-# Topic / rule coverage
-# ---------------------------------------------------------------------------
-
-def rule_ids_with_detector_coverage(fixtures_dir: Path = FIXTURES_PATH) -> set[str]:
-    """Rule IDs exercised by at least one detector-case gold fixture (any
-    expected_result). Used by the topic-coverage check: every hard_rejection
-    rule must have at least one gold case (docs/evaluation.md -> 'Regression
-    gates' #2)."""
-    covered: set[str] = set()
-    for case in load_gold_cases(fixtures_dir):
-        if not case.is_detector_case:
-            continue
-        rule_id = (case.detector_expectation or {}).get("rule_id")
-        if rule_id:
-            covered.add(rule_id)
-    return covered
-
-
-def missing_rule_coverage(
-    fixtures_dir: Path = FIXTURES_PATH, playbook_path: Path = PLAYBOOK_PATH
-) -> list[str]:
-    playbook = load_playbook(playbook_path)
-    all_rule_ids = {r["id"] for r in playbook.get("hard_rejections", [])}
-    covered = rule_ids_with_detector_coverage(fixtures_dir)
-    return sorted(all_rule_ids - covered)
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
-def run_detector_gate_for_playbook(entry, quiet: bool = False) -> bool:
-    """Run the detector D-gate (score every gold fixture + per-rule
-    coverage check) for a single PRECISION registry entry. Returns True on
-    PASS. Caller is responsible for only invoking this on a "precision"
-    profile entry -- see playbook_registry.profile()."""
+def run_harness_gate_for_playbook(entry, quiet: bool = False) -> bool:
+    """Run the eval-harness gate (score every gold fixture in this entry's
+    fixtures_dir) for a single registry entry. Returns True on PASS.
+    Detector-era fixtures sharing the directory score a trivial skip-PASS
+    (GoldCase.is_eval_harness_case), never a failure."""
     results = score_all(fixtures_dir=entry.fixtures_dir, playbook_path=entry.playbook_path)
-    missing = missing_rule_coverage(fixtures_dir=entry.fixtures_dir, playbook_path=entry.playbook_path)
-
     failed = [r for r in results if not r.passed]
 
     if not quiet:
-        print(f"Evaluation harness [{entry.playbook_id}]: scored {len(results)} gold fixture(s).")
+        print(f"Evaluation harness [{entry.playbook_id}]: scored {len(results)} fixture(s).")
         for r in results:
             status = "PASS" if r.passed else "FAIL"
             print(f"  [{status}] {r.case_id}")
             for reason in r.reasons:
                 print(f"      {reason}")
-        if missing:
-            print(f"\nMissing per-rule gold-case coverage for {len(missing)} rule(s): {missing}")
-        else:
-            print("\nAll hard_rejection rules have at least one gold-case detector fixture.")
 
-    ok = not failed and not missing
+    ok = not failed
     if not quiet:
         print("PASS" if ok else "FAIL", f"[{entry.playbook_id}]\n")
     return ok
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Detector D-gate CLI (issue #62; profile-conditional per issue #288).
+    """Eval-harness CLI (issue #400; profile-conditional per issue #288 --
+    see module docstring "Playbook-profile-conditional CLI" above).
 
     With no `--playbook-id`, iterates every registered playbook_id: a
-    "knowledge" profile entry (no anchor_map_path / section_config_path --
-    see playbook_registry.profile()) has no detector-relevant standard-form
-    structure for this gate to score fixtures against, so it is explicitly
-    SKIPped (printed, never silent) and counted as skipped-not-passed, not
-    silently omitted. "precision" profile entries (e.g. eiaa) still run the
-    full detector gate below, so they lose no enforcement. `--playbook-id`
-    still selects exactly one entry (skipping the profile check -- an
-    explicit request always runs), preserving the pre-#288 single-playbook
-    CLI contract.
+    "knowledge" profile entry is explicitly SKIPped (printed, never
+    silent) and counted as skipped-not-passed; a "precision" profile entry
+    runs the full gate. `--playbook-id` still selects exactly one entry,
+    skipping the profile check -- an explicit request always runs.
     """
     argv = argv if argv is not None else sys.argv[1:]
     quiet = "--quiet" in argv
@@ -687,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--playbook-id" in argv:
         idx = argv.index("--playbook-id")
         entry = playbook_registry.resolve_playbook(argv[idx + 1])
-        ok = run_detector_gate_for_playbook(entry, quiet=quiet)
+        ok = run_harness_gate_for_playbook(entry, quiet=quiet)
         if not quiet:
             print("\nPASS" if ok else "\nFAIL")
         return 0 if ok else 1
@@ -701,16 +526,16 @@ def main(argv: list[str] | None = None) -> int:
         entry = playbook_registry.resolve_playbook(playbook_id)
         prof = playbook_registry.profile(entry)
         if prof == "knowledge":
-            print(f"SKIP (knowledge profile): D-gate {playbook_id}")
+            print(f"SKIP (knowledge profile): eval harness gate {playbook_id}")
             skipped.append(playbook_id)
             continue
         ran.append(playbook_id)
-        if not run_detector_gate_for_playbook(entry, quiet=quiet):
+        if not run_harness_gate_for_playbook(entry, quiet=quiet):
             all_ok = False
 
     if not quiet:
         print(
-            f"D-gate summary: {len(ran)} playbook(s) scored, "
+            f"Eval harness summary: {len(ran)} playbook(s) scored, "
             f"{len(skipped)} skipped (knowledge profile): {skipped}"
         )
         print("\nPASS" if all_ok else "\nFAIL")

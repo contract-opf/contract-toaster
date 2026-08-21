@@ -171,7 +171,7 @@ class FakeS3:
         self.objects: dict[tuple, dict] = {}
         self.tags: dict[tuple, dict] = {}
 
-    def put_object(self, Bucket, Key, Body=b""):
+    def put_object(self, Bucket, Key, Body=b"", **_kwargs):
         self.objects[(Bucket, Key)] = Body
 
     def list_objects_v2(self, Bucket, Prefix):

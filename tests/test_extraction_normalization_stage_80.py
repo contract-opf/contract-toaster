@@ -30,10 +30,12 @@ module does not exist or does not implement the documented rule.
      textbox/shape text, image alt text) carrying planted payload text ->
      the payload text is absent from the extracted output.
   3. Tracked-changes / comments / hidden-text fixtures normalize exactly
-     per the ARCHITECTURE.md / issue #65 / issue #199 documented rule:
-     accept path (single-author pending change -> accept-all) and reject
-     paths (multi-author conflict, pending change inside a field code,
-     malformed/corrupt revision record -> fail closed).
+     per the ARCHITECTURE.md / issue #65 / issue #199 / issue #563 / issue
+     #530 documented rule: accept paths (single-author pending change,
+     multi-author/multi-cluster pending changes -- issue #563 -- and a
+     pending change inside a field code -- issue #530 -- all accept-all
+     with a disclosure note) and the one reject path (a malformed/corrupt
+     revision record with no resulting_text -> fail closed).
   4. An un-normalizable fixture fails closed to the issue #38 internal
      analysis report artifact with `status=MANUAL_REVIEW_REQUIRED`,
      `reason=unnormalizable_input`.
@@ -175,7 +177,9 @@ def _malformed_deletion_p(original: str) -> str:
 
 def _field_code_conflict_p(original: str, resulting: str, author: str = "counterparty") -> str:
     """A pending tracked change living INSIDE a field's cached-result
-    region (w:fldSimple) -- ambiguous independent of the accept-all rule."""
+    region (w:fldSimple) -- accepts-all the same as an ordinary pending
+    change (issue #530): the cluster's own resulting_text is already the
+    field's resolved display text."""
     return (
         "<w:p>"
         '<w:fldSimple w:instr=" REF GoverningLawJurisdiction ">'
@@ -414,31 +418,64 @@ def test_single_author_pending_change_accepts_all(failures: list[str]) -> None:
         )
 
 
-def test_multi_author_conflict_fails_closed(failures: list[str]) -> None:
+def test_multi_author_conflict_accepts_all(failures: list[str]) -> None:
+    """MUST-NORMALIZE (issue #563, exercised via real OOXML extraction):
+    two different authors' pending edits on the same paragraph, back-to-back
+    with no intervening plain text, used to fail the whole document closed
+    (issue #199). Issue #563 redefines this as ACCEPT-ALL with a disclosure
+    note, same as the single-author case -- every cluster's resulting_text
+    is the SAME whole-paragraph accept-all text."""
+    resulting_a = "Each party's liability under this Agreement shall be uncapped."
+    resulting_b = "Each party's aggregate liability under this Agreement shall not exceed $250,000."
     body = _heading_p("Limitation on Liability") + _two_author_conflict_p(
         "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
-        "Each party's liability under this Agreement shall be uncapped.",
-        "Each party's aggregate liability under this Agreement shall not exceed $250,000.",
+        resulting_a,
+        resulting_b,
     )
     result = stage.extract_and_normalize(_build_docx_bytes(body))
-    if result.get("status") != "unnormalizable_input":
-        failures.append(f"[G3b] Two-author conflicting pending changes must fail closed. Got: {result}")
+    if result.get("status") != "normalized":
+        failures.append(f"[G3b] Two-author pending changes must accept-all, not fail closed. Got: {result}")
         return
-    report = result["analysis_report"]
-    if report.get("reason") != "unnormalizable_input" or report.get("status") != "MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[G3b2] Fail-closed report has wrong reason/status: {report!r}")
-    if "decision" in report:
+    para = result["paragraphs"][0]
+    if resulting_a not in para["text"] or resulting_b not in para["text"]:
+        failures.append(f"[G3b2] Both authors' resulting text must be folded into the operative draft: {para!r}")
+    if "normalization_notes" not in result or not result["normalization_notes"]:
         failures.append(
-            f"[G3b3] The fail-closed report must never carry a 'decision' field "
-            f"(system status, never a legal decision). Got: {report!r}"
+            f"[G3b3] Multi-author accept-all disposition must be recorded in "
+            f"normalization_notes, never silent. Got: {result}"
         )
 
 
-def test_pending_change_inside_field_code_fails_closed(failures: list[str]) -> None:
+def test_pending_change_inside_field_code_accepts_all(failures: list[str]) -> None:
+    """MUST-NORMALIZE (issue #530, exercised via real OOXML extraction): a
+    pending tracked change living inside a field's cached-result region
+    used to fail the whole document closed (issue #199's original rule).
+    Owner decision 2026-08-09 redefines this as ACCEPT-ALL with a
+    disclosure note naming what the field resolved to -- the field's own
+    resulting_text is already the resolved display text, so there is no
+    separate "which field result wins" decision left to make."""
     body = _heading_p("Governing Law") + _field_code_conflict_p("Delaware", "New York")
     result = stage.extract_and_normalize(_build_docx_bytes(body))
-    if result.get("status") != "unnormalizable_input":
-        failures.append(f"[G3c] Pending change inside a field code must fail closed. Got: {result}")
+    if result.get("status") != "normalized":
+        failures.append(
+            f"[G3c] Pending change inside a field code must accept-all, not fail "
+            f"closed. Got: {result}"
+        )
+        return
+    para = result["paragraphs"][0]
+    if "New York" not in para["text"]:
+        failures.append(f"[G3c2] Field's resolved resulting text not folded into output: {para!r}")
+    if "Delaware" in para["text"]:
+        failures.append(f"[G3c3] Pre-edit field text must not remain once accept-all applies: {para!r}")
+    notes = result.get("normalization_notes") or ""
+    if not notes:
+        failures.append(
+            f"[G3c4] Disposition must be recorded in normalization_notes, never silent. Got: {result}"
+        )
+    if "New York" not in notes or "field" not in notes.lower():
+        failures.append(
+            f"[G3c5] normalization_notes must name what the field resolved to. Got: {notes!r}"
+        )
 
 
 def test_malformed_deletion_with_comment_fails_closed(failures: list[str]) -> None:
@@ -682,8 +719,8 @@ TESTS = [
     test_clean_standard_form_yields_structured_paragraph_list,
     test_disallowed_parts_payload_never_reaches_output,
     test_single_author_pending_change_accepts_all,
-    test_multi_author_conflict_fails_closed,
-    test_pending_change_inside_field_code_fails_closed,
+    test_multi_author_conflict_accepts_all,
+    test_pending_change_inside_field_code_accepts_all,
     test_malformed_deletion_with_comment_fails_closed,
     test_hidden_text_and_field_result_normalize_cleanly,
     test_sibling_body_paragraph_survives_accept_all_on_other_sibling,

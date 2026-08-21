@@ -76,8 +76,30 @@ CRITIC_OUTPUT_RATE_USD_PER_MILLION = 16.50
 DEAD_EXECUTION_ACTUAL_USD_CENTS = 0
 
 
+def _requote_enabled() -> bool:
+    """MIRROR of backend/src/config.py's requote_enabled() -- issue #569.
+
+    This Lambda cannot import backend/src/config.py (see module docstring),
+    so the same `REQUOTE_ENABLED` env var is read directly, with the same
+    default-OFF matching set, at the same call site
+    (`compute_worst_case_reservation_usd_cents`) config.requote_enabled()
+    gates in backend/src/reviews.py."""
+    return os.environ.get("REQUOTE_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def compute_worst_case_reservation_usd_cents() -> int:
-    """MIRROR of backend/src/reviews.py's function of the same name."""
+    """MIRROR of backend/src/reviews.py's function of the same name.
+
+    Issue #569: mirrors that function's `if config.requote_enabled(): usd +=
+    primary_usd` branch (one extra primary-priced pass, unmultiplied by
+    attempts_per_pass -- see reviews.py's docstring for the full
+    rationale), so this settlement-side copy cannot drift from the
+    reserve-side reviews.py figure when the flag is on.
+    """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
     primary_usd = MAX_INPUT_TOKENS * (
         PRIMARY_INPUT_RATE_USD_PER_MILLION / 1_000_000
@@ -86,6 +108,8 @@ def compute_worst_case_reservation_usd_cents() -> int:
         CRITIC_INPUT_RATE_USD_PER_MILLION / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (CRITIC_OUTPUT_RATE_USD_PER_MILLION / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
+    if _requote_enabled():
+        usd += primary_usd
     return int(round(usd * 100))
 
 

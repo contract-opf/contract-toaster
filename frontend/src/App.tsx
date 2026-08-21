@@ -13,17 +13,19 @@
  * sign-in flow (redirects to Cognito hosted UI, handles the OAuth callback,
  * and manages the session).
  *
- * ATTORNEY-APPROVAL WATERMARK: all output states carry the mandatory
- * watermark "tool recommendation only — attorney approval required" (see
- * ARCHITECTURE.md → Frontend) — implemented by ReviewSubmission, the
- * reviewer flow added for issue #186.
- *
  * ACCEPT/REQUEST_CHANGE framing: ACCEPT reads "no requested changes
  * identified by tool" — never "no action needed" or "approved"
  * (ARCHITECTURE.md § Wrong-format rejection UX) — see ReviewSubmission.
+ *
+ * Issue #492 (owner direction): attorney/legal review is a policy the
+ * deploying organization owns entirely outside this product — the result
+ * panel no longer asserts or nags about it. See ReviewSubmission.tsx's own
+ * module docstring for what replaced the removed disclaimer, and
+ * docs/threat-model.md for where that framing still lives outside the SPA
+ * (the generated `.docx` itself).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import AdminUsers from './AdminUsers';
 import AdminRetention from './AdminRetention';
@@ -36,7 +38,8 @@ import ReviewHistory from './ReviewHistory';
 import PasswordLogin, { DemoIdentity } from './PasswordLogin';
 import ChangePassword from './ChangePassword';
 import { isPasswordMode } from './auth';
-import { authorizedFetch } from './api';
+import { authorizedFetch, onSessionExpired } from './api';
+import { ErrorBoundary } from './ErrorBoundary';
 import { CtAppShell, CtBanner, CtButton, CtChip, CtTabBar } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -95,6 +98,72 @@ type TabId =
 interface TabDef {
   id: TabId;
   label: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hash-based tab routing (issue #489, item 1).
+//
+// Before this, `activeTab` was plain in-memory state: no tab was linkable,
+// browser back/forward did nothing, and every reload landed on Review. No
+// router dependency is warranted at eight tabs — this is a bidirectional
+// mapping between a `TabId` and a `location.hash` fragment, plus the
+// `hashchange` listener wired into `AppContent` below.
+//
+// Primary tabs (every signed-in user's) route as `#/<id>` (`#/review`,
+// `#/history`); the six admin-only tabs route as `#/admin/<id>`
+// (`#/admin/playbooks`, …) so the URL itself carries the same two-tier shape
+// issue #477 gave the tab bar. PRIMARY_TAB_IDS/ADMIN_TAB_IDS are the sole
+// authority on which prefix a given id gets — kept as `Set`s (not re-derived
+// from `primaryTabs`/`adminTabs` below, which depend on `isAdmin` and would
+// make the admin-tab set empty for a non-admin caller, exactly the caller
+// `tabFromHash` most needs to recognise so it can refuse the hash).
+const PRIMARY_TAB_IDS = new Set<TabId>(['review', 'history']);
+const ADMIN_TAB_IDS = new Set<TabId>([
+  'users',
+  'retention',
+  'model',
+  'instructions',
+  'playbooks',
+  'diagnostics',
+]);
+
+function hashForTab(id: TabId): string {
+  return ADMIN_TAB_IDS.has(id) ? `#/admin/${id}` : `#/${id}`;
+}
+
+/**
+ * The inverse of `hashForTab`. Returns `null` for anything that isn't a
+ * recognised tab id in the shape this app produces — an empty hash (first
+ * visit, no tab hash written yet), a stale/foreign hash, or a hand-typed
+ * `#/admin/nonsense`. `null` always means "fall back to Review" to the one
+ * caller (below); it does NOT by itself mean "unauthorized" — a non-admin
+ * caller deep-linking to a real admin tab id gets a non-null result here and
+ * is caught instead by the admin-capability effect in `AppContent`, which is
+ * the only place that knows the caller's resolved role.
+ */
+function tabFromHash(hash: string): TabId | null {
+  const path = hash.replace(/^#\/?/, '');
+  if (!path) return null;
+  const adminMatch = /^admin\/(.+)$/.exec(path);
+  if (adminMatch) {
+    const candidate = adminMatch[1] as TabId;
+    return ADMIN_TAB_IDS.has(candidate) ? candidate : null;
+  }
+  return PRIMARY_TAB_IDS.has(path as TabId) ? (path as TabId) : null;
+}
+
+/** The tab to render on first mount: whatever `location.hash` already names
+ *  (a fresh page load with a hash from a previous visit, a pasted deep
+ *  link, or — since `AppContent` can remount without a navigation, e.g. the
+ *  #487 expired-session/relogin cycle — a hash this same tab already wrote),
+ *  or Review when there is none/it's unrecognised. `TabId`, not just the
+ *  admin subset, so an admin-tab hash survives long enough for the
+ *  admin-capability effect below to either confirm it or reject it — it must
+ *  never resolve straight to 'review' on the strength of a probe that has
+ *  not even started. */
+function resolveInitialTab(): TabId {
+  if (typeof window === 'undefined') return 'review';
+  return tabFromHash(window.location.hash) ?? 'review';
 }
 
 function useAdminCapability(): AdminCapability {
@@ -308,7 +377,81 @@ function AppContent({
       : []),
   ];
 
-  const [activeTab, setActiveTab] = useState<TabId>('review');
+  // Issue #487/#489: which tab you were on has to survive both an expired
+  // session AND a browser reload.
+  //
+  // #487 alone used to solve this with a module-level `lastActiveTab`
+  // variable, deliberately in-memory and reset on reload ("a reload IS the
+  // user asking for a fresh start"). #489 overturns that last part: a reload
+  // must land back on the same tab, a pasted deep link must open directly to
+  // it, and back/forward must walk tab history — none of which an in-memory
+  // variable can do. `location.hash` replaces it and, as a side effect,
+  // subsumes the #487 case for free: a 401 drops `identity` and unmounts this
+  // component (taking any in-memory state with it), but never touches
+  // `location.hash`, so `resolveInitialTab` reads the very same hash back on
+  // re-login without this component needing to remember anything itself.
+  const [activeTab, setActiveTab] = useState<TabId>(resolveInitialTab);
+
+  // Reflect `activeTab` into `location.hash` on every change, INCLUDING the
+  // very first render — a fresh visit with no hash yet must still leave one
+  // behind (`#/review`) so the very next reload has something to restore.
+  // Guarded on the hash already matching so a `hashchange`-driven update
+  // (the effect below) doesn't bounce straight back into a second history
+  // entry for the tab it just navigated to.
+  //
+  // The very first reflect is special-cased: when the URL arrived with NO
+  // hash at all, writing one via `location.hash = next` PUSHES a history
+  // entry (browser back would then return to the same page with the hash
+  // stripped, taking two presses to actually leave). `history.replaceState`
+  // leaves the same hash behind without stacking that spurious entry. Once
+  // a hash exists, every subsequent reflect is a genuine tab change and
+  // should keep pushing so back/forward can walk tab history.
+  const didInitialReflect = useRef(false);
+  useEffect(() => {
+    const next = hashForTab(activeTab);
+    if (window.location.hash !== next) {
+      if (!didInitialReflect.current && !window.location.hash) {
+        history.replaceState(null, '', next);
+      } else {
+        window.location.hash = next;
+      }
+    }
+    didInitialReflect.current = true;
+  }, [activeTab]);
+
+  // Back/forward (and any other out-of-band hash edit) walks tab history.
+  // Mount-only listener; `tabFromHash` alone decides the fallback here since
+  // this effect has no opinion on admin authorization — that is the
+  // capability-gate effect below's job, and it runs on `activeTab` too.
+  useEffect(() => {
+    function onHashChange(): void {
+      setActiveTab(tabFromHash(window.location.hash) ?? 'review');
+    }
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // Admin gate on the RESOLVED tab (issue #489's "unauthorized hashes fall
+  // back to review"): a non-admin caller who deep-links to `#/admin/users`
+  // must land on Review, exactly like every admin panel's own 403-hide-itself
+  // posture. Deliberately keyed on `adminCapability === 'non-admin'` and NOT
+  // `!== 'admin'` — the probe starts 'loading' on every mount, and an actual
+  // admin's own deep link into an admin tab must survive that window rather
+  // than being bounced to Review before the probe even answers.
+  useEffect(() => {
+    if (adminCapability !== 'non-admin') return;
+    if (ADMIN_TAB_IDS.has(activeTab)) {
+      // REPLACE the rejected admin hash, don't push a new entry on top of
+      // it. The reflect effect above only pushes when the hash doesn't
+      // already match `activeTab` — pre-correcting the URL here first means
+      // that by the time it runs, `location.hash` already reads `#/review`,
+      // so it sees nothing to do. Without this, Back would return to the
+      // very admin hash that was just rejected, re-triggering this same
+      // gate and pushing `#/review` again: an escape-proof loop.
+      history.replaceState(null, '', hashForTab('review'));
+      setActiveTab('review');
+    }
+  }, [adminCapability, activeTab]);
 
   // ct-tab-bar is a controlled component (docs/frontend-design-system.md
   // §9 Notes): it owns no state of its own, only the keyboard/roving-
@@ -337,12 +480,23 @@ function AppContent({
         <CtButton type="button" variant="ghost" onClick={signOut}>
           Sign out
         </CtButton>
-        {defaultCredentialsWarning && (
+      </div>
+
+      {/* Account notices live in their OWN full-width row, never inside the
+          identity cluster above. A block-level banner rendered as a flex item
+          between "Sign out" and the page edge is both visually wrong and
+          structurally destructive: the identity track is sized to its
+          content, so a full-width alert in it starves the brand nameplate
+          until it stacks one word per line. See ct-app-shell.css's `notice`
+          area. Nothing renders (and the row collapses) when there is no
+          warning to show. */}
+      {defaultCredentialsWarning && (
+        <div slot="notice">
           <CtBanner variant="warn" data-testid="default-credentials-warning">
             This account still uses the shipped default password — change it now.
           </CtBanner>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Tabs — two independent accessible tablists (issue #477), not one
           flat row. Every signed-in user has at least Review + History
@@ -380,7 +534,7 @@ function AppContent({
         className="ct-tabpanel"
         hidden={activeTab !== 'review'}
       >
-        <ReviewSubmission catalogVersion={catalogVersion} />
+        <ErrorBoundary name="review"><ReviewSubmission catalogVersion={catalogVersion} /></ErrorBoundary>
       </section>
 
       {/* History — mounted for every signed-in user, not inside the isAdmin
@@ -393,7 +547,7 @@ function AppContent({
         className="ct-tabpanel"
         hidden={activeTab !== 'history'}
       >
-        <ReviewHistory />
+        <ErrorBoundary name="history"><ReviewHistory /></ErrorBoundary>
       </section>
 
       {isAdmin && (
@@ -405,7 +559,7 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'users'}
           >
-            <AdminUsers />
+            <ErrorBoundary name="users"><AdminUsers /></ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -414,7 +568,7 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'retention'}
           >
-            <AdminRetention />
+            <ErrorBoundary name="retention"><AdminRetention /></ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -423,7 +577,7 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'model'}
           >
-            <AdminModel />
+            <ErrorBoundary name="model"><AdminModel /></ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -432,7 +586,7 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'playbooks'}
           >
-            <AdminPlaybooks onCatalogChange={bumpCatalogVersion} />
+            <ErrorBoundary name="playbooks"><AdminPlaybooks onCatalogChange={bumpCatalogVersion} /></ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -441,7 +595,7 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'instructions'}
           >
-            <AdminInstructions />
+            <ErrorBoundary name="instructions"><AdminInstructions /></ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -450,7 +604,7 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'diagnostics'}
           >
-            <AdminDiagnostics />
+            <ErrorBoundary name="diagnostics"><AdminDiagnostics /></ErrorBoundary>
           </section>
         </>
       )}
@@ -500,6 +654,21 @@ function SsoApp(): React.ReactElement {
 function PasswordApp(): React.ReactElement {
   const [identity, setIdentity] = useState<DemoIdentity | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  // Issue #487. Before this, an expired session showed up as every panel
+  // independently failing with its own "We couldn't load…" copy, and none of
+  // them said the one true, actionable thing: you are signed out. `api.ts`
+  // notices the 401 once, centrally; this drops `identity` so the login gate
+  // renders, with copy that says what happened.
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        setSessionExpired(true);
+        setIdentity(null);
+      }),
+    [],
+  );
   // Issue #468's whole point: a page reload must NOT force a re-login when
   // the httpOnly session cookie is still valid. `identity` is in-memory
   // React state, so it is always null on the very first render after a
@@ -552,7 +721,21 @@ function PasswordApp(): React.ReactElement {
   }
 
   if (!identity) {
-    return <PasswordLogin onAuthenticated={setIdentity} />;
+    return (
+      <>
+        {sessionExpired && (
+          <CtBanner variant="warn" data-testid="session-expired">
+            Your session expired — sign in to continue.
+          </CtBanner>
+        )}
+        <PasswordLogin
+          onAuthenticated={(next) => {
+            setSessionExpired(false);
+            setIdentity(next);
+          }}
+        />
+      </>
+    );
   }
 
   function handleSignOut(): void {
@@ -588,6 +771,15 @@ function PasswordApp(): React.ReactElement {
 }
 
 export default function App(): React.ReactElement {
+  // The last-resort boundary (issue #487). Per-panel boundaries are the
+  // primary defence -- they keep a broken screen from taking the other seven
+  // with it -- and this only catches a throw OUTSIDE any panel: the header,
+  // the tab bar, the auth shell. Without it those still white-screen, which
+  // is the failure mode being fixed, just from a rarer origin.
+  return <ErrorBoundary name="app">{renderAuthenticatedApp()}</ErrorBoundary>;
+}
+
+function renderAuthenticatedApp(): React.ReactElement {
   if (isPasswordMode()) {
     return <PasswordApp />;
   }

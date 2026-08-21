@@ -124,8 +124,8 @@
         },
         "playbook_topic_id": {
           "type": "string",
-          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-          "description": "The kebab-case topic id from the active playbook (topics[].id) that governs this issue. Used by the pipeline to look up replacement_text constraints and by the audit table to record topic coverage."
+          "pattern": "^[a-z0-9]+(?:[-.][a-z0-9]+)*$",
+          "description": "The topic id from the ACTIVE playbook that governs this issue, copied verbatim from that playbook's own vocabulary: a v1 playbook's kebab-case topics[].id (indemnification), or an OPF playbook's dotted id (clause.indemnification). Deliberately NOT any string -- this value reaches the audit table and the replacement_text lookup, so uppercase, whitespace and path punctuation stay rejected. Used by the pipeline to look up replacement_text constraints and by the audit table to record topic coverage."
         },
         "internal_precedent_citation": {
           "description": "Internal audit-only reference to corpus precedent (clause_id, source document, or null). Stripped from generated .docx footnotes. Must not appear in external output. Retained only in retention-governed confidential storage.",

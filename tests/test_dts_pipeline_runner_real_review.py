@@ -45,6 +45,10 @@ of a live OpenRouter call -- fully offline, no network -- and asserts:
      `_load_playbook_bundle` never called) is proven in
      tests/test_runtime_playbook_loading.py, this issue's own required-
      verification file.
+  6. Issue #563: `_write_real_terminal` persists `normalization_notes` from
+     a `run_review` result onto the reviews row when present, and leaves the
+     key ABSENT (never a null placeholder) when the result carries none --
+     the same convention `decision`/`summary`/`reason` already follow.
 
 Run standalone: `python3 tests/test_dts_pipeline_runner_real_review.py`
 Exit codes: 0 = pass, 1 = fail
@@ -349,7 +353,7 @@ class FakeS3:
     def get_object(self, Bucket, Key):
         return {"Body": io.BytesIO(self._uploads[Key])}
 
-    def put_object(self, Bucket, Key, Body):
+    def put_object(self, Bucket, Key, Body, **_kwargs):
         self.puts.append({"Bucket": Bucket, "Key": Key, "Body": Body})
 
 
@@ -412,8 +416,12 @@ class TestRunRealPipeline(unittest.TestCase):
         self.assertEqual(reviews_table.item["status"], "DONE")
         self.assertEqual(reviews_table.item["decision"], "REQUEST_CHANGE")
         self.assertEqual(reviews_table.item.get("output_s3_key"), f"outputs/{REVIEW_ID}/out.docx")
-        self.assertEqual(len(s3.puts), 1)
-        self.assertEqual(s3.puts[0]["Key"], f"outputs/{REVIEW_ID}/out.docx")
+        # Issue #416 added a second put -- outputs/{rid}/analysis.json -- so this
+        # asserts THE REDLINE was written rather than a total object count,
+        # which is what it always meant.
+        keys = [put["Key"] for put in s3.puts]
+        self.assertIn(f"outputs/{REVIEW_ID}/out.docx", keys)
+        self.assertIn(f"outputs/{REVIEW_ID}/analysis.json", keys)
         settle.assert_called_once()
 
     def test_accept_reaches_done_with_no_output_object(self) -> None:
@@ -432,7 +440,15 @@ class TestRunRealPipeline(unittest.TestCase):
         self.assertEqual(reviews_table.item["status"], "DONE")
         self.assertEqual(reviews_table.item["decision"], "ACCEPT")
         self.assertNotIn("output_s3_key", reviews_table.item)
-        self.assertEqual(s3.puts, [])
+        # No output DOCUMENT, which is what this test is named for: an ACCEPT
+        # has nothing to redline. Issue #416's analysis artifact is a
+        # different thing and IS written here -- an accepted review is one
+        # somebody may well want to interrogate later ("why was this fine?"),
+        # so persisting the reasoning is exactly as useful as on the
+        # REQUEST_CHANGE path.
+        keys = [put["Key"] for put in s3.puts]
+        self.assertNotIn(f"outputs/{REVIEW_ID}/out.docx", keys)
+        self.assertEqual(keys, [f"outputs/{REVIEW_ID}/analysis.json"])
 
     def test_unhandled_exception_records_stage_failure_not_wedged(self) -> None:
         """A missing upload object blows up at the fetch-upload stage
@@ -490,11 +506,77 @@ class TestRunRealPipeline(unittest.TestCase):
         settle.assert_called_once()
 
 
+class TestNormalizationNotesPersisted563(unittest.TestCase):
+    """Issue #563: `_write_real_terminal` persists `normalization_notes`
+    from a `run_review` result onto the reviews row the SAME "absent, never
+    a null placeholder" way `decision`/`summary`/`reason` already are --
+    mirroring the established assertNotIn precedent for this convention at
+    tests/test_review_opf_lineage.py:457 and :483."""
+
+    def test_normalization_notes_present_reaches_the_review_row(self) -> None:
+        notes = (
+            "Paragraph 'Limitation on Liability': pending tracked change "
+            "(author: counterparty, status: unresolved) accepted-all into "
+            "the operative draft."
+        )
+        table = FakeReviewsTable(status="RUNNING")
+        pr._write_real_terminal(
+            REVIEW_ID,
+            {"status": "OK", "decision": "REQUEST_CHANGE", "normalization_notes": notes},
+            output_s3_key=None,
+            dynamodb_resource=FakeDDB(table),
+        )
+        self.assertEqual(table.item.get("normalization_notes"), notes)
+
+    def test_normalization_notes_absent_leaves_the_key_absent(self) -> None:
+        table = FakeReviewsTable(status="RUNNING")
+        pr._write_real_terminal(
+            REVIEW_ID,
+            {"status": "OK", "decision": "ACCEPT"},
+            output_s3_key=None,
+            dynamodb_resource=FakeDDB(table),
+        )
+        self.assertNotIn("normalization_notes", table.item)
+
+
+class TestRequotePersisted569(unittest.TestCase):
+    """Issue #569 fix round 1, finding 4: `_write_real_terminal` persists
+    `requote` from a `run_review` result onto the reviews row the SAME
+    "absent, never a null placeholder" way `normalization_notes` already is
+    (`TestNormalizationNotesPersisted563` above) -- previously covered by
+    NO staged test: `tests/test_review_api_84.py`'s existing `requote`
+    reference only covers the pre-existing READ side
+    (`reviews.get_review_detail`), never this write side."""
+
+    def test_requote_present_reaches_the_review_row(self) -> None:
+        requote = {"attempted": 1, "recovered": 1, "still_failed": 0}
+        table = FakeReviewsTable(status="RUNNING")
+        pr._write_real_terminal(
+            REVIEW_ID,
+            {"status": "OK", "decision": "REQUEST_CHANGE", "requote": requote},
+            output_s3_key=None,
+            dynamodb_resource=FakeDDB(table),
+        )
+        self.assertEqual(table.item.get("requote"), requote)
+
+    def test_requote_absent_leaves_the_key_absent(self) -> None:
+        table = FakeReviewsTable(status="RUNNING")
+        pr._write_real_terminal(
+            REVIEW_ID,
+            {"status": "OK", "decision": "ACCEPT"},
+            output_s3_key=None,
+            dynamodb_resource=FakeDDB(table),
+        )
+        self.assertNotIn("requote", table.item)
+
+
 def _run_tests() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTests(loader.loadTestsFromTestCase(TestDefaultRunnerSelectsRealVsMock))
     suite.addTests(loader.loadTestsFromTestCase(TestRunRealPipeline))
+    suite.addTests(loader.loadTestsFromTestCase(TestNormalizationNotesPersisted563))
+    suite.addTests(loader.loadTestsFromTestCase(TestRequotePersisted569))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

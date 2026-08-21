@@ -22,6 +22,10 @@
   --ct-glow: #ff7a1a;           /* the "hot slot" glow */
   --ct-toast: #d9a463;          /* toasted bread */
   --ct-toast-crust: #8a5a2b;
+  --ct-butter-1: #f5d97a;       /* "Butter it" (issue #499) — decorative
+                                    butter-pat gradient, top stop */
+  --ct-butter-2: #e0b94a;       /* butter-pat gradient, bottom stop */
+  --ct-butter-shadow: rgb(0 0 0 / 20%);
 
   /* Status palette */
   --ct-ok: #2e794d;             /* darkened from #2f7d4f — #396 contrast audit
@@ -124,6 +128,11 @@
     --ct-glow: #ff9a3c;
     --ct-toast: #b98246;
     --ct-toast-crust: #f2ede2;
+    --ct-butter-1: #c9a04a;    /* "Butter it" (issue #499) — night gradient,
+                                   darkened so it doesn't glare on the dark
+                                   surface, same hue as day */
+    --ct-butter-2: #9c7530;
+    --ct-butter-shadow: rgb(0 0 0 / 45%);
 
     --ct-ok: #6fcf97;
     --ct-ok-bg: #1e2f26;
@@ -183,6 +192,10 @@
   --ct-glow: #ff9a3c;
   --ct-toast: #b98246;
   --ct-toast-crust: #f2ede2;
+  --ct-butter-1: #c9a04a;     /* "Butter it" (issue #499) — see the
+                                  media-query dark block above for detail */
+  --ct-butter-2: #9c7530;
+  --ct-butter-shadow: rgb(0 0 0 / 45%);
 
   --ct-ok: #6fcf97;
   --ct-ok-bg: #1e2f26;

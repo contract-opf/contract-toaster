@@ -1,0 +1,43 @@
+{
+  "case_id": "llm-near-miss-non-exclusive-restated",
+  "schema": "llm-native-v1",
+  "description": "Ported from tests/gold-fixtures/near-miss-non-exclusive-restated.json (issue #400): a restated but still-non-exclusive clause is a near-miss over-flag probe -- ACCEPT is the correct decision.",
+  "document": {
+    "clauses": [
+      {
+        "heading": "11. Exclusivity",
+        "text": "This Agreement is non-exclusive. Institution remains free to enter into similar arrangements with other parties at any time during the term."
+      }
+    ]
+  },
+  "model_responses": {
+    "primary": [
+      {
+        "schema_version": "output-schema-v1",
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": null,
+        "verdict_summary": "No changes identified relative to your standard positions."
+      }
+    ],
+    "critic": [
+      {
+        "schema_version": "output-schema-v1",
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": null,
+        "verdict_summary": null
+      }
+    ]
+  },
+  "expected": {
+    "status": "OK",
+    "decision": "ACCEPT",
+    "min_issues": 0,
+    "max_issues": 0
+  }
+}

@@ -109,8 +109,30 @@ def _ddb():
     return boto3.resource("dynamodb")
 
 
+def _requote_enabled() -> bool:
+    """MIRROR of backend/src/config.py's requote_enabled() -- issue #569.
+
+    This Lambda cannot import backend/src/config.py (see module docstring),
+    so the same `REQUOTE_ENABLED` env var is read directly, with the same
+    default-OFF matching set, at the same call site
+    (`compute_worst_case_reservation_usd_cents`) config.requote_enabled()
+    gates in backend/src/reviews.py."""
+    return os.environ.get("REQUOTE_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def compute_worst_case_reservation_usd_cents() -> int:
-    """MIRROR of backend/src/reviews.py's function of the same name."""
+    """MIRROR of backend/src/reviews.py's function of the same name.
+
+    Issue #569: mirrors that function's `if config.requote_enabled(): usd +=
+    primary_usd` branch (one extra primary-priced pass, unmultiplied by
+    attempts_per_pass -- see reviews.py's docstring for the full
+    rationale), so this settlement-side copy cannot drift from the
+    reserve-side reviews.py figure when the flag is on.
+    """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
     primary_usd = MAX_INPUT_TOKENS * (
         PRIMARY_INPUT_RATE_USD_PER_MILLION / 1_000_000
@@ -119,6 +141,8 @@ def compute_worst_case_reservation_usd_cents() -> int:
         CRITIC_INPUT_RATE_USD_PER_MILLION / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (CRITIC_OUTPUT_RATE_USD_PER_MILLION / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
+    if _requote_enabled():
+        usd += primary_usd
     return int(round(usd * 100))
 
 
@@ -212,6 +236,14 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
         ":status": terminal_status,
         ":now": str(int(time.time())),
         ":error": "ERROR",
+        # A review the owner stopped. StopExecution (backend/src/reviews.py::
+        # stop_running_execution) prevents any FURTHER state from running, but
+        # it cannot kill the Lambda already in flight -- so this stage can
+        # legitimately arrive here moments after the row went CANCELLED, and
+        # without this guard it would overwrite that with DONE and hand the
+        # reviewer the redline they cancelled. Mirrors the same refusal in
+        # backend/src/reviews.py::mark_cancelled, from the other side.
+        ":cancelled": "CANCELLED",
     }
     if decision is not None:
         set_clauses.append("decision = :decision")
@@ -241,13 +273,19 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
         table.update_item(
             Key={"review_id": review_id},
             UpdateExpression="SET " + ", ".join(set_clauses),
-            ConditionExpression="attribute_not_exists(#status) OR #status <> :error",
+            ConditionExpression=(
+                "attribute_not_exists(#status) "
+                "OR (#status <> :error AND #status <> :cancelled)"
+            ),
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-            # Row is already ERROR -- a failure was recorded first; leave it.
+            # Row is already ERROR (a failure was recorded first) or CANCELLED
+            # (the owner stopped it while this stage was in flight). Either
+            # way that terminal state was written deliberately and wins --
+            # leave it.
             return
         raise
 

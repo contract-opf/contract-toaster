@@ -268,7 +268,10 @@ class TestRunRealPipelineWritesProgress(unittest.TestCase):
         self.assertEqual(table.item["status"], "DONE")
         self.assertEqual(table.item["decision"], "REQUEST_CHANGE")
         self.assertNotIn("failing_stage", table.item)
-        self.assertEqual(len(s3.puts), 1)
+        # Issue #416 added a second put -- outputs/{rid}/analysis.json -- so this
+        # asserts THE REDLINE was written rather than a total object count,
+        # which is what it always meant.
+        self.assertIn(f"outputs/{REVIEW_ID}/out.docx", [put["Key"] for put in s3.puts])
         # Nothing was recorded (every write threw) -- the UI simply keeps
         # showing its indeterminate treatment.
         self.assertEqual(table.progress_history, [])

@@ -1,0 +1,47 @@
+{
+  "case_id": "llm-accept-clean-draft",
+  "schema": "llm-native-v1",
+  "description": "Ported from the detector-era clean/verbatim gold-fixture category (issue #400): a draft matching the standard positions produces ACCEPT with no issues through the real LLM-native pipeline.",
+  "document": {
+    "clauses": [
+      {
+        "heading": "8. Limitation on Liability",
+        "text": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth."
+      },
+      {
+        "heading": "2.1 Term",
+        "text": "This Agreement has an initial term of five years with automatic one-year renewals, subject to 60 days written notice of non-renewal."
+      }
+    ]
+  },
+  "model_responses": {
+    "primary": [
+      {
+        "schema_version": "output-schema-v1",
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": null,
+        "verdict_summary": "No changes identified relative to your standard positions."
+      }
+    ],
+    "critic": [
+      {
+        "schema_version": "output-schema-v1",
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": null,
+        "verdict_summary": null
+      }
+    ]
+  },
+  "expected": {
+    "status": "OK",
+    "decision": "ACCEPT",
+    "min_issues": 0,
+    "max_issues": 0
+  }
+}

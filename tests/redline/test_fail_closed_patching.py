@@ -353,15 +353,23 @@ def main():
             f"[C5] Corrupt/irreconcilable document must fail closed. Got: {result_corrupt}"
         )
 
-    # C5b: genuinely ambiguous pending revisions (issue #199) still fail
-    # closed even though a LONE pending revision now accept-alls -- multiple
-    # interleaved authors on the same paragraph is one of the reserved
-    # ambiguous structures.
+    # C5b: multiple interleaved pending-revision authors on one paragraph
+    # used to be one of the reserved ambiguous structures (issue #199) --
+    # issue #563 found that reasoning did not hold in the real pipeline
+    # (every cluster's resulting_text is the SAME whole-paragraph
+    # accept-all text) and redefined this as ACCEPT-ALL with a disclosure
+    # note, same as a single pending revision.
     result_conflicting = normalize_input.normalize(conflicting_doc)
-    if result_conflicting.get("normalizable") is not False:
+    if result_conflicting.get("normalizable") is not True:
         failures.append(
             f"[C5b] Multiple interleaved pending-revision authors on one "
-            f"paragraph must still fail closed (issue #199). Got: {result_conflicting}"
+            f"paragraph must accept-all, not fail closed (issue #563). "
+            f"Got: {result_conflicting}"
+        )
+    if not result_conflicting.get("normalization_notes"):
+        failures.append(
+            f"[C5c] Multi-author accept-all disposition must be recorded in "
+            f"normalization_notes, never silent. Got: {result_conflicting}"
         )
 
     # C6: the un-normalizable path maps to the documented pipeline status
@@ -369,7 +377,6 @@ def main():
     # reason=unnormalizable_input) -- never a legal decision.
     for label, result in (
         ("corrupt", result_corrupt),
-        ("conflicting", result_conflicting),
     ):
         report = normalize_input.build_unnormalizable_report(result)
         if report.get("report_type") != "analysis_report":

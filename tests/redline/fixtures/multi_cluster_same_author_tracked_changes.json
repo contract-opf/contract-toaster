@@ -1,0 +1,25 @@
+{
+  "description": "MUST-NORMALIZE (issue #563): the paragraph carries TWO separate pending (unresolved) tracked-change clusters from the SAME author -- two distinct edited spans in one clause, not interleaved authors. Prior to issue #563 this was reserved fail-closed as a nested/conflicting-revisions ambiguity (rule 1); #563 redefines it as ACCEPT-ALL with a disclosure note, same as the multi-author case, since resulting_text is the SAME whole-paragraph accept-all text on every cluster record regardless of how many clusters or authors contributed to it.",
+  "paragraphs": [
+    {
+      "heading": "Payment Terms",
+      "text": "Payment is due within 30 days, in USD, by wire transfer.",
+      "revisions": [
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "counterparty",
+          "original_text": "Payment is due within 30 days, in USD, by wire transfer.",
+          "resulting_text": "Payment is due within 45 days, in EUR, by wire transfer."
+        },
+        {
+          "type": "tracked_change",
+          "status": "unresolved",
+          "author": "counterparty",
+          "original_text": "Payment is due within 30 days, in USD, by wire transfer.",
+          "resulting_text": "Payment is due within 45 days, in EUR, by wire transfer."
+        }
+      ]
+    }
+  ]
+}

@@ -268,6 +268,13 @@ class FakePlaybookVersionsTable:
         items = [item for item in self.items.values() if item.get(key_obj.name) == value]
         return {"Items": items}
 
+    def scan(self, **_kwargs):
+        # Issue #485/#490: `playbook_versions.list_all_version_playbook_ids`
+        # (the catalog's DB-only-playbook union) does a full table scan.
+        # This fake never holds enough rows to need real pagination, so one
+        # call always returns everything and no `LastEvaluatedKey`.
+        return {"Items": list(self.items.values())}
+
 
 class FakeDDB:
     """One fake dynamodb_resource sharing ONE playbooks table + ONE
@@ -303,7 +310,7 @@ class FakeS3:
     def get_object(self, Bucket, Key):
         return {"Body": io.BytesIO(self._uploads[Key])}
 
-    def put_object(self, Bucket, Key, Body):
+    def put_object(self, Bucket, Key, Body, **_kwargs):
         self.puts.append({"Bucket": Bucket, "Key": Key, "Body": Body})
 
 
@@ -968,8 +975,10 @@ class TestSeededPlaybookRunsRealReviews(unittest.TestCase):
         self.assertEqual(reviews_table.item["status"], "DONE")
         self.assertEqual(reviews_table.item["decision"], "REQUEST_CHANGE")
         self.assertEqual(reviews_table.item.get("output_s3_key"), f"outputs/{REVIEW_ID}/out.docx")
-        self.assertEqual(len(s3.puts), 1)
-        self.assertEqual(s3.puts[0]["Key"], f"outputs/{REVIEW_ID}/out.docx")
+        # Issue #416 added a second put -- outputs/{rid}/analysis.json -- so this
+        # asserts THE REDLINE was written rather than a total object count,
+        # which is what it always meant.
+        self.assertIn(f"outputs/{REVIEW_ID}/out.docx", [put["Key"] for put in s3.puts])
         settle.assert_called_once()
 
     def test_review_without_the_seed_is_quarantined_not_run(self):

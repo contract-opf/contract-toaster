@@ -11,6 +11,14 @@ implementation, scripts/detector_common.py, and pointed all three former
 copies at it. This file is the conformance guard the issue asks for on top
 of that extraction:
 
+Issue #400 narrowed part (b)'s structural guard from three call sites to
+two: scripts/eval_harness.py was re-pointed at the LLM-native review path
+(scripts/review_spine.py::run_review) and no longer imports
+scripts/detector_common.py at all -- its own delegation guard is retired
+along with that import, not because the delegation regressed. The two
+remaining call sites (tests/lint-gold-fixtures.py, tests/lint-acceptable-
+variations.py) are untouched and still fully enforced below.
+
   (a) A table of adversarial cases asserting the schema's documented
       semantics (playbooks/schema.json ~502-527: `word_boundary` vs
       `substring` vs `regex` match, `match_surface` inserted vs
@@ -23,15 +31,16 @@ of that extraction:
       If detector_common ever regressed to the pre-#212 HUNK-WIDE exemption
       check, those rows go from firing to not-firing and this test fails.
 
-  (b) A structural guard asserting scripts/eval_harness.py, tests/lint-
-      gold-fixtures.py, and tests/lint-acceptable-variations.py contain no
+  (b) A structural guard asserting tests/lint-gold-fixtures.py and
+      tests/lint-acceptable-variations.py (CALL_SITES below -- issue #400
+      narrowed this from three call sites to two, see above) contain no
       local re-implementation of the matching primitives (find_spans,
       phrase_matches, _compile, _span_inside, normalize) and that every
       local wrapper of check_on_insert_rule_fires / check_on_remove_or_
       alter_rule_fires in those files actually DELEGATES (via AST call-
       graph inspection, not just an import statement) to
-      scripts/detector_common's function of the same name, and that none
-      of the three files import Python's `re` module at all (matching
+      scripts/detector_common's function of the same name, and that
+      neither file imports Python's `re` module at all (matching
       requires some pattern-matching primitive; banning `re` from these
       call sites forces delegation rather than a fresh local regex copy).
 
@@ -460,7 +469,6 @@ def test_invalid_config_values_raise_loudly() -> None:
 # ---------------------------------------------------------------------------
 
 CALL_SITES = {
-    "scripts/eval_harness.py": SCRIPTS_DIR / "eval_harness.py",
     "tests/lint-gold-fixtures.py": TESTS_DIR / "lint-gold-fixtures.py",
     "tests/lint-acceptable-variations.py": TESTS_DIR / "lint-acceptable-variations.py",
 }

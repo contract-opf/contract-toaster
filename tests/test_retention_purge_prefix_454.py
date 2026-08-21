@@ -184,8 +184,36 @@ class PurgePrefixTestBase(unittest.TestCase):
             "created_at": str(now - age_days * DAY),
             "retention_window_at_creation": window_days,
             "legal_hold": legal_hold,
-            "verdict_summary": "some substantive summary",
-            "issue_rationale_text": "some substantive rationale",
+            # `summary`, not `verdict_summary`: the attribute every real
+            # writer produces (see tests/test_summary_attribute_roundtrip.py).
+            # `issue_rationale_text` is deliberately NOT seeded: no writer
+            # has ever produced it (the per-issue rationale lives in
+            # `issues[].external_rationale_for_footnote`, inside the S3
+            # analysis artifact, never on this row), and it has been removed
+            # from both purge lists for exactly that reason.
+            "summary": "some substantive summary",
+            # Issue #563: also a Confidential substance field (names a
+            # paragraph heading from the counterparty document) -- must
+            # clear on purge exactly like summary
+            # (backend/src/retention.py's REMOVE expression), and survive
+            # exactly like it on a held/active/not-yet-eligible row.
+            "normalization_notes": "Paragraph 'Limitation on Liability': ...",
+            # Issue #486: the attorney's free-text disposition note -- same
+            # Confidential-substance reasoning, same REMOVE expression.
+            "attorney_disposition_note": "Narrowed the indemnification carve-out further.",
+            # Issue #499: model-drafted cover-note prose summarizing the
+            # counterparty's document -- same Confidential-substance
+            # reasoning, same REMOVE expression. Seeded here (not just in
+            # tests/test_retention_purge_worker.py, which only drives the
+            # Lambda) so this file's own backend-vs-Lambda drift check
+            # (this class's two "at_the_real_layout" tests) actually proves
+            # BOTH purge implementations clear it, not just one.
+            "cover_note_draft": "Attached is our revised markup for your review.",
+            # toaster_guidance (issue #398): the submitter's own free-text
+            # per-review prose, Confidential per docs/data-handling.md --
+            # was in NEITHER purge list before this fix, a real retention
+            # leak (unlike issue_rationale_text above, a phantom name).
+            "toaster_guidance": "Be lenient on the payment terms for this one.",
             "output_s3_key": output_key,
         }
         if record_pointer:
@@ -240,6 +268,42 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
             "survived -- exactly the #454 defect.",
         )
         self.assertObjectGone(os.environ["OUTPUTS_BUCKET"], output_key)
+        row = self.reviews_table.get_item(Key={"review_id": "rid-probe"})["Item"]
+        self.assertNotIn(
+            "normalization_notes", row,
+            "A purged row must lose normalization_notes -- it names a "
+            "paragraph heading from the counterparty document, the same "
+            "Confidential-substance reasoning as summary (issue #563 "
+            "follow-up).",
+        )
+        self.assertNotIn(
+            "attorney_disposition_note", row,
+            "A purged row must lose attorney_disposition_note -- the same "
+            "Confidential-substance reasoning, per docs/data-handling.md's "
+            "field table (issue #486 follow-up).",
+        )
+        self.assertNotIn(
+            "cover_note_draft", row,
+            "A purged row must lose cover_note_draft -- the same "
+            "Confidential-substance reasoning, per docs/data-handling.md's "
+            "field table (issue #499 follow-up). This is backend/src/"
+            "retention.py's OWN in-process REMOVE clause -- "
+            "tests/test_retention_purge_worker.py only drives the Lambda "
+            "handler, so without this assertion a typo dropping "
+            "cover_note_draft from this file's hand-written UpdateExpression "
+            "string would pass the whole suite.",
+        )
+        self.assertNotIn(
+            "toaster_guidance", row,
+            "A purged row must lose toaster_guidance -- the submitter's own "
+            "free-text prose, Confidential per docs/data-handling.md, was "
+            "in NEITHER purge list before this fix.",
+        )
+        self.assertIn(
+            "purged_at", row,
+            "A purged row must carry the purged_at marker, stamped in the "
+            "same update as the substance-field clear.",
+        )
 
     def test_production_worker_lambda_deletes_input_document_at_the_real_layout(self):
         """The same assertion against the copy that actually runs on AWS --
@@ -252,6 +316,29 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
         self.assertIn("rid-lambda", summary["deleted_reviews"])
         self.assertObjectGone(os.environ["UPLOADS_BUCKET"], input_key)
         self.assertObjectGone(os.environ["OUTPUTS_BUCKET"], output_key)
+        row = self.reviews_table.get_item(Key={"review_id": "rid-lambda"})["Item"]
+        self.assertNotIn(
+            "attorney_disposition_note", row,
+            "The production Lambda's SUBSTANCE_FIELDS must clear this too -- "
+            "fixing only backend/src/retention.py would leave the deployment "
+            "broken (issue #486 follow-up).",
+        )
+        self.assertNotIn(
+            "cover_note_draft", row,
+            "The production Lambda's SUBSTANCE_FIELDS must clear this too -- "
+            "fixing only backend/src/retention.py would leave the deployment "
+            "broken (issue #499 follow-up).",
+        )
+        self.assertNotIn(
+            "toaster_guidance", row,
+            "The production Lambda's SUBSTANCE_FIELDS must clear this too.",
+        )
+        self.assertIn(
+            "purged_at", row,
+            "The production Lambda must stamp purged_at too -- fixing only "
+            "backend/src/retention.py would leave the deployment with no "
+            "marker at all.",
+        )
 
     def test_row_predating_the_recorded_pointer_is_purged_via_prefix_scan(self):
         """Every review created before #449 has no `upload_s3_key` on its row.
@@ -279,6 +366,28 @@ class TestInputDocumentIsPurged(PurgePrefixTestBase):
         self.assertObjectPresent(os.environ["UPLOADS_BUCKET"], active_key)
         self.assertObjectPresent(os.environ["UPLOADS_BUCKET"], held_key)
         self.assertObjectPresent(os.environ["UPLOADS_BUCKET"], recent_key)
+        held_row = self.reviews_table.get_item(Key={"review_id": "rid-held"})["Item"]
+        self.assertIn(
+            "normalization_notes", held_row,
+            "A legal-held row must retain normalization_notes -- legal hold "
+            "overrides purge for every substance field (issue #563 follow-up).",
+        )
+        self.assertIn(
+            "attorney_disposition_note", held_row,
+            "A legal-held row must retain attorney_disposition_note too -- "
+            "legal hold overrides purge for every substance field "
+            "(issue #486 follow-up).",
+        )
+        self.assertIn(
+            "toaster_guidance", held_row,
+            "A legal-held row must retain toaster_guidance too -- legal hold "
+            "overrides purge for every substance field.",
+        )
+        self.assertNotIn(
+            "purged_at", held_row,
+            "A held review was never purged, so it must not carry the "
+            "purged_at marker either.",
+        )
 
     def test_stored_pointer_naming_another_review_is_never_acted_on(self):
         """A corrupted / mis-migrated pointer must not let one review's purge
@@ -366,7 +475,7 @@ class TestSuccessIsTiedToOutcome(PurgePrefixTestBase):
         # Its substance fields survive too, so the next sweep can retry it
         # rather than leaving a document with no record of what it said.
         row = self.reviews_table.get_item(Key={"review_id": "rid-survivor"})["Item"]
-        self.assertIn("verdict_summary", row)
+        self.assertIn("summary", row)
         # The outputs half still went (a partial purge is retried, not undone).
         self.assertObjectGone(os.environ["OUTPUTS_BUCKET"], output_key)
 
@@ -391,7 +500,7 @@ class TestDryRunOperatorGate(PurgePrefixTestBase):
         self.assertObjectPresent(os.environ["UPLOADS_BUCKET"], input_key)
         self.assertObjectPresent(os.environ["OUTPUTS_BUCKET"], output_key)
         row = self.reviews_table.get_item(Key={"review_id": "rid-dry"})["Item"]
-        self.assertIn("verdict_summary", row)
+        self.assertIn("summary", row)
 
     def test_dry_run_reports_exactly_what_the_real_sweep_then_deletes(self):
         input_key, _ = self._seed_review("rid-parity")

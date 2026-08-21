@@ -21,7 +21,7 @@
  * fetch is stubbed per test. No live AWS/Cognito/network.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
 import AdminUsers from '../AdminUsers';
 import App from '../App';
@@ -317,6 +317,12 @@ describe('friendly errors — no raw technical strings', () => {
     const announcement = screen.getByTestId('review-ready-announcement');
     expect(announcement.textContent).not.toContain('Saving it to your downloads');
     expect(announcement.textContent).not.toContain('saved to your downloads');
+
+    // Issue #492/#466: the visible "Redline saved to your downloads." line
+    // must never render when the auto-save actually failed — this is the
+    // attempted-and-failed shape (mis-configured outputs bucket), distinct
+    // from the never-attempted (critic-gated) path covered elsewhere.
+    expect(screen.queryByTestId('review-saved-line')).toBeNull();
   });
 
   it('shows friendly copy for a version-fetch failure in App.tsx', async () => {
@@ -388,7 +394,14 @@ describe('accessibility — status and error regions', () => {
     expect(errorEl).toHaveAttribute('role', 'alert');
   });
 
-  it('announces the review-status region via aria-live', async () => {
+  // Issue #510 reversed this expectation. `review-status` used to be
+  // `aria-live="polite"`, which meant the terminal poll narrated the whole
+  // block — id chip, outcome chip, decision copy, critic-delta indicator,
+  // download row — back to back with the purpose-written handoff copy in the
+  // sibling region beside it. The terminal moment is still announced, by the
+  // one region written to announce it; see single-terminal-announcement.test.tsx,
+  // which owns that property now.
+  it('leaves the review-status region silent, so the terminal moment is announced once', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -421,7 +434,12 @@ describe('accessibility — status and error regions', () => {
     fireEvent.click(screen.getByTestId('review-submit-button'));
 
     const statusEl = await screen.findByTestId('review-status');
-    expect(statusEl).toHaveAttribute('aria-live', 'polite');
+    expect(statusEl).not.toHaveAttribute('aria-live', 'polite');
+    // The announcement did not disappear, it moved: the dedicated handoff
+    // region carries it.
+    await waitFor(() => {
+      expect(screen.getByTestId('review-ready-announcement').textContent).not.toBe('');
+    });
   });
 
   it('announces AdminUsers error region via role="alert"', async () => {

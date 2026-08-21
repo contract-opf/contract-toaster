@@ -447,7 +447,7 @@ class TestProjectionCarriesPlaybookVersionLineage(unittest.TestCase):
     def test_list_carries_both_fields(self):
         items = reviews_module.list_reviews(
             _caller_row(OWNER), _row_resource(VERSIONED_ROW, UNVERSIONED_ROW)
-        )
+        )['items']
         by_id = {item["review_id"]: item for item in items}
 
         self.assertEqual(by_id["rev-471-versioned"]["playbook_version"], SEEDED_VERSION)

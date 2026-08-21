@@ -132,6 +132,30 @@ MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
 # `_build_quote_analysis_report`).
 REASON_QUOTE_PATCHES_NOT_APPLIED = "quote_patches_not_applied"
 
+# Notes modes (epic #519 axis 1, `backend/src/reviews.py::NOTES_MODES`) in
+# which a review's document is allowed to carry internal-audience content --
+# and therefore the only modes in which the export marker belongs on the
+# generated document at all (issue #513: the marker is no longer
+# unconditional; it is a "this document contains internal notes" signpost,
+# present iff internal notes are actually included). Mirrors
+# `primary_review_pass._NOTES_MODES_WITH_INTERNAL_CONTENT` -- duplicated
+# rather than imported, same as that module's own copy of this small
+# constant, to keep this module free of a dependency on the prompt-assembly
+# layer for one boolean.
+_NOTES_MODES_WITH_INTERNAL_CONTENT = ("internal", "both")
+
+
+def _notes_mode_includes_internal_content(notes_mode: str) -> bool:
+    """Whether `notes_mode` puts internal-audience content in scope for this
+    review, and therefore whether the export marker belongs on the
+    generated `.docx`. Same fail-closed direction as
+    `primary_review_pass._notes_mode_includes_internal`: an
+    unrecognized/blank value is treated as NOT including internal content,
+    so a caller that fails to validate upstream still gets the
+    no-marker-needed default rather than an unexplained marker."""
+    return (notes_mode or "").strip().lower() in _NOTES_MODES_WITH_INTERNAL_CONTENT
+
+
 # NOTE: this module never imports `redline_patch`. The anchor/hash-joined
 # patch path that used to live here (redline_patch.join_patches_from_diff/
 # apply_patches) was retired by issue #380 alongside the deterministic
@@ -392,6 +416,7 @@ def inject_export_marker_and_footnotes(
     inplace_applied_patches: list[dict[str, Any]],
     footnote_text_by_anchor: dict[str, Any],
     *,
+    include_marker: bool = True,
     marker_text: str = redline_docx_writer.MARKER_TEXT,
 ) -> bytes:
     """Issue #291 scope items 2-3: inject the export marker (header/footer)
@@ -407,6 +432,17 @@ def inject_export_marker_and_footnotes(
     `redline_docx_writer`'s part builders verbatim) only when the uploaded
     package doesn't already carry them; when it does, the marker paragraph
     or footnote entries are appended to the EXISTING part instead.
+
+    `include_marker` (issue #513, default `True`): whether to touch
+    `word/header1.xml`/`word/footer1.xml` at all. The caller
+    (`generate_redline`, below) passes `False` whenever this review's notes
+    mode carries no internal-audience content -- the marker's only
+    remaining purpose is an honest "this document contains internal notes"
+    signpost, so a document with none gets no marker in any part, and an
+    uploaded document's own pre-existing header/footer (if any) is left
+    completely untouched rather than gaining an appended marker paragraph.
+    Footnoted rationales are unaffected by this flag -- they are unrelated
+    to notes-mode audience and always injected when present.
 
     `inplace_applied_patches` is the `{"anchor", "source_text", "new_text"}`
     list, filtered to just the anchors `InplaceResult.applied` reports --
@@ -425,9 +461,9 @@ def inject_export_marker_and_footnotes(
     # the in-place patcher's own pass, so the same care applies.
     doc_xml_text = originals[redline_inplace.DOCUMENT_PART].decode("utf-8")
     original_root_open_tag = redline_inplace._root_open_tag(doc_xml_text)
-    for prefix, uri in redline_inplace._declared_namespaces(original_root_open_tag):
-        if prefix:
-            ET.register_namespace(prefix, uri)
+    redline_inplace.register_declared_namespaces(
+        redline_inplace._declared_namespaces(original_root_open_tag)
+    )
     doc_root = ET.fromstring(originals[redline_inplace.DOCUMENT_PART])
     body = doc_root.find(_w("body"))
 
@@ -474,20 +510,21 @@ def inject_export_marker_and_footnotes(
     new_footer_rid = None
     new_footnotes_rid = None
 
-    if not have_header:
-        new_header_rid = f"rId{next_rid}"
-        next_rid += 1
-        rel = ET.SubElement(rels_root, _pkg("Relationship"))
-        rel.set("Id", new_header_rid)
-        rel.set("Type", redline_docx_writer.HEADER_REL_TYPE)
-        rel.set("Target", "header1.xml")
-    if not have_footer:
-        new_footer_rid = f"rId{next_rid}"
-        next_rid += 1
-        rel = ET.SubElement(rels_root, _pkg("Relationship"))
-        rel.set("Id", new_footer_rid)
-        rel.set("Type", redline_docx_writer.FOOTER_REL_TYPE)
-        rel.set("Target", "footer1.xml")
+    if include_marker:
+        if not have_header:
+            new_header_rid = f"rId{next_rid}"
+            next_rid += 1
+            rel = ET.SubElement(rels_root, _pkg("Relationship"))
+            rel.set("Id", new_header_rid)
+            rel.set("Type", redline_docx_writer.HEADER_REL_TYPE)
+            rel.set("Target", "header1.xml")
+        if not have_footer:
+            new_footer_rid = f"rId{next_rid}"
+            next_rid += 1
+            rel = ET.SubElement(rels_root, _pkg("Relationship"))
+            rel.set("Id", new_footer_rid)
+            rel.set("Type", redline_docx_writer.FOOTER_REL_TYPE)
+            rel.set("Target", "footer1.xml")
     if footnote_entries and not have_footnotes:
         new_footnotes_rid = f"rId{next_rid}"
         next_rid += 1
@@ -544,19 +581,23 @@ def inject_export_marker_and_footnotes(
 
     new_parts: dict[str, bytes] = {redline_inplace.DOCUMENT_PART: new_document_xml}
 
-    # ---- word/header1.xml / word/footer1.xml
-    if new_header_rid:
-        new_parts["word/header1.xml"] = redline_docx_writer.build_header_xml(marker_text)
-    elif have_header:
-        new_parts["word/header1.xml"] = _append_marker_paragraph(
-            originals["word/header1.xml"], marker_text
-        )
-    if new_footer_rid:
-        new_parts["word/footer1.xml"] = redline_docx_writer.build_footer_xml(marker_text)
-    elif have_footer:
-        new_parts["word/footer1.xml"] = _append_marker_paragraph(
-            originals["word/footer1.xml"], marker_text
-        )
+    # ---- word/header1.xml / word/footer1.xml (issue #513: only ever
+    # touched when include_marker -- an uploaded document's own pre-existing
+    # header/footer is left completely untouched otherwise, never gaining
+    # an appended marker paragraph it wasn't asked for).
+    if include_marker:
+        if new_header_rid:
+            new_parts["word/header1.xml"] = redline_docx_writer.build_header_xml(marker_text)
+        elif have_header:
+            new_parts["word/header1.xml"] = _append_marker_paragraph(
+                originals["word/header1.xml"], marker_text
+            )
+        if new_footer_rid:
+            new_parts["word/footer1.xml"] = redline_docx_writer.build_footer_xml(marker_text)
+        elif have_footer:
+            new_parts["word/footer1.xml"] = _append_marker_paragraph(
+                originals["word/footer1.xml"], marker_text
+            )
 
     # ---- word/footnotes.xml
     if footnote_entries:
@@ -681,7 +722,8 @@ def _build_quote_analysis_report(flag_only: list[dict[str, Any]]) -> dict[str, A
     `redline_patch.build_analysis_report` (not reused directly: that
     function's `fail_closed_path` derivation is hardcoded to the retired
     anchor path's own three reasons and does not generalize to this path's
-    `not_found` / `ambiguous` / `round_trip_verification_failed`).
+    `not_found` / `ambiguous` / `spans_paragraph_break` (issue #564) /
+    `round_trip_verification_failed`).
 
     `flag_only` is `apply_quote_patches`'s own return list -- each entry the
     original `{source_quote, new_text, rationale}` patch plus `reason`, plus
@@ -716,9 +758,10 @@ def _build_quote_analysis_report(flag_only: list[dict[str, Any]]) -> dict[str, A
         "fail_closed_path": (
             "One or more proposed edits could not be safely located or "
             "applied to the uploaded document -- the exact quoted text was "
-            "not found, matched more than once, or the writer's own "
-            "round-trip check failed after applying it. Each is listed "
-            "below for the attorney to apply by hand."
+            "not found, matched more than once, spanned a paragraph break "
+            "the editor cannot write across, or the writer's own round-trip "
+            "check failed after applying it. Each is listed below for the "
+            "attorney to apply by hand, with its own reason."
         ),
         "changes_not_applied": changes_not_applied,
     }
@@ -734,6 +777,7 @@ def generate_redline(
     current_counterparty_name: Optional[str] = None,
     author: str = redline_docx_writer.DEFAULT_AUTHOR,
     date: Any = None,
+    notes_mode: str = "external",
 ) -> dict[str, Any]:
     """Produce the final review deliverable from a reconciled review result.
 
@@ -744,6 +788,18 @@ def generate_redline(
     REQUEST_CHANGE path (issue #379); unused on the ACCEPT / leakage-blocked
     paths, but still a required parameter so every caller threads it through
     regardless of which internal path a given review takes.
+
+    `notes_mode` (issue #513, default `"external"` -- matches
+    `backend/src/reviews.py::DEFAULT_NOTES_MODE`) controls whether the
+    delivered `.docx` carries the internal-notes export marker at all: the
+    marker is present iff `notes_mode` puts internal-audience content in
+    scope for this review (`"internal"`/`"both"` -- see
+    `_notes_mode_includes_internal_content` below, same fail-closed
+    direction as `primary_review_pass._notes_mode_includes_internal`). A
+    review with no internal notes (`"none"`/`"external"`, today's only
+    reachable values while #572's `NOTES_MODE_ENABLED` kill switch is off)
+    gets a `.docx` with no marker in any part -- nothing to de-mark
+    afterward.
 
     ## Delivered document: in place, not a standalone clause list (issue #261)
 
@@ -782,16 +838,24 @@ def generate_redline(
       REQUEST_CHANGE, at least one patch applied (issue #203 -- partial
       delivery, never "instead of": `analysis_report` is populated iff
       `apply_quote_patches` also reported one or more flag-only patches
-      alongside the applied ones, else `None`):
+      alongside the applied ones, else `None`). `flag_only` (issue #569,
+      additive) is `apply_quote_patches`'s own raw flag-only list -- the
+      same one `analysis_report` was built from, each entry still carrying
+      the private `_source_issue` correlation key -- surfaced so
+      `scripts/review_spine.py`'s bounded re-quote repair pass can act on
+      it without recomputing anything; every OTHER existing caller ignores
+      this key and is unaffected by its presence:
         {"status": "OK", "decision": "REQUEST_CHANGE", "docx_bytes": <bytes>,
-         "analysis_report": {...} | None, "verdict_summary": ...}
+         "analysis_report": {...} | None, "verdict_summary": ...,
+         "flag_only": [...]}
 
       REQUEST_CHANGE, every attempted patch failed to locate/apply (zero
       applied -- an ordinary counterparty-document condition, e.g. the
-      model's quotes didn't match this document; never raised as an error):
+      model's quotes didn't match this document; never raised as an error).
+      `flag_only` (issue #569) is present here too, same shape as above:
         {"status": "MANUAL_REVIEW_REQUIRED",
          "reason": "quote_patches_not_applied", "docx_bytes": None,
-         "analysis_report": {...}}
+         "analysis_report": {...}, "flag_only": [...]}
 
       Leakage scan positive detection (either path):
         {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "reason": "leakage_detected",
@@ -873,6 +937,7 @@ def generate_redline(
         patches,
         author=author,
         timestamp_iso=redline_docx_writer._iso_date(date),
+        include_marker=_notes_mode_includes_internal_content(notes_mode),
     )
     docx_bytes = quote_result["docx_bytes"]
 
@@ -921,6 +986,19 @@ def generate_redline(
             "docx_bytes": docx_bytes,
             "analysis_report": analysis_report,
             "verdict_summary": reconciled_result.get("verdict_summary"),
+            # Issue #569: `apply_quote_patches`'s own flag_only list, raw --
+            # already computed above for `_build_quote_analysis_report`, just
+            # not previously surfaced. ADDITIVE only: every existing caller
+            # reads the keys it already knew about and is unaffected by this
+            # one's presence. Each entry carries the private `_source_issue`
+            # key (see `_issues_to_quote_patches`) BY REFERENCE to the exact
+            # object in `reconciled_result["issues"]` -- this is what lets
+            # `scripts/requote_repair.py` merge a correction back onto the
+            # right issue with no separate id-matching scheme. Never surfaced
+            # past `scripts/review_spine.py` (which consumes it internally
+            # and does not copy it onto the public `ReviewResult`), so
+            # `_source_issue` never reaches the API/frontend.
+            "flag_only": quote_result["flag_only"],
         }
 
     # Zero applied: every attempted patch failed to locate/apply. Unlike the
@@ -934,6 +1012,9 @@ def generate_redline(
         "reason": REASON_QUOTE_PATCHES_NOT_APPLIED,
         "docx_bytes": None,
         "analysis_report": analysis_report,
+        # Issue #569: same raw flag_only list as the partial-delivery branch
+        # above -- see that branch's comment.
+        "flag_only": quote_result["flag_only"],
     }
 
 
