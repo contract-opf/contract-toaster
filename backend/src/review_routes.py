@@ -92,6 +92,7 @@ from fastapi import (
     HTTPException,
     Path,
     Query,
+    Request,
     UploadFile,
     status,
 )
@@ -111,6 +112,7 @@ from src import (
     upload_validation,
 )
 from src.auth import get_current_user
+from src.demo_auth import enforce_default_credentials_rotation
 from src.users import require_active_user
 
 logger = logging.getLogger(__name__)
@@ -206,12 +208,18 @@ def get_env_name() -> str:
 
 
 def get_active_user_row(
+    request: Request,
     current_user: dict[str, Any] = Depends(get_current_user),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
 ) -> dict[str, Any]:
-    """Re-verify `users.status == active` on every request -- same
-    composition as src/main.py::get_active_user_row."""
-    return require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    """Re-verify `users.status == active` on every request, then (issue
+    #586) refuse the request if the caller's own row still verifies against
+    its shipped seed default password -- same composition as
+    src/main.py::get_active_user_row, including that enforcement step; see
+    that function's docstring."""
+    caller_row = require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    enforce_default_credentials_rotation(caller_row, request.url.path)
+    return caller_row
 
 
 class NullAvClient:
@@ -407,6 +415,19 @@ def _write_audit_row(
         "target_type": target_type,
         "outcome": "success",
     }
+    # Issue #253: the audit table's `review_id-index` GSI
+    # (infra/lib/nested/data-stack.ts) is what docs/audit-queries.md's "full
+    # history of one review/document" query is keyed by -- and nothing had
+    # ever written the attribute it indexes, so the index was empty and that
+    # query could never return a row. A review-scoped audit row already
+    # carries the review id in `target`; this stamps it under the name the
+    # index expects as well. Additive and non-substantive (it is the same
+    # opaque identifier, twice), and only for review-scoped rows -- an
+    # `upload`-scoped row's target is an upload id, not a review id, and
+    # putting it on this index would make the history query answer with
+    # another entity's events.
+    if target_type == "review" and target:
+        item["review_id"] = target
     if detail:
         item.update(detail)
     try:
@@ -1394,9 +1415,24 @@ async def get_review_output(
 
     output_s3_key = item.get("output_s3_key")
     if not output_s3_key:
+        # Issue #584: "yet" was misleading on a TERMINAL review -- it reads
+        # as a race the caller should retry, when a terminal review with no
+        # output_s3_key never will have one (see
+        # backend/src/pipeline_runner.py::run_real_pipeline's persist_result
+        # issue #584 no-output-for-REQUEST_CHANGE guard, which is what stops most of
+        # these from reaching DONE in the first place -- this covers the
+        # remaining fail-closed/administrative terminals that legitimately
+        # carry no output, e.g. MANUAL_REVIEW_REQUIRED, ERROR, CANCELLED).
+        # A still-PENDING/RUNNING review keeps the original "yet" wording,
+        # since that one genuinely might still produce one.
+        never_will = item.get("status") in reviews.REVIEW_STATUSES_TERMINAL
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No output is available for this review yet.",
+            detail=(
+                "This review has finished with no output to download."
+                if never_will
+                else "No output is available for this review yet."
+            ),
         )
 
     response = download.generate_presigned_download_url(
@@ -1772,7 +1808,14 @@ async def post_review_cover_note(
         # draft persisted or returned.
         leakage_corpus = leakage_corpus_resolver(item.get("playbook_id"))
         scan_result = leakage_scan.LeakageScanner(leakage_corpus).scan(
-            draft, field_name="cover_note_draft"
+            draft,
+            field_name="cover_note_draft",
+            # Issue #521: the declared audience channel, read from the one
+            # static field -> channel table rather than defaulted here, so
+            # this call site cannot drift from the scope table in
+            # docs/output-contract.md. `cover_note_draft` is external-bound
+            # -- it is copied into the reviewer's email to the counterparty.
+            channel=leakage_scan.channel_for_field("cover_note_draft"),
         )
         if scan_result.blocked:
             raise leakage_scan.LeakageDetectedError(

@@ -249,15 +249,30 @@ def _build_draft_docx(overrides: dict[str, str]) -> bytes:
     return _build_docx_bytes("".join(parts))
 
 
+def _sec8_block_id() -> str:
+    """The code-assigned block id of the Section 8 paragraph in this file's
+    own planted draft, resolved through the production extractor (issue
+    #627) rather than written as a literal."""
+    import extraction_normalization_stage as ens
+
+    docx_bytes = _build_draft_docx({"sec-8": _SEC8_DRAFT_TEXT})
+    normalized = ens.extract_and_normalize(docx_bytes)
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        if block["text"] == _SEC8_DRAFT_TEXT:
+            return block_id
+    raise AssertionError("the planted draft no longer carries the Section 8 clause")
+
+
 def _primary_request_change_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [
                 {
+                    "issue_key": "I1",
                     "section_ref": "sec-8",
                     "section_title": "Limitation on Liability",
                     "counterparty_change_summary": (
@@ -269,13 +284,28 @@ def _primary_request_change_response() -> str:
                         "Section 8 must retain the standard aggregate "
                         "liability cap and mutual damages exclusions."
                     ),
-                    "proposed_replacement_text": _SEC8_STANDARD_TEXT,
                     "playbook_topic_id": "limitation-of-liability",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": _SEC8_DRAFT_TEXT,
+                    "replacement_scope_note": (
+                        "The clause states the opposite position outright; a "
+                        "local repair would leave an unlimited-liability term."
+                    ),
                 }
             ],
+            # Issue #627: the edit as a block transcript. The id is derived
+            # from the fixture document by the production extractor, never
+            # typed in.
+            "block_patches": [
+                {
+                    "block_id": _sec8_block_id(),
+                    "segments": [
+                        {"op": "delete", "text": _SEC8_DRAFT_TEXT, "issue_key": "I1"},
+                        {"op": "insert", "text": _SEC8_STANDARD_TEXT, "issue_key": "I1"},
+                    ],
+                }
+            ],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": (
                 "One issue identified in Section 8 requiring attention "
@@ -288,7 +318,6 @@ def _primary_request_change_response() -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,

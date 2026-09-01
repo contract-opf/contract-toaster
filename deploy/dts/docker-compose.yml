@@ -52,6 +52,7 @@ x-resource-names: &resource-names
   PLAYBOOK_VERSIONS_TABLE: contract-toaster-playbook-versions-dts
   PLAYBOOK_INSTRUCTIONS_TABLE: contract-toaster-playbook-instructions-dts
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
+  USER_PREFERENCES_TABLE: contract-toaster-user-preferences-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
   MODEL_INVOCATIONS_TABLE: contract-toaster-model-invocations-dts
@@ -166,13 +167,6 @@ services:
       # tool-use pass-through cannot be proven from the offline test suite.
       # See backend/src/config.py::structured_output_enabled.
       # OPENROUTER_STRUCTURED_OUTPUT: "1"
-      # Issue #569: turns on the bounded re-quote repair pass (one extra
-      # model call to correct a flag-only patch's quote, see
-      # scripts/requote_repair.py's own docstring). Default OFF (unset) --
-      # behavior is byte-identical to today either way until a human flips
-      # this ON after fidelity is measured against this deployment's actual
-      # OpenRouter traffic. See backend/src/config.py::requote_enabled.
-      # REQUOTE_ENABLED: "1"
     depends_on:
       bootstrap:
         condition: service_completed_successfully

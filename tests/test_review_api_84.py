@@ -123,6 +123,26 @@ _RELS_XML_BENIGN = (
 
 
 def _valid_docx_bytes(body_text: str = "Hello") -> bytes:
+    """Build a minimal valid .docx. DETERMINISTIC BY CONSTRUCTION: the same
+    body_text always yields byte-identical output.
+
+    That is load-bearing, not tidiness (issue #583). `zipfile.writestr` with
+    a `str` name synthesizes a ZipInfo stamped with `time.localtime()` at
+    2-SECOND DOS resolution, so two independent builds of the "same" file
+    differ whenever they straddle a tick. `_submit` builds the upload fresh
+    on every call, and the derived-idempotency-key path keys on
+    sha256(file bytes) -- so under load,
+    TestDuplicateSubmissionCollides::test_derived_key_same_bucket_collides
+    submitted two files it believed were identical, got two different
+    hashes, derived two different keys, and saw two different review_ids.
+    Measured on the pre-fix tree: 31/60 parallel runs failed at load
+    average ~240; 0/60 after pinning the timestamp below.
+
+    The 10-minute bucket was never the culprit, and neither was moto:
+    `find_existing_submission` already probes the previous bucket, so even a
+    genuine bucket straddle is covered. Pin the timestamp; do not widen the
+    bucket or the probe.
+    """
     document_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -131,9 +151,16 @@ def _valid_docx_bytes(body_text: str = "Hello") -> bytes:
     )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", _CONTENT_TYPES_WORDPROCESSINGML)
-        zf.writestr("_rels/.rels", _RELS_XML_BENIGN)
-        zf.writestr("word/document.xml", document_xml)
+        for name, payload in (
+            ("[Content_Types].xml", _CONTENT_TYPES_WORDPROCESSINGML),
+            ("_rels/.rels", _RELS_XML_BENIGN),
+            ("word/document.xml", document_xml),
+        ):
+            # An explicit ZipInfo carries a FIXED date_time, unlike the
+            # str-name overload which stamps the wall clock.
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, payload)
     return buf.getvalue()
 
 
@@ -634,10 +661,16 @@ class TestResultPayloadSchema(ReviewApiTestBase):
             "Drifts from playbook position.",
         )
 
-    def test_detail_includes_normalization_notes_and_requote_when_recorded(self):
-        """Issue #570: the receipt's "what was assumed" lines read these two
-        fields off the detail projection. Both are absent-never-null, same
-        convention as every other field `get_review_detail` projects."""
+    def test_detail_includes_normalization_notes_when_recorded(self):
+        """Issue #570: the receipt's "what was assumed" line reads this field
+        off the detail projection. It is absent-never-null, same convention as
+        every other field `get_review_detail` projects.
+
+        Issue #628 deleted the second field this test covered (`requote`,
+        issue #569's address-repair outcome) along with the pass that wrote
+        it; the row below still seeds one, so the assertion that it does NOT
+        reach the response proves the projection dropped it rather than merely
+        never being handed one."""
         review_id = "review-done-with-assumptions"
         self._reviews_table().items[review_id] = {
             "review_id": review_id,
@@ -648,6 +681,8 @@ class TestResultPayloadSchema(ReviewApiTestBase):
                 "Paragraph 'Term': pending tracked change (author: Jane Doe, "
                 "status: unresolved) accepted-all into the operative draft."
             ),
+            # A stale key from a review that predates issue #628. Rows keep
+            # it forever; the projection must not surface it.
             "requote": {"attempted": 2, "recovered": 2, "still_failed": 0},
             "playbook_id": PLAYBOOK_ID,
             "created_at": "3000",
@@ -660,10 +695,10 @@ class TestResultPayloadSchema(ReviewApiTestBase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertIn("Jane Doe", body["normalization_notes"])
-        self.assertEqual(body["requote"], {"attempted": 2, "recovered": 2, "still_failed": 0})
+        self.assertNotIn("requote", body)
 
-    def test_detail_omits_normalization_notes_and_requote_when_not_recorded(self):
-        """The common case, and every review predating #563/#569: absent on
+    def test_detail_omits_normalization_notes_when_not_recorded(self):
+        """The common case, and every review predating #563: absent on
         the row projects as None, never as a fabricated empty value."""
         review_id = "review-done-plain"
         self._reviews_table().items[review_id] = {
@@ -682,7 +717,6 @@ class TestResultPayloadSchema(ReviewApiTestBase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertIsNone(body["normalization_notes"])
-        self.assertIsNone(body["requote"])
 
 
 # -- (7) download writes an audit row; presigned URL is short-lived ---------
@@ -746,6 +780,41 @@ class TestDownloadAudit(ReviewApiTestBase):
         self._authenticate_as("owner-pending")
         resp = self.client.get(f"/api/reviews/{review_id}/output")
         self.assertEqual(resp.status_code, 404)
+        # Issue #584: still genuinely "yet" -- this review is non-terminal
+        # and might still produce an output.
+        self.assertIn("yet", resp.json()["detail"])
+
+    def test_no_output_on_a_terminal_review_is_404_and_does_not_say_yet(self):
+        """Issue #584 AC3: a TERMINAL review with no output object will
+        NEVER have one -- the 404 body must not read like a race the caller
+        should retry. Live evidence: review c81d29c0-... reported this
+        wording while already DONE with two findings and no artifact."""
+        review_id = "review-terminal-no-output"
+        self._reviews_table().items[review_id] = {
+            "review_id": review_id,
+            "owner_sub": "owner-terminal",
+            "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+            "reason": "redline_not_persisted",
+            "failing_stage": "redline",
+            "playbook_id": PLAYBOOK_ID,
+            "created_at": "4000",
+            "updated_at": "4000",
+        }
+        self._authenticate_as("owner-terminal")
+        resp = self.client.get(f"/api/reviews/{review_id}/output")
+        self.assertEqual(resp.status_code, 404)
+        detail = resp.json()["detail"]
+        self.assertNotIn("yet", detail)
+
+        # Issue #584 AC4: the reason must be surfaced to the caller, not
+        # just stored on the DynamoDB row -- assert it at the API-response
+        # level (GET /api/reviews/{id}, reviews.get_review_detail's
+        # projection), not only on the fixture row seeded above.
+        detail_resp = self.client.get(f"/api/reviews/{review_id}")
+        self.assertEqual(detail_resp.status_code, 200)
+        detail_body = detail_resp.json()
+        self.assertEqual(detail_body["reason"], "redline_not_persisted")
+        self.assertIsNotNone(detail_body["failing_stage"])
 
 
 # -- list route sanity (owner-scoped vs admin-all) ----------------------------

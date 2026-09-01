@@ -135,6 +135,9 @@ export interface AppStackProps extends cdk.NestedStackProps {
  *       - dynamodb:     dynamodb:GetItem, UpdateItem on the retention_settings
  *                       table (issue #191) — admin retention-window read/change
  *                       (GET/POST /api/admin/retention).
+ *       - dynamodb:     dynamodb:GetItem, UpdateItem on the user_preferences
+ *                       table (issue #523) — the caller's OWN preferences
+ *                       (GET/PUT /api/me/preferences).
  *       - bedrock inference actions are EXPLICITLY EXCLUDED — inference runs under
  *         the pipeline task role (see the async-pipeline issue #59).
  *
@@ -561,6 +564,19 @@ export class AppStack extends cdk.NestedStack {
             actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
             resources: [`arn:aws:dynamodb:*:*:table/contract-toaster-retention-settings-${envName}`],
           }),
+          // user_preferences — read + update (issue #523). GET/PUT
+          // /api/me/preferences (src/user_preferences.py::get_preferences,
+          // save_preferences) read the caller's own row and update_item it
+          // (update_item upserts, so no PutItem is needed), exactly like the
+          // retention_settings grant above. No DeleteItem: nothing in this
+          // codebase deletes a preferences row — clearing a preference is
+          // writing its default, not removing the row.
+          new iam.PolicyStatement({
+            sid: 'UserPreferencesReadWrite',
+            effect: iam.Effect.ALLOW,
+            actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+            resources: [`arn:aws:dynamodb:*:*:table/contract-toaster-user-preferences-${envName}`],
+          }),
           // bedrock inference actions are INTENTIONALLY ABSENT from this role.
           // Inference runs under the pipeline task role (#59).
         ],
@@ -605,6 +621,7 @@ export class AppStack extends cdk.NestedStack {
     //   SYNC_STATUS_TABLE         — src/users.py Workspace/SSO sync-job status.
     //   REVIEWS_TABLE              — src/retention.py review rows (purge preview/sweep, legal holds).
     //   RETENTION_SETTINGS_TABLE  — src/retention.py global retention-window settings.
+    //   USER_PREFERENCES_TABLE    — src/user_preferences.py per-user preferences (#523).
     //   UPLOADS_BUCKET             — src/retention.py purge-sweep target bucket.
     //   OUTPUTS_BUCKET             — src/retention.py purge-sweep target bucket.
     // -----------------------------------------------------------------------
@@ -641,6 +658,14 @@ export class AppStack extends cdk.NestedStack {
         name: 'RETENTION_SETTINGS_TABLE',
         value: `contract-toaster-retention-settings-${envName}`,
       },
+      // Issue #523 (epic #519 item F): src/user_preferences.py dereferences
+      // this with os.environ[...], so an unset value is a KeyError -> HTTP
+      // 500 on the first GET /api/me/preferences a deployed SPA makes on
+      // page load — the same failure #191 fixed for the tables above.
+      {
+        name: 'USER_PREFERENCES_TABLE',
+        value: `contract-toaster-user-preferences-${envName}`,
+      },
       {
         name: 'UPLOADS_BUCKET',
         value: `contract-toaster-uploads-${envName}`,
@@ -648,21 +673,6 @@ export class AppStack extends cdk.NestedStack {
       {
         name: 'OUTPUTS_BUCKET',
         value: `contract-toaster-outputs-${envName}`,
-      },
-      // Issue #569 (review round 3 fix): this service is the RESERVE side
-      // of the worst-case spend reservation (backend/src/reviews.py::
-      // reserve_spend -> compute_worst_case_reservation_usd_cents, gated on
-      // config.requote_enabled() which reads this same env var) — it must
-      // read the identical REQUOTE_ENABLED value pipeline-stack.ts already
-      // threads to the SETTLE side's two Lambda mirrors (persistFn's
-      // stageEnv, the orphan reconciler's environment), or reserve and
-      // settle permanently disagree by one primary-priced pass whenever the
-      // flag is on, drifting `daily_spend.reserved_usd_cents` forever. Empty
-      // string (unset) preserves pre-#569 behavior exactly, same
-      // default-OFF convention as the flag itself.
-      {
-        name: 'REQUOTE_ENABLED',
-        value: process.env.REQUOTE_ENABLED ?? '',
       },
     ];
 

@@ -32,7 +32,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import AdminDiagnostics, { formatFailureTime, RecentFailure } from '../AdminDiagnostics';
+import AdminDiagnostics, {
+  detectorDetail,
+  formatFailureTime,
+  RecentFailure,
+} from '../AdminDiagnostics';
 import { REASON_EXPLANATIONS } from '../ReviewSubmission';
 
 /** The "Failed at" cell is the row's second `<td>` (Review, Failed at,
@@ -209,7 +213,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     );
   });
 
-  it('never echoes anything beyond the five documented fields', async () => {
+  it('never echoes anything beyond the documented fields', async () => {
     // A deliberately over-stuffed payload: if the route ever regressed into a
     // row dump, or this screen started spreading the row, these would land in
     // the DOM. The screen must render only what it explicitly reads.
@@ -221,6 +225,12 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       stack_trace: 'SENTINEL-TRACE File "/app/backend/src/pipeline_runner.py", line 1',
       exception_message: 'SENTINEL-EXC OpenRouter returned HTTP 402',
       model_api_key: 'sk-or-v1-SENTINEL-KEY-MATERIAL',
+      // Issue #616: the one thing the leakage scanner must never report is
+      // WHAT it matched. The route cannot serve this field (it is not on the
+      // allowlist) and the scanner cannot produce it (no matched span ever
+      // leaves it) — this asserts the render side too, so the screen could
+      // not display it even if a future payload carried one.
+      leakage_matched_text: 'SENTINEL-MATCHED-CONFIDENTIAL-SPAN',
     };
     stubDiagnosticsFetch({
       status: 200,
@@ -507,6 +517,119 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     expect(screen.getByTestId('review-id-text-r-no-clipboard')).toHaveTextContent(
       'r-no-clipboard',
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #616 — WHICH leakage detector fired.
+  //
+  // `reason: 'leakage_detected'` is written identically for all five of the
+  // scanner's categories, so before this every leakage block rendered the
+  // same cause prose and an admin could not tell a correct gate (the model
+  // really did quote the playbook — fix the prompt) from an over-broad
+  // detector. A real EIAA review was blocked in production with no way to
+  // establish which.
+  // -------------------------------------------------------------------------
+
+  const leakageFailure = (overrides: Partial<RecentFailure> = {}): RecentFailure =>
+    failure({
+      review_id: 'r-leakage',
+      reason: 'leakage_detected',
+      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      leakage_category: 'playbook_leakage',
+      leakage_rule_id: 'playbook-ngram',
+      leakage_field_name: 'external_rationale_for_footnote',
+      ...overrides,
+    });
+
+  it('names the leakage detector that fired, beside the generic cause prose', async () => {
+    stubDiagnosticsFetch({ status: 200, body: { failures: [leakageFailure()] } });
+    render(<AdminDiagnostics />);
+
+    const detector = await screen.findByTestId('failure-detector-r-leakage');
+    expect(detector).toHaveTextContent('playbook_leakage');
+    expect(detector).toHaveTextContent('playbook-ngram');
+    expect(detector).toHaveTextContent('external_rationale_for_footnote');
+    // Labelled, so the line reads as operator diagnostic detail rather than
+    // as more of the reader-facing sentence above it.
+    expect(detector).toHaveTextContent(/detector/i);
+    // The reader-facing cause is unchanged and still present — this is
+    // additive detail, not a replacement.
+    expect(screen.getByTestId('failure-cause-r-leakage')).toHaveTextContent(
+      REASON_EXPLANATIONS.leakage_detected.cause,
+    );
+  });
+
+  it('tells two leakage blocks apart — the whole point of the field', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          leakageFailure(),
+          leakageFailure({
+            review_id: 'r-leakage-2',
+            leakage_category: 'system_prompt_leakage',
+            leakage_rule_id: 'system-prompt-ngram',
+            leakage_field_name: 'verdict_summary',
+          }),
+        ],
+      },
+    });
+    render(<AdminDiagnostics />);
+
+    const first = await screen.findByTestId('failure-detector-r-leakage');
+    const second = screen.getByTestId('failure-detector-r-leakage-2');
+    expect(first.textContent).not.toEqual(second.textContent);
+    expect(second).toHaveTextContent('system_prompt_leakage');
+    // Both rows still carry the SAME cause prose — which is exactly why the
+    // detector line had to exist.
+    expect(screen.getByTestId('failure-cause-r-leakage').textContent).toContain(
+      REASON_EXPLANATIONS.leakage_detected.cause,
+    );
+    expect(screen.getByTestId('failure-cause-r-leakage-2').textContent).toContain(
+      REASON_EXPLANATIONS.leakage_detected.cause,
+    );
+  });
+
+  it('renders no detector line at all for a failure that is not a leakage block', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          {
+            ...failure({ review_id: 'r-credits' }),
+            leakage_category: null,
+            leakage_rule_id: null,
+            leakage_field_name: null,
+          },
+        ],
+      },
+    });
+    render(<AdminDiagnostics />);
+    await screen.findByTestId('failure-row-r-credits');
+
+    expect(screen.queryByTestId('failure-detector-r-credits')).toBeNull();
+    expect(screen.getByTestId('failure-cause-r-credits')).not.toHaveTextContent(/detector/i);
+  });
+
+  it('builds the detector line from the three allowlisted fields and nothing else', () => {
+    // A unit check on the formatter itself: it must never become a route for
+    // any other row attribute to reach the DOM, whatever a future payload
+    // carries. `detectorDetail` reads three fields by name — this asserts the
+    // output is exactly their join, with an over-stuffed row supplying
+    // sentinels it must ignore.
+    const overStuffed = {
+      ...failure({ review_id: 'r-x' }),
+      leakage_category: 'citation_leakage',
+      leakage_rule_id: 'counterparty-name',
+      leakage_field_name: 'counterparty_change_summary',
+      leakage_matched_text: 'SENTINEL-MATCHED-CONFIDENTIAL-SPAN',
+      verdict_summary: 'SENTINEL-VERDICT',
+    } as RecentFailure;
+
+    const line = detectorDetail(overStuffed);
+    expect(line).toBe('citation_leakage · counterparty-name · counterparty_change_summary');
+    expect(line).not.toContain('SENTINEL');
+    expect(detectorDetail(failure({ review_id: 'r-y' }))).toBeNull();
   });
 
   it('offers no re-run action — re-running a review spends money and is out of scope', async () => {

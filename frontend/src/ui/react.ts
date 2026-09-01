@@ -32,6 +32,7 @@ import { CtTable as CtTableElement } from './components/ct-table';
 import { CtToolbar as CtToolbarElement } from './components/ct-toolbar';
 import { CtFileDrop as CtFileDropElement } from './components/ct-file-drop';
 import { CtProgress as CtProgressElement } from './components/ct-progress';
+import { CtColumns as CtColumnsElement } from './components/ct-columns';
 
 export type { CtChipVariant, CtButtonVariant, CtButtonSize, CtButtonType, CtCardPad, CtBannerVariant, CtTabDef };
 
@@ -197,5 +198,19 @@ export const CtFileDrop = createComponent({
 export const CtProgress = createComponent({
   tagName: 'ct-progress',
   elementClass: CtProgressElement,
+  react: React,
+});
+
+// ---------------------------------------------------------------------------
+// CtColumns (issue #601) — two-column layout primitive. Never templates the
+// children React hands it (no `render()` override at all, see
+// ct-columns.ts's docstring), so there's no reconciliation hazard to route
+// around; createComponent's output is used directly, the same shape as
+// CtCard/CtBanner above.
+// ---------------------------------------------------------------------------
+
+export const CtColumns = createComponent({
+  tagName: 'ct-columns',
+  elementClass: CtColumnsElement,
   react: React,
 });

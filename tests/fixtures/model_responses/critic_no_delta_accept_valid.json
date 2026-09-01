@@ -1,9 +1,11 @@
 {
-  "schema_version": "output-schema-v1",
+  "schema_version": "output-schema-v3",
   "decision": "ACCEPT",
   "confidence_state": "OK",
   "confidence_band": null,
   "issues": [],
+  "block_patches": [],
+  "block_ops": [],
   "critic_delta": null,
   "verdict_summary": null
 }

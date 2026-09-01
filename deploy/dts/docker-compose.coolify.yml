@@ -69,6 +69,7 @@ x-resource-names: &resource-names
   PLAYBOOK_VERSIONS_TABLE: contract-toaster-playbook-versions-dts
   PLAYBOOK_INSTRUCTIONS_TABLE: contract-toaster-playbook-instructions-dts
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
+  USER_PREFERENCES_TABLE: contract-toaster-user-preferences-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
   MODEL_INVOCATIONS_TABLE: contract-toaster-model-invocations-dts

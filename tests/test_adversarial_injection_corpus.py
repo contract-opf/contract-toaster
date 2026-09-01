@@ -201,9 +201,10 @@ def _build(paragraphs: list[str]) -> bytes:
 
 
 def _fixture(name: str) -> bytes:
-    """Generated on demand, like `tests/fixtures/quote_locate/` -- so the
-    payload text lives in reviewable Python rather than inside a binary nobody
-    can grep, and a reviewer can see exactly what is being attempted."""
+    """Generated on demand, like `tests/fixtures/extraction_normalization_80/`
+    -- so the payload text lives in reviewable Python rather than inside a
+    binary nobody can grep, and a reviewer can see exactly what is being
+    attempted."""
     FIXTURES.mkdir(parents=True, exist_ok=True)
     path = FIXTURES / f"{name}.SYNTHETIC.docx"
     if not path.exists():
@@ -225,11 +226,8 @@ def _primary_prompt(docx_bytes: bytes) -> str:
     paragraphs = _doc_paragraphs(docx_bytes)
     doc_text = "\n\n".join(str(p.get("text", "")) for p in paragraphs)
     return pp.assemble_user_prompt_primary(
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         doc_text=doc_text,
-        doc_paragraphs=paragraphs,
     )
 
 
@@ -238,8 +236,6 @@ def _critic_prompt_quoting(payload_text: str) -> str:
     what actually happens when a payload lands in a clause the reviewer flags,
     because `source_quote` is verbatim counterparty text by definition."""
     return pp.assemble_user_prompt_critic(
-        diff_hunks=[],
-        anchored_clauses=[],
         primary_output={
             "schema_version": "output-schema-v2",
             "issues": [{"source_quote": payload_text, "severity": "medium"}],

@@ -50,6 +50,6 @@ ct-progress {
   margin: var(--ct-space-2) 0 0;
   color: var(--ct-text-muted);
   font-family: var(--ct-font-sans);
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
   text-align: center;
 }

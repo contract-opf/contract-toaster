@@ -120,6 +120,22 @@ import src.main as _backend_main  # noqa: E402
 # In-memory fakes
 # ---------------------------------------------------------------------------
 
+# A subset of DynamoDB's reserved words -- the ones plausible as attribute
+# names in this codebase. NOT the full ~570-word list: this double only needs
+# to stop the class of bug that already shipped once. The authoritative,
+# exhaustive enforcement is moto, in
+# tests/test_user_update_reserved_keyword.py.
+_DDB_RESERVED_WORDS = frozenset(
+    {
+        "ACTION", "BETWEEN", "BY", "DATE", "DEFAULT", "DESC", "EXISTS",
+        "GROUP", "HASH", "KEY", "KEYS", "LANGUAGE", "NAME", "ORDER",
+        "OWNER", "PARTITION", "PUBLIC", "RANGE", "ROLE", "SCAN", "SIZE",
+        "SOURCE", "STATUS", "SYSTEM", "TABLE", "TIMESTAMP", "TOKEN", "TTL",
+        "TYPE", "UPDATE", "USER", "VALUE", "VIEW", "YEAR",
+    }
+)
+
+
 class FakeTable:
     """A tiny in-memory stand-in for a DynamoDB Table resource, keyed by the
     given partition-key attribute name."""
@@ -139,15 +155,45 @@ class FakeTable:
     def put_item(self, Item):
         self.items[Item[self.key_name]] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None):
+    def update_item(
+        self,
+        Key,
+        UpdateExpression,
+        ExpressionAttributeValues=None,
+        ExpressionAttributeNames=None,
+    ):
         key = Key[self.key_name]
         item = self.items.setdefault(key, dict(Key))
         vals = ExpressionAttributeValues or {}
-        # Parse "SET field = :field, other = :other" into attribute writes.
+        names = ExpressionAttributeNames or {}
+        # Parse "SET #f0 = :f0, other = :other" into attribute writes,
+        # resolving ExpressionAttributeNames aliases.
         for clause in UpdateExpression.replace("SET", "", 1).split(","):
             field, _, placeholder = clause.strip().partition("=")
             field = field.strip()
             placeholder = placeholder.strip()
+            if field.startswith("#"):
+                if field not in names:
+                    raise AssertionError(
+                        f"UpdateExpression uses alias {field!r} with no "
+                        f"ExpressionAttributeNames entry for it."
+                    )
+                field = names[field]
+            elif field.upper() in _DDB_RESERVED_WORDS:
+                # Fidelity guard. Real DynamoDB (and moto) reject a literal
+                # reserved keyword with:
+                #   ValidationException: Invalid UpdateExpression: Attribute
+                #   name is a reserved keyword; reserved keyword: status
+                # This double used to accept it, which is exactly why the
+                # `status` regression in `update_user` reached production
+                # with 42 green tests over it. A fake that accepts what the
+                # real dependency rejects is not a test.
+                raise AssertionError(
+                    f"Attribute name is a reserved keyword; reserved keyword: {field}. "
+                    f"Alias it via ExpressionAttributeNames (see "
+                    f"tests/test_user_update_reserved_keyword.py, which enforces "
+                    f"this against moto)."
+                )
             if placeholder in vals:
                 item[field] = vals[placeholder]
 

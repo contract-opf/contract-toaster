@@ -58,8 +58,13 @@ STALE_PENDING_THRESHOLD_SECONDS = int(
 # asset is infra/lambda/orphan_reconciler/ only, so it cannot import either
 # of those modules; tests/test_spend_reservation_settlement.py cross-checks
 # all three copies stay numerically identical.
+#
+# Issue #625 (owner decision 2026-08-25): raised 80_000 -> 100_000 when
+# outline mode was deleted -- one full-quality review up to the cap, a
+# loud `document_too_large` failure above it. Reservations scale with this
+# constant automatically (the formula below), and rise with it.
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 80_000
+MAX_INPUT_TOKENS = 100_000
 MAX_OUTPUT_TOKENS = 8_000
 MAX_RETRIES_PER_PASS = 1
 REGIONAL_PRICING_PREMIUM = 1.10
@@ -76,29 +81,13 @@ CRITIC_OUTPUT_RATE_USD_PER_MILLION = 16.50
 DEAD_EXECUTION_ACTUAL_USD_CENTS = 0
 
 
-def _requote_enabled() -> bool:
-    """MIRROR of backend/src/config.py's requote_enabled() -- issue #569.
-
-    This Lambda cannot import backend/src/config.py (see module docstring),
-    so the same `REQUOTE_ENABLED` env var is read directly, with the same
-    default-OFF matching set, at the same call site
-    (`compute_worst_case_reservation_usd_cents`) config.requote_enabled()
-    gates in backend/src/reviews.py."""
-    return os.environ.get("REQUOTE_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
 def compute_worst_case_reservation_usd_cents() -> int:
     """MIRROR of backend/src/reviews.py's function of the same name.
 
-    Issue #569: mirrors that function's `if config.requote_enabled(): usd +=
-    primary_usd` branch (one extra primary-priced pass, unmultiplied by
-    attempts_per_pass -- see reviews.py's docstring for the full
-    rationale), so this settlement-side copy cannot drift from the
-    reserve-side reviews.py figure when the flag is on.
+    Issue #628 removed the conditional extra primary-priced pass issue #569
+    added here (the address-repair pass, its module and its env flag are all
+    deleted), in the same commit reviews.py dropped it -- so this
+    settlement-side copy cannot drift from the reserve-side figure.
     """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
     primary_usd = MAX_INPUT_TOKENS * (
@@ -108,8 +97,6 @@ def compute_worst_case_reservation_usd_cents() -> int:
         CRITIC_INPUT_RATE_USD_PER_MILLION / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (CRITIC_OUTPUT_RATE_USD_PER_MILLION / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
-    if _requote_enabled():
-        usd += primary_usd
     return int(round(usd * 100))
 
 
@@ -162,8 +149,9 @@ def _release_reservation(review_id: str, submission: dict[str, Any]) -> None:
 
     Issue #189 fix: this previously only set a `reservation_released` flag
     on the submission row and never touched daily_spend.reserved_usd_cents,
-    so a dead execution's $2.11 (worst-case, per-model rates -- see the
-    module constants above) held its slice of the daily cap PERMANENTLY,
+    so a dead execution's worst-case reservation (then $2.11, $2.46 since
+    issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model rates, see
+    the module constants above) held its slice of the daily cap PERMANENTLY,
     accumulating until UTC midnight regardless of how many reviews actually
     completed. The flag is retained (audit marker + the idempotency guard
     below) but the credit-back to daily_spend now actually happens.

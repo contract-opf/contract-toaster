@@ -47,6 +47,7 @@ import {
   CtButton,
   CtCard,
   CtChip,
+  CtColumns,
   CtField,
   CtProgress,
   CtTable,
@@ -581,94 +582,107 @@ export default function AdminRetention(): React.ReactElement | null {
               </CtBanner>
             )}
 
-            <CtField label="New retention window (days, 0–1095)" hint={`${sliderValue} days`}>
-              <input
-                id="retention-slider"
-                data-testid="retention-slider"
-                type="range"
-                min={0}
-                max={1095}
-                value={sliderValue}
-                onChange={(e) => {
-                  setSliderValue(Number(e.target.value));
-                  setPreview(null);
-                }}
-              />
-            </CtField>
+            {/* Issue #602: the ticket's own named example -- the day-count
+                box paired beside its slider via `ct-columns`, `narrow`
+                (#601) on the day-count field so it keeps its own intrinsic
+                width instead of stretching to fill the column ("the ninety
+                day box that's literally the entire width of the
+                viewport"). Both fields drive the SAME `sliderValue` state
+                (see `daysInputText`'s docstring); pairing them is exactly
+                the "related controls" case #601's own doc names, not a
+                sequence-dependent form -- neither must be read before the
+                other. */}
+            <CtColumns>
+              <CtField label="New retention window (days, 0–1095)" hint={`${sliderValue} days`}>
+                <input
+                  id="retention-slider"
+                  data-testid="retention-slider"
+                  type="range"
+                  min={0}
+                  max={1095}
+                  value={sliderValue}
+                  onChange={(e) => {
+                    setSliderValue(Number(e.target.value));
+                    setPreview(null);
+                  }}
+                />
+              </CtField>
 
-            {/* Issue #475: exact numeric entry alongside the slider. This
-                field owns its OWN text (`daysInputText`), NOT `sliderValue`
-                directly -- see that state's docstring for why a controlled
-                `value={sliderValue}` here would make the field
-                un-clearable. An empty or not-yet-parseable value is left in
-                the field as typed and does not touch `sliderValue`;
-                clamping into [0, 1095] happens on blur rather than on every
-                keystroke, so a partially-typed value like "36" is never
-                silently rewritten mid-entry. There is no save-time backstop:
-                `saveRetentionChange` posts `sliderValue` only, so an
-                uncommitted edit left in this field (typed, never blurred)
-                is discarded on save rather than clamped in. */}
-            <CtField
-              label="Days"
-              hint="Type an exact day count — this and the slider above stay in sync."
-            >
-              <input
-                id="retention-days-input"
-                data-testid="retention-days-input"
-                type="number"
-                min={0}
-                max={1095}
-                step={1}
-                inputMode="numeric"
-                value={daysInputText}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  setDaysInputText(raw);
-                  if (raw === '') {
-                    // Mid-edit (the admin selected-all and is retyping, or
-                    // backspacing to clear it): leave `sliderValue` alone
-                    // until blur/save commits (or reverts) this field.
-                    return;
-                  }
-                  const parsed = Number(raw);
-                  if (!Number.isFinite(parsed)) {
-                    return;
-                  }
-                  if (parsed < 0 || parsed > 1095) {
-                    // Out of range mid-typing (e.g. "5000" on the way to
-                    // being backspaced down to "500"): leave `sliderValue`
-                    // alone rather than clamping on every keystroke -- blur
-                    // (or save) is where this settles, per finding 1.
-                    return;
-                  }
-                  setSliderValue(Math.round(parsed));
-                  setPreview(null);
-                }}
-                onBlur={() => {
-                  const parsed = Number(daysInputText);
-                  if (daysInputText === '' || !Number.isFinite(parsed)) {
-                    // Nothing committable was left in the field -- revert
-                    // to the last valid value rather than saving on an
-                    // empty/unparseable state.
-                    setDaysInputText(String(sliderValue));
-                    return;
-                  }
-                  // Write the committed text UNCONDITIONALLY rather than
-                  // routing it through the [sliderValue] effect above: when
-                  // the clamp is a no-op state change (already at a
-                  // boundary -- 1095 or 0), React bails out of the render,
-                  // the effect never re-runs, and the out-of-range text the
-                  // admin typed is left on screen while a different value
-                  // is what Save posts. A retention window is a compliance
-                  // number; showing one and saving another is the one
-                  // failure this field must not have.
-                  const next = clampDays(parsed);
-                  setSliderValue(next);
-                  setDaysInputText(String(next));
-                  setPreview(null);
-                }}
-              />
-            </CtField>
+              {/* Issue #475: exact numeric entry alongside the slider. This
+                  field owns its OWN text (`daysInputText`), NOT `sliderValue`
+                  directly -- see that state's docstring for why a controlled
+                  `value={sliderValue}` here would make the field
+                  un-clearable. An empty or not-yet-parseable value is left in
+                  the field as typed and does not touch `sliderValue`;
+                  clamping into [0, 1095] happens on blur rather than on every
+                  keystroke, so a partially-typed value like "36" is never
+                  silently rewritten mid-entry. There is no save-time backstop:
+                  `saveRetentionChange` posts `sliderValue` only, so an
+                  uncommitted edit left in this field (typed, never blurred)
+                  is discarded on save rather than clamped in. */}
+              <CtField
+                label="Days"
+                hint="Type an exact day count — this and the slider stay in sync."
+                narrow
+              >
+                <input
+                  id="retention-days-input"
+                  data-testid="retention-days-input"
+                  type="number"
+                  min={0}
+                  max={1095}
+                  step={1}
+                  inputMode="numeric"
+                  value={daysInputText}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setDaysInputText(raw);
+                    if (raw === '') {
+                      // Mid-edit (the admin selected-all and is retyping, or
+                      // backspacing to clear it): leave `sliderValue` alone
+                      // until blur/save commits (or reverts) this field.
+                      return;
+                    }
+                    const parsed = Number(raw);
+                    if (!Number.isFinite(parsed)) {
+                      return;
+                    }
+                    if (parsed < 0 || parsed > 1095) {
+                      // Out of range mid-typing (e.g. "5000" on the way to
+                      // being backspaced down to "500"): leave `sliderValue`
+                      // alone rather than clamping on every keystroke -- blur
+                      // (or save) is where this settles, per finding 1.
+                      return;
+                    }
+                    setSliderValue(Math.round(parsed));
+                    setPreview(null);
+                  }}
+                  onBlur={() => {
+                    const parsed = Number(daysInputText);
+                    if (daysInputText === '' || !Number.isFinite(parsed)) {
+                      // Nothing committable was left in the field -- revert
+                      // to the last valid value rather than saving on an
+                      // empty/unparseable state.
+                      setDaysInputText(String(sliderValue));
+                      return;
+                    }
+                    // Write the committed text UNCONDITIONALLY rather than
+                    // routing it through the [sliderValue] effect above: when
+                    // the clamp is a no-op state change (already at a
+                    // boundary -- 1095 or 0), React bails out of the render,
+                    // the effect never re-runs, and the out-of-range text the
+                    // admin typed is left on screen while a different value
+                    // is what Save posts. A retention window is a compliance
+                    // number; showing one and saving another is the one
+                    // failure this field must not have.
+                    const next = clampDays(parsed);
+                    setSliderValue(next);
+                    setDaysInputText(String(next));
+                    setPreview(null);
+                  }}
+                />
+              </CtField>
+            </CtColumns>
             <p data-testid="retention-window-explainer">
               Documents are deleted {sliderValue} day{sliderValue === 1 ? '' : 's'} after their
               review finishes. 0 keeps nothing once a review completes.
@@ -760,67 +774,76 @@ export default function AdminRetention(): React.ReactElement | null {
               states the picker is actually in. Before this it always promised
               a picker, including when the list had failed to load and the
               dropdown opened to nothing at all. */}
-          <CtField
-            label="Pick a recent review"
-            hint={
-              reviewsFailed
-                ? 'The recent-review list could not be loaded, so there is nothing to pick from. Paste a full review ID below instead.'
-                : reviews !== null && reviews.length === 0
-                  ? 'No reviews have been submitted yet, so there is nothing to pick from.'
-                  : 'Selecting one shows its details below — no need to know its ID.'
-            }
-            data-testid="hold-review-picker-field"
-          >
-            <select
-              id="hold-review-select"
-              data-testid="hold-review-select"
-              // Round 2 (finding 2): gated on membership in the RENDERED
-              // options (`reviewPickerOptions`, capped at
-              // `REVIEW_PICKER_OPTION_LIMIT`), not the full `reviewsById` --
-              // a picked id can only ever be one of these options by
-              // construction, but this also guards against `reviewPickerOptions`
-              // shrinking the picked review out of the visible slice on a
-              // `loadReviews()` refresh (e.g. after `placeHold`), which would
-              // otherwise set a `value` with no matching `<option>` and
-              // render blank instead of falling back to the placeholder.
-              value={
-                effectiveReviewId !== '' &&
-                reviewPickerOptions.some((review) => review.review_id === effectiveReviewId)
-                  ? effectiveReviewId
-                  : ''
+          {/* Issue #602: the pick and paste controls are two alternative
+              ways to specify the SAME review (`effectiveReviewId` is
+              exactly one or the other -- see that value's own docstring),
+              never a sequence the admin must read top-to-bottom, so a
+              two-column `ct-columns` pairing is #601's own "related
+              controls" case rather than the "strict top-to-bottom sequence"
+              case the design doc says to avoid it for. */}
+          <CtColumns>
+            <CtField
+              label="Pick a recent review"
+              hint={
+                reviewsFailed
+                  ? 'The recent-review list could not be loaded, so there is nothing to pick from. Paste a full review ID instead.'
+                  : reviews !== null && reviews.length === 0
+                    ? 'No reviews have been submitted yet, so there is nothing to pick from.'
+                    : 'Selecting one shows its details below — no need to know its ID.'
               }
-              onChange={(e) => {
-                setPickedReviewId(e.target.value);
-                setHoldReviewId('');
-              }}
+              data-testid="hold-review-picker-field"
             >
-              <option value="">Select a recent review…</option>
-              {reviewPickerOptions.map((review) => (
-                <option key={review.review_id} value={review.review_id}>
-                  {formatFailureTime(review.created_at)} —{' '}
-                  {submitterIdentity(review.owner_sub, usersBySub)} —{' '}
-                  {describeOutcome(review.status, review.decision).label}
-                </option>
-              ))}
-            </select>
-          </CtField>
-          <CtField
-            label="Review ID"
-            hint="Or paste a full review ID instead."
-            error={holdReviewIdError}
-          >
-            <input
-              id="hold-review-id"
-              data-testid="hold-review-id-input"
-              type="text"
-              autoComplete="off"
-              value={holdReviewId}
-              onChange={(e) => {
-                setHoldReviewId(e.target.value);
-                setPickedReviewId('');
-              }}
-            />
-          </CtField>
+              <select
+                id="hold-review-select"
+                data-testid="hold-review-select"
+                // Round 2 (finding 2): gated on membership in the RENDERED
+                // options (`reviewPickerOptions`, capped at
+                // `REVIEW_PICKER_OPTION_LIMIT`), not the full `reviewsById` --
+                // a picked id can only ever be one of these options by
+                // construction, but this also guards against `reviewPickerOptions`
+                // shrinking the picked review out of the visible slice on a
+                // `loadReviews()` refresh (e.g. after `placeHold`), which would
+                // otherwise set a `value` with no matching `<option>` and
+                // render blank instead of falling back to the placeholder.
+                value={
+                  effectiveReviewId !== '' &&
+                  reviewPickerOptions.some((review) => review.review_id === effectiveReviewId)
+                    ? effectiveReviewId
+                    : ''
+                }
+                onChange={(e) => {
+                  setPickedReviewId(e.target.value);
+                  setHoldReviewId('');
+                }}
+              >
+                <option value="">Select a recent review…</option>
+                {reviewPickerOptions.map((review) => (
+                  <option key={review.review_id} value={review.review_id}>
+                    {formatFailureTime(review.created_at)} —{' '}
+                    {submitterIdentity(review.owner_sub, usersBySub)} —{' '}
+                    {describeOutcome(review.status, review.decision).label}
+                  </option>
+                ))}
+              </select>
+            </CtField>
+            <CtField
+              label="Review ID"
+              hint="Or paste a full review ID instead."
+              error={holdReviewIdError}
+            >
+              <input
+                id="hold-review-id"
+                data-testid="hold-review-id-input"
+                type="text"
+                autoComplete="off"
+                value={holdReviewId}
+                onChange={(e) => {
+                  setHoldReviewId(e.target.value);
+                  setPickedReviewId('');
+                }}
+              />
+            </CtField>
+          </CtColumns>
           {matchedReview && (
             <p data-testid="hold-review-id-match">
               Selected: {formatFailureTime(matchedReview.created_at)} —{' '}

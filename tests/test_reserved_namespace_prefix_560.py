@@ -7,14 +7,14 @@ document crashed the redline.
 
 `ET.register_namespace` refuses any prefix matching `ns\\d+` -- that pattern is
 reserved for ElementTree's own auto-generated bindings -- and raises
-`ValueError`. Three places in the redline path register every prefix a document
-declares. Two guarded the call. `redline_generate.
+`ValueError`. Several places in the redline path register every prefix a
+document declares. Most guarded the call. `redline_generate.
 inject_export_marker_and_footnotes` did not.
 
 Real Word documents carry such prefixes, particularly any that have been
-round-tripped through another tool. So a document that had located every one of
-its patches, and was one step from a finished redline, raised instead --
-producing nothing.
+round-tripped through another tool. So a document whose every edit had
+compiled, one step from a finished redline, raised instead -- producing
+nothing.
 
 ## Measured, not estimated
 
@@ -28,8 +28,8 @@ On a real 31-agreement corpus, 5 patches each:
             121 of 130 patches applied              (93.1%)
              0 documents raised
 
-The residual 9 are a different, known bug (#529: the quote spans a multi-`w:p`
-logical-paragraph join), not this one.
+The residual 9 were a different, known bug (#529/#564: the edit spans a
+multi-`w:p` logical-paragraph join), not this one.
 
 ## Why this test is shaped the way it is
 
@@ -41,10 +41,17 @@ the corpus documents' content mattered.
 The load-bearing assertion is that a redline is PRODUCED. Asserting merely that
 no exception escaped would pass against a version that swallowed the error and
 returned nothing, which is the same outcome for the attorney as the crash.
+
+Issue #628 repointed the driver from the deleted quote patcher onto the LIVE
+block path (`redline_generate.generate_redline_from_blocks`), run in a notes
+mode that carries internal content so the export-marker injection -- the exact
+function that raised -- is on the path under test. The structural trigger and
+every assertion are unchanged.
 """
 
 from __future__ import annotations
 
+import datetime
 import io
 import sys
 import zipfile
@@ -55,8 +62,10 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import extraction_normalization_stage as ens  # noqa: E402
+import leakage_scan  # noqa: E402
+import redline_generate  # noqa: E402
 import redline_inplace  # noqa: E402
-import redline_quote_apply as rqa  # noqa: E402
 
 CLAUSE = (
     "The Recipient shall indemnify the Discloser against all claims arising "
@@ -102,17 +111,71 @@ def _document(extra_root_ns: str) -> bytes:
     return buf.getvalue()
 
 
+ADDITION = " This obligation survives termination."
+
+
 def _apply(docx_bytes: bytes) -> dict:
-    return rqa.apply_quote_patches(
-        docx_bytes,
-        [{
-            "source_quote": CLAUSE,
-            "new_text": CLAUSE + " This obligation survives termination.",
-            "rationale": "regression fixture",
-        }],
-        author="Test",
-        timestamp_iso="2026-08-06T00:00:00Z",
+    """Compile ONE whole-clause edit through the live block path.
+
+    The transcript is derived from the document's OWN block map (the same
+    `extraction_normalization_stage.build_block_map` a real review addresses
+    through), so the fixture cannot address a block the extractor never
+    stamped. `notes_mode="internal"` is what puts the export marker -- and
+    therefore `redline_generate.inject_export_marker_and_footnotes`, the
+    function that raised on a reserved prefix -- on the path.
+
+    Returns `{"docx_bytes", "applied", "flag_only"}` so the assertions below
+    read exactly as they did against the retired quote patcher.
+    """
+    normalized = ens.extract_and_normalize(docx_bytes)
+    block_map = ens.build_block_map(normalized["paragraphs"])
+    block_id, block = next(
+        (bid, blk) for bid, blk in block_map.items() if CLAUSE in blk["text"]
     )
+    result = redline_generate.generate_redline_from_blocks(
+        reconciled_result={
+            "decision": "REQUEST_CHANGE",
+            "issues": [
+                {
+                    "issue_key": "I1",
+                    "section_ref": "2",
+                    "section_title": "Indemnification",
+                    "counterparty_change_summary": "One-way indemnity.",
+                    "decision": "REQUEST_CHANGE",
+                    "external_rationale_for_footnote": "regression fixture",
+                    "internal_rationale_for_footnote": "regression fixture (internal)",
+                    "playbook_topic_id": "indemnification",
+                    "provenance": "model",
+                }
+            ],
+            "block_patches": [
+                {
+                    "block_id": block_id,
+                    "segments": [
+                        # The WHOLE block, transcribed, then the addition --
+                        # the shape the prompt asks a model for.
+                        {"op": "keep", "text": block["text"]},
+                        {"op": "insert", "text": ADDITION, "issue_key": "I1"},
+                    ],
+                }
+            ],
+            "block_ops": [],
+            "verdict_summary": None,
+        },
+        corpus=leakage_scan.ConfidentialCorpus(),
+        normalized_docx_bytes=docx_bytes,
+        notes_mode="internal",
+        author="Test",
+        date=datetime.datetime(2026, 8, 6, tzinfo=datetime.timezone.utc),
+    )
+    return {
+        "docx_bytes": result.get("docx_bytes"),
+        # One edit in, so "applied" is "a document came back with no
+        # flag-only entry for it" -- the same one-element shape the assertions
+        # below were written against.
+        "applied": [] if result.get("flag_only") or result.get("docx_bytes") is None else [block_id],
+        "flag_only": result.get("flag_only") or [],
+    }
 
 
 # ---------------------------------------------------------------------------

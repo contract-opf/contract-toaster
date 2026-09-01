@@ -197,6 +197,12 @@ export class DataStack extends cdk.NestedStack {
   // deprovisioning sync job, shared between the (future) scheduled sync
   // worker and the admin UI's sync-visibility panel.
   readonly syncStatusTable: dynamodb.Table;
+  // Issue #523 (epic #519 item F) — per-user preferences, keyed on the
+  // caller's own cognito_sub. Deliberately NOT the users table: that table's
+  // one "safe to return" projection is what the admin Users UI renders, and
+  // a preference living there would be admin-readable, defeating #519
+  // decision 3 (per-user, no admin override in either direction).
+  readonly userPreferencesTable: dynamodb.Table;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -1114,6 +1120,40 @@ export class DataStack extends cdk.NestedStack {
     cdk.Tags.of(this.retentionSettingsTable).add('contract-toaster:table', 'retention_settings');
 
     // -----------------------------------------------------------------------
+    // user_preferences table — PK: cognito_sub (issue #523, epic #519 item F)
+    //
+    // One row per user, holding that user's OWN settings. Today's only key is
+    //   - notes_mode: 'none' | 'external' | 'internal' | 'both' — which
+    //     audience this user's review footnotes default to
+    // plus `updated_at` (epoch seconds). #489 (remember the sound-mute flag
+    // and the last-selected contract type) is the next consumer: a new key is
+    // a new attribute on this same row, no schema change here.
+    //
+    // Why a separate table rather than an attribute on the users row: the
+    // users table's `PUBLIC_USER_FIELDS` projection is what the ADMIN Users
+    // UI renders, so a preference there would be admin-readable — and epic
+    // #519 decision 3 gives an admin no visibility into, or override over,
+    // anybody else's preference. backend/src/user_preferences.py keys every
+    // read and write on the caller's own sub and exposes no target-subject
+    // parameter at all.
+    //
+    // PITR enabled: consistent with the other config-bearing tables above.
+    // -----------------------------------------------------------------------
+    this.userPreferencesTable = new dynamodb.Table(this, 'UserPreferencesTable', {
+      tableName: `${appName}-user-preferences-${envName}`,
+      partitionKey: { name: 'cognito_sub', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      encryption: ddbEncryption,
+      encryptionKey: dynamodbKeyEncryption,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    cdk.Tags.of(this.userPreferencesTable).add('contract-toaster:env', envName);
+    cdk.Tags.of(this.userPreferencesTable).add('contract-toaster:data-class', 'dynamodb');
+    cdk.Tags.of(this.userPreferencesTable).add('contract-toaster:table', 'user_preferences');
+
+    // -----------------------------------------------------------------------
     // sync_status table — PK: sync_type (issue #92)
     //
     // Single source of truth for "when did the Workspace/SSO deprovisioning
@@ -1292,6 +1332,12 @@ export class DataStack extends cdk.NestedStack {
       value: this.playbookInstructionsTable.tableName,
       description: `Playbook standing-instructions table name for ${envName}`,
       exportName: `ContractToaster-${envName}-playbookInstructions-TableName`,
+    });
+
+    new cdk.CfnOutput(this, 'UserPreferencesTableName', {
+      value: this.userPreferencesTable.tableName,
+      description: `Per-user preferences table name for ${envName}`,
+      exportName: `ContractToaster-${envName}-userPreferences-TableName`,
     });
 
     new cdk.CfnOutput(this, 'ReviewsTableName', {

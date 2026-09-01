@@ -17,7 +17,6 @@
   "model_responses": {
     "primary": [
       {
-        "schema_version": "output-schema-v1",
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "confidence_band": null,
@@ -28,11 +27,11 @@
             "counterparty_change_summary": "Counterparty removed the liability cap from Section 8.",
             "decision": "REQUEST_CHANGE",
             "external_rationale_for_footnote": "Section 8 must retain the standard aggregate liability cap.",
-            "proposed_replacement_text": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
             "playbook_topic_id": "limitation-of-liability",
             "internal_precedent_citation": null,
             "provenance": "model",
-            "source_quote": "Each party's liability under this Agreement shall be unlimited."
+            "issue_key": "I1",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
           },
           {
             "section_ref": "sec-10",
@@ -40,26 +39,60 @@
             "counterparty_change_summary": "Counterparty introduced one-way indemnification of Institution by the Company.",
             "decision": "REQUEST_CHANGE",
             "external_rationale_for_footnote": "One-way indemnification by the Company is not an acceptable position.",
-            "proposed_replacement_text": "Neither party shall bear responsibility for defending or compensating the other party for third-party claims arising under this Agreement, except as expressly and narrowly set forth in Section 8.",
             "playbook_topic_id": "indemnification",
             "internal_precedent_citation": null,
             "provenance": "model",
-            "source_quote": "The Company shall indemnify Institution for any and all claims, without limit."
+            "issue_key": "I2",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
           }
         ],
         "critic_delta": null,
-        "verdict_summary": "Two issues identified requiring attention before your organization can accept this draft."
+        "verdict_summary": "Two issues identified requiring attention before your organization can accept this draft.",
+        "block_patches": [
+          {
+            "block_id": "p0001",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "Each party's liability under this Agreement shall be unlimited.",
+                "issue_key": "I1"
+              },
+              {
+                "op": "insert",
+                "text": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+                "issue_key": "I1"
+              }
+            ]
+          },
+          {
+            "block_id": "p0002",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "The Company shall indemnify Institution for any and all claims, without limit.",
+                "issue_key": "I2"
+              },
+              {
+                "op": "insert",
+                "text": "Neither party shall bear responsibility for defending or compensating the other party for third-party claims arising under this Agreement, except as expressly and narrowly set forth in Section 8.",
+                "issue_key": "I2"
+              }
+            ]
+          }
+        ],
+        "block_ops": []
       }
     ],
     "critic": [
       {
-        "schema_version": "output-schema-v1",
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "confidence_band": null,
         "issues": [],
         "critic_delta": null,
-        "verdict_summary": null
+        "verdict_summary": null,
+        "block_patches": [],
+        "block_ops": []
       }
     ]
   },

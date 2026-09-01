@@ -1,14 +1,18 @@
 name: brand-free-gate
 
-# Issue #404: the engine's public surface must carry no tenant brand.
+# Issue #404 (rescoped by #591): the engine's public surface must carry no
+# FUNCTIONAL reference to the private org, and no corporate-domain leak.
 #
 # The toaster is a brand-free empty shell developed in public (epic #408).
 # tests/lint-brand-free.py scans every tracked file EXCEPT the paths in
 # public-cut-exclude.txt -- i.e. exactly what a public cut would publish --
-# and hard-fails on the tenant brand, on the corporate domain outside a
-# reviewed allowlist, and on any tests/ .docx that does not declare itself
-# synthetic. It self-tests its own scanner first, so a matcher that silently
-# matches nothing cannot pass.
+# and hard-fails on the corporate domain outside a reviewed allowlist, on
+# 'exos-legal' in a FUNCTIONAL position (image path, repo URL, CODEOWNERS-
+# style team, workflow org ref), and on any tests/ .docx that does not
+# declare itself synthetic. The tenant brand string itself ("Exos") is
+# publishable per owner ruling and is no longer policed here. It self-tests
+# its own scanner first, so a matcher that silently matches nothing cannot
+# pass.
 #
 # scripts/check.sh already runs this file (its loop picks up tests/lint-*.py).
 # This workflow exists so the gate also blocks pushes and pull requests

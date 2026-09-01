@@ -190,9 +190,13 @@ describe('hash-based tab routing (issue #489, item 1)', () => {
     render(<App />);
 
     await screen.findByTestId('version-display');
-    const admin = await screen.findByRole('tablist', { name: 'Admin' });
+    // Issue #599 flattened the admin panels into the one "Sections"
+    // tablist (no more separate "Admin" tablist) — the hash itself still
+    // keeps its `#/admin/<id>` shape (see App.tsx), only the rendered tab
+    // bar changed.
+    const sections = await screen.findByRole('tablist', { name: 'Sections' });
     await waitFor(() =>
-      expect(within(admin).getByRole('tab', { name: 'Diagnostics' })).toHaveAttribute(
+      expect(within(sections).getByRole('tab', { name: 'Diagnostics' })).toHaveAttribute(
         'aria-selected',
         'true',
       ),
@@ -205,9 +209,11 @@ describe('hash-based tab routing (issue #489, item 1)', () => {
     render(<App />);
 
     await screen.findByTestId('version-display');
-    // No Admin group exists at all for this caller (#477's own posture) —
-    // and the hash the unauthorized deep link named must not survive either.
-    expect(screen.queryByRole('tablist', { name: 'Admin' })).toBeNull();
+    // No admin tab renders at all for this caller (still one "Sections"
+    // tablist, issue #599) — and the hash the unauthorized deep link named
+    // must not survive either.
+    expect(screen.queryByRole('tab', { name: 'Users' })).toBeNull();
+    expect(screen.getAllByRole('tablist')).toHaveLength(1);
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute(
       'aria-selected',
       'true',

@@ -36,6 +36,7 @@ const REGISTERED_TAGS = [
   'ct-toolbar',
   'ct-file-drop',
   'ct-progress',
+  'ct-columns',
 ];
 
 describe('ui/index.ts registry', () => {

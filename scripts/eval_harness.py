@@ -61,7 +61,9 @@ Each gold fixture is a JSON file with:
         "decision": "ACCEPT" | "REQUEST_CHANGE" | null,   # checked iff present
         "min_issues": <int>,                              # checked iff present
         "max_issues": <int>,                               # checked iff present
-        "quotes_must_locate": <bool>                        # default true
+        "edits_must_apply": <bool>                          # default true
+                                                            # (v2 spelling:
+                                                            #  quotes_must_locate)
       }
     }
 
@@ -80,10 +82,14 @@ and checks the fixture's `expected` block against the actual `ReviewResult`:
 
   - **Decision fidelity**: `status` / `decision` match `expected` exactly.
   - **Issue-count bounds**: `len(findings)` within `[min_issues, max_issues]`.
-  - **Quote locatability**: every finding's `source_quote` locates in the
-    document via the SAME entry point the real pipeline patches from
-    (`scripts/quote_locate.py::locate_quote` -- a verification utility, not
-    a review rule) unless `quotes_must_locate` is explicitly `false`.
+  - **Addressing**: every proposed edit actually reaches the document,
+    unless `edits_must_apply` (or its v2-era spelling `quotes_must_locate`)
+    is explicitly `false`. Under the v3 block-transcript contract that means
+    the result reports NO `analysis_report.changes_not_applied` entries --
+    a transcript that names the wrong block, or misquotes the source, lands
+    there. Issue #628 removed the v2 half of this check along with the
+    locator it called: no fixture can carry a verbatim address any more,
+    because no schema defines one.
   - **Floor obligations**: a fixture whose canned primary/critic output
     marks a hard-rejection-shaped issue REQUEST_CHANGE must reconcile to a
     final `decision="REQUEST_CHANGE"` -- this is the ordinary decision-
@@ -175,7 +181,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import playbook_registry  # noqa: E402
-import quote_locate  # noqa: E402
 import review_spine  # noqa: E402
 
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -266,10 +271,10 @@ def build_document(clauses: list[dict[str, Any]]) -> tuple[bytes, list[dict[str,
     NOT match what `extraction_normalization_stage.extract_and_normalize`
     shows the model: that stage merges a clause's heading and body into a
     single paragraph (heading text becomes the `heading` field, section
-    number stripped) rather than keeping them as two separate entries. A
-    `source_quote` must therefore be verified via `quote_locate.locate_quote`
-    (which re-derives the real pipeline's paragraph list from `docx_bytes`
-    itself), never against `shown_paragraphs` -- see `score_case`.
+    number stripped) rather than keeping them as two separate entries. Any
+    check about what the model was actually shown must therefore re-derive
+    the pipeline's own paragraph list from `docx_bytes`, never assert
+    against `shown_paragraphs` -- see `score_case`.
     """
     parts: list[str] = []
     shown: list[dict[str, Any]] = []
@@ -439,25 +444,25 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
         passed = False
         reasons.append(f"expected <= {max_issues} issue(s), got {len(findings)}")
 
-    if expected.get("quotes_must_locate", True):
-        for finding in findings:
-            quote = finding.get("source_quote")
-            if not quote:
-                continue
-            # issue #400 review-round-3 fix: locate against the PIPELINE's own
-            # view (re-extracted from docx_bytes), not `shown_paragraphs` --
-            # extraction_normalization_stage merges a clause's heading and
-            # body into one paragraph, so the two-entries-per-clause raw view
-            # `build_document` returns disagrees with what the model was
-            # actually shown, and disagrees with what
-            # scripts/redline_quote_apply.py's real locate call sees.
-            located = quote_locate.locate_quote(docx_bytes, quote)
-            if located["status"] != "found":
-                passed = False
-                reasons.append(
-                    f"source_quote does not locate in the shown document text "
-                    f"(status={located['status']!r}): {quote!r}"
-                )
+    if expected.get("edits_must_apply", expected.get("quotes_must_locate", True)):
+        # Issue #627: the ADDRESSING check.
+        #
+        # Under v3 an issue names no quote -- it names a `block_id` and
+        # transcribes that block, and the pipeline proves the transcript
+        # against the document's own bytes. The equivalent of "the quote
+        # located" is therefore "the edit was actually applied", which the
+        # result reports directly: `redline_generate` lists every edit it
+        # could not compile under `analysis_report.changes_not_applied`. A
+        # fixture whose transcript addresses the wrong block, or misquotes
+        # the source, lands there -- so this catches exactly the class the
+        # locate check used to.
+        not_applied = ((result.get("analysis_report") or {}).get("changes_not_applied")) or []
+        for entry in not_applied:
+            passed = False
+            reasons.append(
+                "a proposed edit was not applied to the document "
+                f"(reason={entry.get('reason')!r}, section_ref={entry.get('section_ref')!r})"
+            )
 
     return CaseResult(case_id=case.case_id, passed=passed, reasons=reasons)
 

@@ -5,38 +5,39 @@ Re-added guard for issue #399: a round-trip verification failure FAILS CLOSED.
 ## Why this file exists twice
 
 Phase 1 (#379) rewired `generate_redline` onto the quote-based patcher and, per
-its "rewrite-or-retire" scope, deleted the original of this test. The behaviour
+its "rewrite-or-retire" scope, deleted the original of this test. Issue #628
+then deleted that patcher too, and this file moved onto the block compiler --
+the gate structure is identical, which is why the rewrite is a repointing
+rather than a rewrite of the property. The behaviour
 it guarded survived the rewrite -- independent verification confirmed it -- so
 what was lost was coverage, not correctness. But an unguarded safety invariant
 is one refactor away from being a silent regression, and this one is not a
 cosmetic property:
 
-    when `verify_docx_round_trip` raises, `generate_redline` must return a
-    status dict with `docx_bytes=None`, and must NEVER let the ValueError
+    when `verify_docx_round_trip` raises, the redline entry point must return
+    a status dict with `docx_bytes=None`, and must NEVER let the ValueError
     propagate.
 
 ## The status is NOT the one issue #399 predicted, and that is worth recording
 
 #399's acceptance criteria say the result should be
 `ERROR_MANUAL_REVIEW_REQUIRED` / `round_trip_verification_failed`. It is
-actually `MANUAL_REVIEW_REQUIRED` / `quote_patches_not_applied`, and the
-round-trip cause is carried per-patch inside the analysis report.
+actually `MANUAL_REVIEW_REQUIRED` / `block_edits_not_applied`, and the
+round-trip cause is carried per-edit inside the analysis report.
 
-That is because `apply_quote_patches` runs its OWN round-trip check on the
-bytes it assembled, before returning them. When that check fails it reports
-every patch back as flag-only with `round_trip_verification_failed` and hands
-back `docx_bytes=None`, so `generate_redline` sees "zero applied" and takes
-that branch. Its own round-trip `try/except` never runs on this path -- the
-code comment there already says as much ("Defense-in-depth: apply_quote_patches
-already verified this SAME round trip internally ... re-checking here can only
-ever pass").
+That is because `redline_block_apply.apply_block_transcript` runs its OWN
+round-trip check on the bytes it assembled, before returning them. When that
+check fails it reports every edit back as a failure with
+`round_trip_verification_failed` and hands back `docx_bytes=None`, so
+`generate_redline_from_blocks` sees "zero applied" and takes that branch. Its
+own round-trip `try/except` never runs on this path.
 
 Both layers are covered here, because both are real:
 
   - the INNER gate (`apply_quote_patches`) is what fires on the shipping path,
-    and produces MANUAL_REVIEW_REQUIRED / quote_patches_not_applied with the
-    round-trip cause recorded per patch;
-  - the OUTER gate (`generate_redline`) is what fires for a caller that
+    and produces MANUAL_REVIEW_REQUIRED / block_edits_not_applied with the
+    round-trip cause recorded per edit;
+  - the OUTER gate (`generate_redline_from_blocks`) is what fires for a caller that
     produces bytes some other way, and produces exactly the
     ERROR_MANUAL_REVIEW_REQUIRED / round_trip_verification_failed pair #399
     predicted.
@@ -53,16 +54,16 @@ diagnosable. Worse, "the assembled document did not survive a round trip"
 means the bytes are suspect, and the one thing that must not happen next is
 handing them to a lawyer as their deliverable.
 
-The surviving `tests/test_redline_quote_apply.py` covers the HAPPY round trip
-only, which is why this needed its own file rather than an extra case there.
+`tests/test_redline_block_apply.py` covers the HAPPY round trip only, which is
+why this needs its own file rather than an extra case there.
 
 ## How it is driven
 
-Down the real REQUEST_CHANGE branch with a genuinely locatable `source_quote`,
-so `apply_quote_patches` really applies a patch and really reaches the
-round-trip gate. Only `verify_docx_round_trip` is replaced -- the narrowest
-possible substitution, because a test that stubbed the patcher too would prove
-nothing about the path the pipeline actually takes.
+Down the real REQUEST_CHANGE branch with a transcript that genuinely proves
+against the fixture, so `apply_block_transcript` really compiles an edit and
+really reaches the round-trip gate. Only `verify_docx_round_trip` is replaced
+-- the narrowest possible substitution, because a test that stubbed the
+compiler too would prove nothing about the path the pipeline actually takes.
 
 Exit codes: 0 = pass, 1 = fail
 """
@@ -80,7 +81,10 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import block_transcript  # noqa: E402
+import extraction_normalization_stage as ens  # noqa: E402
 import leakage_scan  # noqa: E402
+import redline_block_apply  # noqa: E402
 import redline_generate  # noqa: E402
 
 _CLAUSE = (
@@ -126,38 +130,56 @@ def _docx_with(text: str) -> bytes:
     return buf.getvalue()
 
 
-def _request_change_result() -> dict:
+def _request_change_result(docx_bytes: bytes) -> dict:
+    """A v3 REQUEST_CHANGE whose transcript replaces the whole clause.
+
+    The `block_id` is resolved from `docx_bytes`'s OWN block map, so the
+    transcript proves by construction and the compiler really reaches its
+    round-trip gate -- which is the whole premise of this file.
+    """
+    normalized = ens.extract_and_normalize(docx_bytes)
+    block_id, block = next(iter(ens.build_block_map(normalized["paragraphs"]).items()))
     return {
-        "schema_version": "output-schema-v1",
+        "schema_version": "output-schema-v3",
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "verdict_summary": "One change requested.",
         "issues": [
             {
+                "issue_key": "I1",
                 "section_ref": "Section 9",
                 "section_title": "Limitation of Liability",
                 "counterparty_change_summary": "Cap replaced with a fixed sum.",
                 "decision": "REQUEST_CHANGE",
                 "external_rationale_for_footnote": "A fees-paid cap is the standard position.",
-                "proposed_replacement_text": _REPLACEMENT,
                 "playbook_topic_id": "clause.liability",
                 "internal_precedent_citation": None,
                 "provenance": "model",
-                "source_quote": _CLAUSE,
             }
         ],
+        "block_patches": [
+            {
+                "block_id": block_id,
+                "segments": [
+                    {"op": "delete", "text": block["text"], "issue_key": "I1"},
+                    {"op": "insert", "text": _REPLACEMENT, "issue_key": "I1"},
+                ],
+            }
+        ],
+        "block_ops": [],
         "critic_delta": None,
     }
 
 
 def _run(monkeypatched_verify) -> dict:
+    docx_bytes = _docx_with(_CLAUSE)
     original = redline_generate.verify_docx_round_trip
     redline_generate.verify_docx_round_trip = monkeypatched_verify
     try:
-        return redline_generate.generate_redline(
-            reconciled_result=_request_change_result(),
+        return redline_generate.generate_redline_from_blocks(
+            reconciled_result=_request_change_result(docx_bytes),
             corpus=leakage_scan.ConfidentialCorpus(),
-            normalized_docx_bytes=_docx_with(_CLAUSE),
+            normalized_docx_bytes=docx_bytes,
             review_id="roundtrip-guard",
         )
     finally:
@@ -165,7 +187,7 @@ def _run(monkeypatched_verify) -> dict:
 
 
 def test_the_happy_path_really_reaches_the_gate(failures: list) -> None:
-    """Guards the guard. If the patch stopped applying -- a locate failure, a
+    """Guards the guard. If the edit stopped applying -- a proof failure, a
     schema change -- the fail-closed test below would pass for the wrong
     reason, because the round-trip gate is only reached when bytes were
     actually produced."""
@@ -193,9 +215,9 @@ def test_round_trip_failure_fails_closed(failures: list) -> None:
 
     if result.get("status") != "MANUAL_REVIEW_REQUIRED":
         failures.append(f"expected MANUAL_REVIEW_REQUIRED, got {result.get('status')!r}")
-    if result.get("reason") != "quote_patches_not_applied":
+    if result.get("reason") != redline_generate.REASON_BLOCK_EDITS_NOT_APPLIED:
         failures.append(
-            f"expected reason=quote_patches_not_applied, got {result.get('reason')!r}"
+            f"expected reason=block_edits_not_applied, got {result.get('reason')!r}"
         )
     # The load-bearing one: bytes that failed a round trip are suspect, and the
     # one thing that must not happen next is handing them to a lawyer as their
@@ -206,8 +228,8 @@ def test_round_trip_failure_fails_closed(failures: list) -> None:
 
 def test_the_round_trip_cause_survives_into_the_report(failures: list) -> None:
     """A human landing on this review must be able to tell a round-trip
-    failure from a quote that simply could not be located -- both arrive as
-    `quote_patches_not_applied`, so the distinction lives per-patch."""
+    failure from an edit the writer simply could not compile -- both arrive as
+    `block_edits_not_applied`, so the distinction lives per-edit."""
 
     def exploding_verify(_docx_bytes):
         raise ValueError("boom")
@@ -219,51 +241,56 @@ def test_the_round_trip_cause_survives_into_the_report(failures: list) -> None:
     if "round_trip_verification_failed" not in reasons:
         failures.append(
             "the report does not say the round trip was what failed; a reader "
-            f"cannot tell this apart from an unlocatable quote. reasons={reasons!r}"
+            f"cannot tell this apart from an uncompilable edit. reasons={reasons!r}"
         )
 
 
 def test_the_outer_gate_catches_a_caller_that_skipped_the_inner_one(failures: list) -> None:
-    """`generate_redline` re-checks the round trip itself, and its own comment
-    calls that "defense-in-depth ... can only ever pass". On the shipping path
-    that is true. This drives the case it exists for: a patcher that hands back
-    bytes WITHOUT having verified them.
+    """`generate_redline_from_blocks` re-checks the round trip itself, and the
+    compiler it calls already did. On the shipping path the outer check can
+    only ever pass. This drives the case it exists for: a compiler that hands
+    back bytes WITHOUT having verified them.
 
-    The stub is deliberately minimal -- it returns the applied/flag_only shape
-    with real bytes and skips only the verification -- because the point is to
+    The stub is deliberately minimal -- it delegates to the real compiler and
+    restores the bytes the inner gate suppressed -- because the point is to
     reach the outer gate, not to replace the path around it.
     """
-    import redline_quote_apply
+    original_apply = redline_block_apply.apply_block_transcript
 
-    original_apply = redline_generate.redline_quote_apply.apply_quote_patches
-
-    def unverified_apply(docx_bytes, patches, *, author, timestamp_iso, include_marker=True):
+    def unverified_apply(docx_bytes, proven, *, author, timestamp_iso, rationale_by_issue=None):
         result = original_apply(
             docx_bytes,
-            patches,
+            proven,
             author=author,
             timestamp_iso=timestamp_iso,
-            include_marker=include_marker,
+            rationale_by_issue=rationale_by_issue,
         )
-        # Hand back bytes even if the inner gate suppressed them.
+        if result["docx_bytes"] is not None:
+            return result
+        # Hand back bytes even though the inner gate suppressed them, and
+        # report the edits as applied so the caller proceeds to its own gate.
+        edits = [
+            {"issue_key": entry.get("issue_key"), "block_id": entry.get("block_id")}
+            for entry in result["failures"]
+        ]
         return {
-            "docx_bytes": result["docx_bytes"] or docx_bytes,
-            "applied": result["applied"] or list(patches),
-            "flag_only": [],
+            "docx_bytes": docx_bytes,
+            "applied": edits,
+            "failures": [],
+            "revision_ids_by_issue": {},
         }
 
     def exploding_verify(_docx_bytes):
         raise ValueError("boom")
 
-    redline_generate.redline_quote_apply.apply_quote_patches = unverified_apply
+    redline_block_apply.apply_block_transcript = unverified_apply
     try:
         result = _run(exploding_verify)
     except ValueError as exc:
         failures.append(f"the outer gate let the ValueError propagate: {exc}")
         return
     finally:
-        redline_generate.redline_quote_apply.apply_quote_patches = original_apply
-        del redline_quote_apply
+        redline_block_apply.apply_block_transcript = original_apply
 
     if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
         failures.append(

@@ -21,13 +21,11 @@ message at all.
 ## What this test asserts (mirrors the issue's acceptance criteria)
 
   1. `scripts/primary_review_pass.py::assemble_user_content_primary`: with
-     `prompt_caching_enabled=True` and a document under the full-doc
-     threshold, the returned content carries EXACTLY ONE `cache_control`
-     block, on the doc block, positioned BEFORE all pass-specific text
-     (mirrors test_primary_review_pass_81.py's structural,
-     position-not-prose breakpoint assertion for issue #30). With
-     `prompt_caching_enabled=False`, OR a document over the threshold
-     (section-outline mode), the result is BYTE-IDENTICAL to
+     `prompt_caching_enabled=True`, the returned content carries EXACTLY
+     ONE `cache_control` block, on the doc block, positioned BEFORE all
+     pass-specific text (mirrors test_primary_review_pass_81.py's
+     structural, position-not-prose breakpoint assertion for issue #30).
+     With `prompt_caching_enabled=False`, the result is BYTE-IDENTICAL to
      `assemble_user_prompt_primary`'s own unmodified output -- issue #568's
      "Capability-False path produces byte-identical requests to today."
   2. `scripts/primary_review_pass.py::build_document_cached_user_content`:
@@ -123,17 +121,26 @@ def _sample_anchored_clauses() -> list[dict[str, Any]]:
 
 # ---------------------------------------------------------------------------
 # 1. assemble_user_content_primary: structural cache-block assertion +
-#    byte-identical capability-False / outline-mode fallback.
+#    byte-identical capability-False fallback.
 # ---------------------------------------------------------------------------
+
+
+SAMPLE_PRECEDENT = [
+    {"clause_id": "syn-cap-1", "polarity": "positive", "text": "Cap at $150,000."}
+]
 
 
 def test_cached_content_has_exactly_one_cache_control_block_on_the_doc_block(
     failures: list[str],
 ) -> None:
+    # A NON-EMPTY retrieved_precedent is what puts a pass-specific block
+    # after the cached one at all (issue #627 fix round 1: with retrieval
+    # dormant the list is the cached doc block ALONE -- see
+    # test_caching_path_never_emits_an_empty_text_block below). The
+    # positional assertions here are about the cached block's placement
+    # RELATIVE to pass-specific text, so they need that text to exist.
     content = pp.assemble_user_content_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
-        retrieved_precedent=[],
+        retrieved_precedent=SAMPLE_PRECEDENT,
         doc_text=SHORT_DOC_TEXT,
         prompt_caching_enabled=True,
     )
@@ -158,8 +165,6 @@ def test_cached_content_has_exactly_one_cache_control_block_on_the_doc_block(
 
 def test_capability_false_byte_identical_to_legacy_assembler(failures: list[str]) -> None:
     kwargs = dict(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         doc_text=SHORT_DOC_TEXT,
     )
@@ -170,34 +175,6 @@ def test_capability_false_byte_identical_to_legacy_assembler(failures: list[str]
     default_call = pp.assemble_user_content_primary(**kwargs)
     if default_call != legacy:
         failures.append("[2b] prompt_caching_enabled default (False) must also be byte-identical to the legacy assembler.")
-
-
-def test_over_threshold_outline_mode_stays_the_legacy_string_even_when_caching_enabled(
-    failures: list[str],
-) -> None:
-    # A document that forces INPUT_MODE_SECTION_OUTLINE has no stable
-    # document PREFIX worth caching (it is a derived heading/word-count
-    # summary, not the document itself) -- prompt_caching_enabled=True must
-    # not change this path at all.
-    huge_doc = "word " * 20000  # ~20,000 tokens at the 4-chars/token estimate * ~5 chars/word
-    doc_paragraphs = [{"heading": "Section 1", "text": huge_doc}]
-    kwargs = dict(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
-        retrieved_precedent=[],
-        doc_text=huge_doc,
-        doc_paragraphs=doc_paragraphs,
-        full_doc_token_threshold=100,  # force outline mode with a small fixture
-    )
-    if pp.resolve_input_mode(huge_doc, 100) != pp.INPUT_MODE_SECTION_OUTLINE:
-        failures.append("[3a] Test fixture setup error: expected outline mode for this doc/threshold pair.")
-        return
-    legacy = pp.assemble_user_prompt_primary(**kwargs)
-    cached = pp.assemble_user_content_primary(**kwargs, prompt_caching_enabled=True)
-    if cached != legacy:
-        failures.append("[3b] Outline-mode input must stay the legacy string even with prompt_caching_enabled=True -- nothing to cache.")
-    if not isinstance(cached, str):
-        failures.append(f"[3c] Outline-mode result must be a str; got {type(cached).__name__}")
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +554,11 @@ def test_openrouter_captures_cache_usage_fields_when_present(failures: list[str]
     )
     with patch.dict("os.environ", {}, clear=True):
         client.invoke(
-            model_id="anthropic/claude-opus-4.8",
+            # Any id enforce_openrouter_policy_model_id allows; the pin is
+            # used for realism. Was anthropic/claude-opus-4.8 until the owner
+            # removed it from `selectable` and the guard began refusing it.
+            # Nothing here reads the capability descriptor.
+            model_id="anthropic/claude-opus-5",
             system_prompt="SYS",
             user_prompt="USER",
             max_output_tokens=100,
@@ -597,7 +578,7 @@ def test_openrouter_usage_omits_cache_keys_when_absent(failures: list[str]) -> N
     )
     with patch.dict("os.environ", {}, clear=True):
         client.invoke(
-            model_id="anthropic/claude-opus-4.8",
+            model_id="anthropic/claude-opus-5",
             system_prompt="SYS",
             user_prompt="USER",
             max_output_tokens=100,
@@ -645,8 +626,6 @@ def test_run_primary_pass_ledgers_cache_usage_fields_when_reported(failures: lis
     ledger: list[mc.ModelInvocationRecord] = []
     result = pp.run_primary_pass(
         review_id="cache-568",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=_sample_playbook(),
         model_client=client,
@@ -674,8 +653,6 @@ def test_run_primary_pass_ledgers_none_when_client_has_no_last_usage(failures: l
     ledger: list[mc.ModelInvocationRecord] = []
     pp.run_primary_pass(
         review_id="cache-568-none",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=_sample_playbook(),
         model_client=client,
@@ -752,8 +729,6 @@ def test_run_primary_pass_capability_true_sends_cached_doc_block_stable_across_r
     ledger: list[mc.ModelInvocationRecord] = []
     result = pp.run_primary_pass(
         review_id="cache-568-retry",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         playbook=_sample_playbook(),
         model_client=client,
@@ -794,8 +769,6 @@ def test_run_primary_pass_capability_false_still_sends_plain_string(failures: li
     )  # default capabilities: all False
     pp.run_primary_pass(
         review_id="cache-568-false",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         playbook=_sample_playbook(),
         model_client=client,
@@ -805,8 +778,6 @@ def test_run_primary_pass_capability_false_still_sends_plain_string(failures: li
     )
     sent = client.calls[0]["user_prompt"]
     expected = pp.assemble_user_prompt_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         doc_text=SHORT_DOC_TEXT,
     )
@@ -816,6 +787,85 @@ def test_run_primary_pass_capability_false_still_sends_plain_string(failures: li
         failures.append(f"[21b] Expected a plain str; got {type(sent).__name__}")
 
 
+def test_caching_path_never_emits_an_empty_text_block(failures: list[str]) -> None:
+    """Issue #627 fix-round-1 regression (finding 1): the Anthropic messages
+    API -- native and through Bedrock, which is what `LiveBedrockModelClient
+    .invoke` speaks -- REJECTS a text content block whose `text` is empty.
+
+    Dropping the permanently-empty `STANDARD_FORM_DIFF`/`ANCHORED_CLAUSES`
+    manifest blocks left retrieval (dormant) as the only contributor to the
+    pass-specific half, so it is `""` on every review reachable today, and
+    the builder used to emit it anyway -- an empty block on the wire of
+    every attempt-1 primary call against the production reviewer
+    (`model-policy/bedrock-us-east-1.json` declares `prompt_caching: true`
+    for `anthropic.claude-opus-4-8`).
+
+    Asserted on BOTH attempts of a real retry, and on the payload
+    `LiveBedrockModelClient` actually puts on the wire -- not on the
+    assembler's return value alone, because the client is the last thing
+    that could have filtered it and does not.
+    """
+    client = mc.FakeBedrockClient(
+        {
+            BEDROCK_PRIMARY_MODEL_ID: [
+                _fixture("schema_invalid_missing_issues.json"),
+                _fixture("primary_request_change_valid.json"),
+            ]
+        },
+        capabilities={"prompt_caching": True},
+    )
+    result = pp.run_primary_pass(
+        review_id="cache-627-empty-block",
+        retrieved_precedent=[],  # retrieval dormant: the production shape
+        playbook=_sample_playbook(),
+        model_client=client,
+        model_id=BEDROCK_PRIMARY_MODEL_ID,
+        ledger_write=lambda _rec: None,
+        doc_text=SHORT_DOC_TEXT,
+    )
+    if result.get("attempts") != 2:
+        failures.append(f"[22a] Test fixture setup error: expected a retry (2 attempts); got {result.get('attempts')!r}")
+        return
+
+    for attempt_index, call in enumerate(client.calls, start=1):
+        sent = call["user_prompt"]
+        if not isinstance(sent, list):
+            failures.append(f"[22b] Attempt {attempt_index}: expected list content for a capability-True model; got {type(sent).__name__}")
+            continue
+        empty = [i for i, block in enumerate(sent) if not (block.get("text") or "").strip()]
+        if empty:
+            failures.append(
+                f"[22c] Attempt {attempt_index}: content block(s) at index {empty} have empty/whitespace-only text -- "
+                f"the Anthropic messages API rejects an empty text block, so this request dies at the provider."
+            )
+
+    # The wire itself: nothing downstream of the assembler filters empties.
+    runtime = _FakeBedrockRuntime(_bedrock_payload("ok"))
+    mc.LiveBedrockModelClient(bedrock_runtime_client=runtime).invoke(
+        model_id=BEDROCK_PRIMARY_MODEL_ID,  # policy: prompt_caching true
+        system_prompt="SYS",
+        user_prompt=client.calls[0]["user_prompt"],
+        max_output_tokens=100,
+    )
+    wire = runtime.last_body()["messages"][0]["content"]
+    if not isinstance(wire, list):
+        failures.append(f"[22d] Expected the block array to reach the wire verbatim; got {type(wire).__name__}")
+        return
+    wire_empty = [i for i, block in enumerate(wire) if not (block.get("text") or "").strip()]
+    if wire_empty:
+        failures.append(f"[22e] Empty text block(s) reached the bedrock-2023-05-31 payload at index {wire_empty}.")
+
+    # And the discipline that omitting the block must not cost: the retry
+    # correction still never rewrites the cached prefix.
+    attempt_1, attempt_2 = client.calls[0]["user_prompt"], client.calls[1]["user_prompt"]
+    if attempt_1[0] != attempt_2[0]:
+        failures.append("[22f] The cached doc block must stay byte-identical across the retry even when it is attempt 1's ONLY block.")
+    if pp.RETRY_CORRECTION_HEADING in attempt_2[0]["text"]:
+        failures.append("[22g] The retry correction must land in a NEW uncached block, never be appended to the cached doc block.")
+    if not any(pp.RETRY_CORRECTION_HEADING in b.get("text", "") for b in attempt_2[1:]):
+        failures.append("[22h] Attempt 2 must carry the retry correction in a block after the cached one.")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -823,7 +873,6 @@ def test_run_primary_pass_capability_false_still_sends_plain_string(failures: li
 TESTS = [
     test_cached_content_has_exactly_one_cache_control_block_on_the_doc_block,
     test_capability_false_byte_identical_to_legacy_assembler,
-    test_over_threshold_outline_mode_stays_the_legacy_string_even_when_caching_enabled,
     test_doc_block_byte_identical_between_primary_and_critic_callers,
     test_append_suffix_never_touches_the_cached_doc_block,
     test_append_falsy_suffix_is_a_no_op_on_both_shapes,
@@ -844,6 +893,7 @@ TESTS = [
     test_run_floor_pass_ledgers_cache_usage_fields_when_reported,
     test_run_primary_pass_capability_true_sends_cached_doc_block_stable_across_retry,
     test_run_primary_pass_capability_false_still_sends_plain_string,
+    test_caching_path_never_emits_an_empty_text_block,
 ]
 
 

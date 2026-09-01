@@ -70,14 +70,24 @@ relationships, content-type overrides) that belong with the rest of the
 writer:
 
 - **Footnoted rationales.** When `footnote_text_by_anchor` maps an applied
-  patch's anchor to its `external_rationale_for_footnote` text, a
-  `<w:footnoteReference>` is appended to that patch's paragraph and the
-  rationale is written to `word/footnotes.xml` as a literal text run --
-  same literal-runs-only rule as the `<w:ins>`/`<w:del>` text
-  (docs/output-contract.md -> "Per-issue output and footnote rules").
-  Footnote ids are computed once by `_compute_footnotes()` and reused by
-  both `word/document.xml` (the reference) and `word/footnotes.xml` (the
-  definition), so the two parts can never disagree on numbering.
+  patch's anchor to footnote text, a `<w:footnoteReference>` is appended to
+  that patch's paragraph and the rationale is written to
+  `word/footnotes.xml` as a literal text run -- same literal-runs-only rule
+  as the `<w:ins>`/`<w:del>` text (docs/output-contract.md ->
+  "Per-issue output and footnote rules"). Footnote ids are computed once by
+  `_compute_footnotes()` and reused by both `word/document.xml` (the
+  reference) and `word/footnotes.xml` (the definition), so the two parts
+  can never disagree on numbering.
+
+  WHICH rationale (or rationales) an anchor carries is the review's notes
+  mode, resolved by `footnote_texts_for_notes_mode` above (issue #522):
+  `external` renders `external_rationale_for_footnote` as before,
+  `internal` renders `internal_rationale_for_footnote` behind
+  `INTERNAL_FOOTNOTE_PREFIX`, `both` renders both against the same patch
+  (external first), and `none` renders no footnotes at all -- no
+  `word/footnotes.xml`, no relationship, no content-type override, rather
+  than an empty part. A mapping value may therefore be a single text or a
+  list of texts (`normalize_footnote_texts`).
 - **Export marker.** `include_marker=True` (this function's own default)
   adds the internal-notes marker redundantly: a first-page cover note
   (`word/document.xml`, before the tracked-change body, followed by an
@@ -123,6 +133,95 @@ DEFAULT_AUTHOR = "contract-toaster"
 # `redline_generate.inject_export_marker_and_footnotes`'s `include_marker`
 # parameter on the live first-party path -- never unconditional.
 MARKER_TEXT = "contains internal notes — not for external transmission"
+
+# ---------------------------------------------------------------------------
+# Footnote audience (issue #522, epic #519 item D)
+# ---------------------------------------------------------------------------
+# A review's notes mode decides WHICH rationales become footnotes in the
+# delivered document. The four modes are `backend/src/reviews.py`'s
+# `NOTES_MODES`; the resolution itself lives here, in the one module BOTH
+# writer paths already share (the live first-party path reaches it through
+# `redline_generate`, which imports this module; the standalone path is this
+# module's own `build_tracked_changes_docx`), so neither path can drift into
+# a different audience rule.
+NOTES_MODE_NONE = "none"
+NOTES_MODE_EXTERNAL = "external"
+NOTES_MODE_INTERNAL = "internal"
+NOTES_MODE_BOTH = "both"
+
+# Prefix stamped on EVERY internal-audience footnote, in every mode that
+# emits one -- never only in `both`.
+#
+# WHY it is load-bearing rather than cosmetic (issue #522, owner comment):
+# the `<w:footnoteReference>` run is emitted INSIDE the patch's `<w:ins>`
+# (see `redline_generate.inject_export_marker_and_footnotes`), and the
+# footnote BODY in `word/footnotes.xml` is ordinary untracked text. So
+# accept-all-changes PROMOTES an internal footnote to plain body text
+# instead of removing it: the accept-all-then-send workflow keeps it, and
+# the reviewer's chance to catch it during tracked-change review has
+# already passed. That property is deliberate and preserved (a footnote
+# that vanished on accept-all would also take the counterparty-facing
+# rationale with it), which makes this marking the only thing standing
+# between an internal note and the counterparty. It therefore names the
+# audience in the rendered text itself, unmissably, and survives accept-all
+# exactly as the note it marks does.
+INTERNAL_FOOTNOTE_PREFIX = "[INTERNAL] NOT FOR THE COUNTERPARTY: "
+
+
+def footnote_texts_for_notes_mode(
+    external_text: Optional[str],
+    internal_text: Optional[str],
+    notes_mode: str = NOTES_MODE_EXTERNAL,
+) -> list[str]:
+    """The ordered footnote texts one issue contributes under `notes_mode`.
+
+    - `none`     -> `[]` (bare tracked changes; no footnote part is written
+                    at all, rather than an empty one)
+    - `external` -> `[external_text]` (today's behaviour)
+    - `internal` -> `[INTERNAL_FOOTNOTE_PREFIX + internal_text]`
+    - `both`     -> both, external first, the internal one marked
+
+    Blank/absent text contributes nothing: an issue with no rationale for
+    the requested audience gets no footnote, and an internal note is never
+    rendered as a bare prefix with nothing after it.
+
+    Unrecognized or blank `notes_mode` resolves to `external` -- the
+    fail-closed direction shared with
+    `redline_generate._notes_mode_includes_internal_content` and
+    `primary_review_pass._notes_mode_includes_internal`: a caller that
+    failed to validate upstream gets the counterparty-safe rationale it
+    would have got before this ticket, never internal content it did not
+    ask for. It deliberately does NOT resolve to `none`, which would
+    silently drop the external rationale a default review is entitled to.
+    """
+    mode = (notes_mode or "").strip().lower()
+    if mode == NOTES_MODE_NONE:
+        return []
+    external = (external_text or "").strip()
+    internal = (internal_text or "").strip()
+    texts: list[str] = []
+    if mode != NOTES_MODE_INTERNAL and external:
+        texts.append(external)
+    if mode in (NOTES_MODE_INTERNAL, NOTES_MODE_BOTH) and internal:
+        texts.append(INTERNAL_FOOTNOTE_PREFIX + internal)
+    return texts
+
+
+def normalize_footnote_texts(value) -> list[str]:
+    """A `footnote_text_by_anchor` VALUE as an ordered list of footnote
+    texts. One anchor may now carry several footnotes (`both` renders an
+    external and an internal one against the same patch), so the mapping
+    accepts either a single string (the pre-#522 shape, still used by
+    `scripts/gen_mock_eiaa_redline_fixture.py` and by any caller with one
+    rationale per anchor) or a list of strings. Blank entries are dropped
+    -- an empty or whitespace-only rationale must never become a footnote
+    with nothing in it."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    return [text for text in ((item or "").strip() for item in value) if text]
+
 
 FOOTNOTES_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
@@ -200,13 +299,18 @@ def _compute_footnotes(
     Computed by this single pure function and reused by both
     `build_document_xml` (footnote references) and `build_footnotes_xml`
     (footnote definitions) so the two parts can never disagree on
-    numbering."""
+    numbering.
+
+    An anchor's value may be a single text or a LIST of texts (issue #522:
+    `notes_mode="both"` renders an external and an internal footnote
+    against the same patch) -- see `normalize_footnote_texts`. Each text
+    becomes its own entry, in list order, so the ids stay dense and the
+    external note always precedes the internal one on a shared anchor."""
     footnote_text_by_anchor = footnote_text_by_anchor or {}
     footnotes = []
     next_id = 1
     for patch in applied_patches:
-        text = footnote_text_by_anchor.get(patch["anchor"])
-        if text:
+        for text in normalize_footnote_texts(footnote_text_by_anchor.get(patch["anchor"])):
             footnotes.append({"id": next_id, "anchor": patch["anchor"], "text": text})
             next_id += 1
     return footnotes
@@ -374,7 +478,9 @@ def build_document_xml(
     original text is known) followed by a `<w:ins>` of `new_text`, in the
     order `applied_patches` is given. When `footnote_text_by_anchor` gives
     a patch's anchor a rationale, that paragraph also gets a
-    `<w:footnoteReference>` run (issue #83). When `include_marker` is True
+    `<w:footnoteReference>` run (issue #83) -- one per text when the anchor
+    carries several (issue #522: `notes_mode="both"`; the caller resolves
+    the texts with `footnote_texts_for_notes_mode`). When `include_marker` is True
     (the default), a first-page cover-note paragraph carrying `marker_text`
     is prepended and `<w:sectPr>` carries `<w:headerReference>`/
     `<w:footerReference>` so the running header/footer marker renders on
@@ -392,7 +498,13 @@ def build_document_xml(
 
     date_str = _iso_date(date)
     footnotes = _compute_footnotes(applied_patches, footnote_text_by_anchor)
-    footnote_id_by_anchor = {f["anchor"]: f["id"] for f in footnotes}
+    # One anchor may carry MORE than one footnote (issue #522: `both`
+    # renders an external and an internal note against the same patch), so
+    # this is a list of ids per anchor, referenced in the order
+    # `_compute_footnotes` assigned them.
+    footnote_ids_by_anchor: dict = {}
+    for entry in footnotes:
+        footnote_ids_by_anchor.setdefault(entry["anchor"], []).append(entry["id"])
     rel_ids = _compute_relationship_ids(bool(footnotes), include_marker)
 
     body = ET.Element(_w("body"))
@@ -416,8 +528,7 @@ def build_document_xml(
             _append_run(p, "ins", "t", new_text, author, date_str, rev_id)
             rev_id += 1
 
-        footnote_id = footnote_id_by_anchor.get(anchor)
-        if footnote_id is not None:
+        for footnote_id in footnote_ids_by_anchor.get(anchor, ()):
             _append_footnote_reference(p, footnote_id)
 
     sect_pr = ET.SubElement(body, _w("sectPr"))
@@ -452,9 +563,14 @@ def build_tracked_changes_docx(
     `word/_rels/document.xml.rels`) containing one tracked-change
     `<w:del>`/`<w:ins>` pair per applied patch.
 
-    `footnote_text_by_anchor` (anchor -> `external_rationale_for_footnote`
-    text) adds a footnoted rationale to each matching patch's paragraph
-    (issue #83 AC: "footnoted rationales"). `include_marker=True` (default)
+    `footnote_text_by_anchor` (anchor -> footnote text, or a LIST of
+    footnote texts) adds a footnoted rationale to each matching patch's
+    paragraph (issue #83 AC: "footnoted rationales"). WHICH rationales those
+    are is the review's notes mode, resolved by the caller with
+    `footnote_texts_for_notes_mode` (issue #522) -- an empty list for
+    `notes_mode="none"`, which leaves this document with no
+    `word/footnotes.xml` part at all rather than an empty one.
+    `include_marker=True` (default)
     bakes in the redundant internal-notes marker -- cover note plus
     every-page header/footer (issue #83 AC: "Marker placement per spec").
     The caller decides `include_marker` based on this review's notes mode

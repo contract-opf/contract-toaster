@@ -56,6 +56,13 @@
   --ct-border-strong: #9c8d72;
   --ct-text: #26221c;
   --ct-text-muted: #6b6255;
+  /* Modal scrim (issue #598). Declared ONCE, in the day block only, and
+     deliberately not overridden per theme: it is a dimming layer over
+     whatever is behind it, not a surface colour, and the same translucent
+     warm black reads correctly in both themes. Nothing is ever painted ON
+     this, so it is not a foreground/background pair the contrast audit can
+     or should score. */
+  --ct-overlay-scrim: rgba(38, 34, 28, 0.55);
   --ct-shadow-1: 0 1px 2px rgba(90, 62, 30, 0.08), 0 1px 1px rgba(90, 62, 30, 0.04);
   --ct-shadow-2: 0 6px 16px rgba(90, 62, 30, 0.12), 0 2px 6px rgba(90, 62, 30, 0.08);
   --ct-shadow-3: 0 16px 40px rgba(90, 62, 30, 0.18), 0 6px 12px rgba(90, 62, 30, 0.1);
@@ -109,7 +116,15 @@
   --ct-font-display: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --ct-font-sans: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --ct-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-  --ct-text-xs: 12px;
+  /* --ct-text-sm (14px) is the FLOOR of the scale: no UI text anywhere may
+     render smaller (issue #600 — the retired --ct-text-xs was 12px and the
+     owner could not comfortably read it). The floor is enforced, not just
+     documented: `npm run audit:layout` check 7 resolves every font-size in
+     frontend/src — stylesheets and inline component styles alike — against
+     these tokens and fails on anything below it. Lowering the value below,
+     or re-adding a smaller step, fails that check too, so the floor cannot
+     be dropped by editing this block. See docs/frontend-design-system.md
+     §4.5. */
   --ct-text-sm: 14px;
   --ct-text-md: 16px;
   --ct-text-lg: 20px;

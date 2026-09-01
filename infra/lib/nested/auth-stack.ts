@@ -5,6 +5,38 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
+/**
+ * Deployment-level auth mode (issue #245).
+ *
+ * Mirrors the backend's `AUTH_MODE_SSO` / `AUTH_MODE_PASSWORD` /
+ * `AUTH_MODE_BOTH` triple in `backend/src/demo_auth.py` — the same three
+ * spellings, so an operator sets one word in one vocabulary and both halves
+ * of the deployment agree on it.
+ */
+export type AuthMode = 'sso' | 'password' | 'both';
+
+/** The three accepted `authMode` values (issue #245). */
+export const VALID_AUTH_MODES: readonly AuthMode[] = ['sso', 'password', 'both'];
+
+/**
+ * Default auth mode: single sign-on only.
+ *
+ * Fail-closed, and deliberately the same default as the backend's
+ * `DEFAULT_AUTH_MODE` in `backend/src/demo_auth.py`: a deploy that says
+ * nothing about auth mode provisions NO username/password surface at all.
+ */
+export const DEFAULT_AUTH_MODE: AuthMode = 'sso';
+
+/**
+ * True when `mode` permits username/password sign-in.
+ *
+ * Mirrors `password_login_allowed` in `backend/src/demo_auth.py` (mode is
+ * `password` or `both`).
+ */
+export function passwordAuthAllowed(mode: AuthMode): boolean {
+  return mode === 'password' || mode === 'both';
+}
+
 export interface AuthStackProps extends cdk.NestedStackProps {
   readonly envName: string;
   /**
@@ -65,6 +97,23 @@ export interface AuthStackProps extends cdk.NestedStackProps {
    * Optional until DataStack is consumed here.
    */
   readonly adminBootstrapTableName?: string;
+  /**
+   * Deployment auth mode (issue #245): `sso` (default), `password`, or
+   * `both`. Supplied by the parent stack from `--context authMode=…`.
+   *
+   * Gates whether this stack provisions the username/password app client
+   * below. `sso` — the default — provisions no password surface at all, so
+   * a deploy that says nothing about auth mode gets the pre-#245 set of
+   * Cognito resources.
+   *
+   * NOTE (issue #245, and stated on the ticket): the demo backend validates
+   * passwords against its OWN DynamoDB store (PBKDF2 hashes in
+   * `backend/src/demo_auth.py`; `backend/src/auth.py` dispatches the
+   * password mode there, not to Cognito). This prop therefore provisions
+   * optionality for a future deployment shape that authenticates against
+   * Cognito — it does not change how the current backend checks a password.
+   */
+  readonly authMode?: AuthMode;
 }
 
 /**
@@ -138,6 +187,17 @@ export class AuthStack extends cdk.NestedStack {
   /** The hosted UI app client (Google IdP only). */
   readonly userPoolClient: cognito.UserPoolClient;
   /**
+   * The username/password app client (issue #245) — present ONLY when
+   * `authMode` is `password` or `both`; `undefined` under the default `sso`
+   * mode. Separate resource from `userPoolClient` by design: the SSO client
+   * must keep its no-direct-auth-flows invariant (tests/test_infra_auth_stack.py
+   * check F), so the password capability is additive, never a flag flipped
+   * on the Google client.
+   */
+  readonly passwordAuthClient?: cognito.CfnUserPoolClient;
+  /** The resolved deployment auth mode (issue #245). */
+  readonly authMode: AuthMode;
+  /**
    * Cognito hosted-UI domain (bare host, no scheme), e.g.
    * `contract-toaster-dev.auth.us-east-1.amazoncognito.com`.
    *
@@ -155,6 +215,19 @@ export class AuthStack extends cdk.NestedStack {
     // Cognito hosted-UI domain prefix + Amplify Hosting subdomain convention.
     const domainPrefix = `${appName}-${envName}`;
     this.hostedUiDomain = `${domainPrefix}.auth.us-east-1.amazoncognito.com`;
+
+    // Auth mode (issue #245). Validated here rather than only at the context
+    // read in contract-toaster-stack.ts so the prop is fail-closed for every
+    // caller of AuthStack, not just the one that parses CDK context.
+    const authMode = props.authMode ?? DEFAULT_AUTH_MODE;
+    if (!VALID_AUTH_MODES.includes(authMode)) {
+      throw new Error(
+        `Invalid authMode '${authMode}'. Must be one of: ` +
+          `${VALID_AUTH_MODES.join(', ')} (supply via --context authMode=<mode>; ` +
+          'see infra/lib/nested/auth-stack.ts, issue #245).',
+      );
+    }
+    this.authMode = authMode;
 
     // -----------------------------------------------------------------------
     // Google OAuth client credentials — Secrets Manager (dynamic reference)
@@ -819,6 +892,60 @@ def handler(event, context):
     this.userPoolClient.node.addDependency(googleIdp);
 
     // -----------------------------------------------------------------------
+    // Username/password app client (issue #245) — ADDITIVE, config-gated
+    //
+    // Provisioned only when `authMode` permits password sign-in (`password`
+    // or `both`). Under the default `sso` mode no resource below is created,
+    // so the default deploy gains no Cognito surface it did not have before
+    // #245 — only the `AuthMode` CfnOutput further down, which reports the
+    // resolved mode and provisions nothing.
+    //
+    // Why a SECOND client rather than a flag on `userPoolClient` above: the
+    // Google client's "no direct auth flows" property is a security
+    // invariant guarded by tests/test_infra_auth_stack.py check F. Adding a
+    // password flow to that client would let anyone holding a Cognito
+    // username/password bypass the two-layer hosted-domain enforcement
+    // (Google `hd` + the pre-token Lambda's ALLOWED_DOMAIN check) that the
+    // SSO client exists to impose. A separate client keeps the two
+    // populations separable — and keeps that invariant testable per
+    // resource.
+    //
+    // Flow choice: SRP (`ALLOW_USER_SRP_AUTH`) — Cognito's username/password
+    // flow in which the password never leaves the client. The alternative
+    // direct flow (USER_PASSWORD_AUTH) posts the plaintext password to the
+    // Cognito API and exists mainly for user-pool migration; it is
+    // deliberately NOT enabled here, matching this stack's standing posture
+    // that no credential plaintext transits or lands anywhere it need not.
+    // The issue permits either ("USER_PASSWORD_AUTH / SRP as appropriate").
+    //
+    // No client secret: like the SSO client this is a public (browser) client.
+    // Nothing here writes credential material into the synthesized template.
+    if (passwordAuthAllowed(authMode)) {
+      this.passwordAuthClient = new cognito.CfnUserPoolClient(
+        this,
+        'PasswordAuthUserPoolClient',
+        {
+          userPoolId: this.userPool.userPoolId,
+          clientName: `${appName}-password-${envName}`,
+          // Cognito's own directory only — this client must NOT be able to
+          // start a federated Google sign-in, which is the SSO client's job.
+          supportedIdentityProviders: ['COGNITO'],
+          explicitAuthFlows: ['ALLOW_USER_SRP_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'],
+          generateSecret: false,
+          preventUserExistenceErrors: 'ENABLED',
+          accessTokenValidity: 60,
+          idTokenValidity: 60,
+          refreshTokenValidity: 30,
+          tokenValidityUnits: {
+            accessToken: 'minutes',
+            idToken: 'minutes',
+            refreshToken: 'days',
+          },
+        },
+      );
+    }
+
+    // -----------------------------------------------------------------------
     // Hosted UI domain prefix: 'contract-toaster-{envName}'
     //
     // Enables the Cognito hosted-UI sign-in page.  The domain prefix must
@@ -926,6 +1053,26 @@ def handler(event, context):
       description: `Cognito user pool client ID for ${envName}`,
       exportName: `ContractToaster-${envName}-UserPoolClientId`,
     });
+
+    // Auth-mode wiring, surfaced (issue #245): the resolved mode is an
+    // output so the deployed shape is inspectable — and so a structural test
+    // can assert against the synthesized template that the mode actually
+    // reached the stack, rather than trusting source text.
+    new cdk.CfnOutput(this, 'AuthMode', {
+      value: this.authMode,
+      description:
+        `Deployment auth mode for ${envName} ` +
+        `(one of: ${VALID_AUTH_MODES.join(', ')})`,
+      exportName: `ContractToaster-${envName}-AuthMode`,
+    });
+
+    if (this.passwordAuthClient) {
+      new cdk.CfnOutput(this, 'PasswordAuthUserPoolClientId', {
+        value: this.passwordAuthClient.ref,
+        description: `Cognito username/password app client ID for ${envName}`,
+        exportName: `ContractToaster-${envName}-PasswordAuthUserPoolClientId`,
+      });
+    }
 
     new cdk.CfnOutput(this, 'UserPoolDomainPrefix', {
       value: userPoolDomain.domainName,

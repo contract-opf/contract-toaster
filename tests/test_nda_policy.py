@@ -318,7 +318,16 @@ def main() -> int:
         ("5", "policy is debranded (no tenant-name literal)", check_5_debranded),
         ("6", "policy is draft, not falsely stamped approved", check_6_not_falsely_approved),
         ("7", "policy_content_hash deterministic and covers approval", check_7_hashing),
-        ("8", "harvest provenance resolves to a revision in git history", check_8_provenance_resolves),
+        (
+            "8",
+            # This harvest records NO git_blob_sha/git_commit: issue #636 edited the
+            # source in the same changeset that re-recorded the harvest, and
+            # tests/test_policy_document.py's provenance rule is that the pair is
+            # recorded together or omitted together -- never fabricated. So the
+            # anchor here is the file on disk, and the label says so.
+            "harvest provenance resolves (to git history when anchored, always on disk)",
+            check_8_provenance_resolves,
+        ),
         ("9", "harvested but NOT wired: no anchor map, not default, still draft", check_9_harvested_but_not_wired),
     ]
     ok = True

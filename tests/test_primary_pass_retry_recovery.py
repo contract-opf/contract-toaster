@@ -69,8 +69,6 @@ def _playbook() -> dict[str, Any]:
 def _run(client: Any, ledger: list[Any] | None = None, **overrides: Any) -> dict[str, Any]:
     return pp.run_primary_pass(
         review_id="retry-recovery",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=_playbook(),
         model_client=client,
@@ -84,8 +82,6 @@ def _run(client: Any, ledger: list[Any] | None = None, **overrides: Any) -> dict
 def _run_critic(client: Any, ledger: list[Any] | None = None, **overrides: Any) -> dict[str, Any]:
     return cp.run_critic_pass(
         review_id="critic-retry-recovery",
-        diff_hunks=[],
-        anchored_clauses=[],
         primary_output=json.loads(_fixture("primary_request_change_valid.json")),
         playbook=_playbook(),
         model_client=client,

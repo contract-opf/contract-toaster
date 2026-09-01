@@ -21,9 +21,17 @@ This test asserts the following invariants:
        - standard-form diff (or "diff")
        - anchored clause text (or "anchored clauses")
        - primary output (or "primary reviewer's output" or "primary's output")
-     And must NOT say the critic receives the raw/full counterparty doc
-     unconditionally (the old description was "the counterparty document"
-     without qualification — that is the bug this issue fixes).
+     And must describe the critic's full-document input CONDITIONALLY.
+     Issue #29 wrote this check to reject the then-current unconditional
+     "the counterparty document"; it asserted the manifest say the critic
+     does NOT receive the raw doc at all. Issue #618 reversed that policy
+     (#380 retired the standard-form diff, leaving the critic reasoning
+     over the primary's JSON alone), so the assertion is now the mirror
+     image: the manifest must say the critic receives the document the
+     primary read AND must state what happens when a caller composes a
+     critic prompt with no document block at all. What #29 was really
+     protecting -- that this cell is never left unqualified -- is
+     unchanged; only which qualifier is correct has flipped.
 
   4. ARCHITECTURE.md must state an assembled-size cap (token cap or
      "max_input_tokens" reference) that the manifest assembler enforces
@@ -111,7 +119,9 @@ def check_primary_manifest_completeness() -> list[str]:
       - the standard-form diff
       - anchored clause text
       - retrieved precedent
-      - a size threshold that gates full-doc inclusion (not unconditional)
+      - the issue #625 size policy: the full document is ALWAYS included,
+        and an oversized one fails closed as `document_too_large` rather
+        than being silently reduced
     """
     failures = []
     arch_text = read(ARCHITECTURE)
@@ -139,12 +149,9 @@ def check_primary_manifest_completeness() -> list[str]:
             "retrieved precedent clauses",
         ),
         (
-            re.compile(
-                r"size threshold|token threshold|threshold.*full.doc|full.doc.*threshold|"
-                r"full.*doc.*below|below.*threshold|doc.*token.*threshold",
-                re.IGNORECASE,
-            ),
-            "size threshold gating full-doc inclusion",
+            re.compile(r"document_too_large", re.IGNORECASE),
+            "the loud oversize outcome (`document_too_large`) that replaced the\n"
+            "  size-gated degrade (issue #625)",
         ),
     ]
 
@@ -153,29 +160,52 @@ def check_primary_manifest_completeness() -> list[str]:
             failures.append(
                 f"  ARCHITECTURE.md per-pass manifest (primary) is missing: {label}\n"
                 f"  The primary manifest must name all blocks the model receives,\n"
-                f"  and full-doc inclusion must be threshold-gated. (issue #29)"
+                f"  and must state what happens to a document that does not fit.\n"
+                f"  (issues #29/#625)"
             )
 
-    # Full-doc must NOT be unconditional (the bug)
-    # "the counterparty document text" with no conditional qualifier is the old text
-    unconditional_full_doc = re.compile(
-        r"primary.*counterparty document(?!.*unless|.*below|.*threshold|.*only if|.*if.*doc|"
-        r".*small|.*short)",
-        re.IGNORECASE | re.DOTALL,
+    # Issue #29 required this cell to describe full-doc inclusion as
+    # CONDITIONAL on a size threshold; issue #625 (owner decision
+    # 2026-08-25) deleted the threshold and the section-outline alternative
+    # it gated, so the assertion is now its mirror image -- exactly as check
+    # 3's critic cell flipped under #618. What #29 was really protecting --
+    # that this cell is never silently ambiguous about whether the model saw
+    # the document -- is unchanged; only which answer is correct has
+    # flipped. Row-scoped, not a DOTALL search over the whole manifest, so
+    # prose from a neighbouring row or from the historical rationale below
+    # the table cannot satisfy it while the cell itself says otherwise.
+    full_doc_row_primary_cell = re.compile(
+        r"^\|\s*Full counterparty document text[^|]*\|([^|]*)\|",
+        re.IGNORECASE | re.MULTILINE,
     )
-    # We check that full-doc for primary is described as conditional somewhere
-    full_doc_conditional = re.compile(
-        r"(full.*doc.*only|only.*full.*doc|full.*doc.*if|if.*doc.*full|"
-        r"threshold.*full|below.*full|full.*below|full.*doc.*threshold|"
-        r"section outline|outline.*section)",
-        re.IGNORECASE,
-    )
-    if not full_doc_conditional.search(manifest_text):
+    row = full_doc_row_primary_cell.search(manifest_text)
+    if row is None:
         failures.append(
-            "  ARCHITECTURE.md per-pass manifest (primary) does not describe\n"
-            "  full-doc inclusion as conditional on a size threshold. The issue\n"
-            "  requires: full doc only below a threshold; else diff + anchored\n"
-            "  clauses + section outline. (issue #29)"
+            "  ARCHITECTURE.md per-pass manifest has no 'Full counterparty\n"
+            "  document text' row with a Primary pass cell. (issues #29/#625)"
+        )
+        return failures
+
+    primary_cell = row.group(1)
+    if not re.search(r"(?<!not )\balways included\b", primary_cell, re.IGNORECASE):
+        failures.append(
+            "  ARCHITECTURE.md per-pass manifest (primary), 'Full counterparty\n"
+            "  document text' row, must state the document is ALWAYS included.\n"
+            "  Issue #625 deleted the size-gated section-outline alternative:\n"
+            "  a model must never redline text it did not receive. (issue #625)"
+        )
+    if not re.search(r"#625", primary_cell):
+        failures.append(
+            "  ARCHITECTURE.md per-pass manifest (primary), 'Full counterparty\n"
+            "  document text' row, must cite the issue that made inclusion\n"
+            "  unconditional (#625), so the change is traceable rather than\n"
+            "  looking like drift. (issue #625)"
+        )
+    if re.search(r"section.outline", primary_cell, re.IGNORECASE):
+        failures.append(
+            "  ARCHITECTURE.md per-pass manifest (primary), 'Full counterparty\n"
+            "  document text' row, still offers a section-outline alternative.\n"
+            "  That mode is deleted, not deprecated. (issue #625)"
         )
 
     return failures
@@ -186,8 +216,9 @@ def check_primary_manifest_completeness() -> list[str]:
 def check_critic_manifest() -> list[str]:
     """
     The critic manifest must name diff, anchored clauses, and the primary
-    output.  It must NOT describe the critic as receiving the raw/full
-    counterparty document unconditionally.
+    output.  It must describe the critic's raw/full counterparty document
+    input conditionally -- unconditional in EITHER direction is the bug
+    (issue #29 caught "always sent"; issue #618 replaced "never sent").
     """
     failures = []
     arch_text = read(ARCHITECTURE)
@@ -252,28 +283,57 @@ def check_critic_manifest() -> list[str]:
             "  always included in the critic pass. (issue #29)"
         )
 
-    # The old description sent "the counterparty document" to the critic.
-    # The new manifest must NOT list the full/raw doc in the critic block
-    # without a qualifier indicating it is omitted or threshold-gated.
-    old_critic_raw_doc = re.compile(
-        r"critic.*counterparty document(?!.*not|.*omit|.*exclud|.*without|.*no raw|"
-        r".*instead of|.*replac)",
-        re.IGNORECASE | re.DOTALL,
+    # Issue #29 originally required this row to say the critic gets NO raw
+    # document; issue #618 reversed the policy, so the assertion is now its
+    # mirror image.  It is scoped to the full-document ROW rather than
+    # searched DOTALL over the whole manifest for the reason check 3's
+    # primary-output assertion is: a loose search matches prose from a
+    # neighbouring row (or from the historical rationale below the table,
+    # which still recites the retired argument) and passes while the cell
+    # itself says the opposite.
+    full_doc_row_critic_cell = re.compile(
+        r"^\|\s*Full counterparty document text[^|]*\|[^|]+\|([^|]*)\|",
+        re.IGNORECASE | re.MULTILINE,
     )
-    # Accept if critic section says it omits or does not include the raw doc
-    critic_omits_raw = re.compile(
-        r"critic.*(?:not.*raw doc|omit.*doc|exclud.*full doc|without.*full doc|"
-        r"no.*raw.*doc|raw doc.*omit|raw.*counterparty.*omit|"
-        r"does not.*raw|does not.*full.*doc)",
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not critic_omits_raw.search(manifest_text):
+    row = full_doc_row_critic_cell.search(manifest_text)
+    if row is None:
         failures.append(
-            "  ARCHITECTURE.md per-pass manifest (critic) does not explicitly\n"
-            "  state that the critic does NOT receive the raw/full counterparty\n"
-            "  document. The old description sent the full doc to the critic;\n"
-            "  the manifest must name what replaces it. (issue #29)"
+            "  ARCHITECTURE.md per-pass manifest has no 'Full counterparty\n"
+            "  document text' row with a Critic pass cell. Whether untrusted\n"
+            "  counterparty text reaches the second model is a security-boundary\n"
+            "  statement and must be stated in the manifest. (issues #29/#618)"
         )
+        return failures
+
+    critic_cell = row.group(1)
+    required_in_cell = [
+        (
+            # Negative lookbehind, so the reverted cell's "**Not included**"
+            # cannot satisfy the assertion that the document IS included.
+            re.compile(r"(?<!not )\bincluded\b", re.IGNORECASE),
+            "that the critic IS given the document the primary read (issue #618\n"
+            "  reversed the original omission once issue #380 retired the diff)",
+        ),
+        (
+            re.compile(r"#618"),
+            "the issue that reversed the original decision (#618), so the change\n"
+            "  is traceable rather than looking like drift",
+        ),
+        (
+            re.compile(r"no document block", re.IGNORECASE),
+            "what happens when a caller composes a critic prompt with no\n"
+            "  `doc_text`: no document block, and the no-document variant of the\n"
+            "  tasking that says so (a prompt constant asserting a block is\n"
+            "  present is a promise the assembler owns keeping true)",
+        ),
+    ]
+    for pattern, label in required_in_cell:
+        if not pattern.search(critic_cell):
+            failures.append(
+                f"  ARCHITECTURE.md per-pass manifest (critic), 'Full counterparty\n"
+                f"  document text' row, does not state: {label}.\n"
+                f"  (issues #29/#618)"
+            )
 
     return failures
 
@@ -473,12 +533,12 @@ def main() -> int:
         ),
         (
             "2",
-            "Primary manifest: diff + anchored clauses + precedents + threshold-gated full-doc",
+            "Primary manifest: diff + anchored clauses + precedents + always-included full-doc",
             check_primary_manifest_completeness,
         ),
         (
             "3",
-            "Critic manifest: diff + anchored clauses + primary output; no unconditional raw doc",
+            "Critic manifest: diff + anchored clauses + primary output; conditional raw doc",
             check_critic_manifest,
         ),
         (

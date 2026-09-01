@@ -5,7 +5,7 @@ import { Construct } from 'constructs';
 import { NetworkStack } from './nested/network-stack';
 import { KmsKeysStack } from './nested/kms-keys-stack';
 import { DataStack } from './nested/data-stack';
-import { AuthStack } from './nested/auth-stack';
+import { AuthMode, AuthStack, DEFAULT_AUTH_MODE } from './nested/auth-stack';
 import { AppStack } from './nested/app-stack';
 import { PipelineStack } from './nested/pipeline-stack';
 import { WafStack } from './nested/waf-stack';
@@ -113,6 +113,11 @@ export class ContractToasterStack extends cdk.Stack {
     //   --context appDomain=…             (REQUIRED — no default)
     //   --context adminEmail=…            (REQUIRED — no default)
     //   --context hostedDomain=…          (REQUIRED — no default)
+    //   --context authMode=sso|password|both  (default: 'sso' — issue #245;
+    //                                     gates the Cognito username/password
+    //                                     app client in AuthStack. Same three
+    //                                     spellings as the backend's auth mode
+    //                                     in backend/src/demo_auth.py.)
     // -----------------------------------------------------------------------
     const appName = (this.node.tryGetContext('appName') as string | undefined) ?? 'contract-toaster';
     const githubRepo = (this.node.tryGetContext('githubRepo') as string | undefined) ?? 'contract-toaster';
@@ -121,6 +126,10 @@ export class ContractToasterStack extends cdk.Stack {
     const appDomain = this.node.tryGetContext('appDomain') as string | undefined;
     const adminEmail = this.node.tryGetContext('adminEmail') as string | undefined;
     const hostedDomain = this.node.tryGetContext('hostedDomain') as string | undefined;
+    // Issue #245: optional, with a fail-closed default of 'sso' (no password
+    // surface). AuthStack validates the value and throws on anything else.
+    const authMode = ((this.node.tryGetContext('authMode') as string | undefined) ??
+      DEFAULT_AUTH_MODE) as AuthMode;
 
     const missingIdentityContext = (
       [
@@ -241,6 +250,7 @@ export class ContractToasterStack extends cdk.Stack {
       appDomain: appDomain!,
       adminEmail: adminEmail!,
       hostedDomain: hostedDomain!,
+      authMode,
     });
 
     // PipelineStack: Step Functions review pipeline skeleton with a mock

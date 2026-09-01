@@ -185,6 +185,14 @@ def _write_audit_entry(
         "target_type": target_type,
         "outcome": "success",
     }
+    # Issue #253: same stamp src/review_routes.py::_write_audit_row applies,
+    # for the same reason -- a legal hold set or released against a review is
+    # part of that review's audit history, and docs/audit-queries.md's "full
+    # history of one review/document" query reads the audit table's
+    # `review_id-index`. Only review-scoped rows: a `retention_settings` row
+    # targets a global setting, not a review.
+    if target_type == "review" and target:
+        item["review_id"] = target
     item.update(detail)
     table.put_item(Item=item)
 

@@ -1,18 +1,20 @@
 {
-  "schema_version": "output-schema-v1",
+  "schema_version": "output-schema-v3",
   "decision": "REQUEST_CHANGE",
   "confidence_state": "OK",
   "confidence_band": null,
   "issues": [],
+  "block_patches": [],
+  "block_ops": [],
   "critic_delta": {
     "added_issues": [
       {
+        "issue_key": "I9",
         "section_ref": "10-non-exclusive",
         "section_title": "Non-Exclusive Arrangement",
         "counterparty_change_summary": "Counterparty struck 'non-exclusive' from Section 10, which the primary pass did not flag.",
         "decision": "REQUEST_CHANGE",
         "external_rationale_for_footnote": "Section 10 must retain the non-exclusive framing.",
-        "proposed_replacement_text": "This Agreement is non-exclusive.",
         "playbook_topic_id": "non-exclusive-arrangement",
         "internal_precedent_citation": null,
         "provenance": "critic-added"

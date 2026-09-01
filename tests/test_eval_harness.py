@@ -193,7 +193,6 @@ def check_deliberately_broken_fixture_fails_decision_mismatch() -> list[str]:
         "model_responses": {
             "primary": [
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -204,7 +203,6 @@ def check_deliberately_broken_fixture_fails_decision_mismatch() -> list[str]:
             ],
             "critic": [
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -230,64 +228,139 @@ def check_deliberately_broken_fixture_fails_decision_mismatch() -> list[str]:
 
 
 def check_deliberately_broken_fixture_fails_quote_locate() -> list[str]:
-    """The canned issue's source_quote does not appear anywhere in the shown
-    document text -- the quote-locatability check must catch this."""
+    """A canned edit that never reaches the document must FAIL the case --
+    and must fail it for THAT reason (issue #627, fix round 1).
+
+    Under v2 this fixture carried a `source_quote` absent from the document
+    and the harness caught it with `quote_locate`. Under the block-transcript
+    contract the same class of error is an edit that never reaches the
+    document, and the harness catches it by refusing any result carrying
+    `analysis_report.changes_not_applied` (`scripts/eval_harness.py::
+    score_case`). The broken thing is still broken the same way; only its
+    spelling moved.
+
+    HOW THE BREAKAGE IS SPELLED, AND WHY NOT ANOTHER WAY. The obvious
+    broken fixture -- a transcript whose keep/delete halves do not reproduce
+    the paragraph's real text -- never reaches this check at all:
+    `primary_review_pass._reject_block_transcript` proves the transcript
+    IN-PASS and spends the bounded retry on it, so with one seeded response
+    the case dies as an exhausted fake client and `score_case` records a
+    caught exception instead. That is correct production behaviour, and it
+    means the in-pass pre-check, not the addressing branch, is what the
+    fixture would have exercised.
+
+    So the transcript here PROVES: its keep/delete segments reconstruct
+    `p0001` exactly. What is broken is attribution -- the segments are
+    authored by `issue_key` "I2", which names no issue in the response.
+    `playbooks/output-schema-v3.json` cannot express that cross-array
+    foreign key, so a real model can emit it; `validate_block_patches` does
+    not look at issue keys, so it survives the in-pass pre-check; and
+    `redline_generate.generate_redline_from_blocks` refuses the batch at
+    stage 5 (`unattributed_block_edit`) because an edit with no author
+    would otherwise be written into the document with no rationale and no
+    footnote. The edit does not reach the document -- exactly the class the
+    locate check used to catch.
+
+    `expected` is written to MATCH the run in every other respect (status
+    and reason included) so the addressing branch is the SOLE thing that can
+    fail this case, and the control below repairs the one broken field and
+    asserts the same fixture then PASSES -- without it, "it failed" would
+    not tell us which mechanism fired."""
     failures = []
     playbook = _load_synthetic_generic_playbook()
 
-    broken = {
-        "case_id": "inline-broken-quote-locate",
-        "schema": "llm-native-v1",
-        "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
-        "model_responses": {
-            "primary": [
-                {
-                    "schema_version": "output-schema-v1",
-                    "decision": "REQUEST_CHANGE",
-                    "confidence_state": "OK",
-                    "confidence_band": None,
-                    "issues": [
-                        {
-                            "section_ref": "sec-8",
-                            "section_title": "Limitation on Liability",
-                            "counterparty_change_summary": "Counterparty removed the liability cap.",
-                            "decision": "REQUEST_CHANGE",
-                            "external_rationale_for_footnote": "Section 8 must retain the standard cap.",
-                            "proposed_replacement_text": "$150,000 mutual aggregate liability cap.",
-                            "playbook_topic_id": "limitation-of-liability",
-                            "internal_precedent_citation": None,
-                            "provenance": "model",
-                            "source_quote": "This exact sentence does not appear anywhere in the document.",
-                        }
-                    ],
-                    "critic_delta": None,
-                    "verdict_summary": "One issue identified.",
-                }
-            ],
-            "critic": [
-                {
-                    "schema_version": "output-schema-v1",
-                    "decision": "REQUEST_CHANGE",
-                    "confidence_state": "OK",
-                    "confidence_band": None,
-                    "issues": [],
-                    "critic_delta": None,
-                    "verdict_summary": None,
-                }
-            ],
-        },
-        "expected": {"status": "OK", "decision": "REQUEST_CHANGE", "min_issues": 1, "max_issues": 1},
-    }
+    def _case(issue_key: str, expected: dict) -> dict:
+        return {
+            "case_id": f"inline-broken-edit-not-applied-{issue_key}",
+            "schema": "llm-native-v1",
+            "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
+            "model_responses": {
+                "primary": [
+                    {
+                        "decision": "REQUEST_CHANGE",
+                        "confidence_state": "OK",
+                        "confidence_band": None,
+                        "issues": [
+                            {
+                                "issue_key": "I1",
+                                "section_ref": "sec-8",
+                                "section_title": "Limitation on Liability",
+                                "counterparty_change_summary": "Counterparty removed the liability cap.",
+                                "decision": "REQUEST_CHANGE",
+                                "external_rationale_for_footnote": "Section 8 must retain the standard cap.",
+                                "playbook_topic_id": "limitation-of-liability",
+                                "internal_precedent_citation": None,
+                                "provenance": "model",
+                            }
+                        ],
+                        "block_patches": [
+                            {
+                                # `p0001` IS the document's only block, and
+                                # keep+delete reconstruct its text
+                                # ("Liability is unlimited.") byte-for-byte,
+                                # so the transcript PROVES -- both in-pass
+                                # and again at stage 5.
+                                "block_id": "p0001",
+                                "segments": [
+                                    {"op": "keep", "text": "Liability is "},
+                                    {"op": "delete", "text": "unlimited", "issue_key": issue_key},
+                                    {"op": "insert", "text": "capped at $150,000", "issue_key": issue_key},
+                                    {"op": "keep", "text": "."},
+                                ],
+                            }
+                        ],
+                        "block_ops": [],
+                        "critic_delta": None,
+                        "verdict_summary": "One issue identified.",
+                    }
+                ],
+                "critic": [
+                    {
+                        "decision": "REQUEST_CHANGE",
+                        "confidence_state": "OK",
+                        "confidence_band": None,
+                        "issues": [],
+                        "block_patches": [],
+                        "block_ops": [],
+                        "critic_delta": None,
+                        "verdict_summary": None,
+                    }
+                ],
+            },
+            "expected": expected,
+        }
 
+    # "I2" authors the edits but names no issue: the edit is unattributable
+    # and never reaches the document.
+    broken = _case(
+        "I2",
+        {"status": "MANUAL_REVIEW_REQUIRED", "reason": "block_transcript_rejected"},
+    )
     result = eval_harness.score_case(_make_case(broken), playbook)
     if result.passed:
         failures.append(
-            "  a fixture whose canned source_quote does not locate in the shown "
-            "document text scored PASS -- the quote-locatability check is not "
-            "actually enforced."
+            "  a fixture whose canned edit never reached the document scored "
+            "PASS -- the addressing check is not actually enforced."
         )
-    if not any("does not locate" in r for r in result.reasons):
-        failures.append(f"  expected a 'does not locate' reason, got: {result.reasons!r}")
+    if not any("was not applied" in r for r in result.reasons):
+        failures.append(
+            f"  expected the ADDRESSING reason ('a proposed edit was not applied "
+            f"to the document') to be what failed this case; got: {result.reasons!r}"
+        )
+
+    # Control: the SAME fixture with the one broken field repaired must
+    # PASS -- so the FAIL above is attributable to the unapplied edit and
+    # not to some unrelated defect in the fixture.
+    repaired = _case(
+        "I1",
+        {"status": "OK", "decision": "REQUEST_CHANGE", "min_issues": 1, "max_issues": 1},
+    )
+    control = eval_harness.score_case(_make_case(repaired), playbook)
+    if not control.passed:
+        failures.append(
+            f"  control fixture setup error: repairing the segments' issue_key to "
+            f"the issue that exists should score PASS; got: {control.reasons!r}"
+        )
     return failures
 
 
@@ -313,7 +386,6 @@ def check_clause_text_with_xml_metacharacters_does_not_raise() -> list[str]:
         "model_responses": {
             "primary": [
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -324,7 +396,6 @@ def check_clause_text_with_xml_metacharacters_does_not_raise() -> list[str]:
             ],
             "critic": [
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -381,7 +452,6 @@ def check_run_review_exception_is_caught_as_a_fail() -> list[str]:
         "model_responses": {
             "primary": [
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "NOT_A_VALID_DECISION",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -615,7 +685,7 @@ def main() -> int:
         ("2", "eval_harness.py imports no detector / standard-form-diff module", check_no_detector_or_diff_imports),
         ("3", "ported llm-native-v1 fixtures PASS; detector-era fixtures skip", check_ported_fixtures_pass_and_detector_fixtures_skip),
         ("4a", "a decision-mismatch fixture is caught (FAILs)", check_deliberately_broken_fixture_fails_decision_mismatch),
-        ("4b", "a non-locating source_quote fixture is caught (FAILs)", check_deliberately_broken_fixture_fails_quote_locate),
+        ("4b", "an edit that never reached the document is caught (FAILs)", check_deliberately_broken_fixture_fails_quote_locate),
         ("4c", "clause text with '&'/'<'/'>' is escaped, not a ParseError", check_clause_text_with_xml_metacharacters_does_not_raise),
         ("4d", "run_review exceptions are caught as a per-case FAIL, not propagated", check_run_review_exception_is_caught_as_a_fail),
         ("4e", "expected.reason mismatch is caught (status alone is not enough)", check_expected_reason_mismatch_is_caught),
