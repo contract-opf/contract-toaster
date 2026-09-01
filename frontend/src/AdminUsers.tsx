@@ -37,7 +37,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
-import { CtBanner, CtButton, CtCard, CtChip, CtField, CtProgress, CtTable, CtToolbar } from './ui/react';
+import {
+  CtBanner,
+  CtButton,
+  CtCard,
+  CtChip,
+  CtColumns,
+  CtField,
+  CtProgress,
+  CtTable,
+  CtToolbar,
+} from './ui/react';
 import type { CtChipVariant } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -94,11 +104,49 @@ export interface SyncStatus {
   next_run_at: number | null;
 }
 
-/** The subset of `GET /api/admin/auth-mode`'s response this screen reads
- * (issue #474) — mirrors `backend/src/demo_auth.py::get_auth_mode_settings`.
- * The toggle UI itself is #246; this screen only reads the stored mode to
- * decide what to show, never writes it. */
+/** The subset of `/api/admin/auth-mode`'s response this screen uses —
+ * mirrors `backend/src/demo_auth.py::get_auth_mode_settings`, which is also
+ * exactly what the POST returns after a successful write. Read since #474;
+ * written since #246 (the toggle below). */
 type AuthMode = 'sso' | 'password' | 'both';
+
+/** One selectable mode, as served in `auth_mode_options` (issue #246). The
+ * labels are the SERVER's (`demo_auth.AUTH_MODE_OPTIONS`, already de-branded)
+ * — this screen never composes its own, so the two can't drift. */
+interface AuthModeOption {
+  value: AuthMode;
+  label: string;
+}
+
+function parseAuthMode(value: unknown): AuthMode | null {
+  return value === 'sso' || value === 'password' || value === 'both' ? value : null;
+}
+
+/**
+ * The options this screen can offer: every well-formed entry whose value is
+ * a mode the SPA itself understands. A mode the union doesn't cover is
+ * dropped rather than offered, because everything downstream of `authMode`
+ * (`availableAddUserTypes`, `showSyncCard`) branches on those three names —
+ * offering a fourth would let an admin store a mode this screen would then
+ * render incorrectly. If the backend ever adds one, widen `AuthMode` here.
+ */
+function parseAuthModeOptions(raw: unknown): AuthModeOption[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const parsed: AuthModeOption[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const { value, label } = entry as { value?: unknown; label?: unknown };
+    const mode = parseAuthMode(value);
+    if (mode !== null && typeof label === 'string' && label !== '') {
+      parsed.push({ value: mode, label });
+    }
+  }
+  return parsed;
+}
 
 /** A user-creation type this screen can add (mirrors `demo_auth.USER_TYPE_*`). */
 type AddUserType = 'sso' | 'password';
@@ -229,6 +277,15 @@ export default function AdminUsers(): React.ReactElement | null {
   // screen) and Add-user offers BOTH user types rather than guessing wrong
   // and hiding a legitimate one.
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  // The choices the toggle offers (issue #246), served alongside the mode
+  // itself. Empty until the probe succeeds — and an empty list renders NO
+  // toggle at all, which is the honest degrade: the whole point of
+  // `auth_mode_options` is that this screen doesn't hard-code the choices,
+  // so with none in hand there is nothing legitimate to draw.
+  const [authModeOptions, setAuthModeOptions] = useState<AuthModeOption[]>([]);
+  const [authModeSaving, setAuthModeSaving] = useState(false);
+  const [authModeError, setAuthModeError] = useState<string | null>(null);
+  const [authModeNotice, setAuthModeNotice] = useState<string | null>(null);
 
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [addUserType, setAddUserType] = useState<AddUserType>('sso');
@@ -319,6 +376,25 @@ export default function AdminUsers(): React.ReactElement | null {
     }
   }, []);
 
+  /**
+   * Adopt an `/api/admin/auth-mode` settings body — the GET's and the POST's
+   * responses are the same shape (`demo_auth.set_auth_mode` re-reads and
+   * returns the settings), so both go through here and can't drift apart.
+   * Each field is adopted independently, so a garbled one never discards the
+   * other.
+   */
+  const applyAuthModeSettings = useCallback((payload: unknown): void => {
+    const data = (payload ?? {}) as { auth_mode?: unknown; auth_mode_options?: unknown };
+    const options = parseAuthModeOptions(data.auth_mode_options);
+    if (options.length > 0) {
+      setAuthModeOptions(options);
+    }
+    const mode = parseAuthMode(data.auth_mode);
+    if (mode !== null) {
+      setAuthMode(mode);
+    }
+  }, []);
+
   const loadAuthMode = useCallback(async () => {
     try {
       const response = await jsonFetch('/api/admin/auth-mode');
@@ -329,14 +405,60 @@ export default function AdminUsers(): React.ReactElement | null {
       if (!response.ok) {
         return; // Degrades to "unknown" (see authMode's docstring above).
       }
-      const data = (await response.json()) as { auth_mode?: string };
-      if (data.auth_mode === 'sso' || data.auth_mode === 'password' || data.auth_mode === 'both') {
-        setAuthMode(data.auth_mode);
-      }
+      applyAuthModeSettings(await response.json());
     } catch {
       // Leaves authMode null — same "unknown, degrade safely" contract as loadMe.
     }
-  }, []);
+  }, [applyAuthModeSettings]);
+
+  /**
+   * Write the stored auth mode (POST /api/admin/auth-mode, issue #246 — the
+   * route has existed since #232 and nothing in the SPA had ever called it).
+   *
+   * Same posture as every other mutation on this screen: no optimistic UI.
+   * The select keeps showing the CONFIRMED mode until the server's response
+   * says otherwise, and success updates state in place — never a reload,
+   * which would destroy the in-memory session token (auth.ts) and sign the
+   * operator out, the same defect #439 fixed for the loaders here.
+   */
+  const saveAuthMode = useCallback(
+    async (rawMode: string) => {
+      const mode = parseAuthMode(rawMode);
+      if (mode === null) {
+        return; // Nothing this screen offers can produce this.
+      }
+      setAuthModeError(null);
+      setAuthModeNotice(null);
+      setAuthModeSaving(true);
+      try {
+        const response = await jsonFetch('/api/admin/auth-mode', {
+          method: 'POST',
+          body: JSON.stringify({ auth_mode: mode }),
+        });
+        if (!response.ok) {
+          const detail = await readErrorDetail(response);
+          throw new Error(
+            detail ??
+              friendlyErrorMessage(
+                `POST /api/admin/auth-mode returned HTTP ${response.status}`,
+                "We couldn't change the sign-in method. Please try again.",
+              ),
+          );
+        }
+        applyAuthModeSettings(await response.json());
+        setAuthModeNotice('Sign-in method updated. It applies to everyone from now on.');
+      } catch (err) {
+        setAuthModeError(
+          err instanceof Error
+            ? err.message
+            : friendlyErrorMessage(err, "We couldn't change the sign-in method. Please try again."),
+        );
+      } finally {
+        setAuthModeSaving(false);
+      }
+    },
+    [applyAuthModeSettings],
+  );
 
   useEffect(() => {
     void loadUsers();
@@ -616,7 +738,19 @@ export default function AdminUsers(): React.ReactElement | null {
                 />
               </CtField>
             ) : (
-              <>
+              /* Issue #608 (#602 split): username and its initial password
+                 are the "related controls" pair `ct-columns` (#601) exists
+                 for — one credential, entered in one go, comparable widths,
+                 neither `narrow`. Generate stays inside the PASSWORD
+                 column's own `ct-stack` (the same shape AdminModel's
+                 ModelRoleField uses for a control plus its adjunct): as a
+                 third direct child of the grid it would wrap onto a second
+                 row underneath the USERNAME field instead, detached from
+                 the field it fills in. `ct-columns` never moves its
+                 children, so username → password → Generate stays the DOM
+                 and tab order, and the whole row collapses to one column
+                 below 640px on its own. */
+              <CtColumns>
                 <CtField label="Username">
                   <input
                     data-testid="admin-users-add-username"
@@ -627,32 +761,34 @@ export default function AdminUsers(): React.ReactElement | null {
                     onChange={(e) => setAddUsername(e.target.value)}
                   />
                 </CtField>
-                <CtField
-                  label="Initial password"
-                  hint="Type one, or click Generate. The server never returns it after creation — this screen shows it exactly once."
-                >
-                  <input
-                    data-testid="admin-users-add-password"
-                    type="text"
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="ct-mono"
-                    value={addPassword}
-                    onChange={(e) => setAddPassword(e.target.value)}
-                  />
-                </CtField>
-                <div className="ct-actions">
-                  <CtButton
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    data-testid="admin-users-add-generate"
-                    onClick={() => setAddPassword(generatePassword())}
+                <div className="ct-stack">
+                  <CtField
+                    label="Initial password"
+                    hint="Type one, or click Generate. The server never returns it after creation — this screen shows it exactly once."
                   >
-                    Generate
-                  </CtButton>
+                    <input
+                      data-testid="admin-users-add-password"
+                      type="text"
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="ct-mono"
+                      value={addPassword}
+                      onChange={(e) => setAddPassword(e.target.value)}
+                    />
+                  </CtField>
+                  <div className="ct-actions">
+                    <CtButton
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      data-testid="admin-users-add-generate"
+                      onClick={() => setAddPassword(generatePassword())}
+                    >
+                      Generate
+                    </CtButton>
+                  </div>
                 </div>
-              </>
+              </CtColumns>
             )}
 
             <label className="ct-row" data-testid="admin-users-add-is-admin-row">
@@ -699,6 +835,60 @@ export default function AdminUsers(): React.ReactElement | null {
             </CtButton>
           </div>
         </div>
+      )}
+
+      {/* Sign-in method (issue #246) — the WRITE half of the auth-mode
+          setting #474 already reads. Rendered only once the server has told
+          us what the choices are: `auth_mode_options` exists precisely so
+          this screen doesn't hard-code them (backend/src/demo_auth.py), so
+          an unprobeable deployment gets no toggle rather than an invented
+          one. Everything mode-dependent below reacts off `authMode`, which
+          the POST response updates in place. */}
+      {authModeOptions.length > 0 && (
+        <CtCard data-testid="admin-users-auth-mode-panel">
+          <div className="ct-stack">
+            <CtToolbar title="Sign-in method" />
+            {authModeError && (
+              <CtBanner variant="danger" data-testid="admin-users-auth-mode-error">
+                {authModeError}
+              </CtBanner>
+            )}
+            {authModeNotice && (
+              <CtBanner variant="ok" data-testid="admin-users-auth-mode-notice">
+                {authModeNotice}
+              </CtBanner>
+            )}
+            <CtField
+              label="How people sign in"
+              hint="Applies immediately, to everyone. Make sure someone can still get in the way you are switching to before you switch — this screen is behind that sign-in too."
+            >
+              <select
+                data-testid="admin-users-auth-mode-select"
+                value={authMode ?? ''}
+                disabled={authModeSaving}
+                onChange={(e) => void saveAuthMode(e.target.value)}
+              >
+                {/* Reachable without any bad response: the GET returns the
+                    stored row's `auth_mode` UNVALIDATED
+                    (demo_auth.get_auth_mode_settings), so a value written
+                    out-of-band — never by the POST, which validates — arrives
+                    here as a mode this screen can't name. Say so rather than
+                    let the browser display whichever option happens to be
+                    first, which would misreport the live setting. */}
+                {authMode === null && (
+                  <option value="" disabled>
+                    Not a setting this screen recognises — choose one
+                  </option>
+                )}
+                {authModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </CtField>
+          </div>
+        </CtCard>
       )}
 
       {/* Sync-job visibility panel — hidden entirely on a password-mode

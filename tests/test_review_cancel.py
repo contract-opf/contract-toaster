@@ -96,8 +96,6 @@ def test_primary_pass_stops_before_the_first_call(failures: list[str]) -> None:
     try:
         pp.run_primary_pass(
             review_id="cancel-1",
-            diff_hunks=[],
-            anchored_clauses=[],
             retrieved_precedent=[],
             playbook=_playbook(),
             model_client=client,
@@ -130,8 +128,6 @@ def test_primary_pass_stops_between_attempts(failures: list[str]) -> None:
     try:
         pp.run_primary_pass(
             review_id="cancel-2",
-            diff_hunks=[],
-            anchored_clauses=[],
             retrieved_precedent=[],
             playbook=_playbook(),
             model_client=client,
@@ -156,8 +152,6 @@ def test_no_checkpoint_is_the_unchanged_path(failures: list[str]) -> None:
     client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_fixture("primary_request_change_valid.json")]})
     result = pp.run_primary_pass(
         review_id="cancel-3",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=_playbook(),
         model_client=client,
@@ -179,8 +173,6 @@ def test_critic_pass_stops_before_the_first_call(failures: list[str]) -> None:
     try:
         cp.run_critic_pass(
             review_id="cancel-4",
-            diff_hunks=[],
-            anchored_clauses=[],
             primary_output=json.loads(_fixture("primary_request_change_valid.json")),
             playbook=_playbook(),
             model_client=client,
@@ -223,7 +215,11 @@ def test_client_stops_retrying_when_cancelled(failures: list[str]) -> None:
     )
     try:
         client.invoke(
-            model_id="anthropic/claude-opus-4.8",
+            # Any id enforce_openrouter_policy_model_id allows; the pin is
+            # used for realism. Was anthropic/claude-opus-4.8 until the owner
+            # removed it from `selectable` and the guard began refusing it.
+            # Nothing here reads the capability descriptor.
+            model_id="anthropic/claude-opus-5",
             system_prompt="s",
             user_prompt="u",
             max_output_tokens=100,
@@ -256,7 +252,7 @@ def test_client_without_checkpoint_still_retries(failures: list[str]) -> None:
     )
     try:
         client.invoke(
-            model_id="anthropic/claude-opus-4.8",
+            model_id="anthropic/claude-opus-5",
             system_prompt="s",
             user_prompt="u",
             max_output_tokens=100,

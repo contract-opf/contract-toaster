@@ -58,15 +58,50 @@
 #   repo-wide lock so the concurrency that produced the original false green
 #   cannot arise in the first place; see its header.
 #
-#   The lenient behaviour existed for a real reason: a handful of moto-backed
-#   tests (e.g. the S3 upload end-to-end test in
-#   tests/test_review_routes_mounted_186.py) flake under heavy CPU load and
-#   pass reliably alone, and a gate that is red every other run trains
-#   everyone to ignore red. That reason still holds — but the answer is to fix
-#   or quarantine the specific offender, not to leave the FLAKY bucket silent
-#   for everything. If you find yourself typing ALLOW_FLAKY=1 by reflex, the
-#   flaky test has become the problem: file it. (Most of that load came from
-#   concurrent full gate runs, which check.sh's lock now prevents.)
+#   The lenient behaviour existed for a real reason: a gate that is red every
+#   other run trains everyone to ignore red. That reason still holds — but the
+#   answer is to fix or quarantine the specific offender, not to leave the
+#   FLAKY bucket silent for everything. If you find yourself typing
+#   ALLOW_FLAKY=1 by reflex, the flaky test has become the problem: file it.
+#   (Most of the load that provoked flakes came from concurrent full gate runs,
+#   which check.sh's lock now prevents.)
+#
+#   WHAT "FLAKES UNDER LOAD" ACTUALLY MEANT HERE — read this before blaming
+#   moto. This comment used to name tests/test_review_routes_mounted_186.py as
+#   the standing example of "a moto-backed test that flakes under heavy CPU
+#   load and passes reliably alone", and issue #583 was filed off that
+#   description. Diagnosed 2026-08-22: moto was never involved, and there was
+#   no race. The test built a .docx TWICE — once to upload, once to compare the
+#   stored object against — and asserted the two archives were byte-identical.
+#   `zipfile.writestr` stamps `time.localtime()` into every local-file header
+#   at 2-SECOND DOS resolution, so two independent builds differ whenever they
+#   straddle a tick. Load did not create a race; it widened the gap between the
+#   two builds (75ms idle -> ~700ms at load average ~100), and that gap over
+#   2s IS the failure probability. Measured on the pre-fix tree: 11/60 parallel
+#   runs failed under load, and the failing runs were EXACTLY the 11 whose two
+#   builds straddled a tick — no false positives, no false negatives. 8cb2beb
+#   (2026-08-19) replaced the byte comparison with a semantic one; 60/60 pass
+#   under the same load. The test is not quarantined and needs no allowlist.
+#
+#   THE SAME ROOT CAUSE BIT A SECOND FILE, found by the very gate run that was
+#   verifying the above: tests/test_review_api_84.py, whose `_submit` also
+#   rebuilt its .docx on every call. There the non-deterministic bytes fed
+#   sha256(file) -> the DERIVED idempotency key, so
+#   test_derived_key_same_bucket_collides submitted two files it believed were
+#   identical, got two hashes, two keys, and two review_ids. Measured: 31/60
+#   parallel runs failed at load average ~240; 0/60 after the builder was
+#   pinned to a fixed ZipInfo date_time (verified at load average ~380).
+#   Note what was NOT wrong: the 10-minute bucket and the previous-bucket
+#   probe in find_existing_submission are both correct and already handle a
+#   genuine bucket straddle. Pin the timestamp; don't widen the bucket.
+#
+#   The transferable lesson: on this tree "flakes under load" has meant
+#   test-side nondeterminism whose window load merely WIDENS, not a race in the
+#   mocked AWS layer. Look for a wall-clock-stamped artifact first. Note the
+#   two instances presented completely differently — one as a byte comparison,
+#   one as an idempotency-key mismatch — so grep for the SOURCE (a helper
+#   rebuilt per call via `zipfile.writestr` with a str name), not the symptom.
+#   Build fixtures deterministically and neither symptom can arise.
 #
 # Per-run log files land in their own mktemp directory, NOT at a fixed
 # /tmp/check_<basename>.log path — that fixed path was itself shared across

@@ -80,7 +80,20 @@ import model_output_schema as mos  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
 
-PRIMARY_MODEL_ID = "anthropic/claude-opus-4.8"
+# model-policy/openrouter.json's two pinned ids. These are here ONLY so
+# `OpenRouterModelClient.invoke`'s runtime policy assertion
+# (enforce_openrouter_policy_model_id) does not fire ahead of the tool-mode
+# behaviour under test; the primary was anthropic/claude-opus-4.8 until the
+# owner removed that id from `selectable`, after which the guard refuses it.
+# opus-5 (the primary pin since issue #604) is the right stand-in EVEN THOUGH
+# it declares `structured_outputs: true` and tool mode is the fallback for
+# models that do not: nothing in this file ever passes the `output_schema=`
+# kwarg (every schema below is handed over as `tool_spec`), and `invoke` adds
+# `response_format` only when `output_schema is not None` AND the capability
+# is True -- so the capability descriptor cannot reach any assertion here.
+# The file where the id DOES carry that meaning is
+# tests/test_structured_output_request.py (OPENROUTER_NO_CAPABILITY_MODEL_ID).
+PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
 
 # The only two "valid" fixture filenames whose top-level shape this file's
@@ -159,19 +172,25 @@ class TestModelFacingOutputSchema(unittest.TestCase):
         issue_def = self.schema["definitions"]["Issue"]
         self.assertNotIn("provenance", issue_def["required"])
         # Every other originally-required Issue field is untouched.
+        # Every other originally-required Issue field is untouched. Issue
+        # #627: the ACTIVE contract is v3, whose required set adds
+        # `issue_key` and no longer requires `proposed_replacement_text` --
+        # which the projection also strips outright, since the pipeline
+        # derives it from the proven transcript.
         self.assertEqual(
             set(issue_def["required"]),
             {
+                "issue_key",
                 "section_ref",
                 "section_title",
                 "counterparty_change_summary",
                 "decision",
                 "external_rationale_for_footnote",
-                "proposed_replacement_text",
                 "playbook_topic_id",
                 "internal_precedent_citation",
             },
         )
+        self.assertNotIn("proposed_replacement_text", issue_def["properties"])
 
     def test_issue_definition_properties_no_longer_declares_provenance(self) -> None:
         self.assertNotIn("provenance", self.schema["definitions"]["Issue"]["properties"])
@@ -380,7 +399,7 @@ class TestOpenRouterInvokeToolSpec(unittest.TestCase):
         self.assertTrue(tool_ok, tool_parsed)
         self.assertTrue(prose_ok, prose_parsed)
         self.assertEqual(tool_parsed, prose_parsed)
-        self.assertEqual(tool_parsed["schema_version"], "output-schema-v1")
+        self.assertEqual(tool_parsed["schema_version"], pp.OUTPUT_SCHEMA_VERSION)
         self.assertEqual(tool_parsed["issues"][0]["provenance"], "model")
 
 
@@ -481,8 +500,6 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             result = pp.run_primary_pass(
                 review_id="r-1",
-                diff_hunks=_sample_diff_hunks(),
-                anchored_clauses=_sample_anchored_clauses(),
                 retrieved_precedent=[],
                 playbook=_sample_playbook(),
                 model_client=legacy,
@@ -501,8 +518,6 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
         with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "1"}, clear=True):
             result = pp.run_primary_pass(
                 review_id="r-2",
-                diff_hunks=_sample_diff_hunks(),
-                anchored_clauses=_sample_anchored_clauses(),
                 retrieved_precedent=[],
                 playbook=_sample_playbook(),
                 model_client=client,
@@ -521,8 +536,6 @@ class TestRunCriticPassThreading(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             result = cp.run_critic_pass(
                 review_id="r-3",
-                diff_hunks=_sample_diff_hunks(),
-                anchored_clauses=_sample_anchored_clauses(),
                 primary_output=primary_output,
                 playbook=_sample_playbook(),
                 model_client=legacy,
@@ -541,8 +554,6 @@ class TestRunCriticPassThreading(unittest.TestCase):
         with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "1"}, clear=True):
             result = cp.run_critic_pass(
                 review_id="r-4",
-                diff_hunks=_sample_diff_hunks(),
-                anchored_clauses=_sample_anchored_clauses(),
                 primary_output=primary_output,
                 playbook=_sample_playbook(),
                 model_client=client,

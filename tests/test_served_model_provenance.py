@@ -116,8 +116,12 @@ class TestServedModelCapture(unittest.TestCase):
     def test_a_provider_that_omits_them_does_not_fail_the_call(self):
         """Provenance is never worth failing an otherwise-successful call."""
         client = _client([_body()])
+        # model_id is incidental here: it only has to be an id
+        # enforce_openrouter_policy_model_id allows (it was
+        # anthropic/claude-opus-4.8 until the owner removed that from
+        # `selectable`). No capability descriptor is read on this path.
         content = client.invoke(
-            system_prompt="s", user_prompt="u", model_id="anthropic/claude-opus-4.8",
+            system_prompt="s", user_prompt="u", model_id="anthropic/claude-opus-5",
             max_output_tokens=64,
         )
         self.assertEqual(content, "{}")

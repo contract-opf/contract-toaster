@@ -13,7 +13,6 @@
   "model_responses": {
     "primary": [
       {
-        "schema_version": "output-schema-v1",
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "confidence_band": null,
@@ -24,26 +23,45 @@
             "counterparty_change_summary": "Counterparty introduced one-way indemnification of Institution by the Company.",
             "decision": "REQUEST_CHANGE",
             "external_rationale_for_footnote": "Counterparty introduces general or one-way indemnification by the Company. Narrow mutual IP or gross-negligence/willful-misconduct indemnification capped by Section 8 is an acceptable variation (see indemnification topic) and must not fire this rule. Trigger 'company\\s+(shall|will|must|agrees?\\s+to)\\b[^.]{0,40}indemnif' (regex, in regex_trigger_terms) catches one-way the Company indemnification across common modal/volitional phrasings without firing on mutual or each-party formulations. Issue #220: this regex trigger lives in regex_trigger_terms, not trigger_terms, so the plain phrases 'hold harmless' and 'duty to defend' are matched as word-boundary phrases, not compiled as regex.",
-            "proposed_replacement_text": "Neither party shall bear responsibility for defending or compensating the other party for third-party claims arising under this Agreement, except as expressly and narrowly set forth in Section 8.",
             "playbook_topic_id": "indemnification",
             "internal_precedent_citation": null,
             "provenance": "model",
-            "source_quote": "The Company shall indemnify Institution for any and all claims, without limit."
+            "issue_key": "I1",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
           }
         ],
         "critic_delta": null,
-        "verdict_summary": "One issue identified requiring attention before your organization can accept this draft."
+        "verdict_summary": "One issue identified requiring attention before your organization can accept this draft.",
+        "block_patches": [
+          {
+            "block_id": "p0001",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "The Company shall indemnify Institution for any and all claims, without limit.",
+                "issue_key": "I1"
+              },
+              {
+                "op": "insert",
+                "text": "Neither party shall bear responsibility for defending or compensating the other party for third-party claims arising under this Agreement, except as expressly and narrowly set forth in Section 8.",
+                "issue_key": "I1"
+              }
+            ]
+          }
+        ],
+        "block_ops": []
       }
     ],
     "critic": [
       {
-        "schema_version": "output-schema-v1",
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "confidence_band": null,
         "issues": [],
         "critic_delta": null,
-        "verdict_summary": null
+        "verdict_summary": null,
+        "block_patches": [],
+        "block_ops": []
       }
     ]
   },

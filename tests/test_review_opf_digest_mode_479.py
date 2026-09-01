@@ -219,31 +219,66 @@ def _build_docx_bytes() -> bytes:
 # ---------------------------------------------------------------------------
 
 
+_DRAFT_INDEMNITY_TEXT = "Each party shall indemnify the other without limitation as to amount."
+
+
+def _indemnity_block_id() -> str:
+    """The code-assigned block id of `_build_docx_bytes()`'s one body
+    paragraph, resolved through the production extractor (issue #627) rather
+    than written as a literal -- a transcript naming an id the document does
+    not have is rejected by `block_transcript.validate_block_patches`."""
+    import extraction_normalization_stage as ens
+
+    normalized = ens.extract_and_normalize(_build_docx_bytes())
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        if block["text"] == _DRAFT_INDEMNITY_TEXT:
+            return block_id
+    raise AssertionError("the synthetic fixture no longer carries the draft clause")
+
+
 def _primary_request_change_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [
                 {
+                    "issue_key": "I1",
                     "section_ref": "clause-indemnification",
                     "section_title": "Indemnification",
                     "counterparty_change_summary": "Uncapped indemnity, no dollar limit stated.",
                     "decision": "REQUEST_CHANGE",
                     "external_rationale_for_footnote": "Indemnity must be capped.",
-                    "proposed_replacement_text": (
-                        "Each party's indemnification obligation is capped at fees paid."
-                    ),
                     "playbook_topic_id": "clause-indemnification",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": (
-                        "Each party shall indemnify the other without limitation as to amount."
+                    "replacement_scope_note": (
+                        "The clause disclaims any limit outright, so the cap "
+                        "cannot be added without replacing it."
                     ),
                 }
             ],
+            # Issue #627: the edit as a block transcript over the real
+            # document, ids and source text both derived from the fixture
+            # bytes.
+            "block_patches": [
+                {
+                    "block_id": _indemnity_block_id(),
+                    "segments": [
+                        {"op": "delete", "text": _DRAFT_INDEMNITY_TEXT, "issue_key": "I1"},
+                        {
+                            "op": "insert",
+                            "text": (
+                                "Each party's indemnification obligation is capped at fees paid."
+                            ),
+                            "issue_key": "I1",
+                        },
+                    ],
+                }
+            ],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": "One issue identified requiring attention.",
         }
@@ -253,7 +288,6 @@ def _primary_request_change_response() -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -267,7 +301,6 @@ def _critic_no_delta_response() -> str:
 def _primary_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -281,7 +314,6 @@ def _primary_accept_response() -> str:
 def _critic_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -684,56 +716,80 @@ class TestOpfPenRulesEnforcement(unittest.TestCase):
         over_long_text = "x" * 1600
 
         def _primary_response_with_over_long_replacement() -> str:
+            # Issue #627: the over-long text is what the model INSERTS. Under
+            # the block-transcript contract it no longer authors
+            # `proposed_replacement_text` -- the pipeline DERIVES that field
+            # from the proven transcript's inserts, so an over-long insert is
+            # exactly how an over-long replacement now arrives, and stage 5
+            # is where the pen rules judge it.
             return json.dumps(
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "REQUEST_CHANGE",
                     "confidence_state": "OK",
                     "confidence_band": None,
                     "issues": [
                         {
+                            "issue_key": "I1",
                             "section_ref": "clause-indemnification",
                             "section_title": "Indemnification",
                             "counterparty_change_summary": "Uncapped indemnity.",
                             "decision": "REQUEST_CHANGE",
                             "external_rationale_for_footnote": "Indemnity must be capped.",
-                            "proposed_replacement_text": over_long_text,
                             "playbook_topic_id": "clause-indemnification",
                             "internal_precedent_citation": None,
                             "provenance": "model",
-                            "source_quote": (
-                                "Each party shall indemnify the other without "
-                                "limitation as to amount."
-                            ),
                         }
                     ],
+                    "block_patches": [
+                        {
+                            "block_id": _indemnity_block_id(),
+                            "segments": [
+                                {
+                                    "op": "delete",
+                                    "text": _DRAFT_INDEMNITY_TEXT,
+                                    "issue_key": "I1",
+                                },
+                                {"op": "insert", "text": over_long_text, "issue_key": "I1"},
+                            ],
+                        }
+                    ],
+                    "block_ops": [],
                     "critic_delta": None,
                     "verdict_summary": "One issue identified requiring attention.",
                 }
             )
 
-        # Bounded-retry budget is 1 retry: attempt 1 (violation -> retry
-        # consumed), attempt 2 (still violating -> demoted to flag-only
-        # rather than failing the whole pass).
+        # ONE response is enough now: the pen rules no longer consume a
+        # pass-time retry (the model authored nothing for them to judge at
+        # that layer), they run once at stage 5 against the DERIVED text.
         fake_client = model_client_module.FakeBedrockClient(
             {
-                PRIMARY_MODEL_ID: [
-                    _primary_response_with_over_long_replacement(),
-                    _primary_response_with_over_long_replacement(),
-                ],
+                PRIMARY_MODEL_ID: [_primary_response_with_over_long_replacement()],
                 CRITIC_MODEL_ID: [_critic_no_delta_response()],
             }
         )
 
         result = review_spine.run_review(docx_bytes, bundle, fake_client, review_id="opf-479-13")
 
-        self.assertEqual(result["status"], "OK", result)
-        self.assertEqual(result["decision"], "REQUEST_CHANGE")
+        # Issue #627: the pen rules still catch it, and they still keep the
+        # over-long text out of the delivered document -- but the OUTCOME
+        # shape moved with the enforcement point. Under v2 the violation was
+        # caught at pass time and the issue was DEMOTED to flag-only, so the
+        # review completed OK with nothing to download. Under the
+        # block-transcript contract the violation is caught at stage 5,
+        # against the DERIVED replacement, and dropping the issue's edits
+        # leaves a REQUEST_CHANGE with nothing appliable at all -- which
+        # routes to MANUAL_REVIEW_REQUIRED, the same fail-closed outcome the
+        # quote path already gives a REQUEST_CHANGE whose every patch failed.
+        # The attorney still sees the finding and its reason; what changed is
+        # that the run no longer reports itself DONE.
+        self.assertEqual(result["status"], "MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result.get("reason"), "block_edits_not_applied")
         self.assertEqual(len(result["findings"]), 1, result["findings"])
-        # Demoted to flag-only (issue #293 scope item 6's own convention):
-        # the over-long text never reached the delivered redline.
-        self.assertEqual(result["findings"][0]["proposed_replacement_text"], "")
         self.assertIsNone(result.get("redline_bytes"))
+        not_applied = result["analysis_report"]["changes_not_applied"]
+        self.assertEqual(len(not_applied), 1, not_applied)
+        self.assertEqual(not_applied[0]["section_ref"], "clause-indemnification")
 
 
 class TestOpfLeakageCorpus(unittest.TestCase):
@@ -749,7 +805,6 @@ class TestOpfLeakageCorpus(unittest.TestCase):
         def _primary_accept_with_leak() -> str:
             return json.dumps(
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -793,7 +848,6 @@ class TestOpfLeakageCorpus(unittest.TestCase):
         def _primary_accept_with_leak() -> str:
             return json.dumps(
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,
@@ -834,7 +888,6 @@ class TestOpfLeakageCorpus(unittest.TestCase):
         def _primary_accept_with_leak() -> str:
             return json.dumps(
                 {
-                    "schema_version": "output-schema-v1",
                     "decision": "ACCEPT",
                     "confidence_state": "OK",
                     "confidence_band": None,

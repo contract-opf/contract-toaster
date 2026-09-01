@@ -150,6 +150,23 @@ describe('CtTabBar', () => {
     expect(usersTab).toBeInTheDocument();
   });
 
+  it('falls back to tabindex="0" on index 0 when `active` names a tab this instance is not rendering', async () => {
+    // Mirrors App.tsx's non-admin caller whose hash still resolves to an
+    // admin-only id (`tabFromHash` doesn't consult `isAdmin`) after `tabs`
+    // has already filtered that id out — see ct-tab-bar.ts's `render()`
+    // fallback comment.
+    render(<ControlledTabBar initial="not-in-this-group" />);
+    await settleHost('ct-tab-bar');
+
+    const reviewTab = screen.getByRole('tab', { name: 'Review' });
+    const usersTab = screen.getByRole('tab', { name: 'Users & access' });
+    const retentionTab = screen.getByRole('tab', { name: 'Retention & legal hold' });
+    expect(reviewTab).toHaveAttribute('tabindex', '0');
+    expect(reviewTab).toHaveAttribute('aria-selected', 'false');
+    expect(usersTab).toHaveAttribute('tabindex', '-1');
+    expect(retentionTab).toHaveAttribute('tabindex', '-1');
+  });
+
   it('re-importing the ui/react module does not throw (defineOnce guards registration)', async () => {
     await expect(import('../ui/react')).resolves.toBeDefined();
     await expect(import('../ui/components/ct-tab-bar')).resolves.toBeDefined();

@@ -9,7 +9,13 @@ Endpoints:
   GET /version  — allowlisted (requires a valid Cognito JWT).
                   Returns version, commit SHA, image digest, and uptime_seconds.
 
-  GET /whoami   — authenticated echo endpoint.
+  GET /whoami   — authenticated echo endpoint. NOT advertised in the OpenAPI
+                  schema (issue #588: the deployed reverse proxy
+                  (deploy/dts/nginx.conf) only forwards /api/, /version,
+                  /health, and /openapi.json to this backend, so a schema
+                  entry for /whoami misrepresented it as reachable). Still
+                  mounted and functional for direct callers of the API
+                  origin.
                   Returns the verified Cognito claims so callers can prove JWT
                   verification is working end-to-end (issue #55 AC).
 
@@ -22,6 +28,12 @@ Endpoints:
                   (issue #469). Only valid for a username/password row (400
                   for an SSO row); 401 if current_password is wrong, 400 if
                   new_password is under demo_auth.MIN_PASSWORD_LENGTH chars.
+  GET /api/me/preferences — authenticated: the CALLER'S OWN preferences
+                  (issue #523). Never another user's — there is no admin
+                  variant of this route by design (epic #519 decision 3).
+  PUT /api/me/preferences — authenticated: partial update of the CALLER'S
+                  OWN preferences (issue #523). 400 on an unknown key or a
+                  rejected value; 403 on a body naming another user.
 
   GET /api/users            — admin: the allowlist view (issue #92).
   POST /api/users           — admin: add a user, SSO or username/password (#232).
@@ -64,6 +76,45 @@ Endpoints:
                       or document substance, or key material is reachable
                       through it (the response is an explicit field
                       projection, see reviews.list_recent_failures).
+
+  GET  /api/admin/spend          — admin: the spend ledger + reconcile view
+                      (#252) — today's reserved/settled totals against the
+                      configured daily ceiling, a bounded trailing window of
+                      the same, and `outstanding_reservation_usd_cents` (the
+                      reserved-but-never-settled remainder #59/#61's
+                      reconcile procedure acts on). `?days=N` is clamped
+                      and is a CALENDAR window, not a row count.
+                      Read-only: the reconcile ACTION is not part of this
+                      slice.
+  GET  /api/admin/health         — admin: pipeline health (#252) — review
+                      counts by status, stale in-flight (PENDING/RUNNING)
+                      reviews with a bounded oldest-first sample, and
+                      concurrency occupancy against PIPELINE_MAX_CONCURRENCY.
+                      `?stale_after_seconds=N` is clamped. Distinct from the
+                      public `/health` liveness probe above, which is
+                      unchanged.
+  GET  /api/admin/manual-review  — admin: the manual-review queue (#252/#37)
+                      — every review in MANUAL_REVIEW_REQUIRED or
+                      ERROR_MANUAL_REVIEW_REQUIRED, newest first, with its
+                      wait time and 24-hour-SLA state (RUNBOOK.md ->
+                      "Manual-review filter: owner and SLA"). Filterable by
+                      `?status_filter=` and `?triage=`; an unrecognised
+                      filter value is a 400, never silently ignored.
+                      `counts` is computed over the unfiltered queue.
+  GET  /api/admin/releases       — admin: release activity + the per-review
+                      cost-outlier flag (#252) — recent release-bundle
+                      activations/rollbacks with bundle content hashes, read
+                      from the append-only audit trail, plus reviews whose
+                      real ledgered cost is an outlier against the median of
+                      a BOUNDED sample of the model-invocation ledger
+                      (ARCHITECTURE.md -> "Security posture": a possible
+                      injection or runaway signal). `?limit=N` is clamped.
+
+  All four of the above are an explicit field projection, exactly like the
+  diagnostics route: no document substance, rationale, S3 key, execution
+  ARN, or key material is reachable through any of them, and each 403s a
+  non-admin rather than returning a filtered 200 (they are instance-wide
+  operational views with no "your own row" subset).
 
   POST /api/admin/playbooks
                       — admin: create a brand-new playbook_id AND its first
@@ -250,6 +301,11 @@ Environment variables (DynamoDB/S3, consumed by src/retention.py):
   UPLOADS_BUCKET             — uploads S3 bucket name
   OUTPUTS_BUCKET             — outputs S3 bucket name
 
+Environment variables (DynamoDB, consumed by src/user_preferences.py — #523):
+  USER_PREFERENCES_TABLE     — per-user preferences table (PK: cognito_sub).
+                                Read and written ONLY for the caller's own
+                                sub; there is no admin-over-others path.
+
 Security invariants:
   - /health is public and returns ONLY liveness status.  Build details must
     not leak on the unauthenticated path (threat model: information disclosure).
@@ -281,6 +337,17 @@ from fastapi.responses import JSONResponse
 
 from src import config
 from src import purge_scheduler
+from src.admin_dashboard import (
+    MANUAL_REVIEW_DEFAULT_LIMIT,
+    RELEASE_ACTIVITY_DEFAULT_LIMIT,
+    SPEND_LEDGER_DEFAULT_DAYS,
+    STALE_IN_FLIGHT_SECONDS_DEFAULT,
+    get_pipeline_health,
+    get_release_activity,
+    get_spend_ledger,
+    list_manual_review_queue,
+)
+from src.audit_queries import AUDIT_QUERY_DEFAULT_LIMIT, run_audit_query
 from src.auth import get_current_user
 from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
@@ -290,6 +357,7 @@ from src.demo_auth import (
     clear_demo_session_cookie,
     client_ip_from_request,
     default_credentials_warning,
+    enforce_default_credentials_rotation,
     get_auth_mode_settings,
     issue_demo_token,
     login_with_password,
@@ -346,6 +414,7 @@ from src.retention import (
     request_retention_change,
     set_legal_hold,
 )
+from src.user_preferences import get_preferences, save_preferences
 from src.users import get_sync_status, list_users, require_active_user, update_user
 
 logger = logging.getLogger(__name__)
@@ -383,12 +452,22 @@ def get_embed_fn() -> Any:
 
 
 def get_active_user_row(
+    request: Request,
     current_user: dict[str, Any] = Depends(get_current_user),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
 ) -> dict[str, Any]:
     """FastAPI dependency: re-verify `users.status == active` on every
-    request (backend-side gate, independent of the edge/token layers)."""
-    return require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    request (backend-side gate, independent of the edge/token layers), then
+    (issue #586) refuse the request outright if the caller's OWN row still
+    verifies against its shipped seed default password -- unless this
+    request is one of the two rotation-flow routes
+    (demo_auth.DEFAULT_CREDENTIALS_ENFORCEMENT_EXEMPT_PATHS) a caller needs
+    to see and clear that warning. No-op for any row where
+    `default_credentials_warning` is False (every SSO caller, and any
+    password caller who has already rotated)."""
+    caller_row = require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    enforce_default_credentials_rotation(caller_row, request.url.path)
+    return caller_row
 
 
 def _is_admin(caller_user_row: dict[str, Any]) -> bool:
@@ -489,7 +568,7 @@ async def version(
     )
 
 
-@app.get("/whoami", include_in_schema=True)
+@app.get("/whoami", include_in_schema=False)
 async def whoami(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> JSONResponse:
@@ -501,6 +580,20 @@ async def whoami(
 
     Per issue #55 AC: "A /whoami (or equivalent) authenticated echo endpoint
     proves it end-to-end."
+
+    Issue #588: NOT advertised in the OpenAPI schema (`include_in_schema=
+    False`). The deployed reverse proxy (`deploy/dts/nginx.conf`) only
+    forwards `/api/`, `/version`, `/health`, and `/openapi.json` to this
+    backend; any other path a real browser requests -- including this one
+    -- falls through to nginx's own SPA-fallback `location /` block and
+    gets back `index.html`, not this handler. The route stays mounted (it
+    has a real caller: tests/test_demo_auth_232.py exercises it as a
+    cookie-auth round-trip proxy, and it is the local/Docker-Compose
+    demo-auth path's echo -- see that test's docstring for why /api/me
+    doesn't substitute for it there) and still works for any caller that
+    reaches the API origin directly; it is only removed from the
+    *published* contract so the schema stops promising a path the
+    primary (browser-facing) origin cannot actually deliver.
     """
     return JSONResponse(
         content={
@@ -582,6 +675,42 @@ async def post_me_password(
         dynamodb_resource,
     )
     return JSONResponse(content=result)
+
+
+@app.get("/api/me/preferences", include_in_schema=True)
+async def get_me_preferences(
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Authenticated: the CALLER'S OWN preferences (issue #523, epic #519 F).
+
+    There is deliberately no `/api/users/{sub}/preferences` counterpart and
+    no admin variant of this route: epic #519 decision 3 makes the notes-mode
+    preference per-user with no admin override in either direction, so the
+    only subject this route can ever address is the caller's own
+    (`src.user_preferences` derives the key from `caller_row`, never from
+    input). Always 200 for an active user — an untouched preference reads
+    back as its documented default rather than a 404.
+    """
+    return JSONResponse(content=get_preferences(caller_row, dynamodb_resource))
+
+
+@app.put("/api/me/preferences", include_in_schema=True)
+async def put_me_preferences(
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Authenticated: change the CALLER'S OWN preferences (issue #523).
+
+    Body: {"preferences": {"<known key>": <value>, ...}} — a partial update;
+    unmentioned keys keep whatever the row already holds. HTTP 400 for an
+    unknown preference key or a value its spec rejects (including a
+    `notes_mode` of `internal`/`both` while the #572 kill switch is off),
+    403 for a body naming another user's `cognito_sub`. Returns the same
+    shape the GET returns.
+    """
+    return JSONResponse(content=save_preferences(body, caller_row, dynamodb_resource))
 
 
 @app.get("/api/users", include_in_schema=True)
@@ -958,6 +1087,172 @@ async def get_admin_diagnostics_recent_failures(
     """
     failures = list_recent_failures(caller_row, dynamodb_resource, limit=limit)
     return JSONResponse(content={"failures": failures})
+
+
+@app.get("/api/admin/spend", include_in_schema=True)
+async def get_admin_spend(
+    days: int = SPEND_LEDGER_DEFAULT_DAYS,
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the spend ledger + reconcile view (issue #252).
+
+    Today's reserved/settled totals against the configured daily ceiling,
+    plus a bounded trailing window of the same, over the `daily_spend`
+    counter rows #61/#59 already maintain. Idempotent and read-only: the
+    abandoned-reservation reconcile ACTION is deliberately not part of this
+    slice (issue #252 Scope: "All read-only"), so this surfaces the
+    condition — `outstanding_reservation_usd_cents` — without acting on it.
+    `days` is clamped into [1, admin_dashboard.SPEND_LEDGER_MAX_DAYS] and is
+    a CALENDAR window — the last N UTC days ending today, not the N most
+    recent rows, which are different windows on a deployment that has been
+    idle (a daily-spend row exists only for a day that had spend).
+
+    Raises HTTP 403 for a non-admin caller.
+    """
+    ledger = get_spend_ledger(caller_row, dynamodb_resource, days=days)
+    return JSONResponse(content=ledger)
+
+
+@app.get("/api/admin/health", include_in_schema=True)
+async def get_admin_pipeline_health(
+    stale_after_seconds: int = STALE_IN_FLIGHT_SECONDS_DEFAULT,
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the pipeline-health summary (issue #252).
+
+    Review counts by status, stale in-flight (PENDING/RUNNING) reviews with a
+    bounded oldest-first sample, and concurrency occupancy against
+    PIPELINE_MAX_CONCURRENCY. UNRELATED to the public `GET /health` liveness
+    probe above, which is unchanged and still leaks no build or operational
+    detail. Every row is an explicit field projection (see
+    admin_dashboard._STALE_REVIEW_FIELDS) — no document substance, no S3 key.
+
+    Raises HTTP 403 for a non-admin caller.
+    """
+    health = get_pipeline_health(
+        caller_row, dynamodb_resource, stale_after_seconds=stale_after_seconds
+    )
+    return JSONResponse(content=health)
+
+
+@app.get("/api/admin/manual-review", include_in_schema=True)
+async def get_admin_manual_review_queue(
+    status_filter: str | None = None,
+    triage: str | None = None,
+    limit: int = MANUAL_REVIEW_DEFAULT_LIMIT,
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the manual-review queue, filterable (issues #252 / #37).
+
+    Every review sitting in MANUAL_REVIEW_REQUIRED or
+    ERROR_MANUAL_REVIEW_REQUIRED, newest first, with how long it has waited
+    and whether it has passed the 24-hour SLA (RUNBOOK.md -> "Manual-review
+    filter: owner and SLA"). `status_filter` selects one of those two
+    statuses (or "all"); `triage` selects pending/triaged/none against
+    `disposition.legal_triage_status`. `counts` is computed over the
+    UNFILTERED queue, so it is the tile figure regardless of the filter.
+    `limit` is clamped into [1, admin_dashboard.MANUAL_REVIEW_MAX_LIMIT].
+
+    Raises HTTP 403 for a non-admin caller, 400 for an unrecognised filter
+    value (never a silently-ignored parameter).
+    """
+    queue = list_manual_review_queue(
+        caller_row,
+        dynamodb_resource,
+        status_filter=status_filter,
+        triage=triage,
+        limit=limit,
+    )
+    return JSONResponse(content=queue)
+
+
+@app.get("/api/admin/releases", include_in_schema=True)
+async def get_admin_releases(
+    limit: int = RELEASE_ACTIVITY_DEFAULT_LIMIT,
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: release activity + the per-review cost-outlier flag (#252).
+
+    Recent release-bundle activations/rollbacks with their bundle content
+    hashes, read from the append-only audit trail rather than from a mutable
+    current-state row, plus reviews whose real ledgered cost is an outlier
+    against the deployment's median — flagged, per ARCHITECTURE.md ->
+    "Security posture", as a possible injection or runaway signal. The
+    outlier block reports `available: false` on a deployment with no
+    model-invocation ledger (#414) rather than failing the request, and its
+    baseline is the median of a BOUNDED sample of that ledger
+    (admin_dashboard.COST_OUTLIER_LEDGER_ROWS_DEFAULT rows — the ledger is
+    append-only, so an uncapped read would grow forever), reported back as
+    `cost_outliers.sample_row_cap` / `.truncated`.
+    `limit` is clamped into [1, admin_dashboard.RELEASE_ACTIVITY_MAX_LIMIT].
+
+    Raises HTTP 403 for a non-admin caller.
+    """
+    activity = get_release_activity(caller_row, dynamodb_resource, limit=limit)
+    return JSONResponse(content=activity)
+
+
+@app.get("/api/audit", include_in_schema=True)
+async def get_audit(
+    query: str | None = None,
+    review_id: str | None = None,
+    actor: str | None = None,
+    month: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    component: str | None = None,
+    value: str | None = None,
+    playbook_id: str | None = None,
+    playbook_version: str | None = None,
+    limit: int = AUDIT_QUERY_DEFAULT_LIMIT,
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the docs/audit-queries.md catalogue, as a query API (issue #253).
+
+    With no `query`, returns the catalogue index — which investigations can
+    be run and with which parameters — so the #93 audit explorer builds its
+    picker from the backend rather than from a second, drifting copy of the
+    catalogue. With a `query`, runs that entry.
+
+    EVERY entry is key/index access: a partition-key or GSI Query, or a
+    primary-key GetItem/BatchGetItem. Nothing here scans `audit` or
+    `reviews`, and a catalogue component with no index behind it is refused
+    with 400 naming the missing index rather than served by a scan (see
+    audit_queries.ROLLBACK_UNINDEXED_COMPONENTS). `limit` is clamped into
+    [1, audit_queries.AUDIT_QUERY_MAX_LIMIT], so no request can turn an
+    investigation into a full-table dump.
+
+    Every response carries a `retention_boundary` block (issue #34) saying
+    whether the answer survives a review's retention window, and the entries
+    whose producers are dormant or unwired say so in the payload rather than
+    returning a bare empty list that reads as an all-clear.
+
+    Raises HTTP 403 for a non-admin caller, 400 for an unrecognised query
+    name or a missing/invalid parameter, 404 for an unknown playbook version.
+    """
+    result = run_audit_query(
+        caller_row,
+        dynamodb_resource,
+        query=query,
+        params={
+            "review_id": review_id,
+            "actor": actor,
+            "month": month,
+            "since": since,
+            "until": until,
+            "component": component,
+            "value": value,
+            "playbook_id": playbook_id,
+            "playbook_version": playbook_version,
+            "limit": limit,
+        },
+    )
+    return JSONResponse(content=result)
 
 
 @app.post("/api/admin/playbooks", include_in_schema=True)

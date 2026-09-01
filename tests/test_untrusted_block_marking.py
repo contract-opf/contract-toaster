@@ -6,13 +6,20 @@ Gate for issue #505: no counterparty-authored text sits in an unmarked block.
 
 `assemble_user_prompt_critic` wrapped `STANDARD_FORM_DIFF`, `ANCHORED_CLAUSES`
 and `PRIMARY_REVIEWER_OUTPUT` with no untrusted marking at all, while the
-primary assembler marked only `COUNTERPARTY_DOCUMENT` and `SECTION_OUTLINE`.
+primary assembler marked only `COUNTERPARTY_DOCUMENT`.
 
-The critic never receives the raw document -- deliberate, per ARCHITECTURE.md
--- but that is not the same as receiving no counterparty-authored text.
-`ANCHORED_CLAUSES` renders `counterparty_text` verbatim, `STANDARD_FORM_DIFF`
-renders counterparty wording, and `PRIMARY_REVIEWER_OUTPUT` routinely quotes
-the document through `source_quote`.
+When issue #505 wrote this gate the critic never received the raw document
+-- deliberate, per ARCHITECTURE.md -- but that was never the same as
+receiving no counterparty-authored text. `ANCHORED_CLAUSES` renders
+`counterparty_text` verbatim, `STANDARD_FORM_DIFF` renders counterparty
+wording, and `PRIMARY_REVIEWER_OUTPUT` routinely quotes the document through
+`source_quote`.
+
+Issue #618 reversed that omission: the critic is now given the document the
+primary pass read, under this same `COUNTERPARTY_DOCUMENT` tag and therefore this
+same marking. That changes the stakes of this gate, not its property -- it is
+tag-derived marking precisely so a block moving into an assembler cannot
+arrive unmarked.
 
 That matters precisely because the critic is the structural defense the design
 leans on -- "an injection would have to fool two different models from two
@@ -35,6 +42,7 @@ Exit codes: 0 = all tests pass, 1 = one or more failed.
 """
 
 import re
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -102,7 +110,7 @@ def _is_marked(prompt: str, tag: str) -> bool:
     """Is `tag`'s opening delimiter immediately preceded by the warning?
 
     Adjacency is the property, not mere presence somewhere in the prompt. A
-    warning 60,000 tokens earlier in an 80,000-token prompt is not a warning
+    warning 80,000 tokens earlier in a 100,000-token prompt is not a warning
     about the block the model is currently reading.
     """
     index = prompt.find(f"<{tag}>")
@@ -115,8 +123,6 @@ def _is_marked(prompt: str, tag: str) -> bool:
 class TestCriticPromptMarking(unittest.TestCase):
     def setUp(self):
         self.prompt = pp.assemble_user_prompt_critic(
-            diff_hunks=DIFF_HUNKS,
-            anchored_clauses=ANCHORED_CLAUSES,
             primary_output=PRIMARY_OUTPUT,
         )
 
@@ -154,8 +160,6 @@ class TestCriticPromptMarking(unittest.TestCase):
 class TestPrimaryPromptMarking(unittest.TestCase):
     def setUp(self):
         self.prompt = pp.assemble_user_prompt_primary(
-            diff_hunks=DIFF_HUNKS,
-            anchored_clauses=ANCHORED_CLAUSES,
             retrieved_precedent=RETRIEVED_PRECEDENT,
             doc_text="The parties agree. " + PLANTED_INJECTION,
         )
@@ -174,18 +178,6 @@ class TestPrimaryPromptMarking(unittest.TestCase):
         self.assertIn("RETRIEVED_PRECEDENT", pp.UNTRUSTED_BEARING_TAGS)
         self.assertTrue(_is_marked(self.prompt, "RETRIEVED_PRECEDENT"))
 
-    def test_the_section_outline_path_is_marked_too(self):
-        prompt = pp.assemble_user_prompt_primary(
-            diff_hunks=[],
-            anchored_clauses=[],
-            retrieved_precedent=[],
-            doc_text="x " * 100_000,
-            doc_paragraphs=[{"heading": "Section 8", "text": PLANTED_INJECTION}],
-            full_doc_token_threshold=10,
-        )
-        self.assertIn("<SECTION_OUTLINE>", prompt)
-        self.assertTrue(_is_marked(prompt, "SECTION_OUTLINE"))
-
 
 class TestTheEnumerationIsTheSourceOfTruth(unittest.TestCase):
     def test_marking_is_derived_from_the_tag_not_passed_per_call_site(self):
@@ -193,7 +185,7 @@ class TestTheEnumerationIsTheSourceOfTruth(unittest.TestCase):
         anyone remembering to mark it. Assembling a tag that is in the
         enumeration marks it; one that is not, does not."""
         self.assertTrue(
-            pp._delimited_block("ANCHORED_CLAUSES", "x").startswith(
+            pp._delimited_block("COUNTERPARTY_DOCUMENT", "x").startswith(
                 pp.UNTRUSTED_BLOCK_WARNING
             )
         )
@@ -214,8 +206,6 @@ class TestTheEnumerationIsTheSourceOfTruth(unittest.TestCase):
         emitted = set(
             _tags_in(
                 pp.assemble_user_prompt_primary(
-                    diff_hunks=DIFF_HUNKS,
-                    anchored_clauses=ANCHORED_CLAUSES,
                     retrieved_precedent=RETRIEVED_PRECEDENT,
                     doc_text="short",
                 )
@@ -223,8 +213,6 @@ class TestTheEnumerationIsTheSourceOfTruth(unittest.TestCase):
         ) | set(
             _tags_in(
                 pp.assemble_user_prompt_critic(
-                    diff_hunks=DIFF_HUNKS,
-                    anchored_clauses=ANCHORED_CLAUSES,
                     primary_output=PRIMARY_OUTPUT,
                 )
             )
@@ -243,43 +231,39 @@ class TestNothingElseMoved(unittest.TestCase):
         self.assertEqual(
             _tags_in(
                 pp.assemble_user_prompt_critic(
-                    diff_hunks=DIFF_HUNKS,
-                    anchored_clauses=ANCHORED_CLAUSES,
                     primary_output=PRIMARY_OUTPUT,
                 )
             ),
-            ["STANDARD_FORM_DIFF", "ANCHORED_CLAUSES", "PRIMARY_REVIEWER_OUTPUT"],
+            # Issue #627 removed the two permanently-empty manifest blocks.
+            ["PRIMARY_REVIEWER_OUTPUT"],
         )
         self.assertEqual(
             _tags_in(
                 pp.assemble_user_prompt_primary(
-                    diff_hunks=DIFF_HUNKS,
-                    anchored_clauses=ANCHORED_CLAUSES,
                     retrieved_precedent=RETRIEVED_PRECEDENT,
                     doc_text="short",
                 )
             ),
-            [
-                "STANDARD_FORM_DIFF",
-                "ANCHORED_CLAUSES",
-                "RETRIEVED_PRECEDENT",
-                "COUNTERPARTY_DOCUMENT",
-            ],
+            ["RETRIEVED_PRECEDENT", "COUNTERPARTY_DOCUMENT"],
         )
 
     def test_block_content_is_unchanged(self):
         """Only the warning is added -- the delimited content itself must be
-        byte-identical, or this stopped being a marking change."""
+        byte-identical, or this stopped being a marking change.
+
+        Asserted on `PRIMARY_REVIEWER_OUTPUT` since issue #627 deleted
+        `ANCHORED_CLAUSES`, which this used to read: it is the critic prompt's
+        remaining untrusted-marked block, and the one whose content actually
+        matters (it carries the counterparty document's own characters
+        through the primary's transcript)."""
         prompt = pp.assemble_user_prompt_critic(
-            diff_hunks=DIFF_HUNKS,
-            anchored_clauses=ANCHORED_CLAUSES,
             primary_output=PRIMARY_OUTPUT,
         )
-        start = prompt.index("<ANCHORED_CLAUSES>") + len("<ANCHORED_CLAUSES>\n")
-        end = prompt.index("</ANCHORED_CLAUSES>")
+        start = prompt.index("<PRIMARY_REVIEWER_OUTPUT>") + len("<PRIMARY_REVIEWER_OUTPUT>\n")
+        end = prompt.index("</PRIMARY_REVIEWER_OUTPUT>")
         self.assertEqual(
             prompt[start:end].rstrip("\n"),
-            pp.render_anchored_clauses_block(ANCHORED_CLAUSES),
+            json.dumps(PRIMARY_OUTPUT, sort_keys=True),
         )
 
     def test_the_prompt_cache_breakpoint_is_untouched(self):

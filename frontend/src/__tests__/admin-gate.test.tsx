@@ -20,7 +20,7 @@
  * fetch is stubbed. No live AWS/Cognito/network.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -61,6 +61,10 @@ const ADMIN_CHROME_TESTIDS = [
   'admin-playbooks-panel',
   'admin-diagnostics-panel',
   'sync-status-panel',
+  // The auth-mode toggle (issue #246) writes who can sign in at all — the
+  // single most misuse-adjacent control on this screen, so it belongs in
+  // the no-flash set alongside the rest of the admin chrome.
+  'admin-users-auth-mode-panel',
   'break-glass-note',
   'retention-slider-panel',
 ];
@@ -126,13 +130,30 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
         users_deprovisioned_count: 0,
         next_run_at: null,
       },
+      // Verbatim backend/src/demo_auth.py::get_auth_mode_settings — the
+      // auth-mode toggle (#246) renders ITS labels, so a stub that omitted
+      // `auth_mode_options` would render no toggle at all.
+      '/api/admin/auth-mode': {
+        setting_id: 'global',
+        auth_mode: 'sso',
+        default_auth_mode: 'sso',
+        auth_mode_options: [
+          { value: 'sso', label: 'Access only (single sign-on)' },
+          { value: 'password', label: 'Username and password' },
+          { value: 'both', label: 'Both — single sign-on and username/password' },
+        ],
+      },
       '/api/admin/retention': {
         setting_id: 'default',
         retention_window_days: 90,
         pending_reduction: null,
       },
       '/api/admin/retention/holds': { holds: [] },
-      '/api/playbooks': { playbooks: [] },
+      '/api/playbooks': {
+        playbooks: [{ playbook_id: 'eiaa', display_name: 'EIAA', status: 'active', notes: '' }],
+      },
+      '/api/admin/playbooks/eiaa/versions': { versions: [] },
+      '/api/admin/playbooks/eiaa/instructions': { current: null, history: [] },
       '/api/admin/diagnostics/recent-failures': { failures: [] },
       '/api/admin/model-key': {
         setting_id: 'global',
@@ -151,12 +172,19 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
     expect(await screen.findByTestId('admin-users-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-retention-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-model-panel')).toBeInTheDocument();
-    // The instructions panel fetches GET /api/playbooks on mount (stubbed
-    // to an empty catalog above), renders its zero-installed empty state,
-    // and needs no per-playbook instructions route stubbed.
-    expect(await screen.findByTestId('admin-instructions-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-playbooks-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('admin-diagnostics-panel')).toBeInTheDocument();
     expect(await screen.findByTestId('break-glass-note')).toBeInTheDocument();
+    // The auth-mode toggle is admin-only chrome too (#246): it must show up
+    // for THIS caller, having been asserted absent for a non-admin above.
+    expect(await screen.findByTestId('admin-users-auth-mode-panel')).toBeInTheDocument();
+
+    // Issue #605: the instructions panel is no longer its own tab/route —
+    // it's nested inside the Playbooks panel and only appears once a
+    // playbook is selected there (the same click that opens version
+    // history). Prove it's still reachable for an admin caller.
+    await screen.findByTestId('playbook-row-eiaa');
+    fireEvent.click(screen.getByTestId('playbook-versions-eiaa'));
+    expect(await screen.findByTestId('admin-instructions-panel')).toBeInTheDocument();
   });
 });

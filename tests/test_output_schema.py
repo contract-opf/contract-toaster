@@ -8,8 +8,8 @@ so this file's checks and fixtures hold for both).
 Three checks (all must pass; exit 1 on any failure):
 
 1. SUBSET CHECK: every field in output_format.every_issue_includes is a top-level
-   property of playbooks/output-schema-v2.json.  Fails today because the schema
-   does not exist.
+   property of the ACTIVE output contract (primary_review_pass.OUTPUT_SCHEMA_PATH),
+   not of a hard-coded generation of it (issue #636 scope 3).
 
 2. BUNDLE-COMPOSITION CHECK: playbooks/schema.json requires release.output_contract_hash
    (or the active playbook's release block carries output_contract_hash).  Fails
@@ -22,12 +22,82 @@ Three checks (all must pass; exit 1 on any failure):
    absent (issue #376 acceptance criterion).
 """
 
+import ast
 import json
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# The v2 artifact, still the subject of this file's VALIDATOR UNIT TESTS: those
+# fixtures pin the superseded contract on purpose (issue #376) and must keep
+# reading it.
 OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v2.json"
+
+PRIMARY_REVIEW_PASS_SRC = REPO_ROOT / "scripts" / "primary_review_pass.py"
+
+
+def _active_output_schema_path() -> Path:
+    """`primary_review_pass.OUTPUT_SCHEMA_PATH`, read WITHOUT importing it.
+
+    The SUBSET CHECK below asks "does this playbook instruct the field set the
+    model is actually validated against?", so it has to read the contract in
+    force rather than a hard-coded generation of it -- issue #627 flipped the
+    active artifact to output-schema-v3.json (which makes `issue_key` REQUIRED
+    on every Issue), and a correctly-aligned playbook failed this check purely
+    because the check was pinned to v2 (issue #636 scope 3).
+
+    It is resolved out of the SOURCE with `ast` instead of by importing the
+    module, because `.github/workflows/output-schema.yml` runs this file as
+    `python3 tests/test_output_schema.py` on a bare interpreter and states the
+    invariant explicitly: "Only the v3 step below needs it; every other step in
+    this job is stdlib-only." Importing `primary_review_pass` pulls in
+    `model_client` -> `jsonschema` and fails that job with ModuleNotFoundError
+    while passing locally in a venv that has the dependency -- the CI blind
+    spot this repo has already been bitten by twice.
+
+    Raises rather than falling back to a guessed path: a silent fallback would
+    make this check pass against a contract that is not the live one, which is
+    the exact failure mode it exists to prevent.
+    """
+    tree = ast.parse(PRIMARY_REVIEW_PASS_SRC.read_text(encoding="utf-8"))
+    assignments: dict[str, ast.expr] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assignments[target.id] = node.value
+
+    name = "OUTPUT_SCHEMA_PATH"
+    seen: set[str] = set()
+    while name in assignments and isinstance(assignments[name], ast.Name):
+        if name in seen:
+            raise RuntimeError(f"cyclic alias resolving OUTPUT_SCHEMA_PATH at {name!r}")
+        seen.add(name)
+        name = assignments[name].id  # type: ignore[union-attr]
+
+    if name not in assignments:
+        raise RuntimeError(
+            f"could not resolve OUTPUT_SCHEMA_PATH in {PRIMARY_REVIEW_PASS_SRC}"
+        )
+
+    # Expected shape: REPO_ROOT / "playbooks" / "<artifact>.json"
+    parts: list[str] = []
+    node = assignments[name]
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        if not isinstance(node.right, ast.Constant) or not isinstance(node.right.value, str):
+            raise RuntimeError(f"unexpected path component in OUTPUT_SCHEMA_PATH: {ast.dump(node.right)}")
+        parts.append(node.right.value)
+        node = node.left
+    if not (isinstance(node, ast.Name) and node.id == "REPO_ROOT") or not parts:
+        raise RuntimeError(
+            "OUTPUT_SCHEMA_PATH is no longer a REPO_ROOT-anchored path expression; "
+            "update this resolver rather than guessing."
+        )
+    return REPO_ROOT.joinpath(*reversed(parts))
+
+
+ACTIVE_OUTPUT_SCHEMA_PATH = _active_output_schema_path()
 PLAYBOOK_SCHEMA_PATH = REPO_ROOT / "playbooks" / "schema.json"
 EIAA_PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 
@@ -267,17 +337,18 @@ def validate(obj, schema: dict) -> list:
 # ---------------------------------------------------------------------------
 
 def check_subset(failures: list) -> None:
-    """every_issue_includes ⊆ properties of output-schema-v2.json issues[]."""
+    """every_issue_includes ⊆ properties of the ACTIVE output contract's issues[]."""
     label = "SUBSET CHECK"
+    schema_name = ACTIVE_OUTPUT_SCHEMA_PATH.name
 
-    if not OUTPUT_SCHEMA_PATH.exists():
+    if not ACTIVE_OUTPUT_SCHEMA_PATH.exists():
         failures.append(
-            f"{label}: {OUTPUT_SCHEMA_PATH.name} does not exist. "
-            "Author playbooks/output-schema-v2.json to fix."
+            f"{label}: {schema_name} does not exist. "
+            f"Author playbooks/{schema_name} to fix."
         )
         return
 
-    with open(OUTPUT_SCHEMA_PATH) as f:
+    with open(ACTIVE_OUTPUT_SCHEMA_PATH) as f:
         output_schema = json.load(f)
 
     with open(EIAA_PLAYBOOK_PATH) as f:
@@ -303,7 +374,7 @@ def check_subset(failures: list) -> None:
         issue_props = items_schema["properties"]
     except (KeyError, TypeError) as e:
         failures.append(
-            f"{label}: could not navigate output-schema-v2.json to "
+            f"{label}: could not navigate {schema_name} to "
             f"properties.issues.items.properties (with $ref resolution): {e}"
         )
         return
@@ -311,13 +382,13 @@ def check_subset(failures: list) -> None:
     missing = [field for field in every_issue_includes if field not in issue_props]
     if missing:
         failures.append(
-            f"{label}: fields in every_issue_includes not found in output-schema-v2.json "
+            f"{label}: fields in every_issue_includes not found in {schema_name} "
             f"issue properties: {missing}"
         )
     else:
         print(
             f"  PASS {label}: all {len(every_issue_includes)} every_issue_includes fields "
-            f"are properties of output-schema-v2.json issues[]."
+            f"are properties of {schema_name} issues[]."
         )
 
 

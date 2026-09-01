@@ -13,24 +13,26 @@
   "model_responses": {
     "primary": [
       {
-        "schema_version": "output-schema-v1",
         "decision": "ACCEPT",
         "confidence_state": "OK",
         "confidence_band": null,
         "issues": [],
         "critic_delta": null,
-        "verdict_summary": "No changes identified relative to your standard positions."
+        "verdict_summary": "No changes identified relative to your standard positions.",
+        "block_patches": [],
+        "block_ops": []
       }
     ],
     "critic": [
       {
-        "schema_version": "output-schema-v1",
         "decision": "ACCEPT",
         "confidence_state": "OK",
         "confidence_band": null,
         "issues": [],
         "critic_delta": null,
-        "verdict_summary": null
+        "verdict_summary": null,
+        "block_patches": [],
+        "block_ops": []
       }
     ]
   },

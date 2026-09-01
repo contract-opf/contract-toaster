@@ -27,7 +27,10 @@ network, no AWS.
      appears anywhere in the response body. The route is a controlled
      projection, not a log viewer -- so the assertion is made against the RAW
      response text, not against a parsed subset, and the row shape is
-     asserted to be EXACTLY the five documented fields.
+     asserted to be EXACTLY the nine documented fields (six, plus issue
+     #616's three leakage-detector fields -- a category constant, a
+     detector rule name and a model-output field NAME, never anything the
+     detector matched).
   4. BOUNDED. `?limit=` is clamped into [1, RECENT_FAILURES_MAX_LIMIT]; the
      default is RECENT_FAILURES_DEFAULT_LIMIT; a hostile `limit=100000`
      cannot turn the route into a full-table dump.
@@ -458,10 +461,19 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
 # ---------------------------------------------------------------------------
 # 3. The negative assertion: nothing but the documented fields crosses the
 # boundary. Issue #472 deliberately WIDENS this from five fields to six
-# (adding `failed_at`) -- same "restate the invariant, don't just loosen it"
+# (adding `failed_at`), and issue #616 from six to nine (adding
+# `leakage_category`/`leakage_rule_id`/`leakage_field_name`, present only on
+# a leakage block) -- same "restate the invariant, don't just loosen it"
 # pattern as tests/test_stage_failure_taxonomy.py's own #442 update: the
 # allowlist is still an exhaustive, hand-maintained list, it just now lists
-# one more deliberate disclosure decision.
+# three more deliberate disclosure decisions.
+#
+# Those three are safe for one reason and only that reason:
+# `scripts/leakage_scan.py` reports "detection category, and rule id --
+# never the matched confidential text". A category constant, a detector rule
+# name and a model-output FIELD name are not substance. What the detector
+# matched is not here, and `tests/test_leakage_diagnosis_616.py` is where
+# that is proven end to end through the real pipeline writers.
 # ---------------------------------------------------------------------------
 
 
@@ -481,18 +493,39 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
             )
         ]
 
-    def test_row_shape_is_exactly_the_six_documented_fields(self) -> None:
+    def test_row_shape_is_exactly_the_nine_documented_fields(self) -> None:
         row = self._get().json()["failures"][0]
         self.assertEqual(
             sorted(row.keys()),
             sorted(
-                ["review_id", "created_at", "failed_at", "failing_stage", "reason", "status"]
+                [
+                    "review_id",
+                    "created_at",
+                    "failed_at",
+                    "failing_stage",
+                    "reason",
+                    "status",
+                    # Issue #616 -- null here: this row is not a leakage
+                    # block, and the projection is fixed-shape.
+                    "leakage_category",
+                    "leakage_rule_id",
+                    "leakage_field_name",
+                ]
             ),
         )
         self.assertEqual(row["reason"], "model_account_out_of_credits")
         self.assertEqual(row["failing_stage"], "run_review")
         self.assertEqual(row["failed_at"], "1700000042")
         self.assertEqual(row["status"], "ERROR")
+
+    def test_a_non_leakage_failure_names_no_detector(self) -> None:
+        """Issue #616: the detector fields are for the ONE reason token that
+        needed them. Every other failure leaves them null, so the Diagnostics
+        screen has nothing to render a "Detector" line from."""
+        row = self._get().json()["failures"][0]
+        for field in ("leakage_category", "leakage_rule_id", "leakage_field_name"):
+            with self.subTest(field=field):
+                self.assertIsNone(row[field])
 
     def test_no_sensitive_field_appears_anywhere_in_the_response(self) -> None:
         body = self._get().text

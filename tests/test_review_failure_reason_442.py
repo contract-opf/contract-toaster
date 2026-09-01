@@ -83,8 +83,10 @@ REVIEW_ID = "00000000-0000-4000-a000-000000000442"
 
 # The policy-pinned primary id (model-policy/openrouter.json). Used only so
 # invoke()'s runtime policy-pin assertion (issue #269) does not fire ahead of
-# the transport behavior under test here.
-PRIMARY_MODEL_ID = "anthropic/claude-opus-4.8"
+# the transport behavior under test here. Was anthropic/claude-opus-4.8 until
+# the owner removed that id from `selectable` and the assertion started
+# refusing it; any allowed id works, nothing here reads capabilities.
+PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 
 FRONTEND_REVIEW_SUBMISSION = REPO_ROOT / "frontend" / "src" / "ReviewSubmission.tsx"
 

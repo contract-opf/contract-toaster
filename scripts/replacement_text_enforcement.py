@@ -104,10 +104,56 @@ PEN_RULES_DEFAULTS_PATH = REPO_ROOT / "playbooks" / "pen-rules.defaults.json"
 MAX_CHARS_EXCEEDED = "max_chars_exceeded"
 MUST_NOT_INTRODUCE_VIOLATION = "must_not_introduce_violation"
 REPLACEMENT_NOT_PERMITTED = "replacement_not_permitted"
+EMPTY_REPLACEMENT_TEXT = "empty_replacement_text"
 
 FAILURE_CODES = frozenset(
-    {MAX_CHARS_EXCEEDED, MUST_NOT_INTRODUCE_VIOLATION, REPLACEMENT_NOT_PERMITTED}
+    {
+        MAX_CHARS_EXCEEDED,
+        MUST_NOT_INTRODUCE_VIOLATION,
+        REPLACEMENT_NOT_PERMITTED,
+        EMPTY_REPLACEMENT_TEXT,
+    }
 )
+
+# Issue #585, review round 1 findings 1+2: a flag-only issue (empty
+# `proposed_replacement_text`) reaches the redline stage/UI as an unlabeled
+# empty string unless something names WHY it has no text. This field is set
+# on the issue dict itself (mutated in place, same convention as
+# `demote_issue_to_flag_only`) whenever `proposed_replacement_text` is
+# legitimately/terminally empty, so every downstream reader --
+# `scripts/redline_generate.py::_issues_to_quote_patches`, the UI -- can
+# distinguish "this topic never wanted a redline" from "the model tried,
+# failed the bounded retry budget, and got demoted" instead of inferring
+# either from a bare `== ""` check.
+REPLACEMENT_TEXT_OUTCOME_FIELD = "replacement_text_outcome"
+
+# The topic's RESOLVED replacement_text.mode is 'none': a redline was never
+# permitted for this topic, so an empty proposed_replacement_text is exactly
+# what `render_replacement_text_modes_block` told the model to produce. Set
+# by `check_issues_replacement_text` before it skips the issue.
+FLAG_ONLY_MODE_NONE = "flag_only_mode_none"
+
+# The topic's RESOLVED replacement_text.mode permits/requires a redline, the
+# model raised the issue, but `proposed_replacement_text` was still empty
+# after the bounded retry budget was exhausted. Set by
+# `demote_issue_to_flag_only` in place of the silent empty string that was
+# the sole signal before issue #585.
+FLAG_ONLY_RETRY_EXHAUSTED = "flag_only_retry_exhausted"
+
+# Issue #585 finding 2 (review round 2): the playbook is OPF-native --
+# `primary_review_pass.resolve_pen_rules_bundle` returned `bundle=None`
+# (issue #479) -- so `resolve_pen_rules(None, ...)` falls back to
+# `playbooks/pen-rules.defaults.json`'s `"default"` block (`mode=
+# "replace"`) purely as a config default, NOT because any operator told
+# this topic to require a redline. `render_replacement_text_modes_block`
+# ALSO returns `None` for that same `bundle=None` case (no `topics` to
+# describe), so the model was never shown the mode it would otherwise be
+# judged against. Firing `EMPTY_REPLACEMENT_TEXT` here would burn a retry
+# call and terminate the issue as `FLAG_ONLY_RETRY_EXHAUSTED` ("the model
+# tried and failed") for a rule it was never given -- factually wrong. Set
+# instead of failing, until the OPF path actually wires a modes block into
+# the prompt (tracked as a follow-up, not widened into this ticket).
+FLAG_ONLY_MODE_UNSPECIFIED = "flag_only_mode_unspecified"
 
 
 class ReplacementTextConfigError(ValueError):
@@ -144,7 +190,14 @@ def check_replacement_text(
     `replacement_text` object per playbooks/schema.json). Per
     output-schema-v1.json's `proposed_replacement_text` description, an
     empty string always signals mode='none' (flag only, no replacement
-    proposed) and trivially passes -- there is nothing to bound or scan.
+    proposed) and trivially passes here -- there is nothing to bound or
+    scan against THIS topic's bounds/content constraints. This function
+    stays agnostic to whether an empty string was actually APPROPRIATE for
+    this topic's mode -- that decision-aware check (issue #585: a
+    REQUEST_CHANGE issue on a topic whose mode permits replacement text but
+    got none anyway) lives one layer up, in
+    `check_issues_replacement_text`, which has the resolved mode in hand
+    before it ever calls this function.
 
     Checks, in order (first violation wins, matching the "first reason to
     block" convention in scripts/leakage_scan.py's LeakageScanner.scan):
@@ -398,25 +451,126 @@ def check_issues_replacement_text(
 
     Returns one `(issue, ReplacementTextCheckResult)` pair per issue that
     FAILS the check -- empty list means every issue passed (or had nothing
-    to check). An issue with no `playbook_topic_id` or an empty
-    `proposed_replacement_text` (flag-only, including every Floor-derived
-    fire from `scripts/floor_judge.floor_fires`) is skipped -- there is
-    nothing to bound or scan. A topic that cannot be resolved (config
-    problem, not a model-output problem) is also skipped here rather than
-    raised -- callers running this post-validation, mid-pipeline have no
-    good recovery for a playbook-authoring bug beyond what
+    to check). An issue with no `playbook_topic_id` is skipped -- there is
+    no topic to resolve pen rules against. A topic that cannot be resolved
+    (config problem, not a model-output problem) is also skipped here
+    rather than raised -- callers running this post-validation, mid-pipeline
+    have no good recovery for a playbook-authoring bug beyond what
     `check_replacement_text`'s own `ReplacementTextConfigError` already
     surfaces to direct callers of that function.
+
+    Issue #585: an empty `proposed_replacement_text` is only skipped
+    (legitimate flag-only) when the topic's RESOLVED `replacement_text.mode`
+    is `'none'` -- that topic never wants a redline, so an empty string is
+    exactly what `render_replacement_text_modes_block` told the model to
+    produce (see tests/test_primary_review_pass.py). Skipped here means
+    labelled, not silent: this function sets `issue[REPLACEMENT_TEXT_
+    OUTCOME_FIELD] = FLAG_ONLY_MODE_NONE` on the issue in place before
+    skipping it, so `scripts/redline_generate.py::_issues_to_quote_patches`
+    and the UI can tell "this topic never wanted a redline" apart from any
+    other empty-text outcome instead of inferring it from a bare `== ""`.
+
+    CORRECTION (review round 1, finding 3): mode `'none'` is NOT the
+    universal fate of a Floor-derived fire from `scripts/floor_judge.
+    floor_fires` -- only true for a v1/v2 playbook bundle that actually
+    defines the topic's mode. For an OPF-shaped playbook,
+    `primary_review_pass.resolve_pen_rules_bundle` returns `bundle=None`
+    (issue #479), and `resolve_pen_rules(None, ...)` falls back to
+    `playbooks/pen-rules.defaults.json`'s `"default"` block, whose `mode` is
+    `"replace"` -- NOT `"none"`. `resolve_pen_rules`'s own resolution is
+    unchanged by this correction (pinned by
+    tests/test_replacement_text_enforcement.py::
+    TestOpfNoneBundleDocstringClaim::test_opf_none_bundle_defaults_to_replace_mode_not_none).
+
+    CORRECTION (review round 2, finding 2): the `bundle=None` case above is
+    NOT treated as an ordinary `"replace"`-mode violation, though. Its
+    `"replace"` default is a config fallback the OPERATOR never chose for
+    this topic, and `render_replacement_text_modes_block` also returns
+    `None` for that same `bundle=None` case -- the model was never told
+    this topic wants a redline. Judging it against a rule it was never
+    shown would fire `EMPTY_REPLACEMENT_TEXT`, burn a retry call, and
+    terminate the issue labelled `FLAG_ONLY_RETRY_EXHAUSTED` ("the model
+    tried and failed"), which is not what happened. This function checks
+    `bundle is None` BEFORE consulting the resolved mode and labels such an
+    issue `FLAG_ONLY_MODE_UNSPECIFIED` instead, with no failure/retry --
+    pinned end-to-end (through `primary_review_pass.run_primary_pass`, not
+    just this pure function) by
+    tests/test_primary_review_pass.py::test_opf_none_bundle_empty_replacement_text_does_not_retry_or_fail.
+    Wiring an actual modes block into the OPF prompt path remains a real
+    gap, left for a follow-up rather than widened into this ticket's
+    scope.
+
+    For every other resolved mode (`bounded_edit`, `full_replace`,
+    `replace`, ...), a `decision=REQUEST_CHANGE` issue with an empty
+    `proposed_replacement_text` is a violation (`EMPTY_REPLACEMENT_TEXT`) --
+    the topic permits/requires replacement text, the model raised the
+    issue, but produced nothing for the redline stage to apply. This was
+    previously unenforced: live prod run `c81d29c0` (2026-08-21) produced
+    two REQUEST_CHANGE issues with empty replacement text and BOTH were
+    silently skipped here, so the review completed OK with nothing to
+    redline -- for that specific run BOTH issues' topics
+    (`nda-confidentiality-scope` / `nda-compelled-disclosure`) resolve to
+    mode `'none'` (they are legitimate flag-only per the playbook's own
+    authoring), so this mode-aware check does not itself turn them into
+    violations; what it adds for that exact shape is the explicit
+    `FLAG_ONLY_MODE_NONE` label above, in place of the previous unlabelled
+    silent skip. This check does not distinguish quote-bearing issues from
+    omission-type ones (missing-clause findings): either way, if the
+    topic's mode says a redline is wanted, an empty proposed_replacement_
+    text is a defect that consumes the same bounded retry budget as any
+    other pen-rules violation, then demotes to an explicit, ledgered
+    flag-only outcome on the final attempt
+    (`primary_review_pass.run_primary_pass` / `critic_review_pass.py`'s own
+    wiring, unchanged by this fix) -- never a silent pass-through; see
+    `demote_issue_to_flag_only` for the matching `FLAG_ONLY_RETRY_EXHAUSTED`
+    label on that path.
     """
     failures: list[tuple[dict[str, Any], ReplacementTextCheckResult]] = []
     for issue in issues:
         topic_id = issue.get("playbook_topic_id")
         text = issue.get("proposed_replacement_text") or ""
-        if not topic_id or not text:
+        if not topic_id:
             continue
         try:
             resolved = resolve_pen_rules(bundle, topic_id, defaults_path=defaults_path)
         except ReplacementTextConfigError:
+            continue
+        if not text:
+            if bundle is None:
+                # Issue #585 finding 2 (review round 2): the OPF-native
+                # fallback (`bundle is None`) never told the model what
+                # mode this topic resolves to -- `resolved.get("mode")`
+                # here is only `pen-rules.defaults.json`'s config default,
+                # never something the prompt actually asked the model to
+                # honor (`render_replacement_text_modes_block` returns
+                # `None` for this same bundle). Do not judge the model
+                # against a rule it was never shown; label distinctly
+                # instead of firing EMPTY_REPLACEMENT_TEXT.
+                issue[REPLACEMENT_TEXT_OUTCOME_FIELD] = FLAG_ONLY_MODE_UNSPECIFIED
+                continue
+            if resolved.get("mode", "none") == "none":
+                # Legitimate flag-only: this topic never wants a redline.
+                # Issue #585 finding 1: label it explicitly rather than
+                # silently skipping -- downstream readers must be able to
+                # tell this apart from any other empty-text outcome.
+                issue[REPLACEMENT_TEXT_OUTCOME_FIELD] = FLAG_ONLY_MODE_NONE
+                continue
+            failures.append(
+                (
+                    issue,
+                    ReplacementTextCheckResult(
+                        passed=False,
+                        failure=EMPTY_REPLACEMENT_TEXT,
+                        detail=(
+                            f"topic {topic_id!r}: decision=REQUEST_CHANGE issue has "
+                            f"an empty proposed_replacement_text but "
+                            f"replacement_text.mode={resolved.get('mode')!r} "
+                            "permits a redline -- nothing for the redline stage "
+                            "to apply."
+                        ),
+                    ),
+                )
+            )
             continue
         result = check_replacement_text({"id": topic_id, "replacement_text": resolved}, text)
         if not result.passed:
@@ -428,5 +582,18 @@ def demote_issue_to_flag_only(issue: dict[str, Any]) -> None:
     """Mutate `issue` in place to a flag-only issue (issue #293 scope item
     6): `proposed_replacement_text` -> `""`, per output-schema-v1.json's
     convention that an empty string signals mode='none' (flag only, no
-    replacement proposed) -- and per issue #260, renders with NO patch."""
+    replacement proposed) -- and per issue #260, renders with NO patch.
+
+    Issue #585 finding 2: the bare empty string is not, on its own, an
+    acceptable terminal state -- it is indistinguishable from any other
+    empty-text outcome once it reaches the redline stage. This also sets
+    `issue[REPLACEMENT_TEXT_OUTCOME_FIELD] = FLAG_ONLY_RETRY_EXHAUSTED`, a
+    named marker distinct from `FLAG_ONLY_MODE_NONE`
+    (`check_issues_replacement_text`'s own label for the legitimate
+    mode='none' path): this path means the bounded retry budget was spent
+    and the model still produced nothing, not that the topic never wanted a
+    redline. `scripts/redline_generate.py::_issues_to_quote_patches` reads
+    this field to carry a labelled reason into `flag_only`/`analysis_
+    report` instead of dropping the issue silently."""
     issue["proposed_replacement_text"] = ""
+    issue[REPLACEMENT_TEXT_OUTCOME_FIELD] = FLAG_ONLY_RETRY_EXHAUSTED

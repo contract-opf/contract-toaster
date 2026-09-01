@@ -2,18 +2,19 @@
 """
 Gate for issue #565: every named `tools/churn_docx.py` transform has a
 corresponding shape that survives the FULL model-free spine (extract ->
-normalize -> locate -> apply).
+normalize -> prove -> compile).
 
 ## Why this file exists
 
 Every structural failure class the private corpus has discovered so far
 (#560/#561's reserved-namespace crash, #564's paragraph-join accounting, the
-curly-punctuation locate failures `scripts/quote_locate.py`'s own docstring
-measured on the real EIAA corpus) was fixed against documents that can never
+curly-punctuation matching failures measured on the real EIAA corpus -- 15 of
+its 16 normalizable documents carry curly punctuation) was fixed against
+documents that can never
 be committed. Nothing proves those fixes cannot silently regress from a
 fresh public checkout. This file is that proof: one GENERATED shape per
 transform, asserting the GENERAL property each transform exists to guard --
-"a document shaped like X still normalizes, locates, and applies" -- never a
+"a document shaped like X still normalizes, proves, and compiles" -- never a
 specific private-corpus case.
 
 ## Generated, not vendored
@@ -28,10 +29,12 @@ string is fabricated -- no real party names, no vendored third-party paper.
 ## The uniform survival check
 
 For every shape: `extract_and_normalize()` must return `status ==
-"normalized"`; `ANCHOR_QUOTE` (the Governing Law clause -- deliberately
-untouched by every transform, see `churn_docx.py`) must `locate` as `found`;
-and a patch built from it must `apply` (`docx_bytes` produced, exactly one
-patch in `applied`). Several transforms also get one EXTRA, transform-
+"normalized"`; the block carrying `ANCHOR_QUOTE` (the Governing Law clause --
+deliberately untouched by every transform, see `churn_docx.py`) must be
+addressable and its own text must PROVE against a transcript of it
+(`block_transcript.validate_block_patches`); and the edit that transcript
+carries must COMPILE (`redline_block_apply.apply_block_transcript` produces
+`docx_bytes` with exactly one applied edit and no failures). Several transforms also get one EXTRA, transform-
 specific assertion proving the exact property that transform exists to
 exercise (see each `test_*` function below) -- still a general structural
 property, never a quote lifted from real paper.
@@ -60,11 +63,11 @@ for _dir in (SCRIPTS_DIR, TOOLS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+import block_transcript as bt  # noqa: E402
 import churn_docx as cd  # noqa: E402
 import document_spine_smoke as dss  # noqa: E402
 import extraction_normalization_stage as ens  # noqa: E402
-import quote_locate as ql  # noqa: E402
-import redline_quote_apply as rqa  # noqa: E402
+import redline_block_apply as rba  # noqa: E402
 
 # One base contract flavor is enough for the six required shapes (every
 # flavor shares the same five clause bodies -- see churn_docx.py); the
@@ -106,6 +109,25 @@ def _baseline_fixture(flavor_name: str) -> bytes:
     return _write_if_missing(_fixture_path(f"baseline-{flavor_name}"), docx_bytes)
 
 
+def _block_carrying(paragraphs: list, needle: str) -> tuple[str, dict] | None:
+    """`(block_id, block)` for the addressed block whose own text contains
+    `needle`, from the SAME `build_block_map` a real review addresses
+    through -- or `None` when no block carries it."""
+    block_map = ens.build_block_map(paragraphs)
+    for block_id, block in block_map.items():
+        if needle in block["text"]:
+            return block_id, block
+    return None
+
+
+def _prove(paragraphs: list, block_id: str, segments: list) -> dict:
+    return bt.validate_block_patches(
+        [{"block_id": block_id, "segments": segments}],
+        [],
+        ens.build_block_map(paragraphs),
+    )
+
+
 def _assert_survives_full_spine(name: str, docx_bytes: bytes, failures: list) -> dict | None:
     """The uniform property every shape must have (module docstring).
     Returns the normalized result dict on success, or `None` after
@@ -117,27 +139,41 @@ def _assert_survives_full_spine(name: str, docx_bytes: bytes, failures: list) ->
         return None
 
     paragraphs = norm["paragraphs"]
-    loc = ql.locate_quote_in_paragraphs(paragraphs, cd.ANCHOR_QUOTE)
-    if loc["status"] != "found":
-        failures.append(f"[{name}] the anchor clause did not locate: status={loc['status']!r}")
+    found = _block_carrying(paragraphs, cd.ANCHOR_QUOTE)
+    if found is None:
+        failures.append(f"[{name}] no addressed block carries the anchor clause")
+        return None
+    block_id, block = found
+
+    # Transcribe the anchor block WHOLE and append the suffix -- exactly the
+    # shape the prompt asks a model for. A transform that mangled the anchor
+    # clause's characters makes this `keep` fail to prove, which is the
+    # property being guarded.
+    proven = _prove(
+        paragraphs,
+        block_id,
+        [
+            {"op": "keep", "text": block["text"]},
+            {"op": "insert", "text": _PATCH_SUFFIX, "issue_key": "I1"},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(
+            f"[{name}] the anchor block's own text did not prove: "
+            f"{[f.get('reason') for f in proven['failures']]}"
+        )
         return None
 
-    result = rqa.apply_quote_patches(
+    result = rba.apply_block_transcript(
         docx_bytes,
-        [
-            {
-                "source_quote": cd.ANCHOR_QUOTE,
-                "new_text": cd.ANCHOR_QUOTE + _PATCH_SUFFIX,
-                "rationale": "document-shapes survival test",
-            }
-        ],
+        proven,
         author=_APPLY_AUTHOR,
         timestamp_iso=_APPLY_TIMESTAMP,
     )
-    if result["docx_bytes"] is None or len(result["applied"]) != 1:
+    if result["docx_bytes"] is None or len(result["applied"]) != 1 or result["failures"]:
         failures.append(
-            f"[{name}] the anchor patch did not apply: "
-            f"applied={len(result['applied'])} flag_only={result['flag_only']}"
+            f"[{name}] the anchor edit did not compile: "
+            f"applied={len(result['applied'])} failures={result['failures']}"
         )
         return None
 
@@ -165,14 +201,34 @@ def test_curly_punctuation_survives(failures: list) -> None:
     norm = _assert_survives_full_spine(name, docx_bytes, failures)
     if norm is None:
         return
-    # THE property (quote_locate.py's _TYPOGRAPHIC_FOLD): a STRAIGHT-quote
-    # copy -- what a model produces -- must still locate against the
-    # document's own CURLY punctuation.
-    loc = ql.locate_quote_in_paragraphs(norm["paragraphs"], cd.TERM_BODY)
-    if loc["status"] != "found":
+    # THE property (text_fold.TYPOGRAPHIC_FOLD): a STRAIGHT-punctuation
+    # transcription -- what a model produces -- must still prove against the
+    # document's own CURLY punctuation, and the resulting offsets must index
+    # the DOCUMENT's characters, not the model's copy.
+    found = _block_carrying(norm["paragraphs"], "survive termination for a period of three")
+    if found is None:
+        failures.append(f"[{name}] could not find the Term block")
+        return
+    block_id, block = found
+    if block["text"] == cd.TERM_BODY:
         failures.append(
-            f"[{name}] a straight-punctuation quote did not locate against "
-            f"the curly-punctuation document: status={loc['status']!r}"
+            f"[{name}] fixture is wrong -- the document's Term clause is not "
+            f"curly, so a straight transcription proves trivially"
+        )
+        return
+    proven = _prove(
+        norm["paragraphs"],
+        block_id,
+        [
+            {"op": "keep", "text": cd.TERM_BODY},
+            {"op": "insert", "text": _PATCH_SUFFIX, "issue_key": "I1"},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(
+            f"[{name}] a straight-punctuation transcription did not prove against "
+            f"the curly-punctuation document: "
+            f"{[f.get('reason') for f in proven['failures']]}"
         )
 
 
@@ -183,10 +239,10 @@ def test_split_paragraphs_survives(failures: list) -> None:
     if norm is None:
         return
     # THE property (issue #564): the split clause's physical_spans records
-    # 3+ physical paragraphs; a quote confined to ONE of them still locates
-    # as found; the ORIGINAL whole clause (now spanning two joins) reports
-    # the honest, distinct, non-crashing spans_paragraph_break outcome --
-    # never a false not_found.
+    # 3+ physical paragraphs; an edit confined to ONE of them still compiles;
+    # an edit spanning a join reports the honest, distinct, non-crashing
+    # `spans_physical_paragraph` failure -- never a silent drop, and never a
+    # half-written paragraph.
     paragraphs = norm["paragraphs"]
     definitions_para = next((p for p in paragraphs if "Confidential Information means" in p["text"]), None)
     if definitions_para is None:
@@ -197,19 +253,73 @@ def test_split_paragraphs_survives(failures: list) -> None:
             f"[{name}] expected >=3 physical_spans after splitting, got "
             f"{definitions_para.get('physical_spans')!r}"
         )
+    found = _block_carrying(paragraphs, "Confidential Information means")
+    if found is None:
+        failures.append(f"[{name}] the split Definitions paragraph is not addressable")
+        return
+    block_id, block = found
+    text = block["text"]
     first_sentence = (
         "Confidential Information means any non-public information "
         "disclosed by either party under this Agreement."
     )
-    loc_first = ql.locate_quote_in_paragraphs(paragraphs, first_sentence)
-    if loc_first["status"] != "found":
-        failures.append(f"[{name}] a single-sentence quote did not locate: status={loc_first['status']!r}")
-    loc_whole = ql.locate_quote_in_paragraphs(paragraphs, cd.DEFINITIONS_BODY)
-    if loc_whole["status"] != "spans_paragraph_break":
+    if first_sentence not in text:
+        failures.append(f"[{name}] fixture is wrong -- the first sentence is not in the block")
+        return
+
+    # (a) An edit confined to ONE physical paragraph compiles.
+    head, _, tail = text.partition(first_sentence)
+    confined = _prove(
+        paragraphs,
+        block_id,
+        [seg for seg in (
+            {"op": "keep", "text": head} if head else None,
+            {"op": "delete", "text": first_sentence, "issue_key": "I1"},
+            {"op": "insert", "text": "Confidential Information means nothing.", "issue_key": "I1"},
+            {"op": "keep", "text": tail} if tail else None,
+        ) if seg is not None],
+    )
+    if confined["status"] != "proven":
         failures.append(
-            f"[{name}] a quote spanning the split expected "
-            f"spans_paragraph_break, got {loc_whole['status']!r}"
+            f"[{name}] a single-physical-paragraph edit did not prove: "
+            f"{[f.get('reason') for f in confined['failures']]}"
         )
+    else:
+        confined_result = rba.apply_block_transcript(
+            docx_bytes, confined, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP
+        )
+        if confined_result["docx_bytes"] is None or confined_result["failures"]:
+            failures.append(
+                f"[{name}] a single-physical-paragraph edit did not compile: "
+                f"{confined_result['failures']!r}"
+            )
+
+    # (b) An edit whose DELETE spans a physical join proves (the transcript
+    # describes the block correctly) but is refused by the WRITER, with its
+    # own distinct reason.
+    spanning = _prove(
+        paragraphs,
+        block_id,
+        [
+            {"op": "delete", "text": text, "issue_key": "I1"},
+            {"op": "insert", "text": "Confidential Information means nothing.", "issue_key": "I1"},
+        ],
+    )
+    if spanning["status"] != "proven":
+        failures.append(
+            f"[{name}] a whole-block transcript of the split paragraph did not "
+            f"prove: {[f.get('reason') for f in spanning['failures']]}"
+        )
+    else:
+        spanning_result = rba.apply_block_transcript(
+            docx_bytes, spanning, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP
+        )
+        reasons = {f.get("reason") for f in spanning_result["failures"]}
+        if reasons != {rba.REASON_SPANS_PHYSICAL_PARAGRAPH}:
+            failures.append(
+                f"[{name}] an edit spanning the split expected "
+                f"{rba.REASON_SPANS_PHYSICAL_PARAGRAPH!r}, got {reasons!r}"
+            )
 
 
 def test_strip_heading_styles_survives(failures: list) -> None:

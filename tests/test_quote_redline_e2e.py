@@ -17,9 +17,15 @@ the REAL, composed `scripts/review_spine.py::run_review` end to end, over a
 genuinely reformatted fixture contract (`tests/fixtures/quote_redline_e2e/
 reformatted-contract.SYNTHETIC.docx` -- see that directory's `_generate.py`
 for why it is NOT built from the standard form), with a `FakeBedrockClient`
-(offline, no network) whose primary-pass response carries verbatim
-`source_quote`s, and proves the pipeline now produces a real tracked-changes
-`.docx` instead.
+(offline, no network), and proves the pipeline produces a real
+tracked-changes `.docx` instead.
+
+Issue #627 moved the ADDRESSING this rests on from verbatim `source_quote`s
+to block transcripts proven against the document's own bytes. The property
+under test is unchanged and, if anything, more strongly held: a reformatted
+draft that no diff can anchor is exactly the case block addressing was
+designed for, since the id is assigned by the extractor rather than
+recovered from the paper.
 
 ## What this test asserts (mirrors the issue's Scope / Acceptance criteria)
 
@@ -32,16 +38,21 @@ for why it is NOT built from the standard form), with a `FakeBedrockClient`
      one-way-indemnification clause), with the text immediately outside
      that span preserved untouched, plus a `<w:footnoteReference>` and a
      `word/footnotes.xml` entry carrying that issue's rationale.
-  3. A second issue (Article II's shortened non-renewal notice) whose
-     `source_quote` PARAPHRASES the actual clause rather than quoting it
-     verbatim -- a realistic imperfect-copy failure mode, per
-     `scripts/quote_locate.py`'s own documented "NOT semantic edits" scope
-     -- does not locate, and is reported flag-only:
-     `analysis_report.changes_not_applied` names it with `reason=
-     "not_found"`, its proposed replacement text is never silently
-     inserted anywhere in the delivered document, and it still reaches the
-     attorney via the ordinary `findings` list (flag-only means "not
-     auto-applied", never "hidden").
+  3. A second issue (Article II's shortened non-renewal notice) that the
+     model could not express as an edit at all is reported FLAG-ONLY: it is
+     named in `analysis_report.changes_not_applied` with its own reason,
+     nothing of it is silently inserted into the delivered document, and it
+     still reaches the attorney via the ordinary `findings` list (flag-only
+     means "not auto-applied", never "hidden").
+
+     Under v2 this issue's `source_quote` PARAPHRASED the clause instead of
+     quoting it -- a realistic imperfect-copy failure that cost the tracked
+     change. Issue #627 retired that failure mode outright: the model names
+     a code-assigned `block_id`, not a quote it must reproduce, so there is
+     no address for it to get subtly wrong. What survives is the OUTCOME
+     this part exists to pin -- an issue with nothing appliable is still
+     delivered as an observation and never half-applied -- and that is what
+     it now asserts.
 
 Run standalone: `python3 tests/test_quote_redline_e2e.py`
 Exit codes: 0 = pass, 1 = fail
@@ -146,7 +157,7 @@ ARTICLE_II_SECTION_TITLE = "Duration and Renewal"
 # the NOT-LOCATABLE issue's source_quote. Realistic imperfect-copy failure
 # mode: different wording ("may terminate ... without cause") than the
 # actual clause ("delivers written notice of non-renewal"), not merely a
-# whitespace variant, so scripts/quote_locate.py's whitespace-tolerant (but
+# whitespace variant, so the retired locator's whitespace-tolerant (but
 # not fuzzy/semantic) matcher legitimately fails to locate it.
 NOT_LOCATABLE_SOURCE_QUOTE = (
     "either party may terminate this Agreement without cause upon ten (10) "
@@ -162,15 +173,46 @@ NOT_LOCATABLE_RATIONALE = (
 )
 
 
-def _primary_request_change_response() -> str:
+def _article_iv_transcript(docx_bytes: bytes) -> dict[str, Any]:
+    """Article IV's block, transcribed as keep / delete / insert / keep
+    (issue #627).
+
+    Both the block id and every source character are DERIVED from the
+    fixture's own bytes by the production extractor: the block is found by
+    the span it must contain, and the surrounding `keep` text is sliced out
+    of that block's real text. Nothing here is retyped, which is the only
+    way a transcript fixture can be trusted -- a hand-copied keep is a
+    `source_mismatch` waiting to happen.
+    """
+    import extraction_normalization_stage as ens
+
+    normalized = ens.extract_and_normalize(docx_bytes)
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        text = block["text"]
+        if LOCATABLE_SOURCE_QUOTE in text:
+            at = text.index(LOCATABLE_SOURCE_QUOTE)
+            return {
+                "block_id": block_id,
+                "segments": [
+                    {"op": "keep", "text": text[:at]},
+                    {"op": "delete", "text": LOCATABLE_SOURCE_QUOTE, "issue_key": "I1"},
+                    {"op": "insert", "text": LOCATABLE_REPLACEMENT_TEXT, "issue_key": "I1"},
+                    {"op": "keep", "text": text[at + len(LOCATABLE_SOURCE_QUOTE):]},
+                ],
+            }
+    raise AssertionError("the reformatted fixture no longer carries Article IV's clause")
+
+
+def _primary_request_change_response(docx_bytes: bytes) -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [
                 {
+                    "issue_key": "I1",
                     "section_ref": ARTICLE_IV_SECTION_REF,
                     "section_title": ARTICLE_IV_SECTION_TITLE,
                     "counterparty_change_summary": (
@@ -180,13 +222,22 @@ def _primary_request_change_response() -> str:
                     ),
                     "decision": "REQUEST_CHANGE",
                     "external_rationale_for_footnote": LOCATABLE_RATIONALE,
-                    "proposed_replacement_text": LOCATABLE_REPLACEMENT_TEXT,
                     "playbook_topic_id": "limitation-of-liability",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": LOCATABLE_SOURCE_QUOTE,
                 },
                 {
+                    # The second issue carries NO EDIT (issue #627). Under v2
+                    # this was the "model paraphrased its own quote" failure:
+                    # a real, common, imperfect-copy mode that cost the issue
+                    # its tracked change. Block addressing makes that
+                    # particular mistake impossible -- the model names a code
+                    # -assigned id, not a quote it has to reproduce -- and the
+                    # surviving shape of the same OUTCOME is an issue the
+                    # model could not express as an edit at all. It must
+                    # still reach the attorney, and its replacement language
+                    # must still never appear in the delivered document.
+                    "issue_key": "I2",
                     "section_ref": ARTICLE_II_SECTION_REF,
                     "section_title": ARTICLE_II_SECTION_TITLE,
                     "counterparty_change_summary": (
@@ -195,13 +246,13 @@ def _primary_request_change_response() -> str:
                     ),
                     "decision": "REQUEST_CHANGE",
                     "external_rationale_for_footnote": NOT_LOCATABLE_RATIONALE,
-                    "proposed_replacement_text": NOT_LOCATABLE_REPLACEMENT_TEXT,
                     "playbook_topic_id": "term-length",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": NOT_LOCATABLE_SOURCE_QUOTE,
                 },
             ],
+            "block_patches": [_article_iv_transcript(docx_bytes)],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": (
                 "Two issues identified: Article IV imposes unlimited, "
@@ -216,7 +267,6 @@ def _primary_request_change_response() -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -248,7 +298,7 @@ def _run_pipeline(rs, model_client_module):
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client_module.FakeBedrockClient(
         {
-            primary_id: [_primary_request_change_response()],
+            primary_id: [_primary_request_change_response(docx_bytes)],
             critic_id: [_critic_no_delta_response()],
         }
     )
@@ -300,9 +350,14 @@ def _part_1_review_result(result: dict[str, Any], failures: list[str]) -> None:
     )
     if article_ii_finding is None:
         failures.append("[1f] Article II's not-locatable issue is missing from findings entirely.")
-    elif article_ii_finding.get("proposed_replacement_text") != NOT_LOCATABLE_REPLACEMENT_TEXT:
+    elif article_ii_finding.get("proposed_replacement_text"):
+        # Issue #627: the model proposed no edit for this issue, so there is
+        # no proven transcript to derive a replacement from -- the field must
+        # stay empty rather than being invented.
         failures.append(
-            "[1g] Article II finding's proposed_replacement_text was mutated "
+            "[1g] Article II finding carries a replacement text the model never "
+            "proposed and the pipeline could not have derived; got "
+            f"{article_ii_finding.get('proposed_replacement_text')!r}. Was mutated "
             "by the pipeline -- reconciliation must pass primary issues "
             "through unchanged."
         )
@@ -424,7 +479,7 @@ def _part_3_not_locatable_is_flag_only(result: dict[str, Any], failures: list[st
             f"not-locatable quote, got {analysis_report!r}"
         )
         return
-    if analysis_report.get("report_type") != "analysis_report":
+    if analysis_report.get("report_type") not in ("analysis_report", "flag_only_report"):
         failures.append(f"[3b] Unexpected analysis_report shape: {analysis_report}")
     if "decision" in analysis_report:
         failures.append("[3c] analysis_report must never carry a decision field (system artifact, not a legal one).")
@@ -433,17 +488,25 @@ def _part_3_not_locatable_is_flag_only(result: dict[str, Any], failures: list[st
     if len(changes_not_applied) != 1:
         failures.append(
             f"[3d] Expected exactly 1 changes_not_applied entry (Article IV's "
-            f"quote WAS locatable and applied), got {len(changes_not_applied)}: "
+            f"transcript proved and WAS applied), got {len(changes_not_applied)}: "
             f"{changes_not_applied}"
         )
         return
     entry = changes_not_applied[0]
     if entry.get("section_ref") != ARTICLE_II_SECTION_REF:
         failures.append(f"[3e] Expected the flag-only entry anchored at Article II, got {entry.get('section_ref')!r}")
-    if entry.get("reason") != "not_found":
-        failures.append(f"[3f] Expected reason=not_found (paraphrased quote), got {entry.get('reason')!r}")
-    if entry.get("source_quote") != NOT_LOCATABLE_SOURCE_QUOTE:
-        failures.append("[3g] changes_not_applied entry's source_quote does not match the issue's own quote.")
+    # Issue #627: the entry is reported by the issue #585 flag-only
+    # labelling rather than by the quote patcher's `not_found`, because
+    # under the block-transcript contract this issue proposes no edit at all
+    # -- there is no address that failed to resolve, there is nothing the
+    # model asked to change.
+    if analysis_report.get("report_type") != "flag_only_report":
+        failures.append(
+            f"[3f] An issue carrying no edit must be reported as a flag_only_report, got "
+            f"{analysis_report.get('report_type')!r}"
+        )
+    if not entry.get("reason"):
+        failures.append(f"[3g] The flag-only entry must carry its own reason; got {entry!r}")
 
 
 def main() -> int:

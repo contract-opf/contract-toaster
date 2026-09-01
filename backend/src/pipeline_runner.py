@@ -913,10 +913,6 @@ _ANALYSIS_FIELDS = (
     # tracked changes into the operative draft before review. Absent (never
     # a null placeholder) for a review with nothing to accept.
     "normalization_notes",
-    # Issue #569: the bounded re-quote repair pass's outcome. Absent (never
-    # a null placeholder) when the flag was off or nothing was eligible to
-    # repair.
-    "requote",
     # Issue #582 (Defect 3): `review_knowledge.ReviewKnowledge.lineage_
     # record()` -- what actually governed an OPF review, INCLUDING
     # `prompt_omissions` (substance-free: kinds and counts, never clause
@@ -928,6 +924,29 @@ _ANALYSIS_FIELDS = (
     # its `posture_source` reflected real playbook content or an empty
     # `posture: {}`/`floor: {}` shape composing to nothing.
     "opf_knowledge_lineage",
+    # Issue #616: WHICH leakage detector blocked this review -- the
+    # detection category, the rule that fired, and the model-output field it
+    # fired on, exactly as `scripts/review_spine.py::run_review` surfaces
+    # them off `leakage_scan.LeakageDetectedError`. Before this, a
+    # leakage-blocked review recorded only `reason="leakage_detected"`, so
+    # every block in production was indistinguishable from every other one
+    # and the analysis artifact -- the very thing this whitelist exists to
+    # preserve evidence in -- had nothing to say about the block.
+    #
+    # These carry NO matched confidential text and never may: the scanner
+    # reports "detection category, and rule id -- never the matched
+    # confidential text" (scripts/leakage_scan.py's header), which is the
+    # entire reason these three are safe to persist here.
+    #
+    # `run_review` sets these keys only on a leakage block, so they are
+    # absent from the RESULT -- and therefore from the reviews row, which
+    # `_write_real_terminal` writes conditionally -- on every other review,
+    # matching `normalization_notes` above. (This artifact
+    # projection is a fixed-shape document, so an absent key lands here as
+    # `null`, identically to every other optional field in this tuple.)
+    "leakage_category",
+    "leakage_rule_id",
+    "leakage_field_name",
 )
 
 
@@ -1040,7 +1059,8 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
                           analysis_s3_key: str | None = None,
                           model_ids: dict[str, str] | None = None,
                           opf_lineage: dict[str, Any] | None = None,
-                          floor_coverage: dict[str, Any] | None = None) -> None:
+                          floor_coverage: dict[str, Any] | None = None,
+                          failing_stage: str | None = None) -> None:
     """Write the terminal reviews-row state from a ReviewResult dict
     (scripts/review_spine.py::run_review's return contract). Unlike
     reviews.record_stage_failure (used only for an actual raised
@@ -1081,11 +1101,14 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     generic dict parameter, since it never needs the coverage-style
     ids-only projection `floor_coverage` does.
 
-    `requote` (issue #569) is written the SAME "simple, always-present-or-
-    absent" way as `normalization_notes` above -- the bounded re-quote
-    repair pass's `{"attempted", "recovered", "still_failed"}` outcome,
-    present only when `scripts/review_spine.py::run_review` actually ran
-    that pass.
+    `leakage_category` / `leakage_rule_id` / `leakage_field_name` (issue
+    #616) are written the SAME conditional way, and only a leakage-blocked
+    `run_review` result carries them. They exist so the admin Diagnostics
+    screen can say WHICH detector fired instead of showing one identical
+    generic cause for every block. They are non-substantive by
+    construction -- `scripts/leakage_scan.py` reports "detection category,
+    and rule id -- never the matched confidential text" -- and no value
+    derived from the matched span may ever be added alongside them.
 
     Also stamps `failed_at` (issue #472) whenever `terminal` is not
     `reviews.REVIEW_STATUS_SUCCESS_TERMINAL` -- same epoch-second string as
@@ -1094,6 +1117,17 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     failed, not the submission time it fell back to before this field
     existed. A `DONE` row gets no `failed_at`, which is correct: it didn't
     fail.
+
+    `failing_stage` (issue #584, default `None`): the stage to attribute a
+    NON-EXCEPTION failure to -- absent, never a null placeholder, for a
+    genuine success, identically to `normalization_notes` above.
+    This is the same field `reviews.record_stage_failure` stamps for an
+    exception-raised failure; this is the equivalent for a terminal state
+    the pipeline computed rather than raised. `run_real_pipeline` supplies
+    `persist_result` for a result it downgraded at the persist boundary
+    itself (a REQUEST_CHANGE decision with no output object written, #584)
+    and `run_review` for a fail-closed status `run_review` returned
+    (leakage/OOXML/round-trip/block-compile, issue #616).
     """
     status_value = result["status"]
     terminal = "DONE" if status_value == "OK" else status_value
@@ -1124,6 +1158,13 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     if result.get("reason") is not None:
         set_clauses.append("reason = :r")
         values[":r"] = result["reason"]
+    # Issue #584: the real failing sub-stage, when the caller has downgraded
+    # `result["status"]` at the persist boundary rather than `run_review`
+    # raising it -- absent (never a null placeholder) for every ordinary
+    # DONE/fail-closed row, same convention as normalization_notes.
+    if failing_stage is not None:
+        set_clauses.append("failing_stage = :fs")
+        values[":fs"] = failing_stage
     # Issue #563: disclosure that stage 1 accepted one or more pending
     # tracked changes into the operative draft before review, same "absent,
     # never a null placeholder" convention as decision/summary/reason above
@@ -1132,15 +1173,27 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     if result.get("normalization_notes") is not None:
         set_clauses.append("normalization_notes = :nn")
         values[":nn"] = result["normalization_notes"]
-    # Issue #569: the bounded re-quote repair pass's outcome
-    # (attempted/recovered/still_failed), same "absent, never a null
-    # placeholder" convention as normalization_notes above -- run_review
-    # only ever sets this key when the flag was on AND something was
-    # eligible to repair. `backend/src/reviews.py::get_review_detail` reads
-    # this straight off the row (`item.get("requote")`).
-    if result.get("requote") is not None:
-        set_clauses.append("requote = :rq")
-        values[":rq"] = result["requote"]
+    # Issue #616: which leakage detector blocked this review. Written onto
+    # the ROW (not just the analysis artifact) because the admin Diagnostics
+    # route reads the row and nothing else -- `backend/src/reviews.py::
+    # list_recent_failures` never opens `analysis.json`, so detail that
+    # lives only in the artifact is detail no operator can reach from
+    # inside the app, which is the exact failure issue #443 built that
+    # screen to remove.
+    #
+    # Same "absent, never a null placeholder" convention as
+    # normalization_notes above: `run_review` sets these keys only
+    # on a leakage block. Safe to persist for the reason the scanner's own
+    # header gives -- category and rule id are reportable, the matched
+    # confidential text never leaves `leakage_scan.py` at all.
+    for index, leakage_field in enumerate(
+        ("leakage_category", "leakage_rule_id", "leakage_field_name")
+    ):
+        leakage_value = result.get(leakage_field)
+        if leakage_value is not None:
+            placeholder = f":lk{index}"
+            set_clauses.append(f"{leakage_field} = {placeholder}")
+            values[placeholder] = leakage_value
     if output_s3_key is not None:
         set_clauses.append("output_s3_key = :o")
         values[":o"] = output_s3_key
@@ -1423,6 +1476,52 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # what `run_review` actually judged for this run, including the
         # `floor_invariant_unjudged` quarantine path.
         floor_coverage = _floor_coverage_for_result(result)
+        # Issue #584: a REQUEST_CHANGE decision with no persisted output is
+        # NOT a success, even though `redline_generate.generate_redline`'s
+        # own "nothing to attempt" branch (every issue TRUE flag-only, no
+        # proposed_replacement_text) returns `status="OK"` -- that status
+        # describes the redline SUB-STAGE completing without error, not the
+        # review having a deliverable. Left as-is, `status="OK"` reaches the
+        # `terminal = "DONE"` line below unchanged, and a review with real
+        # findings but no redline object reports success with nothing to
+        # show for it (live evidence: review c81d29c0-..., #584). Caught
+        # HERE, at the one place `output_s3_key` (what `_write_real_output`
+        # actually wrote) and `result["decision"]` (what the pipeline
+        # concluded) are both in scope, rather than inside
+        # `redline_generate.py` -- which stage produced the empty redline is
+        # this ticket's OUT-OF-SCOPE sibling; this only stops the empty
+        # result from being reported as DONE. ACCEPT is unaffected (it never
+        # has an output_s3_key -- see
+        # test_dts_pipeline_runner_real_review.py::
+        # test_accept_reaches_done_with_no_output_object), and a
+        # REQUEST_CHANGE that DID persist an object is unaffected too.
+        if result.get("decision") == "REQUEST_CHANGE" and output_s3_key is None:
+            result = {**result, "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+                      "reason": "redline_not_persisted"}
+            failing_stage = stage
+        elif result["status"] != "OK":
+            # Issue #616 second finding: every fail-closed condition
+            # `run_review` computes for itself -- `leakage_detected`,
+            # `quote_patches_not_applied`, `output_ooxml_scan_failed`,
+            # `round_trip_verification_failed` -- comes back as a terminal
+            # STATUS DICT rather than a raised exception (deliberately; see
+            # `scripts/redline_generate.py`'s "Never raises for ANY of the
+            # fail-closed conditions above" contract). So the one writer
+            # that stamps `failing_stage`, `reviews.record_stage_failure`,
+            # is only ever reached by the `except` branch below and never
+            # ran for any of them: the row got no `failing_stage` at all and
+            # the Diagnostics STAGE column rendered "—" for exactly the
+            # failures an operator most needs attributed.
+            #
+            # `run_review` is the true attribution, not the `persist_result`
+            # value `stage` holds by this line: the condition was detected
+            # and decided inside `run_review`, and persisting is what is
+            # faithfully recording it. It is also the same token
+            # `record_stage_failure` records when a run_review call raises
+            # instead, so the two paths now agree.
+            failing_stage = "run_review"
+        else:
+            failing_stage = None
         _write_real_terminal(
             review_id, result, output_s3_key, dynamodb_resource,
             analysis_s3_key=analysis_s3_key,
@@ -1442,6 +1541,11 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 **injection_summary,
             },
             opf_lineage=opf_lineage, floor_coverage=floor_coverage,
+            # Issue #584: only set on the no-output branch just above -- a
+            # genuine DONE/other terminal keeps `failing_stage` absent
+            # (never a null placeholder), same convention as every other
+            # optional field `_write_real_terminal` writes.
+            failing_stage=failing_stage,
         )
         # Settling is deliberately the LAST thing, and deliberately cannot
         # throw (issue #446): by this point the redline is in object storage

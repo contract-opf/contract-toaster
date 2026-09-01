@@ -45,6 +45,15 @@ import {
   type BrowningLevel,
 } from './browning';
 
+import {
+  DEFAULT_NOTES_MODE,
+  INTERNAL_NOTES_DISCLOSURE,
+  NOTES_MODE_SETTINGS,
+  isNotesModeAvailable,
+  notesModeSetting,
+  type NotesMode,
+} from '../notesMode';
+
 // ---------------------------------------------------------------------------
 // Shared stylesheet — a plain <style>, no CSS-in-JS dependency. Everything the
 // SVG can't express as a static attribute lives here: the dial-pointer
@@ -133,7 +142,7 @@ export function ToasterStyles(): React.ReactElement {
       .toaster-dial-stop:focus-visible { outline: 2px solid #2a6bcc; outline-offset: 2px; }
       /* Browning readback (#495): quiet, permanent, and never truncated — the
          sentence it shows is the sentence the model is sent. */
-      .toaster-browning__note { text-align: center; margin: 0.15rem 0 0; font-size: 0.85rem; max-width: 42ch; }
+      .toaster-browning__note { text-align: center; margin: 0.15rem 0 0; font-size: var(--ct-text-sm, 14px); max-width: 42ch; }
 
       /* --- The receipt (issue #498) --- */
       .toaster-receipt { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; margin-top: 0.5rem; }
@@ -143,7 +152,7 @@ export function ToasterStyles(): React.ReactElement {
         background: var(--ct-receipt-paper, #fdfbf5);
         color: var(--ct-receipt-ink, #2a2119);
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.82rem; line-height: 1.55;
+        font-size: var(--ct-text-sm, 14px); line-height: 1.55;
         box-shadow: 0 1px 2px rgba(20, 14, 8, 0.14);
         /* A torn bottom edge, drawn rather than imaged (the CSP forbids
            remote loads and this file carries no image files). */
@@ -383,7 +392,7 @@ export function ToasterStyles(): React.ReactElement {
       .toaster-hero__toast-btn:disabled { cursor: default; opacity: 0.6; }
       .toaster-hero__toast-btn:focus-visible { outline: 2px solid var(--ct-accent, #af4b29); outline-offset: 3px; border-radius: 8px; }
       .toaster-hero__toast-caption {
-        font-size: 0.8rem; font-weight: 600; color: var(--ct-accent, #af4b29);
+        font-size: var(--ct-text-sm, 14px); font-weight: 600; color: var(--ct-accent, #af4b29);
         text-decoration: underline; text-underline-offset: 2px;
       }
       /* Burnt slice + smoke (issue #501). The wisps rise and fade on a slow
@@ -401,7 +410,7 @@ export function ToasterStyles(): React.ReactElement {
         pointer-events: none;
       }
       .toaster-hero__progress { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
-      .toaster-hero__progress p { font-size: 0.85rem; margin: 0; }
+      .toaster-hero__progress p { font-size: var(--ct-text-sm, 14px); margin: 0; }
 
       /* --- Staged doneness (issue #447): the toast slice IS the bar ---
          The slice darkens one step per real pipeline sub-stage, along a warm
@@ -436,8 +445,8 @@ export function ToasterStyles(): React.ReactElement {
         0%, 100% { opacity: 0.18; }
         50% { opacity: 0.62; }
       }
-      .toaster-doneness__step { font-size: 0.85rem; font-weight: 600; margin: 0; text-align: center; }
-      .toaster-doneness__hint { font-size: 0.78rem; margin: 0; opacity: 0.75; text-align: center; }
+      .toaster-doneness__step { font-size: var(--ct-text-sm, 14px); font-weight: 600; margin: 0; text-align: center; }
+      .toaster-doneness__hint { font-size: var(--ct-text-sm, 14px); margin: 0; opacity: 0.75; text-align: center; }
 
       @media (prefers-color-scheme: dark) {
         .toaster-dial-stop { background: #2e2a24; color: #f2ede2; border-color: #6b6b6b; }
@@ -814,6 +823,149 @@ export function BrowningControl({ value, onChange }: BrowningControlProps): Reac
   );
 }
 
+// ---------------------------------------------------------------------------
+// NotesModeControl — the four-way footnote-audience picker (issue #523, epic
+// #519 item F).
+//
+// Same accessible shape as the dial and the browning control above: a real
+// ARIA `radiogroup` of `radio` stops with roving tabIndex and
+// arrow/Home/End keys. Two things it does that the browning control does not:
+//
+//   1. Unavailable stops. While the #572 kill switch is off, `internal` and
+//      `both` are refused server-side, so they render de-emphasized and
+//      `aria-disabled` — visible, focusable, NOT selectable — exactly as
+//      `ContractTypeDial` treats a coming-soon playbook. Pointer and keyboard
+//      agree because both route through `selectable`.
+//   2. The disclosure. Choosing a mode that puts our own reasoning in the
+//      file says so, once, in one sentence, right where the choice is made.
+//      Not a dialog and not a confirmation (epic #519 decision 4 retired the
+//      nag), and never for `none`/`external`, which produce a document that
+//      is counterparty-safe by construction.
+//
+// This is the TOASTER-side surface. `ReviewSubmission.tsx` also renders a
+// plain <select> below the form fold wired to the SAME `onChange` handler,
+// per #504's dual-surface rule — neither can drift because neither owns the
+// value.
+// ---------------------------------------------------------------------------
+interface NotesModeControlProps {
+  value: NotesMode;
+  onChange: (mode: NotesMode) => void;
+  /** Whether `internal`/`both` may be chosen at all in this deployment —
+   *  `notes_mode_available` from GET /api/me/preferences (#572 kill switch). */
+  internalAvailable: boolean;
+}
+
+export function NotesModeControl({
+  value,
+  onChange,
+  internalAvailable,
+}: NotesModeControlProps): React.ReactElement {
+  const groupRef = useRef<HTMLDivElement | null>(null);
+
+  const selectable = NOTES_MODE_SETTINGS.filter((setting) =>
+    isNotesModeAvailable(setting.id, internalAvailable),
+  );
+
+  const selectAt = useCallback(
+    (index: number) => {
+      if (selectable.length === 0) {
+        return;
+      }
+      const count = selectable.length;
+      const next = selectable[((index % count) + count) % count];
+      if (!next) {
+        return;
+      }
+      onChange(next.id);
+      const buttons = groupRef.current?.querySelectorAll<HTMLButtonElement>('button[data-notes-mode]');
+      const nextButton = buttons
+        ? Array.from(buttons).find((btn) => btn.dataset.notesMode === next.id)
+        : undefined;
+      nextButton?.focus();
+    },
+    [selectable, onChange],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const current = Math.max(
+        0,
+        selectable.findIndex((setting) => setting.id === value),
+      );
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        selectAt(current + 1);
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        selectAt(current - 1);
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        selectAt(0);
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        selectAt(selectable.length - 1);
+      }
+    },
+    [value, selectAt, selectable],
+  );
+
+  const setting = notesModeSetting(value);
+
+  return (
+    <div style={{ marginBottom: '0.5rem' }}>
+      <span
+        id="review-notes-mode-label"
+        style={{ display: 'block', marginBottom: '0.25rem', textAlign: 'center' }}
+      >
+        Footnotes:
+      </span>
+      <div
+        ref={groupRef}
+        role="radiogroup"
+        aria-labelledby="review-notes-mode-label"
+        data-testid="review-notes-mode-control"
+        className="toaster-dial"
+        onKeyDown={handleKeyDown}
+      >
+        {NOTES_MODE_SETTINGS.map((option) => {
+          const unavailable = !isNotesModeAvailable(option.id, internalAvailable);
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={option.id === value}
+              aria-disabled={unavailable || undefined}
+              tabIndex={option.id === value ? 0 : -1}
+              data-notes-mode={option.id}
+              data-testid={`review-notes-mode-option-${option.id}`}
+              className={`toaster-dial-stop${unavailable ? ' toaster-dial-stop--coming-soon' : ''}`}
+              onClick={() => {
+                if (!unavailable) {
+                  onChange(option.id);
+                }
+              }}
+            >
+              {unavailable ? `${option.label} (unavailable)` : option.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="ct-muted toaster-browning__note" data-testid="review-notes-mode-note">
+        {setting.note}
+      </p>
+      {setting.carriesInternalNotes && (
+        <p
+          className="ct-muted toaster-browning__note"
+          data-testid="review-notes-mode-internal-disclosure"
+        >
+          {INTERNAL_NOTES_DISCLOSURE}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ===========================================================================
 // ToasterHero — THE hero. One cohesive, near-photoreal chrome toaster: layered
 // chrome gradients, a specular highlight, a soft ground shadow, a rotating
@@ -887,6 +1039,15 @@ export interface ToasterHeroProps {
    */
   browning?: BrowningLevel;
   onBrowningChange?: (level: BrowningLevel) => void;
+  /**
+   * Footnote audience (issue #523). Optional on the same terms as `browning`
+   * above: without `onNotesModeChange` no control renders at all, so the
+   * state-illustration wrappers below stay exactly as they were.
+   */
+  notesMode?: NotesMode;
+  onNotesModeChange?: (mode: NotesMode) => void;
+  /** Whether `internal`/`both` are selectable in this deployment (#572). */
+  notesModeInternalAvailable?: boolean;
 }
 
 // Geometry constants for the hero SVG (user-space units; viewBox 0 0 420 340).
@@ -952,6 +1113,9 @@ export function ToasterHero({
   leverArmed = false,
   browning = DEFAULT_BROWNING,
   onBrowningChange,
+  notesMode = DEFAULT_NOTES_MODE,
+  onNotesModeChange,
+  notesModeInternalAvailable = false,
 }: ToasterHeroProps): React.ReactElement {
   // Namespace every gradient/filter id so multiple toasters on a page can't
   // collide on url(#…) references. useId is stable across renders; strip the
@@ -1712,6 +1876,16 @@ export function ToasterHero({
           the appliance, not a live control that changes nothing. */}
       {onBrowningChange && <BrowningControl value={browning} onChange={onBrowningChange} />}
 
+      {/* The footnote-audience control (#523). Same rendering rule as the
+          browning control above: present only when a handler is wired in. */}
+      {onNotesModeChange && (
+        <NotesModeControl
+          value={notesMode}
+          onChange={onNotesModeChange}
+          internalAvailable={notesModeInternalAvailable}
+        />
+      )}
+
       {/* WORKING — staged doneness when the pipeline reports where it is;
           the indeterminate ring when it does not. */}
       {working && (
@@ -2051,7 +2225,7 @@ export function ProgressToaster(): React.ReactElement {
         <line className="toaster-coil toaster-coil--hot" x1="110" y1="24" x2="110" y2="55" />
       </ToasterBody>
       <DonenessRing />
-      <p style={{ fontSize: '0.85rem', margin: '0.25rem 0 0' }}>Toasting your review…</p>
+      <p style={{ fontSize: 'var(--ct-text-sm, 14px)', margin: '0.25rem 0 0' }}>Toasting your review…</p>
     </div>
   );
 }

@@ -58,6 +58,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
 
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
+import replacement_text_enforcement as _rte  # noqa: E402
 import reviews as _reviews_module  # noqa: E402
 
 
@@ -153,45 +154,62 @@ def test_system_blocks_order_and_cache_breakpoint(failures: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_overlay_instructs_source_quote_in_key_set(failures: list[str]) -> None:
+def test_overlay_instructs_the_addressing_contract_in_key_set(failures: list[str]) -> None:
+    """Issue #378 asked this of `source_quote`: the overlay, not any playbook
+    file, must instruct how an issue names the span it is about.
+
+    Issue #627 replaced the ANSWER, not the question. The model no longer
+    names a verbatim span; it names a code-assigned `block_id` and
+    transcribes that block. So the assertions move to the field that carries
+    the address, and one is added in the opposite direction: `source_quote`
+    must now be actively UN-asked, because a prompt still requesting it would
+    keep producing a key the active schema forbids.
+    """
     overlay = pp.BINARY_DECISION_OVERLAY_BLOCK
 
-    if "source_quote" not in overlay:
+    if '"block_id"' not in overlay:
         failures.append(
-            "[1g] BINARY_DECISION_OVERLAY_BLOCK must mention \"source_quote\" -- "
-            "issue #378 requires the code-composed overlay (not any playbook "
-            "file) to instruct the model to emit it per issue."
+            '[1g] BINARY_DECISION_OVERLAY_BLOCK must mention "block_id" -- it is how a '
+            "v3 issue's edits name the span they apply to."
         )
         return
+    if 'Do NOT include a "source_quote" key' not in overlay:
+        failures.append(
+            "[1g2] The overlay must actively forbid `source_quote`; the active contract "
+            "has no such property and `additionalProperties: false` rejects it."
+        )
 
-    # The existing enumerated key set (section_ref ... provenance) must still
-    # be present verbatim -- this is an addition, not a replacement of the
-    # prior authoritative key set from issue #81/#267.
+    # The enumerated key set the issue-object contract states must still be
+    # present verbatim -- issue #627 removed exactly two of them
+    # (`source_quote`, `proposed_replacement_text`) and added `issue_key`.
     for prior_key in (
+        "issue_key",
         "section_ref",
         "section_title",
         "counterparty_change_summary",
         "external_rationale_for_footnote",
-        "proposed_replacement_text",
         "playbook_topic_id",
         "internal_precedent_citation",
         "provenance",
     ):
         if f'"{prior_key}"' not in overlay:
-            failures.append(f"[1h] BINARY_DECISION_OVERLAY_BLOCK must still enumerate \"{prior_key}\" -- source_quote must be additive, not a replacement of the issue #81/#267 key set.")
+            failures.append(f"[1h] BINARY_DECISION_OVERLAY_BLOCK must still enumerate \"{prior_key}\".")
 
     if "verbatim" not in overlay.lower():
-        failures.append("[1i] The source_quote instruction must require verbatim (exact-substring) text, not paraphrase.")
+        failures.append("[1i] The transcript instruction must require verbatim source text, not paraphrase.")
 
-    # #378 scope: MUST provide source_quote when a verbatim span exists, but
-    # OMIT the key (never fabricate) when the model has no full document text
-    # to quote from (e.g. the SECTION_OUTLINE-only path above
-    # full_doc_token_threshold -- see assemble_user_prompt_primary) or no
-    # single contiguous span (missing clause, non-contiguous change).
-    if "omit" not in overlay.lower():
-        failures.append("[1j] The overlay must instruct the model to OMIT source_quote (not fabricate one) when it has no locatable verbatim span -- e.g. the section-outline-only path.")
-    if "fabricat" not in overlay.lower():
-        failures.append("[1k] The overlay must explicitly forbid fabricating/approximating a source_quote.")
+    # The #378 concern -- never invent an address -- survives as the rule
+    # that a transcript is CHECKED against the document's real characters.
+    if "checks them against the document's real characters" not in overlay:
+        failures.append(
+            "[1j] The overlay must tell the model its transcript is checked against the "
+            "document's own characters -- the replacement for #378's 'never fabricate a "
+            "quote' rule."
+        )
+    if "nothing skipped and nothing invented" not in overlay:
+        failures.append(
+            "[1k] The overlay must explicitly forbid inventing transcript text."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -208,35 +226,41 @@ def test_overlay_instructs_source_quote_in_key_set(failures: list[str]) -> None:
 
 
 def test_overlay_instructs_paragraph_boundary_rule(failures: list[str]) -> None:
+    """Issue #564's preventive half, restated for the v3 contract.
+
+    Under v2 the hazard was a `source_quote` spanning two physical
+    paragraphs, which could not locate. Under v3 an edit cannot cross a
+    paragraph boundary BY CONSTRUCTION -- a `block_patch` names exactly one
+    `block_id` and its segments transcribe that one paragraph -- so the
+    instruction that prevents the hazard is the one that says so. The
+    prohibition still has to be STATED: a model told to transcribe "a
+    paragraph" without being told one entry covers exactly one block will
+    write one entry spanning two.
+    """
     overlay = pp.BINARY_DECISION_OVERLAY_BLOCK
 
-    if "paragraph boundary" not in overlay.lower():
+    if "EXACTLY ONE entry per block_id" not in overlay:
         failures.append(
-            "[1l] BINARY_DECISION_OVERLAY_BLOCK must tell the model that a "
-            "newline in the shown document text marks a paragraph boundary "
-            "-- issue #564's preventive half, not just the reporting half."
+            "[1l] BINARY_DECISION_OVERLAY_BLOCK must tell the model that a block_patch "
+            "covers EXACTLY ONE block -- issue #564's preventive half, restated for the "
+            "block-transcript contract."
         )
-    if "must not cross" not in overlay.lower():
+    if "TRANSCRIBE THE WHOLE PARAGRAPH" not in overlay:
         failures.append(
-            "[1m] BINARY_DECISION_OVERLAY_BLOCK must instruct that "
-            "\"source_quote\" MUST NOT cross a paragraph boundary -- the "
-            "sentence that actually prevents cross-paragraph quotes, as "
-            "opposed to merely classifying them after the fact."
+            "[1m] BINARY_DECISION_OVERLAY_BLOCK must instruct that a block's "
+            "segments transcribe THE WHOLE PARAGRAPH, start to finish -- the "
+            "sentence that actually keeps one entry inside one paragraph, as "
+            "opposed to merely rejecting a straddling one after the fact."
         )
 
 
 def test_primary_user_prompt_block_order_full_doc(failures: list[str]) -> None:
     prompt = pp.assemble_user_prompt_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
-        full_doc_token_threshold=15_000,
     )
 
     required_tags_in_order = [
-        "<STANDARD_FORM_DIFF>",
-        "<ANCHORED_CLAUSES>",
         "<RETRIEVED_PRECEDENT>",
         "<COUNTERPARTY_DOCUMENT>",
     ]
@@ -246,53 +270,35 @@ def test_primary_user_prompt_block_order_full_doc(failures: list[str]) -> None:
     elif positions != sorted(positions):
         failures.append(f"[1h] Primary prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")
 
-    if "SECTION_OUTLINE" in prompt:
-        failures.append("[1i] Below-threshold doc must use the full-doc block, not the section outline.")
-
     if pp.UNTRUSTED_BLOCK_WARNING not in prompt:
         failures.append("[1j] Counterparty document block must carry the untrusted-input anti-injection warning.")
 
     if "$75,000" not in prompt:
-        failures.append("[1k] Full document text must be present verbatim below the size threshold.")
-
-
-def test_primary_user_prompt_outline_above_threshold(failures: list[str]) -> None:
-    long_doc = "Section 1. " + ("word " * 5000)  # ~5000+ words, well above a tiny threshold
-    prompt = pp.assemble_user_prompt_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
-        retrieved_precedent=_sample_precedent(),
-        doc_text=long_doc,
-        doc_paragraphs=[{"heading": "Section 1", "text": long_doc}],
-        full_doc_token_threshold=10,  # force above-threshold path
-    )
-
-    if "<SECTION_OUTLINE>" not in prompt:
-        failures.append("[1l] Above-threshold doc must be replaced by a section outline block.")
-    if "<COUNTERPARTY_DOCUMENT>" in prompt:
-        failures.append("[1m] Above-threshold doc must NOT include the full counterparty-document block.")
-    if "Section 1: 5001 words" not in prompt and "Section 1:" not in prompt:
-        failures.append("[1n] Section outline must include heading + word count.")
+        failures.append("[1k] Full document text must be present verbatim in the counterparty-document block.")
 
 
 def test_critic_user_prompt_manifest(failures: list[str]) -> None:
     primary_output = json.loads(_load_fixture_text("primary_request_change_valid.json"))
     prompt = pp.assemble_user_prompt_critic(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         primary_output=primary_output,
     )
 
-    required_tags_in_order = ["<STANDARD_FORM_DIFF>", "<ANCHORED_CLAUSES>", "<PRIMARY_REVIEWER_OUTPUT>"]
+    # Issue #627 removed the two permanently-empty manifest blocks; the
+    # critic's prompt is now the tasking, the document, and the primary's
+    # output.
+    required_tags_in_order = ["<PRIMARY_REVIEWER_OUTPUT>"]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
         failures.append(f"[1o] Critic prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")
     elif positions != sorted(positions):
         failures.append(f"[1p] Critic prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")
 
-    for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>", "<SECTION_OUTLINE>"):
+    # This call passes no `doc_text`, so no document block is composed
+    # (issue #618's absent-or-populated doctrine); retrieved precedent is
+    # primary-only per the #29 manifest.
+    for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>"):
         if forbidden_tag in prompt:
-            failures.append(f"[1q] Critic prompt must NOT include {forbidden_tag} (raw doc / outline / precedent are primary-only per the #29 manifest).")
+            failures.append(f"[1q] Critic prompt must NOT include {forbidden_tag} for a call that passes no document.")
 
     if "$150,000" not in prompt:
         failures.append("[1r] Critic prompt must include the primary reviewer's full structured output.")
@@ -318,8 +324,6 @@ def test_assembled_size_within_cap_on_every_gold_case(failures: list[str]) -> No
             {"anchor": case["planted_variation"].get("topic_id", "?"), "standard_text": "", "counterparty_text": altered_hunk, "delta": altered_hunk}
         ]
         user_prompt = pp.assemble_user_prompt_primary(
-            diff_hunks=diff_hunks,
-            anchored_clauses=anchored_clauses,
             retrieved_precedent=[],
             doc_text=altered_hunk,
         )
@@ -417,8 +421,6 @@ def test_critic_pass_shares_same_projection_as_primary(failures: list[str]) -> N
     primary_output = json.loads(_load_fixture_text("primary_request_change_valid.json"))
     cp.run_critic_pass(
         review_id="review-critic-projection",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         primary_output=primary_output,
         playbook=playbook,
         model_client=client,
@@ -453,8 +455,6 @@ def test_ledger_records_projected_playbook_hash(failures: list[str]) -> None:
 
     pp.run_primary_pass(
         review_id="review-projected-hash",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         playbook=playbook,
         model_client=client,
@@ -495,8 +495,6 @@ def test_schema_invalid_then_valid_retries_once_and_succeeds(failures: list[str]
 
     result = pp.run_primary_pass(
         review_id="review-retry-success",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -537,8 +535,6 @@ def test_two_schema_invalid_responses_terminal_error_manual_review(failures: lis
 
     result = pp.run_primary_pass(
         review_id="review-terminal-failure",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -564,26 +560,28 @@ def test_two_schema_invalid_responses_terminal_error_manual_review(failures: lis
 
 
 # ---------------------------------------------------------------------------
-# Issue #376: output-schema-v2.json is a clean-break successor to v1 adding
-# an OPTIONAL issues[].source_quote field. The pipeline (pp.OUTPUT_SCHEMA_PATH)
-# now validates against v2, not v1. v2's Issue shape is a strict superset of
-# v1's, so a response that includes source_quote must validate and complete
-# the pass successfully (this was schema-invalid under v1's
-# additionalProperties: false), while a response missing a genuinely-required
-# field must still be rejected exactly as before -- the schema swap is not a
-# validation weakening.
+# Issue #376 asked this of the v1->v2 swap, and issue #627 asks the same of
+# the v2->v3 cutover: a response in the shape the CURRENT prompt requests
+# must validate and complete the pass, and a response missing a
+# genuinely-required field must still be rejected -- a contract swap is never
+# a validation weakening.
+#
+# The carrier moved (v2's optional `issues[].source_quote` -> v3's top-level
+# `block_patches`/`block_ops`); the property being asserted did not.
 # ---------------------------------------------------------------------------
 
 
-def test_v2_schema_accepts_source_quote_end_to_end(failures: list[str]) -> None:
-    responses = {_TEST_MODEL_ID: [_load_fixture_text("primary_request_change_with_source_quote_valid.json")]}
+def test_active_schema_accepts_a_block_transcript_end_to_end(failures: list[str]) -> None:
+    responses = {
+        _TEST_MODEL_ID: [
+            _load_fixture_text("primary_request_change_with_block_transcript_valid.json")
+        ]
+    }
     client = model_client.FakeBedrockClient(responses)
     ledger: list[model_client.ModelInvocationRecord] = []
 
     result = pp.run_primary_pass(
-        review_id="review-source-quote",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
+        review_id="review-block-transcript",
         retrieved_precedent=_sample_precedent(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -593,23 +591,27 @@ def test_v2_schema_accepts_source_quote_end_to_end(failures: list[str]) -> None:
     )
 
     if result.get("status") != "OK":
-        failures.append(f"[9a] Expected status=OK for a v2-shaped response carrying source_quote; got {result!r}")
+        failures.append(f"[9a] Expected status=OK for a v3-shaped transcript response; got {result!r}")
     if result.get("attempts") != 1:
-        failures.append(f"[9b] Expected exactly 1 attempt (no retry needed -- source_quote is schema-valid, not an error); got {result.get('attempts')!r}")
+        failures.append(f"[9b] Expected exactly 1 attempt (a transcript is schema-valid, not an error); got {result.get('attempts')!r}")
+    patches = (result.get("response") or {}).get("block_patches") or []
+    if not patches or not patches[0].get("segments"):
+        failures.append(
+            f"[9c] Expected the validated response to retain its block transcript; got {patches!r}"
+        )
     issues = (result.get("response") or {}).get("issues", [])
-    if not issues or issues[0].get("source_quote") != "Each party's aggregate liability shall not exceed $75,000.":
-        failures.append(f"[9c] Expected the validated response to retain issues[0].source_quote verbatim; got {issues!r}")
+    if not issues or not issues[0].get("issue_key"):
+        failures.append(f"[9c2] Expected every issue to carry its issue_key; got {issues!r}")
 
 
-def test_v2_schema_still_rejects_response_missing_issues(failures: list[str]) -> None:
-    # Acceptance criterion (#376): validate_model_response loads v2 and still
-    # rejects a response missing a genuinely-required field -- the v2 swap
-    # only adds an optional field, it does not relax any required field.
+def test_active_schema_still_rejects_response_missing_issues(failures: list[str]) -> None:
+    # The swap only moves the edit carrier; it does not relax any required
+    # field. The fixture omits `issues` entirely and must still fail.
     is_valid, parsed_or_error = pp.validate_model_response(
         _load_fixture_text("schema_invalid_missing_issues.json")
     )
     if is_valid:
-        failures.append(f"[9d] Expected a response missing 'issues' to still fail validation under output-schema-v2.json; got valid={parsed_or_error!r}")
+        failures.append(f"[9d] Expected a response missing 'issues' to still fail validation under the active artifact; got valid={parsed_or_error!r}")
     elif "issues" not in str(parsed_or_error):
         failures.append(f"[9e] Expected the schema-invalid error to name the missing 'issues' field; got {parsed_or_error!r}")
 
@@ -622,11 +624,91 @@ def test_v2_schema_still_rejects_response_missing_issues(failures: list[str]) ->
 # ---------------------------------------------------------------------------
 
 
-def _response_with_replacement_text(text: str, topic_id: str = "limitation-of-liability") -> str:
+# ---------------------------------------------------------------------------
+# Pass-time replacement-text enforcement is a V2 mechanism (issue #627).
+#
+# Under v1/v2 the model AUTHORED `issues[].proposed_replacement_text`, so
+# `replacement_text_enforcement` judged it the moment the response validated
+# and a violation spent one unit of the pass's own retry budget. That code
+# path is alive and reachable -- the third-party integration and any caller
+# selecting `OUTPUT_SCHEMA_V2_PATH` still speak v2 -- so its coverage is kept
+# here, pinned to the contract it belongs to rather than deleted.
+#
+# It is NOT reachable on the active v3 contract: there the model is told not
+# to send that field at all and the pipeline derives it from the proven
+# transcript, so enforcement runs at stage 5 against the DERIVED text
+# (`redline_generate.generate_redline_from_blocks`; covered end to end by
+# tests/test_block_mode_e2e.py::test_pen_rules_run_against_the_derived_text).
+# `test_pass_time_replacement_text_enforcement_is_off_under_v3` below pins
+# that difference so neither half can be silently switched.
+# ---------------------------------------------------------------------------
+
+_V2_SCHEMA_PATH = pp.OUTPUT_SCHEMA_V2_PATH
+
+_V2_CLEAN_REPLACEMENT_TEXT = (
+    "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+)
+
+
+def _v2_response_with_replacement_text(
+    text: str, topic_id: str = "limitation-of-liability"
+) -> str:
+    """The shared REQUEST_CHANGE fixture, projected back onto the V2 issue
+    shape: `issue_key` dropped (v2 has no such property and forbids extras),
+    `proposed_replacement_text` supplied (v2 requires it)."""
     base = json.loads(_load_fixture_text("primary_request_change_valid.json"))
-    base["issues"][0]["proposed_replacement_text"] = text
-    base["issues"][0]["playbook_topic_id"] = topic_id
+    issue = base["issues"][0]
+    issue.pop("issue_key", None)
+    issue["proposed_replacement_text"] = text
+    issue["playbook_topic_id"] = topic_id
+    base.pop("block_patches", None)
+    base.pop("block_ops", None)
+    base["schema_version"] = "output-schema-v1"
     return json.dumps(base)
+
+
+def _response_with_replacement_text(text: str, topic_id: str = "limitation-of-liability") -> str:
+    return _v2_response_with_replacement_text(text, topic_id)
+
+
+def test_pass_time_replacement_text_enforcement_is_off_under_v3(failures: list[str]) -> None:
+    """The v3 counterpart of the four tests below, stated as the difference
+    it actually is: the SAME violating replacement text buys no retry,
+    because under the block-transcript contract the model never authored
+    that field and the pipeline judges the DERIVED text at stage 5 instead.
+
+    Without this, flipping the gate back on would break every real v3 review
+    (an issue with no `proposed_replacement_text` reads as
+    `empty_replacement_text` on any redline-permitting topic) while the four
+    v2-pinned tests below stayed green.
+    """
+    client = model_client.FakeBedrockClient(
+        {_TEST_MODEL_ID: [_load_fixture_text("primary_request_change_valid.json")]}
+    )
+    result = pp.run_primary_pass(
+        review_id="review-627-no-pass-time-pen-rules",
+        retrieved_precedent=[],
+        playbook=_sample_playbook(),
+        model_client=client,
+        model_id=_TEST_MODEL_ID,
+        ledger_write=lambda record: None,
+        doc_text="Section 8 text.",
+    )
+    if result.get("status") != "OK" or result.get("attempts") != 1:
+        failures.append(
+            f"[12a] a v3 issue carrying no proposed_replacement_text must be accepted in "
+            f"ONE attempt; got {result.get('status')!r}/{result.get('attempts')!r}"
+        )
+    if not pp.authors_block_transcripts(pp.load_output_schema(pp.OUTPUT_SCHEMA_PATH)):
+        failures.append(
+            "[12b] the ACTIVE artifact is not a block-transcript contract, so the gate "
+            "above is off for the wrong reason"
+        )
+    if pp.authors_block_transcripts(pp.load_output_schema(_V2_SCHEMA_PATH)):
+        failures.append(
+            "[12c] the v2 artifact is being read as a block-transcript contract; the four "
+            "tests below would then prove nothing"
+        )
 
 
 def test_replacement_text_violation_then_clean_retries_and_succeeds(failures: list[str]) -> None:
@@ -636,15 +718,14 @@ def test_replacement_text_violation_then_clean_retries_and_succeeds(failures: li
     violating = _response_with_replacement_text(
         "This clause requires the counterparty to indemnify our organization."
     )
-    clean = _load_fixture_text("primary_request_change_valid.json")
+    clean = _v2_response_with_replacement_text(_V2_CLEAN_REPLACEMENT_TEXT)
     responses = {_TEST_MODEL_ID: [violating, clean]}
     client = model_client.FakeBedrockClient(responses)
     ledger: list[model_client.ModelInvocationRecord] = []
 
     result = pp.run_primary_pass(
         review_id="review-pen-rules-retry",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
+        output_schema_path=_V2_SCHEMA_PATH,
         retrieved_precedent=_sample_precedent(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -688,8 +769,7 @@ def test_replacement_text_violation_on_final_attempt_demotes_to_flag_only(failur
 
     result = pp.run_primary_pass(
         review_id="review-pen-rules-demote",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
+        output_schema_path=_V2_SCHEMA_PATH,
         retrieved_precedent=_sample_precedent(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -720,6 +800,157 @@ def test_replacement_text_violation_on_final_attempt_demotes_to_flag_only(failur
             failures.append(f"[8h] Final ledger row must still record the failure that triggered the demotion; got {ledger[1].replacement_text_failures!r}")
 
 
+def test_empty_replacement_text_retries_and_succeeds_on_clean_attempt(failures: list[str]) -> None:
+    # Issue #585: a REQUEST_CHANGE issue on limitation-of-liability
+    # (mode='bounded_edit', so a redline is permitted/expected) with an
+    # empty proposed_replacement_text is a violation -- same bounded retry
+    # budget as any other pen-rules violation, not a silent pass-through.
+    violating = _response_with_replacement_text("")
+    clean = _v2_response_with_replacement_text(_V2_CLEAN_REPLACEMENT_TEXT)
+    responses = {_TEST_MODEL_ID: [violating, clean]}
+    client = model_client.FakeBedrockClient(responses)
+    ledger: list[model_client.ModelInvocationRecord] = []
+
+    result = pp.run_primary_pass(
+        review_id="review-empty-replacement-retry",
+        output_schema_path=_V2_SCHEMA_PATH,
+        retrieved_precedent=_sample_precedent(),
+        playbook=_sample_playbook(),
+        model_client=client,
+        model_id=_TEST_MODEL_ID,
+        ledger_write=ledger.append,
+        doc_text="Section 8 text.",
+    )
+
+    if result.get("status") != "OK":
+        failures.append(f"[10a] Expected status=OK after an empty-replacement-text retry; got {result!r}")
+    if result.get("attempts") != 2:
+        failures.append(f"[10b] Expected exactly 2 attempts (1 retry, same budget as any other pen-rules violation); got {result.get('attempts')!r}")
+
+    got_text = result.get("response", {}).get("issues", [{}])[0].get("proposed_replacement_text")
+    expected_clean_text = json.loads(clean)["issues"][0]["proposed_replacement_text"]
+    if got_text != expected_clean_text:
+        failures.append(f"[10c] Final response's replacement text must be the clean second attempt's; got {got_text!r}")
+
+    if len(ledger) != 2:
+        failures.append(f"[10d] Expected 2 ledger rows (retry, success); got {len(ledger)}")
+    else:
+        if ledger[0].outcome != "retry":
+            failures.append(f"[10e] First ledger row must be outcome=retry; got {ledger[0]!r}")
+        if ledger[0].replacement_text_failures != ["empty_replacement_text"]:
+            failures.append(f"[10f] First ledger row must record empty_replacement_text; got {ledger[0].replacement_text_failures!r}")
+        if ledger[1].outcome != "success":
+            failures.append(f"[10g] Second ledger row must be outcome=success; got {ledger[1]!r}")
+        if ledger[1].replacement_text_failures != []:
+            failures.append(f"[10h] Second (clean) attempt's ledger row must record no failures; got {ledger[1].replacement_text_failures!r}")
+
+
+def test_empty_replacement_text_on_final_attempt_demotes_to_flag_only(failures: list[str]) -> None:
+    # Issue #585: still-empty on the final attempt demotes to an explicit,
+    # ledgered flag-only outcome (status=OK, never a pipeline error) -- it
+    # is never silently carried into the redline stage as an unlabeled
+    # empty string.
+    violating = _response_with_replacement_text("")
+    responses = {_TEST_MODEL_ID: [violating, violating]}
+    client = model_client.FakeBedrockClient(responses)
+    ledger: list[model_client.ModelInvocationRecord] = []
+
+    result = pp.run_primary_pass(
+        review_id="review-empty-replacement-demote",
+        output_schema_path=_V2_SCHEMA_PATH,
+        retrieved_precedent=_sample_precedent(),
+        playbook=_sample_playbook(),
+        model_client=client,
+        model_id=_TEST_MODEL_ID,
+        ledger_write=ledger.append,
+        doc_text="Section 8 text.",
+    )
+
+    if result.get("status") != "OK":
+        failures.append(f"[11a] A still-empty replacement on the final attempt must demote to flag-only, status=OK; got {result!r}")
+    if result.get("attempts") != 2:
+        failures.append(f"[11b] Expected exactly 2 attempts (bounded retry budget exhausted); got {result.get('attempts')!r}")
+
+    issues = result.get("response", {}).get("issues", [])
+    if not issues or issues[0].get("proposed_replacement_text") != "":
+        failures.append(f"[11c] The violating issue must remain demoted to flag-only (proposed_replacement_text==''); got {issues!r}")
+    # Issue #585 review round 1, finding 2: the bare empty string is not
+    # itself an acceptable terminal state -- demote_issue_to_flag_only must
+    # also set an explicit, named marker distinguishing "retry budget
+    # exhausted" from any other empty-text outcome, so the redline stage
+    # never has to infer the reason from `== ""` alone.
+    if not issues or issues[0].get(_rte.REPLACEMENT_TEXT_OUTCOME_FIELD) != _rte.FLAG_ONLY_RETRY_EXHAUSTED:
+        failures.append(f"[11i] The demoted issue must carry replacement_text_outcome=FLAG_ONLY_RETRY_EXHAUSTED, not a silent empty string; got {issues!r}")
+
+    if len(ledger) != 2:
+        failures.append(f"[11d] Expected 2 ledger rows (retry, success-with-demotion); got {len(ledger)}")
+    else:
+        if ledger[0].replacement_text_failures != ["empty_replacement_text"]:
+            failures.append(f"[11e] First ledger row must record empty_replacement_text; got {ledger[0].replacement_text_failures!r}")
+        if ledger[1].outcome != "success":
+            failures.append(f"[11f] Final ledger row must be outcome=success (demoted, not a pipeline failure); got {ledger[1]!r}")
+        if ledger[1].replacement_text_failures != ["empty_replacement_text"]:
+            failures.append(f"[11g] Final ledger row must still record the failure that triggered the demotion; got {ledger[1].replacement_text_failures!r}")
+
+
+def _opf_playbook() -> dict[str, Any]:
+    """A minimal OPF-shaped playbook dict -- carries `opf_bundle_v2` (issue
+    #479's marker), no `topics`/`default`/`per_topic`. This is all
+    `resolve_pen_rules_bundle` inspects to return `bundle=None`
+    (`playbook.get("opf_bundle_v2") is not None`); every other function this
+    pass touches (`assemble_system_blocks`, `project_playbook_for_prompt`,
+    ...) reads playbook fields with `.get(...)` and tolerates the rest being
+    absent."""
+    return {"opf_bundle_v2": {"opf": {}, "overrides": None}}
+
+
+def test_opf_none_bundle_empty_replacement_text_does_not_retry_or_fail(failures: list[str]) -> None:
+    # Issue #585 finding 2 (review round 2): on the OPF-native path
+    # (`resolve_pen_rules_bundle` -> `bundle=None`, issue #479), the model
+    # is never told what mode a topic resolves to
+    # (`render_replacement_text_modes_block` also returns `None` for the
+    # same bundle) -- an empty `proposed_replacement_text` there must NOT
+    # be judged an `EMPTY_REPLACEMENT_TEXT` violation. This must hold
+    # THROUGH `run_primary_pass`, not just the pure
+    # `check_issues_replacement_text` function: a single clean-looking
+    # response must succeed on the FIRST attempt, with no retry burned and
+    # no ledger row recording a replacement-text failure.
+    only_response = _response_with_replacement_text("", topic_id="any-topic-id")
+    responses = {_TEST_MODEL_ID: [only_response]}
+    client = model_client.FakeBedrockClient(responses)
+    ledger: list[model_client.ModelInvocationRecord] = []
+
+    result = pp.run_primary_pass(
+        review_id="review-opf-empty-replacement",
+        output_schema_path=_V2_SCHEMA_PATH,
+        retrieved_precedent=_sample_precedent(),
+        playbook=_opf_playbook(),
+        model_client=client,
+        model_id=_TEST_MODEL_ID,
+        ledger_write=ledger.append,
+        doc_text="Section 8 text.",
+    )
+
+    if result.get("status") != "OK":
+        failures.append(f"[12a] Expected status=OK on the first attempt (no violation to retry); got {result!r}")
+    if result.get("attempts") != 1:
+        failures.append(f"[12b] Expected exactly 1 attempt -- a bundle=None empty-text issue must never burn a retry; got {result.get('attempts')!r}")
+    if len(client.calls) != 1:
+        failures.append(f"[12c] Expected exactly 1 model invocation; got {len(client.calls)}")
+
+    issues = result.get("response", {}).get("issues", [])
+    if not issues or issues[0].get(_rte.REPLACEMENT_TEXT_OUTCOME_FIELD) != _rte.FLAG_ONLY_MODE_UNSPECIFIED:
+        failures.append(f"[12d] The issue must be labelled replacement_text_outcome=FLAG_ONLY_MODE_UNSPECIFIED, distinct from FLAG_ONLY_RETRY_EXHAUSTED (no retry was ever warranted); got {issues!r}")
+
+    if len(ledger) != 1:
+        failures.append(f"[12e] Expected exactly 1 ledger row (success, first attempt); got {len(ledger)}")
+    else:
+        if ledger[0].outcome != "success":
+            failures.append(f"[12f] The single ledger row must be outcome=success, never retry; got {ledger[0]!r}")
+        if ledger[0].replacement_text_failures != []:
+            failures.append(f"[12g] The ledger row must record no replacement-text failures -- this was never a violation; got {ledger[0].replacement_text_failures!r}")
+
+
 def test_fake_client_raises_when_exhausted(failures: list[str]) -> None:
     client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_load_fixture_text("primary_accept_valid.json")]})
     client.invoke(model_id=_TEST_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=100)
@@ -743,8 +974,6 @@ def test_cap_exceeded_input_never_calls_model(failures: list[str]) -> None:
 
     result = pp.run_primary_pass(
         review_id="review-oversized",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -806,8 +1035,6 @@ def test_run_primary_pass_rejects_inference_profile_before_any_call(failures: li
     try:
         pp.run_primary_pass(
             review_id="review-bad-model-id",
-            diff_hunks=_sample_diff_hunks(),
-            anchored_clauses=_sample_anchored_clauses(),
             retrieved_precedent=_sample_precedent(),
             playbook=_sample_playbook(),
             model_client=client,
@@ -846,10 +1073,9 @@ def test_cost_model_constants_match_reviews_module(failures: list[str]) -> None:
 
 TESTS = [
     test_system_blocks_order_and_cache_breakpoint,
-    test_overlay_instructs_source_quote_in_key_set,
+    test_overlay_instructs_the_addressing_contract_in_key_set,
     test_overlay_instructs_paragraph_boundary_rule,
     test_primary_user_prompt_block_order_full_doc,
-    test_primary_user_prompt_outline_above_threshold,
     test_critic_user_prompt_manifest,
     test_assembled_size_within_cap_on_every_gold_case,
     test_playbook_projection_excludes_governance_metadata,
@@ -858,10 +1084,14 @@ TESTS = [
     test_ledger_records_projected_playbook_hash,
     test_schema_invalid_then_valid_retries_once_and_succeeds,
     test_two_schema_invalid_responses_terminal_error_manual_review,
-    test_v2_schema_accepts_source_quote_end_to_end,
-    test_v2_schema_still_rejects_response_missing_issues,
+    test_active_schema_accepts_a_block_transcript_end_to_end,
+    test_pass_time_replacement_text_enforcement_is_off_under_v3,
+    test_active_schema_still_rejects_response_missing_issues,
     test_replacement_text_violation_then_clean_retries_and_succeeds,
     test_replacement_text_violation_on_final_attempt_demotes_to_flag_only,
+    test_empty_replacement_text_retries_and_succeeds_on_clean_attempt,
+    test_empty_replacement_text_on_final_attempt_demotes_to_flag_only,
+    test_opf_none_bundle_empty_replacement_text_does_not_retry_or_fail,
     test_fake_client_raises_when_exhausted,
     test_cap_exceeded_input_never_calls_model,
     test_single_region_native_id_enforced,

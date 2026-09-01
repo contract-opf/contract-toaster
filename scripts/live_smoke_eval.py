@@ -20,14 +20,14 @@ This script is the standing instrument that closes it: point it at a
 directory of `.docx` files, an on-disk playbook bundle, and a resolvable
 OpenRouter API key, and it drives the REAL composed pipeline against a REAL
 `OpenRouterModelClient` (backend/src/model_client.py) -- no mock, no fake --
-recording per-run validation outcome, attempts, decision, input_mode,
+recording per-run validation outcome, attempts, decision,
 REAL token usage, cost, and wall-clock latency, then an aggregate summary
 (validity rate, retry rate, decision distribution, cost/latency mean+p95).
 
 BUILDING and OFFLINE-TESTING this script is AFK work (this issue). RUNNING
 it against live OpenRouter traffic is a HUMAN step, tracked on the epic --
-see the module docstrings of issue #418 (structured-output A/B) and #419
-(input_mode threshold) for the same "AFK build, human execute" split.
+see the module docstring of issue #418 (structured-output A/B) for the
+same "AFK build, human execute" split.
 
 ## Scope boundaries (read before extending)
 
@@ -52,8 +52,8 @@ The default report (`--out`, default `report.json`) is built ONLY from:
   - fixed metadata (doc filename, run index, requested structured-output
     mode),
   - the pipeline's own STATUS-LEVEL fields (`status`, `decision`, `reason`,
-    `input_mode`, `summary` -- the same short verdict narrative already
-    surfaced to a human reviewer, never an issue's `source_quote` /
+    `summary` -- the same short verdict narrative already
+    surfaced to a human reviewer, never an issue's transcript segments /
     `proposed_replacement_text` / `external_rationale_for_footnote`),
   - a validation-outcome token derived from those same fields (never the
     raw provider error text -- see `classify_validation_outcome`),
@@ -369,7 +369,6 @@ def run_one(
                 "decision": None,
                 "reason": type(exc).__name__,
                 "summary": None,
-                "input_mode": None,
             }
     finally:
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -406,7 +405,6 @@ def run_one(
         "decision": result.get("decision"),
         "reason": result.get("reason"),
         "validation_outcome": classify_validation_outcome(result),
-        "input_mode": result.get("input_mode"),
         "summary": result.get("summary"),
         "primary_attempts": attempts["primary"],
         "critic_attempts": attempts["critic"],

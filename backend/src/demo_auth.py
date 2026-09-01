@@ -631,6 +631,53 @@ def default_credentials_warning(user_row: dict[str, Any]) -> bool:
     return _verify_password(seed["password"], user_row.get("password_hash", ""))
 
 
+# ---------------------------------------------------------------------------
+# Rotation enforcement (issue #586): `default_credentials_warning` above was,
+# until this fix, purely informational -- a banner the SPA rendered, nothing
+# more. A caller still signed in on a shipped default password (admin/admin,
+# user/user) had full, unrestricted access to every route indefinitely.
+#
+# Chosen enforcement (ticket: "pick ONE"): refuse privileged operations while
+# the flag is set, rather than a forced-rotation interstitial. Every
+# authenticated route except the two a caller needs to SEE and CLEAR the
+# warning stays blocked until the password is rotated:
+#   - GET  /api/me           -- so the SPA can still learn the warning is set
+#   - POST /api/me/password  -- the only way to clear it
+# Wired into backend.src.main.get_active_user_row (the dependency nearly
+# every route already goes through), keyed on the caller's OWN row -- an
+# SSO caller's row never carries this flag (default_credentials_warning is
+# password-mode only), so SSO callers are entirely unaffected.
+# ---------------------------------------------------------------------------
+DEFAULT_CREDENTIALS_ENFORCEMENT_EXEMPT_PATHS = frozenset({"/api/me", "/api/me/password"})
+
+
+def enforce_default_credentials_rotation(caller_user_row: dict[str, Any], request_path: str) -> None:
+    """Raise HTTPException(403) if `caller_user_row` still verifies against
+    its shipped seed default password AND `request_path` is not one of the
+    two rotation-flow routes exempted above.
+
+    No-op (never raises) for a row where `default_credentials_warning` is
+    False -- an SSO row, a non-seeded username, or an already-rotated
+    password.
+    """
+    if request_path in DEFAULT_CREDENTIALS_ENFORCEMENT_EXEMPT_PATHS:
+        return
+    if not default_credentials_warning(caller_user_row):
+        return
+    logger.info(
+        "DEFAULT_CREDENTIALS_BLOCK: username=%s path=%s",
+        caller_user_row.get("username"),
+        request_path,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "This account still uses the shipped default password. "
+            "Change it at POST /api/me/password before continuing."
+        ),
+    )
+
+
 def login_with_password(
     username: str,
     password: str,

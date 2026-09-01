@@ -380,15 +380,31 @@ def _build_docx_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _confidentiality_block_id() -> str:
+    """The code-assigned block id of `_build_docx_bytes()`'s one body
+    paragraph, resolved through the production extractor (issue #627) rather
+    than written as a literal -- an id a test invents is an address the
+    document does not have, and `block_transcript.validate_block_patches`
+    rejects it."""
+    import extraction_normalization_stage as ens
+
+    normalized = ens.extract_and_normalize(_build_docx_bytes())
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        if block["text"] == _DRAFT_CONFIDENTIALITY_TEXT:
+            return block_id
+    raise AssertionError("the synthetic fixture no longer carries the draft clause")
+
+
 def _primary_request_change_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [
                 {
+                    "issue_key": "I1",
                     "section_ref": "Confidentiality Obligations",
                     "section_title": "Confidentiality Obligations",
                     "counterparty_change_summary": (
@@ -400,17 +416,42 @@ def _primary_request_change_response() -> str:
                         "The confidentiality obligation must survive for a "
                         "defined, bounded period, not indefinitely."
                     ),
-                    "proposed_replacement_text": (
-                        "This confidentiality obligation survives termination "
-                        "of this agreement for three (3) years from the date "
-                        "of disclosure."
-                    ),
                     "playbook_topic_id": "nda-term-survival",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": _DRAFT_CONFIDENTIALITY_TEXT,
+                    "replacement_scope_note": (
+                        "The clause states a perpetual obligation outright; a "
+                        "local repair would leave the survival period unstated."
+                    ),
                 }
             ],
+            # Issue #627: the edit is a block transcript over the document's
+            # ONE body paragraph. The block id is derived from the fixture
+            # bytes by the production extractor (`_confidentiality_block_id`),
+            # never typed in, and the deleted span is that paragraph's own
+            # text, so the transcript proves against the real document.
+            "block_patches": [
+                {
+                    "block_id": _confidentiality_block_id(),
+                    "segments": [
+                        {
+                            "op": "delete",
+                            "text": _DRAFT_CONFIDENTIALITY_TEXT,
+                            "issue_key": "I1",
+                        },
+                        {
+                            "op": "insert",
+                            "text": (
+                                "This confidentiality obligation survives "
+                                "termination of this agreement for three (3) "
+                                "years from the date of disclosure."
+                            ),
+                            "issue_key": "I1",
+                        },
+                    ],
+                }
+            ],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": (
                 "One issue identified in the confidentiality section, "
@@ -423,7 +464,6 @@ def _primary_request_change_response() -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,

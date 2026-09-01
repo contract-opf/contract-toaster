@@ -45,6 +45,47 @@ The runtime allowlist check for `selectable` lives where it belongs, in
 backend/src/model_client.py::enforce_openrouter_policy_model_id, which still
 refuses any id that is in neither the pins nor the allowlist.
 
+FORWARD DIVERGENCE, DECLARED (issue #604): the generation halves of the two
+pins are no longer required to be byte-equal in one direction only. The drift
+this gate was built for (#269) was openrouter.json falling BEHIND -- pinned to
+"anthropic/claude-opus-4" / "anthropic/claude-3.7-sonnet" while every other
+artifact said Opus 4.8 / Sonnet 4.6. That is still an unconditional failure,
+and so is any family mismatch.
+
+What is now allowed, and ONLY when the openrouter.json role entry declares
+`matrix_divergence_note` (a non-empty string saying why), is openrouter.json
+pinning a NEWER generation of the SAME family than Bedrock. The two targets
+reach their models by different routes and the routes move at different
+speeds: an OpenRouter id is available the day the provider lists it, whereas a
+Bedrock id additionally needs model access granted in the account, a recorded
+on-demand quota (model-policy/bedrock-us-east-1.json's granted_tpm/granted_rpm
+and the review_throughput_ceiling / max_eval_parallelism derived from them),
+an IAM grant scoped to that exact foundation-model ARN in infra/lib/nested/
+pipeline-stack.ts, and a quarterly recertification run. Requiring the DTS
+target to sit on an older model until all of that has been re-verified is a
+cost the #269 drift bug never argued for.
+
+The declaration requirement is what keeps this from being a blanket
+relaxation: an ACCIDENTAL forward bump still fails this gate, exactly like a
+backwards one, until somebody writes down that they meant it. `check_consistency`
+is the only place that reads the field.
+
+DEFAULTS-ARE-SELECTABLE (issue #589): the SCOPE note above is about family/
+generation *parity* checking -- it still has no opinion on a non-Anthropic
+`selectable` entry, and still has nothing on the Bedrock side to compare one
+against. But that is a different question from whether openrouter.json's OWN
+`models.primary` / `models.critic` ids are themselves members of its OWN
+`selectable` array. They must be: `selectable` is meant to WIDEN the runtime
+allowlist beyond the pins (model_client.enforce_openrouter_policy_model_id
+accepts either), not to be the only reachable set. If a pin drifts out of
+`selectable`, an admin who ever picks anything from the dropdown has no
+dropdown entry that leads back to it -- the only route back to the pin is a
+null/"" write that reverts to the default, which is not the same as it being
+selectable. `check_defaults_are_selectable` below enforces this membership;
+it does not parse ids or compare families, so it applies equally to a
+non-Anthropic default (there is none today, but nothing here assumes
+otherwise).
+
 Run: python3 tests/lint-model-policy-consistency.py
 Exit 0 = pass, 1 = fail.
 """
@@ -73,6 +114,29 @@ _MODEL_ID_RE = re.compile(
     r"(?:-(?P<post_ver>\d+(?:[.-]\d+)?))?",
     re.IGNORECASE,
 )
+
+
+# openrouter.json role-entry field that DECLARES a deliberate forward pin (see
+# FORWARD DIVERGENCE, DECLARED in the module docstring). Absent/blank means the
+# generations must match exactly.
+MATRIX_DIVERGENCE_FIELD = "matrix_divergence_note"
+
+
+def _generation_key(generation: str | None) -> tuple[int, ...]:
+    """A comparable key for a normalized generation string ("4.8" -> (4, 8)).
+
+    Only used to answer "is openrouter ahead of bedrock, or behind?". An
+    unparseable or absent generation sorts lowest, which makes it BEHIND
+    anything numbered -- the fail-loudly side.
+    """
+    if not generation:
+        return ()
+    parts: list[int] = []
+    for chunk in generation.split("."):
+        if not chunk.isdigit():
+            return ()
+        parts.append(int(chunk))
+    return tuple(parts)
 
 
 class ModelIdParseError(ValueError):
@@ -154,10 +218,62 @@ def check_consistency(bedrock_policy: dict, openrouter_policy: dict) -> list[str
                 f"openrouter.json={openrouter_id!r} (family={openrouter_family!r})."
             )
         if bedrock_gen != openrouter_gen:
+            declared = str(openrouter_entry.get(MATRIX_DIVERGENCE_FIELD) or "").strip()
+            ahead = _generation_key(openrouter_gen) > _generation_key(bedrock_gen)
+            if not ahead:
+                failures.append(
+                    f"models.{role_key} model generation differs and openrouter.json is "
+                    f"BEHIND: bedrock-us-east-1.json={bedrock_id!r} "
+                    f"(generation={bedrock_gen!r}) vs openrouter.json={openrouter_id!r} "
+                    f"(generation={openrouter_gen!r}). This is the issue #269 drift; "
+                    f"there is no declaration that makes it acceptable."
+                )
+            elif not declared:
+                failures.append(
+                    f"models.{role_key} model generation differs (openrouter.json is "
+                    f"AHEAD): bedrock-us-east-1.json={bedrock_id!r} "
+                    f"(generation={bedrock_gen!r}) vs openrouter.json={openrouter_id!r} "
+                    f"(generation={openrouter_gen!r}), and openrouter.json's "
+                    f"models.{role_key} declares no {MATRIX_DIVERGENCE_FIELD!r}. A "
+                    f"deliberate forward pin must say so in the artifact; an accidental "
+                    f"one must not pass silently."
+                )
+    return failures
+
+
+def check_defaults_are_selectable(openrouter_policy: dict) -> list[str]:
+    """Returns a list of human-readable failure messages; empty = consistent.
+
+    (issue #589) Every SHARED_ROLES pin in openrouter.json's `models` block
+    must also appear in that same file's `selectable` array. `selectable` is
+    documented (model_settings.py's module docstring) as WIDENING the runtime
+    allowlist beyond the pins -- an admin choice and the policy default are
+    meant to be equally reachable from the picker. A pin that is absent from
+    `selectable` is only reachable by clearing an admin's override back to
+    "" (the default); it is never a choice the dropdown itself offers.
+
+    Deliberately id-only, not family/generation parsing like
+    check_consistency above -- this is a simple set-membership check, so it
+    has no opinion to fail to express about a non-Anthropic default (there is
+    none today, but nothing here assumes there never will be).
+    """
+    failures: list[str] = []
+    selectable_ids = {
+        entry.get("model_id") for entry in openrouter_policy.get("selectable", [])
+    }
+    openrouter_models = openrouter_policy.get("models", {})
+
+    for role_key in SHARED_ROLES:
+        entry = openrouter_models.get(role_key)
+        if entry is None:
+            continue  # already reported by check_consistency
+        model_id = entry.get("model_id", "")
+        if model_id not in selectable_ids:
             failures.append(
-                f"models.{role_key} model generation differs: "
-                f"bedrock-us-east-1.json={bedrock_id!r} (generation={bedrock_gen!r}) vs "
-                f"openrouter.json={openrouter_id!r} (generation={openrouter_gen!r})."
+                f"openrouter.json models.{role_key}.model_id {model_id!r} is not a "
+                f"member of openrouter.json's `selectable` allowlist -- an admin who "
+                f"changes the selection can never pick their way back to it (only a "
+                f"null/\"\" write reverting to the default reaches it)."
             )
     return failures
 
@@ -171,6 +287,7 @@ def main() -> int:
         "(bedrock-us-east-1.json vs openrouter.json)..."
     )
     failures = check_consistency(bedrock_policy, openrouter_policy)
+    failures += check_defaults_are_selectable(openrouter_policy)
 
     if failures:
         print("\nFAIL: model-policy artifacts diverge:\n")
@@ -179,7 +296,11 @@ def main() -> int:
         print()
         return 1
 
-    print("PASS: model-policy artifacts agree per role (family + generation).")
+    print(
+        "PASS: model-policy artifacts agree per role (same family; any newer "
+        "openrouter.json generation is declared), and openrouter.json's "
+        "defaults are all selectable."
+    )
     return 0
 
 

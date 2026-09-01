@@ -27,16 +27,27 @@ ct-field {
 .ct-field__hint {
   order: 2;
   margin: 0;
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
   color: var(--ct-text-muted);
 }
 
 .ct-field__error {
   order: 3;
   margin: 0;
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
   font-weight: 500;
   color: var(--ct-danger);
+}
+
+/* `narrow` (issue #601, docs/frontend-design-system.md §6) — the slotted
+   CONTROL only (never the label/hint/error above), so its own intrinsic
+   width governs instead of the flex column's default `align-items: stretch`.
+   Deliberately not `align-items: flex-start` on the whole host: that would
+   also size the hint/error `<p>`s to their own max-content width, and a
+   long hint line's max-content is wider than most containers — see
+   ct-field.ts's docstring. */
+ct-field[narrow] > :is(input, select, textarea) {
+  align-self: flex-start;
 }
 
 /* The slotted control is React-owned light-DOM content (see the docstring

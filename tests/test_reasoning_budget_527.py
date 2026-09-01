@@ -74,7 +74,11 @@ import pipeline_runner as pr  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import reviews  # noqa: E402
 
-PRIMARY_MODEL_ID = "anthropic/claude-opus-4.8"  # reasoning_max_tokens: 0
+# The property this id carries is `reasoning_max_tokens: 0` (plus being an id
+# enforce_openrouter_policy_model_id allows). Was anthropic/claude-opus-4.8
+# until the owner removed it from `selectable`; the primary pin has the same
+# zero allowance, so every assertion below keeps its original meaning.
+PRIMARY_MODEL_ID = "anthropic/claude-opus-5"  # reasoning_max_tokens: 0
 KIMI_MODEL_ID = "moonshotai/kimi-k3"  # reasoning_max_tokens: > 0
 GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"  # reasoning_max_tokens: > 0
 
@@ -286,6 +290,34 @@ class TestNewTokenTaxonomyAndCopy(unittest.TestCase):
                 self.assertIn(f"{token}: {{", block)
 
 
+class TestEveryStageFailureReasonHasUiCopy(unittest.TestCase):
+    """Issue #584 AC4 (generalized): `reviews.STAGE_FAILURE_REASON_STATUS` is
+    the authoritative list of `reason` tokens a review row can carry. Every
+    one of them must have a matching `REASON_EXPLANATIONS` entry in the UI,
+    or a review that fails with that token renders no cause/fix copy at all
+    -- silently, since `bash scripts/check-frontend.sh` passes whether or
+    not the entry exists. This is the same source-grep technique
+    `test_both_tokens_have_user_facing_prose_in_the_ui` above uses for the
+    two #527 tokens, generalized to the whole taxonomy so a future token
+    added to STAGE_FAILURE_REASON_STATUS without UI copy fails here instead
+    of shipping unnoticed."""
+
+    def test_every_taxonomy_token_has_a_reason_explanations_entry(self) -> None:
+        source = FRONTEND_REVIEW_SUBMISSION.read_text(encoding="utf-8")
+        explanations = source.split("const REASON_EXPLANATIONS", 1)
+        self.assertEqual(len(explanations), 2, "REASON_EXPLANATIONS not found in the UI")
+        block = explanations[1].split("const STAGE_EXPLANATIONS", 1)[0]
+        for token in reviews.STAGE_FAILURE_REASON_STATUS:
+            with self.subTest(token=token):
+                self.assertIn(
+                    f"{token}: {{",
+                    block,
+                    f"reviews.STAGE_FAILURE_REASON_STATUS[{token!r}] has no "
+                    "matching REASON_EXPLANATIONS entry in "
+                    "frontend/src/ReviewSubmission.tsx.",
+                )
+
+
 # ---------------------------------------------------------------------------
 # 6. record_stage_failure stamps model ids
 # ---------------------------------------------------------------------------
@@ -320,10 +352,10 @@ class TestRecordStageFailureStampsModelIds(unittest.TestCase):
         with patch.dict("os.environ", {"REVIEWS_TABLE": "reviews-test"}, clear=False):
             reviews.record_stage_failure(
                 "rid", "run_review", "model_empty_content", FakeDDB(table),
-                model_ids={"primary_model_id": "anthropic/claude-opus-4.8",
+                model_ids={"primary_model_id": PRIMARY_MODEL_ID,
                            "critic_model_id": "moonshotai/kimi-k3"},
             )
-        self.assertEqual(table.item["primary_model_id"], "anthropic/claude-opus-4.8")
+        self.assertEqual(table.item["primary_model_id"], PRIMARY_MODEL_ID)
         self.assertEqual(table.item["critic_model_id"], "moonshotai/kimi-k3")
         self.assertEqual(table.item["reason"], "model_empty_content")
 
@@ -465,6 +497,7 @@ def _run_tests() -> int:
         TestRecordStageFailureStampsModelIds,
         TestRunRealPipelineCapturesModelIdsOnFailure,
         TestModelResponseContractViolation,
+        TestEveryStageFailureReasonHasUiCopy,
     ):
         suite.addTests(loader.loadTestsFromTestCase(case))
     result = unittest.TextTestRunner(verbosity=2).run(suite)

@@ -66,7 +66,26 @@ export function __resetSessionExpiredListeners(): void {
   sessionExpiredListeners.clear();
 }
 
-export async function authorizedFetch(path: string, init?: RequestInit): Promise<Response> {
+/**
+ * issue #592 fix-round-1: `suppressSessionExpiredNotification` opts a call
+ * out of the global "session expired" notifier below on a 401. The version
+ * footer's poll (App.tsx, issue #592) is the one caller that needs this --
+ * it is the app's first *idle background* authenticated request, so a 401
+ * from it (a session TTL lapsing in a tab nobody has re-focused) must stay
+ * exactly as swallowed as the rest of that poll's failure handling, not
+ * escalate to a forced sign-out. Every other caller is a request a person
+ * just triggered, where the existing sign-out-on-401 behavior is correct
+ * and unchanged.
+ */
+export interface AuthorizedFetchOptions {
+  suppressSessionExpiredNotification?: boolean;
+}
+
+export async function authorizedFetch(
+  path: string,
+  init?: RequestInit,
+  options?: AuthorizedFetchOptions,
+): Promise<Response> {
   const token = await getToken();
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   if (token) {
@@ -81,7 +100,7 @@ export async function authorizedFetch(path: string, init?: RequestInit): Promise
   // it must not bounce the user to a screen they are already on. The
   // distinction is the route, not the status: everything else behind
   // `authorizedFetch` is a route that only an authenticated caller reaches.
-  if (response.status === 401 && !isUnauthenticatedRoute(path)) {
+  if (response.status === 401 && !isUnauthenticatedRoute(path) && !options?.suppressSessionExpiredNotification) {
     for (const listener of sessionExpiredListeners) {
       try {
         listener();

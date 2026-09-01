@@ -18,14 +18,21 @@ the shared prompt-manifest assembler both passes use per issue #29):
       `model_client.BedrockModelClient` (no temperature/top_p/top_k --
       those sampling params are simply never sent). LEDGER every attempt in
       a finally path.
-  17. Validate the response against `playbooks/output-schema-v2.json` (issue
-      #376: the v2 clean-break successor to output-schema-v1.json, adding an
-      optional `issues[].source_quote` field; v2's Issue shape is a strict
-      superset of v1's, so this is a non-breaking swap for any response the
-      unmodified prompt below already produces). On schema failure, exactly
-      ONE bounded structured-output retry; if the retry also fails,
-      `status=ERROR_MANUAL_REVIEW_REQUIRED` (distinct from a pipeline
+  17. Validate the response against `playbooks/output-schema-v3.json` (issue
+      #627: the Candidate E hard cutover -- the prompt this module assembles
+      and the artifact it validates against were switched TOGETHER, in one
+      commit, because moving one without the other is the model-output-
+      contract-drift failure this repo has already lived through). On schema
+      failure, exactly ONE bounded structured-output retry; if the retry also
+      fails, `status=ERROR_MANUAL_REVIEW_REQUIRED` (distinct from a pipeline
       `ERROR`). No best-effort redline either way.
+
+      A v3 response's `block_patches`/`block_ops` transcript is proven
+      against the document's own bytes by `scripts/block_transcript.py`, and
+      -- when the caller supplies a `block_map` -- that proof runs INSIDE
+      this pass's retry budget, so a `source_mismatch`/`alignment_ambiguous`
+      rejection buys one informed retry carrying the divergence context
+      rather than dying terminally at stage 5.
 
 Per the #29/#30 per-pass prompt manifest (ARCHITECTURE.md -> "Per-pass
 prompt manifest"):
@@ -62,15 +69,15 @@ prompt manifest"):
   `assemble_system_blocks` below.
 
   Primary user prompt: standard-form diff (always) + anchored clause text
-  (always) + retrieved precedent (always) + full counterparty document text
-  if its token count is <= `full_doc_token_threshold` (default 60,000),
-  else a section outline (heading + word count per section) instead.
+  (always) + retrieved precedent (always) + the full counterparty document
+  text (always -- issue #625 deleted the section-outline fallback; a
+  document too large for the cap fails closed as `document_too_large`
+  rather than being reviewed from a heading digest).
 
   Critic user prompt: standard-form diff (always) + anchored clause text
-  (always) + the primary reviewer's full structured output (always). No
-  retrieved precedent, no raw/outline document -- see ARCHITECTURE.md for
-  the efficacy rationale (the critic reasons over the diff + primary output,
-  not a third copy of the contract).
+  (always) + the counterparty document the primary pass read (issue #618)
+  + the primary reviewer's full structured output (always). No retrieved
+  precedent -- see ARCHITECTURE.md for the efficacy rationale.
 
 EVERY user-prompt block that can carry counterparty-authored or otherwise
 document-derived text is wrapped in explicit delimiters with an
@@ -95,6 +102,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -114,6 +122,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+import block_transcript as _block_transcript  # noqa: E402
 import config as _config  # noqa: E402
 import model_client as _model_client  # noqa: E402
 import model_output_schema as _mos  # noqa: E402
@@ -127,17 +136,141 @@ except ImportError as _exc:  # pragma: no cover - dev dependency, see requiremen
         "Activate the project venv and `pip install -r requirements-dev.txt`."
     ) from _exc
 
-OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v2.json"
+# Issue #624 authored these two artifacts side by side; issue #627 (the hard
+# cutover) made v3 the ACTIVE one. `OUTPUT_SCHEMA_PATH` is the single name
+# every seam in this module resolves the active contract from -- the
+# model-facing tool schema (#418), the provider-safe projected schema (#567),
+# and `validate_model_response`'s acceptance check -- so there is exactly one
+# thing to move when a contract is flipped again.
+OUTPUT_SCHEMA_V2_PATH = REPO_ROOT / "playbooks" / "output-schema-v2.json"
 
-# The `schema_version` const the output contract requires (output-schema-v2.json
-# -> properties.schema_version.const). It is pipeline-owned envelope metadata,
-# not a model judgment, so the pipeline stamps it (see _stamp_pipeline_envelope)
-# rather than depending on the model to echo it back. Deliberately still
-# "output-schema-v1" -- see output-schema-v2.json's top-level description:
-# v2 only adds an optional field the prompt below does not yet request, so
-# the envelope marker a prompt-compliant response carries is unchanged until
-# the follow-up issue that updates this prompt to request source_quote.
-OUTPUT_SCHEMA_VERSION = "output-schema-v1"
+# The Candidate E output contract -- `issues[].issue_key`, top-level
+# `block_patches[]`/`block_ops[]`, no verbatim-quote address. ACTIVE since
+# issue #627:
+# the prompt this module assembles (`_render_binary_decision_overlay`) asks
+# for exactly this shape, and `OUTPUT_SCHEMA_VERSION` below is read straight
+# OFF this artifact rather than restated as a literal, so the instructed
+# envelope value and the validating artifact are one fact with one source and
+# cannot drift apart the way #624's own comment warned they would.
+#
+# The artifact's own `description` still says "DORMANT ON ARRIVAL ... still
+# defaults to playbooks/output-schema-v2.json". That sentence is STALE and is
+# deliberately not corrected here: the file's bytes are content-hash-gated
+# (`release.output_contract_hash`), so editing it is the owner's governance
+# step, not this ticket's. Recorded in docs/output-contract.md -> "Schema
+# version v3" -> "Known stale text, deliberately left stale" so nobody reads
+# that description as current.
+OUTPUT_SCHEMA_V3_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"
+
+OUTPUT_SCHEMA_PATH = OUTPUT_SCHEMA_V3_PATH
+
+# ---------------------------------------------------------------------------
+# Structured-output validation: the ACTIVE artifact is the single source of
+# truth for both model passes (issue #4 -> #376 -> #624 -> #627).
+#
+# Defined HERE, ahead of the prompt blocks, rather than down beside
+# `validate_model_response`: the output-contract overlay block tells the model
+# which `schema_version` literal to emit, and that literal is read off the
+# active artifact by `OUTPUT_SCHEMA_VERSION` below. A prompt constant that
+# restates the schema's own const by hand is exactly the drift this cutover
+# exists to prevent.
+# ---------------------------------------------------------------------------
+
+# Issue #624: keyed BY PATH, not a single slot. The cache used to be one
+# `dict | None` filled by whichever call came first and returned to every
+# later caller regardless of the `path` it asked for -- harmless while
+# exactly one artifact existed, and a silent cross-contract mix-up the
+# moment a second one is selectable (a v3 caller would get v2's schema, or
+# worse, poison the slot every v2 caller then reads). Keyed by the resolved
+# absolute path so two spellings of the same file share one entry.
+_OUTPUT_SCHEMA_CACHE: dict[str, dict[str, Any]] = {}
+
+# What `output_schema_version_const` returns for a schema declaring no
+# `schema_version` const at all -- a synthetic test schema, never a shipped
+# artifact (v1, v2 and v3 all declare one). The v1 literal, because that is
+# what every artifact predating the const-reading path declared.
+_SCHEMA_VERSION_FALLBACK = "output-schema-v1"
+
+
+def load_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
+    """The FULL validation contract for a model response, read from `path`
+    and memoized per path. Defaults to `OUTPUT_SCHEMA_PATH`
+    (`playbooks/output-schema-v3.json` since issue #627) -- the ACTIVE
+    artifact.
+
+    `OUTPUT_SCHEMA_V2_PATH` remains selectable, but NOT for the third-party
+    path: `scripts/third_party_output_integration.py` pins v3 itself (issue
+    #629) and never reads this default. Since issue #628 deleted the
+    quote-fidelity measurement instrument, its only remaining callers are
+    `_RETIRED_ISSUE_KEYS` below and the tests that deliberately pin the
+    superseded contract."""
+    key = str(Path(path).resolve())
+    cached = _OUTPUT_SCHEMA_CACHE.get(key)
+    if cached is None:
+        with open(path, "r", encoding="utf-8") as fh:
+            cached = json.load(fh)
+        _OUTPUT_SCHEMA_CACHE[key] = cached
+    return cached
+
+
+def output_schema_version_const(schema: dict[str, Any]) -> str:
+    """The `schema_version` literal `schema` requires, read from the artifact
+    itself (`properties.schema_version.const`) rather than hardcoded.
+
+    Issue #624: `_stamp_pipeline_envelope` stamps this pipeline-owned
+    envelope field, so it must stamp what the SELECTED artifact demands --
+    `"output-schema-v1"` for v1/v2 (v2 deliberately kept the v1 literal; see
+    `OUTPUT_SCHEMA_V2_PATH`), `"output-schema-v3"` for v3, which bumped it
+    because a v2-shaped response no longer validates. Falls back to
+    `_SCHEMA_VERSION_FALLBACK` for a schema that declares no const, so a
+    synthetic test schema without one behaves exactly as before.
+    """
+    const = ((schema.get("properties") or {}).get("schema_version") or {}).get("const")
+    return const if isinstance(const, str) and const else _SCHEMA_VERSION_FALLBACK
+
+
+# The `schema_version` const the ACTIVE output contract requires. It is
+# pipeline-owned envelope metadata, not a model judgment, so the pipeline
+# stamps it (see `_stamp_pipeline_envelope`) rather than depending on the
+# model to echo it back -- but the OUTPUT CONTRACT block still names it to
+# the model, and that instruction and this validator must agree.
+#
+# READ OFF THE ARTIFACT, never restated (issue #627). Before the cutover this
+# was the literal `"output-schema-v1"` sitting next to a v2 path, correct only
+# because v2 deliberately declined to bump its own const. Under v3 the const
+# IS bumped, and a hand-copied literal here would have instructed the model to
+# emit a value the validator rejects -- the exact drift the flip ticket named
+# as its failure mode. `tests/test_v3_flip_627.py` asserts the instructed
+# value and the active artifact agree in ONE test so they cannot come apart.
+OUTPUT_SCHEMA_VERSION = output_schema_version_const(load_output_schema(OUTPUT_SCHEMA_PATH))
+
+
+# The `definitions.Issue` property names v2 carried and v3 dropped -- computed
+# from the two governed artifacts, never restated as a literal, exactly as
+# `OUTPUT_SCHEMA_VERSION` above is read off the active artifact rather than
+# hand-copied.
+#
+# WHY THIS EXISTS AT ALL. v3's `Issue` sets `additionalProperties: false`, so
+# a response carrying a retired key fails `validate_model_response` outright
+# and terminates the review -- and a model with v2-era habits will emit one
+# unprompted. Issue #627 (review round 3) therefore made the output-contract
+# overlay forbid each retired key BY NAME; `tests/test_v3_flip_627.py` and
+# `tests/test_primary_review_pass_81.py` both pin that sentence into the
+# assembled prompt so it cannot be quietly dropped.
+#
+# WHY IT IS DERIVED. Issue #628 deleted every module that read the retired
+# addressing field, and hand-typed copies of its name are exactly what that
+# deletion is meant to leave nowhere. Deriving the name from the artifacts
+# keeps the ONE copy that must survive -- the sentence the model reads -- and
+# makes it impossible for the prompt's list and the schemas to disagree: a
+# future contract that retires another `Issue` key gets that key forbidden in
+# the prompt with no code change at all.
+_RETIRED_ISSUE_KEYS = tuple(
+    sorted(
+        set((load_output_schema(OUTPUT_SCHEMA_V2_PATH)["definitions"]["Issue"]["properties"]))
+        - set((load_output_schema(OUTPUT_SCHEMA_PATH)["definitions"]["Issue"]["properties"]))
+    )
+)
 
 # ---------------------------------------------------------------------------
 # Cost-model constants (issue #14). Mirrors backend/src/reviews.py's
@@ -148,8 +281,14 @@ OUTPUT_SCHEMA_VERSION = "output-schema-v1"
 # backend/src/retention.py and infra/lambda/purge_worker/handler.py).
 # tests/test_primary_review_pass_81.py cross-checks these against
 # reviews.py's copy so the two cannot silently drift.
+#
+# Issue #625 (owner decision 2026-08-25): raised 80_000 -> 100_000 when
+# outline mode was deleted. There is now exactly ONE review quality --
+# full-document -- so the cap is the whole size policy: at or under it the
+# document is reviewed in full, over it the review fails loudly as
+# `document_too_large`. Nothing degrades quietly in between.
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 80_000
+MAX_INPUT_TOKENS = 100_000
 MAX_OUTPUT_TOKENS = 8_000
 MAX_RETRIES_PER_PASS = 1
 
@@ -171,44 +310,36 @@ def widen_output_budget(current: int) -> int:
     """
     return min(max(current * 2, current + 1), MAX_OUTPUT_TOKENS_CEILING)
 
-# ARCHITECTURE.md -> "Per-pass prompt manifest" -> full-doc threshold.
+# ARCHITECTURE.md -> "Per-pass prompt manifest" -> document size policy.
 #
-# Issue #419: raised from 15_000 to 60_000. At 15_000, any document over
-# ~60KB of text (~a 30-page MSA) silently degraded to a headings+word-count
-# outline with no signal anywhere in the result -- the model reviewed a
-# table of contents and returned a confident-looking decision. That was far
-# too conservative: model-policy/openrouter.json already prices reviews
-# assuming ~60k input tokens, and the pinned models take 200k context.
+# Issue #625 (owner decision 2026-08-25) DELETED the full-doc token
+# threshold and with it outline mode (issue #419's section-outline
+# fallback). There is no quality tiering by document size any more: every
+# document whose assembled prompt fits MAX_INPUT_TOKENS above gets the
+# full-quality, full-document review, and anything over it fails loudly as
+# `document_too_large` (step 14 below) rather than being quietly reviewed
+# from a table of contents. A model must never redline text it did not
+# receive, which is exactly what an outline review invited.
 #
-# Headroom math (why 60k is still safe against MAX_INPUT_TOKENS below):
-#   60k (doc, at this new default) + the system blocks (guidance + overlay
-#   + playbook + any toaster-guidance/standing-instructions/Floor blocks --
-#   MEASURED via assemble_system_blocks/assembled_prompt_tokens against the
-#   synthetic-generic playbook: ~10,399 tokens with toaster_guidance and
-#   instructions_text both empty (total 70,627/80,000), ~14,696 tokens with
-#   a modest 2k-token toaster-guidance block plus 2k-token standing
-#   instructions (total 74,924/80,000, 94% of the cap)) fits under
-#   MAX_INPUT_TOKENS=80_000 -- the step-14 pre-call gate below -- but not
-#   with wide margin: a heavier real playbook or toaster-guidance/standing-
-#   instructions payload than the modest case above can still breach it.
-#   MAX_INPUT_TOKENS=80_000 itself, ESTIMATED at the 4-chars/token rate
-#   below, is well under 100k tokens of REAL provider tokenization in the
-#   worst case (dense/non-English/code-heavy text can tokenize denser than
-#   the estimate assumes -- see CONSERVATIVE-MARGIN NOTE below), which is
-#   still comfortably inside the pinned models' 200k real context window.
-#   The provider-side `ModelContextLengthExceededError` fail-closed path
-#   (model_client.py, mapped to the same `document_too_large` outcome in
-#   `run_primary_pass` below) remains the backstop for an estimate miss
+# Headroom math (why 100k is the cap and what it leaves room for):
+#   the document + the system blocks (guidance + overlay + playbook + any
+#   toaster-guidance/standing-instructions/Floor blocks -- MEASURED via
+#   assemble_system_blocks/assembled_prompt_tokens against the synthetic-
+#   generic playbook: ~10,399 tokens with toaster_guidance and
+#   instructions_text both empty, ~14,696 tokens with a modest 2k-token
+#   toaster-guidance block plus 2k-token standing instructions) must fit
+#   under MAX_INPUT_TOKENS=100_000 -- the step-14 pre-call gate below. So a
+#   ~85k-token document still reviews in full even carrying a heavy
+#   playbook and guidance payload; a bigger one fails closed instead of
+#   degrading. MAX_INPUT_TOKENS=100_000, ESTIMATED at the 4-chars/token
+#   rate below, is well under 125k tokens of REAL provider tokenization in
+#   the worst case (dense/non-English/code-heavy text can tokenize denser
+#   than the estimate assumes -- see CONSERVATIVE-MARGIN NOTE below), which
+#   is still comfortably inside the pinned models' 200k real context
+#   window. The provider-side `ModelContextLengthExceededError` fail-closed
+#   path (model_client.py, mapped to the same `document_too_large` outcome
+#   in `run_primary_pass` below) remains the backstop for an estimate miss
 #   this margin doesn't cover.
-#
-# When the document is over this threshold, the primary user prompt sends a
-# section outline (heading + word count per section) instead of the full
-# text -- see `resolve_input_mode` / `assemble_user_prompt_primary` below.
-# That degrade is no longer silent: `run_primary_pass` reports which mode it
-# used as `input_mode`, and `reconciliation.reconcile()` degrades
-# `confidence_state` one level and appends a fixed, substance-free notice to
-# `verdict_summary` whenever `input_mode == INPUT_MODE_SECTION_OUTLINE`.
-DEFAULT_FULL_DOC_TOKEN_THRESHOLD = 60_000
 
 # ---------------------------------------------------------------------------
 # Offline token-count heuristic. No live tokenizer is available offline (no
@@ -252,61 +383,500 @@ REVIEW_GUIDANCE_BLOCK = (
     "docs/design-notes.md)."
 )
 
-BINARY_DECISION_OVERLAY_BLOCK = (
-    "Collapse your assessment to a binary external decision: ACCEPT (no "
-    "requested changes) or REQUEST_CHANGE (one or more issues require "
-    "attention). Do not emit a third legal category; carry uncertainty in "
-    "confidence_state instead.\n\n"
-    "OUTPUT CONTRACT -- follow it EXACTLY:\n"
-    "- Respond with a SINGLE raw JSON object and NOTHING else: no prose "
-    "before or after it, no explanation, no markdown code fences. The first "
-    "character of your response must be '{' and the last must be '}'.\n"
-    "- Include these top-level keys and ONLY these: \"schema_version\" "
-    "(string, exactly \"output-schema-v1\"), \"decision\" (\"ACCEPT\" or "
-    "\"REQUEST_CHANGE\"), \"confidence_state\", \"issues\" (array). You MAY "
-    "also include \"verdict_summary\" (a brief narrative string). Do NOT add "
-    "any other top-level key.\n"
-    "- \"confidence_state\" is EXACTLY ONE of these three literal values, "
-    "and never any other word: \"OK\" (normal confidence in this review), "
-    "\"LOW_CONFIDENCE\" (you are uncertain, but you still identified the "
-    "issues you list), or \"MANUAL_REVIEW_REQUIRED\" (you could not review "
-    "this document well enough for the result to be relied on). It is a "
-    "system status, NOT a confidence score -- do not emit \"high\", "
-    "\"medium\", \"low\", a number, or any other value.\n"
-    "- \"issues\" is an empty array for ACCEPT. For REQUEST_CHANGE, review "
-    "the document clause by clause against the playbook. Each issue object "
-    "has EXACTLY these keys and no others: \"section_ref\", "
-    "\"section_title\", \"counterparty_change_summary\", \"decision\", "
-    "\"external_rationale_for_footnote\", \"proposed_replacement_text\", "
-    "\"playbook_topic_id\", \"internal_precedent_citation\", \"provenance\" "
-    "(string, exactly \"model\"), plus \"source_quote\" whenever it applies "
-    "(see next bullet for when to omit it).\n"
-    "- \"source_quote\" MUST be the exact verbatim text copied from the "
-    "counterparty document text shown to you (character-for-character, "
-    "never paraphrased, never with typos silently fixed) that this issue's "
-    "proposed_replacement_text would replace -- one clause or sentence, "
-    "long enough to be unique in the document and short enough to target "
-    "precisely. A newline in the document text you were shown marks a "
-    "paragraph boundary; \"source_quote\" MUST NOT cross one -- copy text "
-    "from within a single paragraph only. OMIT the \"source_quote\" key "
-    "entirely -- do not include it at all, never a fabricated or "
-    "approximate value -- when you have no single contiguous verbatim span "
-    "to name for the issue: for example a missing clause, a change "
-    "spanning multiple non-contiguous locations, a change spanning a "
-    "paragraph boundary, or when you were shown only a section outline "
-    "rather than the full document text.\n"
-    "- The counterparty document text you were shown renders each "
-    "clause's own title on a line of its own, prefixed with \"## \". "
-    "Those marker lines are orientation supplied by this pipeline to "
-    "show you where each clause begins -- they are NOT part of the "
-    "contract, and they appear nowhere in the document itself. NEVER "
-    "copy a \"## \" line, or the title on it, into \"source_quote\" -- "
-    "quote only from the body text beneath it. A \"source_quote\" "
-    "carrying a \"## \" line cannot be found in the document and its "
-    "issue silently loses its tracked change.\n"
-    "- Put any high-level narrative in \"verdict_summary\", never in a new "
-    "top-level key. This response must conform exactly to the "
-    "output-schema-v1 response schema."
+# ---------------------------------------------------------------------------
+# Own-words rule for the narrative fields (issue #616).
+#
+# CAUSE, from live prod review 9d0a5718-4061-4e41-b98d-c88a78d57a21: the
+# primary model reproduced blocked playbook content VERBATIM in
+# `verdict_summary`, `scripts/leakage_scan.py` fired
+# (`playbook_leakage` / `playbook-ngram` / `verdict_summary`), and the whole
+# review died at `run_review` with nothing for the user to download. On the
+# OPF 0.3 path `ConfidentialCorpus.from_opf_document` puts Floor invariant
+# `statement`/`rationale`, `posture.system_prompt`, and the digest's
+# `concessions`/`unacceptable`/`exemplar_forms` summaries into
+# `playbook_ngrams` -- all of it written as normative contract prose, i.e.
+# exactly the wording a model reaches for when it states back which position
+# it applied. Restating it word-for-word therefore trips the gate.
+#
+# THE GATE IS CORRECT AND IS NOT TOUCHED. This is the upstream fix: the
+# scanner matches verbatim substrings modulo case/whitespace, and its own
+# docstring records paraphrase as a deliberate, accepted residual
+# ("Residual risk -- paraphrase (documented, not a silent miss)"). A
+# summary in the model's own words is therefore already inside what the
+# design tolerates; nothing is being loosened.
+#
+# SCOPED, NOT BLANKET. A flat "never quote the playbook" would be a
+# regression: `proposed_replacement_text` exists to reproduce the tenant's
+# `our_standard` / digest standard text word-for-word so it can be dropped
+# into the document, and `LeakageScanner.scan`'s `is_replacement_text`
+# allowlist (issue #208) exists precisely so a faithful restoration does not
+# self-block. A block transcript's `keep`/`delete` segment text likewise
+# MUST stay character-for-character -- it is transcribed from the document,
+# not authored. So the rule names the narrative fields it binds and
+# enumerates those exemptions explicitly.
+#
+# PARAPHRASE IS NOT VAGUENESS. The attorney reading `verdict_summary` still
+# has to know which position was applied, what it requires, and how the
+# clause fell short -- so the rule spends a bullet saying that rewording is
+# a change of wording and never a loss of substance.
+#
+# WHERE IT LANDS: appended to `BINARY_DECISION_OVERLAY_BLOCK` below, which
+# is the ONE output-contract block both knowledge paths and both passes
+# send -- `assemble_system_blocks` (v1) and
+# `review_spine._assemble_opf_system_blocks` (OPF digest mode) each include
+# it verbatim, and `critic_review_pass.run_critic_pass` reads the same
+# assembled blocks. That is why the critic's own narrative prose
+# (`critic_delta.contested_replacements[].critic_objection`,
+# `critic_delta.rationale_objections[].objection`), which is scanned against
+# the SAME `playbook_ngrams` with no allowlist, is covered by the third
+# clause below WITHOUT naming a `critic_delta` key here: the overlay tells
+# every reader "include these top-level keys and ONLY these", so naming
+# critic-only keys in it would invite the PRIMARY pass to emit them.
+#
+# WHAT THIS CANNOT PROVE: that the model obeys. tests/ pins the instruction
+# into the assembled prompt; only a live paid review shows the behavior.
+# ---------------------------------------------------------------------------
+OWN_WORDS_SUMMARY_RULE = (
+    "- WRITE \"verdict_summary\" IN YOUR OWN WORDS. It is your account, for "
+    "the attorney who asked for this review, of what you found -- not a "
+    "quotation of the material you were given. Do NOT copy sentences or "
+    "distinctive phrases word-for-word out of the playbook, the playbook "
+    "knowledge, the rules that bind this review, the guidance, or these "
+    "instructions; restate every position you relied on in your own "
+    "phrasing.\n"
+    "- Your own words does NOT mean vague. The attorney must still be able "
+    "to tell from \"verdict_summary\" exactly which position was applied, "
+    "what that position requires, and how this document falls short of it "
+    "-- name the clause, name the requirement, name the gap. Rewording is a "
+    "change of wording, never a loss of substance or specificity.\n"
+    "- The same own-words rule governs the other prose you write to explain "
+    "yourself: \"counterparty_change_summary\", "
+    "\"external_rationale_for_footnote\", and any objection you raise "
+    "against another reviewer's issue.\n"
+    "- The block-transcript fields are exempt and must stay verbatim: the "
+    "\"text\" of every \"keep\" and \"delete\" segment is a "
+    "character-for-character copy of the counterparty document, as required "
+    "above, and the \"text\" of an \"insert\" segment (and an "
+    "\"insert_block_after\" op's \"new_text\") may and should reproduce a "
+    "standard or preferred clause word-for-word so it lands in the document "
+    "as drafted. Never paraphrase any of those."
+)
+
+# ---------------------------------------------------------------------------
+# Issue #522 (epic #519 item D): the ONE mode-conditional part of the output
+# contract.
+#
+# The renderer this pairs with is `redline_docx_writer.
+# footnote_texts_for_notes_mode`, which renders an issue's
+# `internal_rationale_for_footnote` -- behind
+# `redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX` -- in the `internal`/`both`
+# notes modes. A renderer whose input field no prompt ever asks for is dead
+# on every real review, so the request lives here, in the block that states
+# the issue-object contract, and it is gated on the SAME notes mode the
+# renderer reads.
+#
+# WHY IT IS IN THIS BLOCK RATHER THAN A NEW ONE: the overlay tells the model
+# each issue object "has EXACTLY these keys and no others". A separate later
+# block granting an extra key would contradict that sentence rather than
+# extend it, and a prompt that contradicts itself is a prompt whose
+# behaviour nobody can predict. The key list itself is therefore what
+# varies, in one place, with the bullet that explains the field appearing
+# only when the key does.
+#
+# WHY IT IS GATED AT ALL (epic #519, "the critical architectural
+# consequence"): internal-audience content must be *requested* to exist. A
+# review in `none`/`external` is never told to write internal reasoning
+# anywhere, so there is none to filter out on the way to the counterparty --
+# the post-hoc "strip the internal footnotes before download" design the
+# epic rules out. `_notes_mode_includes_internal` below is the same
+# fail-closed predicate the toaster-guidance narration clause uses, and
+# `model_output_schema.model_facing_output_schema(notes_mode=...)` is the
+# schema half of the same gate: under provider-enforced structured output
+# the projected schema, not this prose, decides what the model may emit, so
+# BOTH have to open in the same modes or the field stays unproducible.
+#
+# NOT COVERED BY `OWN_WORDS_SUMMARY_RULE`, deliberately: that rule exists to
+# keep playbook phrasing out of counterparty-bound prose (issue #616), and
+# the internal channel is the one place a playbook position is the intended
+# content (issue #521's ruleset split). Extending it here would forbid
+# exactly what an internal note is for.
+#
+# WHAT THIS CANNOT PROVE: that the model obeys. tests/ pins the instruction
+# into the assembled prompt; only a live paid review shows the behavior.
+# ---------------------------------------------------------------------------
+
+# The one internal-audience key of `playbooks/output-schema-v3.json`'s
+# `Issue` (carried through from v2 unchanged -- see that artifact's own Issue
+# description). Spelled here as the prompt literal it is; `redline_generate.
+# INTERNAL_RATIONALE_FIELD` is the same name on the renderer side, and
+# `tests/redline/test_footnote_audience_modes_522.py` pins the two together.
+INTERNAL_RATIONALE_FIELD = "internal_rationale_for_footnote"
+
+_INTERNAL_RATIONALE_KEY_CLAUSE = (
+    ", plus \"internal_rationale_for_footnote\" whenever this issue needs a "
+    "note written for your own team (see the bullet below for what belongs "
+    "there and when to omit it)"
+)
+
+_INTERNAL_RATIONALE_BULLET = (
+    "- THIS REVIEW IS RUN WITH INTERNAL NOTES ON, so an issue MAY carry an "
+    "\"internal_rationale_for_footnote\": one or two sentences addressed to "
+    "YOUR OWN TEAM and to nobody else -- the internal reasoning behind the "
+    "issue, the position you applied, or a departure from that position "
+    "that the reviewing team directed for this review. It is rendered into "
+    "the delivered document as a SEPARATE footnote behind an unmissable "
+    "\"[INTERNAL]\" marking, and it is the ONLY field in this contract "
+    "written for an internal reader. Keep "
+    "\"external_rationale_for_footnote\" purely counterparty-facing in "
+    "every case -- the contract position only, never internal strategy, "
+    "never the reviewing team's own instructions to you. OMIT the "
+    "\"internal_rationale_for_footnote\" key entirely -- never an empty "
+    "string, never a placeholder, never a restatement of the external "
+    "rationale -- when you have no internal note to make for that issue.\n"
+)
+
+
+# ---------------------------------------------------------------------------
+# Issue #627: the minimality instruction, VERBATIM.
+#
+# Quoted as a single constant, not woven into the surrounding prose, because
+# the flip ticket specifies these exact words and a paraphrase is a different
+# instruction. Under the block-transcript contract the model writes the edit
+# itself -- keep/delete/insert spans over the document's own text -- so
+# "smallest coherent change" is no longer advice about how to phrase a
+# replacement clause: it is the rule that decides how much of the paragraph
+# ends up inside `delete` segments, and therefore how much of the delivered
+# `.docx` is struck through in front of the counterparty.
+# ---------------------------------------------------------------------------
+MINIMALITY_INSTRUCTION = (
+    "Make the smallest coherent change that achieves the required legal "
+    "outcome while preserving all acceptable language, structure, defined "
+    "terms, drafting voice, and formatting. Do not make stylistic "
+    "improvements or normalize the clause to house form."
+)
+
+
+def _render_binary_decision_overlay(*, internal_notes: bool) -> str:
+    """The binary-decision output-contract block.
+
+    Issue #627 rewrote this for the v3 block-transcript contract: the model
+    no longer names a document-wide-unique verbatim quote per issue and no
+    longer restates a whole replacement clause. It names an `issue_key` per
+    issue, and expresses every physical edit as a TRANSCRIPT -- ordered
+    keep/delete/insert segments over one addressed block (`block_patches`),
+    or a whole-paragraph operation (`block_ops`) -- each edit tagged with the
+    `issue_key` that authored it. `scripts/block_transcript.py` proves that
+    transcript against the document's own bytes, so a keep segment that
+    silently rewrites the source is rejected rather than absorbed.
+
+    The instructed `schema_version` is `OUTPUT_SCHEMA_VERSION`, which is read
+    off `OUTPUT_SCHEMA_PATH` -- the artifact `validate_model_response`
+    actually checks against. Interpolated, never spelled as a literal: this
+    block and that validator are the two halves the flip ticket named as the
+    drift risk, and they are now one value with one source.
+
+    `internal_notes` (issue #522) is whether this review's notes mode puts
+    internal-audience content in scope. False -- every review reachable in
+    production while #572's `NOTES_MODE_ENABLED` kill switch is off -- is
+    what `BINARY_DECISION_OVERLAY_BLOCK` below is defined as. True adds the
+    `internal_rationale_for_footnote` key to the issue-object contract and
+    the bullet that explains it, and changes nothing else. See the module
+    comment above.
+    """
+    internal_key_clause = _INTERNAL_RATIONALE_KEY_CLAUSE if internal_notes else ""
+    internal_bullet = _INTERNAL_RATIONALE_BULLET if internal_notes else ""
+    return (
+        "Collapse your assessment to a binary external decision: ACCEPT (no "
+        "requested changes) or REQUEST_CHANGE (one or more issues require "
+        "attention). Do not emit a third legal category; carry uncertainty in "
+        "confidence_state instead.\n\n"
+        "HOW THE DOCUMENT IS ADDRESSED -- read this before the output "
+        "contract:\n"
+        "- The counterparty document text you were shown renders each "
+        "paragraph with a code-assigned BLOCK ID at the start of its first "
+        "line, in square brackets: \"[p0001] \", \"[p0002] \", and so on. "
+        "One id per paragraph, in document order.\n"
+        "- Those ids are how you point at the document. You do NOT quote the "
+        "document to identify what you are changing, and you do NOT restate a "
+        "whole clause to change it: you name the block id and transcribe that "
+        "block as an ordered list of segments.\n"
+        "- A paragraph whose first line also carries a \"## \" marker is a "
+        "clause TITLE line. Both the \"[pNNNN] \" id and the \"## \" marker "
+        "are orientation supplied by this pipeline -- they are NOT part of the "
+        "contract and they appear nowhere in the document itself.\n"
+        "- NEVER copy the \"[pNNNN]\" markers into any output field or "
+        "segment text. A block id belongs in a \"block_id\" or "
+        "\"anchor_block_id\" field and nowhere else. A segment whose text "
+        "carries a marker does not match the document's real characters and "
+        "its edit is rejected.\n\n"
+        "OUTPUT CONTRACT -- follow it EXACTLY:\n"
+        "- Respond with a SINGLE raw JSON object and NOTHING else: no prose "
+        "before or after it, no explanation, no markdown code fences. The first "
+        "character of your response must be '{' and the last must be '}'.\n"
+        "- Include these top-level keys and ONLY these: \"schema_version\" "
+        f"(string, exactly \"{OUTPUT_SCHEMA_VERSION}\"), \"decision\" "
+        "(\"ACCEPT\" or \"REQUEST_CHANGE\"), \"confidence_state\", "
+        "\"issues\" (array), \"block_patches\" (array) and \"block_ops\" "
+        "(array). You MAY also include \"verdict_summary\" (a brief narrative "
+        "string). Do NOT add any other top-level key.\n"
+        "- \"confidence_state\" is EXACTLY ONE of these three literal values, "
+        "and never any other word: \"OK\" (normal confidence in this review), "
+        "\"LOW_CONFIDENCE\" (you are uncertain, but you still identified the "
+        "issues you list), or \"MANUAL_REVIEW_REQUIRED\" (you could not review "
+        "this document well enough for the result to be relied on). It is a "
+        "system status, NOT a confidence score -- do not emit \"high\", "
+        "\"medium\", \"low\", a number, or any other value.\n"
+        "- For ACCEPT, \"issues\", \"block_patches\" and \"block_ops\" are "
+        "all empty arrays. For REQUEST_CHANGE, review the document clause by "
+        "clause against the playbook.\n"
+        "- \"issues\" is the list of what is wrong. Each issue object has "
+        "EXACTLY these keys and no others: \"issue_key\", \"section_ref\", "
+        "\"section_title\", \"counterparty_change_summary\", \"decision\", "
+        "\"external_rationale_for_footnote\", \"playbook_topic_id\", "
+        "\"internal_precedent_citation\", \"provenance\" (string, exactly "
+        "\"model\"), plus \"replacement_scope_note\" whenever it applies "
+        "(see the wholesale-replacement bullet below)"
+        + internal_key_clause
+        + ".\n"
+        "- \"issue_key\" is a short handle you assign to the issue: "
+        "\"I1\", \"I2\", \"I3\", ... -- the letter I followed by digits, "
+        "and nothing else. Every issue in this response must have a DIFFERENT "
+        "issue_key. It is what joins an issue to the edits that express it, so "
+        "an issue_key you reuse or mistype silently attaches your edit to the "
+        "wrong issue.\n"
+        "- Do NOT include a "
+        + " key and do NOT include a ".join(
+            f"\"{name}\"" for name in (*_RETIRED_ISSUE_KEYS, "proposed_replacement_text")
+        )
+        + " key. Under this contract your edits ARE "
+        "your proposal: this pipeline derives the resulting clause text from "
+        "the segments you transcribe below, so restating it would be a second, "
+        "unverified copy that could disagree with the edit you actually "
+        "authored.\n\n"
+        "HOW TO WRITE AN EDIT:\n"
+        "- \"block_patches\" holds every SUB-PARAGRAPH edit: changing words, "
+        "phrases or sentences inside a paragraph. EXACTLY ONE entry per "
+        "block_id -- if two different issues both edit the same paragraph, "
+        "they are two segments carrying different issue_keys inside that ONE "
+        "entry, never two entries for the same block_id.\n"
+        "- Each entry is {\"block_id\": \"pNNNN\", \"segments\": [...]}, "
+        "where the segments TRANSCRIBE THE WHOLE PARAGRAPH in order, start to "
+        "finish. Three segment shapes, and no others:\n"
+        "    {\"op\": \"keep\", \"text\": \"...\"} -- a span of the "
+        "paragraph's own text you are NOT changing. A keep carries no "
+        "issue_key: nothing authored it.\n"
+        "    {\"op\": \"delete\", \"text\": \"...\", \"issue_key\": "
+        "\"I1\"} -- a span of the paragraph's own text to remove.\n"
+        "    {\"op\": \"insert\", \"text\": \"...\", \"issue_key\": "
+        "\"I1\"} -- new language to add at this point.\n"
+        "- The \"keep\" and \"delete\" segments together must reproduce that "
+        "paragraph's text EXACTLY, end to end, in order, with nothing skipped "
+        "and nothing invented -- this pipeline checks them against the "
+        "document's real characters. Copy them; do not retype them from "
+        "memory, do not fix typos, do not tidy spacing or punctuation. A "
+        "\"delete\" immediately followed by an \"insert\" is how you write a "
+        "replacement.\n"
+        "- \"block_ops\" holds WHOLE-PARAGRAPH work, which needs no "
+        "transcript. Two shapes, and no others:\n"
+        "    {\"op\": \"delete_block\", \"block_id\": \"pNNNN\", "
+        "\"issue_key\": \"I1\"} -- strike an entire paragraph.\n"
+        "    {\"op\": \"insert_block_after\", \"anchor_block_id\": "
+        "\"pNNNN\", \"new_text\": \"...\", \"issue_key\": \"I1\"} -- add "
+        "a new paragraph immediately after an existing one; this is how a "
+        "MISSING clause is supplied. Use \"start\" as the anchor_block_id to "
+        "add one before the document's first paragraph.\n"
+        "- A paragraph you delete wholesale must NOT also appear in "
+        "block_patches, and must not be deleted twice.\n"
+        "- Every issue you raise in \"issues\" should be expressed by at least "
+        "one edit naming its issue_key, and every edit must name an issue_key "
+        "that exists in \"issues\". An issue you genuinely cannot express as "
+        "an edit -- an observation for the attorney rather than a change to "
+        "the paper -- may carry no edits at all, but never invent an edit to "
+        "satisfy this.\n\n"
+        "HOW MUCH TO CHANGE:\n"
+        f"- {MINIMALITY_INSTRUCTION}\n"
+        "- Prefer repairing a clause in place -- a few deletes and inserts "
+        "around the words that are actually wrong -- over deleting the whole "
+        "clause and inserting a new one. The counterparty reads the tracked "
+        "changes you produce; a paragraph struck through in its entirety and "
+        "replaced reads as a rewrite even when only one sentence was "
+        "objectionable.\n"
+        "- If you DO replace a clause wholesale, that issue MUST carry a "
+        "\"replacement_scope_note\": one short sentence saying why a local "
+        "repair would be misleading or ineffective here. Omit the key entirely "
+        "whenever your segments repair the clause in place, which is the "
+        "expected default. It is an internal note for the reviewing attorney "
+        "and is never shown to the counterparty.\n"
+        + internal_bullet
+        + "- Put any high-level narrative in \"verdict_summary\", never in a "
+        "new top-level key. This response must conform exactly to the "
+        f"{OUTPUT_SCHEMA_VERSION} response schema.\n"
+        + OWN_WORDS_SUMMARY_RULE
+    )
+
+
+# The output-contract block every review sent before issue #522, and the one
+# every review with internal notes OFF still sends -- byte for byte. Kept as
+# a module constant because it is what `tests/` and
+# `tests/test_document_size_policy_625.py`'s shipped-prompt sweep read, and
+# what `review_spine._assemble_opf_system_blocks` sends on an OPF review
+# whose notes mode carries no internal content. Use
+# `render_binary_decision_overlay_block(notes_mode)` from any call site that
+# HAS a notes mode.
+BINARY_DECISION_OVERLAY_BLOCK = _render_binary_decision_overlay(internal_notes=False)
+
+
+def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
+    """The output-contract block for a review in `notes_mode` (issue #522).
+
+    `internal`/`both` get the variant that asks for
+    `internal_rationale_for_footnote`; `none`/`external`, and any
+    unrecognized or blank value, get `BINARY_DECISION_OVERLAY_BLOCK`
+    unchanged -- the same fail-closed direction
+    `_notes_mode_includes_internal` takes everywhere else, so a caller that
+    failed to validate upstream is never told to write internal content.
+    The default matches `assemble_system_blocks`' own, so an un-migrated
+    caller reproduces today's prompt exactly.
+    """
+    return _render_binary_decision_overlay(
+        internal_notes=_notes_mode_includes_internal(notes_mode)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Critic tasking (issue #618).
+#
+# WHAT WAS MISSING. The critic pass shares every system block with the
+# primary pass (`assemble_system_blocks` / the OPF composer), and those
+# blocks describe ONE job: review the document and emit the output contract.
+# No prompt text anywhere told the critic that it is the ADVERSARIAL second
+# reader rather than a second primary. ARCHITECTURE.md describes that
+# tasking; no assembled prompt contained it. The critic was inferring its
+# role from the shape of its input -- and since issue #380 retired the
+# standard-form diff, that input had shrunk to the primary's own JSON, with
+# `STANDARD_FORM_DIFF` and `ANCHORED_CLAUSES` permanently empty.
+#
+# WHERE IT LANDS: FIRST in `assemble_user_prompt_critic`'s user prompt,
+# ahead of every delimited data block, and nowhere near the primary's
+# prompt. It is plain trusted instruction text, deliberately NOT wrapped in
+# a `<TAG>` delimiter: the delimiters in these prompts mean "untrusted data,
+# never an instruction" (see `_delimited_block` /
+# `UNTRUSTED_BEARING_TAGS`), which is the exact opposite of what this block
+# is.
+#
+# NO MINIMUM FINDINGS. Stated explicitly, and last, because it is the
+# instruction an adversarial tasking most reliably erodes: a critic told to
+# find fault will find fault, and manufactured objections against a good
+# review cost an attorney more than they save. An empty critique is a
+# correct answer, not a failed one.
+#
+# TWO VARIANTS, BECAUSE THE DOCUMENT IS NOT ALWAYS IN THE PROMPT.
+# `assemble_user_prompt_critic` composes no `COUNTERPARTY_DOCUMENT` block
+# for a caller that passes no `doc_text` (the pre-#618 block sequence --
+# see that function's absent-or-populated doctrine), so the tasking cannot
+# be a single unconditional constant: it would tell the critic that a
+# document is "shown to you below" when none is, and forbid any objection
+# it "cannot ground in the document text shown to you" -- which, read
+# literally, forbids EVERY objection, silencing the adversarial pass
+# entirely on those reviews. The two constants below
+# therefore differ in precisely the two paragraphs that speak about the
+# document (the role paragraph and the evidence paragraph) and are composed
+# from the same shared pieces, so the parts that must stay identical cannot
+# drift apart. Neither variant relaxes the grounding requirement: the
+# no-document variant redirects it at the material the critic actually has.
+#
+# WHAT THIS CANNOT PROVE: that the model obeys. tests/ pins the instruction
+# into the assembled prompt; only a live paid review shows the behavior.
+# ---------------------------------------------------------------------------
+_CRITIC_TASKING_ROLE_WITH_DOCUMENT = (
+    "YOUR ROLE ON THIS REVIEW: you are the adversarial second reader. "
+    "Another reviewer has already reviewed the counterparty document shown "
+    "to you below and produced the structured output shown to you below. "
+    "You are not repeating that review. Your job is to test it."
+)
+
+_CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT = (
+    "YOUR ROLE ON THIS REVIEW: you are the adversarial second reader. "
+    "Another reviewer has already reviewed a counterparty document and "
+    "produced the structured output shown to you below. THE DOCUMENT "
+    "ITSELF IS NOT SHOWN TO YOU ON THIS REVIEW: this prompt was composed "
+    "without it, so the document text is not among the material you have. "
+    "You are not repeating that review. Your job is to test it on the "
+    "material you do have."
+)
+
+_CRITIC_TASKING_DUTIES = (
+    "Look for exactly these four things:\n"
+    "1. ISSUES THE FIRST REVIEWER MISSED -- a clause that departs from the "
+    "playbook position and was not flagged at all. Report each one in "
+    "\"critic_delta\".\"added_issues\".\n"
+    "2. OVER-FLAGGING -- an issue the first reviewer raised that the "
+    "document does not actually support, or that the playbook does not "
+    "actually require. Report it in \"critic_delta\".\"rationale_objections\".\n"
+    "3. WEAK EXTERNAL RATIONALE -- an "
+    "\"external_rationale_for_footnote\" that does not hold up: it "
+    "misstates the clause, misstates the playbook position, or gives the "
+    "counterparty a reason that would not survive being read back to them. "
+    "Report it in \"critic_delta\".\"rationale_objections\".\n"
+    "4. REPLACEMENT TEXT THAT DRIFTS FROM THE PLAYBOOK POSITION -- a "
+    "\"proposed_replacement_text\" that concedes more than the playbook "
+    "position allows, asks for more than it allows, or answers a different "
+    "question than the clause raises. Report it in "
+    "\"critic_delta\".\"contested_replacements\". Never silently rewrite "
+    "the first reviewer's replacement text; contest it and let the "
+    "reconciler decide."
+)
+
+_CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT = (
+    "EVIDENCE BEFORE CONCLUSION. For every objection you raise, quote the "
+    "document evidence FIRST and state the objection SECOND -- name the "
+    "clause and the words in it that you are reasoning from, then say what "
+    "is wrong. An objection you cannot ground in the document text shown to "
+    "you is an objection you must not raise."
+)
+
+_CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT = (
+    "EVIDENCE BEFORE CONCLUSION. For every objection you raise, quote the "
+    "evidence FIRST and state the objection SECOND -- name the clause and "
+    "the words you are reasoning from, then say what is wrong. Because the "
+    "document is not shown to you on this review, your evidence is the "
+    "material that IS shown to you: the clause text the first reviewer "
+    "quoted, the rationales and replacement text it wrote, and the playbook "
+    "positions. Reason from those, and do not assert what the document says "
+    "beyond what they show. This narrows what you can object to -- an issue "
+    "the first reviewer never quoted is one you usually cannot reach from "
+    "here -- but it does not lower the bar for grounding: an objection you "
+    "cannot ground in the material shown to you is an objection you must "
+    "not raise."
+)
+
+_CRITIC_TASKING_NO_MINIMUM = (
+    "THERE IS NO MINIMUM NUMBER OF FINDINGS. Zero is a legitimate result. "
+    "If the first reviewer's work is sound, say so and return an empty "
+    "critique -- that is the CORRECT output, not a failure to do your job. "
+    "Do not invent an objection, split one objection into several, or "
+    "downgrade a sound issue in order to have something to report."
+)
+
+# Emitted when the critic prompt carries a `COUNTERPARTY_DOCUMENT` block.
+CRITIC_TASKING_BLOCK = "\n\n".join(
+    (
+        _CRITIC_TASKING_ROLE_WITH_DOCUMENT,
+        _CRITIC_TASKING_DUTIES,
+        _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT,
+        _CRITIC_TASKING_NO_MINIMUM,
+    )
+)
+
+# Emitted when it does not (a caller that passes no `doc_text` -- see the
+# note above).
+CRITIC_TASKING_BLOCK_NO_DOCUMENT = "\n\n".join(
+    (
+        _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT,
+        _CRITIC_TASKING_DUTIES,
+        _CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT,
+        _CRITIC_TASKING_NO_MINIMUM,
+    )
 )
 
 
@@ -334,27 +904,106 @@ BINARY_DECISION_OVERLAY_BLOCK = (
 RETRY_CORRECTION_HEADING = "PREVIOUS ATTEMPT REJECTED -- CORRECT AND RESEND"
 
 
+# The `last_error`/`correction` TOKEN a rejected block transcript carries
+# (issue #627), in this module's own "TOKEN: detail" convention -- so
+# `_error_token` ledgers it as `block_transcript_rejected` and
+# `render_retry_correction_block` can frame the retry for the right fault.
+BLOCK_TRANSCRIPT_ERROR_TOKEN = "block_transcript_rejected"
+
+# How many rejected transcript entries a correction block names. A transcript
+# is rejected as a WHOLE (`validate_block_patches` never returns a partial
+# proof), so a model that mis-transcribed one paragraph can accumulate a long
+# failure list from one bad habit; naming the first few teaches the habit
+# without pasting the document back into the prompt. The cap is on the
+# CORRECTION only -- every failure is still ledgered in `last_error`.
+_MAX_REPORTED_TRANSCRIPT_FAILURES = 5
+
+
+def render_block_transcript_failures(failures: Any) -> str:
+    """The human-and-model-readable rendering of
+    `block_transcript.validate_block_patches`' structured `failures` list
+    (issue #627) -- the "detail" half of a `block_transcript_rejected:
+    <detail>` error.
+
+    WHAT IT MUST CARRY, and why. A bare `source_mismatch` tells the model
+    only that it got the text wrong somewhere, which is exactly as useful as
+    no message at all when the block is a 400-word indemnity clause. The
+    validator already computes the divergence context on BOTH sides --
+    `block_transcript._mismatch` records `divergence_offset`, the document's
+    own `block_context` and the model's `transcript_context` -- and this
+    renders all of it, so the retry can see the two texts side by side at the
+    point they parted company. That context is the whole value of an informed
+    retry over a blind one.
+
+    Document text in a retry prompt is not a new disclosure: the model
+    already holds the entire document in the same prompt, under
+    `COUNTERPARTY_DOCUMENT`. The context is a pointer INTO what it was
+    already shown.
+    """
+    if not isinstance(failures, list) or not failures:
+        return "the block transcript was rejected"
+    lines: list[str] = []
+    for failure in failures[:_MAX_REPORTED_TRANSCRIPT_FAILURES]:
+        if not isinstance(failure, dict):
+            lines.append(f"  - {failure}")
+            continue
+        where = failure.get("block_id")
+        head = f"  - [{failure.get('reason')}]"
+        if where:
+            head += f" block {where}"
+        head += f": {failure.get('detail')}"
+        lines.append(head)
+        block_context = failure.get("block_context")
+        transcript_context = failure.get("transcript_context")
+        if block_context is not None or transcript_context is not None:
+            lines.append(f"      the document has: {block_context!r}")
+            lines.append(f"      you transcribed:  {transcript_context!r}")
+    remaining = len(failures) - _MAX_REPORTED_TRANSCRIPT_FAILURES
+    if remaining > 0:
+        lines.append(f"  - ...and {remaining} more")
+    return "\n".join(lines)
+
+
 def render_retry_correction_block(error: Any) -> str:
     """The correction appended to the next attempt's user prompt.
 
     Returns "" for a falsy `error` so a caller can append unconditionally and
     an attempt with nothing to correct stays byte-identical to attempt 1.
 
-    The framing is chosen from the error's own token because the two failure
-    classes ask for opposite things. A schema/JSON failure means the shape was
-    wrong and the judgment was fine; a replacement-text violation means the
-    shape was fine and one drafting rule was broken. Telling a model its
-    "response schema" was rejected when the real fault was its replacement
-    text invites it to start rearranging the envelope -- observed live
-    2026-08-04, where a generically-worded correction produced an invented
-    `external_rationale_for_footnote_topic` key and failed the retry for a
-    brand-new reason. Hence also the explicit no-new-keys instruction: under
-    `additionalProperties: false`, one helpful extra field is fatal.
+    The framing is chosen from the error's own token because the failure
+    classes ask for different things. A schema/JSON failure means the shape
+    was wrong and the judgment was fine; a replacement-text violation means
+    the shape was fine and one drafting rule was broken; a block-transcript
+    rejection (issue #627) means both the shape and the judgment were fine
+    and the TRANSCRIPTION of the document's own words was not -- the one
+    fault where "do not change your legal judgment" is not enough guidance,
+    because the fix is to go back and copy the paragraph again. Telling a
+    model its "response schema" was rejected when the real fault was
+    something else invites it to start rearranging the envelope -- observed
+    live 2026-08-04, where a generically-worded correction produced an
+    invented `external_rationale_for_footnote_topic` key and failed the retry
+    for a brand-new reason. Hence also the explicit no-new-keys instruction:
+    under `additionalProperties: false`, one helpful extra field is fatal.
     """
     if not error:
         return ""
     text = str(error)
-    if text.startswith("replacement_text_violation"):
+    if text.startswith(BLOCK_TRANSCRIPT_ERROR_TOKEN):
+        fault = (
+            "Your edits were rejected: one or more of your block transcripts "
+            "does not match the document's own text."
+        )
+        remedy = (
+            "Go back to the block(s) named above in the counterparty document "
+            "and transcribe them again, character for character -- the "
+            "\"keep\" and \"delete\" segments together must reproduce the "
+            "paragraph exactly, in order, with nothing skipped, nothing "
+            "retyped from memory, no typos fixed, no spacing or punctuation "
+            "tidied, and no \"[pNNNN]\" marker copied in. Keep every other "
+            "part of your response exactly as it was -- same issues, same "
+            "issue_keys, same decision, same intended edits."
+        )
+    elif text.startswith("replacement_text_violation"):
         fault = (
             "One or more of your proposed_replacement_text values broke a "
             "drafting rule:"
@@ -559,9 +1208,45 @@ _TOASTER_GUIDANCE_INTRO_COMMON = (
 
 # Appended only when this review's notes mode includes internal content --
 # see the module comment above for why `none`/`external` must never see it.
+#
+# WHICH FIELD IT NAMES (issue #522, epic #519 item D). #516 landed this
+# clause pointing at `external_rationale_for_footnote` because that was the
+# only per-issue rationale field that existed; item D adds the
+# internal-audience one and its renderer, so the clause now points there
+# instead. It matters: the clause is appended in exactly the two modes
+# (`internal`/`both`) whose documents render a footnote per issue, and
+# "the reviewing team directed a departure from our standard position" is
+# internal-audience content by definition. Left pointing at the external
+# field, it would have routed that sentence into the ONE footnote the
+# renderer emits unmarked -- and because the `<w:footnoteReference>` sits
+# inside the patch's `<w:ins>`, accept-all would then promote it to body
+# text in the copy that goes to the counterparty. The external field is
+# named here only to forbid it, which is why
+# `tests/test_toaster_guidance_notes_mode_gate_516.py` now asserts the
+# direction rather than mere presence.
+#
+# `verdict_summary` is left in the clause UNCHANGED from #516, and whether
+# it belongs there is an OPEN QUESTION — do not read its presence as a
+# ruling. What the 2026-08-03 owner ruling on #516 actually held is
+# recorded ~65 lines above and is the opposite of a safety argument for it:
+# `verdict_summary` is persisted as `summary` and rendered in the UI, the
+# threat model assumes it is realistically copy-pasted into email, and so
+# it is "no safer a destination than the footnote" — routing the narration
+# there *instead* was explicitly REJECTED, not endorsed. #522 therefore
+# does not settle it: this ticket's job was to stop the narration landing
+# in a counterparty-read field, and leaving the pre-existing
+# `verdict_summary` target alone is the conservative choice, not a
+# decision. Note the open tension for whoever picks this up: `leakage_scan
+# ._FIELD_CHANNELS` declares `verdict_summary` CHANNEL_EXTERNAL, so in
+# `internal`/`both` this clause still points internal-audience narration at
+# an external-channel field. Resolving that needs an owner ruling (and, on
+# the ACCEPT path, note there is no document and no issue at all, so
+# `internal_rationale_for_footnote` has nowhere to live — dropping
+# `verdict_summary` would leave ACCEPT-path deviations unrecordable).
 _TOASTER_GUIDANCE_NARRATION_CLAUSE = (
     ", and say you did so (name the point of conflict) in verdict_summary "
-    "or the relevant issue's external_rationale_for_footnote"
+    "or the relevant issue's internal_rationale_for_footnote -- never in "
+    "external_rationale_for_footnote, which the counterparty reads"
 )
 
 
@@ -632,10 +1317,16 @@ FLOOR_BLOCK_INTRO = (
     "and never argued around on the facts -- for each one, decide only "
     "whether the document violates it. If ANY obligation below is "
     "violated, you MUST include a REQUEST_CHANGE issue for that violation, "
-    "with source_quote set to the exact verbatim counterparty text that "
-    "violates it, following the source_quote rule stated above (omit "
-    "source_quote only when no single contiguous span exists to name, e.g. "
-    "a missing clause)."
+    "carrying its own \"issue_key\", and express the fix the way every "
+    "other issue expresses one: as \"block_patches\" segments (or a "
+    "\"block_ops\" entry) tagged with that issue_key, per the output "
+    "contract above. The segments you transcribe ARE the citation for a "
+    "Floor violation -- they are checked against the document's real "
+    "characters, so nothing else needs to name the offending text. When a "
+    "violation is a MISSING clause "
+    "there is no existing text to edit: raise the issue and add the "
+    "language with an \"insert_block_after\" block_op, or raise the issue "
+    "with no edit at all if nothing can be inserted safely."
 )
 
 
@@ -725,6 +1416,33 @@ REPLACEMENT_TEXT_MODES_INTRO = (
     "must_not_introduce constraints in the playbook JSON below."
 )
 
+# The block-transcript (v3) wording of the SAME block. Issue #627 review
+# round 3: under v3 the overlay forbids "proposed_replacement_text" outright
+# and lists the Issue's keys as "EXACTLY these keys and no others", so the
+# v2 text above both asks for a field the same prompt prohibits AND promises
+# an enforcement that no longer runs where it claims -- pass-time
+# `replacement_text_enforcement` is disabled under a block-transcript
+# contract, and stage 5 runs pen rules only over DERIVED text for
+# edit-bearing issues, so a flag-only issue carrying model-supplied
+# replacement text is pen-rule-checked nowhere. Under v3 "flag only" is
+# expressed by AUTHORING NO EDIT, which is a thing the model does rather
+# than a field it fills, so the instruction has to change shape and not just
+# wording.
+REPLACEMENT_TEXT_MODES_INTRO_V3 = (
+    "TOPIC REPLACEMENT-TEXT MODES -- read this before authoring any edit. "
+    "Each topic id below names the SAME resolved replacement_text.mode this "
+    "response is checked against after you submit it:\n"
+    "- mode \"none\": FLAG ONLY. A redline is never permitted for this "
+    "topic, no matter how clear the fix seems. Raise the issue as normal "
+    "(with its own \"issue_key\") and author NO EDIT for it: no "
+    "\"block_patches\" segment and no \"block_ops\" entry may carry that "
+    "issue_key. Put your explanation in \"external_rationale_for_footnote\" "
+    "instead.\n"
+    "- any other mode (\"fixed\", \"from_template\", \"bounded_edit\"): an "
+    "edit may be authored for that issue, bounded by that topic's max_chars "
+    "and must_not_introduce constraints in the playbook JSON below."
+)
+
 
 def render_replacement_text_modes_block(playbook: dict[str, Any]) -> str | None:
     """Render the per-topic replacement-text-mode system block, or None when
@@ -747,7 +1465,16 @@ def render_replacement_text_modes_block(playbook: dict[str, Any]) -> str | None:
     if not topics:
         return None
     bundle = resolve_pen_rules_bundle(playbook)
-    lines = [REPLACEMENT_TEXT_MODES_INTRO, ""]
+    # Which wording depends on the ACTIVE output contract, read off the
+    # artifact through the same seam `check_issues_replacement_text` and the
+    # REQUEST projection use -- never a second, independently-maintained
+    # notion of "are we on v3 yet" (issue #627 review round 3).
+    intro = (
+        REPLACEMENT_TEXT_MODES_INTRO_V3
+        if authors_block_transcripts(load_output_schema())
+        else REPLACEMENT_TEXT_MODES_INTRO
+    )
+    lines = [intro, ""]
     for topic in topics:
         topic_id = topic.get("id")
         if not topic_id:
@@ -757,7 +1484,12 @@ def render_replacement_text_modes_block(playbook: dict[str, Any]) -> str | None:
         except _rte.ReplacementTextConfigError:
             continue
         mode = resolved.get("mode", "none")
-        suffix = " -- FLAG ONLY, no replacement text permitted." if mode == "none" else ""
+        flag_only_suffix = (
+            " -- FLAG ONLY, author no edit for this issue."
+            if intro is REPLACEMENT_TEXT_MODES_INTRO_V3
+            else " -- FLAG ONLY, no replacement text permitted."
+        )
+        suffix = flag_only_suffix if mode == "none" else ""
         lines.append(f'{len(lines) - 1}. [topic:{topic_id}] mode="{mode}"{suffix}')
     if len(lines) == 2:  # only the intro + blank line -- nothing resolvable
         return None
@@ -809,16 +1541,28 @@ def assemble_system_blocks(
     Floor block keeps its own pinned position immediately before the
     playbook JSON.
 
-    `notes_mode` (issue #520, default `"external"`) is threaded into
-    `render_toaster_guidance_block` (issue #516, epic #519 item B): whether
-    the toaster-guidance block instructs the model to narrate a
-    guidance/playbook conflict into `verdict_summary` /
-    `external_rationale_for_footnote` depends on it -- both fields are
-    counterparty-facing in every mode, so the narration instruction is only
-    given when the mode puts internal content in scope (`internal`/`both`).
-    See `render_toaster_guidance_block`'s docstring and the module comment
-    above `_TOASTER_GUIDANCE_INTRO_COMMON` for the full reasoning. `external`
-    (the default) omits the narration instruction, same as `none`.
+    `notes_mode` (issues #520/#522, default `"external"`) is threaded into
+    TWO blocks, which together are the whole prompt-side notes-mode gate:
+
+    - `render_toaster_guidance_block` (issue #516, epic #519 item B):
+      whether the toaster-guidance block instructs the model to narrate a
+      guidance/playbook conflict at all depends on it -- that narration is
+      internal-audience content, so the instruction is only given when the
+      mode puts internal content in scope (`internal`/`both`), and it names
+      `internal_rationale_for_footnote` as the per-issue place for it. See
+      that function's docstring and the module comment above
+      `_TOASTER_GUIDANCE_INTRO_COMMON`.
+    - `render_binary_decision_overlay_block` (issue #522, epic #519 item
+      D): whether the issue-object contract carries the
+      `internal_rationale_for_footnote` key at all depends on it. Without
+      this half the clause above would name a key the output contract
+      forbids, and the renderer that emits it
+      (`redline_docx_writer.footnote_texts_for_notes_mode`) would have no
+      producer. See the module comment above
+      `_render_binary_decision_overlay`.
+
+    `external` (the default) gets neither, same as `none` -- both render
+    byte-identically to the pre-#516/#522 prompt.
     """
     blocks: list[dict[str, Any]] = [{"type": "text", "text": REVIEW_GUIDANCE_BLOCK}]
 
@@ -830,7 +1574,9 @@ def assemble_system_blocks(
     if guidance_text is not None:
         blocks.append({"type": "text", "text": guidance_text})
 
-    blocks.append({"type": "text", "text": BINARY_DECISION_OVERLAY_BLOCK})
+    blocks.append(
+        {"type": "text", "text": render_binary_decision_overlay_block(notes_mode)}
+    )
 
     replacement_modes_text = render_replacement_text_modes_block(playbook)
     if replacement_modes_text is not None:
@@ -876,28 +1622,38 @@ UNTRUSTED_BLOCK_WARNING = (
 #
 # What was unmarked, and why each one matters:
 #
-#   STANDARD_FORM_DIFF      renders counterparty wording on every hunk.
-#   ANCHORED_CLAUSES        renders `counterparty_text` verbatim per clause.
 #   RETRIEVED_PRECEDENT     our own corpus, but third-party in origin and
 #                           document-derived. The cost of marking it is one
 #                           sentence.
 #   PRIMARY_REVIEWER_OUTPUT the least obvious and the most consequential. It
 #                           is OUR model's prose, so it reads as trustworthy
-#                           -- and it quotes the counterparty document
-#                           verbatim through `source_quote`.
+#                           -- and under v3 it carries the counterparty
+#                           document's own characters verbatim, in every
+#                           `keep`/`delete` segment of its block transcript
+#                           (issue #627; before the flip the same text
+#                           arrived through the model's verbatim quote).
 #
-# The critic never receives the raw document (deliberate, ARCHITECTURE.md),
-# but that is not the same as receiving no counterparty text. The critic is
-# the structural defense the whole design leans on -- "an injection would have
-# to fool two different models from two labs" -- and before this, an injection
-# that survived the primary arrived at the critic BETTER FRAMED than it had
-# been at the primary.
+# When issue #505 wrote this list, the critic did not receive the raw
+# document at all -- but that was never the same as receiving no counterparty
+# text. The critic is the structural defense the whole design leans on -- "an
+# injection would have to fool two different models from two labs" -- and
+# before #505, an injection that survived the primary arrived at the critic
+# BETTER FRAMED than it had been at the primary.
+#
+# Issue #618 gives the critic the document itself, under this same
+# `COUNTERPARTY_DOCUMENT` tag and therefore this same marking -- one tag, one
+# rendering, one warning, for both passes. Nothing about that tag's handling
+# changes; only the set of assemblers that emit it does.
+#
+# Issue #627 dropped `STANDARD_FORM_DIFF` and `ANCHORED_CLAUSES` from this set
+# along with the blocks themselves. They were retained after issue #380
+# retired the standard-form diff for ONE reason -- keeping the assembled
+# prompt SHAPE stable while its content went permanently empty -- and the
+# hard cutover rewrites that shape anyway. A tag no assembler can emit does
+# not need an untrusted marking; it needs to be gone.
 UNTRUSTED_BEARING_TAGS = frozenset(
     {
         "COUNTERPARTY_DOCUMENT",
-        "SECTION_OUTLINE",
-        "STANDARD_FORM_DIFF",
-        "ANCHORED_CLAUSES",
         "RETRIEVED_PRECEDENT",
         "PRIMARY_REVIEWER_OUTPUT",
     }
@@ -909,8 +1665,8 @@ def _delimited_block(tag: str, content: str) -> str:
     `UNTRUSTED_BEARING_TAGS`.
 
     The warning sits immediately before the opening delimiter, not once at the
-    top of the prompt. Adjacency is the point: a warning 60,000 tokens earlier
-    in an 80,000-token prompt is not a warning about the block the model is
+    top of the prompt. Adjacency is the point: a warning 80,000 tokens earlier
+    in a 100,000-token prompt is not a warning about the block the model is
     currently reading. The cost is one sentence per block against a document
     that can run to the input cap.
     """
@@ -921,27 +1677,6 @@ def _delimited_block(tag: str, content: str) -> str:
     parts.append(content)
     parts.append(f"</{tag}>")
     return "\n".join(parts)
-
-
-def render_diff_block(diff_hunks: list[dict[str, Any]]) -> str:
-    lines = []
-    for hunk in diff_hunks:
-        lines.append(
-            f"[{hunk.get('kind', '?')}] anchor={hunk.get('anchor', '?')}: {hunk.get('text', '')}"
-        )
-    return "\n".join(lines)
-
-
-def render_anchored_clauses_block(anchored_clauses: list[dict[str, Any]]) -> str:
-    blocks = []
-    for clause in anchored_clauses:
-        blocks.append(
-            f"anchor={clause.get('anchor', '?')}\n"
-            f"standard: {clause.get('standard_text', '')}\n"
-            f"counterparty: {clause.get('counterparty_text', '')}\n"
-            f"delta: {clause.get('delta', '')}"
-        )
-    return "\n\n".join(blocks)
 
 
 def render_precedent_block(retrieved_precedent: list[dict[str, Any]]) -> str:
@@ -975,115 +1710,131 @@ def render_retrieved_precedent_delimited_block(
     return _delimited_block("RETRIEVED_PRECEDENT", render_precedent_block(retrieved_precedent))
 
 
-def render_section_outline(doc_paragraphs: list[dict[str, Any]]) -> str:
-    lines = []
-    for para in doc_paragraphs:
-        heading = para.get("heading") or "(untitled)"
-        word_count = len(str(para.get("text", "")).split())
-        lines.append(f"{heading}: {word_count} words")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Input-mode observability (issue #419). Which branch the full-doc-vs-outline
-# gate above took used to be invisible outside this function's own prompt
-# string -- `run_primary_pass` reports it as `input_mode` on its returned
-# result, and `reconciliation.reconcile()` reads it to degrade
-# `confidence_state` and append a fixed notice to `verdict_summary`.
-#
-# `INPUT_MODE_SECTION_OUTLINE`'s literal value is duplicated (not imported)
-# in scripts/reconciliation.py, per this module's own MAX_INPUT_TOKENS
-# comment above ("each module owning its own copy of small shared
-# sentinels") -- reconciliation.py is a deliberately dependency-free pure
-# function module (no I/O, no model calls, no cross-module imports).
-# tests/test_full_doc_threshold.py cross-checks the two literals so they
-# cannot silently drift.
-# ---------------------------------------------------------------------------
-INPUT_MODE_FULL_DOCUMENT = "full_document"
-INPUT_MODE_SECTION_OUTLINE = "section_outline"
-
-
 # `scripts/review_spine.py::document_text_for_review` renders each normalized
 # paragraph's heading on its own line, prefixed with this marker, so clause
 # titles reach the model at all (before that fix, 28 of 30 headings on a real
 # target document never did). The marker is PURE RENDERING: it exists in no
-# `.docx`, and in no `paragraph["text"]` -- which is the only thing
-# `scripts/quote_locate.py::locate_quote_in_paragraphs` searches (`heading` is
-# a separate key on the normalized record and is not in the search basis at
-# all). So a `source_quote` that carries a marker line cannot locate, the
-# issue degrades to flag-only, and the attorney gets an observation with no
-# tracked change and no error -- the same silent-redline-loss failure mode as
+# `.docx`, and in no `paragraph["text"]` -- which is the only thing a block's
+# own text is built from (`heading` is a separate key on the normalized
+# record and is not part of it). So a `keep`/`delete` segment that carries a
+# marker line cannot prove against the block, `block_transcript` rejects the
+# whole transcript, and the attorney gets observations with no tracked
+# changes and no error -- the same silent-redline-loss failure mode as
 # issue #560.
 #
 # Duplicated here rather than imported: `review_spine` imports THIS module, so
 # importing back would cycle. Same "each module owning its own copy of small
-# shared sentinels" convention as `INPUT_MODE_SECTION_OUTLINE` above, and
-# cross-checked against `review_spine`'s ACTUAL rendering by
+# shared sentinels" convention as MAX_INPUT_TOKENS above, and cross-checked
+# against `review_spine`'s ACTUAL rendering by
 # `tests/test_heading_marker_quote_poisoning.py` so the two cannot drift.
 RENDERED_HEADING_MARKER = "## "
 
-
-def resolve_input_mode(
-    doc_text: str, full_doc_token_threshold: int = DEFAULT_FULL_DOC_TOKEN_THRESHOLD
-) -> str:
-    """Which of `INPUT_MODE_FULL_DOCUMENT` / `INPUT_MODE_SECTION_OUTLINE`
-    `assemble_user_prompt_primary`'s doc-text gate takes for this
-    `doc_text`/`full_doc_token_threshold` pair.
-
-    The single source of truth both that function's own branch and
-    `run_primary_pass`'s `input_mode` result field read, so the two can
-    never independently drift on which mode was actually used.
-    """
-    if estimate_tokens(doc_text) <= full_doc_token_threshold:
-        return INPUT_MODE_FULL_DOCUMENT
-    return INPUT_MODE_SECTION_OUTLINE
+# The block-id marker `scripts/review_spine.py::render_block_marker` renders
+# at the head of every logical paragraph's first line (issue #627):
+# `"[p0001] "`. Four digits is a display width, not a ceiling -- position
+# 10000 renders `[p10000]` -- so the pattern accepts four OR MORE, and it
+# swallows the trailing whitespace so stripping it leaves the paragraph's real
+# first character at the head of the string.
+#
+# Anchored at the start (`^`, no `re.MULTILINE`): only a LEADING marker is
+# ever removed. A `[pNNNN]`-shaped token deeper inside a value is either
+# genuine document text or a span that crossed a paragraph boundary, and
+# editing either would be this backstop inventing content the model did not
+# write -- the same "only a leading marker" discipline
+# `_strip_rendered_heading_markers` already keeps.
+#
+# Duplicated rather than imported for the same reason
+# `RENDERED_HEADING_MARKER` is (`review_spine` imports THIS module; importing
+# back would cycle), and cross-checked against `review_spine`'s ACTUAL
+# rendering by `tests/test_heading_marker_quote_poisoning.py`.
+RENDERED_BLOCK_MARKER_PATTERN = re.compile(r"^\[p\d{4,}\][ \t]*")
 
 
 def assemble_user_prompt_primary(
     *,
-    diff_hunks: list[dict[str, Any]],
-    anchored_clauses: list[dict[str, Any]],
     retrieved_precedent: list[dict[str, Any]],
     doc_text: str = "",
-    doc_paragraphs: list[dict[str, Any]] | None = None,
-    full_doc_token_threshold: int = DEFAULT_FULL_DOC_TOKEN_THRESHOLD,
 ) -> str:
-    """Primary-pass user prompt per the #29 manifest: diff + anchored
-    clauses + retrieved precedent (when non-empty; omitted entirely
-    otherwise -- see `render_retrieved_precedent_delimited_block`, issue
-    #582) + full doc OR section outline, gated on `full_doc_token_threshold`
-    (see `resolve_input_mode`)."""
-    blocks = [
-        _delimited_block("STANDARD_FORM_DIFF", render_diff_block(diff_hunks)),
-        _delimited_block("ANCHORED_CLAUSES", render_anchored_clauses_block(anchored_clauses)),
-    ]
+    """Primary-pass user prompt: retrieved precedent (when non-empty; omitted
+    entirely otherwise -- see `render_retrieved_precedent_delimited_block`,
+    issue #582) + the FULL counterparty document text, block-id marked.
+
+    Issue #627 removed the last two blocks of the original #29 manifest.
+    `STANDARD_FORM_DIFF` and `ANCHORED_CLAUSES` had been permanently empty
+    since issue #380 retired the standard-form diff, and were composed anyway
+    -- as empty delimited slots -- purely to keep the assembled prompt SHAPE
+    unchanged. The hard cutover rewrites that shape, so the rationale is
+    spent: a block that advertises a data source and shows it empty is prompt
+    noise, and the same absent-or-populated doctrine that governs
+    `render_toaster_guidance_block`, `render_floor_block` and
+    `render_retrieved_precedent_delimited_block` now governs these too --
+    permanently absent.
+
+    Issue #625 deleted the size-gated section-outline alternative: there is
+    one review quality, and it reviews the document it was given. A
+    document too large for `MAX_INPUT_TOKENS` never reaches this assembler's
+    output at all -- `run_primary_pass`'s step-14 gate fails it closed as
+    `document_too_large` before any model call."""
+    blocks = []
     precedent_block = render_retrieved_precedent_delimited_block(retrieved_precedent)
     if precedent_block is not None:
         blocks.append(precedent_block)
-    if resolve_input_mode(doc_text, full_doc_token_threshold) == INPUT_MODE_FULL_DOCUMENT:
-        blocks.append(_delimited_block("COUNTERPARTY_DOCUMENT", doc_text))
-    else:
-        outline = render_section_outline(doc_paragraphs or [])
-        blocks.append(_delimited_block("SECTION_OUTLINE", outline))
+    blocks.append(_delimited_block("COUNTERPARTY_DOCUMENT", doc_text))
     return "\n\n".join(blocks)
 
 
 def assemble_user_prompt_critic(
     *,
-    diff_hunks: list[dict[str, Any]],
-    anchored_clauses: list[dict[str, Any]],
     primary_output: dict[str, Any],
+    doc_text: str = "",
 ) -> str:
-    """Critic-pass user prompt per the #29 manifest: diff + anchored
-    clauses + the primary reviewer's full structured output. No retrieved
-    precedent, no raw document or outline -- see ARCHITECTURE.md rationale."""
+    """Critic-pass user prompt: the critic tasking (issue #618, trusted
+    instruction text, first and undelimited), then the delimited data blocks
+    -- the counterparty document + the primary reviewer's full structured
+    output. No retrieved precedent (primary-only), and, since issue #627, no
+    `STANDARD_FORM_DIFF`/`ANCHORED_CLAUSES` slots: see
+    `assemble_user_prompt_primary` for why those two are gone from BOTH
+    passes rather than one.
+
+    WHICH tasking is chosen by whether a document block is actually
+    composed: `CRITIC_TASKING_BLOCK` when one is,
+    `CRITIC_TASKING_BLOCK_NO_DOCUMENT` when one is not. The tasking asserts
+    the document is "shown to you below" and refuses any objection not
+    grounded in it, so emitting it over a prompt with no document block
+    would forbid every objection and silence the adversarial pass on exactly
+    the largest documents. A prompt constant that speaks about a data block
+    is a promise about that block; the assembler that can drop the block
+    owns keeping the promise true.
+
+    `doc_text` (issue #618, default `""`): the SAME document string the
+    primary pass reviewed, rendered through the SAME
+    `_delimited_block("COUNTERPARTY_DOCUMENT", ...)` the primary uses -- one
+    tag, one rendering, one untrusted warning, both passes. Ahead of
+    `PRIMARY_REVIEWER_OUTPUT` deliberately: the tasking above asks the critic
+    to ground every objection in the document FIRST and object SECOND, so the
+    evidence is what it reads first.
+
+    Empty `doc_text` OMITS the block entirely rather than composing an empty
+    labelled slot that advertises a document and shows none -- the same
+    absent-or-populated doctrine as `render_toaster_guidance_block`,
+    `render_floor_block` and `render_retrieved_precedent_delimited_block`
+    (issue #582). Callers that pass no document therefore get the
+    pre-#618 block sequence unchanged.
+
+    There is deliberately NO reduced-fidelity fallback here: a document too
+    large to send to the critic fails closed as `document_too_large` in
+    `critic_review_pass.run_critic_pass`'s pre-call cap check rather than
+    quietly critiquing a review of a document the critic never read. Issue
+    #625 made that the primary pass's rule too.
+    """
     blocks = [
-        _delimited_block("STANDARD_FORM_DIFF", render_diff_block(diff_hunks)),
-        _delimited_block("ANCHORED_CLAUSES", render_anchored_clauses_block(anchored_clauses)),
-        _delimited_block(
-            "PRIMARY_REVIEWER_OUTPUT", json.dumps(primary_output, sort_keys=True)
-        ),
+        CRITIC_TASKING_BLOCK if doc_text else CRITIC_TASKING_BLOCK_NO_DOCUMENT,
     ]
+    if doc_text:
+        blocks.append(_delimited_block("COUNTERPARTY_DOCUMENT", doc_text))
+    blocks.append(
+        _delimited_block("PRIMARY_REVIEWER_OUTPUT", json.dumps(primary_output, sort_keys=True))
+    )
     return "\n\n".join(blocks)
 
 
@@ -1132,15 +1883,33 @@ def assembled_prompt_tokens(
 def build_document_cached_user_content(
     doc_text: str, pass_specific_text: str
 ) -> list[dict[str, Any]]:
-    """The shared doc-block builder (issue #568). Returns EXACTLY two
-    blocks, in this fixed order:
+    """The shared doc-block builder (issue #568). Returns the blocks below,
+    in this fixed order:
 
       1. The delimited `<COUNTERPARTY_DOCUMENT>` block -- the SAME
          `_delimited_block` rendering (including the untrusted-input
          warning; `COUNTERPARTY_DOCUMENT` is in `UNTRUSTED_BEARING_TAGS`)
          `assemble_user_prompt_primary` has always used for this tag --
          marked `cache_control: {"type": "ephemeral"}`.
-      2. `pass_specific_text` verbatim, uncached.
+      2. `pass_specific_text` verbatim, uncached -- OMITTED ENTIRELY when
+         that text is empty or whitespace-only.
+
+    WHY THE SECOND BLOCK IS CONDITIONAL (issue #627 fix round 1). The
+    Anthropic messages API -- native and through Bedrock, which is what
+    `LiveBedrockModelClient.invoke` speaks -- REJECTS a text content block
+    whose `text` is empty. Before issue #627 the pass-specific half was
+    never empty: it always carried at least the two permanently-empty
+    `STANDARD_FORM_DIFF`/`ANCHORED_CLAUSES` manifest blocks. Dropping those
+    left retrieval (dormant -- docs/rag-dormant.md) as its only contributor,
+    so on every review reachable today it is `""`, and emitting it anyway
+    would have put an empty block on the wire of every attempt-1 primary
+    call against the production reviewer (`model-policy/bedrock-us-east-1
+    .json` declares `prompt_caching: true` for it) -- green offline, dead in
+    prod, which is the exact failure class this cutover exists to avoid.
+
+    Omitting the block does NOT weaken the ordering discipline below:
+    `append_user_content_suffix` starts a FRESH block when the last one is
+    the cached document, so a retry correction still never joins block 1.
 
     Called with the SAME (normalized) `doc_text` from two different
     callers, this returns a byte-identical block 1 regardless of
@@ -1150,28 +1919,27 @@ def build_document_cached_user_content(
 
     Ordering discipline (issue #568 Notes): retry/critique content must
     APPEND after this cached prefix, never rewrite it -- see
-    `append_user_content_suffix` below, which only ever mutates block 2.
-    This constrains any future re-quote call built on top of this
-    function too: new content always joins block 2, never block 1.
+    `append_user_content_suffix` below, which never touches block 1
+    (appending to an uncached later block, or starting one when block 1 is
+    all there is). This constrains any future consumer built on top of this
+    function too: new content always lands after block 1, never in it.
     """
-    return [
+    blocks: list[dict[str, Any]] = [
         {
             "type": "text",
             "text": _delimited_block("COUNTERPARTY_DOCUMENT", doc_text),
             "cache_control": {"type": "ephemeral"},
-        },
-        {"type": "text", "text": pass_specific_text},
+        }
     ]
+    if pass_specific_text and pass_specific_text.strip():
+        blocks.append({"type": "text", "text": pass_specific_text})
+    return blocks
 
 
 def assemble_user_content_primary(
     *,
-    diff_hunks: list[dict[str, Any]],
-    anchored_clauses: list[dict[str, Any]],
     retrieved_precedent: list[dict[str, Any]],
     doc_text: str = "",
-    doc_paragraphs: list[dict[str, Any]] | None = None,
-    full_doc_token_threshold: int = DEFAULT_FULL_DOC_TOKEN_THRESHOLD,
     prompt_caching_enabled: bool = False,
 ) -> "str | list[dict[str, Any]]":
     """The primary-pass user content `run_primary_pass` sends to
@@ -1180,42 +1948,42 @@ def assemble_user_content_primary(
     Two paths, chosen BEFORE any model call and never mixed:
 
     - `prompt_caching_enabled=False` (the default -- a capability-False
-      model per #562's descriptor), OR the document did not qualify for
-      full-text inclusion (`resolve_input_mode` took the
-      `INPUT_MODE_SECTION_OUTLINE` branch, so there is no stable document
-      prefix worth caching): returns `assemble_user_prompt_primary`'s
+      model per #562's descriptor): returns `assemble_user_prompt_primary`'s
       unmodified plain-string output -- a straight passthrough, not a
       reimplementation, so this path is byte-identical to every call
       before issue #568 (that function's own callers, and its own tests,
       are untouched).
-    - `prompt_caching_enabled=True` AND `INPUT_MODE_FULL_DOCUMENT`: returns
-      `build_document_cached_user_content`'s two-block list -- the cached
-      document block FIRST, and the diff/anchored-clauses/retrieved-
-      precedent text (when non-empty; omitted entirely otherwise -- see
+    - `prompt_caching_enabled=True`: returns
+      `build_document_cached_user_content`'s block list -- the cached
+      document block FIRST, and the retrieved-precedent text (when
+      non-empty; omitted entirely otherwise -- see
       `render_retrieved_precedent_delimited_block`, issue #582) (this
       call's "pass-specific instruction") as the second, uncached block,
-      per the issue's ordering discipline.
+      per the issue's ordering discipline. With retrieval dormant that
+      second half is empty, and the list is the cached block ALONE (issue
+      #627 fix round 1) -- never a block with empty `text`, which the
+      Anthropic messages API rejects.
+
+    Issue #625 removed the third condition this used to carry -- the
+    section-outline branch had no stable document prefix worth caching, and
+    that branch no longer exists.
     """
-    if (
-        not prompt_caching_enabled
-        or resolve_input_mode(doc_text, full_doc_token_threshold) != INPUT_MODE_FULL_DOCUMENT
-    ):
+    if not prompt_caching_enabled:
         return assemble_user_prompt_primary(
-            diff_hunks=diff_hunks,
-            anchored_clauses=anchored_clauses,
             retrieved_precedent=retrieved_precedent,
             doc_text=doc_text,
-            doc_paragraphs=doc_paragraphs,
-            full_doc_token_threshold=full_doc_token_threshold,
         )
-    pass_specific_parts = [
-        _delimited_block("STANDARD_FORM_DIFF", render_diff_block(diff_hunks)),
-        _delimited_block("ANCHORED_CLAUSES", render_anchored_clauses_block(anchored_clauses)),
-    ]
     precedent_block = render_retrieved_precedent_delimited_block(retrieved_precedent)
-    if precedent_block is not None:
-        pass_specific_parts.append(precedent_block)
-    pass_specific_text = "\n\n".join(pass_specific_parts)
+    # Issue #627: with the two permanently-empty manifest blocks gone, the
+    # pass-specific half can now be genuinely EMPTY -- retrieval is dormant
+    # (docs/rag-dormant.md), so on every review reachable today this is "".
+    # `build_document_cached_user_content` then returns the cached document
+    # block ALONE rather than trailing an empty text block the Anthropic
+    # messages API would reject (fix round 1 -- see that function's own
+    # "WHY THE SECOND BLOCK IS CONDITIONAL"), and `append_user_content_
+    # suffix` starts a fresh block for a retry correction so the cached
+    # prefix is still never rewritten.
+    pass_specific_text = precedent_block if precedent_block is not None else ""
     return build_document_cached_user_content(doc_text, pass_specific_text)
 
 
@@ -1234,31 +2002,35 @@ def append_user_content_suffix(
     `suffix` (attempt 1, nothing to correct yet) returns `user_content`
     unchanged, so a first attempt that never retries stays byte-identical
     to a call that never went through this function.
+
+    When the LAST block is itself the cached document block (issue #627 fix
+    round 1: `build_document_cached_user_content` now omits an empty
+    pass-specific block, so on a retrieval-dormant review the doc block is
+    the only one there), the suffix starts a NEW uncached block instead of
+    joining it. Appending to it would rewrite the cached prefix and zero the
+    cache on the very call -- the same-review retry -- issue #568 built this
+    breakpoint for.
     """
     if not suffix:
         return user_content
     if isinstance(user_content, str):
         return user_content + suffix
     blocks = [dict(block) for block in user_content]
+    if "cache_control" in blocks[-1]:
+        blocks.append({"type": "text", "text": suffix})
+        return blocks
     blocks[-1]["text"] = blocks[-1].get("text", "") + suffix
     return blocks
 
 
 # ---------------------------------------------------------------------------
-# Structured-output validation (issue #4: playbooks/output-schema-v1.json,
-# superseded by issue #376's playbooks/output-schema-v2.json, is the single
-# validation source of truth for both model passes).
+# Structured-output validation. `load_output_schema` /
+# `output_schema_version_const` / `_OUTPUT_SCHEMA_CACHE` live at the TOP of
+# this module (issue #627) rather than here, because the OUTPUT CONTRACT
+# prompt block reads the ACTIVE artifact's `schema_version` const off them --
+# the instruction and the validator are one fact. Everything else in this
+# section still lives below.
 # ---------------------------------------------------------------------------
-
-_OUTPUT_SCHEMA_CACHE: dict[str, Any] | None = None
-
-
-def load_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
-    global _OUTPUT_SCHEMA_CACHE
-    if _OUTPUT_SCHEMA_CACHE is None:
-        with open(path, "r", encoding="utf-8") as fh:
-            _OUTPUT_SCHEMA_CACHE = json.load(fh)
-    return _OUTPUT_SCHEMA_CACHE
 
 
 class ModelResponseContractViolation(ValueError):
@@ -1329,7 +2101,9 @@ def _extract_json_object(raw_text: str) -> str:
     return raw_text
 
 
-def _stamp_pipeline_envelope(parsed: Any, *, issue_provenance: str) -> None:
+def _stamp_pipeline_envelope(
+    parsed: Any, *, issue_provenance: str, schema_version: str = OUTPUT_SCHEMA_VERSION
+) -> None:
     """Stamp the pipeline-owned envelope metadata the model is not the source
     of truth for, in place, BEFORE schema validation: the ``schema_version``
     const and a ``provenance`` on every Issue-shaped object (top-level
@@ -1344,10 +2118,18 @@ def _stamp_pipeline_envelope(parsed: Any, *, issue_provenance: str) -> None:
     instructed output_format. This does NOT add model-judgment fields
     (``decision``, ``issues``, an issue's substantive keys): a response that
     omits those still fails schema validation, unpatched.
+
+    ``schema_version`` (issue #624) is the literal the ACTIVE artifact
+    demands, resolved by ``output_schema_version_const`` from whichever
+    schema ``validate_model_response`` is about to check against -- stamping
+    a hardcoded ``"output-schema-v1"`` under a selected v3 artifact (whose
+    const IS bumped) would fail the very validation this runs ahead of.
+    Defaults to ``OUTPUT_SCHEMA_VERSION``, so a caller that stamps without
+    naming a schema behaves exactly as it did before.
     """
     if not isinstance(parsed, dict):
         return
-    parsed.setdefault("schema_version", OUTPUT_SCHEMA_VERSION)
+    parsed.setdefault("schema_version", schema_version)
     for issue in parsed.get("issues", []) or []:
         if isinstance(issue, dict):
             issue.setdefault("provenance", issue_provenance)
@@ -1359,15 +2141,24 @@ def _stamp_pipeline_envelope(parsed: Any, *, issue_provenance: str) -> None:
 
 
 def _denullify_unrepresentable_issue_fields(parsed: Any) -> None:
-    """Strip a `null` or empty-string `source_quote` back to ABSENT on
-    every Issue-shaped object (top-level ``issues`` and
-    ``critic_delta.added_issues``), in place, BEFORE the full-schema check.
+    """Strip a `null` or empty-string value back to ABSENT, on every
+    Issue-shaped object (top-level ``issues`` and
+    ``critic_delta.added_issues``), for every field
+    ``model_output_schema._ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`` gave a
+    projected-schema null branch -- in place, BEFORE the full-schema check.
+    The two lists are read from the ONE constant so a field can never gain
+    a null branch in the request without gaining its normalization here
+    (the reasoning below was written for the v2 quote field issue #628
+    deleted and applies unchanged to the surviving entry,
+    ``internal_rationale_for_footnote``, added by issue #522 fix round 2 --
+    same `minLength: 1`-with-no-null-escape shape, same "absent means I
+    have none" reading in the full schema).
 
     Issue #567 fix round 3: ``model_output_schema.project_output_schema_
-    for_provider`` gives ``source_quote`` a ``null`` branch so a strict-mode
+    for_provider`` gives each such field a ``null`` branch so a strict-mode
     provider (which MUST emit every required property with SOME value) has
-    an honest "no value" to send -- but ``playbooks/output-schema-v2.json``'s
-    own definition has no ``null`` branch and a ``minLength: 1`` floor, so a
+    an honest "no value" to send -- but the full artifact's own definition
+    has no ``null`` branch and a ``minLength: 1`` floor, so a
     schema-enforced ``null`` response would otherwise fail the very
     validation this function runs ahead of. This mirrors
     ``_stamp_pipeline_envelope``'s own "narrow, technical reshaping, never
@@ -1399,62 +2190,217 @@ def _denullify_unrepresentable_issue_fields(parsed: Any) -> None:
     if isinstance(critic_delta, dict):
         issues += list(critic_delta.get("added_issues") or [])
     for issue in issues:
-        if isinstance(issue, dict) and issue.get("source_quote") in (None, ""):
-            issue.pop("source_quote", None)
+        if not isinstance(issue, dict):
+            continue
+        for field in _mos._ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH:
+            if issue.get(field) in (None, ""):
+                issue.pop(field, None)
 
 
-def _strip_rendered_heading_markers(parsed: Any) -> None:
-    """Remove a LEADING `RENDERED_HEADING_MARKER` line from `source_quote` on
-    every Issue-shaped object (top-level ``issues`` and
-    ``critic_delta.added_issues``), in place, BEFORE the full-schema check --
-    the same objects and the same in-place discipline as
-    ``_denullify_unrepresentable_issue_fields`` below.
+def _duplicate_issue_key_error(parsed: Any, schema: dict[str, Any]) -> str | None:
+    """The first repeated ``issue_key`` in `parsed`, phrased as a validation
+    error, or ``None`` when the active `schema` does not define
+    ``issue_key`` at all or every key is distinct.
 
-    See ``RENDERED_HEADING_MARKER``'s own comment for why this matters: the
-    marker is scaffolding this pipeline renders, present in no document, so a
-    quote carrying it is unlocatable and its redline is lost in silence. The
-    prompt already tells the model not to copy it (the binary-decision overlay
-    block's own ``"## "`` bullet); this is the backstop for a model that does
-    it anyway, which costs a real attorney a real tracked change every time.
+    Issue #624: ``playbooks/output-schema-v3.json`` requires every Issue to
+    carry an ``issue_key`` that is unique ACROSS THE RESPONSE -- it is the
+    handle every ``block_patches`` segment and every ``block_ops`` entry
+    names to say which issue authored that edit, so two issues sharing one
+    key silently merge their redlines under whichever issue the reader
+    happens to render. JSON Schema draft-07 cannot express uniqueness of a
+    field across array items (``uniqueItems`` compares whole items, and
+    ``issues[]`` and ``critic_delta.added_issues`` are two arrays besides),
+    so the artifact enforces the FORM of a key and this enforces the
+    uniqueness half, immediately alongside the schema check and reported
+    with the same ``schema_invalid`` token every other contract violation
+    gets -- one contract, one rejection vocabulary, one retry path.
 
-    Removing it does not touch model judgment -- the same narrow, technical
-    reshaping ``_denullify_unrepresentable_issue_fields`` performs and
-    ``_stamp_pipeline_envelope`` documents: what the model communicated (WHICH
-    span of the contract this issue is about) is unchanged; only pipeline-
-    injected rendering it should never have copied is dropped.
-
-    ONLY a leading marker line is removed. A ``"## "`` deeper inside a quote
-    means the quote crossed a paragraph boundary (already forbidden by the
-    prompt, already ``not_found`` at the locator) or is genuine document text
-    -- editing either would be this function inventing a span the model did
-    not name, which the "never best-effort patch model judgment" invariant
-    forbids.
-
-    A quote that is ONLY a marker line names no contract text at all and is
-    reduced to ``""``, which ``_denullify_unrepresentable_issue_fields`` --
-    which MUST therefore run after this -- then strips to ABSENT: the shape
-    the schema (``minLength: 1``) and the redline path already treat as "no
-    quote to locate", so the issue degrades to flag-only honestly instead of
-    failing the whole response closed on a technicality.
+    Gated on the ACTIVE artifact, not on a version string: a schema whose
+    ``definitions.Issue.properties`` has no ``issue_key`` (v1, v2, or any
+    synthetic test schema) makes this a no-op, so selecting v2 -- still the
+    default -- leaves ``validate_model_response`` behaviorally identical.
+    Scans the top-level ``issues`` and ``critic_delta.added_issues``
+    together, in that order, because "the response" is what the keys must be
+    unique within. Non-string / absent keys are skipped here rather than
+    reported: the schema's own ``required``/``pattern`` check is what
+    rejects those, and reporting them twice would just bury the real error.
     """
+    issue_def = (schema.get("definitions") or {}).get("Issue") or {}
+    if "issue_key" not in (issue_def.get("properties") or {}):
+        return None
     if not isinstance(parsed, dict):
-        return
+        return None
     issues = list(parsed.get("issues") or [])
     critic_delta = parsed.get("critic_delta")
     if isinstance(critic_delta, dict):
         issues += list(critic_delta.get("added_issues") or [])
+    seen: set[str] = set()
     for issue in issues:
         if not isinstance(issue, dict):
             continue
-        quote = issue.get("source_quote")
-        if not isinstance(quote, str) or not quote.startswith(RENDERED_HEADING_MARKER):
+        issue_key = issue.get("issue_key")
+        if not isinstance(issue_key, str):
             continue
-        _marker_line, newline, remainder = quote.partition("\n")
-        issue["source_quote"] = remainder if newline else ""
+        if issue_key in seen:
+            return (
+                f"issue_key {issue_key!r} appears on more than one issue; every "
+                "issue_key must be unique across the response, since it is what "
+                "attributes each block patch segment and block op to its issue"
+            )
+        seen.add(issue_key)
+    return None
+
+
+def _issue_shaped_objects(parsed: Any) -> list[dict[str, Any]]:
+    """Every Issue-shaped object in a parsed response -- top-level ``issues``
+    plus ``critic_delta.added_issues`` -- the one place that pairing is
+    spelled, so a normalization can never be applied to one list and quietly
+    skip the other."""
+    if not isinstance(parsed, dict):
+        return []
+    issues = [issue for issue in (parsed.get("issues") or []) if isinstance(issue, dict)]
+    critic_delta = parsed.get("critic_delta")
+    if isinstance(critic_delta, dict):
+        issues += [
+            issue
+            for issue in (critic_delta.get("added_issues") or [])
+            if isinstance(issue, dict)
+        ]
+    return issues
+
+
+def _strip_rendered_block_markers(parsed: Any) -> None:
+    """Remove a LEADING block-id marker (``RENDERED_BLOCK_MARKER_PATTERN`` --
+    ``"[p0001] "``) from every transcript segment text and every Issue string
+    field, in place, BEFORE the full-schema check (issue #627).
+
+    THE DETERMINISTIC HALF OF MARKER HYGIENE. The prompt's own rule ("NEVER
+    copy the [pNNNN] markers into any output field or segment text") is the
+    first half; this is the backstop for a model that does it anyway, and it
+    is the more consequential half under the block-transcript contract. A
+    marker is PURE RENDERING -- `scripts/review_spine.py::render_block_marker`
+    injects it into the text the model reads and it exists in no `.docx` and
+    in no `paragraph["text"]`. So a ``keep``/``delete`` segment that opens
+    with one does not match the block's real characters, and
+    `block_transcript.validate_block_patches` rejects the WHOLE transcript as
+    ``source_mismatch`` -- not one issue degraded to flag-only the way a
+    marker-poisoned v2 quote was, but every edit in the response
+    lost at once. That is a large blast radius for a formatting slip the
+    pipeline itself created.
+
+    WHERE IT RUNS. Segment ``text`` on every ``block_patches[].segments``
+    entry, ``new_text`` on every ``block_ops`` entry, and every string-valued
+    field of every Issue-shaped object (`_issue_shaped_objects`) -- not a
+    hand-listed subset of issue fields: the model can copy a marker into any
+    prose field it writes, and a marker is never legitimate content in ANY of
+    them. ``block_id``/``anchor_block_id`` are deliberately NOT stripped: an
+    id is supposed to be a bare ``pNNNN``, and a bracketed one is a real
+    addressing error that `block_transcript` must reject as
+    ``unknown_block_id`` rather than have silently repaired underneath it.
+
+    Removing a marker does not touch model judgment -- the same narrow,
+    technical reshaping `_strip_rendered_heading_markers` and
+    `_denullify_unrepresentable_issue_fields` perform: what the model
+    communicated is unchanged, and only pipeline-injected rendering it should
+    never have copied is dropped.
+
+    A value that is ONLY a marker is reduced to ``""``. For a segment that is
+    then rejected by the schema (``minLength: 1``), which is correct: a
+    segment naming no text at all is not an edit, and inventing one would be
+    a repair. For an Issue field it is handled exactly as an empty value
+    already is downstream.
+    """
+    if not isinstance(parsed, dict):
+        return
+
+    def stripped(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        return RENDERED_BLOCK_MARKER_PATTERN.sub("", value, count=1)
+
+    for patch in parsed.get("block_patches") or []:
+        if not isinstance(patch, dict):
+            continue
+        for segment in patch.get("segments") or []:
+            if isinstance(segment, dict) and "text" in segment:
+                segment["text"] = stripped(segment["text"])
+    for block_op in parsed.get("block_ops") or []:
+        if isinstance(block_op, dict) and "new_text" in block_op:
+            block_op["new_text"] = stripped(block_op["new_text"])
+    for issue in _issue_shaped_objects(parsed):
+        for key, value in list(issue.items()):
+            if key in ("block_id", "anchor_block_id"):
+                continue
+            issue[key] = stripped(value)
+
+
+def _without_leading_heading_line(value: str) -> str:
+    """`value` with its leading `RENDERED_HEADING_MARKER` LINE removed --
+    `""` when the marker line is the whole value. One definition so every
+    caller below agrees on what "remove the marker" means."""
+    _marker_line, newline, remainder = value.partition("\n")
+    return remainder if newline else ""
+
+
+def _strip_rendered_heading_markers(parsed: Any) -> None:
+    """Remove a LEADING `RENDERED_HEADING_MARKER` line from every SOURCE-op
+    block-transcript segment (`keep`/`delete` -- `block_transcript.SOURCE_OPS`),
+    in place, BEFORE the full-schema check -- the same in-place discipline as
+    ``_denullify_unrepresentable_issue_fields`` below.
+
+    See ``RENDERED_HEADING_MARKER``'s own comment for why this matters: the
+    marker is scaffolding this pipeline renders, present in no document and
+    in no block's own text, so a transcribed segment carrying it cannot prove
+    against the block and `block_transcript.validate_block_patches` rejects
+    the WHOLE transcript. The prompt already tells the model not to copy it
+    (the binary-decision overlay block's own ``"## "`` bullet); this is the
+    backstop for a model that does it anyway, which costs a real attorney
+    every tracked change in the response at once.
+
+    Removing it does not touch model judgment -- the same narrow, technical
+    reshaping ``_denullify_unrepresentable_issue_fields`` performs and
+    ``_stamp_pipeline_envelope`` documents: what the model communicated
+    (WHICH span of the contract it is editing) is unchanged; only
+    pipeline-injected rendering it should never have copied is dropped.
+
+    ONLY a leading marker line is removed, and only on a SOURCE op. A
+    ``"## "`` deeper inside a segment is genuine document text; an ``insert``
+    (and an ``insert_block_after``'s ``new_text``) is language the model is
+    AUTHORING rather than transcribing, so a leading ``"## "`` there is the
+    model's own text and removing it would be this backstop editing model
+    judgment -- which the "never best-effort patch model judgment" invariant
+    forbids.
+
+    Issue #628 removed this function's other half. Under v2 it also stripped
+    the marker off each issue's verbatim quote address; v3 has no such field
+    (`playbooks/output-schema-v3.json` -> `Issue`), so that branch could
+    never fire again.
+    """
+    if not isinstance(parsed, dict):
+        return
+
+    # A `keep`/`delete` segment is SOURCE text -- transcribed from the block's
+    # own characters -- and the heading line is in no block's `text` (the
+    # normalized record keeps `heading` as a separate key), so a segment that
+    # opens with one cannot prove and takes the whole transcript down with it.
+    for patch in parsed.get("block_patches") or []:
+        if not isinstance(patch, dict):
+            continue
+        for segment in patch.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            if segment.get("op") not in _block_transcript.SOURCE_OPS:
+                continue
+            text = segment.get("text")
+            if isinstance(text, str) and text.startswith(RENDERED_HEADING_MARKER):
+                segment["text"] = _without_leading_heading_line(text)
 
 
 def validate_model_response(
-    raw_text: str, *, issue_provenance: str = "model"
+    raw_text: str,
+    *,
+    issue_provenance: str = "model",
+    schema_path: Path = OUTPUT_SCHEMA_PATH,
 ) -> tuple[bool, Any]:
     """Unwrap -> parse -> stamp envelope -> strictly schema-validate a raw
     model response.
@@ -1462,7 +2408,7 @@ def validate_model_response(
     Returns (True, parsed_dict) on success, (False, error_message) on
     failure -- either invalid JSON or schema-invalid JSON.
 
-    Four normalizations run before the strict jsonschema check, all
+    Five normalizations run before the strict jsonschema check, all
     narrowly scoped so the "never best-effort patch malformed JSON"
     invariant still holds for model-judgment content: (1)
     `_extract_json_object` unwraps a prose/markdown-fence wrapper the model
@@ -1470,19 +2416,39 @@ def validate_model_response(
     intermittently do), (2) `_stamp_pipeline_envelope` fills the
     pipeline-owned envelope fields (`schema_version`, per-issue
     `provenance`) the model's instructed output_format does not ask it to
-    produce, (3) `_strip_rendered_heading_markers` removes a leading
+    produce, (2a) `_strip_rendered_heading_markers` removes a leading
     `RENDERED_HEADING_MARKER` line -- rendering this pipeline injected into
-    the document text, present in no real document -- from a `source_quote`
-    that copied it, which would otherwise be unlocatable and cost its issue
-    the tracked change, and (4) `_denullify_unrepresentable_issue_fields`
-    (issue #567 fix round 3) strips a `source_quote` the projected provider
+    the document text, present in no real document -- from every transcribed
+    `keep`/`delete` segment that copied it, which would otherwise fail the
+    whole transcript, (3) `_strip_rendered_block_markers` (issue #627) THEN
+    removes a leading `"[pNNNN] "` block-id marker -- likewise pure rendering
+    -- from every transcript segment text and every Issue string field, which
+    would otherwise fail the whole transcript as `source_mismatch`. That ORDER
+    is load-bearing since issue #642 moved the heading ABOVE the block marker
+    (`"## Heading\n[pNNNN] body"`): both patterns are anchored at `^`, so
+    stripping the block marker first would not match a value that copied the
+    heading line too, and the marker would survive into the transcript. And
+    (4) `_denullify_unrepresentable_issue_fields`
+    (issue #567 fix round 3) strips a field the projected provider
     schema forced to be nullable back to absent, the shape the full schema
-    already treats identically -- and which also finishes (3)'s
-    heading-ONLY case, so the two run in that order. None of the four
+    already treats identically. None of the four
     invents a `decision`, an `issues` list, or an issue's substantive keys
     -- a response missing those still fails, unpatched. `issue_provenance` is the provenance stamped on this
     pass's own issues ("model" for the primary pass, "critic-added" for the
     critic pass).
+
+    `schema_path` (issue #624) selects WHICH output-contract artifact is the
+    acceptance criterion, defaulting to `OUTPUT_SCHEMA_PATH` -- the active
+    one, which is `playbooks/output-schema-v3.json` since issue #627's hard
+    cutover, and which is what both model-facing passes and every real review
+    now validate against. Passing `OUTPUT_SCHEMA_V2_PATH` validates against
+    the superseded contract instead, for the callers named on
+    `load_output_schema`. Two things follow the selected artifact rather than a
+    hardcoded constant: the `schema_version` literal stamped onto the
+    envelope (`output_schema_version_const`) and the cross-response
+    `issue_key` uniqueness check (`_duplicate_issue_key_error`), which
+    draft-07 cannot express and which is a no-op on any artifact that does
+    not define `issue_key`.
     """
     try:
         parsed = json.loads(_extract_json_object(raw_text))
@@ -1490,11 +2456,24 @@ def validate_model_response(
         return False, f"invalid_json: {exc}"
     except ModelResponseContractViolation as exc:
         return False, f"invalid_response_contract: {exc}"
-    _stamp_pipeline_envelope(parsed, issue_provenance=issue_provenance)
+    schema = load_output_schema(schema_path)
+    _stamp_pipeline_envelope(
+        parsed,
+        issue_provenance=issue_provenance,
+        schema_version=output_schema_version_const(schema),
+    )
+    # ORDER MATTERS (issue #642). review_spine renders a heading-bearing
+    # paragraph as "## Heading\n[pNNNN] body", so a model that copies both
+    # markers hands us a value STARTING with the heading line. Both patterns
+    # are anchored at `^`, so stripping the block marker first would not match
+    # (the string starts with "## "), and the marker would survive into the
+    # transcript and fail it as `source_mismatch`. Heading line first, then
+    # the block marker that introduces the body.
     _strip_rendered_heading_markers(parsed)
+    _strip_rendered_block_markers(parsed)
     _denullify_unrepresentable_issue_fields(parsed)
     try:
-        jsonschema.validate(instance=parsed, schema=load_output_schema())
+        jsonschema.validate(instance=parsed, schema=schema)
     except jsonschema.ValidationError as exc:
         # Name WHERE the response broke, not just what was wrong with it.
         # `exc.message` alone reads "'medium' is not one of [...]" with no
@@ -1506,6 +2485,9 @@ def validate_model_response(
         location = "/".join(str(part) for part in exc.absolute_path)
         suffix = f" (at {location})" if location else ""
         return False, f"schema_invalid: {exc.message}{suffix}"
+    duplicate = _duplicate_issue_key_error(parsed, schema)
+    if duplicate is not None:
+        return False, f"schema_invalid: {duplicate}"
     return True, parsed
 
 
@@ -1530,6 +2512,67 @@ def _error_token(last_error: Any) -> str:
     return last_error.split(":", 1)[0]
 
 
+def authors_block_transcripts(schema: dict[str, Any]) -> bool:
+    """Whether `schema` is a block-transcript output contract -- i.e. it
+    defines a top-level `block_patches` carrier (issue #627).
+
+    Re-exported from `model_output_schema`, which owns schema introspection,
+    so the REQUEST projection and this pass's own enforcement decide "does
+    the model author replacement text here?" from ONE implementation rather
+    than two that can disagree.
+
+    WHAT IT GATES HERE: pass-time replacement-text enforcement. Under v1/v2 the
+    model authored `issues[].proposed_replacement_text` itself, so
+    `replacement_text_enforcement` could and had to judge it the moment the
+    response validated -- including the `empty_replacement_text` rule, which
+    fires when a REQUEST_CHANGE issue on a redline-permitting topic carries
+    no replacement at all. Under v3 the model does not author that field --
+    the prompt explicitly forbids it, and the pipeline DERIVES it from the
+    proven transcript in `redline_generate.generate_redline_from_blocks`,
+    which runs the SAME pen rules against the derived text. Judging the
+    model's (absent) value here would fail every well-formed v3 response as
+    `empty_replacement_text` and burn the whole retry budget on a field the
+    model was told not to send.
+
+    So the enforcement does not disappear; it moves to the only place the
+    text it judges actually exists. A caller that selects the v2 artifact
+    (the tests that pin the superseded contract -- not the third-party path,
+    which pins v3 itself) still gets pass-time enforcement, unchanged.
+    """
+    return _mos.authors_block_transcripts(schema)
+
+
+def _reject_block_transcript(parsed: Any, block_map: Any) -> str | None:
+    """`"block_transcript_rejected: <detail>"` when `parsed` carries a block
+    transcript that does not prove against `block_map`, else `None` (issue
+    #627).
+
+    `None` -- i.e. nothing to check -- in three cases, all of them ordinary:
+    no `block_map` was supplied by the caller, the response carries no
+    `block_patches`/`block_ops` at all (every ACCEPT, and every v1/v2-shaped
+    response), or the transcript proved.
+
+    This is a PRE-CHECK, never the authority.
+    `redline_generate.generate_redline_from_blocks` proves the transcript
+    again against a block map it re-derives from the document bytes itself,
+    and that remains the fail-closed gate on what reaches a `.docx`. This one
+    exists to spend a retry while a retry is still available.
+    """
+    if not isinstance(block_map, dict) or not block_map or not isinstance(parsed, dict):
+        return None
+    block_patches = parsed.get("block_patches") or []
+    block_ops = parsed.get("block_ops") or []
+    if not block_patches and not block_ops:
+        return None
+    proven = _block_transcript.validate_block_patches(block_patches, block_ops, block_map)
+    if proven.get("status") == "proven":
+        return None
+    return (
+        f"{BLOCK_TRANSCRIPT_ERROR_TOKEN}: "
+        f"{render_block_transcript_failures(proven.get('failures'))}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Orchestration: assemble -> cap-check -> invoke -> validate -> bounded
 # retry -> ledger every attempt via a finally path.
@@ -1539,28 +2582,57 @@ def _error_token(last_error: Any) -> str:
 def run_primary_pass(
     *,
     review_id: str,
-    diff_hunks: list[dict[str, Any]],
-    anchored_clauses: list[dict[str, Any]],
     retrieved_precedent: list[dict[str, Any]],
     playbook: dict[str, Any],
     model_client: "_model_client.BedrockModelClient",
     model_id: str,
     ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],
     doc_text: str = "",
-    doc_paragraphs: list[dict[str, Any]] | None = None,
     toaster_guidance: str = "",
     instructions_text: str = "",
     notes_mode: str = "external",
     max_input_tokens: int = MAX_INPUT_TOKENS,
     max_output_tokens: int = MAX_OUTPUT_TOKENS,
     max_retries: int = MAX_RETRIES_PER_PASS,
-    full_doc_token_threshold: int = DEFAULT_FULL_DOC_TOKEN_THRESHOLD,
     system_blocks_override: list[dict[str, Any]] | None = None,
     playbook_hash_override: str | None = None,
+    output_schema_path: Path = OUTPUT_SCHEMA_PATH,
+    block_map: dict[str, Any] | None = None,
     cancel_checkpoint: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run the primary review pass end-to-end (data-flow steps 14-15-17 for
     the primary pass).
+
+    `output_schema_path` (issue #624, default `OUTPUT_SCHEMA_PATH` =
+    `playbooks/output-schema-v3.json` since issue #627) is the one place the
+    ACTIVE output contract is named for this pass: it feeds all three schema
+    seams together -- the model-facing tool schema (#418), the provider-safe
+    projected schema (#567), and `validate_model_response`'s acceptance
+    check -- so a caller cannot select an artifact for one of them and
+    silently leave the others on another. `OUTPUT_SCHEMA_V2_PATH` remains
+    selectable for a caller that must still speak the superseded contract.
+
+    `block_map` (issue #627, default `None`): the addressing view over the
+    SAME normalized paragraphs `doc_text` was rendered from
+    (`extraction_normalization_stage.build_block_map`). When given, a
+    schema-valid response carrying a block transcript is PROVEN against it
+    (`block_transcript.validate_block_patches`) before this pass returns OK,
+    and a rejection spends one unit of the SAME bounded retry budget with the
+    divergence context in the correction -- the "informed retry" half of the
+    cutover.
+
+    WHY THE PROOF BELONGS HERE AND NOT ONLY AT STAGE 5. `redline_generate
+    .generate_redline_from_blocks` re-derives its own block map and proves
+    the transcript again -- that is the authoritative, fail-closed check and
+    it does not move. But by the time stage 5 runs, the retry budget is spent
+    and the model is gone, so a rejection there is TERMINAL for the whole
+    review: `validate_block_patches` never returns a partial proof, so one
+    mistranscribed paragraph loses every edit in the response. Proving here
+    too converts the most recoverable failure the new contract can produce --
+    the model retyped a sentence instead of copying it -- from "the review
+    dies" into "ask again, and show it where it diverged". `None` (the
+    default) skips the check entirely, so a caller that has no block map
+    behaves exactly as it did before this issue.
 
     `cancel_checkpoint` (default `None`): called before each attempt; it
     raises if the reviewer has asked to stop, and that exception propagates
@@ -1570,10 +2642,9 @@ def run_primary_pass(
     raises is deliberately not caught by the attempt loop's own handlers: a
     cancellation is not a model failure and must not consume a retry.
 
-    Every returned status dict also carries `input_mode`
-    (`"full_document"` | `"section_outline"`, issue #419) -- whether
-    `doc_text` fit under `full_doc_token_threshold` and was sent in full, or
-    was replaced by a section outline (see `resolve_input_mode`).
+    `doc_text` is always sent in full (issue #625 deleted the
+    section-outline fallback): either the whole document reaches the model
+    or the pass fails closed as `document_too_large` below.
 
     Returns one of:
       {"status": "MANUAL_REVIEW_REQUIRED", "reason": "document_too_large", ...}
@@ -1582,7 +2653,7 @@ def run_primary_pass(
         model's context length (model_client.ModelContextLengthExceededError)
         -- the SAME fail-closed oversize outcome either way, never a
         generic pipeline ERROR.
-      {"status": "OK", "response": {...}, "attempts": N, "input_mode": ..., ...}
+      {"status": "OK", "response": {...}, "attempts": N, ...}
         -- schema-valid response obtained within the retry budget.
       {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "attempts": N, ...}
         -- still schema-invalid after the one bounded retry.
@@ -1652,7 +2723,18 @@ def run_primary_pass(
     # `model_client` whose `invoke()` predates this kwarg (every existing
     # test double) is completely unaffected when the flag is off, and the
     # request payload stays byte-identical to today.
-    tool_spec = _mos.model_facing_output_schema() if _config.structured_output_enabled() else None
+    # Issue #522: `notes_mode` is threaded into BOTH projections below for
+    # the same reason `assemble_system_blocks` gets it -- the prompt half
+    # of the gate asks for `internal_rationale_for_footnote` in
+    # `internal`/`both`, and under provider-enforced structured output the
+    # projected schema is what decides whether the model may actually emit
+    # it. A mode-blind projection here would silently un-ask the question
+    # the prompt just asked.
+    tool_spec = (
+        _mos.model_facing_output_schema(output_schema_path, notes_mode=notes_mode)
+        if _config.structured_output_enabled()
+        else None
+    )
 
     # Issue #567: the provider-safe projected schema (SEPARATE from
     # `tool_spec` above -- see model_output_schema.py's module docstring),
@@ -1669,7 +2751,9 @@ def run_primary_pass(
     # `schema_enforcement_requested` ledger/result field below, not the
     # sole enforcement point.
     output_schema = (
-        _mos.project_output_schema_for_provider()
+        _mos.project_output_schema_for_provider(
+            path=output_schema_path, notes_mode=notes_mode
+        )
         if (model_capabilities or {}).get("structured_outputs")
         else None
     )
@@ -1680,6 +2764,13 @@ def run_primary_pass(
     # `resolve_pen_rules_bundle`'s docstring for the OPF-shaped-playbook
     # fallback-to-None rationale.
     pen_rules_bundle = resolve_pen_rules_bundle(playbook)
+
+    # Issue #627: OFF under a block-transcript contract -- see
+    # `authors_block_transcripts` for why, and for where the enforcement went
+    # instead (stage 5, against the DERIVED replacement text).
+    pass_time_replacement_text_enforcement_off = authors_block_transcripts(
+        load_output_schema(output_schema_path)
+    )
 
     system_blocks = (
         system_blocks_override
@@ -1693,26 +2784,15 @@ def run_primary_pass(
     # -- resolved from the SAME model_capabilities #562 already plumbed
     # above. `assemble_user_content_primary` returns
     # `assemble_user_prompt_primary`'s unmodified plain string whenever
-    # caching would not help (capability False, or no full document to
-    # cache), and issue #568's cached two-block form only when it would --
-    # see that function's own docstring.
+    # caching would not help (capability False), and issue #568's cached
+    # two-block form only when it would -- see that function's own
+    # docstring.
     prompt_caching_enabled = bool((model_capabilities or {}).get("prompt_caching"))
     user_content = assemble_user_content_primary(
-        diff_hunks=diff_hunks,
-        anchored_clauses=anchored_clauses,
         retrieved_precedent=retrieved_precedent,
         doc_text=doc_text,
-        doc_paragraphs=doc_paragraphs,
-        full_doc_token_threshold=full_doc_token_threshold,
         prompt_caching_enabled=prompt_caching_enabled,
     )
-    # Issue #419: which branch assemble_user_prompt_primary's own gate just
-    # took, via the SAME resolve_input_mode() call so the two can never
-    # independently drift. Reported on every returned status below (not just
-    # OK) so the degrade this threshold controls is observable end to end --
-    # never only visible by re-deriving it from doc_text/full_doc_token_threshold
-    # after the fact.
-    input_mode = resolve_input_mode(doc_text, full_doc_token_threshold)
 
     assembled_tokens = assembled_prompt_tokens(system_blocks, user_content)
     # Issue #267 AC: the ledger records the projected view's hash alongside
@@ -1732,7 +2812,6 @@ def run_primary_pass(
             "reason": "document_too_large",
             "assembled_tokens": assembled_tokens,
             "max_input_tokens": max_input_tokens,
-            "input_mode": input_mode,
         }
 
     attempts_allowed = 1 + max_retries
@@ -1798,9 +2877,41 @@ def run_primary_pass(
             raw_response = model_client.invoke(**invoke_kwargs)
             attempt_duration_ms = int((time.monotonic() - attempt_started_monotonic) * 1000)
             is_valid, parsed_or_error = validate_model_response(
-                raw_response, issue_provenance="model"
+                raw_response, issue_provenance="model", schema_path=output_schema_path
             )
             if is_valid:
+                # Issue #627: prove the block transcript against the real
+                # document BEFORE accepting the response. Runs only when the
+                # caller supplied a `block_map` AND the response actually
+                # carries a transcript -- an ACCEPT, and any v1/v2-shaped
+                # response, has neither carrier and skips this untouched.
+                #
+                # Shape-driven, exactly like `review_spine.uses_block_mode`:
+                # the carriers are the honest signal on the object in hand,
+                # not an envelope version string.
+                transcript_rejection = _reject_block_transcript(
+                    parsed_or_error, block_map
+                )
+                if transcript_rejection is not None and attempt < attempts_allowed:
+                    last_error = transcript_rejection
+                    correction = last_error
+                    outcome = "retry"
+                    continue
+                if transcript_rejection is not None:
+                    # Budget spent and the transcript still does not prove.
+                    # Fail the pass rather than hand stage 5 a response whose
+                    # edits are already known not to apply: that would burn
+                    # the critic pass, reconciliation and the leakage scan to
+                    # arrive at the same rejection with less information
+                    # about why.
+                    last_error = transcript_rejection
+                    outcome = "failure"
+                    return {
+                        "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+                        "attempts": attempt,
+                        "assembled_tokens": assembled_tokens,
+                        "last_error": last_error,
+                    }
                 # Issue #293 scope item 6: immediately after schema
                 # validation succeeds, run post-validation replacement-text
                 # enforcement per issue against its RESOLVED pen rules. A
@@ -1808,8 +2919,12 @@ def run_primary_pass(
                 # budget (no new retry budget) -- retry once, then demote the
                 # violating issue(s) to flag-only on the final attempt rather
                 # than failing the whole pass.
-                rt_failures = _rte.check_issues_replacement_text(
-                    _rte.collect_checkable_issues(parsed_or_error), pen_rules_bundle
+                rt_failures = (
+                    []
+                    if pass_time_replacement_text_enforcement_off
+                    else _rte.check_issues_replacement_text(
+                        _rte.collect_checkable_issues(parsed_or_error), pen_rules_bundle
+                    )
                 )
                 if rt_failures and attempt < attempts_allowed:
                     replacement_text_failures = [result.failure for _issue, result in rt_failures]
@@ -1827,13 +2942,6 @@ def run_primary_pass(
                     "response": parsed_or_error,
                     "attempts": attempt,
                     "assembled_tokens": assembled_tokens,
-                    # Issue #419: "full_document" | "section_outline" -- see
-                    # resolve_input_mode above. Threaded by
-                    # scripts/review_spine.py into the final ReviewResult and
-                    # read by scripts/reconciliation.py::reconcile() to
-                    # degrade confidence_state and append the fixed
-                    # outline-mode notice to verdict_summary.
-                    "input_mode": input_mode,
                     # Issue #514: the model the PROVIDER says it served on
                     # the attempt that actually produced this result. The
                     # ledger records every attempt, but the review row wants
@@ -1995,7 +3103,6 @@ def run_primary_pass(
                 "reason": "document_too_large",
                 "assembled_tokens": assembled_tokens,
                 "max_input_tokens": max_input_tokens,
-                "input_mode": input_mode,
             }
 
     # Retry budget exhausted, still schema-invalid: terminal, distinct from
@@ -2005,5 +3112,4 @@ def run_primary_pass(
         "attempts": attempts_allowed,
         "last_error": last_error,
         "assembled_tokens": assembled_tokens,
-        "input_mode": input_mode,
     }

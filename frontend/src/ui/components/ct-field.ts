@@ -39,6 +39,24 @@
  * whenever the control child is added, replaced, or removed — the closest
  * light-DOM equivalent of a shadow `<slot>`'s `slotchange` event (the
  * ticket's "on slot change").
+ *
+ * `narrow` (issue #601, docs/frontend-design-system.md §6): a reflected
+ * Lit boolean property (unlike `label`/`hint`/`error` above, it drives no
+ * synchronous DOM build, only a CSS attribute selector in ct-field.css, so
+ * Lit's normal — microtask-deferred — reactive-property/attribute
+ * reflection is fine here; there is nothing for a synchronous
+ * `getByLabelText` to miss). When set, the slotted CONTROL (never the
+ * label/hint/error text) opts out of the flex column's default
+ * `align-items: stretch`, so e.g. a 3-digit day count renders at its own
+ * intrinsic width instead of being stretched to fill whatever container
+ * (`ct-stack`, the `ct-columns` grid) this field happens to sit in — the
+ * "ninety day box that's literally the entire width of the viewport" the
+ * ticket names. Only the control's alignment changes; the label/hint/error
+ * stay full width and wrap normally, which is what keeps this safe against
+ * long hint text overflowing (an `align-items: flex-start` on the whole
+ * field would size EVERY child, hint paragraph included, to its own
+ * max-content width, which is exactly the wide-single-line-text overflow
+ * ct-app-shell.css's `minmax(0, 1fr)` comment warns about elsewhere).
  */
 import { LitElement } from 'lit';
 import { defineOnce } from '../define';
@@ -49,6 +67,12 @@ const TAG = 'ct-field';
 let nextFieldId = 0;
 
 export class CtField extends LitElement {
+  static properties = {
+    narrow: { type: Boolean, reflect: true },
+  };
+
+  declare narrow: boolean;
+
   createRenderRoot(): this {
     return this;
   }
@@ -63,6 +87,11 @@ export class CtField extends LitElement {
   private _label = '';
   private _hint = '';
   private _error = '';
+
+  constructor() {
+    super();
+    this.narrow = false;
+  }
 
   connectedCallback(): void {
     super.connectedCallback();

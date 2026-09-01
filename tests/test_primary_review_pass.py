@@ -134,10 +134,13 @@ def _flag_only_response(topic_ids: list[str]) -> str:
         (MODEL_RESPONSES_DIR / "primary_request_change_valid.json").read_text(encoding="utf-8")
     )["issues"][0]
     issues = []
-    for topic_id in topic_ids:
+    for index, topic_id in enumerate(topic_ids, start=1):
         issue = dict(base_issue)
+        # Issue #627: v3 requires a response-local `issue_key`, mutually
+        # unique across the response -- a shared "I1" would be rejected as a
+        # duplicate, not silently merged.
+        issue["issue_key"] = f"I{index}"
         issue["playbook_topic_id"] = topic_id
-        issue["proposed_replacement_text"] = ""
         issue["section_ref"] = "3"
         issue["section_title"] = "Confidentiality"
         issue["counterparty_change_summary"] = f"Flag-only concern on topic {topic_id}."
@@ -148,7 +151,7 @@ def _flag_only_response(topic_ids: list[str]) -> str:
         issues.append(issue)
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
+            "schema_version": pp.OUTPUT_SCHEMA_VERSION,
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "issues": issues,
@@ -194,7 +197,31 @@ def test_prompt_names_mode_none_topics_as_flag_only(failures: list[str]) -> None
             "[1c] Replacement-text-modes block must explicitly say FLAG ONLY for a "
             "mode='none' topic."
         )
-    if "proposed_replacement_text" not in block:
+    # [1d] The block must name the mechanism a flag-only topic actually
+    # constrains -- and that mechanism is contract-dependent, so this reads
+    # the ACTIVE contract exactly the way production selects the wording
+    # (`render_replacement_text_modes_block` branches on
+    # `authors_block_transcripts(load_output_schema())`). Pinning the v2
+    # phrasing here is what made issue #627's cutover red: under v3 the
+    # overlay FORBIDS `proposed_replacement_text` outright, so a modes block
+    # still naming it would instruct a field the active validator rejects --
+    # the drift this test exists to prevent, inverted.
+    if pp.authors_block_transcripts(pp.load_output_schema()):
+        if "proposed_replacement_text" in block:
+            failures.append(
+                "[1d] Under a block-transcript contract the replacement-text-modes "
+                "block must NOT name \"proposed_replacement_text\" -- the same "
+                "assembled prompt forbids that key, so instructing it here would "
+                "produce a response the active validator rejects."
+            )
+        for token in ("block_patches", "block_ops", "issue_key"):
+            if token not in block:
+                failures.append(
+                    f"[1d] Under a block-transcript contract the replacement-text-modes "
+                    f"block must express flag-only in transcript terms (author no edit); "
+                    f"missing {token!r}."
+                )
+    elif "proposed_replacement_text" not in block:
         failures.append(
             "[1d] Replacement-text-modes block must name the proposed_replacement_text "
             "field it constrains."
@@ -243,8 +270,6 @@ def test_flag_only_response_on_mode_none_topics_succeeds_in_one_attempt(failures
 
     result = pp.run_primary_pass(
         review_id="review-nda-mode-none",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         playbook=playbook,
         model_client=client,
@@ -267,7 +292,12 @@ def test_flag_only_response_on_mode_none_topics_succeeds_in_one_attempt(failures
     if len(issues) != len(mode_none_topics):
         failures.append(f"[2d] Expected {len(mode_none_topics)} issues in the response; got {len(issues)}")
     for issue in issues:
-        if issue.get("proposed_replacement_text") != "":
+        # Issue #627: under the block-transcript contract the model does not
+        # author `proposed_replacement_text` at all -- the pipeline derives
+        # it from a proven transcript, and a flag-only issue has no
+        # transcript to derive from. "Never carries replacement text" is
+        # therefore "the key is absent", not "the key is an empty string".
+        if "proposed_replacement_text" in issue:
             failures.append(
                 f"[2e] A mode='none' topic's issue must never carry replacement text, demoted "
                 f"or otherwise; got {issue!r}"
