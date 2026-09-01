@@ -229,9 +229,26 @@ def test_floor_block_present_and_unwaivable(failures: list[str]) -> None:
         if tag not in floor_text:
             failures.append(f"[4b] Floor block must name every hard_rejections rule id; missing {tag}.")
 
-    for phrase in ("REQUEST_CHANGE", "source_quote"):
+    # v3 contract (issue #627): a Floor violation is raised as a
+    # REQUEST_CHANGE issue carrying an `issue_key`, and the fix is expressed
+    # as block_patches/block_ops segments tagged with that key. This block
+    # used to demand `source_quote` -- which `output-schema-v3.json` rejects
+    # (`additionalProperties: false`), so a model obeying it failed
+    # validation, burned the single retry and terminated the review on
+    # exactly the non-negotiable findings.
+    for phrase in ("REQUEST_CHANGE", "issue_key", "block_patches"):
         if phrase not in floor_text:
-            failures.append(f"[4c] Floor block must instruct a REQUEST_CHANGE issue with source_quote on violation; missing {phrase!r}.")
+            failures.append(
+                f"[4c] Floor block must instruct a REQUEST_CHANGE issue carrying an "
+                f"issue_key, with the fix expressed as block_patches/block_ops; "
+                f"missing {phrase!r}."
+            )
+    if "source_quote" in floor_text:
+        failures.append(
+            "[4c-v3] Floor block must NOT mention `source_quote`: the v3 Issue forbids "
+            "that key, and the overlay already carries the single blanket prohibition. "
+            "The transcribed segments are the citation."
+        )
 
     upper = floor_text.upper()
     if "NON-NEGOTIABLE" not in upper and "NEVER WAIVED" not in floor_text and "CAN NEVER BE WAIVED" not in floor_text:
@@ -283,8 +300,6 @@ def test_run_primary_pass_threads_toaster_guidance_into_system_prompt(failures: 
 
     pp.run_primary_pass(
         review_id="review-398-primary-guidance",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=playbook,
         model_client=client,
@@ -311,8 +326,6 @@ def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: l
 
     cp.run_critic_pass(
         review_id="review-398-critic-guidance",
-        diff_hunks=[],
-        anchored_clauses=[],
         primary_output=primary_output,
         playbook=playbook,
         model_client=client,
@@ -336,23 +349,39 @@ def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: l
 # ---------------------------------------------------------------------------
 
 
-def _primary_request_change_response_for_unmodified_draft() -> str:
+def _primary_request_change_response_for_unmodified_draft(docx_bytes: bytes) -> str:
     """Run B below drives `run_review` over the UNMODIFIED draft
     (`_build_draft_docx(dsf_module, {})` -- no override, so sec-8's text IS
     the standard form's own text verbatim), unlike
-    `test_review_spine._primary_request_change_response`'s `source_quote`
-    (added for issue #379), which matches THAT file's own OVERRIDDEN sec-8
-    draft text instead. Reuses the same issue shape, with `source_quote`
-    swapped for one that actually locates in THIS test's unmodified
-    document -- issue #379's quote-based patcher requires a real, locatable
-    quote to produce `redline_bytes`; this test's own crux (AC1: the
-    guidance-driven ACCEPT -> REQUEST_CHANGE flip) is otherwise unaffected
-    by this cosmetic difference."""
+    `test_review_spine._primary_request_change_response_with_transcript`,
+    whose transcript addresses THAT file's own OVERRIDDEN sec-8 draft text.
+
+    Issue #627: a block transcript reproduces one specific document's
+    characters, so this builds its own against `docx_bytes` -- id derived by
+    the production extractor, deleted span taken from the block's own text.
+    A transcript that named the overridden text would be rejected as
+    `source_mismatch` here, which is the contract working, not a fixture to
+    force. This test's own crux (AC1: the guidance-driven ACCEPT ->
+    REQUEST_CHANGE flip) is unaffected either way."""
+    from test_review_spine import block_id_for_text
+
     response = json.loads(_primary_request_change_response())
-    response["issues"][0]["source_quote"] = _SEC8_STANDARD_TEXT
-    response["issues"][0]["proposed_replacement_text"] = (
-        f"{_SEC8_STANDARD_TEXT} This position is reconfirmed for every deal this quarter."
+    response["issues"][0]["replacement_scope_note"] = (
+        "The reviewing team asked for this clause to be restated in full this quarter."
     )
+    response["block_patches"] = [
+        {
+            "block_id": block_id_for_text(docx_bytes, _SEC8_STANDARD_TEXT),
+            "segments": [
+                {"op": "keep", "text": _SEC8_STANDARD_TEXT},
+                {
+                    "op": "insert",
+                    "text": " This position is reconfirmed for every deal this quarter.",
+                    "issue_key": "I1",
+                },
+            ],
+        }
+    ]
     return json.dumps(response)
 
 
@@ -398,7 +427,7 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
     )
     request_change_client = model_client.FakeBedrockClient(
         {
-            primary_id: [_primary_request_change_response_for_unmodified_draft()],
+            primary_id: [_primary_request_change_response_for_unmodified_draft(docx_bytes)],
             critic_id: [_critic_no_delta_response()],
         }
     )
@@ -441,28 +470,13 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
 # ---------------------------------------------------------------------------
 
 
-def test_floor_violation_yields_model_issue_with_source_quote(failures: list[str]) -> None:
+def test_floor_violation_yields_model_issue_with_a_document_edit(failures: list[str]) -> None:
     playbook = _sample_playbook()  # synthetic-generic playbook fixture -- 15 hard_rejections
-    fixture_text = _load_fixture_text("primary_request_change_with_source_quote_valid.json")
+    fixture_text = _load_fixture_text("primary_request_change_with_block_transcript_valid.json")
     client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [fixture_text]})
 
     result = pp.run_primary_pass(
         review_id="review-398-floor-violation",
-        diff_hunks=[
-            {
-                "kind": "modified_new",
-                "anchor": "sec-8",
-                "text": "Each party's aggregate liability shall not exceed $75,000.",
-            }
-        ],
-        anchored_clauses=[
-            {
-                "anchor": "sec-8",
-                "standard_text": "Each party's aggregate liability shall not exceed $150,000.",
-                "counterparty_text": "Each party's aggregate liability shall not exceed $75,000.",
-                "delta": "$150,000 -> $75,000",
-            }
-        ],
         retrieved_precedent=[],
         playbook=playbook,
         model_client=client,
@@ -485,10 +499,27 @@ def test_floor_violation_yields_model_issue_with_source_quote(failures: list[str
         failures.append(f"[8c] Expected the Floor-violation issue's decision to be REQUEST_CHANGE; got {issue.get('decision')!r}")
     if issue.get("provenance") != "model":
         failures.append(f"[8d] AC2: expected provenance='model' (the model path, no detector); got {issue.get('provenance')!r}")
-    if not issue.get("source_quote"):
-        failures.append("[8e] AC2: expected a non-empty, locatable source_quote on the Floor-violation issue.")
-    elif issue["source_quote"] != "Each party's aggregate liability shall not exceed $75,000.":
-        failures.append(f"[8f] Expected source_quote to be the exact verbatim counterparty text; got {issue['source_quote']!r}")
+    # Issue #627: AC2 asked for an issue that ADDRESSES the offending span
+    # concretely, not merely narrates it -- under v1/v2 that was a verbatim
+    # `source_quote`, and under the block-transcript contract it is an edit
+    # naming the issue's own `issue_key` against a real block. The property
+    # is unchanged; the carrier moved.
+    if not issue.get("issue_key"):
+        failures.append("[8e] AC2: expected the Floor-violation issue to carry an issue_key.")
+    else:
+        response = result.get("response") or {}
+        authored = [
+            segment
+            for patch in (response.get("block_patches") or [])
+            for segment in (patch.get("segments") or [])
+            if segment.get("issue_key") == issue["issue_key"]
+        ]
+        if not authored:
+            failures.append(
+                "[8f] AC2: expected the Floor-violation issue to be expressed by at least "
+                "one edit naming its own issue_key -- an issue that addresses nothing in "
+                "the document cannot become a redline."
+            )
 
     # Plumbing proof: the Floor block (derived from hard_rejections) really
     # reached the model's system prompt for THIS call -- this is what
@@ -600,7 +631,7 @@ _ALL_TESTS = [
     test_run_primary_pass_threads_toaster_guidance_into_system_prompt,
     test_run_critic_pass_threads_toaster_guidance_into_system_prompt,
     test_run_review_toaster_guidance_flips_accept_to_request_change,
-    test_floor_violation_yields_model_issue_with_source_quote,
+    test_floor_violation_yields_model_issue_with_a_document_edit,
     test_submit_review_threads_toaster_guidance_into_execution_input,
     test_submit_review_defaults_toaster_guidance_to_empty_string,
 ]

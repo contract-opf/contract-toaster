@@ -22,9 +22,9 @@ just the .ts source):
   B. The App Runner CfnService's RuntimeEnvironmentVariables contains every
      env var the mounted /api/* routes dereference: USERS_TABLE,
      AUDIT_TABLE, SYNC_STATUS_TABLE, REVIEWS_TABLE,
-     RETENTION_SETTINGS_TABLE, UPLOADS_BUCKET, OUTPUTS_BUCKET (in addition
-     to the pre-existing COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID /
-     AWS_REGION).
+     RETENTION_SETTINGS_TABLE, USER_PREFERENCES_TABLE (issue #523),
+     UPLOADS_BUCKET, OUTPUTS_BUCKET (in addition to the pre-existing
+     COGNITO_USER_POOL_ID / COGNITO_APP_CLIENT_ID / AWS_REGION).
   C. The API task-role IAM policy grants dynamodb access to the audit
      table, scoped to PutItem ONLY (append-only, per the documented audit
      posture in ARCHITECTURE.md "Audit posture" -- no GetItem, Query,
@@ -33,6 +33,9 @@ just the .ts source):
      sync_status table.
   E. The API task-role IAM policy grants dynamodb:GetItem and
      dynamodb:UpdateItem on the retention_settings table.
+  E2. The API task-role IAM policy grants dynamodb:GetItem and
+     dynamodb:UpdateItem on the user_preferences table (issue #523) -- the
+     per-user store behind GET/PUT /api/me/preferences.
   F. The API task-role IAM policy grants s3:GetObject on the UPLOADS bucket
      prefix (issue #449). Same class of bug as C-E, one bucket over: the
      only uploads grant the role ever held was s3:PutObject, so the
@@ -50,14 +53,14 @@ just the .ts source):
      the AWS target got AccessDenied from the first `put_object` (the
      Upload/DownloadInput/Download statements are scoped to `uploads/*` and
      `outputs/*` only, never `playbooks/*`).
-  H. The App Runner CfnService's RuntimeEnvironmentVariables includes
-     REQUOTE_ENABLED (issue #569, review round 3 fix) -- pipeline-stack.ts
-     already threads this flag to the settlement-side Lambda mirrors'
-     `compute_worst_case_reservation_usd_cents()`; this app-stack.ts service
-     is where the reserve side of that same function actually runs
-     (backend/src/reviews.py::reserve_spend), and had never been given the
-     same var, so turning the flag on at deploy time would permanently
-     desync reserve and settle by one primary-priced pass per review.
+  H. The App Runner CfnService's RuntimeEnvironmentVariables carries NO
+     REQUOTE_ENABLED (issue #628). Issue #569's review round 3 added that
+     var here so the reserve side (backend/src/reviews.py::reserve_spend)
+     could agree with the settlement-side Lambda mirrors whenever the flag
+     was on. Issue #628 deleted the pass, its module, its flag, and both
+     mirrors' copies of the term -- so threading the var now would be dead
+     deploy config wired to nothing, and this check is inverted rather than
+     deleted so a revert of half the change fails CI.
 
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
@@ -196,6 +199,11 @@ REQUIRED_ENV_VARS = {
     "SYNC_STATUS_TABLE": "contract-toaster-sync-status-dev",
     "REVIEWS_TABLE": "contract-toaster-reviews-dev",
     "RETENTION_SETTINGS_TABLE": "contract-toaster-retention-settings-dev",
+    # Issue #523: src/user_preferences.py dereferences this with
+    # os.environ[...] on GET/PUT /api/me/preferences -- the SPA calls the GET
+    # on every Review-tab mount, so an unset value is a KeyError -> HTTP 500
+    # on page load in a deployed environment.
+    "USER_PREFERENCES_TABLE": "contract-toaster-user-preferences-dev",
     "UPLOADS_BUCKET": "contract-toaster-uploads-dev",
     "OUTPUTS_BUCKET": "contract-toaster-outputs-dev",
 }
@@ -297,6 +305,28 @@ def check_cde_task_role_grants(policy: dict[str, Any]) -> list[str]:
             {"dynamodb:GetItem", "dynamodb:UpdateItem"} <= retention_actions,
             "retention_settings table grant includes GetItem and UpdateItem",
             f"got actions: {sorted(retention_actions)}",
+        )
+
+    # E2 (issue #523): user_preferences table -- GetItem + UpdateItem, the
+    # same read-then-upsert shape retention_settings uses. Without the grant
+    # the env var above just points the API at a table it cannot touch, so
+    # every /api/me/preferences call would 500 on AccessDenied instead of
+    # KeyError -- a different symptom, the same broken page.
+    prefs_statements = _statements_for_resource_substring(
+        statements, "table/contract-toaster-user-preferences-"
+    )
+    failures += _assert(
+        len(prefs_statements) >= 1,
+        "a policy statement grants access to the user_preferences table",
+    )
+    if prefs_statements:
+        prefs_actions: set[str] = set()
+        for s in prefs_statements:
+            prefs_actions |= _actions(s)
+        failures += _assert(
+            {"dynamodb:GetItem", "dynamodb:UpdateItem"} <= prefs_actions,
+            "user_preferences table grant includes GetItem and UpdateItem",
+            f"got actions: {sorted(prefs_actions)}",
         )
 
     # Regression guard: the pre-existing reviews/review-submissions/users
@@ -424,27 +454,27 @@ def check_g_playbook_artifacts_grant(policy: dict[str, Any]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check H -- REQUOTE_ENABLED reaches the RESERVE side (issue #569, review
-# round 3 fix). backend/src/reviews.py::compute_worst_case_reservation_usd_
-# cents() is flag-aware (config.requote_enabled(), which reads this exact env
-# var), and pipeline-stack.ts already threads it to the SETTLE side's two
-# Lambda mirrors (persistFn's stageEnv, the orphan reconciler's environment)
-# -- but this App Runner service, where reserve_spend actually runs, was
-# never given the same var. With the flag on at deploy time, reserve
-# (App Runner, env-blind -> always the flag-off figure) and settle (the two
-# Lambdas, flag-aware) would permanently disagree by one primary-priced pass
-# on every review, drifting daily_spend.reserved_usd_cents forever -- the
-# exact drift tests/test_spend_reservation_settlement.py's cross-module
-# parity test proves at the Python level but cannot see, since it patches
-# os.environ inside one process rather than covering the CDK env-threading
-# gap between two independently-synthesized stacks.
+# Check H -- REQUOTE_ENABLED reaches NOTHING (issue #628).
+#
+# Issue #569 (review round 3) threaded this var to the App Runner service so
+# the RESERVE side of `compute_worst_case_reservation_usd_cents()` could agree
+# with the two SETTLE-side Lambda mirrors when the flag was on. Issue #628
+# deleted the address-repair pass that reservation covered, its module,
+# `backend/src/config.py::requote_enabled`, and the term in both mirrors --
+# so the var now steers nothing at all.
+#
+# Inverted rather than deleted, deliberately: a half-revert that puts the
+# term back in one mirror while the other stays without it is exactly the
+# silent reserve/settle drift #569 fixed, and this synthesized-template check
+# is the only place that can see the CDK half of it.
+# `tests/test_spend_reservation_settlement.py` holds the Python half (all
+# three copies must ignore the var).
 # ---------------------------------------------------------------------------
 
 
-def check_h_requote_enabled_reaches_app_runner(service: dict[str, Any]) -> list[str]:
-    print("\nCheck H: App Runner RuntimeEnvironmentVariables includes "
-          "REQUOTE_ENABLED (the RESERVE-side flag pipeline-stack.ts already "
-          "threads to the SETTLE-side Lambda mirrors) …")
+def check_h_requote_enabled_is_gone_from_app_runner(service: dict[str, Any]) -> list[str]:
+    print("\nCheck H: App Runner RuntimeEnvironmentVariables no longer carries "
+          "REQUOTE_ENABLED (issue #628 deleted the pass it reserved for) …")
     failures: list[str] = []
 
     image_config = (
@@ -457,12 +487,11 @@ def check_h_requote_enabled_reaches_app_runner(service: dict[str, Any]) -> list[
     by_name = {e.get("Name"): e.get("Value") for e in env_vars}
 
     failures += _assert(
-        "REQUOTE_ENABLED" in by_name,
-        "RuntimeEnvironmentVariables includes REQUOTE_ENABLED",
-        f"present names: {sorted(by_name.keys())} -- without this, the App "
-        f"Runner service (the reserve side) can never agree with the "
-        f"settlement-side Lambda mirrors on the worst-case reservation "
-        f"whenever the flag is turned on.",
+        "REQUOTE_ENABLED" not in by_name,
+        "RuntimeEnvironmentVariables carries no REQUOTE_ENABLED",
+        f"present names: {sorted(by_name.keys())} -- the flag and the pass it "
+        f"gated were deleted by issue #628, so deploying this var would wire "
+        f"a live-looking switch to nothing.",
     )
 
     return failures
@@ -485,7 +514,7 @@ def main() -> int:
         all_failures += _assert(False, "AWS::AppRunner::Service resource found in App template")
     else:
         all_failures += check_b_runtime_env_vars(service)
-        all_failures += check_h_requote_enabled_reaches_app_runner(service)
+        all_failures += check_h_requote_enabled_is_gone_from_app_runner(service)
 
     policy = _api_task_role_policy(resources)
     if policy is None:

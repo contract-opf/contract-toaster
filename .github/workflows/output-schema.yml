@@ -1,4 +1,4 @@
-# Output-contract schema gate (issue #4, extended by issues #35 and #36)
+# Output-contract schema gate (issue #4, extended by issues #35, #36 and #624)
 #
 # Enforces checks on every change to the output schema, playbooks, or related docs:
 #
@@ -19,14 +19,27 @@
 #      and the root carries an optional `confidence_band` field; both are framed as
 #      system metadata (never a legal category). Invalid provenance values are rejected.
 #
-#   5. CRITIC-DELTA PRESENTATION GATE (issue #36): docs/output-contract.md carries a
+#   5. V3 OUTPUT-CONTRACT GATE (issue #624): playbooks/output-schema-v3.json — the
+#      Candidate E block-transcript contract (per-issue issue_key, top-level
+#      block_patches[]/block_ops[], no source_quote) — is a well-formed clean break,
+#      the every_issue_includes ⊆ issues[] subset rule holds against IT too, its
+#      block-transcript shapes are the ones scripts/block_transcript.py actually
+#      consumes, those shapes survive the provider-strict schema projection, and
+#      output-schema-v2.json remains the ACTIVE validator (v3 is dormant until the
+#      flip ticket moves the prompt and the validator together).
+#
+#   6. CRITIC-DELTA PRESENTATION GATE (issue #36): docs/output-contract.md carries a
 #      normative 'Critic-delta presentation' section specifying per-issue badges for
 #      contested replacements, side-by-side alternatives, critic-added attribution, and
 #      the download gate rule. ARCHITECTURE.md frontend section references the surface.
 #      CriticDelta schema has both contested_replacements and added_issues with
 #      critic_objection for badge text.
 #
-# No model invocation, no AWS credentials required.
+# No model invocation, no AWS credentials required. Checks 1-4 and 6 use only the
+# stdlib; check 5 needs the pinned `jsonschema` from requirements-dev.txt, because
+# v3's new shapes (oneOf branches, additionalProperties, minItems, patterns) are
+# outside what a hand-rolled validator honestly covers — and a validator that
+# accepts what the real one rejects is not a gate.
 # See docs/output-contract.md for the coupling rules.
 
 name: Output-contract schema gate
@@ -40,6 +53,10 @@ on:
       - "docs/output-contract.md"
       - "ARCHITECTURE.md"
       - "tests/test_output_schema.py"
+      - "tests/test_output_schema_v3.py"
+      - "scripts/model_output_schema.py"
+      - "scripts/primary_review_pass.py"
+      - "scripts/block_transcript.py"
       - "tests/test_provenance_confidence_band.py"
       - "tests/test_critic_delta_presentation.py"
       - ".github/workflows/output-schema.yml"
@@ -49,6 +66,10 @@ on:
       - "docs/output-contract.md"
       - "ARCHITECTURE.md"
       - "tests/test_output_schema.py"
+      - "tests/test_output_schema_v3.py"
+      - "scripts/model_output_schema.py"
+      - "scripts/primary_review_pass.py"
+      - "scripts/block_transcript.py"
       - "tests/test_provenance_confidence_band.py"
       - "tests/test_critic_delta_presentation.py"
       - ".github/workflows/output-schema.yml"
@@ -66,8 +87,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      # No pip install needed — the tests use only the stdlib.
 
       - name: Output-contract schema checks
         # Fails if any of:
@@ -88,6 +107,29 @@ jobs:
         #   - fixtures with invalid provenance values (empty, unknown, detector:) pass
         # A failed check blocks merge.
         run: python3 tests/test_provenance_confidence_band.py
+
+      - name: Install the v3 gate's validator dependency
+        # Pinned identically to requirements-dev.txt. Only the v3 step below
+        # needs it; every other step in this job is stdlib-only.
+        run: python3 -m pip install --disable-pip-version-check --quiet jsonschema==4.26.0
+
+      - name: v3 output-contract gate (issue #624)
+        # Fails if any of:
+        #   - playbooks/output-schema-v3.json is missing, or is not a clean break
+        #     (own $id, output_contract_version "v3", schema_version const bumped),
+        #     or output-schema-v1/v2.json were edited in place
+        #   - every_issue_includes is not a subset of v3's issues[] properties
+        #   - any valid/invalid fixture for a v3 shape (issue_key,
+        #     replacement_scope_note, block_patches segments, block_ops) is
+        #     misclassified, or an Issue/segment object is not additionalProperties:false
+        #   - a schema-valid block transcript is NOT proven by
+        #     scripts/block_transcript.py::validate_block_patches
+        #   - block_patches/segments/block_ops do not survive
+        #     scripts/model_output_schema.py's provider-strict projection
+        #   - a duplicate issues[].issue_key is accepted
+        #   - the live path stops defaulting to output-schema-v2.json
+        # A failed check blocks merge.
+        run: python3 tests/test_output_schema_v3.py
 
       - name: Critic-delta presentation surface gate (issue #36)
         # Fails if any of:

@@ -15,10 +15,12 @@
  *             (PasswordLogin.tsx only — App.tsx uses ct-app-shell, issue
  *             #390; the pre-auth login screen has its own nameplate
  *             instead, issue #391)
- *   Tabs      .ct-tabpanel  .ct-tab-group  .ct-tab-group__label (the tab
- *             STRIP itself is ct-tab-bar, issue #390; the group wrapper is
- *             app chrome around a second labeled `<ct-tab-bar>` instance,
- *             issue #477 — see App.tsx)
+ *   Tabs      .ct-tabpanel (the tab STRIP itself is ct-tab-bar, issue #390;
+ *             one flat `<ct-tab-bar>` instance renders the whole tab set,
+ *             issue #599 — App.tsx. #477's `.ct-tab-group`/
+ *             `.ct-tab-group__label` wrapper around a second labeled
+ *             instance was removed when #599 reversed that DECISION; see
+ *             git history for the retired classes)
  *   Sections  .ct-section  .ct-section-title  .ct-outcome-headline (issue
  *             #492 — the result panel's biggest text, colored per the
  *             outcome variant via an inline custom-property style rather
@@ -74,38 +76,25 @@
   padding-top: 0.25rem;
 }
 
-/* Admin tab group (issue #477) — the six admin-only tabs render as a SECOND
-   labeled `<ct-tab-bar>` instance (App.tsx) rather than joining the primary
-   row as flat peers. `.ct-tab-group` and `.ct-tab-group__label` are app
-   chrome wrapped AROUND that instance, not part of the ct-tab-bar element
-   itself, so they live here rather than in ct-tab-bar.css.
-   `.ct-tab-group__label` is the sighted-user counterpart to the second
-   instance's `aria-label="Admin"` (ct-tab-bar.ts's `label` prop) — visible
-   text is `aria-hidden` to avoid the two being announced back to back.
-   Wrapping stays the default `flex-wrap: wrap` behavior of
-   `.ct-tab-bar__track` (ct-tab-bar.css); this only adds the label and a
-   little breathing room so a wrap here reads as an intentional section, not
-   an accident (the whole point of #477). */
-.ct-tab-group {
-  margin-top: var(--ct-space-2);
-}
-.ct-tab-group__label {
-  display: block;
-  font-family: var(--ct-font-sans);
-  font-size: var(--ct-text-xs);
-  font-weight: 600;
-  color: var(--ct-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0 0 var(--ct-space-1);
-}
+/* .ct-tab-group / .ct-tab-group__label (issue #477's admin-tab-group
+   wrapper, a second labeled `<ct-tab-bar>` instance beneath the primary
+   row) were removed by issue #599, which reverses that DECISION per owner
+   directive (2026-08-20): App.tsx now renders one flat `<ct-tab-bar>`
+   instance for the whole tab set, admin-only entries included, so there is
+   no second instance left to wrap or label. See git history for the
+   removed rules. */
 
 /* --------------------------------------------------------------- Sections */
 .ct-section {
   margin: 0 0 var(--ct-gap-lg);
 }
+/* Issue #600 retired the ad-hoc 1.15rem here for --ct-text-lg (20px): the
+   type scale is the only vocabulary for sizes now, and an off-scale literal
+   is exactly what the floor guard cannot reason about. This <h2> still reads
+   a step below base.css's own h2 (--ct-text-xl), which is the whole point of
+   the class. */
 .ct-section-title {
-  font-size: 1.15rem;
+  font-size: var(--ct-text-lg);
   margin: 0 0 0.75rem;
 }
 
@@ -118,9 +107,12 @@
   margin: 0 0 var(--ct-space-2);
 }
 
+/* Muted secondary copy. Issue #600: this was 0.85rem (13.6px), below the
+   --ct-text-sm floor — "muted" is a COLOUR treatment, not a licence to
+   shrink text below what the owner can read. */
 .ct-muted {
   color: var(--ct-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--ct-text-sm);
 }
 
 /* Review IDs, digests, key hints — mono face per docs/frontend-design-
@@ -185,6 +177,68 @@
 }
 .ct-actions button[type='submit'],
 .ct-actions [role='button'] { width: auto; }
+
+/* Table-row action group (issue #598). A plain `.ct-actions` in a narrow
+   table column wraps one button per line, so three actions read as a
+   vertical stack — and the one-way door (Remove) sat in it with the same
+   visual weight as Rename. Two bands instead: routine actions together,
+   destructive separated by a rule and pushed to the end. `flex-wrap` stays
+   on both so a genuinely narrow viewport still reflows rather than
+   overflowing the row. */
+.ct-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-gap-sm);
+}
+.ct-row-actions__main,
+.ct-row-actions__danger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ct-gap-sm);
+}
+/* The separation itself. `margin-inline-start: auto` on a wrapped flex line
+   is a no-op, so the rule (not the gap) is what still reads as "this one is
+   different" once the bands stack at a narrow width. */
+.ct-row-actions__danger {
+  margin-inline-start: auto;
+  padding-inline-start: var(--ct-gap-sm);
+  border-inline-start: 1px solid var(--ct-border);
+}
+
+/* --------------------------------------------------- Local modal overlay */
+/* Issue #598: version history moved out of an inline expansion and into an
+   overlay. CTDS has no dialog primitive and #598 says not to invent a shared
+   one here, so these two classes are deliberately app-level and used by
+   exactly one screen (AdminPlaybooks). If a second consumer appears, that is
+   the moment to promote it to a ct-dialog component, not before.
+
+   No grid tracks and no absolutely-positioned visually-hidden helper, so
+   nothing here is subject to layout-audit.mjs's checks 1 or 2. */
+.ct-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--ct-gap);
+  overflow-y: auto;
+  background: var(--ct-overlay-scrim);
+}
+.ct-overlay__panel {
+  width: min(64rem, 100%);
+  margin-block: auto;
+}
+/* The panel takes focus on open (tabIndex -1). It is a container, not a
+   control, so the ring would be noise around the whole card — but it must
+   not be `outline: none` either, since that is how the focus audit's rule
+   gets defeated. Rendered as a subtle edge instead. */
+.ct-overlay__panel:focus-visible {
+  outline: var(--ct-focus-outline);
+  outline-offset: var(--ct-focus-outline-offset);
+}
 
 /* "Butter it" (issue #499) — a purely decorative animation target
    (aria-hidden, no content) that `toaster/motion.ts`'s butterSlide()

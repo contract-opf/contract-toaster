@@ -158,12 +158,12 @@
   "output_format": {
     "decision_field": "ACCEPT | REQUEST_CHANGE",
     "every_issue_includes": [
+      "issue_key",
       "section_ref",
       "section_title",
       "counterparty_change_summary",
       "decision",
       "external_rationale_for_footnote",
-      "proposed_replacement_text",
       "playbook_topic_id"
     ],
     "footnote_phrasing_rules": [

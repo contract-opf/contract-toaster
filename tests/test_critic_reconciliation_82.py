@@ -181,18 +181,22 @@ def test_critic_added_issue_appended_with_attribution(failures: list[str]) -> No
 
 def test_contested_replacement_primary_text_stands(failures: list[str]) -> None:
     primary = _primary_request_change()
-    original_replacement_text = primary["issues"][0]["proposed_replacement_text"]
+    # Issue #627: the model no longer authors `proposed_replacement_text`
+    # (the pipeline derives it from the proven transcript), so the property
+    # being guarded is stated on the whole issue rather than on that one
+    # field -- and stated more strongly for it: the critic may not silently
+    # rewrite ANY of the primary's issue, not just its replacement text.
+    original_issue = json.loads(json.dumps(primary["issues"][0]))
     critic = _load_fixture("critic_contested_replacement_valid.json")
 
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
 
     if len(result["issues"]) != 1:
         failures.append(f"[3a] Contesting a replacement must not add/remove issues; got {len(result['issues'])}")
-    elif result["issues"][0]["proposed_replacement_text"] != original_replacement_text:
+    elif result["issues"][0] != original_issue:
         failures.append(
-            f"[3b] Primary's proposed_replacement_text must stand unmodified; "
-            f"got {result['issues'][0]['proposed_replacement_text']!r} "
-            f"expected {original_replacement_text!r}"
+            f"[3b] The primary's issue must stand unmodified when the critic contests it; "
+            f"got {result['issues'][0]!r} expected {original_issue!r}"
         )
 
     if result["critic_delta"] is None:
@@ -288,8 +292,6 @@ def test_critic_schema_invalid_after_retry_is_terminal(failures: list[str]) -> N
 
     critic_result = cp.run_critic_pass(
         review_id="review-critic-terminal",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         primary_output=_primary_request_change(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -334,8 +336,6 @@ def test_critic_success_composes_to_ok_reconciled_result(failures: list[str]) ->
 
     critic_result = cp.run_critic_pass(
         review_id="review-critic-ok",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         primary_output=_primary_accept(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -376,8 +376,6 @@ def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str])
     primary_output = _primary_request_change()
     result = cp.run_critic_pass(
         review_id="review-manifest-check",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         primary_output=primary_output,
         playbook=_sample_playbook(),
         model_client=client,
@@ -395,15 +393,18 @@ def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str])
         failures.append(f"[7d] Critic must be invoked on the pinned Sonnet id; got {call['model_id']!r}")
 
     user_prompt = call["user_prompt"]
-    required_tags_in_order = ["<STANDARD_FORM_DIFF>", "<ANCHORED_CLAUSES>", "<PRIMARY_REVIEWER_OUTPUT>"]
+    # Issue #627 removed the two permanently-empty manifest blocks; the
+    # critic's prompt is now the tasking, the document, and the primary's
+    # output.
+    required_tags_in_order = ["<PRIMARY_REVIEWER_OUTPUT>"]
     positions = [user_prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
         failures.append(f"[7e] Critic user prompt missing a required manifest block: {dict(zip(required_tags_in_order, positions))}")
     elif positions != sorted(positions):
         failures.append(f"[7f] Critic user prompt manifest blocks out of order: {dict(zip(required_tags_in_order, positions))}")
-    for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>", "<SECTION_OUTLINE>"):
+    for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>"):
         if forbidden_tag in user_prompt:
-            failures.append(f"[7g] Critic prompt must not include {forbidden_tag} -- raw doc/outline/precedent are primary-only.")
+            failures.append(f"[7g] Critic prompt must not include {forbidden_tag} -- this call passes no document, and retrieved precedent is primary-only.")
 
     system_prompt = call["system_prompt"]
     if pp.REVIEW_GUIDANCE_BLOCK not in system_prompt:
@@ -424,11 +425,41 @@ def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str])
 # ---------------------------------------------------------------------------
 
 
-def _critic_response_with_replacement_text(text: str, topic_id: str = "exclusivity") -> str:
+# Pass-time replacement-text enforcement is a V2 mechanism (issue #627): the
+# model authored `proposed_replacement_text` under v1/v2, so the critic pass
+# judged it the moment the response validated. Under the ACTIVE v3 contract
+# the model does not author that field at all -- the pipeline derives it from
+# the proven transcript and the pen rules run against the DERIVED text at
+# stage 5. The v2 path is still reachable (the third-party integration, and
+# any caller selecting `OUTPUT_SCHEMA_V2_PATH`), so its coverage is kept here
+# and pinned to that contract rather than deleted. See
+# `tests/test_primary_review_pass_81.py::
+# test_pass_time_replacement_text_enforcement_is_off_under_v3` for the
+# assertion that the two halves cannot be silently swapped.
+_V2_SCHEMA_PATH = pp.OUTPUT_SCHEMA_V2_PATH
+
+_V2_CLEAN_CRITIC_REPLACEMENT_TEXT = "This Agreement is non-exclusive."
+
+
+def _v2_critic_response_with_replacement_text(
+    text: str, topic_id: str = "exclusivity"
+) -> str:
+    """The shared critic fixture, projected back onto the V2 issue shape:
+    `issue_key` dropped (v2 has no such property and forbids extras),
+    `proposed_replacement_text` supplied (v2 requires it)."""
     base = json.loads(_load_fixture_text("critic_added_issue_valid.json"))
-    base["critic_delta"]["added_issues"][0]["proposed_replacement_text"] = text
-    base["critic_delta"]["added_issues"][0]["playbook_topic_id"] = topic_id
+    base.pop("block_patches", None)
+    base.pop("block_ops", None)
+    base["schema_version"] = "output-schema-v1"
+    added = base["critic_delta"]["added_issues"][0]
+    added.pop("issue_key", None)
+    added["proposed_replacement_text"] = text
+    added["playbook_topic_id"] = topic_id
     return json.dumps(base)
+
+
+def _critic_response_with_replacement_text(text: str, topic_id: str = "exclusivity") -> str:
+    return _v2_critic_response_with_replacement_text(text, topic_id)
 
 
 def test_critic_replacement_text_violation_then_clean_retries_and_succeeds(failures: list[str]) -> None:
@@ -437,15 +468,19 @@ def test_critic_replacement_text_violation_then_clean_retries_and_succeeds(failu
     violating = _critic_response_with_replacement_text(
         "This clause requires the counterparty to indemnify our organization."
     )
-    clean = _load_fixture_text("critic_added_issue_valid.json")
+    # The clean retry keeps the fixture's OWN topic ("non-exclusive-
+    # arrangement"), not the violating call's "exclusivity" -- the point of
+    # the second attempt is that nothing about it violates.
+    clean = _v2_critic_response_with_replacement_text(
+        _V2_CLEAN_CRITIC_REPLACEMENT_TEXT, topic_id="non-exclusive-arrangement"
+    )
     responses = {_CRITIC_MODEL_ID: [violating, clean]}
     client = model_client.FakeBedrockClient(responses)
     ledger: list[model_client.ModelInvocationRecord] = []
 
     critic_result = cp.run_critic_pass(
         review_id="review-critic-pen-rules-retry",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
+        output_schema_path=_V2_SCHEMA_PATH,
         primary_output=_primary_accept(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -486,8 +521,7 @@ def test_critic_replacement_text_violation_on_final_attempt_demotes_to_flag_only
 
     critic_result = cp.run_critic_pass(
         review_id="review-critic-pen-rules-demote",
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
+        output_schema_path=_V2_SCHEMA_PATH,
         primary_output=_primary_accept(),
         playbook=_sample_playbook(),
         model_client=client,
@@ -519,8 +553,6 @@ def test_run_critic_pass_rejects_inference_profile_before_any_call(failures: lis
     try:
         cp.run_critic_pass(
             review_id="review-bad-model-id",
-            diff_hunks=_sample_diff_hunks(),
-            anchored_clauses=_sample_anchored_clauses(),
             primary_output=_primary_request_change(),
             playbook=_sample_playbook(),
             model_client=client,

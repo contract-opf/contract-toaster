@@ -14,13 +14,13 @@ nesting depth, touching nothing else.
 
 ## The gap this closes (measured, not assumed)
 
-Before this materializer exists, `redline_quote_apply.apply_quote_patches`
-locates a `source_quote` against the ACCEPT-ALL text
+Before this materializer exists, the redline compiler proves its edit
+against the ACCEPT-ALL text
 (`extraction_normalization_stage.extract_and_normalize`'s own paragraph
 text) but then hands `docx-editor` the RAW, still-marked-up bytes to edit.
 `docx-editor`'s own text-map search happens to compute a compatible
-accepted view for LOCATING the match -- so the patch does not fail to
-locate. What it does NOT do is clean up the counterparty's own pending
+accepted view for MATCHING the source span -- so the edit does not fail to
+apply. What it does NOT do is clean up the counterparty's own pending
 `<w:ins>`/`<w:del>` once its text has been folded into a match: `replace()`
 only rewrites the VISIBLE span, so the counterparty's original pending
 revisions survive in the delivered document, nested awkwardly around (and,
@@ -47,9 +47,52 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import block_transcript  # noqa: E402
 import extraction_normalization_stage as stage  # noqa: E402
+import redline_block_apply  # noqa: E402
 import redline_generate  # noqa: E402
-import redline_quote_apply as rqa  # noqa: E402
+
+# Issue #628: the quote patcher these two end-to-end cases used to drive is
+# deleted. They drive the LIVE block compiler instead -- a whole-block
+# replace transcript, proven against the same bytes the compiler is handed,
+# which is exactly the addressing a real review performs.
+
+
+def _apply_whole_block_replacement(docx_bytes: bytes, new_text: str) -> dict:
+    """Replace the FIRST block's entire text with `new_text`, via the real
+    validate -> compile path.
+
+    The transcript is proven against `docx_bytes`'s OWN block map, so this
+    helper can never address a block the extractor did not stamp -- and,
+    critically for the raw-bytes case below, the proof is taken against the
+    SAME bytes the compiler is then handed, never against a materialized
+    copy the caller did not pass in.
+    """
+    normalized = stage.extract_and_normalize(docx_bytes)
+    block_map = stage.build_block_map(normalized["paragraphs"])
+    block_id, block = next(iter(block_map.items()))
+    proven = block_transcript.validate_block_patches(
+        [
+            {
+                "block_id": block_id,
+                "segments": [
+                    {"op": "delete", "text": block["text"], "issue_key": "I1"},
+                    {"op": "insert", "text": new_text, "issue_key": "I1"},
+                ],
+            }
+        ],
+        [],
+        block_map,
+    )
+    if proven["status"] != "proven":
+        return {"proven": False, "applied": [], "failures": proven["failures"], "docx_bytes": None}
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes,
+        proven,
+        author="contract-toaster",
+        timestamp_iso="2026-01-01T00:00:00Z",
+    )
+    return dict(result, proven=True)
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -422,32 +465,24 @@ def test_raw_bytes_still_leak_the_counterpartys_pending_markup(failures: list) -
     load-bearing); it does NOT mean the defect was closed.
 
     Note on the ticket's premise: issue #563 said to "watch this test fail
-    first" against raw bytes, expecting a LOCATE failure. That did not
-    reproduce -- `apply_quote_patches` locates and applies cleanly against
-    raw bytes (`result["applied"]` is True below). The actual pre-fix defect
-    is not a locate/apply failure; it is that the counterparty's own pending
+    first" against raw bytes, expecting an ADDRESSING failure. That did not
+    reproduce -- the edit applies cleanly against raw bytes
+    (`result["applied"]` is non-empty below). The actual pre-fix defect
+    is not an addressing failure; it is that the counterparty's own pending
     tracked-change authors (alice/bob) survive into the delivered redline
     when the editor is fed raw, unmaterialized bytes."""
     docx_bytes = _build_docx_bytes(_two_cluster_two_author_p())
-    normalized = stage.extract_and_normalize(docx_bytes)
-    source_quote = normalized["paragraphs"][0]["text"]
 
-    result = rqa.apply_quote_patches(
+    result = _apply_whole_block_replacement(
         docx_bytes,
-        [{
-            "source_quote": source_quote,
-            "new_text": "three (3) years, renewable upon written consent of both parties",
-            "rationale": "regression fixture",
-        }],
-        author="contract-toaster",
-        timestamp_iso="2026-01-01T00:00:00Z",
+        "three (3) years, renewable upon written consent of both parties",
     )
     if not result["applied"] or result["docx_bytes"] is None:
         failures.append(
-            "expected the patch to apply against raw bytes (locate succeeds "
-            "even though the result is not canonical) -- if this now fails "
-            "to apply at all, this test's premise has changed and it needs "
-            "re-examining, not just re-asserting"
+            "expected the edit to apply against raw bytes (addressing "
+            "succeeds even though the result is not canonical) -- if this now "
+            "fails to apply at all, this test's premise has changed and it "
+            "needs re-examining, not just re-asserting"
         )
         return
 
@@ -456,8 +491,8 @@ def test_raw_bytes_still_leak_the_counterpartys_pending_markup(failures: list) -
         failures.append(
             "EXPECTED (documenting the pre-materialization gap): the "
             "counterparty's own pending revisions (alice/bob) should still "
-            "leak into a patch applied against raw bytes. They did not -- "
-            "if apply_quote_patches or docx-editor changed to clean these "
+            "leak into an edit applied against raw bytes. They did not -- "
+            "if the compiler or docx-editor changed to clean these "
             "up on its own, materialize_accept_all may no longer be "
             "load-bearing for this property; re-examine before treating "
             "this as a regression."
@@ -466,37 +501,29 @@ def test_raw_bytes_still_leak_the_counterpartys_pending_markup(failures: list) -
 
 def test_materialized_bytes_deliver_a_clean_single_author_redline(failures: list) -> None:
     """THE FIX, end to end (issue #563's motivating property): the SAME
-    source_quote, drawn from the accept-all text of a paragraph whose raw
-    XML had pending changes mid-span from two authors, LOCATES and APPLIES
-    via `redline_quote_apply.apply_quote_patches` against the MATERIALIZED
-    bytes -- and, unlike the raw-bytes case above, the delivered document
-    carries ONLY the toaster's own new redline. No counterparty author
-    survives: the pending changes were already physically accepted before
-    the patch ever ran."""
+    whole-block replacement, proven against the accept-all text of a
+    paragraph whose raw XML had pending changes mid-span from two authors,
+    PROVES and COMPILES against the MATERIALIZED bytes -- and, unlike the
+    raw-bytes case above, the delivered document carries ONLY the toaster's
+    own new redline. No counterparty author survives: the pending changes
+    were already physically accepted before the edit ever ran."""
     docx_bytes = _build_docx_bytes(_two_cluster_two_author_p())
     normalized = stage.extract_and_normalize(docx_bytes)
     if normalized["status"] != "normalized":
         failures.append(f"fixture must normalize; got {normalized['status']!r}")
         return
-    source_quote = normalized["paragraphs"][0]["text"]
 
     materialized = stage.materialize_accept_all(docx_bytes)
 
-    result = rqa.apply_quote_patches(
+    result = _apply_whole_block_replacement(
         materialized,
-        [{
-            "source_quote": source_quote,
-            "new_text": "three (3) years, renewable upon written consent of both parties",
-            "rationale": "regression fixture",
-        }],
-        author="contract-toaster",
-        timestamp_iso="2026-01-01T00:00:00Z",
+        "three (3) years, renewable upon written consent of both parties",
     )
 
     if not result["applied"] or result["docx_bytes"] is None:
         failures.append(
-            f"the patch must locate and apply against materialized bytes; "
-            f"applied={result['applied']} flag_only={result['flag_only']}"
+            f"the edit must prove and compile against materialized bytes; "
+            f"applied={result['applied']} failures={result['failures']}"
         )
         return
 

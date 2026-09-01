@@ -40,7 +40,15 @@ for _dir in (BACKEND_SRC, SCRIPTS_DIR):
 import model_client as mc  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 
-PRIMARY_MODEL_ID = "anthropic/claude-opus-4.8"
+# anthropic/claude-opus-5 -- model-policy/openrouter.json's `models.primary`
+# pin. It is here ONLY so `OpenRouterModelClient.invoke`'s runtime policy
+# assertion (enforce_openrouter_policy_model_id) does not fire ahead of the
+# behaviour actually under test. It was anthropic/claude-opus-4.8 until the
+# owner removed that id from `selectable`, at which point the guard began
+# refusing it. Nothing here reads the model's capability descriptor (no call
+# below passes `output_schema=`), so any allowed id would do; the primary pin
+# is chosen because that is what these calls stand in for.
+PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 SECRET_PROMPT = "CONFIDENTIAL clause: liability capped at $150,000."
 
 
@@ -253,8 +261,6 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             result = pp.run_primary_pass(
                 review_id="review-retry-opaque",
-                diff_hunks=[],
-                anchored_clauses=[],
                 retrieved_precedent=[],
                 playbook={"policy_id": "p", "clauses": []},
                 model_client=client,
@@ -343,8 +349,6 @@ class TestContextLengthFailClosed(unittest.TestCase):
         ledger: list = []
         result = pp.run_primary_pass(
             review_id="review-context-length",
-            diff_hunks=[],
-            anchored_clauses=[],
             retrieved_precedent=[],
             playbook={"policy_id": "p", "clauses": []},
             model_client=client,

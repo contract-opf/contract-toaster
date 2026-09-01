@@ -27,9 +27,11 @@
 #                 SYNTHETIC placeholder standard form, so silently skipping it
 #                 would silently stop covering the §10 sub-clause-split bug
 #                 it was written to catch.
-#   docx-editor — REQUIRED runtime dependency of scripts/redline_quote_apply.py
-#                 (issue #377), pinned identically to backend/requirements.txt
-#                 so tests/test_redline_quote_apply.py (which hard-imports it,
+#   docx-editor — REQUIRED runtime dependency of scripts/redline_block_apply.py
+#                 (issue #626's pass 1; it was issue #377's quote patcher's
+#                 dependency first, until issue #628 deleted that module),
+#                 pinned identically to backend/requirements.txt so
+#                 tests/test_redline_block_apply.py (which hard-imports it,
 #                 no try/except fallback) is REQUIRED, not skipped, in this
 #                 repo's own gate.
 #

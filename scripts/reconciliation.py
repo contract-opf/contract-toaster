@@ -35,16 +35,13 @@ reconciliation":
     The merge is monotonic: the critic can only degrade the band, never
     raise it back toward `OK`. A rationale objection alone does not trigger
     this degradation.
-  - **Outline-only input degrades the confidence band too.** When the
-    primary pass reviewed a section outline rather than the full document
-    text (`input_mode="section_outline"`, issue #419 -- the document was
-    over `primary_review_pass.DEFAULT_FULL_DOC_TOKEN_THRESHOLD`),
-    `confidence_state` is degraded one FURTHER level (stacking with any
-    critic-disagreement degrade above) and a fixed, substance-free sentence
-    is appended to `verdict_summary` saying so -- see
-    `OUTLINE_MODE_SUMMARY_NOTICE` below. A model reviewing a table of
-    contents and returning a confident-looking decision is exactly the
-    silent-degrade this issue exists to end.
+  - **There is no size-based degrade.** Issue #625 (owner decision
+    2026-08-25) deleted the heading-digest review mode: a document either
+    fits `primary_review_pass.MAX_INPUT_TOKENS` and is reviewed in full, or
+    the review fails loudly as `document_too_large` and never reaches this
+    function at all. The confidence degrade that mode used to trigger here,
+    and the fixed notice it appended to `verdict_summary`, are gone with it
+    -- there is no longer a reduced review quality for them to warn about.
 
 `reconcile()` is a pure function: no I/O, no model calls, deterministic
 given its inputs -- so it is unit-testable as a table
@@ -54,9 +51,28 @@ production.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "output-schema-v1"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import primary_review_pass as _pp  # noqa: E402
+
+# The envelope literal the merged result stamps itself with. Issue #627: read
+# off the ACTIVE output-contract artifact (`primary_review_pass
+# .OUTPUT_SCHEMA_VERSION` -> `playbooks/output-schema-v3.json`'s own
+# `schema_version` const), NOT restated as a literal here.
+#
+# A hardcoded `"output-schema-v1"` was correct for as long as v1 and v2 shared
+# a const, and became a silent contradiction the moment the active artifact
+# bumped one: this module stamps an envelope claiming a contract, and the
+# result it stamps is then read by surfaces that validate against the ACTIVE
+# artifact. Two spellings of "which contract is this" is exactly the drift the
+# cutover exists to remove, so there is now one.
+SCHEMA_VERSION = _pp.OUTPUT_SCHEMA_VERSION
 
 # CriticDelta sub-keys, per playbooks/output-schema-v1.json definitions.CriticDelta.
 _CRITIC_DELTA_KEYS = ("added_issues", "contested_replacements", "rationale_objections")
@@ -69,31 +85,6 @@ _CONFIDENCE_LEVELS = (
     "LOW_CONFIDENCE",
     "MANUAL_REVIEW_REQUIRED",
     "ERROR_MANUAL_REVIEW_REQUIRED",
-)
-
-# ---------------------------------------------------------------------------
-# Outline-only input degrade (issue #419). `input_mode` is
-# `primary_review_pass.run_primary_pass`'s own observability field -- see
-# that module's `resolve_input_mode` / `INPUT_MODE_SECTION_OUTLINE`. The
-# literal below is a DUPLICATE of that constant, not an import: this module
-# is deliberately dependency-free (no I/O, no model calls, no cross-module
-# imports -- see the module docstring), the same "each module owns its own
-# copy of small shared sentinels" convention primary_review_pass.py's own
-# MAX_INPUT_TOKENS comment documents. tests/test_full_doc_threshold.py
-# cross-checks the two literals so they cannot silently drift.
-INPUT_MODE_SECTION_OUTLINE = "section_outline"
-
-# The fixed, substance-free sentence appended to `verdict_summary` whenever
-# `input_mode == INPUT_MODE_SECTION_OUTLINE` (issue #419 AC: "a fixed
-# sentence... contains no document content"). Static string only -- never
-# interpolated with anything document-derived, so it needs no leakage-scan
-# consideration beyond what verdict_summary already gets.
-# Release voicing: "your document" phrasing, no internal-org name, no
-# jargon (project de-brand rule; see docs -> "Release voicing").
-OUTLINE_MODE_SUMMARY_NOTICE = (
-    "Your document was too large for a full-text review, so this result is "
-    "based on a section outline rather than the full document text -- "
-    "treat it with extra caution."
 )
 
 
@@ -117,12 +108,70 @@ def _issue_key(issue: dict[str, Any]) -> tuple[Any, Any]:
     return (issue.get("playbook_topic_id"), issue.get("section_ref"))
 
 
+#: Format of a response-local issue handle, per
+#: `playbooks/output-schema-v3.json`'s `IssueKey` (`^I[0-9]{1,4}$`).
+_ISSUE_KEY_FORMAT = "I%d"
+
+
+def _with_response_issue_key(
+    issue: dict[str, Any], existing: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Give `issue` an `issue_key` that is unique against `existing` -- the
+    issues already merged into this response (issue #627). Returns the same
+    dict, mutated. A key that is already free stays untouched; a missing key
+    and a COLLIDING key are both replaced with the lowest unused index.
+
+    WHY THIS EXISTS. Under v3 every Issue REQUIRES an `issue_key`, mutually
+    unique across the whole response. `primary_review_pass
+    ._duplicate_issue_key_error` enforces that uniqueness WITHIN one model
+    response -- it never sees a second one -- but `reconcile` below merges
+    THREE producers into a single `issues` list, and downstream code keys
+    that merged list (`redline_generate.generate_redline_from_blocks` builds
+    `issues_by_key` and attributes every proven edit through it, last key
+    wins). Uniqueness therefore has to be re-established against the merged
+    result, and this is the only place that can see it.
+
+    Both non-primary producers need it, for different reasons:
+
+      - A deterministic fire (`floor_judge.floor_fires`, and the lexical-
+        detector shape it mirrors) is built by CODE, from a verdict, with no
+        model in the loop to name it. Appending one unkeyed would make the
+        merged result stop conforming to the very contract this module
+        stamps it with two lines later.
+      - A CRITIC-added issue is model-authored and so arrives keyed -- but
+        keyed in the critic's OWN response, where the primary's keys were
+        not in scope. Both passes are told by the same
+        `primary_review_pass.BINARY_DECISION_OVERLAY_BLOCK` to number issues
+        "I1", "I2", "I3", ..., so a critic that adds its first issue emits
+        "I1" -- the key the primary's first issue almost always has.
+        Un-rekeyed, that collision silently re-attributes the primary's
+        proven block edits (and the counterparty-facing footnote they carry)
+        to the critic's unrelated issue.
+
+    Only the LATER producer is ever re-keyed: the primary's keys are the
+    ones `block_patches`/`block_ops` segments name, so moving one would
+    orphan a proven edit. Lowest unused index, so the assignment is
+    deterministic and reproducible for the same inputs -- the same property
+    every other merge decision in this module has.
+    """
+    taken = {
+        other.get("issue_key") for other in existing if other is not issue
+    }
+    current = issue.get("issue_key")
+    if current and current not in taken:
+        return issue
+    index = 1
+    while _ISSUE_KEY_FORMAT % index in taken:
+        index += 1
+    issue["issue_key"] = _ISSUE_KEY_FORMAT % index
+    return issue
+
+
 def reconcile(
     *,
     primary_result: dict[str, Any],
     critic_result: dict[str, Any] | None = None,
     detector_fires: list[dict[str, Any]] | None = None,
-    input_mode: str = "full_document",
 ) -> dict[str, Any]:
     """Deterministically merge the primary pass output, the critic pass
     output, and deterministic detector fires into the final review result.
@@ -145,19 +194,10 @@ def reconcile(
     common case -- detectors are deterministic pre-model-call checks the
     models are not guaranteed to also restate).
 
-    `input_mode` (issue #419, default `"full_document"`): the ORCHESTRATION
-    wrapper's own field (`primary_pass_result["input_mode"]` -- NOT part of
-    `primary_result`/the schema-valid response dict itself, since it is
-    pipeline-derived metadata the model never emits). `run_two_pass_review`
-    below reads it off `primary_pass_result` and passes it straight through.
-    When it equals `INPUT_MODE_SECTION_OUTLINE`, `confidence_state` (and its
-    mirrored `confidence_band`) is degraded one FURTHER level beyond
-    whatever the critic-delta merge above already produced, and
-    `OUTLINE_MODE_SUMMARY_NOTICE` is appended to `verdict_summary` -- see
-    the module docstring's "Outline-only input degrades the confidence band
-    too" bullet. The default reproduces pre-#419 behavior exactly.
-
-    Returns a merged `output-schema-v1`-shaped dict.
+    Returns a merged `output-schema-v1`-shaped dict, plus (issue #626) the
+    primary pass's own top-level `block_patches`/`block_ops` when it carries
+    them -- see the comment above the return statement for why they are
+    forwarded rather than merged, and why only the primary's.
     """
     detector_fires = detector_fires or []
 
@@ -178,6 +218,19 @@ def reconcile(
         for issue in raw_delta.get("added_issues", []):
             attributed = dict(issue)
             attributed["provenance"] = "critic-added"
+            # Re-key against the MERGED result, not against the critic's own
+            # response -- see `_with_response_issue_key`. The critic numbers
+            # its issues from "I1" in a response where the primary's keys
+            # were not in scope, so its first added issue routinely collides
+            # with the primary's first, and `issues_by_key` downstream is
+            # last-wins. `attributed` is the SAME object that goes into
+            # `critic_delta_record` below, so mutating it here fixes the
+            # audit record too. Issues already merged AND ones only recorded
+            # under `critic_delta` both count as taken: v3 requires the keys
+            # to be mutually unique across the whole response.
+            _with_response_issue_key(
+                attributed, final_issues + critic_delta_record["added_issues"]
+            )
             key = _issue_key(attributed)
             if key not in seen_keys:
                 final_issues.append(attributed)
@@ -198,7 +251,7 @@ def reconcile(
     for fire in detector_fires:
         key = _issue_key(fire)
         if key not in seen_keys:
-            final_issues.append(dict(fire))
+            final_issues.append(_with_response_issue_key(dict(fire), final_issues))
             seen_keys.add(key)
 
     has_critic_delta = any(critic_delta_record[key] for key in _CRITIC_DELTA_KEYS)
@@ -234,34 +287,32 @@ def reconcile(
         else primary_confidence_state
     )
 
-    # Outline-only input degrade (issue #419): a SEPARATE, independent
-    # degrade from the critic-delta one above -- the two stack (a review
-    # that is both outline-only AND critic-contested is worse than either
-    # alone) -- applied last so it always reflects the critic-merged state,
-    # never gets silently overwritten by it.
     verdict_summary = primary_result.get("verdict_summary")
-    is_outline_only = input_mode == INPUT_MODE_SECTION_OUTLINE
-    if is_outline_only:
-        confidence_state = _degrade_confidence_state(confidence_state)
-        if verdict_summary:
-            # Bound the merged string to the schema's 2000-char maximum
-            # (playbooks/output-schema-v1.json / -v2.json's
-            # `verdict_summary.oneOf[1].maxLength`) -- a schema-valid
-            # <=2000-char model summary must not become a >2000-char merged
-            # one just because this notice got appended. OUTLINE_MODE_
-            # SUMMARY_NOTICE is the load-bearing user signal here, so it is
-            # NEVER truncated; the model's own summary is elided instead to
-            # make room for the separator + fixed notice.
-            _separator = "\n\n"
-            _max_model_summary_len = 2000 - len(_separator) - len(OUTLINE_MODE_SUMMARY_NOTICE)
-            if len(verdict_summary) > _max_model_summary_len:
-                _ellipsis = "..."
-                verdict_summary = verdict_summary[: _max_model_summary_len - len(_ellipsis)] + _ellipsis
-            verdict_summary = f"{verdict_summary}{_separator}{OUTLINE_MODE_SUMMARY_NOTICE}"
-        else:
-            verdict_summary = OUTLINE_MODE_SUMMARY_NOTICE
 
     confidence_band = None if confidence_state == "OK" else confidence_state
+
+    # Issue #626: carry the v3 block transcript through to the redline
+    # stage. `block_patches` / `block_ops` are top-level, response-scoped
+    # edit carriers (`playbooks/output-schema-v3.json`), not per-issue
+    # fields, so nothing above merges them -- they are forwarded verbatim
+    # from the PRIMARY pass, and only when that pass actually carries them.
+    # A v1/v2 response has neither key, so this dict is byte-identical to
+    # what it was before issue #626 for a caller still on that contract; a
+    # v3 response (the active contract since issue #627) carries them.
+    #
+    # The CRITIC's own transcript is deliberately not merged here. Two
+    # transcripts naming one `block_id` cannot both be proven against that
+    # block without merging them into a single ordered segment list, which
+    # is a repair -- exactly what `block_transcript.validate_block_patches`
+    # refuses (`duplicate_block_id`). A critic-added issue with no edits of
+    # its own therefore reaches the redline stage as an ordinary flag-only
+    # issue; giving the critic a way to author block edits belongs to the
+    # flip ticket, together with the prompt that would ask it for them.
+    block_carriers = {
+        key: primary_result[key]
+        for key in ("block_patches", "block_ops")
+        if primary_result.get(key)
+    }
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -271,6 +322,7 @@ def reconcile(
         "issues": final_issues,
         "critic_delta": critic_delta_record if has_critic_delta else None,
         "verdict_summary": verdict_summary,
+        **block_carriers,
     }
 
 
@@ -301,10 +353,6 @@ def run_two_pass_review(
         -- both passes succeeded; `result` is `reconcile()`'s merged
         output-schema-v1-shaped dict.
 
-    `primary_pass_result["input_mode"]` (issue #419, absent on a pre-#419
-    caller/fixture) is read here and passed to `reconcile()` -- see that
-    function's own `input_mode` docstring. Absent defaults to
-    `"full_document"`, reproducing pre-#419 behavior exactly.
     """
     if primary_pass_result.get("status") != "OK":
         return dict(primary_pass_result)
@@ -321,6 +369,5 @@ def run_two_pass_review(
         primary_result=primary_pass_result["response"],
         critic_result=critic_pass_result["response"],
         detector_fires=detector_fires,
-        input_mode=primary_pass_result.get("input_mode", "full_document"),
     )
     return {"status": "OK", "result": reconciled}

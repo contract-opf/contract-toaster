@@ -58,8 +58,9 @@ import src.pipeline_runner as pipeline_runner  # noqa: E402
 
 REVIEW_ID = "rev-analysis-1"
 
-# Deliberately document-shaped: a finding carries a verbatim source quote and
-# proposed replacement text, which is exactly why none of it may reach a log.
+# Deliberately document-shaped: a finding carries proposed replacement text
+# drawn from the counterparty's own clause, which is exactly why none of it
+# may reach a log.
 SECRET_QUOTE = "The Institution shall indemnify the Company for all claims whatsoever."
 
 _OK_RESULT = {
@@ -69,9 +70,10 @@ _OK_RESULT = {
     "reason": None,
     "findings": [
         {
+            "issue_key": "I1",
             "section_ref": "Section 8",
             "section_title": "Indemnification",
-            "source_quote": SECRET_QUOTE,
+            "counterparty_change_summary": SECRET_QUOTE,
             "proposed_replacement_text": "Each party shall indemnify the other.",
         }
     ],
@@ -83,12 +85,19 @@ _MANUAL_RESULT = {
     "status": "MANUAL_REVIEW_REQUIRED",
     "decision": None,
     "summary": None,
-    "reason": "quote_patches_not_applied",
+    # The shapes `redline_generate.generate_redline_from_blocks` actually
+    # produces (issue #628): a block-compile failure, and a
+    # `changes_not_applied` entry carrying no address field of any kind --
+    # v3 defines none. The secret rides in `counterparty_change_summary`,
+    # which that entry really does carry.
+    "reason": "block_edits_not_applied",
     "findings": [],
     "analysis_report": {
         "report_type": "analysis_report",
-        "reason": "quote_patches_not_applied",
-        "changes_not_applied": [{"section_ref": "Section 8", "source_quote": SECRET_QUOTE}],
+        "reason": "block_edits_not_applied",
+        "changes_not_applied": [
+            {"section_ref": "Section 8", "counterparty_change_summary": SECRET_QUOTE}
+        ],
     },
     "redline_bytes": None,
 }
@@ -130,7 +139,7 @@ class TestTheArtifactIsWritten(unittest.TestCase):
         s3 = FakeS3()
         key = _write(_MANUAL_RESULT, s3)
         stored = json.loads(s3.objects[key].decode())
-        self.assertEqual(stored["reason"], "quote_patches_not_applied")
+        self.assertEqual(stored["reason"], "block_edits_not_applied")
         self.assertEqual(stored["findings"], [])
         self.assertIsNotNone(stored["analysis_report"])
 

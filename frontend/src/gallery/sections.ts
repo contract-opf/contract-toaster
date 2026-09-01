@@ -35,6 +35,7 @@ import type { CtField } from '../ui/components/ct-field';
 import type { CtToolbar } from '../ui/components/ct-toolbar';
 import type { CtFileDrop } from '../ui/components/ct-file-drop';
 import type { CtProgress } from '../ui/components/ct-progress';
+import type { CtColumns } from '../ui/components/ct-columns';
 
 export interface NavItem {
   id: string;
@@ -54,6 +55,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'ct-toolbar', label: 'ct-toolbar' },
   { id: 'ct-file-drop', label: 'ct-file-drop' },
   { id: 'ct-progress', label: 'ct-progress' },
+  { id: 'ct-columns', label: 'ct-columns' },
   { id: 'tokens', label: 'Design tokens' },
 ];
 
@@ -401,6 +403,24 @@ export function buildFieldSection(): HTMLElement {
     return f;
   }
 
+  // Issue #601: `narrow` opts the slotted CONTROL out of the field's
+  // default full-width stretch — the fix for "the ninety day box that's,
+  // like, literally the entire width of the viewport". Shown inside a wide
+  // `.gallery-frame` (not a narrow example-group row) so the stretch is
+  // actually visible: at gallery-row width every input already looks
+  // narrow regardless of this prop.
+  function daysField(narrow: boolean): CtField {
+    const f = field({
+      label: narrow ? 'Days (narrow)' : 'Days (default)',
+      hint: narrow ? 'Marked `narrow` — keeps its own width.' : "Today's default: stretches to fill its container.",
+      type: 'number',
+    });
+    if (narrow) {
+      f.narrow = true;
+    }
+    return f;
+  }
+
   body.append(
     exampleGroup(
       'Default / with hint / with error',
@@ -410,8 +430,12 @@ export function buildFieldSection(): HTMLElement {
         field({ label: 'Password', error: 'Incorrect username or password.', type: 'password' }),
       ]),
     ),
+    exampleGroup(
+      'Natural width — `narrow` (default full-bleed vs. marked narrow, same wide container)',
+      el('div', { className: 'gallery-frame' }, [daysField(false), daysField(true)]),
+    ),
     codeSnippet(
-      `import { CtField } from '../ui/react';\n\n<CtField label="Username">\n  <input type="text" value={username} onChange={handleChange} />\n</CtField>`,
+      `import { CtField } from '../ui/react';\n\n<CtField label="Username">\n  <input type="text" value={username} onChange={handleChange} />\n</CtField>\n\n// A short control that shouldn't stretch to its container's full width:\n<CtField label="Days" narrow>\n  <input type="number" min={0} max={1095} />\n</CtField>`,
     ),
   );
 
@@ -601,6 +625,70 @@ export function buildProgressSection(): HTMLElement {
   body.append(
     exampleGroup('Bare / with caption', el('div', {}, [bare, el('div', { className: 'gallery-space-row' }), captioned])),
     codeSnippet(`import { CtProgress } from '../ui/react';\n\n<CtProgress label="Reviewing your document…" />`),
+  );
+
+  return section;
+}
+
+// ---------------------------------------------------------------------------
+// ct-columns
+// ---------------------------------------------------------------------------
+export function buildColumnsSection(): HTMLElement {
+  const { section, body } = componentSection(
+    'ct-columns',
+    'ct-columns',
+    'Two-column layout primitive: two columns at desktop width, one column below 640px. Children are never moved or wrapped — the grid only repositions them visually, so DOM/tab order never scrambles.',
+  );
+
+  function labeledCard(title: string, text: string): CtCard {
+    const c = createEl<CtCard>('ct-card');
+    c.append(el('h3', { text: title }), el('p', { text }));
+    return c;
+  }
+
+  const basic = createEl<CtColumns>('ct-columns');
+  basic.append(
+    labeledCard('Column A', 'Two related panels, side by side at desktop width.'),
+    labeledCard('Column B', 'Resize the window below 640px (or shrink this frame) to see it collapse to one column.'),
+  );
+
+  // The exact scenario the ticket names: a retention-window day count
+  // beside its slider — paired with ct-field's own `narrow` prop (see the
+  // ct-field section above) so the short control doesn't stretch to fill
+  // its column.
+  function pairedField(label: string, hint: string, narrow: boolean): CtField {
+    const f = createEl<CtField>('ct-field');
+    f.label = label;
+    f.hint = hint;
+    if (narrow) {
+      f.narrow = true;
+    }
+    const input = el('input', {});
+    input.setAttribute('type', narrow ? 'number' : 'range');
+    input.setAttribute('value', '90');
+    if (narrow) {
+      input.setAttribute('min', '0');
+      input.setAttribute('max', '1095');
+    }
+    f.append(input);
+    return f;
+  }
+
+  const fieldPair = createEl<CtColumns>('ct-columns');
+  fieldPair.append(
+    pairedField('Retention window (days)', '90 days', false),
+    pairedField('Days', 'Exact entry, paired with the slider.', true),
+  );
+
+  body.append(
+    exampleGroup('Two columns (resize below 640px to see it collapse)', el('div', { className: 'gallery-frame' }, [basic])),
+    exampleGroup(
+      "Paired with ct-field's `narrow` prop — the retention-window scenario this ticket names",
+      el('div', { className: 'gallery-frame' }, [fieldPair]),
+    ),
+    codeSnippet(
+      `import { CtColumns, CtField } from '../ui/react';\n\n<CtColumns>\n  <CtField label="Retention window (days)" hint="90 days">\n    <input type="range" min={0} max={1095} value={90} />\n  </CtField>\n  <CtField label="Days" narrow>\n    <input type="number" min={0} max={1095} value={90} />\n  </CtField>\n</CtColumns>`,
+    ),
   );
 
   return section;

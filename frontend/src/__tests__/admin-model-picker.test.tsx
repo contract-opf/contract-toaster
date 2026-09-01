@@ -29,11 +29,34 @@ vi.mock('../auth', () => ({
 }));
 
 const OPUS_5 = 'anthropic/claude-opus-5';
+// A second Highest-tier entry that is NOT the default pin. This was
+// anthropic/claude-opus-4.8 until the owner removed that id from
+// model-policy/openrouter.json's `selectable`; kept mirroring the real
+// artifact by swapping in another id that is genuinely on the allowlist,
+// rather than leaving the fixture advertising a model the app can no longer
+// offer. Nothing below depends on WHICH id this is, only that it is a
+// non-default Highest-tier choice.
+const GPT_56 = 'openai/gpt-5.6-sol';
 const GEMINI = 'google/gemini-3.1-pro-preview';
 const DEEPSEEK = 'deepseek/deepseek-v4-pro';
 
-/** Mirrors model-policy/openrouter.json's `selectable`, trimmed to three. */
+/**
+ * Mirrors model-policy/openrouter.json's `selectable`, trimmed to four. The
+ * DEFAULT PIN IS ONE OF THEM — that is not incidental to this fixture, it is
+ * the invariant tests/lint-model-policy-consistency.py::check_defaults_are_selectable
+ * enforces (issue #589), and the reason the picker can mark the default in
+ * place rather than listing it a second time (issue #604).
+ */
 const CATALOGUE = [
+  {
+    model_id: GPT_56,
+    display_name: 'GPT-5.6 Sol',
+    tier: 'Highest',
+    note: 'Frontier model from a different lab — a genuine second opinion.',
+    cost_per_million_input_usd: 5,
+    cost_per_million_output_usd: 30,
+    context_length: 1050000,
+  },
   {
     model_id: OPUS_5,
     display_name: 'Claude Opus 5',
@@ -70,7 +93,7 @@ function selection(overrides: Partial<ModelSelectionSettings> = {}): ModelSelect
     model_provider: 'openrouter',
     selectable: CATALOGUE,
     default_primary: {
-      model_id: 'anthropic/claude-opus-4.8',
+      model_id: OPUS_5,
       cost_per_million_input_usd: 5,
       cost_per_million_output_usd: 25,
     },
@@ -83,7 +106,7 @@ function selection(overrides: Partial<ModelSelectionSettings> = {}): ModelSelect
     pricing_basis_critic: { input_tokens: 70000, output_tokens: 5000 },
     selected_primary_model_id: '',
     selected_critic_model_id: '',
-    effective_primary_model_id: 'anthropic/claude-opus-4.8',
+    effective_primary_model_id: OPUS_5,
     effective_critic_model_id: 'anthropic/claude-sonnet-4.6',
     primary_source: 'default',
     critic_source: 'default',
@@ -235,9 +258,142 @@ describe('AdminModel — the model picker', () => {
     render(<AdminModel />);
 
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
-    const dflt = optionTexts(primary)[0];
-    expect(dflt).toContain('anthropic/claude-opus-4.8');
+    const dflt = optionTexts(primary).find((t) => t.includes('Claude Opus 5'));
     expect(dflt).toContain('$0.500');
+  });
+
+  // --- issue #604: the default is MARKED, not listed a second time ----------
+
+  it('lists no separate "Default:" pseudo-option', async () => {
+    stubFetch({ get: () => ({ status: 200, body: selection() }) });
+    render(<AdminModel />);
+
+    const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
+    // The old shape was an extra first option reading
+    // "Default: anthropic/claude-opus-5 — $0.500 per review", on top of the
+    // catalogue row for the very same model.
+    for (const text of optionTexts(primary)) {
+      expect(text).not.toMatch(/^\s*Default:/);
+    }
+    // One row per catalogue model, and no spare.
+    expect(primary.options.length).toBe(CATALOGUE.length);
+    expect(optionTexts(primary).filter((t) => t.includes('Claude Opus 5')).length).toBe(1);
+  });
+
+  it('marks the default model itself with a check mark, and only that one', async () => {
+    stubFetch({ get: () => ({ status: 200, body: selection() }) });
+    render(<AdminModel />);
+
+    const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
+    const marked = optionTexts(primary).filter((t) => t.includes('✓'));
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toContain('Claude Opus 5');
+    // ...and it is still the option that means "no override".
+    const markedOption = Array.from(primary.options).find((o) => o.textContent?.includes('✓'));
+    expect(markedOption?.value).toBe('');
+  });
+
+  it('still expresses "no override" once the Default: option is gone', async () => {
+    const fetchMock = stubFetch({
+      get: () => ({
+        status: 200,
+        body: selection({
+          selected_primary_model_id: GEMINI,
+          effective_primary_model_id: GEMINI,
+          primary_source: 'admin',
+        }),
+      }),
+      post: () => ({ status: 200, body: selection() }),
+    });
+    render(<AdminModel />);
+
+    const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
+    expect(primary.value).toBe(GEMINI);
+    // Picking the marked default row is the "revert this pass" gesture now.
+    fireEvent.change(primary, { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('admin-model-selection-save'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-model-selection-notice')).toBeInTheDocument();
+    });
+    const post = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(JSON.parse((post?.[1] as RequestInit).body as string).primary_model_id).toBe('');
+  });
+
+  it('lands a stored selection that names the default model on the marked row', async () => {
+    // Round-trip hazard: before #604 the default had its own value="" option
+    // and an explicit stored id had its own row. Now they are one row, so a
+    // row stored as the literal default id must still select something.
+    stubFetch({
+      get: () => ({
+        status: 200,
+        body: selection({
+          selected_primary_model_id: OPUS_5,
+          effective_primary_model_id: OPUS_5,
+          primary_source: 'admin',
+        }),
+      }),
+    });
+    render(<AdminModel />);
+
+    const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
+    expect(primary.value).toBe('');
+    expect(primary.selectedIndex).toBeGreaterThanOrEqual(0);
+    expect(primary.options[primary.selectedIndex].textContent).toContain('Claude Opus 5');
+  });
+
+  it('keeps "no override" reachable if the pin ever falls out of the catalogue', async () => {
+    // The critic default is deliberately absent from this trimmed catalogue —
+    // the CI gate forbids that on the real artifact, but the picker must not
+    // become unusable if it ever happens.
+    stubFetch({ get: () => ({ status: 200, body: selection() }) });
+    render(<AdminModel />);
+
+    const critic = (await screen.findByTestId('admin-model-critic-select')) as HTMLSelectElement;
+    expect(critic.value).toBe('');
+    expect(optionTexts(critic)[0]).toContain('anthropic/claude-sonnet-4.6');
+    expect(optionTexts(critic)[0]).toContain('✓');
+  });
+
+  it('keeps the marked option, the field hint and the "running on" line naming one model', async () => {
+    // Measured in prod on 2026-08-23: the Models screen restated the default
+    // on THREE separate surfaces (the `Default:` option, "Keeping the model
+    // this deployment ships with (<id>)", and "Running on <id>"). One of them
+    // left behind is worse than none, because the screen then contradicts
+    // itself about what the next review will cost. Driven off the fixture's
+    // default_primary so it fails if any surface stops following it.
+    stubFetch({
+      get: () => ({
+        status: 200,
+        body: selection({
+          default_primary: {
+            model_id: GEMINI,
+            cost_per_million_input_usd: 2,
+            cost_per_million_output_usd: 12,
+          },
+          effective_primary_model_id: GEMINI,
+        }),
+      }),
+    });
+    render(<AdminModel />);
+
+    const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
+    const marked = Array.from(primary.options).find((o) => o.textContent?.includes('✓'));
+    expect(marked?.textContent).toContain('Gemini 3.1 Pro (preview)');
+    expect(marked?.value).toBe('');
+    expect(primary.value).toBe('');
+    expect(screen.getByTestId('admin-model-primary-effective')).toHaveTextContent(GEMINI);
+    // The hint under THIS field describes the model actually in force, so the
+    // "Keeping the model this deployment ships with (<id>)" fallback — which
+    // named a model id of its own — must not be what is on screen. Scoped to
+    // the primary field: the critic's default is deliberately absent from this
+    // trimmed catalogue, so the critic field legitimately shows the fallback.
+    const field = screen.getByTestId('admin-model-primary-effective').parentElement;
+    const fieldText = field?.textContent ?? '';
+    expect(fieldText).toContain('Very strong over long context.');
+    expect(fieldText).not.toContain('Keeping the model this deployment ships with');
   });
 
   it('labels the tier as an assessment rather than a measurement', async () => {
@@ -303,14 +459,17 @@ describe('AdminModel — the model picker', () => {
   });
 
   it('posts both roles independently and confirms the save', async () => {
+    // Both roles are moved OFF their default here: the marked default row
+    // posts "" (see the #604 tests above), so picking it would not prove the
+    // two ids travel independently.
     let current = selection();
     const fetchMock = stubFetch({
       get: () => ({ status: 200, body: current }),
       post: () => {
         current = selection({
-          selected_primary_model_id: OPUS_5,
+          selected_primary_model_id: GEMINI,
           selected_critic_model_id: DEEPSEEK,
-          effective_primary_model_id: OPUS_5,
+          effective_primary_model_id: GEMINI,
           effective_critic_model_id: DEEPSEEK,
           primary_source: 'admin',
           critic_source: 'admin',
@@ -321,7 +480,7 @@ describe('AdminModel — the model picker', () => {
     render(<AdminModel />);
 
     fireEvent.change(await screen.findByTestId('admin-model-primary-select'), {
-      target: { value: OPUS_5 },
+      target: { value: GEMINI },
     });
     fireEvent.change(screen.getByTestId('admin-model-critic-select'), {
       target: { value: DEEPSEEK },
@@ -336,10 +495,10 @@ describe('AdminModel — the model picker', () => {
       ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
     );
     expect(JSON.parse((post?.[1] as RequestInit).body as string)).toEqual({
-      primary_model_id: OPUS_5,
+      primary_model_id: GEMINI,
       critic_model_id: DEEPSEEK,
     });
-    expect(await screen.findByTestId('admin-model-primary-effective')).toHaveTextContent(OPUS_5);
+    expect(await screen.findByTestId('admin-model-primary-effective')).toHaveTextContent(GEMINI);
   });
 
   it('can send a pass back to the default', async () => {

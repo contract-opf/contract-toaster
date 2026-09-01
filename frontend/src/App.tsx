@@ -7,7 +7,11 @@
  *
  * After sign-in via Google (Cognito hosted UI), the app shows:
  *   - Header: "Signed in as you@example.com" (the authenticated user's email)
- *   - Footer: version from the authenticated /version endpoint
+ *   - Footer: version from the authenticated /version endpoint, plus the
+ *     build time parsed out of the version string (issue #603 —
+ *     `buildTimestampFromVersion` below)
+ *   - Foot of page: account notices (the default-password warning), moved
+ *     down from under the nameplate by issue #603 per owner direction
  *
  * The Authenticator component from @aws-amplify/ui-react handles the full
  * sign-in flow (redirects to Cognito hosted UI, handles the OAuth callback,
@@ -30,7 +34,6 @@ import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import AdminUsers from './AdminUsers';
 import AdminRetention from './AdminRetention';
 import AdminModel from './AdminModel';
-import AdminInstructions from './AdminInstructions';
 import AdminPlaybooks from './AdminPlaybooks';
 import AdminDiagnostics from './AdminDiagnostics';
 import ReviewSubmission from './ReviewSubmission';
@@ -64,6 +67,80 @@ interface VersionInfo {
   uptime_seconds: number;
 }
 
+// Issue #592: the footer is the deploy-verification signal, so it can't
+// hold the value fetched once at first load forever — a redeploy that
+// lands while the tab stays open must show up without a reload. Polling
+// (rather than e.g. a visibilitychange/focus refetch) is the one strategy
+// that catches a redeploy even in a tab nobody ever re-focuses.
+const VERSION_POLL_INTERVAL_MS = 60_000;
+
+// ---------------------------------------------------------------------------
+// Build timestamp (issue #603).
+//
+// The publish workflow tags each image `<short-sha>-$(date -u +%Y%m%d%H%M%S)`
+// (.github/workflows/dts-image-publish.yml) and bakes that string in as
+// VERSION, so the build time is ALREADY in the string the footer shows — it
+// just isn't legible. Parsing it here rather than adding a `built_at` field
+// to /version is deliberate: the backend payload would then have to be
+// plumbed through every deployment target's compose/env, and issue #469's
+// landmine is precisely that VERSION/COMMIT_SHA/IMAGE_DIGEST must stay EMPTY
+// in deploy/dts/docker-compose.coolify.yml so the image's baked-in ENV wins.
+// A parser adds no deploy coupling at all. (A real `built_at`, independent of
+// the tag, remains a sensible follow-up if one is ever needed.)
+//
+// The stamp is UTC at the source, and is rendered as UTC — not converted to
+// the viewer's local zone. The footer is a deploy-verification signal read
+// against `docker image ls` output and workflow logs, which are all UTC;
+// making the one human-readable copy of that instant disagree with them by
+// an offset would be a worse footer, not a friendlier one. It also keeps the
+// rendering deterministic rather than dependent on the runner's TZ.
+const BUILD_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// The id the identity cluster's ChangePassword control carries, and the
+// fragment the foot-of-page default-password warning links to (issue #603).
+// One constant so the link and its target cannot drift apart.
+const CHANGE_PASSWORD_ANCHOR = 'change-password';
+
+/**
+ * "20 Aug 2026, 19:16 UTC" for `cb79b4a-20260820191617`, or null when the
+ * version string carries no timestamp suffix (VERSION defaults to `dev`) or
+ * carries a nonsense one. Null means "render no date", never "Invalid Date".
+ * Exported for direct unit coverage of the degradation cases.
+ */
+export function buildTimestampFromVersion(version: string | null | undefined): string | null {
+  const match = /-(\d{14})$/.exec(version ?? '');
+  if (!match) {
+    return null;
+  }
+  const digits = match[1];
+  const [year, month, day, hour, minute, second] = [
+    digits.slice(0, 4),
+    digits.slice(4, 6),
+    digits.slice(6, 8),
+    digits.slice(8, 10),
+    digits.slice(10, 12),
+    digits.slice(12, 14),
+  ].map(Number);
+
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  // Date.UTC does not reject out-of-range parts, it ROLLS THEM OVER: month 13
+  // silently becomes January of the next year, day 32 becomes the 1st. A
+  // round-trip comparison is what turns "parsed something" into "parsed this".
+  const roundTrips =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute &&
+    date.getUTCSeconds() === second;
+  if (!roundTrips) {
+    return null;
+  }
+
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${day} ${BUILD_MONTHS[month - 1]} ${year}, ${pad(hour)}:${pad(minute)} UTC`;
+}
+
 // ---------------------------------------------------------------------------
 // Admin-visibility gate (issue #234).
 //
@@ -80,7 +157,7 @@ type AdminCapability = 'loading' | 'admin' | 'non-admin';
 
 // ---------------------------------------------------------------------------
 // Tabbed shell. One app shell + one Review experience shared by both roles;
-// the two admin tabs are appended only for an admin caller.
+// the admin-only tabs are appended only for an admin caller.
 // ---------------------------------------------------------------------------
 type TabId =
   | 'review'
@@ -91,7 +168,12 @@ type TabId =
   | 'users'
   | 'retention'
   | 'model'
-  | 'instructions'
+  // Issue #605: 'playbooks' covers both playbook lifecycle AND each
+  // playbook's standing instructions — the two used to be separate tabs
+  // ('playbooks' + 'instructions'), merged into this one screen. There is
+  // no 'instructions' id any more; a stale `#/admin/instructions` deep link
+  // falls back to Review via `tabFromHash`'s documented "unrecognised hash"
+  // path, same as any other retired tab.
   | 'playbooks'
   | 'diagnostics';
 
@@ -105,27 +187,24 @@ interface TabDef {
 //
 // Before this, `activeTab` was plain in-memory state: no tab was linkable,
 // browser back/forward did nothing, and every reload landed on Review. No
-// router dependency is warranted at eight tabs — this is a bidirectional
+// router dependency is warranted at seven tabs — this is a bidirectional
 // mapping between a `TabId` and a `location.hash` fragment, plus the
 // `hashchange` listener wired into `AppContent` below.
 //
 // Primary tabs (every signed-in user's) route as `#/<id>` (`#/review`,
-// `#/history`); the six admin-only tabs route as `#/admin/<id>`
-// (`#/admin/playbooks`, …) so the URL itself carries the same two-tier shape
-// issue #477 gave the tab bar. PRIMARY_TAB_IDS/ADMIN_TAB_IDS are the sole
-// authority on which prefix a given id gets — kept as `Set`s (not re-derived
-// from `primaryTabs`/`adminTabs` below, which depend on `isAdmin` and would
-// make the admin-tab set empty for a non-admin caller, exactly the caller
-// `tabFromHash` most needs to recognise so it can refuse the hash).
+// `#/history`); the five admin-only tabs route as `#/admin/<id>`
+// (`#/admin/playbooks`, …). Issue #599 flattened the tab BAR itself back to
+// one row (reversing #477's two-tablist DECISION per owner directive,
+// 2026-08-20), but deliberately did NOT flatten the hash shape: existing
+// `#/admin/<id>` deep links and bookmarks must keep working, so the URL
+// still carries the two-tier split even though the rendered tabs no longer
+// do. PRIMARY_TAB_IDS/ADMIN_TAB_IDS are the sole authority on which prefix a
+// given id gets — kept as `Set`s (not re-derived from `TAB_DEFS` below,
+// which depends on `isAdmin` and would make the admin-tab set empty for a
+// non-admin caller, exactly the caller `tabFromHash` most needs to
+// recognise so it can refuse the hash).
 const PRIMARY_TAB_IDS = new Set<TabId>(['review', 'history']);
-const ADMIN_TAB_IDS = new Set<TabId>([
-  'users',
-  'retention',
-  'model',
-  'instructions',
-  'playbooks',
-  'diagnostics',
-]);
+const ADMIN_TAB_IDS = new Set<TabId>(['users', 'retention', 'model', 'playbooks', 'diagnostics']);
 
 function hashForTab(id: TabId): string {
   return ADMIN_TAB_IDS.has(id) ? `#/admin/${id}` : `#/${id}`;
@@ -270,17 +349,40 @@ function AppContent({
   // banner below clears immediately instead of waiting for a reload.
   const [credentialsRefreshKey, setCredentialsRefreshKey] = useState(0);
   const defaultCredentialsWarning = useDefaultCredentialsWarning(credentialsRefreshKey);
+  const buildTimestamp = buildTimestampFromVersion(versionInfo?.version);
 
   // Fetch version from the authenticated /version endpoint via authorizedFetch
   // (sso: Amplify session Bearer token, unchanged; password mode: the
   // httpOnly session cookie, issue #468 — see useAdminCapability above).
   // /health is public/liveness-only; /version requires authentication.
+  //
+  // Issue #592: fetched once on mount AND re-fetched on VERSION_POLL_INTERVAL_MS
+  // for as long as the component stays mounted, so the footer — the
+  // deploy-verification signal — reflects a backend redeploy that lands
+  // while the tab is still open, instead of freezing on the value captured
+  // at first load. A poll failure is swallowed (keeps showing the last
+  // good value) rather than flipping to the error state — a transient
+  // blip mid-poll shouldn't replace a value that was fine a moment ago.
+  //
+  // Issue #592 fix-round-1: this is the app's first *idle background*
+  // authenticated request — the comment above ("swallowed") only held for
+  // the footer text, not for a 401's side effect, because a plain 401 from
+  // `authorizedFetch` also fires the global session-expiry notifier
+  // (api.ts), which forces a sign-out. Left wired that way, a session TTL
+  // lapsing in a tab nobody re-focuses (exactly the scenario polling was
+  // chosen for, above) would silently sign the user out ~60s later — the
+  // "broader stale-session problem" issue #592 explicitly puts out of
+  // scope. `suppressSessionExpiredNotification` opts this one call out of
+  // that notifier so a poll failure really is fully swallowed, as claimed.
   useEffect(() => {
     let cancelled = false;
+    let firstFetch = true;
 
     async function fetchVersion(): Promise<void> {
       try {
-        const response = await authorizedFetch('/version');
+        const response = await authorizedFetch('/version', undefined, {
+          suppressSessionExpiredNotification: true,
+        });
 
         if (!response.ok) {
           throw new Error(`/version returned HTTP ${response.status}`);
@@ -289,19 +391,32 @@ function AppContent({
         const data = (await response.json()) as VersionInfo;
         if (!cancelled) {
           setVersionInfo(data);
+          // A later poll succeeding must clear an error set by an earlier
+          // failed fetch (issue #592 fix-round-1) -- otherwise the footer,
+          // the deploy-verification signal, stays pinned to "unavailable"
+          // forever even once the backend is reachable again.
+          setVersionError(null);
         }
       } catch (err) {
         if (!cancelled) {
           // eslint-disable-next-line no-console
           console.error(err);
-          setVersionError('Version information is unavailable right now.');
+          if (firstFetch) {
+            setVersionError('Version information is unavailable right now.');
+          }
         }
+      } finally {
+        firstFetch = false;
       }
     }
 
     void fetchVersion();
+    const intervalId = setInterval(() => {
+      void fetchVersion();
+    }, VERSION_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearInterval(intervalId);
     };
   }, []);
 
@@ -325,57 +440,58 @@ function AppContent({
     setCatalogVersion((version) => version + 1);
   }, []);
 
-  // Tab set (issue #477): split into two independent tablists instead of one
-  // flat row of up to eight peers. Review and History are every signed-in
-  // user's tabs; the six admin-only panels render as their OWN labeled
-  // "Admin" tablist beneath it, allowed to wrap on its own without reading
-  // as an accident (see the DECISION comment on issue #477 for why this beat
-  // a horizontally-scrolling strip). `useAdminCapability` decides whether
-  // the admin group exists at all and the header admin badge; it never
+  // Tab set (issue #599 — REVERSES issue #477's two-tablist DECISION, per
+  // owner directive 2026-08-20: the owner looked at the shipped two-tier
+  // shell and wanted the tab bar flat, "read as one flat set of
+  // destinations"). #477 split Review/History from the admin-only panels
+  // into two independently labeled tablists so an orphaned last tab
+  // wouldn't read as an accident when it wrapped; #599's answer to that same
+  // worry is `ct-tab-bar.css`'s existing `flex-wrap: wrap` (unchanged — see
+  // `frontend/scripts/layout-audit.mjs` check 3), which lets a single flat
+  // row of up to seven tabs wrap onto a second line at narrow widths
+  // instead of clipping or scrolling — never a horizontally-clipped row
+  // that hides Diagnostics. `useAdminCapability` still decides whether the
+  // admin-only entries render at all (and the header admin badge); it never
   // branches which panel renders or the rest of the Review flow.
   // <ReviewSubmission /> takes no admin gate of its own (issue #433 removed
   // the one bespoke admin action it used to offer) — playbook administration
   // lives in the admin tabs, and the server stays authoritative for every
   // action there.
-  const primaryTabs: TabDef[] = [
+  //
+  // TAB_DEFS is the single ordered source of truth (owner's own order:
+  // Review, History, Users, Retention, Models, Playbooks, Diagnostics —
+  // "Playbook instructions" is not its own tab any more, per #605). Each
+  // admin-only entry carries `adminOnly: true` instead of living in a
+  // separate array spliced in by an `isAdmin` ternary (the pre-#599 shape) —
+  // `tabs` below filters those out for a non-admin caller so `ct-tab-bar`
+  // never even sees them, matching how every admin panel already
+  // 403-hides itself. Renamed per the ticket: "Users & access" → "Users",
+  // "Retention & legal hold" → "Retention", "Model & API key" → "Models"
+  // (the panel headers themselves are unchanged — out of this ticket's
+  // scope; see AdminModel.tsx's own `CtToolbar title`).
+  const TAB_DEFS: (TabDef & { adminOnly?: boolean })[] = [
     { id: 'review', label: 'Review' },
-    // History (issue #449) — every signed-in user, not gated on isAdmin.
+    // History (issue #449) — every signed-in user, never adminOnly.
     { id: 'history', label: 'History' },
+    { id: 'users', label: 'Users', adminOnly: true },
+    { id: 'retention', label: 'Retention', adminOnly: true },
+    { id: 'model', label: 'Models', adminOnly: true },
+    // Playbook lifecycle (issue #434) — upload, activate, roll back,
+    // rename, remove, per-version notes — AND, since issue #605 merged the
+    // old separate "Playbook instructions" tab into this one screen, each
+    // playbook's live standing instructions too (issue #484, epic #481;
+    // `AdminInstructions.tsx`, now rendered from inside `AdminPlaybooks.tsx`
+    // rather than as its own tabpanel below). Since #433 retired the
+    // bundled-sample special case, this is the ONLY playbook-lifecycle
+    // surface in the app.
+    { id: 'playbooks', label: 'Playbooks', adminOnly: true },
+    // Diagnostics (issue #443) — why recent reviews failed, read from the
+    // #442 reason vocabulary. Last on purpose: it is where you go when
+    // something is wrong, not part of the routine configuration flow above.
+    { id: 'diagnostics', label: 'Diagnostics', adminOnly: true },
   ];
 
-  // Empty (not just hidden) for a non-admin caller — the admin group must
-  // not render at all, matching how every admin panel already 403-hides
-  // itself (issue #477 DECISION comment). Kept as the pre-#477
-  // `...(isAdmin ? ([...] as TabDef[]) : [])` shape (rather than a plain
-  // ternary) — tests/test_review_history_449.py's
-  // test_history_tab_is_not_admin_gated source-scrapes App.tsx for exactly
-  // this pattern to confirm 'history' never lands inside it.
-  const adminTabs: TabDef[] = [
-    ...(isAdmin
-      ? ([
-          { id: 'users', label: 'Users & access' },
-          { id: 'retention', label: 'Retention & legal hold' },
-          { id: 'model', label: 'Model & API key' },
-          // Playbook lifecycle (issue #434) — upload, activate, roll back,
-          // rename, remove, per-version notes. Since #433 retired the
-          // bundled-sample special case, this is the ONLY playbook-lifecycle
-          // surface in the app.
-          { id: 'playbooks', label: 'Playbooks' },
-          // Playbook instructions (issue #484, epic #481). Replaces the old
-          // "Pen rules & posture" tab: a live, per-playbook plain-English
-          // standing-instructions box, versioned and compare-and-set saved.
-          // "Playbook instructions" reads better as a tab label than
-          // "Standing instructions" (the page heading inside says that
-          // instead) — see AdminInstructions.tsx's docstring.
-          { id: 'instructions', label: 'Playbook instructions' },
-          // Diagnostics (issue #443) — why recent reviews failed, read from
-          // the #442 reason vocabulary. Last in the admin set on purpose: it
-          // is where you go when something is wrong, not part of the
-          // routine configuration flow above.
-          { id: 'diagnostics', label: 'Diagnostics' },
-        ] as TabDef[])
-      : []),
-  ];
+  const tabs: TabDef[] = TAB_DEFS.filter((tab) => !tab.adminOnly || isAdmin);
 
   // Issue #487/#489: which tab you were on has to survive both an expired
   // session AND a browser reload.
@@ -474,6 +590,7 @@ function AppContent({
             Google, not here (issue #469). */}
         {isPasswordMode() && (
           <ChangePassword
+            controlId={CHANGE_PASSWORD_ANCHOR}
             onChanged={() => setCredentialsRefreshKey((key) => key + 1)}
           />
         )}
@@ -482,42 +599,19 @@ function AppContent({
         </CtButton>
       </div>
 
-      {/* Account notices live in their OWN full-width row, never inside the
-          identity cluster above. A block-level banner rendered as a flex item
-          between "Sign out" and the page edge is both visually wrong and
-          structurally destructive: the identity track is sized to its
-          content, so a full-width alert in it starves the brand nameplate
-          until it stacks one word per line. See ct-app-shell.css's `notice`
-          area. Nothing renders (and the row collapses) when there is no
-          warning to show. */}
-      {defaultCredentialsWarning && (
-        <div slot="notice">
-          <CtBanner variant="warn" data-testid="default-credentials-warning">
-            This account still uses the shipped default password — change it now.
-          </CtBanner>
-        </div>
-      )}
-
-      {/* Tabs — two independent accessible tablists (issue #477), not one
-          flat row. Every signed-in user has at least Review + History
-          (issue #449); the primary tab bar used to be dropped for the
-          single-tab case, which no longer exists. The Admin group only
-          renders for an admin caller — it must never appear empty or
-          disabled for a reviewer. `active` is one id shared by both
-          instances: keyboard Home/End/arrow cycling stays PER GROUP
-          (ct-tab-bar.ts's roving tabindex is per-instance), and the native
-          Tab key moves between the two `<ct-tab-bar>` elements exactly as
-          it would between any two sibling widgets. */}
+      {/* Tabs — ONE flat accessible tablist (issue #599; reverses #477's
+          two independent tablists). Every signed-in user has at least
+          Review + History (issue #449); the admin-only entries are simply
+          absent from `tabs` for a non-admin caller, so this single
+          `<ct-tab-bar>` never renders them at all — never present-but-
+          disabled. Keyboard Home/End/arrow cycling now covers every visible
+          tab in one ring (ct-tab-bar.ts's roving tabindex), matching the
+          single tablist's single accessible name ("Sections", the
+          component's default). Wrapping at narrow widths is
+          `ct-tab-bar.css`'s existing `flex-wrap: wrap` — unchanged by this
+          ticket, see the TAB_DEFS comment above. */}
       <div slot="tabs">
-        <CtTabBar tabs={primaryTabs} active={activeTab} onSelect={handleTabSelect} />
-        {isAdmin && (
-          <div className="ct-tab-group">
-            <span className="ct-tab-group__label" aria-hidden="true">
-              Admin
-            </span>
-            <CtTabBar tabs={adminTabs} active={activeTab} onSelect={handleTabSelect} label="Admin" />
-          </div>
-        )}
+        <CtTabBar tabs={tabs} active={activeTab} onSelect={handleTabSelect} />
       </div>
 
       {/* Tabpanels. CRITICAL: every panel stays MOUNTED at once; visibility is
@@ -590,15 +684,6 @@ function AppContent({
           </section>
           <section
             role="tabpanel"
-            id="panel-instructions"
-            aria-labelledby="tab-instructions"
-            className="ct-tabpanel"
-            hidden={activeTab !== 'instructions'}
-          >
-            <ErrorBoundary name="instructions"><AdminInstructions /></ErrorBoundary>
-          </section>
-          <section
-            role="tabpanel"
             id="panel-diagnostics"
             aria-labelledby="tab-diagnostics"
             className="ct-tabpanel"
@@ -609,14 +694,54 @@ function AppContent({
         </>
       )}
 
-      {/* Footer — version from authenticated /version endpoint (unchanged). */}
+      {/* Account notices live in their OWN full-width row, never inside the
+          identity cluster. A block-level banner rendered as a flex item
+          between "Sign out" and the page edge is both visually wrong and
+          structurally destructive: the identity track is sized to its
+          content, so a full-width alert in it starves the brand nameplate
+          until it stacks one word per line (issue #469).
+
+          Issue #603 moved this row from directly under the nameplate to the
+          FOOT of the page, per owner direction — the warning is a standing
+          condition, not news, and a permanent amber block at the top of every
+          screen reads as an unfixable error. Note that this is a DOM move,
+          not a CSS one: the element itself now comes after every tabpanel, so
+          it is last for a screen reader and for tab order too, not merely
+          painted lower. ct-app-shell.css's `notice` grid area moved to match.
+
+          Moving it away from the identity cluster's "Change password" button
+          would have stranded the warning from its remedy, so the copy now
+          carries its own link to that control (#change-password). Nothing
+          renders — and the row collapses — when there is no warning. */}
+      {defaultCredentialsWarning && (
+        <div slot="notice">
+          <CtBanner variant="warn" data-testid="default-credentials-warning">
+            This account still uses the shipped default password —{' '}
+            <a href={`#${CHANGE_PASSWORD_ANCHOR}`} data-testid="default-credentials-change-link">
+              change it now
+            </a>
+            .
+          </CtBanner>
+        </div>
+      )}
+
+      {/* Footer — version from the authenticated /version endpoint, plus the
+          build time parsed out of the version string itself (issue #603).
+          The date is a SEPARATE element from `version-display`: that testid
+          is the deploy-verification hook other tests match exact text
+          against (stale-signals-592.test.tsx), and it stays exactly what it
+          was. Absent a timestamp suffix (VERSION=dev) nothing renders here
+          at all — never "Invalid Date". */}
       <footer slot="footer">
         {versionError ? (
           <span data-testid="version-error">{versionError}</span>
         ) : versionInfo ? (
-          <span data-testid="version-display">
-            Version {versionInfo.version} ({versionInfo.commit.slice(0, 8)})
-          </span>
+          <>
+            <span data-testid="version-display">
+              Version {versionInfo.version} ({versionInfo.commit.slice(0, 8)})
+            </span>
+            {buildTimestamp && <span data-testid="version-built-at"> · Built {buildTimestamp}</span>}
+          </>
         ) : (
           <span data-testid="version-loading">Loading version…</span>
         )}
@@ -634,13 +759,88 @@ function AppContent({
  */
 // SSO (AWS) target: the Cognito Authenticator provides the identity; derive the
 // email and sign-out from the Amplify session, exactly as before.
-function SsoApp(): React.ReactElement {
+//
+// Issue #587. Before this, a 401 from an authenticated call in SSO mode fired
+// the central notifier (api.ts, issue #487) into an empty listener set —
+// `PasswordApp` was the only subscriber in the whole codebase — so the
+// authenticated shell and stale History rows stayed on screen with no
+// visible signal that the session had died. Calling Amplify's own `signOut`
+// here forces the Authenticator back to its signed-out (hosted UI) surface,
+// the same mechanism the user's own sign-out button already uses.
+// `onExpired`/`onReauthenticated` (from `SsoShell`, which survives the
+// sign-out unlike this component, since `signOut` unmounts it) are what
+// actually drive the "session expired" banner on the resulting hosted-UI
+// surface, and clear it again once the user is back — see `SsoShell`.
+function SsoApp({
+  onExpired,
+  onReauthenticated,
+}: {
+  onExpired: () => void;
+  onReauthenticated: () => void;
+}): React.ReactElement {
   const { user, signOut } = useAuthenticator((ctx) => [ctx.user]);
   const userEmail: string =
     (user as { signInDetails?: { loginId?: string } }).signInDetails?.loginId ??
     (user as { username?: string }).username ??
     'unknown';
+
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        onExpired();
+        signOut?.();
+      }),
+    [signOut, onExpired],
+  );
+
+  // `SsoApp` only ever renders while the Authenticator considers the user
+  // signed in — including immediately after a re-sign-in following an
+  // expiry — so mounting it is exactly the "reauthenticated" event. Without
+  // this, the banner set by `onExpired` above would never clear: it renders
+  // outside the Authenticator (see `SsoShell`), so nothing else tells it the
+  // user signed back in. Mirrors `PasswordApp`, which clears its own
+  // `sessionExpired` flag from `PasswordLogin`'s `onAuthenticated`.
+  useEffect(() => {
+    onReauthenticated();
+    // Run once per mount only — `onReauthenticated` is a fresh closure each
+    // render, and re-running this on every render would still be correct
+    // (it's idempotent) but noisier than necessary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return <AppContent userEmail={userEmail} signOut={signOut ?? (() => {})} />;
+}
+
+// Issue #587. `SsoApp` unmounts the instant `signOut()` runs (the
+// Authenticator swaps it for its own hosted-UI sign-in surface), so any
+// "why are you seeing this" state has to live above the Authenticator,
+// where it survives that unmount. `SsoShell` is that place: it owns the
+// `sessionExpired` flag, passes `onExpired`/`onReauthenticated` down so
+// `SsoApp` can flip it on a 401 and clear it again once signed back in, and
+// renders the same `session-expired` banner password mode already shows
+// (App.tsx's `PasswordApp`) around whatever the Authenticator is currently
+// rendering — the hosted sign-in form on expiry, `SsoApp` once signed in
+// again.
+function SsoShell(): React.ReactElement {
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  return (
+    <>
+      {sessionExpired && (
+        <CtBanner variant="warn" data-testid="session-expired">
+          Your session expired — sign in to continue.
+        </CtBanner>
+      )}
+      <Authenticator hideSignUp socialProviders={['google']}>
+        {() => (
+          <SsoApp
+            onExpired={() => setSessionExpired(true)}
+            onReauthenticated={() => setSessionExpired(false)}
+          />
+        )}
+      </Authenticator>
+    </>
+  );
 }
 
 // Password (Docker Compose) target: gate on PasswordLogin; once signed in, render the app
@@ -798,9 +998,7 @@ function renderAuthenticatedApp(): React.ReactElement {
   // (AuthenticatorProps → RouterProps/SignInBaseProps; both are destructured
   // by AuthenticatorInternal). See sso-signin-surface.test.tsx, which renders
   // the REAL Authenticator — no vi.mock — and asserts the resulting surface.
-  return (
-    <Authenticator hideSignUp socialProviders={['google']}>
-      {() => <SsoApp />}
-    </Authenticator>
-  );
+  // The Authenticator itself now lives in `SsoShell`, which wraps it with the
+  // session-expired banner (issue #587) — see `SsoShell`.
+  return <SsoShell />;
 }

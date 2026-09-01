@@ -288,12 +288,41 @@ CSP-safe):
 
 ```
 --ct-font-display / --ct-font-sans / --ct-font-mono   (each with system fallbacks)
---ct-text-xs 12px  --ct-text-sm 14px  --ct-text-md 16px
+--ct-text-sm 14px  --ct-text-md 16px                  (body is --ct-text-md)
 --ct-text-lg 20px  --ct-text-xl 25px  --ct-text-2xl 31px
 --ct-leading-tight 1.25   --ct-leading 1.55
 ```
 Load only latin subsets, weights 400/500/700 (display: 500/700) — keep
 the font payload under ~120 KB total.
+
+**The floor is 14px (`--ct-text-sm`), and it is enforced (issue #600).**
+`base.css` sets `body` to `--ct-text-md` (16px); `--ct-text-sm` is one
+step down and the smallest size anything in this app may render at.
+There is no `--ct-text-xs` — it was 12px, the owner measured it on the
+live Review screen and could not read it, and it was deleted rather than
+redefined so it cannot quietly come back.
+
+Three rules follow, all of them checked by `npm run audit:layout`
+(check 7), which sweeps every `.css`, `.ts`, and `.tsx` file under
+`frontend/src`:
+
+1. **Sizes come from the scale.** A `--ct-text-*` token, or nothing. The
+   audit permits a bare `px`/`rem` literal at or above the floor so that
+   the check is about legibility rather than spelling, but new code should
+   use the token — an off-scale literal is how `1.15rem`, `0.85rem`, and
+   `0.78rem` accumulated in the first place.
+2. **No `em` or `%` font sizes.** They compound with their context, so no
+   source guard can prove they clear the floor: base.css's old `0.92em`
+   mono size was 14.7px inside body copy and 12.9px inside a 14px table
+   cell. Use an absolute token.
+3. **The scale itself may not define a sub-floor step.** Adding one fails
+   the audit immediately, before any rule uses it.
+
+"Muted", "hint", "caption", and "metadata" are *colour and weight*
+treatments (`--ct-text-muted`, 500/600), never a licence to shrink text.
+Note that vitest cannot catch any of this — the component suite runs with
+`css: false`, so no stylesheet is loaded at all; `audit:layout` is the
+only thing standing between the app and 12px text.
 
 ## 5. Component doctrine: light-DOM-first Lit
 
@@ -339,13 +368,14 @@ contract — extend, don't rename):
 | `ct-icon-button` | light | Square hit-target ≥44px, `label` (required, becomes `aria-label`). |
 | `ct-card` | shadow (slotted) | Surface + border + shadow-1 + radius; `pad: none\|md\|lg`. Replaces `.ct-card`. |
 | `ct-banner` | light | Inline status surface. `variant` as chip; `role="status"` or `"alert"` (danger). Replaces `.ct-error/.ct-status/.ct-note`. |
-| `ct-tab-bar` | light | ARIA tablist with roving tabindex + arrow/Home/End nav, extracted from `App.tsx:203-289` **behavior-identical** (same roles, `data-tab-id`, `aria-controls` to light-DOM panels). Emits `ct-select {id}`. Panels stay in React and stay mounted (§3.4). Animated active indicator (token motion). Public `label` prop sets the element's `aria-label` (default `"Sections"`); issue #477 introduced a two-tablist arrangement — `App.tsx` renders a primary instance plus, for an admin caller only, a second instance with `label="Admin"` wrapped in `.ct-tab-group` (`app.css`). Both instances share one `active` id, but roving-tabindex/Home/End cycling is per-instance, so each tablist is an independent widget (an instance whose `active` id belongs to the other group falls back its own roving tabindex to index 0). |
+| `ct-tab-bar` | light | ARIA tablist with roving tabindex + arrow/Home/End nav, extracted from `App.tsx:203-289` **behavior-identical** (same roles, `data-tab-id`, `aria-controls` to light-DOM panels). Emits `ct-select {id}`. Panels stay in React and stay mounted (§3.4). Animated active indicator (token motion). Public `label` prop sets the element's `aria-label` (default `"Sections"`, still the only instance App.tsx renders). Issue #477 briefly split the tab set into two independent tablist instances (primary + an admin-only `label="Admin"` second instance wrapped in `.ct-tab-group`); issue #599 reversed that DECISION per owner directive (2026-08-20) back to the single flat instance — `App.tsx` now hands it one ordered array with admin-only entries filtered out for a non-admin caller, relying on this element's existing `flex-wrap: wrap` (unchanged, `ct-tab-bar.css`) to keep up to seven tabs usable at narrow widths. The roving-tabindex fallback (an instance whose `active` id isn't among its own `tabs` still puts `tabindex="0"` on index 0) still matters with one instance: a non-admin caller's hash can resolve to an admin-only id that `tabs` has already filtered out. |
 | `ct-app-shell` | light | Header (brand nameplate in display face, identity, role badge, sign-out slot), max-width content column on `--ct-bg`, footer (version in mono). Slots: `header-actions`, default, `footer`. |
-| `ct-field` | light | Label + control-slot + hint + error with wired `for`/`aria-describedby`; error text in `role="alert"` context per existing copy rules. |
+| `ct-field` | light | Label + control-slot + hint + error with wired `for`/`aria-describedby`; error text in `role="alert"` context per existing copy rules. `narrow` (issue #601): opts the slotted control out of the field's default full-width stretch, so a short control (e.g. a number input) keeps its own intrinsic width instead of being stretched to fill whatever container (`ct-stack`, `ct-columns`) it sits in — only the control is affected, never the label/hint/error text. |
 | `ct-table` | light | Styled table wrapper: sunken header row, hairline rows, hover tint, `.ct-table-scroll` behavior built in (horizontal scroll wrapper). |
 | `ct-toolbar` | light | Row layout for filters/actions above tables; replaces `.ct-toolbar/.ct-row/.ct-actions` usage in admin panels. |
 | `ct-file-drop` | light | Drag-and-drop + click-to-browse upload. Accept list, max size, selected-file pill (name/size/clear), keyboard + SR accessible (`<input type=file>` under the hood), emits `ct-files {files}`. Visually rhymes with the toaster slot: sunken well, accent glow on dragover. |
 | `ct-progress` | light | Indeterminate warm shimmer bar + optional phase caption; used during upload/poll alongside the hero. |
+| `ct-columns` | light | Two-column layout primitive (issue #601): two columns at desktop width, one column below a 640px breakpoint (matching `ct-app-shell`'s own collapse point). Children are never moved/wrapped — the grid only repositions them visually, so DOM/tab order is untouched. Deliberately minimal (no `span`/gap-size props — "not a grid framework"); pairs with `ct-field`'s `narrow` prop above for the short-control case. **When not to use it:** a single logical control (`ct-stack` alone is correct — there's nothing to pair it with), or a form whose fields must be read in strict top-to-bottom sequence (two columns read left-to-right per row before the next row, which breaks a sequence-dependent read order even though DOM/tab order stays correct). |
 
 Deliberately not building: modal/dialog (no current use), toast/snackbar
 (banners + hero cover it), router (tabs are state), icon system beyond

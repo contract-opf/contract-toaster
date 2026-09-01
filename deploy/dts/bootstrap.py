@@ -80,7 +80,21 @@ _MOCK_OUTPUT_ROOT = _APP_ROOT / "infra" / "fixtures" / "mock-outputs"
 # (index_name, hash_attr, range_attr) tuples.
 _TABLES = [
     ("USERS_TABLE", "cognito_sub", None, []),
-    ("REVIEWS_TABLE", "review_id", None, [("owner_sub-index", "owner_sub", "created_at")]),
+    # playbook_hash-index mirrors infra/lib/nested/data-stack.ts: the audit
+    # query API (issue #253) reads it for docs/audit-queries.md's
+    # rollback/quarantine population and "every REQUEST_CHANGE under a given
+    # playbook version" entries. Without it both raise ValidationException
+    # ("table does not have the specified index") on DTS -- the same #446
+    # shape that broke every spend settle.
+    (
+        "REVIEWS_TABLE",
+        "review_id",
+        None,
+        [
+            ("owner_sub-index", "owner_sub", "created_at"),
+            ("playbook_hash-index", "playbook_hash", "created_at"),
+        ],
+    ),
     # review_id-index mirrors infra/lib/nested/data-stack.ts: pipeline_runner's
     # _find_submission_by_review_id queries it to settle a review's spend
     # reservation. Without it every settle raises ValidationException ("table
@@ -88,7 +102,19 @@ _TABLES = [
     # always had the index.
     ("REVIEW_SUBMISSIONS_TABLE", "idempotency_key", None, [("review_id-index", "review_id", None)]),
     ("DAILY_SPEND_TABLE", "spend_date", None, []),
-    ("AUDIT_TABLE", "partition", "timestamp", []),
+    # actor-index / review_id-index mirror infra/lib/nested/data-stack.ts:
+    # docs/audit-queries.md keys "everything a given user did" and "full
+    # history of one review/document" on them, and the audit query API
+    # (issue #253) queries them directly.
+    (
+        "AUDIT_TABLE",
+        "partition",
+        "timestamp",
+        [
+            ("actor-index", "actor", "timestamp"),
+            ("review_id-index", "review_id", "timestamp"),
+        ],
+    ),
     ("AUTH_SETTINGS_TABLE", "setting_id", None, []),
     ("PLAYBOOKS_TABLE", "playbook_id", None, []),
     ("PLAYBOOK_VERSIONS_TABLE", "playbook_id", "version", []),
@@ -101,6 +127,10 @@ _TABLES = [
     # infra/lib/nested/data-stack.ts's `dynamodb.AttributeType.NUMBER`.
     ("PLAYBOOK_INSTRUCTIONS_TABLE", "playbook_id", "version", []),
     ("RETENTION_SETTINGS_TABLE", "setting_id", None, []),
+    # Per-user preferences (issue #523, epic #519 item F) -- one row per
+    # user, keyed on their own cognito_sub. No range key: a user has one
+    # preferences row, and every known preference is an attribute on it.
+    ("USER_PREFERENCES_TABLE", "cognito_sub", None, []),
     ("MODEL_SETTINGS_TABLE", "setting_id", None, []),
     ("SYNC_STATUS_TABLE", "sync_type", None, []),
     # Model-invocation ledger (issue #414) -- metadata-only record of every

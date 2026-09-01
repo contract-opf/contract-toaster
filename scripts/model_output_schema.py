@@ -3,9 +3,18 @@
 Model-facing output schema projection (issue #418) and provider-safe schema
 projection (issue #567).
 
-`playbooks/output-schema-v2.json` is the pipeline's FULL validation
-contract for a model response -- but two of its required fields are not
-something the model can honestly answer:
+READING NOTE ON ARTIFACT NAMES. This docstring names
+`playbooks/output-schema-v2.json` throughout because that was the sole
+artifact when #418/#567 were written. The ACTIVE contract is
+`playbooks/output-schema-v3.json` as of issue #627 (see `OUTPUT_SCHEMA_PATH`
+below and the #624/#627 paragraph further down); every mechanism described
+here is artifact-agnostic and unchanged -- only which file the default names
+moved. Read a bare "output-schema-v2.json" below as "the full artifact being
+projected", not as a claim about which one is active.
+
+The full artifact is the pipeline's FULL validation contract for a model
+response -- but two of its required fields are not something the model can
+honestly answer:
 
   - top-level `schema_version` -- a fixed const the pipeline itself stamps
     (`scripts/primary_review_pass.py::_stamp_pipeline_envelope`), never a
@@ -20,6 +29,20 @@ Under `OPENROUTER_STRUCTURED_OUTPUT=1` (issue #418,
 must not require fields the model was never asked to produce. This module
 derives that model-facing schema by removing both fields from
 output-schema-v2.json.
+
+A THIRD field is removed for a different reason, and CONDITIONALLY (issue
+#522, epic #519 item D): each `Issue`'s optional
+`internal_rationale_for_footnote` is genuine model prose, but whether a
+review asks for internal-audience content at all is that review's notes
+mode -- so the projection takes a `notes_mode` and keeps the property in
+`internal`/`both`, strips it everywhere else. See
+`_ISSUE_FIELDS_REQUESTED_ONLY_WITH_INTERNAL_NOTES` below. An
+unconditional property would be a standing request on every review, which
+is the one thing that epic forbids; a permanently absent one would leave
+the renderer that consumes the field (`redline_docx_writer.
+footnote_texts_for_notes_mode`) with nothing able to produce it, since
+under provider enforcement the projected schema -- not the prompt's prose
+-- decides what the model may emit.
 
 `model_facing_output_schema()` is PROJECTION ONLY: the pipeline's actual
 acceptance criterion is unchanged. `primary_review_pass.validate_model_response`
@@ -50,30 +73,56 @@ is now only ever called (via that pass's own gate) on a property the full
 schema ALREADY makes nullable -- a property that was merely optional (no
 null branch) is instead added to `required` with its type UNCHANGED, safe
 exactly where the full schema already accepts an empty `""`/`[]` for it;
-(b) `Issue.source_quote`, the one optional property with neither a null
-branch NOR an emittable empty value (`minLength: 1`), was dropped from the
-projected schema entirely rather than forced into `required` with no
-honest value to give it. Fix round 2, finding 3 also rewrites every
+(b) v2's optional `Issue` quote field -- the one property with neither a
+null branch NOR an emittable empty value (`minLength: 1`) -- was dropped
+from the projected schema entirely rather than forced into `required` with
+no honest value to give it. Fix round 2, finding 3 also rewrites every
 `oneOf` this projection produces or preserves to `anyOf` (OpenAI-strict-
 mode's supported-keyword subset has the latter, not the former) and strips
 the non-JSON-Schema-validation root keywords (`$schema` / `$id` /
 `output_contract_version`) the source file carries.
 
-Fix round 3 REVERSED fix round 2's `source_quote` handling: since
-#379/#380 retired the anchor-joined patch path, `source_quote` is the ONLY
-way a REQUEST_CHANGE issue locates its redline target, so dropping it
-meant every issue on a structured-outputs-capable model shipped zero
-redlines. `source_quote` is now given a NEW `null` branch instead (`_make_
-issue_fields_nullable_in_place` / `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_
-BRANCH`) -- a real, emittable "no value" -- paired with a post-hoc
-normalization in `primary_review_pass.py::_denullify_unrepresentable_
-issue_fields` that strips a `null`/empty `source_quote` back to ABSENT
-(a value the full schema already treats identically) before the full
-schema check runs. Fix round 3 also corrected `_break_recursive_refs_
+Fix round 3 REVERSED that: under v2 the quote field was the ONLY way a
+REQUEST_CHANGE issue located its redline target, so dropping it meant every
+issue on a structured-outputs-capable model shipped zero redlines. The fix
+was a NEW `null` branch instead (`_make_issue_fields_nullable_in_place` /
+`_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`) -- a real, emittable "no value"
+-- paired with a post-hoc normalization in
+`primary_review_pass.py::_denullify_unrepresentable_issue_fields` that
+strips a `null`/empty value back to ABSENT (a value the full schema already
+treats identically) before the full schema check runs. Issue #627 removed
+the quote field from the contract and issue #628 deleted the locator that
+read it, so that field is gone from both lists; the MACHINERY survives
+because `internal_rationale_for_footnote` (issue #522) has exactly the same
+shape and still needs it. Fix round 3 also corrected `_break_recursive_refs_
 in_place`'s flattened substitution node, which had been getting
 `additionalProperties: false` forced onto it with no `properties` to
 match -- accepting only `{}` rather than the "genuinely permissive" node
 its own docstring claimed.
+
+Issue #624 added a THIRD artifact both entry points must handle,
+`playbooks/output-schema-v3.json` (the Candidate E block-transcript
+contract), reached by passing its path as the `path` argument. Issue #627's
+hard cutover then made it the DEFAULT (see `OUTPUT_SCHEMA_PATH` below), so
+every request this module projects for a first-party review is now a v3
+request; v2 is what a caller passes explicitly. Two v3-only shapes are the
+ones that must survive the strict passes
+above intact: the top-level `block_patches[]` (each entry a `block_id`
+plus an ordered `segments[]` transcript) and `block_ops[]` (whole-block
+`delete_block` / `insert_block_after`). Nothing here drops them -- every
+pass above either rewrites a keyword in place or adds to `required` -- and
+this module's tests assert that end to end, because fix round 3's lesson
+was precisely that a field silently missing from the projected schema
+ships ZERO redlines on every structured-outputs model while every fixture
+test stays green. One of the passes is a no-op on v3 in the notes modes that strip it:
+`_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH` names only
+`internal_rationale_for_footnote`, which the projection carries in the
+`internal`/`both` modes alone, so `_make_issue_fields_nullable_in_place`
+finds nothing to widen in `none`/`external`; and v3's
+`Issue.replacement_scope_note` / `proposed_replacement_text` are optional
+with NO `minLength` floor, so `_force_all_properties_required_in_place`
+adds them to `required` with their type untouched, `""` being a value the
+full v3 schema already accepts.
 
 This is a SEPARATE projection from `model_facing_output_schema` (built ON
 TOP of it -- the model still cannot honestly emit `schema_version` /
@@ -81,12 +130,13 @@ TOP of it -- the model still cannot honestly emit `schema_version` /
 model-facing tool-mode schema (#418) and the provider-safe schema (#567)
 are two independent request-shaping seams that happen to share the same
 stamped-field starting point. Same PROJECTION-ONLY discipline applies
-throughout: the full, unmodified `output-schema-v2.json` still governs
-post-hoc validation in `primary_review_pass.validate_model_response`
+throughout: the full, unmodified ACTIVE artifact (`output-schema-v3.json`
+since issue #627) still governs post-hoc validation in
+`primary_review_pass.validate_model_response`
 regardless of which (if either) projection a given request used --
 `_denullify_unrepresentable_issue_fields` above is what keeps that true
-now that the projection can emit a value (`source_quote: null`) the full
-schema does not itself accept.
+now that the projection can emit a value (`internal_rationale_for_
+footnote: null`) the full schema does not itself accept.
 """
 
 from __future__ import annotations
@@ -96,7 +146,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v2.json"
+# Issue #627 (the hard cutover) flipped this default from
+# `output-schema-v2.json` to v3, in the same diff that flipped
+# `primary_review_pass.OUTPUT_SCHEMA_PATH` and the prompt. Both request-side
+# projections below are built from whichever artifact is named here, so a
+# default left on v2 would have projected a v2-shaped tool schema for a
+# v3-shaped prompt -- the request half of the very drift this cutover exists
+# to prevent. `run_primary_pass`/`run_critic_pass` pass their own
+# `output_schema_path` explicitly; this default serves every other caller.
+OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"
 
 # Pipeline-stamped fields the model must not be asked to produce -- see the
 # module docstring. Kept as their own named tuples (rather than one shared
@@ -104,6 +162,87 @@ OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v2.json"
 # to without disturbing the other.
 _TOP_LEVEL_STAMPED_FIELDS = ("schema_version",)
 _ISSUE_STAMPED_FIELDS = ("provenance",)
+
+# Issue-level fields the PIPELINE derives under a block-transcript contract
+# (issue #627), removed from the model-facing projection for the same reason
+# `_ISSUE_STAMPED_FIELDS` are: the model is not the source of truth for them,
+# so asking is at best noise and at worst a contradiction.
+#
+# `proposed_replacement_text` is v3's case. The v3 prompt explicitly tells the
+# model NOT to send it -- its edits ARE its proposal, and
+# `redline_generate.derived_replacement_text_by_issue` computes this field
+# from the PROVEN transcript. Left in the projection it would be a field a
+# strict-mode provider is contractually REQUIRED to emit
+# (`_force_all_properties_required_in_place` makes every remaining property
+# required) while the prompt in the same request forbids it: an impossible
+# instruction, and precisely the prompt/request drift the cutover exists to
+# remove. Under v1/v2 the model DOES author this field, so the removal is
+# conditional on the artifact -- see `authors_block_transcripts`.
+_ISSUE_FIELDS_DERIVED_UNDER_A_BLOCK_TRANSCRIPT_CONTRACT = ("proposed_replacement_text",)
+
+
+def authors_block_transcripts(schema: dict[str, Any]) -> bool:
+    """Whether `schema` is a block-transcript output contract -- i.e. it
+    defines a top-level `block_patches` carrier (issue #627).
+
+    Read off the ARTIFACT, never off a version literal: the contract is what
+    the file says. This module owns the predicate because it owns schema
+    introspection; `primary_review_pass.authors_block_transcripts` is the
+    same function re-exported, so both halves of the pipeline decide "does
+    the model author replacement text here?" from ONE answer.
+    """
+    return "block_patches" in (schema.get("properties") or {})
+
+# Issue-level fields the model is asked for ONLY when this review's notes
+# mode puts internal-audience content in scope -- removed from the
+# model-facing projection (and therefore from the provider projection built
+# on top of it) exactly like a stamped field, for a DIFFERENT reason.
+#
+# `internal_rationale_for_footnote` (issue #522, epic #519 item D) is real
+# model prose, not pipeline metadata -- but WHETHER a review asks the model
+# for internal-audience content is decided from that review's notes mode
+# (epic #519: "notes mode is a pipeline INPUT, not a render-time filter" --
+# internal content has to be *requested* to exist, and a review in
+# `none`/`external` must never be told to produce any). An UNCONDITIONAL
+# property in the model-facing schema would be an invitation on EVERY
+# review, and under a strict provider projection
+# (`_force_all_properties_required_in_place`) a field the model is
+# contractually obliged to fill in or null out -- the exact posture the
+# epic rules out. So the property is stripped in `none`/`external` and kept
+# in `internal`/`both`, in step with the prompt half of the same gate
+# (`primary_review_pass.render_binary_decision_overlay_block`, which adds
+# the key to the issue-object contract in exactly those two modes).
+#
+# BOTH halves have to open together. Prose alone cannot produce the field
+# on a provider-enforced request (the projected schema decides what may be
+# emitted, and `additionalProperties: false` is forced on every object
+# node); a schema property alone would be a key the prompt's "EXACTLY these
+# keys and no others" sentence forbids. Either half left closed leaves
+# `redline_docx_writer.footnote_texts_for_notes_mode` rendering a field
+# nothing can populate -- a renderer that is dead on every real review.
+#
+# The FULL schema declares the field optional in every mode, so this
+# constant governs only what the model is ASKED for, never what is
+# ACCEPTED: a value that arrives some other way validates and renders.
+_ISSUE_FIELDS_REQUESTED_ONLY_WITH_INTERNAL_NOTES = ("internal_rationale_for_footnote",)
+
+# Notes modes that put internal-audience content in scope for a review
+# (epic #519 axis 1). Deliberately a local copy of the same one-line
+# predicate `primary_review_pass._notes_mode_includes_internal`,
+# `redline_generate._notes_mode_includes_internal_content` and
+# `redline_docx_writer.footnote_texts_for_notes_mode` each keep: this
+# module is imported BY `primary_review_pass`, so importing it back would
+# be a cycle, and a shared constants module for one boolean would be a
+# layer for its own sake. Unrecognized/blank is NOT internal -- the same
+# fail-closed direction all four take, so a caller that failed to validate
+# upstream gets the counterparty-safe projection.
+_NOTES_MODES_WITH_INTERNAL_CONTENT = ("internal", "both")
+
+
+def _notes_mode_includes_internal_content(notes_mode: str) -> bool:
+    """Whether `notes_mode` puts internal-audience content in scope -- see
+    `_NOTES_MODES_WITH_INTERNAL_CONTENT` above."""
+    return (notes_mode or "").strip().lower() in _NOTES_MODES_WITH_INTERNAL_CONTENT
 
 
 def _strip_stamped_fields(
@@ -119,7 +258,9 @@ def _strip_stamped_fields(
     return [name for name in required if name not in fields]
 
 
-def model_facing_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
+def model_facing_output_schema(
+    path: Path = OUTPUT_SCHEMA_PATH, notes_mode: str = "external"
+) -> dict[str, Any]:
     """The projected JSON Schema sent as the forced tool's `parameters`
     under structured output (issue #418): `output-schema-v2.json` with the
     pipeline-stamped fields removed from every `required` list AND every
@@ -130,6 +271,19 @@ def model_facing_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any
         from BOTH the top-level `issues` array and
         `critic_delta.added_issues`, since both `$ref` the identical
         definition, so one removal covers both.
+
+    ...plus `_ISSUE_FIELDS_REQUESTED_ONLY_WITH_INTERNAL_NOTES`
+    (`internal_rationale_for_footnote`, issue #522), removed the same way
+    for a different reason -- see that constant's own comment.
+
+    `notes_mode` (issue #522, epic #519 item D, default `"external"` --
+    matching `primary_review_pass.assemble_system_blocks`' own default, so
+    an un-migrated caller gets today's projection byte for byte) governs
+    only that last removal: `internal`/`both` KEEP
+    `internal_rationale_for_footnote` (the modes whose delivered document
+    renders it, and whose prompt asks for it -- `primary_review_pass.
+    render_binary_decision_overlay_block`), every other value strips it.
+    Unrecognized/blank strips it, the fail-closed direction.
 
     Loads `path` fresh on every call (no module-level cache) -- this is a
     small on-disk file read once per pass, not a hot loop, matching this
@@ -152,8 +306,24 @@ def model_facing_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any
     issue_properties = issue_def.get("properties") or {}
     issue_required = issue_def.get("required") or []
     if issue_properties or issue_required:
-        issue_def["required"] = _strip_stamped_fields(
+        issue_required = _strip_stamped_fields(
             issue_properties, issue_required, _ISSUE_STAMPED_FIELDS
+        )
+        internal_notes_fields = (
+            ()
+            if _notes_mode_includes_internal_content(notes_mode)
+            else _ISSUE_FIELDS_REQUESTED_ONLY_WITH_INTERNAL_NOTES
+        )
+        issue_required = _strip_stamped_fields(
+            issue_properties, issue_required, internal_notes_fields
+        )
+        derived_fields = (
+            _ISSUE_FIELDS_DERIVED_UNDER_A_BLOCK_TRANSCRIPT_CONTRACT
+            if authors_block_transcripts(schema)
+            else ()
+        )
+        issue_def["required"] = _strip_stamped_fields(
+            issue_properties, issue_required, derived_fields
         )
 
     return schema
@@ -181,8 +351,22 @@ _UNSUPPORTED_NUMERIC_CONSTRAINT_KEYWORDS = (
     "exclusiveMaximum",
     "multipleOf",
 )
+# Array-cardinality keywords, same rejection class as the string/numeric ones
+# above. No CURRENT property in `output-schema-v2.json` uses any of them --
+# but `playbooks/output-schema-v3.json` (issue #624) does: its
+# `BlockPatch.segments` carries `minItems: 1`, since a block patch with no
+# segments transcribes nothing. Stripping it keeps the projection's own
+# documented direction of looseness ("requests fewer/broader things"): a
+# provider-enforced response that sends `segments: []` anyway still fails
+# closed at `primary_review_pass.validate_model_response`'s FULL-schema
+# check, exactly like an over-length `section_ref` that survived the
+# `maxLength` strip. `maxItems`/`uniqueItems` are listed for completeness,
+# same forward-compat reasoning as the unused numeric keywords.
+_UNSUPPORTED_ARRAY_CONSTRAINT_KEYWORDS = ("minItems", "maxItems", "uniqueItems")
 _UNSUPPORTED_CONSTRAINT_KEYWORDS = (
-    _UNSUPPORTED_STRING_CONSTRAINT_KEYWORDS + _UNSUPPORTED_NUMERIC_CONSTRAINT_KEYWORDS
+    _UNSUPPORTED_STRING_CONSTRAINT_KEYWORDS
+    + _UNSUPPORTED_NUMERIC_CONSTRAINT_KEYWORDS
+    + _UNSUPPORTED_ARRAY_CONSTRAINT_KEYWORDS
 )
 
 # Root JSON-Schema-file keywords `playbooks/output-schema-v2.json` carries
@@ -202,50 +386,62 @@ _UNSUPPORTED_CONSTRAINT_KEYWORDS = (
 # outright, previously via a different keyword.
 _NON_SCHEMA_ROOT_KEYWORDS = ("$schema", "$id", "output_contract_version")
 
-# Optional `definitions.Issue` property (fix round 2, finding 1; REVISED fix
-# round 3, finding 1) whose FULL schema definition
-# (`playbooks/output-schema-v2.json`) offers NO value a provider-enforced
-# request could honestly emit for "no value": `minLength: 1` (an empty
-# string is rejected) and no `null`/`oneOf`/`anyOf` branch (see that file's
-# `definitions.Issue.properties.source_quote`). Every OTHER property
-# `_force_all_properties_required_in_place` newly adds to `required` -- the
-# three `CriticDelta` arrays and `contested_replacements.items.
-# critic_suggested_replacement` -- has an emittable "no value" the full
-# schema already accepts (`[]` / `""`, no `minItems`/`minLength` floor), so
-# those are simply added to `required` with their type untouched (see
-# `_already_permits_null`).
+# Optional `definitions.Issue` properties (fix round 2, finding 1; REVISED
+# fix round 3, finding 1) whose FULL schema definition offers NO value a
+# provider-enforced request could honestly emit for "no value": `minLength:
+# 1` (an empty string is rejected) and no `null`/`oneOf`/`anyOf` branch.
+# Every OTHER property `_force_all_properties_required_in_place` newly adds
+# to `required` -- the three `CriticDelta` arrays and
+# `contested_replacements.items.critic_suggested_replacement` -- has an
+# emittable "no value" the full schema already accepts (`[]` / `""`, no
+# `minItems`/`minLength` floor), so those are simply added to `required`
+# with their type untouched (see `_already_permits_null`).
 #
-# Fix round 2 dropped `source_quote` from the projected schema entirely to
-# sidestep this. Fix round 3 found that unacceptable: since #379/#380
-# retired the anchor-joined patch path, `source_quote` is the ONLY way a
-# REQUEST_CHANGE issue locates its target for redline patching
-# (`scripts/review_spine.py`, `scripts/redline_quote_apply.py`) -- a
-# schema-enforced call could never carry one, so EVERY issue on EVERY
-# structured-outputs-capable model (all six `model-policy/openrouter.json`
-# `selectable` entries, plus Bedrock's pinned primary/critic) would route
-# to `MANUAL_REVIEW_REQUIRED` with `docx_bytes=None`: zero redlines
-# produced, silently, on the very capability this ticket hardens.
+# HISTORY, because the reasoning is what makes the exception safe. Under
+# v2 this list also named that schema's optional quote field -- the address
+# a REQUEST_CHANGE issue located its redline target by. Fix round 2 dropped
+# it from the projected schema entirely to sidestep the problem; fix round 3
+# found that unacceptable, because a schema-enforced call could then never
+# carry an address, so EVERY issue on EVERY structured-outputs-capable model
+# (all six `model-policy/openrouter.json` `selectable` entries, plus
+# Bedrock's pinned primary/critic) would route to `MANUAL_REVIEW_REQUIRED`
+# with `docx_bytes=None`: zero redlines produced, silently, on the very
+# capability that ticket hardened. The fix was to make the field NULLABLE in
+# the projection (a real, emittable "no value" a strict-mode provider can
+# send) and pair it with a normalization in
+# `primary_review_pass.py::_denullify_unrepresentable_issue_fields` that
+# strips a `null` (or empty-string) value back to ABSENT before the
+# full-schema check runs -- the full schema already treats "absent" and "no
+# value" identically, so this loses no information the model actually
+# conveyed; it only reshapes "I have none" into the form both schemas agree
+# on. Issue #627 replaced quote addressing with block transcripts and issue
+# #628 deleted the locator, so that field is gone from the contract and from
+# this list.
 #
-# The fix instead makes `source_quote` NULLABLE in the projection (a real,
-# emittable "no value" a strict-mode provider can send), and pairs it with
-# a normalization in `primary_review_pass.py::_denullify_unrepresentable_
-# issue_fields` that strips a `null` (or empty-string) `source_quote` back
-# to ABSENT before the full-schema check runs -- the full schema already
-# treats "absent" and "no locatable quote" identically (issue #376's
-# original design), so this loses no information the model actually
-# conveyed; it only reshapes "I have none" into the form both schemas
-# agree on. Adding a `null` branch to `output-schema-v2.json` itself was
-# considered and rejected: that changes the pipeline's single validation
+# Widening the FULL artifact instead was considered and rejected then, and
+# the reasoning still governs the surviving entry: editing
+# `playbooks/output-schema-v3.json` changes the pipeline's single validation
 # source of truth and, per that file's own top-level description and
 # docs/output-contract.md, requires a new `release.output_contract_hash`
 # plus legal-governance review -- out of scope for this projection-only
 # module, and unnecessary once the post-hoc normalization exists. NOT the
 # same category as `_TOP_LEVEL_STAMPED_FIELDS`/`_ISSUE_STAMPED_FIELDS`
 # above (pipeline-owned metadata the model was never asked to produce, on
-# EITHER projection): `source_quote` is a model judgment both the
-# non-enforced fallback path (`model_facing_output_schema`, #418) and the
-# strict provider projection below now request and can both receive.
-_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH = ("source_quote",)
+# EITHER projection): these are model judgments both the non-enforced
+# fallback path (`model_facing_output_schema`, #418) and the strict provider
+# projection below request and can both receive.
+#
+# `internal_rationale_for_footnote` (issue #522, fix round 2) is the
+# surviving field of exactly this shape: `minLength: 1` with no
+# `null`/`anyOf` branch in the full schema, so once it is present in the
+# projection at all (`internal`/`both` only) the force-required pass would
+# otherwise oblige the model to invent an internal note on EVERY issue --
+# turning an optional note into a mandatory one and filling the delivered
+# document with `[INTERNAL]` footnotes nobody needed. Listing it here is
+# harmless in the modes that strip it: `_make_issue_fields_nullable_in_
+# place` no-ops on a field its `properties` does not carry, so
+# `none`/`external` projections are untouched.
+_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH = ("internal_rationale_for_footnote",)
 
 
 def _make_issue_fields_nullable_in_place(schema: dict[str, Any]) -> None:
@@ -508,7 +704,7 @@ def _make_nullable_in_place(prop_schema: Any) -> None:
     from THAT call site, every invocation is a no-op confirmation that the
     union is already well-formed, never a live widening. Fix round 3 added
     a second call site, `_make_issue_fields_nullable_in_place`, that calls
-    this UNCONDITIONALLY on `source_quote` specifically -- a genuine, live
+    this UNCONDITIONALLY on the fields it names -- a genuine, live
     widening the full schema does not already offer (see
     `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`'s docstring for why that
     field is the deliberate exception). The three branches below stay
@@ -582,9 +778,9 @@ def _already_permits_null(prop_schema: Any) -> bool:
     Fix round 2, finding 1: before this predicate existed,
     `_force_all_properties_required_in_place` called `_make_nullable_
     in_place` on EVERY property it newly added to `required`, regardless of
-    whether the FULL schema (`playbooks/output-schema-v2.json`) offered a
-    `null` branch for that property at all -- widening 5 fields
-    (`Issue.source_quote`, `CriticDelta.{added_issues,
+    whether the FULL schema offered a
+    `null` branch for that property at all -- widening 5 fields (v2's
+    `Issue` quote field, `CriticDelta.{added_issues,
     contested_replacements,rationale_objections}`,
     `CriticDelta.contested_replacements.items.
     critic_suggested_replacement`) to accept a value (`null`) the FULL
@@ -594,21 +790,21 @@ def _already_permits_null(prop_schema: Any) -> bool:
     predicate gates that call: only a property the full schema ALREADY
     makes nullable may be (redundantly, idempotently) run through
     `_make_nullable_in_place`; every other newly-required property is left
-    with its ORIGINAL type -- safe because output-schema-v2.json places no
+    with its ORIGINAL type -- safe because the full schema places no
     `minItems`/`minLength` floor on the four array/string properties above
-    (an empty `[]`/`""` is a value BOTH schemas accept). `source_quote`
-    (which DOES have a `minLength: 1` floor with no null escape in the
-    FULL schema) is handled differently, not by this predicate: fix round
-    3 gives it a NEW null branch BEFORE this pass runs, via
+    (an empty `[]`/`""` is a value BOTH schemas accept). Every field in
+    `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH` (which DOES have a
+    `minLength: 1` floor with no null escape in the FULL schema) is handled
+    differently, not by this predicate: fix round 3 gives it a NEW null
+    branch BEFORE this pass runs, via
     `_make_issue_fields_nullable_in_place` -- so by the time THIS
     predicate checks it, the null branch already exists (added moments
     ago, not inherited from the full schema) and `_already_permits_null`
     correctly answers True, folding it into the same idempotent-
     confirmation path as a property the full schema made nullable itself.
-    See `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`'s docstring for why
-    `source_quote` needs this special upstream step at all: unlike the
-    four properties above, it has no full-schema-accepted "empty" value to
-    fall back to un-widened.
+    See that constant's own comment for why those fields need the special
+    upstream step at all: unlike the four properties above, they have no
+    full-schema-accepted "empty" value to fall back to un-widened.
     """
     if not isinstance(prop_schema, dict):
         return False
@@ -637,8 +833,8 @@ def _force_all_properties_required_in_place(node: Any) -> None:
     `required` omits a name present in `properties`, even a genuinely
     optional field. Before this pass, four nodes in the real projected
     schema violated that: the document root (`confidence_band`,
-    `critic_delta`, `verdict_summary`), `definitions.Issue`
-    (`source_quote`), `definitions.CriticDelta` (`added_issues`,
+    `critic_delta`, `verdict_summary`), `definitions.Issue` (its optional
+    properties), `definitions.CriticDelta` (`added_issues`,
     `contested_replacements`, `rationale_objections`), and
     `definitions.CriticDelta.properties.contested_replacements.items`
     (`critic_suggested_replacement`) -- a live admin-selectable
@@ -649,8 +845,8 @@ def _force_all_properties_required_in_place(node: Any) -> None:
     Fix round 2, finding 1: fix round 1's own remedy above turned out to
     still be LOOSER than the full schema, not merely differently-shaped --
     unconditionally nullifying every newly-required property let a strict-
-    mode-compliant model emit `null` for `source_quote` / the three
-    `CriticDelta` arrays / `critic_suggested_replacement`, a value the FULL
+    mode-compliant model emit `null` for `Issue`'s optional fields / the
+    three `CriticDelta` arrays / `critic_suggested_replacement`, a value the FULL
     schema (no `null`/`anyOf` branch on any of the four) rejects outright,
     so the provider-compliant response became exactly the one
     `primary_review_pass.validate_model_response` throws away. A property
@@ -662,13 +858,14 @@ def _force_all_properties_required_in_place(node: Any) -> None:
     them (`CriticDelta`'s arrays, `critic_suggested_replacement`) are
     simply added to `required` with their type UNCHANGED, since the full
     schema already accepts an empty `[]`/`""` for each -- no `minItems`/
-    `minLength` floor. `source_quote` (which DOES have a floor, `minLength:
-    1`, with no escape) is handled differently still: fix round 3 gives it
+    `minLength` floor. A field in `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`
+    (which DOES have a floor, `minLength: 1`, with no escape) is handled
+    differently still: fix round 3 gives it
     a null branch BEFORE this pass runs, via `project_output_schema_for_
-    provider`'s `_make_issue_fields_nullable_in_place` step (see
-    `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`'s docstring for why this
-    field, uniquely, needs a NEW null branch the full schema does not
-    already have) -- so by the time THIS pass reaches it,
+    provider`'s `_make_issue_fields_nullable_in_place` step (see that
+    constant's own comment for why those fields, uniquely, need a NEW null
+    branch the full schema does not already have) -- so by the time THIS
+    pass reaches it,
     `_already_permits_null` already answers True and it is folded into the
     ordinary already-nullable path above, no special case needed here.
     A property that was ALREADY required is left completely untouched (no
@@ -695,7 +892,9 @@ def _force_all_properties_required_in_place(node: Any) -> None:
 
 
 def project_output_schema_for_provider(
-    schema: dict[str, Any] | None = None, path: Path = OUTPUT_SCHEMA_PATH
+    schema: dict[str, Any] | None = None,
+    path: Path = OUTPUT_SCHEMA_PATH,
+    notes_mode: str = "external",
 ) -> dict[str, Any]:
     """The provider-safe schema (issue #567) sent as the structured-output
     request field on BOTH first-class adapters -- Bedrock's
@@ -733,11 +932,11 @@ def project_output_schema_for_provider(
          validators support the latter, not the former). Runs BEFORE step
          5 so that step's own null-branch bookkeeping only ever has to
          recognize `anyOf`.
-      4. `_make_issue_fields_nullable_in_place` -- gives `Issue.source_quote`
-         a NEW `null` branch (fix round 3, finding 1: dropping it, as fix
-         round 2 did, left every issue on a structured-outputs-capable
-         model unable to carry the field redline generation depends on --
-         see `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`'s docstring). Runs
+      4. `_make_issue_fields_nullable_in_place` -- gives every field in
+         `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH` a NEW `null` branch (fix
+         round 3, finding 1: dropping such a field, as fix round 2 did,
+         leaves every issue on a structured-outputs-capable model unable to
+         carry it at all -- see that constant's own comment). Runs
          BEFORE step 5 so that step's `_already_permits_null` gate sees the
          null branch this step just added and simply confirms it, rather
          than needing its own special case.
@@ -758,7 +957,7 @@ def project_output_schema_for_provider(
     This is PROJECTION ONLY, exactly like `model_facing_output_schema`: the
     pipeline's actual acceptance criterion is unchanged.
     `primary_review_pass.validate_model_response` still runs the full,
-    unmodified `playbooks/output-schema-v2.json` (via `load_output_schema`)
+    unmodified ACTIVE artifact (via `load_output_schema`)
     against the parsed response post-hoc -- this function changes only what
     the provider is ASKED to enforce, never what is ACCEPTED. A response
     that satisfies this looser projected schema but violates a stripped
@@ -772,7 +971,7 @@ def project_output_schema_for_provider(
     `_denullify_unrepresentable_issue_fields` in `primary_review_pass.py`,
     for `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`) -- never silently
     accepted by the projection and then thrown away by validation, which
-    was the case fix round 2 left unresolved for `source_quote`.
+    was the case fix round 2 left unresolved.
 
     `schema` (default None): inject an already-built schema dict directly
     instead of deriving it from `path` -- used by this module's own tests
@@ -783,11 +982,26 @@ def project_output_schema_for_provider(
     is given. A real caller passes neither and gets
     `model_facing_output_schema(path)` as the starting point.
 
+    `notes_mode` (issue #522, default `"external"`) is forwarded to
+    `model_facing_output_schema` and does nothing else here -- see that
+    function's docstring. It is ignored when `schema` is given, exactly
+    like `path`, since an injected schema has already been projected.
+    `internal_rationale_for_footnote` therefore reaches this function's
+    passes only in `internal`/`both`, where
+    `_ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH` gives it the null branch a
+    strict-mode provider needs to say "no internal note on this issue", and
+    `primary_review_pass._denullify_unrepresentable_issue_fields`
+    strips that null back to absent before the full-schema check.
+
     Returns a fresh dict this call owns -- neither the source file's cached
     read (`model_facing_output_schema` never caches either) nor the
     caller-supplied `schema` argument is mutated.
     """
-    base = schema if schema is not None else model_facing_output_schema(path)
+    base = (
+        schema
+        if schema is not None
+        else model_facing_output_schema(path, notes_mode=notes_mode)
+    )
     projected: dict[str, Any] = json.loads(json.dumps(base))
     _break_recursive_refs_in_place(projected)
     _strip_unsupported_constraints_in_place(projected)

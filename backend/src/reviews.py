@@ -134,8 +134,13 @@ BUCKET_WIDTH_MINUTES = 10
 # ---------------------------------------------------------------------------
 # Cost-model constants (mirrors ARCHITECTURE.md -> Cost shape and
 # pipeline-stack.ts context caps; kept in sync with the pinned config there).
+#
+# Issue #625 (owner decision 2026-08-25): raised 80_000 -> 100_000 when
+# outline mode was deleted -- one full-quality review up to the cap, a
+# loud `document_too_large` failure above it. Reservations scale with this
+# constant automatically (the formula below), and rise with it.
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 80_000
+MAX_INPUT_TOKENS = 100_000
 MAX_OUTPUT_TOKENS = 8_000
 MAX_RETRIES_PER_PASS = 1
 PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
@@ -145,7 +150,8 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # "most expensive tier" rate applied to every pass's tokens -- the latter
 # (the pre-fix WORST_CASE_PRICE_PER_TOKEN_USD = Opus output rate, applied to
 # ALL passes) overshot the true worst case by 4.6x: $9.68 reserved per
-# review vs the documented $2.11 (ARCHITECTURE.md -> Cost shape), which
+# review vs the then-documented $2.11 (ARCHITECTURE.md -> Cost shape;
+# $2.46 since issue #625 raised MAX_INPUT_TOKENS to 100_000), which
 # 429'd the third review of any day against the $20/day default cap.
 #
 # These figures mirror model-policy/bedrock-us-east-1.json's
@@ -154,7 +160,8 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # regional-endpoint surcharge documented in docs/design-notes.md -> Model
 # selection & governance applied ($5.50/$27.50 Opus, $3.30/$16.50 Sonnet) --
 # the SAME regional rates ARCHITECTURE.md's Cost shape unit-economics table
-# cites for its $2.11 worst-case/review arithmetic. They cannot be loaded
+# cites for its $2.46 worst-case/review arithmetic ($2.11 before issue #625
+# raised MAX_INPUT_TOKENS to 100_000). They cannot be loaded
 # directly from model-policy/*.json at runtime: this module ships inside the
 # backend container (backend/Dockerfile COPYs only src/, built from the
 # backend/ directory as its Docker context) and infra/lambda/persist/
@@ -266,6 +273,18 @@ STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # two remain telling-apart-able in the row: one was estimated ahead of
     # the call, the other was measured by the provider.
     "model_context_length_exceeded": "MANUAL_REVIEW_REQUIRED",
+    # Issue #584: a REQUEST_CHANGE decision that persisted no output object
+    # (`redline_generate.generate_redline`'s "every issue flag-only, nothing
+    # to attempt" branch, and any other path that reaches the persist
+    # boundary the same way) -- a pipeline defect, not a document problem
+    # (the document reviewed fine; only the deliverable is missing), so it
+    # gets the SAME status as `structured_output_retry_exhausted` above.
+    # Listed here for the taxonomy's own completeness even though this
+    # token is written directly by `pipeline_runner._write_real_terminal`'s
+    # caller rather than through `record_stage_failure` -- there is no raised
+    # exception to catch, only a "success" result with nothing to show for
+    # it.
+    "redline_not_persisted": "ERROR_MANUAL_REVIEW_REQUIRED",
 }
 
 
@@ -488,7 +507,8 @@ def _active_provider_rates(
     see that file's own `_comment`). Any other value (including unset, the
     AWS/Bedrock target's default) returns the existing hardcoded Bedrock
     regional-rate constants, UNCHANGED -- this branch must never perturb
-    the Bedrock path's documented $2.11 worst case (issue #189).
+    the Bedrock path's documented $2.46 worst case (issue #189; $2.11
+    before issue #625 raised MAX_INPUT_TOKENS to 100_000).
 
     ADMIN SELECTION (issue #445). On the OpenRouter path the rates are those
     of the models that will actually be invoked -- the admin's stored
@@ -553,22 +573,14 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     — only the settled actual spend (ledgered after every model attempt,
     including failures) can come in under it.
 
-    Issue #569: when the bounded re-quote repair pass is on
-    (`config.requote_enabled()`), the reservation also covers its ONE extra
-    model call — priced at the PRIMARY pass's own rate (the model id
-    `scripts/review_spine.py` hands `requote_repair.run_requote_repair`)
-    and bounded by the SAME per-pass token ceilings, but deliberately NOT
-    multiplied by `attempts_per_pass`: that repair call carries no retry
-    budget of its own ("one pass ever", `scripts/requote_repair.py`'s own
-    docstring). This is a generous over-estimate — the repair prompt is
-    just the failed issues' rationale/reasons plus a target paragraph each,
-    far smaller than a full-document review — which is the correct
-    direction for a WORST-CASE reservation. Added only when the flag is on,
-    so a deployment that never turns it on reserves exactly what it always
-    has; settlement needs no matching change, since the repair call shares
-    the SAME model-client instance the primary/critic passes use and its
-    real usage is already folded into that client's own `cumulative_usage`
-    total (`backend/src/pipeline_runner.py::_actual_cents_from_client`).
+    Issue #628: the bounded address-repair pass issue #569 added a
+    conditional third model call for is gone (its module, its flag, and the
+    quote addressing it repaired were all deleted), so the reservation is
+    once again exactly `attempts_per_pass * (primary + critic)` — the same
+    figure a deployment that never turned that flag on always reserved.
+    Both Lambda mirrors of this function (infra/lambda/persist/handler.py,
+    infra/lambda/orphan_reconciler/handler.py) dropped the same term in the
+    same commit, so reserve and settle cannot disagree.
     """
     attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
@@ -581,8 +593,6 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
         critic_input_rate / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (critic_output_rate / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
-    if config.requote_enabled():
-        usd += primary_usd
     return int(round(usd * 100))
 
 
@@ -590,6 +600,7 @@ def compute_actual_usd_cents_from_usage(
     primary_usage: dict[str, int] | None,
     critic_usage: dict[str, int] | None,
     dynamodb_resource: Any = None,
+    rates: tuple[float, float, float, float] | None = None,
 ) -> int:
     """Actual settled cost (cents) for one review's primary + critic passes,
     priced from REAL provider-reported token usage rather than the
@@ -609,9 +620,20 @@ def compute_actual_usd_cents_from_usage(
     uses for this review's reservation, so a review's reservation and its
     eventual settlement are always priced against the same provider and the
     same chosen models.
+
+    `rates` is an ALREADY-RESOLVED `_active_provider_rates` tuple, for the
+    one shape this function did not serve well: a caller pricing MANY
+    reviews inside a SINGLE request. `_active_provider_rates` re-resolves
+    its answer on every call -- on the OpenRouter path it re-reads
+    `model-policy/openrouter.json` AND the admin model-selection DynamoDB
+    row -- so calling it once per review turns one request into an N+1 that
+    grows with the ledger (`admin_dashboard._cost_outliers`, which now
+    resolves the tuple once and threads it in here). Omitted (the settlement
+    path's own shape, and every existing caller), the rates are resolved
+    here exactly as before, so a caller pricing one review is unchanged.
     """
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
-        _active_provider_rates(dynamodb_resource)
+        rates if rates is not None else _active_provider_rates(dynamodb_resource)
     )
     total_usd = 0.0
     if primary_usage:
@@ -1421,11 +1443,16 @@ def resolve_notes_mode(value: str | None) -> str:
 
     Issue #572: while `config.notes_mode_enabled()` is off (the default),
     `internal` and `both` are refused with that same `ValueError` -> 400
-    path -- never silently downgraded to `external` -- because the
-    audience-aware leakage scan (#521) that makes internal reasoning safe to
-    generate does not exist on `main` yet. `none` and `external` stay
-    accepted regardless of the flag: neither can surface internal reasoning,
-    so neither carries the risk the gate exists for.
+    path -- never silently downgraded to `external` -- because there is
+    still nowhere safe for internal reasoning to go. #521 landed the
+    audience-aware leakage scan's machinery, but with EVERY field declared
+    external-bound (`leakage_scan._FIELD_CHANNELS`), so internal reasoning
+    generated today would land in a counterparty-bound field and be blocked
+    by the strict ruleset. The internal-notes field itself, and the renderer
+    that keeps it out of the delivered document, arrive with #522 -- that is
+    what this flag waits for. `none` and `external` stay accepted regardless
+    of the flag: neither can surface internal reasoning, so neither carries
+    the risk the gate exists for.
     """
     if value is None:
         return DEFAULT_NOTES_MODE
@@ -2595,12 +2622,6 @@ def get_review_detail(
         # cluster/author counts, never silent. Absent-on-the-row -> None
         # here, same faithful-projection convention as every other field.
         "normalization_notes": item.get("normalization_notes"),
-        # Issue #569: the bounded re-quote repair pass's outcome, when that
-        # pass has run (attempted/recovered/still_failed). Absent-on-the-row
-        # -> None here, same faithful-projection convention as every other
-        # field -- renders correctly whether or not #569 has landed, since
-        # nothing ever writes this key until it does.
-        "requote": item.get("requote"),
         "reason": reason,
         # Target-agnostic stage-failure taxonomy (issue #258): the specific
         # pipeline stage a failure occurred in, when
@@ -3286,6 +3307,32 @@ _RECENT_FAILURE_FIELDS = (
     "failing_stage",
     "reason",
     "status",
+    # Issue #616: WHICH leakage detector fired, for the one reason token
+    # that was otherwise undiagnosable. `reason="leakage_detected"` is
+    # written identically for all five of `scripts/leakage_scan.py`'s
+    # categories, so an admin could not tell "the model echoed the system
+    # prompt" from "the model quoted the playbook" from "the model named
+    # another counterparty" -- the difference between a correct gate that
+    # needs an upstream prompt fix and a detector that is too broad. A real
+    # EIAA review was blocked in production with no way to establish which.
+    #
+    # THIS IS A DELIBERATE DISCLOSURE DECISION, and it is defensible only
+    # because of what these three fields are. `scripts/leakage_scan.py`'s
+    # own header states the module reports "detection category, and rule
+    # id -- never the matched confidential text", and it is built that way:
+    # `LeakageDetectedError` has no field that could hold a matched span,
+    # so there is no path by which one reaches this row. `category` is one
+    # of five fixed `CATEGORY_*` constants; `rule_id` names a detector rule
+    # declared in that module's own source; `field_name` is a
+    # model-output FIELD NAME (`external_rationale_for_footnote`, ...),
+    # never its contents. All three are already written verbatim to the
+    # `leakage_scan_blocked` audit row for the same reason.
+    #
+    # The allowlist property is unchanged: these are three named fields,
+    # not a widening of what the projection does.
+    "leakage_category",
+    "leakage_rule_id",
+    "leakage_field_name",
 )
 
 
@@ -3324,7 +3371,10 @@ def list_recent_failures(
     Answers, from inside the app, the question that on 2026-08-01 could only
     be answered by driving the Coolify UI into a production container's logs:
     *why* did these reviews fail? Each row carries the #442 `reason` token,
-    the stage that failed, the terminal status, and when -- and nothing else.
+    the stage that failed, the terminal status, when, and -- for a leakage
+    block only -- which detector fired (issue #616's `leakage_category` /
+    `leakage_rule_id` / `leakage_field_name`, non-substantive by the
+    scanner's own construction). Nothing else.
 
     NOT A LOG VIEWER (issue #443, explicitly out of scope): no stack trace,
     no exception message, no prompt or document substance, no key material,

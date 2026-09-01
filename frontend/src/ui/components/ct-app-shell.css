@@ -32,9 +32,9 @@ ct-app-shell {
   grid-template-areas:
     'brand    identity'
     'rule     rule'
-    'notice   notice'
     'tabs     tabs'
     'content  content'
+    'notice   notice'
     'footer   footer';
   column-gap: var(--ct-space-4);
   max-width: var(--ct-maxw);
@@ -86,15 +86,26 @@ ct-app-shell > [slot='identity'] {
 }
 
 /* Account-level notices (issue #469's default-password warning, and anything
-   like it): full width, under the nameplate hairline, above the tabs. This
-   row exists so such a notice never has to be smuggled into the identity
+   like it): full width, at the FOOT of the page just above the footer rule.
+   This row exists so such a notice never has to be smuggled into the identity
    cluster, where it is both visually wrong -- a block-level alert inline
    between "Sign out" and the page edge -- and structurally destructive to the
-   header's track sizing. Empty by default: with no notice rendered the row
-   collapses to nothing and the header is unchanged. */
+   header's track sizing.
+
+   It sat directly under the nameplate hairline until issue #603 moved it
+   down, per owner direction: a standing condition (this account is still on
+   its shipped password) is not news, and a permanent amber block above every
+   screen reads as an unfixable error rather than a to-do. Note this is a
+   grid-AREA move matched by a DOM move in App.tsx -- the element itself now
+   comes after every tabpanel, so it is last in reading and tab order too,
+   not merely painted lower. Do not "fix" one without the other; a CSS-only
+   reorder would put a screen reader's experience out of step with the
+   sighted one.
+
+   Empty by default: with no notice rendered the row collapses to nothing. */
 ct-app-shell > [slot='notice'] {
   grid-area: notice;
-  margin-bottom: var(--ct-space-3);
+  margin-top: var(--ct-space-5);
 }
 
 /* ct-banner's own top margin is for stacking inside a panel; in this row the
@@ -113,7 +124,7 @@ ct-app-shell > [slot='footer'] {
   padding-top: var(--ct-space-3);
   border-top: 1px solid var(--ct-border);
   font-family: var(--ct-font-mono);
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
   color: var(--ct-text-muted);
 }
 
@@ -136,9 +147,9 @@ ct-app-shell > :not([slot]):not(.ct-app-shell__brand):not([hidden]) {
       'brand'
       'identity'
       'rule'
-      'notice'
       'tabs'
       'content'
+      'notice'
       'footer';
   }
   ct-app-shell > [slot='identity'] {

@@ -44,9 +44,13 @@ scan exists to prevent."
      failing against the PRE-#516 `TOASTER_GUIDANCE_INTRO`, which carried
      that instruction unconditionally.
   2. For `notes_mode in ("internal", "both")` (internal notes ON), the
-     narration instruction is UNCHANGED from today's wording -- item B's
-     scope is the gate, not what happens once #521/#522 make the internal
-     channel itself safe.
+     narration instruction is still given -- and, since issue #522 (epic
+     #519 item D) landed the internal-audience field and its
+     `[INTERNAL]`-marked renderer, it names
+     `internal_rationale_for_footnote` and forbids
+     `external_rationale_for_footnote` by name. Item B's own scope was the
+     gate; this is the "once #521/#522 make the internal channel itself
+     safe" half it deferred.
   3. The gate changes ONLY the narration clause: the precedence statement
      ("GOVERNS") and the Floor carve-out survive verbatim in every mode,
      and the two false/true groups are each internally byte-identical.
@@ -110,6 +114,7 @@ from test_review_spine import (  # noqa: E402
     _critic_no_delta_response,
     _load_bundle,
     _primary_request_change_response,
+    _primary_request_change_response_with_transcript,
 )
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -196,9 +201,21 @@ def test_default_argument_matches_external(failures: list[str]) -> None:
 
 
 def test_internal_modes_keep_the_narration_instruction(failures: list[str]) -> None:
-    """Item B's scope is the gate itself, not what #521/#522 later do to
-    make the internal channel safe -- so `internal`/`both` keep today's
-    instruction unchanged."""
+    """Item B's scope was the gate itself, not what #521/#522 later do to
+    make the internal channel safe -- so `internal`/`both` keep the
+    instruction. #522 (epic #519 item D) is the "later": it adds the
+    internal-audience field and its `[INTERNAL]`-marked renderer, so the
+    narration now has a per-issue home that is not counterparty-facing,
+    and the clause points there.
+
+    Why the direction is asserted and not merely the presence of a field
+    name: this clause is appended in exactly the two modes whose documents
+    render a footnote per issue, and "the reviewing team directed a
+    departure from our standard position" is internal-audience content by
+    definition. Pointed at `external_rationale_for_footnote` it would land
+    in the one footnote the renderer emits UNMARKED, which accept-all then
+    promotes to body text in the copy the counterparty reads.
+    """
     for mode in ("internal", "both"):
         block = pp.render_toaster_guidance_block(_CONFLICTING_GUIDANCE, notes_mode=mode)
         if block is None:
@@ -209,9 +226,32 @@ def test_internal_modes_keep_the_narration_instruction(failures: list[str]) -> N
                 f"[3b-{mode}] notes_mode={mode!r} (internal notes ON) must keep instructing the "
                 "model to name a guidance/playbook conflict -- item B only gates when notes are off."
             )
-        for expected in ("verdict_summary", "external_rationale_for_footnote"):
-            if expected not in block:
-                failures.append(f"[3c-{mode}] Expected {expected!r} still named as a narration target.")
+        # Only the INTERNAL field is required. `verdict_summary` is
+        # deliberately NOT asserted either way: whether narration may go
+        # there is an open question (see the comment on
+        # `_TOASTER_GUIDANCE_NARRATION_CLAUSE`) — the 2026-08-03 owner ruling
+        # on #516 rejected routing narration there *instead* of the footnote,
+        # calling it "no safer a destination", but did not rule on it
+        # remaining an additional target. Asserting its presence here would
+        # PIN an unsettled question and make a later owner ruling to remove
+        # it fail a test, which is not this ticket's call to make.
+        if "internal_rationale_for_footnote" not in block:
+            failures.append(
+                f"[3c-{mode}] Expected 'internal_rationale_for_footnote' named as a narration target."
+            )
+        # `external_rationale_for_footnote` may still be NAMED -- but only to
+        # forbid it. "or the relevant issue's external_rationale_for_footnote"
+        # is the pre-#522 wording and must not come back.
+        if "or the relevant issue's external_rationale_for_footnote" in block:
+            failures.append(
+                f"[3d-{mode}] notes_mode={mode!r} still offers external_rationale_for_footnote as a "
+                "narration TARGET. That field is counterparty-facing in every mode and its footnote "
+                "is rendered unmarked -- #522 moved the narration to internal_rationale_for_footnote."
+            )
+        if "external_rationale_for_footnote" in block and "never in" not in block:
+            failures.append(
+                f"[3e-{mode}] external_rationale_for_footnote is named without being forbidden."
+            )
 
 
 def test_only_the_narration_clause_varies_by_mode(failures: list[str]) -> None:
@@ -278,8 +318,6 @@ def test_run_primary_pass_gates_narration_by_notes_mode(failures: list[str]) -> 
     )
     pp.run_primary_pass(
         review_id="review-516-primary-external",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=playbook,
         model_client=external_client,
@@ -302,8 +340,6 @@ def test_run_primary_pass_gates_narration_by_notes_mode(failures: list[str]) -> 
     )
     pp.run_primary_pass(
         review_id="review-516-primary-internal",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=playbook,
         model_client=internal_client,
@@ -339,8 +375,6 @@ def test_run_critic_pass_gates_narration_by_notes_mode(failures: list[str]) -> N
     )
     cp.run_critic_pass(
         review_id="review-516-critic-external",
-        diff_hunks=[],
-        anchored_clauses=[],
         primary_output=primary_output,
         playbook=playbook,
         model_client=external_client,
@@ -373,7 +407,7 @@ def test_end_to_end_redline_carries_no_narration_in_default_mode(failures: list[
     docx_bytes = _build_draft_docx(dsf_module, {"sec-8": _SEC8_DRAFT_TEXT})
     fake_client = model_client.FakeBedrockClient(
         {
-            primary_id: [_primary_request_change_response()],
+            primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],
             critic_id: [_critic_no_delta_response()],
         }
     )

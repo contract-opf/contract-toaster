@@ -102,34 +102,6 @@ def structured_output_enabled() -> bool:
     }
 
 
-def requote_enabled() -> bool:
-    """Issue #569: gates the bounded re-quote repair pass
-    (`scripts/requote_repair.py`, wired into `scripts/review_spine.py`'s
-    stage 5) -- ONE extra model call, made only when at least one
-    `REQUEST_CHANGE` patch failed to locate (`not_found` / `ambiguous` /
-    `spans_paragraph_break`), asking the model to correct just the quoted
-    ADDRESS of an already-decided edit, never the judgment behind it.
-
-    Default OFF: `REQUOTE_ENABLED` unset (or set to anything other than
-    `1`/`true`/`yes`) keeps `run_review`'s behavior byte-identical to
-    before this issue -- no extra model call, no `requote` key on the
-    result, every existing test untouched. Read once at this module seam
-    (the same live-env-read convention as `structured_output_enabled`
-    above), never cached, so a test can flip it per-case with
-    `patch.dict(os.environ, ...)`.
-
-    Flipping the default ON is a deployment-config decision made AFTER
-    issue #566's human-executed quote-fidelity measurement against a real
-    corpus -- this function's default must not change without that
-    evidence, exactly like `structured_output_enabled` above.
-    """
-    return os.environ.get("REQUOTE_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
 def notes_mode_enabled() -> bool:
     """Issue #572: the kill switch that makes epic #519's "ship all of A-G
     together, or none" deploy gate a real mechanism instead of a human
@@ -144,8 +116,7 @@ def notes_mode_enabled() -> bool:
     internal reasoning, so they carry none of the risk this gate exists
     for), and `internal`/`both` are refused exactly as an unrecognized value
     already is. Read once at this module seam (the same live-env-read
-    convention as `structured_output_enabled` / `requote_enabled` above),
-    never cached, so a test can flip it per-case with
+    convention as `structured_output_enabled` above), never cached, so a test can flip it per-case with
     `patch.dict(os.environ, ...)`.
 
     Flipping the default ON is a deployment-config decision made AFTER
@@ -155,7 +126,7 @@ def notes_mode_enabled() -> bool:
     let internal reasoning reach counterparty-facing footnotes before the
     audience-aware leakage scan (#521) exists to stop it. This function's
     default must not change without that evidence, exactly like
-    `structured_output_enabled` and `requote_enabled` above.
+    `structured_output_enabled` above.
     """
     return os.environ.get("NOTES_MODE_ENABLED", "").strip().lower() in {
         "1",

@@ -50,13 +50,16 @@ import primary_review_pass as pp  # noqa: E402
 # model is never instructed to emit (schema_version at top level, provenance
 # per issue). This is the exact shape a real primary pass produces.
 def _issue_without_provenance() -> dict[str, Any]:
+    # Issue #627: the v3 issue shape -- `issue_key` present (the model
+    # authors it), `proposed_replacement_text` absent (the pipeline derives
+    # it from the transcript and the prompt forbids sending it).
     return {
+        "issue_key": "I1",
         "section_ref": "8 Limitation on Liability",
         "section_title": "Limitation on Liability",
         "counterparty_change_summary": "Raised the cap to $500,000 and added carve-outs.",
         "decision": "REQUEST_CHANGE",
         "external_rationale_for_footnote": "The cap exceeds the standard position.",
-        "proposed_replacement_text": "Liability is capped at fees paid in the prior 12 months.",
         "playbook_topic_id": "limitation-of-liability",
         "internal_precedent_citation": "precedent-42",
     }

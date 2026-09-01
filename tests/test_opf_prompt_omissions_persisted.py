@@ -274,7 +274,6 @@ def _opf_run_review_bundle(doc: dict) -> dict:
 def _primary_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -288,7 +287,6 @@ def _primary_accept_response() -> str:
 def _critic_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,

@@ -431,16 +431,35 @@ def update_user(
 
     now = now_epoch if now_epoch is not None else time.time()
 
+    # Every attribute name goes through an ExpressionAttributeNames alias.
+    # `status` -- one of the two PATCHABLE_FIELDS -- is a DynamoDB RESERVED
+    # KEYWORD, so interpolating it literally makes UpdateItem fail against
+    # real DynamoDB (and moto) with:
+    #   ValidationException: Invalid UpdateExpression: Attribute name is a
+    #   reserved keyword; reserved keyword: status
+    # which broke the whole suspend/deprovision lifecycle action. Aliases are
+    # positional (`#f0`, `#f1`, ...) rather than a hard-coded `#status` so
+    # the protection holds automatically as PATCHABLE_FIELDS grows -- a
+    # future field that happens to be reserved (`name`, `size`, `timestamp`
+    # ...) needs no change here. `updated_at` is aliased on the same footing
+    # even though it is not currently reserved: leaving one literal name is
+    # exactly how this class of bug comes back.
+    # `backend/src/playbook_versions.py` already writes `status` this way.
     update_expr_parts = []
+    expr_names: dict[str, str] = {"#updated_at": "updated_at"}
     expr_values: dict[str, Any] = {":updated_at": int(now)}
-    for field, value in updates.items():
-        update_expr_parts.append(f"{field} = :{field}")
-        expr_values[f":{field}"] = value
-    update_expr_parts.append("updated_at = :updated_at")
+    for index, (field, value) in enumerate(updates.items()):
+        alias = f"#f{index}"
+        placeholder = f":f{index}"
+        expr_names[alias] = field
+        expr_values[placeholder] = value
+        update_expr_parts.append(f"{alias} = {placeholder}")
+    update_expr_parts.append("#updated_at = :updated_at")
 
     table.update_item(
         Key={"cognito_sub": target_sub},
         UpdateExpression="SET " + ", ".join(update_expr_parts),
+        ExpressionAttributeNames=expr_names,
         ExpressionAttributeValues=expr_values,
     )
 

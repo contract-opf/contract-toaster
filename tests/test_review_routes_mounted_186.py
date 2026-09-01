@@ -385,6 +385,14 @@ class TestPostReviewsEndToEnd(ReviewApiOnMainAppTestBase):
         # `==` on them an intermittent flake rather than a real assertion.
         # Read the content back out instead, same convention
         # tests/test_quote_redline_e2e.py:341 uses for a delivered zip.
+        #
+        # Measured, not theorised (issue #583): restoring the byte-for-byte
+        # assertion and running 60 copies at load average ~100 failed 11
+        # times, and the 11 failures were exactly the 11 runs whose two
+        # builds straddled a 2s tick — the gap widens from ~75ms idle to
+        # ~700ms loaded. The assertion below passed 60/60 under that same
+        # load. This is why the file was ever called a "moto flake": it
+        # never was one. Do not reintroduce a byte comparison here.
         with zipfile.ZipFile(io.BytesIO(obj["Body"].read())) as zf:
             document_xml = zf.read("word/document.xml").decode("utf-8")
         self.assertIn("Hello", document_xml)

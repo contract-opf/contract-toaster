@@ -229,6 +229,216 @@ class TestConfigError(unittest.TestCase):
             rte.check_replacement_text(topic, "any text")
 
 
+class TestEmptyReplacementTextWiring(unittest.TestCase):
+    """Issue #585: a REQUEST_CHANGE issue on a topic whose resolved mode
+    permits a redline (anything but 'none') must not get a free pass just
+    because `proposed_replacement_text` is empty -- `check_issues_
+    replacement_text` (the pipeline wiring, not the pure per-value
+    `check_replacement_text`) is where this is judged, because only it has
+    the resolved mode in hand. Live prod run c81d29c0 (2026-08-21) produced
+    exactly this shape twice and neither was caught -- this is the red gate
+    for that: it FAILS on the pre-fix `check_issues_replacement_text`
+    (which skipped every empty-text issue unconditionally) and PASSES once
+    the mode-aware check is wired in.
+    """
+
+    def setUp(self) -> None:
+        self.playbook = _load_playbook()
+
+    def test_empty_text_on_bounded_edit_topic_is_a_violation(self) -> None:
+        """The exact prod-observed shape: a REQUEST_CHANGE issue whose topic
+        permits replacement text (mode != 'none') but which came back with an
+        empty proposed_replacement_text."""
+        topic = rte.find_topic(self.playbook, "limitation-of-liability")
+        self.assertEqual(topic["replacement_text"]["mode"], "bounded_edit")
+        issue = {
+            "playbook_topic_id": "limitation-of-liability",
+            "proposed_replacement_text": "",
+        }
+        failures = rte.check_issues_replacement_text([issue], self.playbook)
+        self.assertEqual(len(failures), 1)
+        failed_issue, result = failures[0]
+        self.assertIs(failed_issue, issue)
+        self.assertEqual(result.failure, rte.EMPTY_REPLACEMENT_TEXT)
+
+    def test_empty_text_on_bounded_edit_topic_is_a_violation_for_omission_findings_too(
+        self,
+    ) -> None:
+        """The second prod-observed shape: an omission-type finding -- a
+        missing clause, so the issue points at nothing already in the
+        document -- still needs insertion text if its topic's mode permits a
+        redline. Omission status does not grant an exemption -- pin that
+        explicitly rather than leaving it implicit (ticket AC).
+
+        Under v2 the two shapes differed by the presence of a `source_quote`
+        key. Issue #627 removed that field from the contract and issue #628
+        deleted the machinery that read it, so nothing in the ISSUE
+        distinguishes them any more -- which is itself the point this test
+        now pins: `check_issues_replacement_text` judges the topic's mode and
+        the replacement text, never how the issue is addressed."""
+        topic = rte.find_topic(self.playbook, "limitation-of-liability")
+        self.assertEqual(topic["replacement_text"]["mode"], "bounded_edit")
+        issue = {
+            "playbook_topic_id": "limitation-of-liability",
+            "proposed_replacement_text": "",
+        }
+        failures = rte.check_issues_replacement_text([issue], self.playbook)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0][1].failure, rte.EMPTY_REPLACEMENT_TEXT)
+
+    def test_empty_text_on_mode_none_topic_still_passes(self) -> None:
+        """Positive control / no-regression: a topic whose resolved mode
+        really is 'none' still gets a free pass on empty text -- this is
+        the legitimate flag-only case output-schema-v1.json documents, and
+        must keep working exactly as before (tests/test_primary_review_
+        pass.py's mode='none' coverage depends on this at the pipeline
+        level)."""
+        bundle = {
+            "topics": [
+                {
+                    "id": "flag-only-topic",
+                    "replacement_text": {"mode": "none", "max_chars": 500, "must_not_introduce": []},
+                }
+            ]
+        }
+        issue = {"playbook_topic_id": "flag-only-topic", "proposed_replacement_text": ""}
+        failures = rte.check_issues_replacement_text([issue], bundle)
+        self.assertEqual(failures, [])
+
+    def test_non_empty_text_still_flows_through_untouched(self) -> None:
+        """Positive control (ticket AC): a response WITH replacement text
+        still flows through untouched and produces no failure -- proves the
+        EMPTY_REPLACEMENT_TEXT check is additive, not a regression on the
+        happy path."""
+        topic = rte.find_topic(self.playbook, "limitation-of-liability")
+        issue = {
+            "playbook_topic_id": "limitation-of-liability",
+            "proposed_replacement_text": (
+                "Each party's aggregate liability under this Agreement "
+                "shall not exceed $150,000."
+            ),
+        }
+        failures = rte.check_issues_replacement_text([issue], self.playbook)
+        self.assertEqual(failures, [])
+
+
+NDA_SAMPLE_PLAYBOOK_PATH = (
+    REPO_ROOT / "playbooks" / "samples" / "synthetic-nda-sample-v1.0.0.json"
+)
+
+
+class TestProdObservedFlagOnlyIsLabelled(unittest.TestCase):
+    """Issue #585 review round 1, finding 1: the ticket's live prod run
+    `c81d29c0` (2026-08-21) produced two REQUEST_CHANGE issues -- one on
+    `nda-confidentiality-scope`, one on `nda-compelled-disclosure` -- both
+    empty `proposed_replacement_text`, both resolving to
+    `replacement_text.mode == "none"` in the ACTUAL playbook that served
+    that run (`playbooks/samples/synthetic-nda-sample-v1.0.0.json`, per
+    `registry.json`'s `default_playbook_id: synthetic-nda-sample`). Replayed
+    through the fixed `check_issues_replacement_text`, neither is a
+    violation -- that is correct, per the ticket's own Scope ("if flag-only
+    is legitimate for omissions..."). What was still missing pre-fix: no
+    labelled outcome distinguished this legitimate case from an unlabelled
+    empty string. This pins that the fixed code now labels it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with open(NDA_SAMPLE_PLAYBOOK_PATH, encoding="utf-8") as f:
+            cls.playbook = json.load(f)
+
+    def test_prod_observed_topics_resolve_to_mode_none(self) -> None:
+        for topic_id in ("nda-confidentiality-scope", "nda-compelled-disclosure"):
+            topic = rte.find_topic(self.playbook, topic_id)
+            self.assertIsNotNone(topic, f"{topic_id} must exist in the sample playbook")
+            self.assertEqual(topic["replacement_text"]["mode"], "none")
+
+    def test_clause_bearing_issue_is_labelled_flag_only_mode_none(self) -> None:
+        # Prod issue 0: a well-formed finding against a clause that IS in the
+        # document, on nda-confidentiality-scope, empty
+        # proposed_replacement_text. Under v2 this fixture carried the
+        # issue's verbatim address; v3 has no such field (issues #627/#628),
+        # so the shape is now identical to the omission case below -- which
+        # is exactly what makes the pair worth keeping: two different topics,
+        # same mode, same labelling, no addressing input.
+        issue = {
+            "playbook_topic_id": "nda-confidentiality-scope",
+            "decision": "REQUEST_CHANGE",
+            "proposed_replacement_text": "",
+        }
+        failures = rte.check_issues_replacement_text([issue], self.playbook)
+        self.assertEqual(failures, [], "mode='none' must not fire a violation")
+        self.assertEqual(
+            issue.get(rte.REPLACEMENT_TEXT_OUTCOME_FIELD),
+            rte.FLAG_ONLY_MODE_NONE,
+            "the issue must be labelled, not silently skipped",
+        )
+
+    def test_omission_issue_is_labelled_flag_only_mode_none(self) -> None:
+        # Prod issue 1: an omission-type finding -- a missing clause -- on
+        # nda-compelled-disclosure, empty proposed_replacement_text.
+        issue = {
+            "playbook_topic_id": "nda-compelled-disclosure",
+            "decision": "REQUEST_CHANGE",
+            "proposed_replacement_text": "",
+        }
+        failures = rte.check_issues_replacement_text([issue], self.playbook)
+        self.assertEqual(failures, [], "mode='none' must not fire a violation")
+        self.assertEqual(
+            issue.get(rte.REPLACEMENT_TEXT_OUTCOME_FIELD),
+            rte.FLAG_ONLY_MODE_NONE,
+            "the issue must be labelled, not silently skipped",
+        )
+
+
+class TestOpfNoneBundleDocstringClaim(unittest.TestCase):
+    """Issue #585 review round 1, finding 3: pins the OPF-native path's
+    ACTUAL behaviour (bundle=None -> playbooks/pen-rules.defaults.json's
+    "replace" default), which the pre-fix docstring mischaracterized as
+    always mode='none'. `resolve_pen_rules`'s own resolution is a plain
+    config fallback -- unaffected by review round 2's fix to
+    `check_issues_replacement_text` below, which does NOT treat that
+    fallback as a violation."""
+
+    def test_opf_none_bundle_defaults_to_replace_mode_not_none(self) -> None:
+        resolved = rte.resolve_pen_rules(None, "any-topic-id")
+        self.assertEqual(
+            resolved.get("mode"),
+            "replace",
+            "playbooks/pen-rules.defaults.json's default mode must still be "
+            "'replace', not 'none' -- if this changes, the docstring's "
+            "OPF-path correction and this pin must both be revisited",
+        )
+
+    def test_floor_fire_shaped_issue_on_opf_path_is_labelled_not_a_violation(
+        self,
+    ) -> None:
+        # Issue #585 finding 2 (review round 2): a `bundle=None` fallback
+        # means the model was NEVER told this topic wants a redline
+        # (`render_replacement_text_modes_block` also returns `None` for
+        # this same bundle) -- judging it against `resolve_pen_rules`'s
+        # config-default "replace" mode would be unfair and would burn a
+        # retry call. This must be a distinct, non-failing label, not an
+        # `EMPTY_REPLACEMENT_TEXT` violation.
+        issue = {
+            "playbook_topic_id": "any-topic-id",
+            "decision": "REQUEST_CHANGE",
+            "proposed_replacement_text": "",
+        }
+        failures = rte.check_issues_replacement_text([issue], None)
+        self.assertEqual(
+            failures,
+            [],
+            "a bundle=None fallback must not fail the model against a rule "
+            "it was never shown",
+        )
+        self.assertEqual(
+            issue.get(rte.REPLACEMENT_TEXT_OUTCOME_FIELD),
+            rte.FLAG_ONLY_MODE_UNSPECIFIED,
+            "the issue must be labelled distinctly from FLAG_ONLY_MODE_NONE "
+            "and from FLAG_ONLY_RETRY_EXHAUSTED",
+        )
+
+
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])

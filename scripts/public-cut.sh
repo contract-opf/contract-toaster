@@ -22,8 +22,12 @@
 #      modified), so a reviewer sees the blast radius before publishing.
 #
 # Exit non-zero if any HARD safety check fails (an excluded path survived, or
-# a real-looking secret is present). Soft findings (non-synthetic docx,
-# de-branding drift) are reported, not fatal — they need human judgment.
+# a real-looking secret is present). Soft findings (non-synthetic docx) are
+# reported, not fatal — they need human judgment. (Issue #591: this script
+# used to also report an 'exos-legal' occurrence count as a soft de-branding
+# signal; the brand string is publishable now, so that count was noise and
+# was removed. tests/lint-brand-free.py still hard-fails a FUNCTIONAL
+# exos-legal reference on the public surface.)
 #
 # Usage:
 #   scripts/public-cut.sh [<git-ref>] [<public-repo>]
@@ -134,9 +138,6 @@ if git clone -q --depth 1 "https://github.com/$PUBLIC_REPO" "$PUB" 2>/dev/null; 
   note "added (in cut, not public): $added   removed (in public, not cut): $removed   modified: $modified"
   note "files that exist ONLY in public (a fresh-history overwrite would DELETE these):"
   comm -13 "$OUTDIR/cut.list" "$OUTDIR/pub.list" | sed 's/^/       /' || true
-  cutx=$({ grep -rIoh 'exos-legal' "$STAGE" 2>/dev/null || true; } | wc -l | tr -d ' ')
-  pubx=$({ grep -rIoh 'exos-legal' "$PUB" --exclude-dir=.git 2>/dev/null || true; } | wc -l | tr -d ' ')
-  note "de-branding check — 'exos-legal' occurrences  cut=$cutx  public=$pubx"
 else
   note "(could not clone $PUBLIC_REPO — skipping diff; run with a reachable public repo)"
 fi

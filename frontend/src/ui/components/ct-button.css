@@ -66,7 +66,7 @@ ct-button[size='md'] .ct-button__el {
 }
 ct-button[size='sm'] .ct-button__el {
   padding: 0.3rem 0.7rem;
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
 }
 
 /* Variants */

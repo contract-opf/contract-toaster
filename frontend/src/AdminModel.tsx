@@ -16,6 +16,13 @@
  * opinion is what computes the decision. There is no "use one model for both"
  * option to offer, so don't add one.
  *
+ * THE DEFAULT IS MARKED, NOT DUPLICATED (issue #604). There is no separate
+ * "Default: <id>" pseudo-option above the catalogue any more — the policy pin
+ * is itself a catalogue entry, so it is the one carrying the check mark, and
+ * choosing it is what posts "" ("no override, use the deployment default").
+ * Don't reintroduce a second row for the default: it listed the same model
+ * twice at two different labels, which is what the owner objected to.
+ *
  * COST IS COMPUTED, TIER IS JUDGEMENT. Per-review dollar figures are derived
  * here from the rates and token basis the server sends out of
  * model-policy/openrouter.json — never hardcoded, because the rates change.
@@ -46,7 +53,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
-import { CtBanner, CtButton, CtCard, CtChip, CtField, CtProgress, CtToolbar } from './ui/react';
+import {
+  CtBanner,
+  CtButton,
+  CtCard,
+  CtChip,
+  CtColumns,
+  CtField,
+  CtProgress,
+  CtToolbar,
+} from './ui/react';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/model_settings.py::get_model_key_settings.
@@ -79,7 +95,12 @@ export interface SelectableModel {
   context_length: number;
 }
 
-/** The policy-pinned default for a role — priced, but not part of the catalogue. */
+/**
+ * The policy-pinned default for a role — priced separately, because the server
+ * sends it separately. Since issue #589 it is also guaranteed to BE one of the
+ * `selectable` entries, which is what lets the picker mark the default in place
+ * (issue #604) instead of listing it a second time.
+ */
 export interface DefaultModel {
   model_id: string;
   cost_per_million_input_usd: number;
@@ -205,8 +226,22 @@ function ModelRoleField({
   disabled: boolean;
   onChange: (next: string) => void;
 }): React.ReactElement {
-  const chosen = catalogue.find((m) => m.model_id === value);
+  // "No override" is still the empty string on the wire — POSTing "" is what
+  // reverts a role to the policy pin. What changed (issue #604) is where that
+  // empty string LIVES: it used to have its own `Default: …` pseudo-option
+  // sitting above the catalogue, listing the default model a second time. It
+  // now rides on the default model's OWN catalogue entry, which is marked with
+  // a check mark instead. The two can be the same option because the default
+  // pin is guaranteed to be a member of `selectable`
+  // (tests/lint-model-policy-consistency.py::check_defaults_are_selectable).
   const defaultCost = formatUsd(perReviewCostUsd(defaultModel, basis));
+  const defaultIsInCatalogue = catalogue.some((m) => m.model_id === defaultModel.model_id);
+  // A stored selection that names the default model outright is the same
+  // instruction as "no override", and must land on the same option — otherwise
+  // the <select> would have a value no <option> carries and render blank.
+  const selectValue = value === defaultModel.model_id ? '' : value;
+  const activeId = selectValue === '' ? defaultModel.model_id : selectValue;
+  const chosen = catalogue.find((m) => m.model_id === activeId);
   const hint = chosen
     ? `${chosen.tier} tier (relative capability, our assessment) — ${chosen.note}`
     : `Keeping the model this deployment ships with (${defaultModel.model_id}).`;
@@ -220,19 +255,29 @@ function ModelRoleField({
         <select
           id={`admin-model-${role}-select`}
           data-testid={`admin-model-${role}-select`}
-          value={value}
+          value={selectValue}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         >
-          <option value="">
-            Default: {defaultModel.model_id} — {defaultCost} per review
-          </option>
-          {catalogue.map((model) => (
-            <option key={model.model_id} value={model.model_id}>
-              {model.display_name} — {formatUsd(perReviewCostUsd(model, basis))} per review ·{' '}
-              {model.tier} tier · {model.note}
+          {/* Safety valve, not the normal path: if the pin ever falls out of
+              `selectable` despite the CI gate, "no override" must still be
+              expressible rather than becoming unreachable. */}
+          {!defaultIsInCatalogue && (
+            <option value="">
+              ✓ {defaultModel.model_id} (default) — {defaultCost} per review
             </option>
-          ))}
+          )}
+          {catalogue.map((model) => {
+            const isDefault = model.model_id === defaultModel.model_id;
+            return (
+              <option key={model.model_id} value={isDefault ? '' : model.model_id}>
+                {isDefault ? '✓ ' : ''}
+                {model.display_name}
+                {isDefault ? ' (default)' : ''} — {formatUsd(perReviewCostUsd(model, basis))} per
+                review · {model.tier} tier · {model.note}
+              </option>
+            );
+          })}
         </select>
       </CtField>
       <p data-testid={`admin-model-${role}-effective`} className="ct-muted">
@@ -502,7 +547,7 @@ export default function AdminModel(): React.ReactElement | null {
 
   return (
     <section data-testid="admin-model-panel" className="ct-section ct-stack">
-      <CtToolbar title="Model & API key" />
+      <CtToolbar title="Models" />
 
       {/* A failed load is TERMINAL: the banner carries the message and a
           working retry, and the loader below is unreachable while it shows
@@ -710,28 +755,42 @@ export default function AdminModel(): React.ReactElement | null {
               capability, not a benchmark score.
             </CtBanner>
 
-            {(['primary', 'critic'] as Role[]).map((role) => (
-              <ModelRoleField
-                key={role}
-                role={role}
-                catalogue={selection.selectable ?? []}
-                defaultModel={role === 'primary' ? selection.default_primary : selection.default_critic}
-                basis={
-                  role === 'primary'
-                    ? selection.pricing_basis_primary
-                    : selection.pricing_basis_critic
-                }
-                value={draft[role]}
-                effectiveId={
-                  role === 'primary'
-                    ? selection.effective_primary_model_id
-                    : selection.effective_critic_model_id
-                }
-                source={role === 'primary' ? selection.primary_source : selection.critic_source}
-                disabled={savingModels}
-                onChange={(next) => setDraft((prev) => ({ ...prev, [role]: next }))}
-              />
-            ))}
+            {/* Issue #607 (#602 split): the two role selects are the
+                "related controls" case `ct-columns` (#601) exists for —
+                the copy directly above says the two passes are chosen
+                SEPARATELY, so neither has to be read before the other and
+                a side-by-side row costs no sequence. Neither field is
+                `narrow`: a model dropdown's option text is long, so both
+                should keep filling their own column. The primitive
+                collapses to one column below 640px on its own, and it
+                never moves its children, so the primary-then-critic DOM
+                and tab order below is untouched (ct-columns.ts). */}
+            <CtColumns>
+              {(['primary', 'critic'] as Role[]).map((role) => (
+                <ModelRoleField
+                  key={role}
+                  role={role}
+                  catalogue={selection.selectable ?? []}
+                  defaultModel={
+                    role === 'primary' ? selection.default_primary : selection.default_critic
+                  }
+                  basis={
+                    role === 'primary'
+                      ? selection.pricing_basis_primary
+                      : selection.pricing_basis_critic
+                  }
+                  value={draft[role]}
+                  effectiveId={
+                    role === 'primary'
+                      ? selection.effective_primary_model_id
+                      : selection.effective_critic_model_id
+                  }
+                  source={role === 'primary' ? selection.primary_source : selection.critic_source}
+                  disabled={savingModels}
+                  onChange={(next) => setDraft((prev) => ({ ...prev, [role]: next }))}
+                />
+              ))}
+            </CtColumns>
 
             <div className="ct-row">
               <CtButton

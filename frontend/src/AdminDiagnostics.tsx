@@ -16,8 +16,28 @@
  *   GET /api/admin/diagnostics/recent-failures?limit=N
  *
  * which returns a bounded, newest-first list of recent non-OK terminal
- * reviews, each carrying exactly six fields: `review_id`, `created_at`,
- * `failed_at`, `failing_stage`, `reason`, `status`.
+ * reviews, each carrying exactly nine fields: `review_id`, `created_at`,
+ * `failed_at`, `failing_stage`, `reason`, `status`, and — present only on a
+ * leakage block (issue #616) — `leakage_category`, `leakage_rule_id`,
+ * `leakage_field_name`.
+ *
+ * ## The detector line (issue #616)
+ *
+ * `reason: 'leakage_detected'` is written identically for all five of the
+ * scanner's detection categories, so every leakage block rendered the same
+ * cause prose and an admin could not tell a correct gate (the model really
+ * did echo playbook text — fix the prompt) from an over-broad detector. The
+ * three `leakage_*` fields say which detector fired, and this screen renders
+ * them as a labelled operator line beneath the reader-facing cause.
+ *
+ * They carry no confidential text and cannot: the scanner reports "detection
+ * category, and rule id — never the matched confidential text"
+ * (`scripts/leakage_scan.py`), `leakage_field_name` is a model-output field
+ * NAME rather than its contents, and the error object the pipeline catches
+ * has nowhere to put a matched span. This is admin-only detail and stays
+ * admin-only: `ReviewSubmission.tsx`'s reader-facing `leakage_detected` copy
+ * is deliberately unchanged and non-technical — a reviewer submitting a
+ * document is not shown detector internals.
  *
  * ## What this screen is NOT, deliberately
  *
@@ -90,6 +110,32 @@ export interface RecentFailure {
   reason?: string | null;
   /** The terminal status the taxonomy resolved, e.g. `ERROR`. */
   status: string;
+  /** Issue #616 — leakage-block diagnosis, all three present together and
+   *  ONLY on a `reason: 'leakage_detected'` row. `leakage_category` is one of
+   *  `scripts/leakage_scan.py`'s five `CATEGORY_*` constants;
+   *  `leakage_rule_id` names the detector rule that fired;
+   *  `leakage_field_name` is the model-output field it fired on — a field
+   *  NAME, never its contents. No matched text ever reaches any of them. */
+  leakage_category?: string | null;
+  leakage_rule_id?: string | null;
+  leakage_field_name?: string | null;
+}
+
+/**
+ * The operator-only detector line for a leakage-blocked row (issue #616):
+ * `category · rule_id · field_name`, skipping whatever the row does not
+ * carry, and `null` for every row that is not a leakage block (which is all
+ * of them apart from that one reason token).
+ *
+ * Deliberately a join of the three ALLOWLISTED fields and nothing else — it
+ * never reads, formats, or falls back to any other row attribute, so it
+ * cannot become a route for document substance to reach the DOM.
+ */
+export function detectorDetail(failure: RecentFailure): string | null {
+  const parts = [failure.leakage_category, failure.leakage_rule_id, failure.leakage_field_name]
+    .map((part) => (typeof part === 'string' ? part.trim() : ''))
+    .filter((part) => part.length > 0);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 type LoadState<T> =
@@ -232,8 +278,9 @@ export default function AdminDiagnostics(): React.ReactElement | null {
       <CtBanner variant="muted" data-testid="admin-diagnostics-scope-note">
         The most recent failed reviews across this deployment, newest first, up to{' '}
         {REQUESTED_LIMIT}. Each row says what went wrong and who can fix it. This is not a log
-        view: no document text, review content, or diagnostic output is shown here, and nothing
-        on this screen re-runs a review.
+        view: no document text, review content, application logs, or exception output is shown
+        here, and nothing on this screen re-runs a review. A “Detector” line names the safety
+        check that stopped a review — the check’s own name, never anything it matched.
       </CtBanner>
 
       {load.status === 'failed' && (
@@ -285,6 +332,9 @@ export default function AdminDiagnostics(): React.ReactElement | null {
                     // here (see this file's header).
                     const explanation = explainFailure(failure);
                     const outcomeChip = describeOutcome(failure.status);
+                    // Issue #616: present only on a leakage block; null
+                    // everywhere else, so no other row grows an empty label.
+                    const detector = detectorDetail(failure);
                     return (
                       <tr
                         key={failure.review_id}
@@ -320,11 +370,26 @@ export default function AdminDiagnostics(): React.ReactElement | null {
                           {explanation
                             ? explanation.cause
                             : 'The review stopped before it could finish, and no cause was recorded.'}
+                          {/* Issue #616: the leakage detector that actually
+                              fired, under the reader-facing cause. Labelled
+                              and set in the id/digest mono face so it reads
+                              as operator diagnostic detail rather than as
+                              more prose — the cause sentence above is the
+                              same copy the submitter sees; this line is not.
+                              Rendered only when the row carries it. */}
+                          {detector !== null && (
+                            <div
+                              className="ct-table__mono"
+                              data-testid={`failure-detector-${failure.review_id}`}
+                            >
+                              Detector: {detector}
+                            </div>
+                          )}
                         </td>
                         <td data-testid={`failure-fix-${failure.review_id}`}>
                           {explanation
                             ? explanation.fix
-                            : 'Ask the person who submitted it to try again, and check the model account and key under “Model & API key” if it keeps happening.'}
+                            : 'Ask the person who submitted it to try again, and check the model account and key under “Models” if it keeps happening.'}
                         </td>
                       </tr>
                     );

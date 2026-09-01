@@ -39,7 +39,7 @@ counterparty edit) and `FakeBedrockClient`, `run_review()`:
      on this path -- the fake model issue carries a `source_quote` matching
      the planted counterparty text verbatim, so issue #379's quote-based
      patcher (`scripts/redline_generate.py::generate_redline` ->
-     `scripts/redline_quote_apply.py::apply_quote_patches`) locates and
+     `scripts/redline_block_apply.py::apply_block_transcript`) addresses and
      applies it. A deterministic-detector-fire assertion used to also live
      here (a second issue on Section 1.2, `provenance="detector:..."`,
      that the fake model responses never mentioned) -- that property no
@@ -202,33 +202,121 @@ _SEC8_STANDARD_TEXT = (
 _SEC8_DRAFT_TEXT = "Each party's liability under this Agreement shall be unlimited."
 
 
+# The envelope literal the ACTIVE output contract demands, read off
+# `primary_review_pass` rather than restated (issue #627). A fixture that
+# hardcodes a version literal goes stale silently the next time the contract
+# is flipped -- which is exactly how this suite broke on the v2->v3 cutover.
+def _active_schema_version() -> str:
+    import primary_review_pass
+
+    return primary_review_pass.OUTPUT_SCHEMA_VERSION
+
+
+_ACTIVE_SCHEMA_VERSION = _active_schema_version()
+
+
+def block_id_for_text(docx_bytes: bytes, text: str) -> str:
+    """The code-assigned block id of the logical paragraph whose text is
+    `text`, resolved through the SAME production code the pipeline uses
+    (`extraction_normalization_stage.build_block_map`) -- issue #627.
+
+    Never a typed-in `"p0007"`: under the block-transcript contract a
+    response addresses blocks by id, and an id invented by a test is an
+    address no document has. Deriving it here is what keeps every transcript
+    fixture in this suite reachable by the real producer.
+    """
+    import extraction_normalization_stage as ens
+
+    normalized = ens.extract_and_normalize(docx_bytes)
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        if block["text"] == text:
+            return block_id
+    raise AssertionError(f"no block in the fixture document carries {text!r}")
+
+
+_SEC8_ISSUE = {
+    "issue_key": "I1",
+    "section_ref": "sec-8",
+    "section_title": "Limitation on Liability",
+    "counterparty_change_summary": (
+        "Counterparty removed the liability cap and "
+        "consequential-damages exclusion from Section 8."
+    ),
+    "decision": "REQUEST_CHANGE",
+    "external_rationale_for_footnote": (
+        "Section 8 must retain the standard aggregate "
+        "liability cap and mutual damages exclusions."
+    ),
+    "playbook_topic_id": "limitation-of-liability",
+    "internal_precedent_citation": None,
+    "provenance": "model",
+}
+
+
 def _primary_request_change_response() -> str:
+    """A v3 REQUEST_CHANGE the model can produce against ANY document: one
+    issue, no edits (issue #627).
+
+    FLAG-ONLY on purpose. A block transcript names block ids and reproduces
+    those blocks' exact characters, so a transcript-bearing response is only
+    valid against the ONE document it was written for -- and this fixture is
+    shared by several suites that each build their own. The transcript-
+    bearing counterpart, for the callers that need a delivered redline, is
+    `_primary_request_change_response_with_transcript(docx_bytes)` below,
+    which derives both the id and the text from the document in hand.
+    """
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
+            "schema_version": _ACTIVE_SCHEMA_VERSION,
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
-            "issues": [
+            "issues": [dict(_SEC8_ISSUE)],
+            "block_patches": [],
+            "block_ops": [],
+            "critic_delta": None,
+            "verdict_summary": (
+                "One issue identified in Section 8 requiring attention "
+                "before your organization can accept this draft."
+            ),
+        }
+    )
+
+
+def _primary_request_change_response_with_transcript(docx_bytes: bytes) -> str:
+    """The same Section 8 issue, expressed as a real block transcript over
+    `docx_bytes` (issue #627) -- the shape that actually produces a
+    delivered redline.
+
+    The whole clause is replaced rather than repaired in place, so the issue
+    carries the `replacement_scope_note` the prompt requires for a wholesale
+    replacement. Both the block id and the deleted text are DERIVED from the
+    document, so this cannot address a block the document does not have.
+    """
+    block_id = block_id_for_text(docx_bytes, _SEC8_DRAFT_TEXT)
+    issue = dict(_SEC8_ISSUE)
+    issue["replacement_scope_note"] = (
+        "The clause states the opposite position outright; a local repair "
+        "would leave a sentence that reads as an unlimited-liability term."
+    )
+    return json.dumps(
+        {
+            "schema_version": _ACTIVE_SCHEMA_VERSION,
+            "decision": "REQUEST_CHANGE",
+            "confidence_state": "OK",
+            "confidence_band": None,
+            "issues": [issue],
+            "block_patches": [
                 {
-                    "section_ref": "sec-8",
-                    "section_title": "Limitation on Liability",
-                    "counterparty_change_summary": (
-                        "Counterparty removed the liability cap and "
-                        "consequential-damages exclusion from Section 8."
-                    ),
-                    "decision": "REQUEST_CHANGE",
-                    "external_rationale_for_footnote": (
-                        "Section 8 must retain the standard aggregate "
-                        "liability cap and mutual damages exclusions."
-                    ),
-                    "proposed_replacement_text": _SEC8_STANDARD_TEXT,
-                    "playbook_topic_id": "limitation-of-liability",
-                    "internal_precedent_citation": None,
-                    "provenance": "model",
-                    "source_quote": _SEC8_DRAFT_TEXT,
+                    "block_id": block_id,
+                    "segments": [
+                        {"op": "delete", "text": _SEC8_DRAFT_TEXT, "issue_key": "I1"},
+                        {"op": "insert", "text": _SEC8_STANDARD_TEXT, "issue_key": "I1"},
+                    ],
                 }
             ],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": (
                 "One issue identified in Section 8 requiring attention "
@@ -241,11 +329,13 @@ def _primary_request_change_response() -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
+            "schema_version": _ACTIVE_SCHEMA_VERSION,
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [],
+            "block_patches": [],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": None,
         }
@@ -255,11 +345,13 @@ def _critic_no_delta_response() -> str:
 def _primary_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
+            "schema_version": _ACTIVE_SCHEMA_VERSION,
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [],
+            "block_patches": [],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": (
                 "No changes identified relative to your standard positions."
@@ -268,7 +360,7 @@ def _primary_accept_response() -> str:
     )
 
 
-def _primary_request_change_response_schema_enforced() -> str:
+def _primary_request_change_response_schema_enforced(docx_bytes: bytes) -> str:
     """The capability-True counterpart to `_primary_request_change_
     response` (issue #567 fix round 3, finding 2): a strict-mode provider
     CANNOT emit `schema_version` or `provenance` (both stripped from
@@ -292,23 +384,36 @@ def _primary_request_change_response_schema_enforced() -> str:
             "confidence_band": None,
             "issues": [
                 {
-                    "section_ref": "sec-8",
-                    "section_title": "Limitation on Liability",
-                    "counterparty_change_summary": (
-                        "Counterparty removed the liability cap and "
-                        "consequential-damages exclusion from Section 8."
+                    **{
+                        key: value
+                        for key, value in _SEC8_ISSUE.items()
+                        # Pipeline-stamped, so a strict-mode provider cannot
+                        # emit it (see this function's docstring).
+                        if key != "provenance"
+                    },
+                    # Issue #627: `replacement_scope_note` is OPTIONAL in the
+                    # full v3 contract but REQUIRED in the strict-mode
+                    # projection (`_force_all_properties_required_in_place`),
+                    # and it has no `minLength` floor -- so `""` is the honest
+                    # "no wholesale replacement here" value a strict provider
+                    # emits, and one the full schema accepts unchanged.
+                    "replacement_scope_note": (
+                        "The clause states the opposite position outright; a "
+                        "local repair would leave a sentence that reads as an "
+                        "unlimited-liability term."
                     ),
-                    "decision": "REQUEST_CHANGE",
-                    "external_rationale_for_footnote": (
-                        "Section 8 must retain the standard aggregate "
-                        "liability cap and mutual damages exclusions."
-                    ),
-                    "proposed_replacement_text": _SEC8_STANDARD_TEXT,
-                    "playbook_topic_id": "limitation-of-liability",
-                    "internal_precedent_citation": None,
-                    "source_quote": _SEC8_DRAFT_TEXT,
                 }
             ],
+            "block_patches": [
+                {
+                    "block_id": block_id_for_text(docx_bytes, _SEC8_DRAFT_TEXT),
+                    "segments": [
+                        {"op": "delete", "text": _SEC8_DRAFT_TEXT, "issue_key": "I1"},
+                        {"op": "insert", "text": _SEC8_STANDARD_TEXT, "issue_key": "I1"},
+                    ],
+                }
+            ],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": (
                 "One issue identified in Section 8 requiring attention "
@@ -330,6 +435,8 @@ def _critic_no_delta_response_schema_enforced() -> str:
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [],
+            "block_patches": [],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": None,
         }
@@ -339,11 +446,13 @@ def _critic_no_delta_response_schema_enforced() -> str:
 def _critic_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
+            "schema_version": _ACTIVE_SCHEMA_VERSION,
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [],
+            "block_patches": [],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": None,
         }
@@ -391,7 +500,7 @@ def _part_1_request_change(rs, model_client_module, dsf_module, failures: list[s
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client_module.FakeBedrockClient(
         {
-            primary_id: [_primary_request_change_response()],
+            primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],
             critic_id: [_critic_no_delta_response()],
         }
     )
@@ -551,7 +660,7 @@ def _part_4_schema_enforcement_requested_keys(
     # should ask the provider to enforce the projected schema.
     fake_client_off = model_client_module.FakeBedrockClient(
         {
-            primary_id: [_primary_request_change_response()],
+            primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],
             critic_id: [_critic_no_delta_response()],
         }
     )
@@ -589,7 +698,7 @@ def _part_4_schema_enforcement_requested_keys(
     # real provider would have accepted in the first place.
     fake_client_on = model_client_module.FakeBedrockClient(
         {
-            primary_id: [_primary_request_change_response_schema_enforced()],
+            primary_id: [_primary_request_change_response_schema_enforced(docx_bytes)],
             critic_id: [_critic_no_delta_response_schema_enforced()],
         },
         capabilities={"structured_outputs": True},

@@ -29,8 +29,13 @@ input. This ticket carries it end to end and changes no behaviour: default
      asked for internal notes.
   4. The mode reaches the PROMPT-ASSEMBLY seam, asserted there rather than
      merely stored -- a value that stops at the database is not plumbing.
-  5. Nothing branches on it yet. `external` and the default must produce
-     identical system blocks, because B/C/D are what make the modes differ.
+  5. The default is still a no-op: `external` and the default must produce
+     identical system blocks, so an un-migrated caller gets today's prompt.
+     The prompt now branches on ONE axis -- whether internal-audience
+     content is in scope -- which is how both B (#516, the narration
+     clause) and D (#522, the `internal_rationale_for_footnote` key in the
+     output contract) read the mode. `none` == `external` and `internal` ==
+     `both`, and nothing splits the four any other way.
 
 Offline: pure function-level checks plus source-level threading assertions. No
 AWS, no network, no model.
@@ -113,17 +118,41 @@ class TestItReachesThePromptSeam(unittest.TestCase):
         )
         self.assertEqual(default, external)
 
-    def test_no_mode_changes_the_prompt_yet(self):
-        """B/C/D are what make the modes differ. Until then all four must
-        assemble identically -- otherwise this ticket silently did B's job
-        without B's tests."""
+    def test_the_prompt_differs_only_along_the_internal_content_axis(self):
+        """Item A itself changed nothing; B (#516) and D (#522) are what make
+        the modes differ, and they split the four modes the SAME way -- on
+        whether internal-audience content is in scope at all.
+
+        So with no toaster guidance to gate (B's block is absent entirely),
+        exactly two distinct prompts exist: `none` == `external`, byte for
+        byte the pre-epic prompt, and `internal` == `both`, which differ
+        from it by D's `internal_rationale_for_footnote` grant and nothing
+        else. A third distinct rendering would mean some block is reading
+        the mode on an axis the epic does not have.
+        """
         rendered = {
             mode: pp.render_system_prompt(
                 pp.assemble_system_blocks(PLAYBOOK, "", "", notes_mode=mode)
             )
             for mode in ("none", "external", "internal", "both")
         }
-        self.assertEqual(len(set(rendered.values())), 1, "a mode already changes the prompt")
+        self.assertEqual(
+            len(set(rendered.values())), 2, "the modes differ on more than one axis"
+        )
+        self.assertEqual(rendered["none"], rendered["external"])
+        self.assertEqual(rendered["internal"], rendered["both"])
+        for off in ("none", "external"):
+            self.assertNotIn(
+                "internal_rationale_for_footnote",
+                rendered[off],
+                f"{off!r} must not be asked for internal-audience content",
+            )
+        for on in ("internal", "both"):
+            self.assertIn(
+                "internal_rationale_for_footnote",
+                rendered[on],
+                f"{on!r} renders that field, so its prompt must ask for it",
+            )
 
     def test_both_passes_take_the_mode(self):
         import critic_review_pass
@@ -222,7 +251,7 @@ def main() -> int:
     suite = unittest.TestLoader().loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if result.wasSuccessful():
-        print("\nPASS: notes mode is captured and threaded, and changes nothing yet (issue #520).")
+        print("\nPASS: notes mode is captured, threaded, and branched on one axis (issue #520).")
         return 0
     print(f"\nFAIL: {len(result.failures)} failure(s), {len(result.errors)} error(s).")
     return 1

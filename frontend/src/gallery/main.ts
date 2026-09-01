@@ -41,6 +41,7 @@ import {
   buildToolbarSection,
   buildFileDropSection,
   buildProgressSection,
+  buildColumnsSection,
   buildTokensSection,
 } from './sections';
 
@@ -128,6 +129,7 @@ function buildMain(): HTMLElement {
     buildToolbarSection(),
     buildFileDropSection(),
     buildProgressSection(),
+    buildColumnsSection(),
     buildTokensSection(),
   ]);
 

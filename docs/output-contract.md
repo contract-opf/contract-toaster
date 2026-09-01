@@ -10,12 +10,27 @@ controls that *enforce* these rules (the pre-render leakage scan, output escapin
 
 ## Output-contract schema artifact
 
-**Schema artifact:** [`playbooks/output-schema-v2.json`](../playbooks/output-schema-v2.json) — schema
-`output_contract_version: "v2"`. Superseded from
-[`playbooks/output-schema-v1.json`](../playbooks/output-schema-v1.json) by issue #376; see
-[Schema versions (v1 → v2)](#schema-versions-v1--v2) below.
+**Schema artifact (ACTIVE):** [`playbooks/output-schema-v3.json`](../playbooks/output-schema-v3.json) —
+schema `output_contract_version: "v3"`, the block-transcript contract. Issue #627 made it active in the
+same commit that rewrote both passes' prompts to ask for it; see
+[Schema version v3](#schema-version-v3--the-block-transcript-contract-active) for the delta.
 
-`playbooks/output-schema-v2.json` is the **single machine-readable source of truth** for the shape of the
+[`playbooks/output-schema-v2.json`](../playbooks/output-schema-v2.json) and
+[`playbooks/output-schema-v1.json`](../playbooks/output-schema-v1.json) are superseded but **not deleted**:
+v2 remains selectable via `validate_model_response(..., schema_path=...)`, but **not for the third-party
+integration path** — `scripts/third_party_output_integration.py` pins v3 itself (issue #629). Since
+issue #628 deleted the quote-fidelity measurement instrument, its only remaining callers are the tests
+that deliberately pin the superseded contract, plus `primary_review_pass._RETIRED_ISSUE_KEYS`, which
+derives from v2-minus-v3 the set of `Issue` keys the prompt must forbid the model to emit.
+The v1 → v2 history below is kept because the reasoning still explains why v2's `schema_version` const
+stayed at the v1 literal.
+
+> **Reading note.** The field tables below still describe the v2 issue shape. Where v3 differs — no
+> `issues[].source_quote`, required `issues[].issue_key`, optional `issues[].proposed_replacement_text`
+> (pipeline-derived), and the top-level `block_patches[]` / `block_ops[]` carriers — the
+> [v2 → v3](#schema-version-v3--the-block-transcript-contract-active) section is authoritative.
+
+The ACTIVE artifact is the **single machine-readable source of truth** for the shape of the
 model's JSON response. It governs both the primary-reviewer pass and the adversarial-critic pass.
 The pipeline validates every model response against this schema before any redline is produced.
 
@@ -47,6 +62,7 @@ The pipeline validates every model response against this schema before any redli
 | `issues[].counterparty_change_summary` | string, 1–2000 chars |
 | `issues[].decision` | `const: REQUEST_CHANGE` |
 | `issues[].external_rationale_for_footnote` | string, 1–800 chars |
+| `issues[].internal_rationale_for_footnote` | string, 1–800 chars, **OPTIONAL** — **new in v2**, carried into v3 unchanged; the one internal-audience field. Asked for, and rendered, only in the `internal`/`both` notes modes; see [Which rationale becomes a footnote](#which-rationale-becomes-a-footnote-the-reviews-notes-mode-issue-522-epic-519-item-d) |
 | `issues[].proposed_replacement_text` | string, max 8000 chars |
 | `issues[].playbook_topic_id` | kebab-case pattern |
 | `issues[].internal_precedent_citation` | string (max 500 chars) or null |
@@ -62,22 +78,37 @@ The pipeline validates every model response against this schema before any redli
 | Artifact | `playbooks/output-schema-v1.json` | `playbooks/output-schema-v2.json` |
 | `output_contract_version` | `"v1"` | `"v2"` |
 | `$id` | `.../output-schema/v1.json` | `.../output-schema/v2.json` |
-| Shape delta | — | adds OPTIONAL `issues[].source_quote` (string, 1–8000 chars) |
+| Shape delta | — | adds OPTIONAL `issues[].source_quote` (string, 1–8000 chars, issue #376) and OPTIONAL `issues[].internal_rationale_for_footnote` (string, 1–800 chars, issue #522) |
 | Active validator | — | `scripts/primary_review_pass.py` (`OUTPUT_SCHEMA_PATH`), reused by `critic_review_pass.py` |
 
 `output-schema-v2.json` (issue #376) is a **clean break** per the coupling rules above — a new artifact
-with its own `$id` and `output_contract_version`, not an in-place edit of v1. The only shape change is an
-added, **optional** `issues[].source_quote` field: the exact verbatim text from the counterparty document
+with its own `$id` and `output_contract_version`, not an in-place edit of v1. Its shape delta against v1 is
+**two added, optional `issues[]` fields and nothing else** — one from #376, one from #522.
+
+The first is `issues[].source_quote`: the exact verbatim text from the counterparty document
 that an issue's `proposed_replacement_text` would replace, giving a later pipeline stage a way to locate
 the clause by quote rather than by `section_ref`/anchor alone (the LLM-native quote-based redline plan).
 `source_quote` is optional so an issue without a single locatable verbatim span (e.g. a missing clause, or
 a non-contiguous change) degrades to flag-only for quote-location purposes rather than failing validation.
 
+The second is `issues[].internal_rationale_for_footnote` (issue #522, epic #519 item D), added to this same
+artifact later: the one **internal-audience** field in the schema, rendered into the delivered `.docx`
+footnotes only in the `internal`/`both` notes modes and only behind an `[INTERNAL]` marking — see
+[Which rationale becomes a footnote](#which-rationale-becomes-a-footnote-the-reviews-notes-mode-issue-522-epic-519-item-d).
+It too is optional. Unlike `source_quote`, the prompt *does* ask for it — but only in those same two modes,
+and both the output-contract block and the schema projections are gated on the mode together (the
+"What the prompt actually solicits, per mode" table under
+[Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose) is the full statement).
+A review in `none`/`external` —
+every review reachable while #572's kill switch is off — is asked for nothing new, so a real model's response
+is unaffected. Like every edit to a schema artifact, adding it is a governed change: it needs a new
+`release.output_contract_hash` and the same legal-approval gate (see the coupling rules above).
+
 This issue is deliberately narrow: **prompting the model to emit `source_quote`** and **consuming
 `source_quote` in redline generation** are both separate follow-up issues. Neither pass's prompt changes
 here, so a real model's response is unaffected by the schema swap — v2's `Issue` shape is a strict
 superset of v1's (everything v1 accepted, v2 still accepts; nothing v1 rejected, v2 accepts either,
-because the only addition is optional). Because the prompt-instructed envelope value is unchanged, the
+because both additions are optional). Because the prompt-instructed envelope value is unchanged, the
 `schema_version` **const is deliberately left at `"output-schema-v1"`** in `output-schema-v2.json` rather
 than bumped to `"output-schema-v2"` — bumping it without also updating the prompt would fail every
 prompt-compliant real-model response the moment the pipeline switched validator files, exactly the
@@ -85,13 +116,86 @@ model-output-contract-drift failure mode this project has hit before. `schema_ve
 `"output-schema-v2"` in the follow-up issue that also updates the prompt to request `source_quote`, so
 both change together.
 
-`playbooks/output-schema-v1.json` is **not deleted or modified** by this change — it remains the schema
-used by `scripts/third_party_output_integration.py`'s independent third-party-paper review path, which is
-out of scope for the quote-based redline plan.
+`playbooks/output-schema-v1.json` is **not deleted or modified** by this change. It was, at the time,
+also the schema used by `scripts/third_party_output_integration.py`'s independent third-party-paper
+review path, which was out of scope for the quote-based redline plan; issue #629 moved that path to
+`playbooks/output-schema-v3.json` (see below), so v1 is now the historical artifact only.
+
+## Schema version v3 — the block-transcript contract (active)
+
+| | v2 (superseded) | v3 (ACTIVE since issue #627) |
+|---|---|---|
+| Artifact | `playbooks/output-schema-v2.json` | `playbooks/output-schema-v3.json` |
+| `output_contract_version` | `"v2"` | `"v3"` |
+| `$id` | `.../output-schema/v2.json` | `.../output-schema/v3.json` |
+| `schema_version` const | `"output-schema-v1"` (deliberately unbumped) | `"output-schema-v3"` (**bumped**) |
+| Shape delta | — | removes `issues[].source_quote`; adds required `issues[].issue_key` and optional `issues[].replacement_scope_note`; makes `issues[].proposed_replacement_text` optional; adds top-level `block_patches[]` and `block_ops[]`. Optional `issues[].internal_rationale_for_footnote` (issue #522) is **carried through from v2 unchanged** — it is not a delta, and must stay that way, or the `internal`/`both` notes modes render no footnotes after the flip |
+| Active validator | selectable as `OUTPUT_SCHEMA_V2_PATH`; today only tests pinning the superseded contract select it as a validator (issue #628 deleted the quote-fidelity instrument that was its one production-adjacent reader) | `scripts/primary_review_pass.py`'s `OUTPUT_SCHEMA_PATH` since issue #627 — **both model-facing passes and `scripts/model_output_schema.py`'s request projections validate and project against v3**, as does `scripts/third_party_output_integration.py`, whose responses are code-built rather than model-authored (issue #629) |
+
+`output-schema-v3.json` (issue #624) is a **clean break** per the coupling rules above, and it is the
+Candidate E output contract: instead of naming a document-wide-unique verbatim quote per issue, the model
+addresses code-assigned blocks and transcribes each edited paragraph as an ordered `keep`/`delete`/`insert`
+segment list that `scripts/block_transcript.py::validate_block_patches` proves back against the document's
+own bytes. `block_patches[]` carries exactly one entry per `block_id`; `block_ops[]` carries whole-block
+`delete_block` / `insert_block_after` operations (whose `anchor_block_id` may be the literal `"start"`).
+
+Unlike v2, v3's `schema_version` const **is** bumped: v3 removes a field and adds a required one, so a
+v2-shaped response does not validate against it and the envelope literal must say so. The pipeline stamps
+that literal from whichever artifact is selected (`primary_review_pass.output_schema_version_const`), so
+selecting v2 still stamps `"output-schema-v1"`.
+
+Two properties of v3 are **not** expressible in JSON Schema draft-07 and are enforced beside it:
+
+- `issues[].issue_key` must be unique across the whole response (both `issues[]` and
+  `critic_delta.added_issues`) — it is the handle every `block_patches` segment and `block_ops` entry
+  names to say which issue authored that edit, so two issues sharing a key silently merge their redlines.
+  `primary_review_pass.validate_model_response` rejects a duplicate with the same `schema_invalid` token
+  every other contract violation gets. The check is gated on the ACTIVE artifact defining `issue_key`, so
+  it is inert under v1/v2.
+- Whether a transcript actually maps onto the document's characters is proven by
+  `scripts/block_transcript.py`, fail-closed, never by the schema. The schema fixes the SHAPE only.
+
+**v3 shipped dormant (issue #624) and was ACTIVATED by issue #627.** It was dormant on purpose for one
+release: switching the active validator is a *paired* change with the prompt, and moving one without the
+other breaks every real review while CI stays green on fixtures — the model-output-contract-drift failure
+mode this project has already hit. The flip therefore moved both halves in ONE commit, and bound them in
+code so they cannot come apart again:
+
+- `primary_review_pass.OUTPUT_SCHEMA_VERSION` is READ OFF the active artifact
+  (`output_schema_version_const(load_output_schema(OUTPUT_SCHEMA_PATH))`), never restated as a literal,
+  and the OUTPUT CONTRACT prompt block interpolates that value. One fact, one source.
+- `scripts/model_output_schema.py`'s own `OUTPUT_SCHEMA_PATH` — which feeds the model-facing tool schema
+  and the provider-safe projection — moved with it, so the REQUEST half cannot drift from the prompt
+  either.
+- `tests/test_v3_flip_627.py` asserts the instructed literal and the artifact's own const are the same
+  string, in one test, against the real prompt and the real file.
+
+Two things follow from the model no longer authoring `proposed_replacement_text`: the pipeline DERIVES it
+from the proven transcript (`redline_generate.generate_redline_from_blocks`), and pen-rules enforcement
+(`replacement_text_enforcement`) moved with it — it runs at redline generation against the derived text
+instead of at pass time against a field the model was told not to send. The v2 pass-time path is intact
+for a caller that selects the v2 artifact.
+
+Activation is a release-bundle event: it needs a new `release.output_contract_hash` and the same
+legal-approval gate as a prompt or playbook change, per the coupling rules above. That governance step is
+the owner's, not the code change's.
+
+`playbooks/output-schema-v1.json` and `playbooks/output-schema-v2.json` are **not deleted or modified** by
+issue #624 or #627.
+
+**Known stale text, deliberately left stale.** `playbooks/output-schema-v3.json`'s own top-level
+`description` still carries the sentence "DORMANT ON ARRIVAL: this artifact ships wired but INACTIVE",
+followed by the claim that `scripts/primary_review_pass.py` still defaults to `output-schema-v2.json` and
+that no prompt asks for a v3-only field. All three were true when #624 authored the artifact and are false
+now. It is **not** corrected here because the artifact's bytes are content-hash-gated: any edit to this
+file changes `release.output_contract_hash` and needs the legal-approval gate above, which is the owner's
+governance step and not a code change. Read the artifact's *schema* as authoritative and its *description's
+dormancy claim* as superseded by this section until that step runs. This paragraph exists so the
+contradiction is recorded rather than discovered.
 
 ## ACCEPT summary shape
 
-The ACCEPT result view promises **"a summary of what changed and why each change was acceptable."** The source field for this summary is **`verdict_summary`** — a top-level string in the model response schema (`output-schema-v2.json`, unchanged from `output-schema-v1.json`).
+The ACCEPT result view promises **"a summary of what changed and why each change was acceptable."** The source field for this summary is **`verdict_summary`** — a top-level string in the model response schema (carried unchanged from `output-schema-v1.json` through `output-schema-v2.json` into the ACTIVE `output-schema-v3.json`).
 
 ### Shape and source
 
@@ -192,19 +296,18 @@ The merge rule:
 - **`confidence_band` always mirrors the merged `confidence_state`**: null when `OK`, else the
   `confidence_state` string itself — same rule as the unmerged case above.
 
-### Outline-only-input confidence degrade (issue #419)
+### No size-based confidence degrade (issue #625, 2026-08-25)
 
-`reconcile()` applies a second, independent degrade after the critic-delta merge above: when the
-primary pass reviewed a section outline rather than the full counterparty document text
-(`input_mode="section_outline"` — the document estimated over
-`primary_review_pass.DEFAULT_FULL_DOC_TOKEN_THRESHOLD` tokens, default 60,000), `confidence_state`
-is degraded **one further level** (stacking with the critic-delta degrade when both apply — a
-review that is both outline-only *and* critic-contested is worse than either alone), and a fixed,
-substance-free sentence (no document content — a static string) is appended to `verdict_summary`
-saying the review was outline-only due to document size. `input_mode` is pipeline-derived metadata,
-not part of the model's own `output-schema-v1`/`v2` response — it is not a schema field, and is
-surfaced separately on `scripts/review_spine.py::run_review`'s result dict. A `"full_document"`
-review is unaffected: no degrade, no sentence.
+`reconcile()` applies **no** degrade for document size. Until 2026-08-25 it applied a second,
+independent degrade whenever the primary pass had reviewed a section outline rather than the full
+counterparty document text, plus a fixed sentence appended to `verdict_summary` saying so. Owner
+decision (issue #625) deleted that review mode outright: a document either fits
+`primary_review_pass.MAX_INPUT_TOKENS` (100,000) and is reviewed in full, or the review terminates
+as `MANUAL_REVIEW_REQUIRED` / `document_too_large` before any model call and never reaches
+`reconcile()` at all. There is no longer a reduced review quality for a confidence degrade or a
+summary notice to warn about, and the pipeline-derived `input_mode` field that carried the
+distinction is gone from `scripts/review_spine.py::run_review`'s result dict. The critic-delta
+merge above is now the only rule that moves `confidence_state`.
 
 ## Critic-delta presentation
 
@@ -310,18 +413,54 @@ edit (issue #203): the redline `.docx` is delivered for the applied patches **al
 any in-place-locate failures into that same `changes_not_applied` list (never a silent omission of
 a `REQUEST_CHANGE` edit), so a caller with a mixed-outcome batch delivers the partial redline and
 the report together, with `status = MANUAL_REVIEW_REQUIRED` so a human still sees exactly which
-section(s) were not auto-patched. A batch where every patch matches exactly and locates cleanly
-delivers the full redline with no analysis report at all.
+section(s) were not auto-patched. A batch where every patch matches exactly and locates cleanly,
+with no other issue in the batch deliberately flag-only, delivers the full redline with no analysis
+report at all.
+
+> **Block-transcript path** (issues #626/#628, `scripts/redline_generate.py::
+> generate_redline_from_blocks` / `_build_analysis_report`) reuses this same `analysis_report`
+> artifact shape for its own compile outcomes — `spans_physical_paragraph`, `block_text_changed`,
+> `paragraph_not_resolved`, `edit_not_applied`, `round_trip_verification_failed`, and the rest of
+> `redline_block_apply.FAILURE_REASONS` — with `reason = "block_edits_not_applied"`, or
+> `reason = "block_transcript_rejected"` when the transcript never proved against the document at
+> all. It additionally surfaces issues that were never attempted against the document — a topic
+> whose resolved `replacement_text.mode` is `'none'`, an issue that exhausted its bounded retry
+> budget, or an issue whose whole change set was rolled back because one of its patches failed while
+> another landed (`issue_changeset_failed`, which also carries `patch_reasons`) — labelled per entry
+> via `changes_not_applied[].reason` (`flag_only_mode_none` / `flag_only_retry_exhausted` /
+> `flag_only_mode_unspecified`, issue #585). **Issue #585 finding 1:** when a report's entries are
+> *entirely* never-attempted flags with no genuine apply failure among them, the report's top-level
+> `report_type`/`reason` are **not** `"analysis_report"`/`"block_edits_not_applied"` — reporting
+> that would describe a deliberate, playbook-mandated flag as a system apply failure. Such a report
+> instead carries `report_type = "flag_only_report"`, `reason = "flag_only_issues_present"`, and
+> `fail_closed_path` prose describing a deliberate flag, not a failed apply attempt. This means a
+> batch can deliver the full redline (or have nothing to attempt at all) and still carry a
+> non-`None` `analysis_report`, whenever any issue in it is deliberately flag-only — the invariant
+> above ("no analysis report at all") holds only when the batch contains no flag-only issue of any
+> kind.
+>
+> **Superseded, 2026-08-31 (issue #628).** This callout described the quote-based patch path
+> (issue #379) and its `quote_patches_not_applied` reason until that path's locator and patcher were
+> deleted. The artifact shape, the #585 labelling rule, and the partial-delivery doctrine are
+> unchanged; only the reason vocabulary moved, because block addressing has compile failures rather
+> than lookup failures. A `changes_not_applied` entry no longer carries an address field of any
+> kind: v3 defines none, and inventing one from a transcript would report a span the model never
+> named.
 
 ### Format
 
 The analysis report is a JSON object stored in the `outputs` bucket alongside (or instead of) the
 redline `.docx`. It contains:
 
-- `report_type`: `"analysis_report"` — identifies this as an analysis report, not a redline.
+- `report_type`: `"analysis_report"` — identifies this as an analysis report, not a redline. The
+  block-transcript path's `_build_analysis_report` instead sets `"flag_only_report"` (issue
+  #585 finding 1) when every entry is a deliberate, never-attempted flag and none is a genuine apply
+  failure — see the callout above.
 - `reason`: one of `"unnormalizable_input"`, `"hash_mismatch_at_patch"`, or
   `"inplace_locate_failed"` (issue #291) — the specific fail-closed condition that triggered the
-  report.
+  report. The block-transcript path instead uses `"block_edits_not_applied"` or
+  `"block_transcript_rejected"` (`report_type = "analysis_report"`) or `"flag_only_issues_present"`
+  (`report_type = "flag_only_report"`, issue #585) — see the callout above.
 - `fail_closed_path`: human-readable description of the trigger condition.
 - `changes_not_applied`: an array of the issue entries (from the model's structured output) that
   could not be patched, each carrying `section_ref`, `section_title`, `counterparty_change_summary`,
@@ -410,8 +549,9 @@ not a nag to seek sign-off.
 
 Placement differs by generation path (see [ARCHITECTURE.md → Redlining](../ARCHITECTURE.md#redlining--owned-docx-library)
 for the code-level detail): the live first-party redline path places the marker in the running
-every-page header/footer only; the standalone writer (used for third-party paper and fixture
-generation) additionally places it as a first-page cover note.
+every-page header/footer only; the standalone writer (used for fixture generation) additionally
+places it as a first-page cover note. Third-party paper used the standalone writer until issue #629
+moved it onto the block compiler, so it now takes the header/footer placement too.
 
 There is deliberately **no manual de-marking procedure**. Stripping the marker text would not
 remove the internal-audience content the notes mode actually put in the document (the footnotes and
@@ -445,9 +585,52 @@ defined in [RUNBOOK.md → Manual-review filter: owner and SLA](../RUNBOOK.md#ma
 Each issue in a `REQUEST_CHANGE` carries `section_ref`, `section_title`, `counterparty_change_summary`,
 `decision`, `external_rationale_for_footnote`, `proposed_replacement_text`, `playbook_topic_id`,
 `internal_precedent_citation`, and `provenance` (system metadata — see
-[Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band)). Footnotes
+[Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band)), plus the
+optional `internal_rationale_for_footnote` (see below). Footnotes
 are one or two sentences, name the specific risk, state the position plainly, and propose the
 playbook alternative where one exists (see `output_format.footnote_phrasing_rules`).
+
+### Which rationale becomes a footnote: the review's notes mode (issue #522, epic #519 item D)
+
+An issue carries up to two rationales — `external_rationale_for_footnote` (counterparty-facing) and
+the optional `internal_rationale_for_footnote` (written for your own team). Which of them the
+delivered `.docx` renders is the review's notes mode, resolved in one place,
+`scripts/redline_docx_writer.py` → `footnote_texts_for_notes_mode`, shared by every writer path (the
+live first-party path through `redline_generate`, the block compiler that path and third-party paper
+both use since issue #629, and the standalone writer used for the mock fixture):
+
+| Notes mode | Footnotes emitted per applied patch |
+|---|---|
+| `none` | none at all — bare tracked changes. `word/footnotes.xml` is **omitted**, not emitted empty, and no relationship or content-type override is left dangling |
+| `external` | `external_rationale_for_footnote`, unmarked |
+| `internal` | `internal_rationale_for_footnote`, behind the `[INTERNAL] NOT FOR THE COUNTERPARTY:` marking |
+| `both` | both, against the same patch, external first — only the internal one marked |
+
+An unrecognized or blank mode renders the external rationale: never internal content nobody asked
+for, and never silent suppression of the rationale a default review is entitled to. An issue with
+nothing to say to the requested audience gets no footnote, never an empty one.
+
+**Which field the model is asked to fill is gated on the same mode** — the prompt's output contract
+and the schema projections open for `internal_rationale_for_footnote` in `internal`/`both` and close
+in `none`/`external`, and #516's playbook-deviation narration is directed at that field rather than
+at the counterparty-facing one. The per-mode statement of what is solicited is in
+[Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose) below; it matters here
+because a renderer whose field nothing produces would leave `both` rendering exactly what `external`
+does, and `internal` rendering nothing at all.
+
+**The marking is load-bearing, and it survives accept-all.** The `<w:footnoteReference>` run sits
+inside the patch's `<w:ins>` and the footnote body is ordinary untracked text, so accepting all
+tracked changes *promotes* a footnote to plain body text rather than removing it. That property is
+kept deliberately — a footnote that vanished on accept-all would take the counterparty-facing
+rationale with it — which means the `[INTERNAL]` marking, not the tracked-change review, is what
+stands between an internal note and the counterparty in an accept-all-then-send workflow. It is
+therefore part of the rendered text itself, and `tests/redline/test_footnote_audience_modes_522.py`
+asserts it is still there after the real accept-all transform.
+
+Third-party paper renders no internal footnote today: #250's finding shape carries only a single
+`rationale`, so `internal`/`both` on that path suppress the counterparty-facing note without
+substituting anything. The mode still governs that path — `none` and `internal` both leave its
+generated document with no footnotes part.
 
 ### Flag-only issues (no in-document marking)
 
@@ -491,19 +674,20 @@ clause that cleared nothing). `GET /api/reviews/{id}` still *returns* `verdict_s
 as its response keys — the rename is a storage-layer fact, not an API one. See
 [docs/data-handling.md](data-handling.md)'s field dictionary for the storage side of each.
 
-| Field | Where rendered | Scan required |
-|---|---|---|
-| `verdict_summary` (ACCEPT path) | Reviewer UI on the ACCEPT result page; realistically copy-pasted into email | Yes |
-| `verdict_summary` (REQUEST_CHANGE path) | Reviewer UI alongside the redline | Yes |
-| `external_rationale_for_footnote` | Generated `.docx` footnotes | Yes |
-| `counterparty_change_summary` | Reviewer UI (per-issue summary) | Yes |
-| `proposed_replacement_text` | Generated `.docx` redline | Yes |
-| `critic_delta.contested_replacements[].critic_objection` / `.critic_suggested_replacement` | Admin view; reviewer detail view | Yes |
-| `critic_delta.rationale_objections[].objection` | Admin view; reviewer detail view | Yes |
-| `critic_delta.rationale_objections[].section_ref` | Admin view; reviewer detail view | n/a (a locator, not prose — see below) |
-| `critic_delta.added_issues[]` | Admin view; reviewer detail view | Yes (each scanned as a primary issue) |
-| `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes |
-| `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) |
+| Field | Where rendered | Scan required | Channel |
+|---|---|---|---|
+| `verdict_summary` (ACCEPT path) | Reviewer UI on the ACCEPT result page; realistically copy-pasted into email | Yes | `external` |
+| `verdict_summary` (REQUEST_CHANGE path) | Reviewer UI alongside the redline | Yes | `external` |
+| `external_rationale_for_footnote` | Generated `.docx` footnotes | Yes | `external` |
+| `internal_rationale_for_footnote` | Generated `.docx` footnotes, **only** in the `internal`/`both` notes modes, behind a leading `[INTERNAL]` marking | Yes | `internal` |
+| `counterparty_change_summary` | Reviewer UI (per-issue summary) | Yes | `external` |
+| `proposed_replacement_text` | Generated `.docx` redline | Yes | `external` |
+| `critic_delta.contested_replacements[].critic_objection` / `.critic_suggested_replacement` | Admin view; reviewer detail view | Yes | `external` |
+| `critic_delta.rationale_objections[].objection` | Admin view; reviewer detail view | Yes | `external` |
+| `critic_delta.rationale_objections[].section_ref` | Admin view; reviewer detail view | n/a (a locator, not prose — see below) | n/a |
+| `critic_delta.added_issues[]` | Admin view; reviewer detail view | Yes (each scanned as a primary issue) | `external` (per field, as above) |
+| `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes | `external` |
+| `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) | n/a |
 
 The `critic_delta` rows are enumerated field by field rather than summarised as one line, because
 the summary is what hid issue #517: the table said "`critic_delta` rationale / contested
@@ -514,6 +698,27 @@ prose output reached a human unscanned. A field this table promises is covered b
 than one known to be uncovered — a reader reasonably assumes cover. `section_ref` is excluded
 explicitly for the same reason: it is a locator ("Section 8"), not prose, and scanning it would
 false-positive on any playbook whose topic ids or rule descriptions contain a section number.
+
+**Channel column (issue #521, epic #519 item C).** Each scanned field declares an **audience channel** — `external` or `internal` — which selects which of the scanner's two rulesets applies. The declaration is a **static literal table keyed on field identity**, `scripts/leakage_scan.py` → `_FIELD_CHANNELS`: never inferred from the field's text, and never a function of the review's runtime notes mode. A field's audience is a property of the field.
+
+**Exactly one field is `internal`: `internal_rationale_for_footnote`** (issue #522, epic #519 item D — the renderer that keeps it out of a counterparty-bound document landed with it, never one without the other). It is *scanned*, not skipped: the never-acceptable set (system-prompt leakage, excessive verbatim precedent quotation) blocks it exactly as it blocks an external field, and only the permissive column differs. Every other field above is `external`. `external_rationale_for_footnote` in particular stays `external` in every notes mode — it is written verbatim into the delivered `.docx` footnote, and accept-all *promotes* that footnote to body text rather than removing it.
+
+**What the prompt actually solicits, per mode.** The producer is gated on the same notes mode the renderer reads, in both places a request can be made:
+
+| Notes mode | Output-contract block (`primary_review_pass.render_binary_decision_overlay_block`) | Schema projections (`model_output_schema`) | Deviation-narration clause (#516, only when this review carries `toaster_guidance`) |
+|---|---|---|---|
+| `none`, `external` | no `internal_rationale_for_footnote` key — "EXACTLY these keys and no others" as before | field stripped from the model-facing and provider projections | absent — the model is never told to narrate a guidance/playbook conflict |
+| `internal`, `both` | key added, with a bullet saying it is written for your own team, rendered behind `[INTERNAL]`, and to be omitted when there is no internal note | field kept, and given a `null` branch in the provider projection so "no internal note" is emittable under strict enforcement | present, and it names `internal_rationale_for_footnote` — never `external_rationale_for_footnote`, which it now explicitly forbids |
+
+Both halves have to open together: under provider-enforced structured output the projected schema, not the prompt's prose, decides what the model may emit, and `additionalProperties: false` is forced on every object node. A `null` (or empty) value is normalised back to *absent* before the full-schema check by `primary_review_pass._denullify_unrepresentable_issue_fields` — since issue #628 this field is the only member of `model_output_schema._ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH`, the v2 quote field having left the contract with #627.
+
+Until #522 closed it, this was a real gap in the other direction: #516's narration clause was live in exactly `internal`/`both` and routed "the reviewing team directed a departure from our standard position" into `external_rationale_for_footnote` — the field this table renders **unmarked** — so `both` would have delivered internal narration as the counterparty-facing footnote, and accept-all would have promoted it into the body text. That clause now points at the internal field.
+
+`internal`/`both` remain unselectable in production while #572's `NOTES_MODE_ENABLED` kill switch is off, so every live review today runs `none`/`external` and produces no value for the field at all.
+
+**The marker is a property of the mode, not of the rendered content.** A review in `internal`/`both` whose model returned no internal note on any issue still gets the export marker (`redline_generate` passes `include_marker` from the notes mode alone — issue #513) and therefore a document that says it contains internal notes while carrying none. That over-inclusion is deliberate: the failure directions are not symmetric, and a document marked not-for-external that turns out to hold nothing internal costs a second look, where the reverse costs a leak.
+
+The two rulesets, and the categories that are dormant in production because retrieval was retired, are in [docs/threat-model.md → Model output leakage](threat-model.md#model-output-leakage).
 
 A positive leakage detection on **any** of these fields routes the review to
 `ERROR_MANUAL_REVIEW_REQUIRED` regardless of which path (ACCEPT or REQUEST_CHANGE) the review is on.

@@ -13,9 +13,10 @@ python-multipart==0.0.32
 # scripts/primary_review_pass.py), pinned identically to
 # requirements-dev.txt.
 jsonschema==4.26.0
-# docx-editor: runtime dependency of scripts/redline_quote_apply.py (issue
-# #377, "docx-editor span-apply wrapper") -- applies model-quoted
-# {source_quote, new_text, rationale} patches as Word tracked changes.
+# docx-editor: runtime dependency of scripts/redline_block_apply.py (issue
+# #626's pass 1) -- turns a proven block transcript's offsets into Word
+# tracked changes. It arrived as issue #377's quote patcher's dependency;
+# issue #628 deleted that module, and this one still needs it.
 # MIT license (https://github.com/pablospe/docx-editor); its own dependency
 # is defusedxml (PSF license), installed transitively. Pinned identically to
 # requirements-dev.txt.
