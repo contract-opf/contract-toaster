@@ -11,7 +11,8 @@ proves the fix:
       its OWN model's rate (per-model input/output rates mirroring
       model-policy/bedrock-us-east-1.json's base rates + the ~10% regional
       premium documented in docs/design-notes.md) and must match
-      ARCHITECTURE.md's documented $2.11 worst-case/review -- NOT the
+      ARCHITECTURE.md's documented $2.46 worst-case/review (issue #625
+      raised MAX_INPUT_TOKENS to 100_000; it was $2.11 at 80_000) -- NOT the
       pre-fix $9.68 (a single blended "Opus output" rate applied to every
       token of every pass, backend/src/reviews.py:70-81,273-295 as filed).
       Also cross-checks that the per-model rate constants are numerically
@@ -34,7 +35,8 @@ proves the fix:
       daily_spend.reserved_usd_cents for real, not merely set a
       `reservation_released` flag that nothing downstream ever consumes --
       the pre-fix behavior left a dead review's $9.68 (or, post the
-      per-model fix, $2.11) reserved against the day's cap PERMANENTLY.
+      per-model fix, $2.11 -- $2.46 since issue #625) reserved against the
+      day's cap PERMANENTLY.
 
 These are unit tests against in-memory DynamoDB fakes (no live AWS, no
 moto/boto3 dependency required) -- same third-party-stubbing convention as
@@ -131,6 +133,7 @@ os.environ.setdefault(
 )
 os.environ.setdefault("STALE_PENDING_THRESHOLD_SECONDS", "120")
 
+import config as _config_module  # noqa: E402
 import reviews as _reviews_module  # noqa: E402
 
 ClientError = sys.modules["botocore.exceptions"].ClientError
@@ -308,57 +311,62 @@ def _today() -> str:
 
 
 # ---------------------------------------------------------------------------
-# (a) Reservation formula: per-model rates, matches ARCHITECTURE.md's $2.11
+# (a) Reservation formula: per-model rates, matches ARCHITECTURE.md's $2.46
 # ---------------------------------------------------------------------------
 
 class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
-    def test_reservation_is_211_cents_not_968(self):
-        """Issue #189: the pre-fix formula reserved $9.68 (968 cents) --
-        4.6x ARCHITECTURE.md's documented $2.11 (211 cents) worst case --
-        which 429'd the third review of any day against the $20/day cap."""
+    def test_reservation_is_246_cents_not_the_blended_rate_figure(self):
+        """Issue #189: the pre-fix formula applied a single blended 'Opus
+        output' rate to ALL tokens, reserving 4.6x the documented worst case
+        and 429'ing the third review of any day against the $20/day cap.
+        ARCHITECTURE.md -> Cost shape now documents $2.46 (246 cents) at
+        MAX_INPUT_TOKENS=100_000 (issue #625; it was $2.11 at 80_000)."""
         cents = _reviews_module.compute_worst_case_reservation_usd_cents()
-        self.assertEqual(cents, 211, "Must match ARCHITECTURE.md's $2.11 worst-case/review.")
-        self.assertNotEqual(cents, 968, "Must NOT reproduce the pre-fix $9.68 reservation.")
-
-    def test_reservation_grows_by_exactly_one_primary_priced_pass_when_requote_enabled(self):
-        """Issue #569 fix round 1, finding 3: the `if config.requote_enabled():
-        usd += primary_usd` branch shipped with ZERO test coverage -- every
-        existing caller in tests/ runs with REQUOTE_ENABLED unset, so this
-        branch never executed in the suite. Flag off must reproduce the
-        pre-#569 $2.11 exactly; flag on must add exactly ONE primary-priced
-        pass (`MAX_INPUT_TOKENS`/`MAX_OUTPUT_TOKENS` at the primary rate),
-        never `attempts_per_pass * primary_usd` -- the repair call carries
-        no retry budget of its own (`scripts/requote_repair.py`'s "one pass
-        ever")."""
-        baseline_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
-        self.assertEqual(baseline_cents, 211, "Sanity: flag off must reproduce the documented $2.11.")
-
-        # Computed independently from the raw rate constants -- deliberately
-        # NOT multiplied by attempts_per_pass/MAX_RETRIES_PER_PASS, so a
-        # regression to `usd += attempts_per_pass * primary_usd` fails this
-        # assertion rather than passing it.
-        primary_usd = _reviews_module.MAX_INPUT_TOKENS * (
-            _reviews_module.PRIMARY_INPUT_RATE_USD_PER_MILLION / 1_000_000
-        ) + _reviews_module.MAX_OUTPUT_TOKENS * (
-            _reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION / 1_000_000
+        self.assertEqual(cents, 246, "Must match ARCHITECTURE.md's $2.46 worst-case/review.")
+        blended = int(round(
+            (1 + _reviews_module.MAX_RETRIES_PER_PASS)
+            * 2
+            * (_reviews_module.MAX_INPUT_TOKENS + _reviews_module.MAX_OUTPUT_TOKENS)
+            * _reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION
+            / 1_000_000
+            * 100
+        ))
+        self.assertNotEqual(
+            cents, blended,
+            "Must NOT reproduce the pre-fix single-blended-rate reservation.",
         )
-        expected_cents_with_requote = int(round((baseline_cents / 100 + primary_usd) * 100))
+
+    def test_the_deleted_repair_flag_no_longer_moves_the_reservation(self):
+        """Issue #628 deleted the bounded address-repair pass, its module and
+        its `REQUOTE_ENABLED` flag, so `compute_worst_case_reservation_usd_
+        cents()` is once again exactly `attempts_per_pass * (primary +
+        critic)`.
+
+        Issue #569 had added `if config.requote_enabled(): usd += primary_usd`
+        here, reserving for a third model call. Setting the env var must now
+        change nothing at all -- if someone re-adds an env-gated term to this
+        function, this fails, and the flag-off baseline below is the same
+        documented $2.46 that branch was measured against.
+
+        The flag is also asserted GONE from `backend/src/config.py`: a
+        reservation that ignores the var while the accessor survives would
+        leave a live-looking switch wired to nothing.
+        """
+        baseline_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
+        self.assertEqual(baseline_cents, 246, "Flag-off baseline is the documented $2.46.")
 
         with patch.dict(os.environ, {"REQUOTE_ENABLED": "1"}):
-            cents_with_requote = _reviews_module.compute_worst_case_reservation_usd_cents()
-        # Flag must not leak into the next call in this process.
-        cents_after_flag_cleared = _reviews_module.compute_worst_case_reservation_usd_cents()
-
+            cents_with_flag_set = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(
-            cents_with_requote,
-            expected_cents_with_requote,
-            "Flag ON must add exactly one primary-priced pass, unmultiplied by attempts_per_pass.",
-        )
-        self.assertGreater(cents_with_requote, baseline_cents)
-        self.assertEqual(
-            cents_after_flag_cleared,
+            cents_with_flag_set,
             baseline_cents,
-            "Flag OFF (the default) must be unchanged by this branch's existence.",
+            "REQUOTE_ENABLED must no longer move the reservation -- the pass "
+            "it reserved for was deleted by issue #628.",
+        )
+
+        self.assertFalse(
+            hasattr(_config_module, "requote_enabled"),
+            "backend/src/config.py must not still expose requote_enabled().",
         )
 
     def test_rates_mirror_model_policy_base_rates_times_regional_premium(self):
@@ -421,50 +429,34 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
                 f"orphan_reconciler/handler.py={reconciler_value!r}",
             )
 
-        self.assertEqual(_persist_module.compute_worst_case_reservation_usd_cents(), 211)
-        self.assertEqual(_reconciler_module.compute_worst_case_reservation_usd_cents(), 211)
+        self.assertEqual(_persist_module.compute_worst_case_reservation_usd_cents(), 246)
+        self.assertEqual(_reconciler_module.compute_worst_case_reservation_usd_cents(), 246)
 
-    def test_reservation_parity_across_all_three_copies_under_both_requote_settings(self):
+    def test_reservation_parity_across_all_three_copies(self):
         """Issue #569 fix round 2, finding 2: the parity test above only
         compares the mirrored rate CONSTANTS and the mirrors' hardcoded
-        211-cents baseline -- it never calls
+        worst-case baseline -- it never calls
         `_reviews_module.compute_worst_case_reservation_usd_cents()` and
         compares it against the persist/orphan_reconciler mirrors' own
-        `compute_worst_case_reservation_usd_cents()`, and never runs with
-        `REQUOTE_ENABLED` set. That let reviews.py's flag-aware reservation
-        (backend/src/reviews.py's `if config.requote_enabled(): usd +=
-        primary_usd` branch) drift from the two Lambda mirrors -- which
-        stayed flag-blind -- without failing CI: reserve (reviews.py) and
-        settle (the persist-stage / orphan-reconciler mirrors) would
-        permanently disagree by one primary-priced pass on every review run
-        with the flag on, leaking that difference from
-        `daily_spend.reserved_usd_cents` forever. Assert parity across all
-        three self-contained copies under BOTH REQUOTE_ENABLED unset and
-        REQUOTE_ENABLED=1, so this class of drift fails CI instead of being
-        invisible at the default."""
-        # Flag unset (the default): all three copies must agree, and match
-        # the documented $2.11 baseline.
+        `compute_worst_case_reservation_usd_cents()`. That let reviews.py's
+        reservation drift from the two Lambda mirrors without failing CI:
+        reserve (reviews.py) and settle (the persist-stage /
+        orphan-reconciler mirrors) would permanently disagree on every
+        review, leaking that difference from
+        `daily_spend.reserved_usd_cents` forever.
+
+        Issue #628 removed the env-gated third-pass term from all three
+        copies in one commit, so the parity assertion no longer has a flag
+        dimension -- but it keeps ONE: `REQUOTE_ENABLED=1` must leave all
+        three unmoved, which is what proves the term is gone from the
+        MIRRORS too and not merely from reviews.py.
+        """
         reviews_off = _reviews_module.compute_worst_case_reservation_usd_cents()
         persist_off = _persist_module.compute_worst_case_reservation_usd_cents()
         reconciler_off = _reconciler_module.compute_worst_case_reservation_usd_cents()
-        self.assertEqual(reviews_off, 211)
-        self.assertEqual(persist_off, 211)
-        self.assertEqual(reconciler_off, 211)
-
-        # Flag on: all three copies must agree with each other, AND must
-        # have grown by exactly one primary-priced pass over the flag-off
-        # baseline -- a bug that flipped all three copies to the same WRONG
-        # number would pass a bare cross-module equality check, so also
-        # pin the expected delta independently from the raw rate constants
-        # (same derivation as
-        # test_reservation_grows_by_exactly_one_primary_priced_pass_when_requote_enabled
-        # above), deliberately NOT multiplied by attempts_per_pass.
-        primary_usd = _reviews_module.MAX_INPUT_TOKENS * (
-            _reviews_module.PRIMARY_INPUT_RATE_USD_PER_MILLION / 1_000_000
-        ) + _reviews_module.MAX_OUTPUT_TOKENS * (
-            _reviews_module.PRIMARY_OUTPUT_RATE_USD_PER_MILLION / 1_000_000
-        )
-        expected_cents_with_requote = int(round((reviews_off / 100 + primary_usd) * 100))
+        self.assertEqual(reviews_off, 246)
+        self.assertEqual(persist_off, 246)
+        self.assertEqual(reconciler_off, 246)
 
         with patch.dict(os.environ, {"REQUOTE_ENABLED": "1"}):
             reviews_on = _reviews_module.compute_worst_case_reservation_usd_cents()
@@ -472,22 +464,11 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
             reconciler_on = _reconciler_module.compute_worst_case_reservation_usd_cents()
 
         self.assertEqual(
-            reviews_on, expected_cents_with_requote,
-            "Sanity: reviews.py's flag-on figure must still be exactly one "
-            "primary-priced pass over baseline.",
-        )
-        self.assertEqual(
-            reviews_on, persist_on,
-            "reviews.py and persist/handler.py must agree on the "
-            "reservation with REQUOTE_ENABLED=1 -- a mismatch leaks the "
-            "difference from daily_spend.reserved_usd_cents on every "
-            "settlement via the persist stage.",
-        )
-        self.assertEqual(
-            reviews_on, reconciler_on,
-            "reviews.py and orphan_reconciler/handler.py must agree on the "
-            "reservation with REQUOTE_ENABLED=1 -- same leak on the "
-            "dead-execution settlement path.",
+            (reviews_on, persist_on, reconciler_on),
+            (reviews_off, persist_off, reconciler_off),
+            "No copy may still read REQUOTE_ENABLED -- issue #628 deleted the "
+            "pass it reserved for, and a mirror that still adds the term "
+            "would leak the difference from daily_spend.reserved_usd_cents.",
         )
 
 

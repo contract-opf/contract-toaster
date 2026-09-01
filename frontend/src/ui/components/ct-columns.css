@@ -1,0 +1,29 @@
+/*
+ * ct-columns.css — CTDS two-column layout primitive (issue #601,
+ * docs/frontend-design-system.md §6). Light DOM (§5.1): a CSS Grid
+ * directly on the host tag — children stay exactly where React put them
+ * (see ct-columns.ts's docstring), only their visual position changes.
+ * Tokens only (§5.6).
+ */
+
+/* `minmax(0, 1fr)`, never a bare `1fr` (issue #457's audit, still enforced
+   by `npm run audit:layout`) — a bare `1fr` is `minmax(auto, 1fr)`, and
+   that automatic minimum is the MIN-CONTENT width of the track's
+   contents. One non-shrinkable child pins the track open and the page
+   scrolls horizontally, exactly the failure mode ct-app-shell.css's own
+   outer grid documents. */
+ct-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--ct-space-4);
+  row-gap: var(--ct-space-4);
+}
+
+/* Collapses at the same breakpoint ct-app-shell's own outer grid does
+   (issue #390) — the whole app goes single-column together, rather than
+   this primitive breaking at its own, different width. */
+@media (max-width: 640px) {
+  ct-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

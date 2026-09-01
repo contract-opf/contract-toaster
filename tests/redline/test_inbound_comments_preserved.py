@@ -304,7 +304,7 @@ def _build_commented_docx() -> bytes:
 
     Hand-built OOXML rather than python-docx: python-docx cannot author
     comments, which is precisely why the existing byte-identity test
-    (tests/redline/test_inplace_tracked_changes.py AC1) never exercised a
+    (the retired in-place-patcher slice test's AC1) never exercised a
     comment part.
     """
     content_types = (

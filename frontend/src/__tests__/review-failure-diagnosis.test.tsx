@@ -110,7 +110,7 @@ describe('a failed review explains itself', () => {
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/no usable model api key/i);
-    expect(panel).toHaveTextContent(/model & api key/i);
+    expect(panel).toHaveTextContent(/under “Models”/i);
     // The technical stage stays visible for an admin to quote in a bug report.
     expect(screen.getByTestId('review-failing-stage')).toHaveTextContent('build_model_client');
   });
@@ -162,7 +162,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/run out of credits/i);
     expect(panel).toHaveTextContent(/add funds/i);
-    expect(panel).toHaveTextContent(/model & api key/i);
+    expect(panel).toHaveTextContent(/under “Models”/i);
     // The vaguer stage-keyed fallback must NOT be what got rendered.
     expect(panel).not.toHaveTextContent(/exact cause was not identified/i);
     // It must not blame the reader's document for an operator's billing problem.

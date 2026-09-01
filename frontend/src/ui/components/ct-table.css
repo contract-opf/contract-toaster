@@ -24,7 +24,7 @@ ct-table thead th {
   background: var(--ct-surface-sunken);
   color: var(--ct-text-muted);
   font-family: var(--ct-font-sans);
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -53,7 +53,7 @@ ct-table tbody tr:hover {
    ct-table.ts's docstring. */
 .ct-table__mono {
   font-family: var(--ct-font-mono);
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
 }
 
 /* Empty-state row: a quiet centered muted line inside the table region

@@ -141,6 +141,54 @@ input.) An open comment on an otherwise-ambiguous paragraph (per the AMBIGUOUS
 list above) does not change the outcome either way -- the tracked-change
 structure alone determines fail-open vs. fail-closed.
 
+### Control-character screen (issue #632)
+
+Separate from the revision-disposition rule above, and applied to the
+OPERATIVE text every accepted disposition produces (plus the paragraph's
+heading), is a screen for INVISIBLE Unicode. Counterparty-controlled paper
+can carry zero-width characters -- text the model reads and a human reviewer
+cannot see -- and bidirectional overrides, which make rendered text read in
+a different order than the logical order the model is shown. Both are
+spoofing and prompt-injection surfaces in exactly the place this pipeline is
+least able to notice them: the model's own input.
+
+Screened character classes (any occurrence fails closed):
+
+  U+200B - U+200F   zero-width space/non-joiner/joiner, LRM, RLM
+  U+202A - U+202E   LRE, RLE, PDF, LRO, RLO (bidi embedding/override)
+  U+2060 - U+2064   word joiner and the invisible math operators
+  U+2066 - U+2069   LRI, RLI, FSI, PDI (bidi isolates)
+  U+FEFF            anywhere OTHER than the leading position of the screened
+                    string, where it is an ordinary byte-order mark
+
+EXPLICITLY ALLOWED, never flagged: `\t` (a tab, already handled as ordinary
+whitespace), `\n` (this module's own logical-paragraph join, not document
+content), and U+00A0 NON-BREAKING SPACE, which is common and legitimate in
+real contracts (defined terms, section references, currency amounts).
+
+Disposition: FAIL CLOSED, exactly like any other unnormalizable input --
+never strip, never repair. Silently deleting the characters would hand the
+model a document that differs from the one the attorney sees, which is the
+same class of text/bytes mismatch `materialize_accept_all` exists to
+prevent; and "repair" would decide, on the counterparty's behalf, what the
+operative text was supposed to say.
+
+The fail-closed note is COUNTS-ONLY: how many characters were found, in
+which scope (`heading` or `text` -- a fixed vocabulary, not document
+content), and the offset of the first. It never echoes the offending run,
+its neighbours, or the paragraph heading. `tools/document_spine_smoke.py`
+classifies the note as the symbolic reason code
+`suspicious_control_characters`.
+
+Known cost, stated rather than discovered later: this screen is not free
+against real paper. A scan of real counterparty documents found U+200B
+inside ordinary `<w:t>` runs in a substantial fraction of them (a handful of
+occurrences per document), so this screen WILL route such documents to
+MANUAL_REVIEW_REQUIRED rather than reviewing them. That is the disposition
+issue #632 chose deliberately -- an invisible character in the model's input
+is not something this pipeline is willing to guess about -- but it is a
+refusal rate, not a free win.
+
 A document normalizes (`normalizable=True`) iff EVERY paragraph normalizes.
 One un-normalizable paragraph fails the whole document closed -- a partially
 normalized document (some clauses clean, one paragraph's operative text
@@ -166,6 +214,74 @@ Usage:
 
 import sys
 from typing import Any
+
+# --- Control-character screen (issue #632) ---------------------------------
+#
+# See the module docstring, "Control-character screen", for WHY these classes
+# and why the disposition is fail-closed rather than strip-and-continue.
+# Inclusive `(first, last)` codepoint ranges; U+FEFF is handled separately
+# below because its leading occurrence is a legitimate byte-order mark.
+SUSPICIOUS_CONTROL_RANGES: tuple[tuple[int, int], ...] = (
+    (0x200B, 0x200F),  # ZWSP, ZWNJ, ZWJ, LRM, RLM
+    (0x202A, 0x202E),  # LRE, RLE, PDF, LRO, RLO
+    (0x2060, 0x2064),  # word joiner, invisible times/separator/plus
+    (0x2066, 0x2069),  # LRI, RLI, FSI, PDI
+)
+
+BOM = "﻿"
+
+# The STABLE substring `tools/document_spine_smoke.py` matches to classify
+# this fail-closed path as `suspicious_control_characters`. Everything
+# interpolated after it is a count, an offset, or a fixed scope word --
+# never document text (module docstring, "Control-character screen").
+CONTROL_CHARACTER_NOTE_PREFIX = "Suspicious control characters in extracted"
+
+
+def find_suspicious_control_characters(text: str) -> list[int]:
+    """
+    Return the OFFSETS (never the characters, never their context) of every
+    zero-width or bidirectional control character in `text`, in order.
+
+    U+FEFF at offset 0 is an ordinary byte-order mark and is NOT reported;
+    anywhere else it is a zero-width no-break space and IS. Tab, newline and
+    U+00A0 non-breaking space are explicitly allowed and never reported.
+    """
+    offsets: list[int] = []
+    for index, char in enumerate(text):
+        code = ord(char)
+        if char == BOM:
+            if index != 0:
+                offsets.append(index)
+            continue
+        if any(low <= code <= high for low, high in SUSPICIOUS_CONTROL_RANGES):
+            offsets.append(index)
+    return offsets
+
+
+def _screen_control_characters(heading: str, clean_text: str) -> dict | None:
+    """
+    Screen a paragraph's operative text (and its heading) for the character
+    classes above. Returns an un-normalizable result carrying a COUNTS-ONLY
+    note, or None when the paragraph is clean.
+
+    Called on the OPERATIVE text -- after accept-all has chosen it -- so a
+    hostile `resulting_text` can never reach a disposition note either.
+    """
+    for scope, value in (("heading", heading), ("text", clean_text)):
+        offsets = find_suspicious_control_characters(value or "")
+        if not offsets:
+            continue
+        return {
+            "normalizable": False,
+            "note": (
+                f"{CONTROL_CHARACTER_NOTE_PREFIX} {scope}: {len(offsets)} "
+                f"zero-width or bidirectional control character(s) detected "
+                f"(first at offset {offsets[0]}) -- invisible characters in "
+                f"the model's input are a spoofing and prompt-injection "
+                f"surface; refusing rather than stripping."
+            ),
+        }
+    return None
 
 
 def _normalize_paragraph(paragraph: dict) -> dict:
@@ -248,6 +364,13 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             }
 
     if not pending_tracked_changes:
+        # Control-character screen on the operative text (issue #632) --
+        # every fail-closed branch in this module documents itself; this one
+        # is documented in the module docstring under "Control-character
+        # screen".
+        blocked = _screen_control_characters(heading, clean_text)
+        if blocked:
+            return blocked
         return {"normalizable": True, "clean_text": clean_text}
 
     # --- Pending tracked change(s): accept-all unless genuinely ambiguous ---
@@ -286,6 +409,14 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             ),
         }
     clean_text = resulting_text
+
+    # Control-character screen (issue #632) runs BEFORE any disposition note
+    # is built: the field-code note below quotes `resulting_text` back, so a
+    # hostile accepted text must fail closed here rather than be echoed into
+    # a note that is surfaced to the attorney.
+    blocked = _screen_control_characters(heading, clean_text)
+    if blocked:
+        return blocked
 
     if inside_field_code:
         # Named explicitly (issue #530) rather than folded into the generic

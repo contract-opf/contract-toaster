@@ -1,0 +1,366 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://contract-opf.github.io/playbooks/output-schema/v3.json",
+  "title": "Contract Review — Model Response Schema v3",
+  "description": "Versioned JSON Schema for the model response produced by both the primary reviewer and the adversarial critic in the contract-review pipeline. v3 is the Candidate E output contract: the model no longer names a document-wide-unique verbatim quote per issue (v2's issues[].source_quote, removed here) — instead it addresses code-assigned blocks and transcribes each edited paragraph as an ordered keep/delete/insert segment list that scripts/block_transcript.py::validate_block_patches proves back against the document's own bytes. v3 is a CLEAN BREAK per docs/output-contract.md § Coupling rules — a new artifact with its own $id and output_contract_version, never an in-place edit of output-schema-v2.json, which is untouched. DORMANT ON ARRIVAL: this artifact ships wired but INACTIVE. scripts/primary_review_pass.py still defaults to playbooks/output-schema-v2.json, and no prompt asks for any v3-only field yet. The prompt and the active validator must be switched TOGETHER by the follow-up flip ticket — the model-output-contract-drift lesson is that moving one without the other breaks every real review while CI stays green on fixtures. Unlike v2 (which deliberately left schema_version at the v1 literal because its Issue shape was a strict superset of v1's), v3's schema_version const IS bumped to 'output-schema-v3': v3 removes a field and adds a required one, so a v2-shaped response does NOT validate here and the envelope literal must say so. Activating this artifact requires a new release.output_contract_hash and a legal-governance review (docs/output-contract.md → Coupling rules); that governance step belongs to the flip, not to this artifact's authoring.",
+  "output_contract_version": "v3",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "decision",
+    "confidence_state",
+    "issues"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "output-schema-v3",
+      "description": "Identifies the schema version the model response conforms to. Must equal 'output-schema-v3' for this schema. A mismatch causes the pipeline to route to ERROR_MANUAL_REVIEW_REQUIRED. Pipeline-stamped, never a model judgment: scripts/primary_review_pass.py::_stamp_pipeline_envelope fills it from the ACTIVE schema artifact's own const, so selecting this artifact stamps 'output-schema-v3' and selecting v2 keeps stamping 'output-schema-v1'."
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["ACCEPT", "REQUEST_CHANGE"],
+      "description": "The external binary legal decision. ACCEPT = no requested changes identified by tool. REQUEST_CHANGE = one or more issues require attention. There is no third legal category; uncertainty is carried by confidence_state."
+    },
+    "confidence_state": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "LOW_CONFIDENCE",
+        "MANUAL_REVIEW_REQUIRED",
+        "ERROR_MANUAL_REVIEW_REQUIRED"
+      ],
+      "description": "Internal pipeline confidence, distinct from the external legal decision. OK = normal confidence. LOW_CONFIDENCE = model flagged uncertainty; if a concrete issue exists the decision is still REQUEST_CHANGE; if no concrete issue exists the pipeline routes to MANUAL_REVIEW_REQUIRED status. ERROR_MANUAL_REVIEW_REQUIRED is set by the pipeline on schema-invalid-after-retry or leakage hits — the model must not emit this value directly."
+    },
+    "confidence_band": {
+      "description": "System metadata: the low-confidence band for this review, surfaced in the result view pre-download. Framed as a system status (not a legal verdict or a third legal category). null when confidence_state is OK. Set by the pipeline from confidence_state; mirrors the confidence_state signal as a UI-surface label so the result view can render the band before the attorney downloads the redline.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "string",
+          "enum": ["LOW_CONFIDENCE", "MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED"],
+          "description": "One of the non-OK system confidence states, rendered as a visible band in the result view. Always a system-status label, never a legal decision."
+        }
+      ]
+    },
+    "issues": {
+      "type": "array",
+      "description": "Per-issue list. Empty array for an ACCEPT decision (the model must not invent issues when accepting). For REQUEST_CHANGE, at least one issue must be present.",
+      "items": {
+        "$ref": "#/definitions/Issue"
+      }
+    },
+    "block_patches": {
+      "type": "array",
+      "description": "NEW in v3. Sub-block edits: the model's own transcript of every paragraph it wants to change, EXACTLY ONE entry per block_id. Two issues editing different spans of the same paragraph are two segments carrying different issue_keys inside that ONE entry, never two entries — scripts/block_transcript.py::validate_block_patches rejects a repeated block_id (duplicate_block_id), because a block has exactly one true text and two independent transcripts of it cannot both be proven without merging them, which would be a repair. Empty (or absent) for an ACCEPT decision and for a REQUEST_CHANGE that only proposes whole-block operations. This schema fixes the SHAPE only; whether a transcript actually maps onto the document's bytes is proven by validate_block_patches, which is fail-closed and never repairs a transcript.",
+      "items": {
+        "$ref": "#/definitions/BlockPatch"
+      }
+    },
+    "block_ops": {
+      "type": "array",
+      "description": "NEW in v3. Whole-block operations, which need no transcript because they name no sub-block span: delete_block removes an entire paragraph, insert_block_after adds a new one after a named block (or at 'start', before the document's first block). Empty (or absent) when every edit is a sub-block transcript. Same shape-only contract as block_patches: scripts/block_transcript.py::validate_block_patches resolves block_id / anchor_block_id against the real block map and rejects an unknown id, a block deleted twice, or a block both deleted wholesale and segment-patched.",
+      "items": {
+        "$ref": "#/definitions/BlockOp"
+      }
+    },
+    "critic_delta": {
+      "description": "Adversarial-critic output. Null when this response is from the primary reviewer or when the critic found no differences. Present when this response carries critic-only additions, contested replacements, or rationale objections. Structured as a CriticDelta object or null.",
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/definitions/CriticDelta"}
+      ]
+    },
+    "verdict_summary": {
+      "description": "ACCEPT-path summary: a brief model-generated narrative of what the counterparty changed and why each change was acceptable under the playbook. Source field for the ACCEPT result view ('no requested changes identified by tool — summary of changes reviewed'). Also present on REQUEST_CHANGE for a high-level narrative alongside the per-issue list. Passes the pre-render leakage scan before being surfaced in the UI or stored in a context accessible to non-admin users. Optional — absent for responses generated before this field was added or when the model omits it. See docs/output-contract.md § ACCEPT summary shape.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Non-empty summary string. Subject to the leakage scan (same scope as other human-surfaced model prose). Must not disclose counterparty names, precedent deal dates, verbatim precedent text, internal playbook IDs, or system-prompt fragments."
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "IssueKey": {
+      "type": "string",
+      "pattern": "^I[0-9]{1,4}$",
+      "description": "NEW in v3. The stable, response-local handle for one issue ('I1', 'I2', … up to 'I9999'), MUTUALLY UNIQUE across the whole response — every Issue in issues[] and in critic_delta.added_issues. It is what joins an issue to the edits that express it: every delete/insert segment in block_patches and every block op in block_ops names the issue_key that authored it, so a caller can render or drop one issue's entire contribution without re-deriving which ops were its (scripts/block_transcript.py's by_issue grouping). Draft-07 cannot express uniqueness of a field ACROSS array items, so the pattern is all this file can enforce; the cross-issue uniqueness half is enforced alongside the schema check by scripts/primary_review_pass.py::validate_model_response, which rejects a duplicate with the same schema_invalid token any other contract violation gets."
+    },
+    "Issue": {
+      "type": "object",
+      "description": "A single flagged issue in a REQUEST_CHANGE response. v3 delta vs v2: issues[].source_quote is REMOVED (block transcripts replaced quote location), issue_key is ADDED and REQUIRED, replacement_scope_note is ADDED and optional, and proposed_replacement_text is no longer required. issues[].internal_rationale_for_footnote (issue #522, epic #519 item D) is NOT part of that delta: it is carried through from v2 unchanged — optional, internal-audience, untouched by the block-transcript change — so the notes-mode footnote renderer keeps working across the v2 to v3 flip instead of silently rendering no internal footnotes.",
+      "required": [
+        "issue_key",
+        "section_ref",
+        "section_title",
+        "counterparty_change_summary",
+        "decision",
+        "external_rationale_for_footnote",
+        "playbook_topic_id",
+        "internal_precedent_citation",
+        "provenance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "issue_key": {
+          "$ref": "#/definitions/IssueKey"
+        },
+        "section_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Section number and/or title from the counterparty document (e.g. '8 Limitation on Liability')."
+        },
+        "section_title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "Human-readable section title for display in the review output."
+        },
+        "counterparty_change_summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Brief factual description of what the counterparty changed relative to the standard form. No internal strategy or precedent disclosure."
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["REQUEST_CHANGE"],
+          "description": "Per-issue decision. Always REQUEST_CHANGE at the issue level (issues are only emitted for changes that require redlining)."
+        },
+        "external_rationale_for_footnote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800,
+          "description": "One or two sentence rationale for the external-facing footnote. Must cite the contract position only (section reference and the standard form). Must not disclose counterparty names, precedent deal dates, verbatim precedent text, system-prompt fragments, or internal playbook IDs. Enforced by the pre-render leakage scan."
+        },
+        "internal_rationale_for_footnote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 800,
+          "description": "Carried through from output-schema-v2.json unchanged (issue #522, epic #519 item D), OPTIONAL. One or two sentence rationale written for your OWN team, not the counterparty: the internal reasoning, playbook position, or deviation narration behind this issue. The one internal-audience field in this schema — the leakage scan reads its audience from the field's identity (leakage_scan._FIELD_CHANNELS) and applies the internal ruleset: playbook positions, internal strategy phrasing and precedent citation are permitted here, while system-prompt leakage and excessive verbatim precedent quotation are blocked exactly as on an external field. Rendered into the delivered .docx footnotes ONLY when the review's notes mode is 'internal' or 'both', and only behind an unmissable leading [INTERNAL] marking (redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX) that survives accept-all-changes. The prompt asks for this key in exactly those two modes and strips it from the model-facing schema projection in the others, so the request is notes-mode-gated rather than standing. Omit the key entirely when there is no internal note to make."
+        },
+        "proposed_replacement_text": {
+          "type": "string",
+          "maxLength": 8000,
+          "description": "Proposed replacement clause language. OPTIONAL in v3 (required in v1/v2): under the block-transcript contract the model expresses its edit as keep/delete/insert segments, and the pipeline DERIVES this field from the proven transcript's accept-all projection rather than asking the model to restate it. The field is retained so every downstream shape that reads it (the footnote/result surfaces, replacement_text enforcement, the audit table) stays valid. Still bounded by the topic's replacement_text constraints (mode, max_chars, must_not_introduce) whenever it is present; an empty string signals mode='none' (flag only, no replacement proposed). The pipeline enforces topic-level max_chars post-validation."
+        },
+        "replacement_scope_note": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "NEW in v3, OPTIONAL, INTERNAL-ONLY. The model's short justification for replacing a WHOLE clause rather than repairing it locally — a surgical-redline scope signal for the attorney and the audit record, not external-facing prose. Never rendered into a generated .docx footnote and never surfaced to a non-admin reader: it is retained only in retention-governed confidential storage, the same handling internal_precedent_citation gets. Absent when the model's segments repair the clause in place, which is the expected default."
+        },
+        "playbook_topic_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[-.][a-z0-9]+)*$",
+          "description": "The topic id from the ACTIVE playbook that governs this issue, copied verbatim from that playbook's own vocabulary: a v1 playbook's kebab-case topics[].id (indemnification), or an OPF playbook's dotted id (clause.indemnification). Deliberately NOT any string -- this value reaches the audit table and the replacement_text lookup, so uppercase, whitespace and path punctuation stay rejected. Used by the pipeline to look up replacement_text constraints and by the audit table to record topic coverage."
+        },
+        "internal_precedent_citation": {
+          "description": "Internal audit-only reference to corpus precedent (clause_id, source document, or null). Stripped from generated .docx footnotes. Must not appear in external output. Retained only in retention-governed confidential storage.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "string",
+              "maxLength": 500
+            }
+          ]
+        },
+        "provenance": {
+          "type": "string",
+          "pattern": "^(model|critic-added|detector:[a-z0-9][a-z0-9-]*)$",
+          "description": "System metadata: identifies which pipeline component produced this issue. One of: 'model' (the LLM primary reviewer flagged this issue), 'critic-added' (the adversarial critic added this issue — not present in the primary output), or 'detector:<rule_id>' (a deterministic hard-rejection rule fired; rule_id is the kebab-case id from the playbook hard_rejections list). This field is framed as system metadata in the result view, never as a third legal category. It enables attorneys to calibrate scrutiny: a deterministic detector fire (near-certain, mechanical) warrants different verification effort than an LLM judgment call (probabilistic). The binary external decision (ACCEPT | REQUEST_CHANGE) is unaffected by provenance — provenance is a trust-calibration signal, not a decision modifier."
+        }
+      }
+    },
+    "BlockPatch": {
+      "type": "object",
+      "description": "NEW in v3. One block's complete edit transcript: the ordered keep/delete/insert segments that, taken together, transcribe the WHOLE block. The keep segments are what make the proof safe — a keep asserts 'this text is unchanged', so a silent rewrite inside one is rejected as source_mismatch rather than absorbed.",
+      "required": ["block_id", "segments"],
+      "additionalProperties": false,
+      "properties": {
+        "block_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The code-assigned id of the block this transcript covers, copied verbatim from the block map the prompt showed the model (scripts/extraction_normalization_stage.py::build_block_map stamps 'b0001'-style ids). Deliberately NOT pattern-constrained here — id FORM is the extractor's business and an id that is not in the real block map is rejected by scripts/block_transcript.py (unknown_block_id), which is the check that actually matters."
+        },
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The block's ordered segments. The keep+delete half must reproduce the block's real text end to end; the insert segments carry the new language. Order is the document's own order.",
+          "items": {
+            "$ref": "#/definitions/Segment"
+          }
+        }
+      }
+    },
+    "Segment": {
+      "description": "NEW in v3. One span of a block transcript. A keep is unchanged source text and has no author, so it carries NO issue_key; a delete or insert IS an edit and MUST name the issue_key that authored it (a typo'd or omitted key would otherwise become an unattributed edit). The two branches are mutually exclusive by construction — their op enums are disjoint.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "An unchanged span of the block's own text. Carries no issue_key: nothing authored it.",
+          "required": ["op", "text"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "type": "string",
+              "enum": ["keep"],
+              "description": "This span is unchanged source text."
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000,
+              "description": "The unchanged text, transcribed from the block. Compared in scripts/text_fold.py's comparison-only folded form, which tolerates ONLY how a character was encoded (typographic punctuation straightened, whitespace runs collapsed) — never what it says. Casing, word content and every non-typographic mark must still match exactly."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "An edit span: source text to remove (delete) or new language to add (insert). Always attributed to the issue that authored it.",
+          "required": ["op", "text", "issue_key"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "type": "string",
+              "enum": ["delete", "insert"],
+              "description": "delete = this span of the block's own text is removed; insert = this new text is added at this point. A delete immediately followed by an insert is how a replacement is written."
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000,
+              "description": "For a delete, the source text being removed (proven against the block's real characters, so the applied deletion is expressed in the DOCUMENT's bytes, not the model's transcription of them). For an insert, the new language being added."
+            },
+            "issue_key": {
+              "$ref": "#/definitions/IssueKey"
+            }
+          }
+        }
+      ]
+    },
+    "BlockOp": {
+      "description": "NEW in v3. One whole-block operation. Needs no transcript because it names no sub-block span. The two branches are mutually exclusive by construction — their op enums are disjoint.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Remove an entire block. Rejected by scripts/block_transcript.py if the same block is also segment-patched or deleted twice (conflicting_block_op) — the two cannot both be applied.",
+          "required": ["op", "block_id", "issue_key"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "type": "string",
+              "enum": ["delete_block"],
+              "description": "Delete the named block in its entirety."
+            },
+            "block_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The code-assigned id of the block to delete, copied verbatim from the block map. An id that is not in the real block map is rejected (unknown_block_id)."
+            },
+            "issue_key": {
+              "$ref": "#/definitions/IssueKey"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Add a new block immediately after an existing one — the way a missing clause is supplied.",
+          "required": ["op", "anchor_block_id", "new_text", "issue_key"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "type": "string",
+              "enum": ["insert_block_after"],
+              "description": "Insert a new block after the anchor."
+            },
+            "anchor_block_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The block the new text is inserted after, copied verbatim from the block map — or the literal sentinel 'start' to insert BEFORE the document's first block, which no existing block can anchor. 'start' can never collide with a real id (build_block_map stamps 'b0001'-style ids). Anything else that is not in the real block map is rejected (unknown_block_id)."
+            },
+            "new_text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000,
+              "description": "The new block's full text. Nothing is proven against the document here — this text exists nowhere in it — so the topic's replacement_text constraints are what bound it."
+            },
+            "issue_key": {
+              "$ref": "#/definitions/IssueKey"
+            }
+          }
+        }
+      ]
+    },
+    "CriticDelta": {
+      "type": "object",
+      "description": "The adversarial critic's delta: issues the critic adds, replacements the critic contests, and rationale objections. Preserved in the final result for audit. The critic may not silently overwrite the primary's replacement text; a contested replacement surfaces here rather than being swapped in. Unchanged from v2 — every field, constraint and description is identical.",
+      "additionalProperties": false,
+      "properties": {
+        "added_issues": {
+          "type": "array",
+          "description": "Issues the critic found that the primary missed.",
+          "items": {
+            "$ref": "#/definitions/Issue"
+          }
+        },
+        "contested_replacements": {
+          "type": "array",
+          "description": "Primary replacement texts the critic flagged as drifting from the playbook position.",
+          "items": {
+            "type": "object",
+            "required": ["section_ref", "primary_replacement_text", "critic_objection"],
+            "additionalProperties": false,
+            "properties": {
+              "section_ref": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "primary_replacement_text": {
+                "type": "string",
+                "maxLength": 8000
+              },
+              "critic_objection": {
+                "type": "string",
+                "maxLength": 800,
+                "description": "Why the critic believes the primary's replacement drifts from the playbook."
+              },
+              "critic_suggested_replacement": {
+                "type": "string",
+                "maxLength": 8000,
+                "description": "Optional critic suggestion. The deterministic reconciler decides whether to surface this; it does not automatically replace the primary's text."
+              }
+            }
+          }
+        },
+        "rationale_objections": {
+          "type": "array",
+          "description": "Rationale weaknesses the critic flagged (e.g. over-flagging, weak reasoning) without necessarily contesting the decision.",
+          "items": {
+            "type": "object",
+            "required": ["section_ref", "objection"],
+            "additionalProperties": false,
+            "properties": {
+              "section_ref": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "objection": {
+                "type": "string",
+                "maxLength": 800
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

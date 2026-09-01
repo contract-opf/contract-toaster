@@ -604,17 +604,36 @@ class TestHistoryTabIsWiredForEveryone(unittest.TestCase):
         self.assertIn('id="panel-history"', source)
 
     def test_history_tab_is_not_admin_gated(self) -> None:
-        """The tab must sit in the ALWAYS-present part of the tab array, not
-        inside the `isAdmin ? [...] : []` block -- a reviewer sees their own
-        history."""
+        """The History tab must never be admin-gated -- a reviewer sees
+        their own history.
+
+        Re-expressed for issue #599 (flattened the tab bar back to one row,
+        reversing #477's two-tablist DECISION): App.tsx no longer holds a
+        separate admin-only array spliced in via `...(isAdmin ? [...] : [])`
+        -- that WAS this test's original shape, and #599 deliberately broke
+        it by replacing the two-array split with a single ordered TAB_DEFS
+        list where each admin-only entry instead carries its own
+        `adminOnly: true` marker. The property this test protects is
+        unchanged: locate the 'history' entry in that list and assert it
+        carries no such marker. The stronger, rendered-output version of the
+        same guarantee -- a non-admin caller's tablist contains ONLY Review
+        and History, no admin tab present under either its old or new label
+        -- lives in frontend/src/__tests__/admin-tab-grouping-599.test.tsx,
+        which this source-level check cannot replace outright (jsdom/React
+        rendering is not available to a pure source scrape) but is intended
+        to back up.
+        """
         source = APP_TSX.read_text(encoding="utf-8")
 
-        admin_block = re.search(r"\.\.\.\(isAdmin\s*\n?\s*\?\s*\(\[(.*?)\]\s*as TabDef\[\]\)", source, re.S)
-        self.assertIsNotNone(admin_block, "App.tsx's admin-only tab block was not found")
+        tab_defs = re.search(r"const TAB_DEFS[^=]*=\s*\[(.*?)\n  \];", source, re.S)
+        self.assertIsNotNone(tab_defs, "App.tsx's TAB_DEFS array was not found")
+
+        history_entry = re.search(r"\{\s*id:\s*'history'.*?\}", tab_defs.group(1), re.S)
+        self.assertIsNotNone(history_entry, "App.tsx's TAB_DEFS must define a 'history' entry")
         self.assertNotIn(
-            "id: 'history'",
-            admin_block.group(1),
-            "the History tab must not be inside the admin-only tab block",
+            "adminOnly",
+            history_entry.group(0),
+            "the History tab must not carry an adminOnly marker -- a reviewer sees their own history",
         )
         self.assertIn("{ id: 'history', label:", source)
 

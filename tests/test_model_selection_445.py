@@ -43,6 +43,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -230,13 +231,106 @@ class TestSelectableAllowlist(unittest.TestCase):
             with self.assertRaises(model_client.OpenRouterModelPolicyViolation):
                 model_client.enforce_openrouter_policy_model_id(ARBITRARY_ID)
 
-    def test_default_pins_are_not_on_the_allowlist_but_still_pass(self):
+    def test_default_pins_pass_enforcement(self):
         policy = _policy()
         with patch.dict(os.environ, {}, clear=True):
             for role in ("primary", "critic"):
                 model_client.enforce_openrouter_policy_model_id(
                     policy["models"][role]["model_id"]
                 )
+
+
+# ---------------------------------------------------------------------------
+# (1b) The SHIPPED DEFAULTS themselves (issue #604).
+# ---------------------------------------------------------------------------
+
+
+OPUS_5 = "anthropic/claude-opus-5"
+# Deliberately an id that is NOT in model-policy/openrouter.json any more --
+# see test_opus_4_8_is_neither_the_default_nor_pickable below. Do not "restore"
+# it to the artifact to make that test read more naturally.
+OPUS_48 = "anthropic/claude-opus-4.8"
+SONNET_46 = "anthropic/claude-sonnet-4.6"
+
+
+class TestShippedDefaults(ModelSelectionTestBase):
+    """Issue #604. The owner's complaint was about the model a deployment gets
+    when nobody has touched the picker -- so these assert the RESOLVED default
+    (what `model_client` / `model_settings` actually hand the pipeline with no
+    admin row and no env override), not the artifact's literal bytes. A test
+    reading `policy["models"]["primary"]["model_id"]` back out of the same file
+    the code reads would restate the fixture rather than check the behaviour.
+    """
+
+    def test_the_primary_default_resolves_to_opus_5(self):
+        with _no_env_overrides():
+            self.assertEqual(model_client.openrouter_primary_model_id(), OPUS_5)
+
+    def test_the_primary_default_reaches_the_pipeline_resolver(self):
+        """The id an actual review would run on, through the same entry point
+        pipeline_runner uses, with an empty settings table (nobody has ever
+        touched the picker) rather than no DynamoDB handle at all."""
+        with _no_env_overrides():
+            resolved = model_settings.resolve_openrouter_model_ids(self.ddb)
+        self.assertEqual(resolved["primary"], OPUS_5)
+
+    def test_the_critic_default_deliberately_did_not_move(self):
+        """#604 named only the Opus case. Moving the critic to Sonnet 5 as
+        well would have been an undiscussed second matrix change, so it was
+        left alone -- pinned here so a later drift is a decision, not a slip.
+        """
+        with _no_env_overrides():
+            self.assertEqual(model_client.openrouter_critic_model_id(), SONNET_46)
+
+    def test_opus_4_8_is_neither_the_default_nor_pickable(self):
+        """OWNER DECISION, reversing what this test used to assert.
+
+        History, because the reversal is the point: issue #604 moved the
+        primary pin OFF Opus 4.8, and issue #589 had earlier added it to
+        `selectable` after the 2026-08-21 prod incident -- deliberately, so
+        the default could move while a picker route back to the only pairing
+        with verified live reviews behind it stayed. The owner has since
+        removed that `selectable` entry, having been shown that trade-off and
+        that removing it deletes #589's recovery route, and chose removal
+        anyway.
+
+        So 4.8 is now unreachable by every route: not the resolved default,
+        not on the allowlist, and REFUSED by the runtime guard before a
+        request is spent on it. Asserted through the guard rather than by
+        reading the artifact's bytes, for the same reason as the tests above:
+        what matters is what the pipeline would actually do. If a later change
+        puts 4.8 back, this test is where that decision has to be made
+        explicitly rather than slipped in.
+        """
+        with _no_env_overrides():
+            self.assertNotEqual(model_client.openrouter_primary_model_id(), OPUS_48)
+        self.assertNotIn(OPUS_48, model_client.openrouter_selectable_model_ids())
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(model_client.OpenRouterModelPolicyViolation):
+                model_client.enforce_openrouter_policy_model_id(OPUS_48)
+
+    def test_the_new_default_still_declares_structured_outputs(self):
+        """`openrouter_model_capabilities` resolves the ROLE PIN before the
+        `selectable` entry for the same id, so a pin that declares nothing
+        fails the SHIPPED DEFAULT closed even though the identical selectable
+        entry declares `structured_outputs: true`. Every default review would
+        then quietly drop `output_schema`."""
+        caps = model_client.openrouter_model_capabilities(OPUS_5)
+        self.assertTrue(caps["structured_outputs"], caps)
+
+    def test_no_operator_facing_string_editorialises_about_nationality(self):
+        """The Kimi K3 entry read "Strongest Chinese open-weight model." The
+        catalogue this asserts over is exactly what GET /api/admin/model-selection
+        serialises to the picker."""
+        served = json.dumps(model_client.openrouter_selectable_models())
+        self.assertNotIn("chinese", served.lower(), served)
+        # ...and the claim it was carrying is kept, not silently deleted.
+        kimi = next(
+            e
+            for e in model_client.openrouter_selectable_models()
+            if e["model_id"] == "moonshotai/kimi-k3"
+        )
+        self.assertIn("open-weight", kimi["note"])
 
 
 class TestLiveClientHonorsTheAllowlist(unittest.TestCase):
@@ -756,12 +850,13 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
 
     def test_the_bedrock_target_ignores_the_selection_entirely(self):
         """MODEL_PROVIDER unset is the AWS target, which has no admin-selection
-        concept at all -- its documented $2.11 worst case must not move."""
+        concept at all -- its documented $2.46 worst case (ARCHITECTURE.md ->
+        Cost shape, at MAX_INPUT_TOKENS=100_000) must not move."""
         model_settings.set_model_selection(DEAREST_ID, DEAREST_ID, ADMIN, self.ddb)
         os.environ.pop("MODEL_PROVIDER", None)
         with _no_env_overrides():
             self.assertEqual(
-                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 211
+                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 246
             )
 
 
@@ -885,6 +980,120 @@ class TestConsistencyLintScope(unittest.TestCase):
         )
         self.assertTrue(failures)
 
+    def test_lint_accepts_the_declared_forward_pin_the_real_policy_carries(self):
+        """(issue #604) openrouter.json pins Opus 5 while bedrock-us-east-1.json
+        still pins Opus 4.8. That is allowed only because models.primary
+        declares `matrix_divergence_note` -- the on-disk artifacts, unmodified.
+        """
+        lint = self._lint_module()
+        openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
+        bedrock = lint.load_json(lint.BEDROCK_POLICY_PATH)
+        self.assertNotEqual(
+            lint.parse_model_id(openrouter["models"]["primary"]["model_id"])[1],
+            lint.parse_model_id(bedrock["models"]["primary"]["model_id"])[1],
+            "this test is only meaningful while the two artifacts actually differ",
+        )
+        self.assertEqual(lint.check_consistency(bedrock, openrouter), [])
+
+    def test_lint_rejects_an_UNdeclared_forward_pin(self):
+        """(issue #604) The declaration is the whole guard. Without it a
+        forward bump is indistinguishable from someone editing one artifact
+        and forgetting the other."""
+        lint = self._lint_module()
+        openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
+        openrouter["models"]["primary"].pop(lint.MATRIX_DIVERGENCE_FIELD, None)
+        failures = lint.check_consistency(
+            lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
+        )
+        self.assertTrue(failures)
+        self.assertIn(lint.MATRIX_DIVERGENCE_FIELD, failures[0])
+
+    def test_lint_rejects_a_BACKWARDS_pin_however_loudly_declared(self):
+        """(issues #269, #604) The original drift -- openrouter.json pinned to
+        an OLDER generation than everything else claimed -- stays an
+        unconditional failure. No note excuses it."""
+        lint = self._lint_module()
+        openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
+        openrouter["models"]["primary"]["model_id"] = "anthropic/claude-opus-4"
+        openrouter["models"]["primary"][lint.MATRIX_DIVERGENCE_FIELD] = "we meant it, honest"
+        failures = lint.check_consistency(
+            lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
+        )
+        self.assertTrue(failures)
+        self.assertIn("BEHIND", failures[0])
+
+    def test_defaults_are_selectable_on_the_real_policy(self):
+        """(issue #589) The actual on-disk policy: both default pins must be
+        members of `selectable`. This is the CURRENT-FILE half of the
+        acceptance criterion -- run against today's (fixed) artifact, not a
+        fixture."""
+        lint = self._lint_module()
+        openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
+        self.assertEqual(lint.check_defaults_are_selectable(openrouter), [])
+
+    def test_defaults_are_selectable_check_fires_on_a_drifted_fixture(self):
+        """(issue #589) Positive control: reintroduce the exact drift that was
+        live in prod on 2026-08-21 (default_primary/default_critic absent
+        from `selectable`) in an in-memory fixture, and confirm the new check
+        catches it. Proves the check has teeth, not just that today's file
+        happens to be clean."""
+        lint = self._lint_module()
+        openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
+        drifted_ids = {
+            openrouter["models"]["primary"]["model_id"],
+            openrouter["models"]["critic"]["model_id"],
+        }
+        openrouter["selectable"] = [
+            entry
+            for entry in openrouter["selectable"]
+            if entry["model_id"] not in drifted_ids
+        ]
+        failures = lint.check_defaults_are_selectable(openrouter)
+        self.assertEqual(len(failures), 2)
+        for model_id in drifted_ids:
+            self.assertTrue(
+                any(model_id in msg for msg in failures),
+                f"expected a failure mentioning {model_id!r}, got {failures!r}",
+            )
+
+    def test_main_gate_runs_the_defaults_are_selectable_check(self):
+        """The new check must actually be wired into the CI entrypoint
+        (main()), not just exist as an importable function nobody calls.
+        Proven by calling main() itself -- against a drifted policy on disk --
+        rather than re-implementing main()'s composition inline, so that
+        deleting the `failures += check_defaults_are_selectable(...)` line
+        from main() makes this test fail."""
+        lint = self._lint_module()
+        openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
+        drifted_ids = {
+            openrouter["models"]["primary"]["model_id"],
+            openrouter["models"]["critic"]["model_id"],
+        }
+        openrouter["selectable"] = [
+            entry
+            for entry in openrouter["selectable"]
+            if entry["model_id"] not in drifted_ids
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            drifted_path = Path(tmp_dir) / "openrouter.json"
+            drifted_path.write_text(json.dumps(openrouter))
+
+            original_path = lint.OPENROUTER_POLICY_PATH
+            lint.OPENROUTER_POLICY_PATH = drifted_path
+            try:
+                exit_code = lint.main()
+            finally:
+                lint.OPENROUTER_POLICY_PATH = original_path
+
+        self.assertEqual(
+            exit_code,
+            1,
+            "main() must fail against a policy where the default pins have "
+            "drifted out of `selectable`, i.e. check_defaults_are_selectable's "
+            "result must actually be wired into main()'s composed failures.",
+        )
+
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
@@ -892,6 +1101,7 @@ def main() -> int:
     suite = unittest.TestSuite()
     for case in (
         TestSelectableAllowlist,
+        TestShippedDefaults,
         TestLiveClientHonorsTheAllowlist,
         TestResolutionPrecedence,
         TestStore,

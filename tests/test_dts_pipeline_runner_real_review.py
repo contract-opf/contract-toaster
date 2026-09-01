@@ -24,7 +24,7 @@ of a live OpenRouter call -- fully offline, no network -- and asserts:
      entry's `mock_output_key`, AND a real tracked-changes output object in
      S3 -- the fake model issue's `source_quote` matches the planted
      counterparty text verbatim, so issue #379's quote-based patcher
-     (`scripts/redline_quote_apply.py::apply_quote_patches`) locates and
+     (`scripts/redline_block_apply.py::apply_block_transcript`) addresses and
      applies it, and `_write_real_output` PUTs the result.
   3. An ACCEPT-producing draft (identical to the standard form) reaches
      DONE with decision=ACCEPT and no output object written.
@@ -170,15 +170,69 @@ _SEC8_STANDARD_TEXT = (
 _SEC8_DRAFT_TEXT = "Each party's liability under this Agreement shall be unlimited."
 
 
-def _primary_request_change_response() -> str:
+def _block_id_for_text(docx_bytes: bytes, text: str) -> str:
+    """The code-assigned block id of the paragraph whose text is `text`,
+    resolved through the SAME production code the pipeline uses (issue
+    #627). Derived, never typed in: a `"p0007"` written by hand is an
+    address no document has, and the transcript that named it would be
+    rejected by `block_transcript.validate_block_patches`."""
+    import extraction_normalization_stage as ens
+
+    normalized = ens.extract_and_normalize(docx_bytes)
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        if block["text"] == text:
+            return block_id
+    raise AssertionError(f"no block in the fixture document carries {text!r}")
+
+
+def _canonical_planted_draft() -> bytes:
+    """The draft `.docx` every consumer of `_primary_request_change_response`
+    builds: the synthetic standard form with Section 8 replaced by
+    `_SEC8_DRAFT_TEXT`. Cached because building it reads the standard form
+    off disk and several suites call this per test."""
+    global _CANONICAL_PLANTED_DRAFT
+    if _CANONICAL_PLANTED_DRAFT is None:
+        _CANONICAL_PLANTED_DRAFT = _build_draft_docx({"sec-8": _SEC8_DRAFT_TEXT})
+    return _CANONICAL_PLANTED_DRAFT
+
+
+_CANONICAL_PLANTED_DRAFT: bytes | None = None
+
+
+def _primary_request_change_response(docx_bytes: bytes | None = None) -> str:
+    """A v3 REQUEST_CHANGE carrying a real block transcript (issue #627).
+
+    Under the block-transcript contract an edit names a code-assigned block
+    id and reproduces that block's own characters, so this fixture is only
+    valid against the document it was written for. `docx_bytes` names that
+    document; omitted, it defaults to `_canonical_planted_draft()` -- the
+    exact draft every suite that shares this fixture builds. Both the id and
+    the deleted text are DERIVED from those bytes by the same production
+    code the pipeline uses, never typed in, so the fixture cannot address a
+    block the document does not have.
+    """
+    if docx_bytes is None:
+        docx_bytes = _canonical_planted_draft()
+    patches = [
+        {
+            "block_id": _block_id_for_text(docx_bytes, _SEC8_DRAFT_TEXT),
+            "segments": [
+                {"op": "delete", "text": _SEC8_DRAFT_TEXT, "issue_key": "I1"},
+                {"op": "insert", "text": _SEC8_STANDARD_TEXT, "issue_key": "I1"},
+            ],
+        }
+    ]
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
+            "block_patches": patches,
+            "block_ops": [],
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [
                 {
+                    "issue_key": "I1",
                     "section_ref": "sec-8",
                     "section_title": "Limitation on Liability",
                     "counterparty_change_summary": (
@@ -190,11 +244,9 @@ def _primary_request_change_response() -> str:
                         "Section 8 must retain the standard aggregate "
                         "liability cap and mutual damages exclusions."
                     ),
-                    "proposed_replacement_text": _SEC8_STANDARD_TEXT,
                     "playbook_topic_id": "limitation-of-liability",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": _SEC8_DRAFT_TEXT,
                 }
             ],
             "critic_delta": None,
@@ -209,7 +261,6 @@ def _primary_request_change_response() -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -223,7 +274,6 @@ def _critic_no_delta_response() -> str:
 def _primary_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -237,7 +287,6 @@ def _primary_accept_response() -> str:
 def _critic_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -397,12 +446,14 @@ class TestRunRealPipeline(unittest.TestCase):
         decision from the composed spine AND a real tracked-changes output
         object in S3 -- the fake model issue's source_quote matches the
         planted counterparty text verbatim, so the quote-based patcher
-        (scripts/redline_quote_apply.py::apply_quote_patches) locates and
+        (scripts/redline_block_apply.py::apply_block_transcript) addresses and
         applies it. This differs from the mock pipeline (run_mock_pipeline,
         unaffected by #379), which still PUTs its own pre-baked fixture --
         the two paths are independent by design."""
         docx_bytes = _build_draft_docx({"sec-8": _SEC8_DRAFT_TEXT})
-        client = _fake_client(_primary_request_change_response(), _critic_no_delta_response())
+        client = _fake_client(
+            _primary_request_change_response(docx_bytes), _critic_no_delta_response()
+        )
         reviews_table = FakeReviewsTable()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
 
@@ -449,6 +500,73 @@ class TestRunRealPipeline(unittest.TestCase):
         keys = [put["Key"] for put in s3.puts]
         self.assertNotIn(f"outputs/{REVIEW_ID}/out.docx", keys)
         self.assertEqual(keys, [f"outputs/{REVIEW_ID}/analysis.json"])
+
+    def test_request_change_with_no_output_does_not_reach_done(self) -> None:
+        """Issue #584 (live evidence, review c81d29c0-...): every issue the
+        model raised was TRUE flag-only (no `proposed_replacement_text`), so
+        `redline_generate.generate_redline`'s own "nothing to attempt"
+        branch returns `status="OK"`, `decision="REQUEST_CHANGE"`,
+        `docx_bytes=None` -- a genuine finding with nothing to download.
+        Prove the OLD behavior first (this assertion must FAIL against the
+        pre-#584 tree: it would see status=DONE, output_s3_key absent, no
+        failing_stage), then that the fix flips it to a non-DONE terminal
+        with `failing_stage`/`reason` populated -- and that the analysis
+        (the findings) is still written for investigation, exactly as the
+        ticket's evidence describes ("the analysis worked; only the
+        artifact is missing")."""
+        # Issue #627: under the block-transcript contract "TRUE flag-only" is
+        # an issue with NO EDITS at all -- `proposed_replacement_text` is
+        # derived from the transcript, not authored, so emptying that string
+        # no longer expresses it (and the model is told not to send the key).
+        # Dropping the transcript is the shape the live evidence describes:
+        # a genuine finding with nothing to apply.
+        flag_only_issue = json.loads(_primary_request_change_response())
+        flag_only_issue["block_patches"] = []
+        flag_only_issue["block_ops"] = []
+        docx_bytes = _build_draft_docx({"sec-8": _SEC8_DRAFT_TEXT})
+        # Issue #585: limitation-of-liability's mode is 'bounded_edit' (not
+        # 'none'), so an empty proposed_replacement_text on this
+        # REQUEST_CHANGE issue is now a pen-rules violation
+        # (EMPTY_REPLACEMENT_TEXT) that consumes one retry before demoting
+        # to flag-only -- two identical primary responses queued so the
+        # model "persists" in returning no replacement text across the
+        # retry, same as it did live, and the pass still reaches the
+        # genuinely-empty-after-retry state this test exercises.
+        primary_id = model_client_module.openrouter_primary_model_id()
+        critic_id = model_client_module.openrouter_critic_model_id()
+        client = model_client_module.FakeBedrockClient(
+            {
+                primary_id: [json.dumps(flag_only_issue), json.dumps(flag_only_issue)],
+                critic_id: [_critic_no_delta_response()],
+            }
+        )
+        reviews_table = FakeReviewsTable()
+        s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
+
+        with patch.object(pr, "_settle_reservation") as settle:
+            pr.run_real_pipeline(
+                REVIEW_ID, _payload(),
+                dynamodb_resource=FakeDDB(reviews_table), s3_client=s3,
+                model_client=client,
+            )
+
+        # Positive control lives in test_request_change_reaches_done_with_
+        # output_object above: a REQUEST_CHANGE that DID persist an object
+        # stays DONE, untouched by this fix.
+        self.assertNotEqual(
+            reviews_table.item["status"], "DONE",
+            "A REQUEST_CHANGE with no output object must not report DONE.",
+        )
+        self.assertEqual(reviews_table.item["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(reviews_table.item.get("reason"), "redline_not_persisted")
+        self.assertEqual(reviews_table.item.get("failing_stage"), "persist_result")
+        self.assertNotIn("output_s3_key", reviews_table.item)
+        # The findings are not lost -- the analysis artifact is still
+        # written, same as any other terminal outcome.
+        keys = [put["Key"] for put in s3.puts]
+        self.assertNotIn(f"outputs/{REVIEW_ID}/out.docx", keys)
+        self.assertIn(f"outputs/{REVIEW_ID}/analysis.json", keys)
+        settle.assert_called_once()
 
     def test_unhandled_exception_records_stage_failure_not_wedged(self) -> None:
         """A missing upload object blows up at the fetch-upload stage
@@ -539,27 +657,35 @@ class TestNormalizationNotesPersisted563(unittest.TestCase):
         self.assertNotIn("normalization_notes", table.item)
 
 
-class TestRequotePersisted569(unittest.TestCase):
-    """Issue #569 fix round 1, finding 4: `_write_real_terminal` persists
-    `requote` from a `run_review` result onto the reviews row the SAME
-    "absent, never a null placeholder" way `normalization_notes` already is
-    (`TestNormalizationNotesPersisted563` above) -- previously covered by
-    NO staged test: `tests/test_review_api_84.py`'s existing `requote`
-    reference only covers the pre-existing READ side
-    (`reviews.get_review_detail`), never this write side."""
+class TestDeletedRequoteKeyIsNotPersisted628(unittest.TestCase):
+    """Issue #628 deleted the bounded address-repair pass, so `run_review`
+    can never put a `requote` key on a result and `_write_real_terminal`
+    must no longer look for one.
 
-    def test_requote_present_reaches_the_review_row(self) -> None:
-        requote = {"attempted": 1, "recovered": 1, "still_failed": 0}
+    Kept rather than deleted with the pass: the row-write branch was added by
+    issue #569 specifically because nothing covered it, and asserting the key
+    is now ABSENT even when a caller hands one in is what proves the branch is
+    gone rather than merely unexercised.
+    """
+
+    def test_a_stale_requote_key_on_a_result_never_reaches_the_row(self) -> None:
         table = FakeReviewsTable(status="RUNNING")
         pr._write_real_terminal(
             REVIEW_ID,
-            {"status": "OK", "decision": "REQUEST_CHANGE", "requote": requote},
+            {
+                "status": "OK",
+                "decision": "REQUEST_CHANGE",
+                # A shape no producer can build any more -- passed in
+                # deliberately, as the strongest available proof that the
+                # writer no longer has a branch for it.
+                "requote": {"attempted": 1, "recovered": 1, "still_failed": 0},
+            },
             output_s3_key=None,
             dynamodb_resource=FakeDDB(table),
         )
-        self.assertEqual(table.item.get("requote"), requote)
+        self.assertNotIn("requote", table.item)
 
-    def test_requote_absent_leaves_the_key_absent(self) -> None:
+    def test_an_ordinary_result_leaves_the_key_absent(self) -> None:
         table = FakeReviewsTable(status="RUNNING")
         pr._write_real_terminal(
             REVIEW_ID,
@@ -576,7 +702,7 @@ def _run_tests() -> int:
     suite.addTests(loader.loadTestsFromTestCase(TestDefaultRunnerSelectsRealVsMock))
     suite.addTests(loader.loadTestsFromTestCase(TestRunRealPipeline))
     suite.addTests(loader.loadTestsFromTestCase(TestNormalizationNotesPersisted563))
-    suite.addTests(loader.loadTestsFromTestCase(TestRequotePersisted569))
+    suite.addTests(loader.loadTestsFromTestCase(TestDeletedRequoteKeyIsNotPersisted628))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

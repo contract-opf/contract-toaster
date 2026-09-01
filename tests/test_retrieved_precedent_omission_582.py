@@ -85,8 +85,6 @@ def _sample_precedent() -> list[dict[str, Any]]:
 
 def test_empty_precedent_omits_block_from_plain_string_prompt(failures: list[str]) -> None:
     prompt = pp.assemble_user_prompt_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
     )
@@ -104,8 +102,6 @@ def test_empty_precedent_omits_block_from_capability_false_content(failures: lis
     # per #562's descriptor. This path must be byte-identical to the plain
     # string path above.
     content = pp.assemble_user_content_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
         prompt_caching_enabled=False,
@@ -122,12 +118,10 @@ def test_empty_precedent_omits_block_from_capability_false_content(failures: lis
 
 
 def test_empty_precedent_omits_block_from_cached_content(failures: list[str]) -> None:
-    # prompt_caching_enabled=True AND INPUT_MODE_FULL_DOCUMENT takes the
-    # cached two-block path (build_document_cached_user_content) -- the
-    # pass-specific text is the SECOND, uncached block.
+    # prompt_caching_enabled=True takes the cached two-block path
+    # (build_document_cached_user_content) -- the pass-specific text is the
+    # SECOND, uncached block.
     content = pp.assemble_user_content_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=[],
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
         prompt_caching_enabled=True,
@@ -166,8 +160,6 @@ def test_render_retrieved_precedent_delimited_block_returns_none_when_empty(
 
 def test_nonempty_precedent_still_composes_the_block_plain_string(failures: list[str]) -> None:
     prompt = pp.assemble_user_prompt_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
     )
@@ -183,8 +175,6 @@ def test_nonempty_precedent_still_composes_the_block_plain_string(failures: list
             "precedent clause content verbatim."
         )
     required_tags_in_order = [
-        "<STANDARD_FORM_DIFF>",
-        "<ANCHORED_CLAUSES>",
         "<RETRIEVED_PRECEDENT>",
         "<COUNTERPARTY_DOCUMENT>",
     ]
@@ -208,8 +198,6 @@ def test_nonempty_precedent_still_composes_the_block_plain_string(failures: list
 
 def test_nonempty_precedent_still_composes_the_block_cached_path(failures: list[str]) -> None:
     content = pp.assemble_user_content_primary(
-        diff_hunks=_sample_diff_hunks(),
-        anchored_clauses=_sample_anchored_clauses(),
         retrieved_precedent=_sample_precedent(),
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
         prompt_caching_enabled=True,

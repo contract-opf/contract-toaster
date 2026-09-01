@@ -215,8 +215,6 @@ def test_run_primary_pass_threads_instructions_text_into_system_prompt(failures:
 
     pp.run_primary_pass(
         review_id="review-483-primary-instructions",
-        diff_hunks=[],
-        anchored_clauses=[],
         retrieved_precedent=[],
         playbook=playbook,
         model_client=client,
@@ -243,8 +241,6 @@ def test_run_critic_pass_threads_instructions_text_into_system_prompt(failures: 
 
     cp.run_critic_pass(
         review_id="review-483-critic-instructions",
-        diff_hunks=[],
-        anchored_clauses=[],
         primary_output=primary_output,
         playbook=playbook,
         model_client=client,

@@ -52,7 +52,7 @@ response reports:
      silent/incorrect edit.
 
 Uses python-docx (test-only dependency, matches
-`tests/test_redline_quote_apply.py`'s convention) to build a real,
+the repo's other OOXML fixture builders' convention) to build a real,
 Word-authored-shaped `.docx` -- python-docx's default `Heading1` style
 writes the exact `<w:pStyle w:val="Heading1"/>` this repo's other hand-built
 fixtures use, so headings extract identically either way (confirmed against

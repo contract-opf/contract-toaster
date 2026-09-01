@@ -20,3 +20,4 @@ import './components/ct-table';
 import './components/ct-toolbar';
 import './components/ct-file-drop';
 import './components/ct-progress';
+import './components/ct-columns';

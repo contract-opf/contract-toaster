@@ -17,9 +17,12 @@ exposes.
      `{"structured_outputs": True, "prompt_caching": False}` for a
      `selectable` entry (model-policy/openrouter.json marks
      `structured_outputs: true` there per the file's own verification
-     note), all-False for the policy-pinned primary/critic ids (that file
-     declares neither field for them), and all-False -- never a KeyError --
-     for a model_id the policy does not mention at all.
+     note), all-False for the policy-pinned CRITIC id (that file declares
+     neither field for it), and all-False -- never a KeyError -- for a
+     model_id the policy does not mention at all. The pinned PRIMARY is the
+     exception and is asserted separately: issue #604 repinned it to
+     anthropic/claude-opus-5, which the artifact DOES declare
+     `structured_outputs: true` for.
   3. A policy entry that omits a capability field defaults that field to
      False -- explicit "absent -> False" fail-closed coverage, independent
      of any specific model_id already in the shipped policy files.
@@ -63,9 +66,22 @@ _BEDROCK_CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 _BEDROCK_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 _BEDROCK_UNKNOWN_MODEL_ID = "anthropic.claude-haiku-4-1"
 
-_OPENROUTER_PRIMARY_MODEL_ID = "anthropic/claude-opus-4.8"
+# The pinned primary since issue #604. It DECLARES `structured_outputs: true`
+# -- unlike the critic pin, which declares nothing. This constant was
+# anthropic/claude-opus-4.8 (which declared nothing and was selectable) until
+# the owner removed that id from `selectable`; leaving it here would have kept
+# the assertion below GREEN for the wrong reason -- as an unlisted id, not as
+# a pin whose capability fields are absent.
+_OPENROUTER_PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 _OPENROUTER_CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
-_OPENROUTER_SELECTABLE_MODEL_ID = "anthropic/claude-opus-5"
+# Must be an id that is ONLY in `selectable` -- not also a role pin -- or
+# `openrouter_model_capabilities` returns from its role loop and the
+# selectable scan this constant exists to exercise never runs. That is what
+# happened silently once issue #604 repinned the primary to opus-5, which
+# this constant used to name. The role pins today are opus-5 (primary),
+# sonnet-4.6 (critic), deepseek-v4-pro (preflight) and sonnet-5 (cover_note),
+# so gpt-5.6-sol is selectable-only and declares `structured_outputs: true`.
+_OPENROUTER_SELECTABLE_MODEL_ID = "openai/gpt-5.6-sol"
 _OPENROUTER_UNKNOWN_MODEL_ID = "some-provider/unlisted-model"
 
 _ALL_FALSE = {"structured_outputs": False, "prompt_caching": False}
@@ -160,15 +176,27 @@ class TestBedrockCapabilities(unittest.TestCase):
 
 
 class TestOpenRouterCapabilities(unittest.TestCase):
-    def test_pinned_primary_and_critic_are_all_false(self) -> None:
-        # model-policy/openrouter.json's pricing verification for these two
-        # ids predates the capability check and never confirmed it --
-        # absent, not a guess.
-        self.assertEqual(
-            mc.openrouter_model_capabilities(_OPENROUTER_PRIMARY_MODEL_ID), _ALL_FALSE
-        )
+    def test_pinned_critic_is_all_false(self) -> None:
+        # model-policy/openrouter.json's pricing verification for the critic id
+        # predates the capability check and never confirmed it -- absent, not a
+        # guess. This is the fail-closed half of the pair, and after the owner
+        # deleted anthropic/claude-opus-4.8 from `selectable` it is the only id
+        # in that artifact that is BOTH allowed by the runtime guard AND
+        # capability-False, which is why several other test files now stand on
+        # it (see tests/test_structured_output_request.py).
         self.assertEqual(
             mc.openrouter_model_capabilities(_OPENROUTER_CRITIC_MODEL_ID), _ALL_FALSE
+        )
+
+    def test_pinned_primary_declares_structured_outputs(self) -> None:
+        # The other half, and the reason the two pins must not be asserted
+        # together any more: issue #604 repinned the primary to
+        # anthropic/claude-opus-5, an id the 2026-08-02 verification pass DID
+        # confirm, so the pin declares the field. Absence would silently drop
+        # `output_schema` from every default review.
+        self.assertEqual(
+            mc.openrouter_model_capabilities(_OPENROUTER_PRIMARY_MODEL_ID),
+            {"structured_outputs": True, "prompt_caching": False},
         )
 
     def test_selectable_model_reads_structured_outputs_true(self) -> None:

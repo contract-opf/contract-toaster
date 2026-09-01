@@ -130,6 +130,13 @@ import {
   type BrowningLevel,
 } from './toaster/browning';
 import {
+  DEFAULT_NOTES_MODE,
+  NOTES_MODE_SETTINGS,
+  isNotesMode,
+  isNotesModeAvailable,
+  type NotesMode,
+} from './notesMode';
+import {
   primeAudio,
   playLever,
   startTicking,
@@ -414,44 +421,44 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // --- The operator's problem: the model account, key or model ------------
   model_account_out_of_credits: {
     cause: 'The model account has run out of credits, so the review was never run.',
-    fix: 'An admin needs to add funds to the account used under “Model & API key”. Nothing is wrong with your document — resubmit it once that is done.',
+    fix: 'An admin needs to add funds to the account used under “Models”. Nothing is wrong with your document — resubmit it once that is done.',
   },
   model_key_rejected: {
     cause: 'The model provider rejected the key this deployment is using.',
-    fix: 'An admin can replace the key under “Model & API key”. Until then every review will fail the same way.',
+    fix: 'An admin can replace the key under “Models”. Until then every review will fail the same way.',
   },
   model_rate_limited: {
     cause: 'The model provider is temporarily refusing requests because too many were sent at once.',
-    fix: 'Wait a few minutes and submit again. If it keeps happening, an admin should check the account’s limits under “Model & API key”.',
+    fix: 'Wait a few minutes and submit again. If it keeps happening, an admin should check the account’s limits under “Models”.',
   },
   model_unavailable: {
     cause: 'The model this deployment is set to use is not available from the provider right now.',
-    fix: 'Try again later, or ask an admin to select a different model under “Model & API key”.',
+    fix: 'Try again later, or ask an admin to select a different model under “Models”.',
   },
   // Issue #472: the pre-call sibling of model_key_rejected above — no key
   // was configured at all, so the review never reached the model. This is
   // the single most likely first-run mistake (upload before setting a key).
   model_key_missing: {
     cause: 'No API key is configured for the model provider, so the review was never sent.',
-    fix: 'An admin can add one under “Model & API key”. Until then every review will fail here.',
+    fix: 'An admin can add one under “Models”. Until then every review will fail here.',
   },
   model_timeout: {
     cause: 'The model provider did not respond in time, so the review was not completed.',
-    fix: 'This is usually temporary — it is worth submitting again. If it keeps happening, an admin should check the account and model under “Model & API key”.',
+    fix: 'This is usually temporary — it is worth submitting again. If it keeps happening, an admin should check the account and model under “Models”.',
   },
   // Issue #527: the model returned no usable content at all -- distinct
   // from model_output_truncated below, which has a specific, actionable
   // cause (the token budget ran out) this one does not.
   model_empty_content: {
     cause: 'The model returned an empty response, so the review could not be completed.',
-    fix: 'This is usually temporary — it is worth submitting again. If it keeps happening, an admin should try a different model under “Model & API key”.',
+    fix: 'This is usually temporary — it is worth submitting again. If it keeps happening, an admin should try a different model under “Models”.',
   },
   // Issue #527: the model was cut off before it finished (its response hit
   // the token budget) -- a reasoning-class model spends part of that budget
   // on internal reasoning before it can produce any output.
   model_output_truncated: {
     cause: 'The model ran out of room to finish its answer, so the review could not be completed.',
-    fix: 'This has been recorded. An admin can select a different model under “Model & API key”. If it keeps happening with the same model, whoever operates this deployment needs to raise that model’s reasoning allowance.',
+    fix: 'This has been recorded. An admin can select a different model under “Models”. If it keeps happening with the same model, whoever operates this deployment needs to raise that model’s reasoning allowance.',
   },
   // --- Your problem: the document itself ----------------------------------
   model_context_length_exceeded: {
@@ -491,7 +498,7 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // --- The system's problem: nothing the reader can do --------------------
   structured_output_retry_exhausted: {
     cause: 'The model kept returning a result the system could not read, so no review was produced.',
-    fix: 'This has been recorded. Please try again; if it keeps happening, an admin should try a different model under “Model & API key”.',
+    fix: 'This has been recorded. Please try again; if it keeps happening, an admin should try a different model under “Models”.',
   },
   quote_patches_not_applied: {
     cause: 'The review found changes to request, but none of them could be placed into your document, so no marked-up copy was produced.',
@@ -525,7 +532,17 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   },
   floor_invariant_unjudged: {
     cause: 'One of this contract type’s required rules could not be checked, so the review was stopped rather than finish with a rule unverified.',
-    fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should check the account and model under “Model & API key”.',
+    fix: 'This has been recorded. It is worth submitting again; if it keeps happening, an admin should check the account and model under “Models”.',
+  },
+  // Issue #584: the review found changes to request but produced no
+  // marked-up document to deliver them in (every proposed change came back
+  // flag-only, with nothing to place into the file). Distinct from
+  // quote_patches_not_applied above: that token means changes WERE
+  // attempted and failed to place; this one means nothing was ever
+  // attempted because there was no located text to change.
+  redline_not_persisted: {
+    cause: 'The review found changes to request, but no marked-up document was produced to deliver them in.',
+    fix: 'This has been recorded for an admin to investigate. Please try again; if it keeps happening, contact an admin.',
   },
 };
 
@@ -541,7 +558,7 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
 const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
   build_model_client: {
     cause: 'No usable model API key was found, so the review never reached the model.',
-    fix: 'An admin can add one under “Model & API key”. Until then every review will fail here.',
+    fix: 'An admin can add one under “Models”. Until then every review will fail here.',
   },
   load_playbook: {
     cause: "This contract type isn't set up for review yet.",
@@ -555,7 +572,7 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
     cause: 'The model could not complete the review.',
     fix:
       'The exact cause was not identified. An admin can check the account, key and ' +
-      'model under “Model & API key”; it is also worth re-submitting in case it was ' +
+      'model under “Models”; it is also worth re-submitting in case it was ' +
       'a passing problem at the provider.',
   },
   persist_result: {
@@ -651,6 +668,41 @@ function describePreflightStats(preflight: PreflightResult): string {
   return parts.join(' · ');
 }
 
+// Issue #592: "a"/"an" for the classifier's type guess. NOT a closed
+// vocabulary: known_agreement_types() (scripts/preflight_pass.py) unions
+// CANONICAL_AGREEMENT_TYPES with every installed, non-test_only playbook's
+// own `agreement_type`, so an admin can add an arbitrary label at any time
+// -- this first-letter check gets a spelled-as-it-sounds label right
+// ("Employment Agreement" -> "an") but still mis-articles an acronym like
+// "NDA" (pronounced with a leading vowel sound despite the consonant
+// letter); that gap is untracked and out of this ticket's scope. The one
+// label this file DOES need to get exactly right, the classifier's own
+// unclassified fallback ("Other" — matches
+// scripts/preflight_pass.py::UNCLASSIFIED_AGREEMENT_TYPE), is special-cased
+// in describeAgreementTypeGuess below instead of routed through here at
+// all, because "an Other" is not idiomatic English no matter which article
+// precedes it.
+function withIndefiniteArticle(label: string): string {
+  const article = /^[aeiou]/i.test(label) ? 'an' : 'a';
+  return `${article} ${label}`;
+}
+
+// Mirrors scripts/preflight_pass.py::UNCLASSIFIED_AGREEMENT_TYPE — the
+// classifier's fallback label when nothing in the vocabulary fits.
+const UNCLASSIFIED_AGREEMENT_TYPE = 'Other';
+
+// The noun phrase used everywhere a type guess reads like "This reads like
+// ___". Every call site routes through here (not through
+// withIndefiniteArticle directly) so the "Other" special case in the
+// warning banners, the neutral type/side line, and any future caller of
+// this phrase can never drift out of sync with each other again.
+function describeAgreementTypeGuess(label: string): string {
+  if (label === UNCLASSIFIED_AGREEMENT_TYPE) {
+    return 'an unrecognized type';
+  }
+  return withIndefiniteArticle(label);
+}
+
 // Which side's paper this reads like, in the neutral, factual phrasing the
 // issue's Context insists on: "the toaster reviews both first- and
 // third-party paper -- 'this isn't our template' is never a mismatch
@@ -684,7 +736,7 @@ function PreflightVerdict({
   const sideText = describePaperSide(preflight.paperSide);
   const typeText = preflight.agreementTypeGuess;
   const readsLike = [
-    typeText ? `reads like a ${typeText}` : null,
+    typeText ? `reads like ${describeAgreementTypeGuess(typeText)}` : null,
     sideText || null,
   ]
     .filter(Boolean)
@@ -711,7 +763,7 @@ function PreflightVerdict({
     // example ("You can toast it anyway -- or turn the dial.").
     return (
       <CtBanner variant="warn" data-testid="review-preflight-match-unlikely">
-        {typeText ? `This reads like a ${typeText}` : 'This document'}
+        {typeText ? `This reads like ${describeAgreementTypeGuess(typeText)}` : 'This document'}
         {selectedPlaybookLabel ? `, not ${selectedPlaybookLabel}` : ''}. You can toast it
         anyway — or turn the dial.
       </CtBanner>
@@ -781,6 +833,24 @@ export default function ReviewSubmission({
   // composed with it at submit time rather than being a second thing the
   // backend has to know about -- browning IS guidance, one sentence of it.
   const [browning, setBrowning] = useState<BrowningLevel>(DEFAULT_BROWNING);
+  // Footnote audience (issue #523, epic #519 item F). Two values, not one:
+  //   `notesMode`        — what THIS review will be submitted with.
+  //   `storedNotesMode`  — what the server currently holds as this user's
+  //                        default, so "Make this my default" can tell an
+  //                        override apart from a no-op and never write a
+  //                        preference the user did not ask to change.
+  // A per-review change must NOT silently become the default — epic #519's
+  // model is "the preference sets the default; the per-review control
+  // overrides it for that review" — which is why the save is its own
+  // deliberate action rather than a side effect of turning the dial.
+  // `notesModeInternalAvailable` mirrors the server's #572 kill switch; it
+  // starts false so the two internal-notes stops are never offered before
+  // the server has said they exist.
+  const [notesMode, setNotesMode] = useState<NotesMode>(DEFAULT_NOTES_MODE);
+  const [storedNotesMode, setStoredNotesMode] = useState<NotesMode>(DEFAULT_NOTES_MODE);
+  const [notesModeInternalAvailable, setNotesModeInternalAvailable] = useState(false);
+  const [notesModeSaving, setNotesModeSaving] = useState(false);
+  const [notesModeSaveError, setNotesModeSaveError] = useState<string | null>(null);
   const [submittedGuidance, setSubmittedGuidance] = useState<string | null>(null);
   // Whether the submit that produced the review now in flight was *resumed*
   // onto a pre-existing review (`SubmitResponse.resumed`). This matters only
@@ -946,6 +1016,81 @@ export default function ReviewSubmission({
       writeLastPlaybookId(playbookId);
     }
   }, [playbookId]);
+
+  // Issue #523: seed the footnote-audience control from this user's stored
+  // preference. Server-side and not localStorage on purpose — a client-only
+  // preference cannot survive a sign-out, and this repo persists nothing
+  // security-relevant in the browser anyway (see notesMode.ts / the epic).
+  //
+  // Failure posture matches `fetchCatalog`'s neighbours: a preferences read
+  // that fails leaves the documented default in place and renders no error.
+  // The control still works for this review; only the remembered default is
+  // missing, and an error banner for that would be noise on a panel whose
+  // job is toasting a contract.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await authorizedFetch('/api/me/preferences');
+        if (!response.ok) return;
+        const body = (await response.json()) as {
+          preferences?: { notes_mode?: unknown };
+          notes_mode_available?: unknown;
+        };
+        if (cancelled) return;
+        const available = body.notes_mode_available === true;
+        setNotesModeInternalAvailable(available);
+        const stored = body.preferences?.notes_mode;
+        // A stored mode this deployment can no longer offer (the #572 kill
+        // switch went off under a user who had chosen `internal`) falls back
+        // to the default rather than preselecting a stop the control refuses
+        // to select and the server would refuse to accept.
+        if (isNotesMode(stored) && isNotesModeAvailable(stored, available)) {
+          setStoredNotesMode(stored);
+          setNotesMode(stored);
+        }
+      } catch {
+        /* preferences are a nicety; the control's default already works */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Issue #523: the ONE handler both notes-mode surfaces share — the
+  // toaster-side radiogroup and the plain <select> below the fold (#504's
+  // dual-surface rule). Neither owns the value, so the two cannot drift.
+  const handleNotesModeChange = useCallback((mode: NotesMode) => {
+    setNotesMode(mode);
+    setNotesModeSaveError(null);
+  }, []);
+
+  // Issue #523: writing the DEFAULT is its own deliberate act. Turning the
+  // control changes this review only; this is what changes what the next one
+  // starts from.
+  const saveNotesModePreference = useCallback(async (): Promise<void> => {
+    setNotesModeSaving(true);
+    setNotesModeSaveError(null);
+    try {
+      const response = await authorizedFetch('/api/me/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { notes_mode: notesMode } }),
+      });
+      if (!response.ok) {
+        const detail = await readErrorDetail(response);
+        throw new Error(detail ?? 'preferences save rejected');
+      }
+      setStoredNotesMode(notesMode);
+    } catch (err) {
+      setNotesModeSaveError(
+        friendlyErrorMessage(err, "We couldn't save that as your default just now."),
+      );
+    } finally {
+      setNotesModeSaving(false);
+    }
+  }, [notesMode]);
 
   // Issue #491: fire the cheap preflight check the moment a file is chosen.
   // Deliberately NOT part of `submitReview` and never awaited by anything
@@ -1362,6 +1507,16 @@ export default function ReviewSubmission({
         if (guidance) {
           formData.append('toaster_guidance', guidance);
         }
+        // Issue #523: the footnote audience for THIS review. Appended only
+        // when it differs from the backend's own default (`external`,
+        // backend/src/reviews.py::DEFAULT_NOTES_MODE), so a reviewer who
+        // never touches the control — or whose stored preference IS the
+        // default — sends a request byte-identical to the one this form sent
+        // before the control existed. The value is the wire vocabulary
+        // itself, never a translated label.
+        if (notesMode !== DEFAULT_NOTES_MODE) {
+          formData.append('notes_mode', notesMode);
+        }
 
         const response = await authorizedFetch('/api/reviews', {
           method: 'POST',
@@ -1396,7 +1551,16 @@ export default function ReviewSubmission({
         setSubmitting(false);
       }
     },
-    [file, playbookId, playbooks, stopPolling, toasterGuidance],
+    // `browning` and `notesMode` (issue #523) belong here for the same reason
+    // every other value read inside does: without them this callback keeps
+    // the closure it was built with, and a reviewer who picks the file BEFORE
+    // touching either control submits the value it held beforehand. Nothing
+    // caught it while `file` happened to change last — choosing a file is a
+    // dependency change, which rebuilt the callback and hid the staleness —
+    // but the reverse order is just as ordinary a thing to do, and it sent
+    // the wrong request. `browning` was already missing before #523 added
+    // `notesMode` beside it; both are one and the same defect.
+    [browning, file, notesMode, playbookId, playbooks, stopPolling, toasterGuidance],
   );
 
   const handleSubmit = useCallback(
@@ -1730,6 +1894,13 @@ export default function ReviewSubmission({
               }
               setBrowning(level);
             }}
+            /* Issue #523: the toaster-side half of the footnote-audience
+               control. `handleNotesModeChange` is the SAME function the plain
+               <select> in the form below calls — one handler, two surfaces
+               (#504's dual-surface rule). */
+            notesMode={notesMode}
+            onNotesModeChange={handleNotesModeChange}
+            notesModeInternalAvailable={notesModeInternalAvailable}
           />
 
           {/* Non-terminal states (submitting / polling). Issue #447 retired
@@ -1793,6 +1964,62 @@ export default function ReviewSubmission({
               description — precedence is visible at the point of authoring,
               not only in a doc (docs/frontend-design-system.md §15.3).
             */}
+            {/*
+              Issue #523 — the CONVENTIONAL half of the footnote-audience
+              control (#504's dual-surface rule: "a conventional control doing
+              the identical thing ... sharing one handler"). A plain <select>,
+              no appliance metaphor, reachable by Tab in document order and
+              usable with no pointer at all. It calls
+              `handleNotesModeChange` — the same function the toaster-side
+              radiogroup calls — so the two surfaces cannot disagree about
+              what this review will be submitted with.
+
+              A mode this deployment refuses (`internal`/`both` while the #572
+              kill switch is off) renders as a DISABLED option rather than
+              being dropped: the same "visible, not selectable" posture the
+              dial's coming-soon stops take, so the four modes are legible
+              even where two of them cannot be picked.
+            */}
+            <div data-testid="review-notes-mode-field">
+              <CtField
+                label="Footnotes in the document"
+                hint="Applies to this review. Saving it as your default is a separate step."
+              >
+                <select
+                  id="review-notes-mode-select"
+                  data-testid="review-notes-mode-select"
+                  value={notesMode}
+                  onChange={(event) => handleNotesModeChange(event.target.value as NotesMode)}
+                >
+                  {NOTES_MODE_SETTINGS.map((option) => (
+                    <option
+                      key={option.id}
+                      value={option.id}
+                      disabled={!isNotesModeAvailable(option.id, notesModeInternalAvailable)}
+                    >
+                      {option.label} — {option.note}
+                    </option>
+                  ))}
+                </select>
+              </CtField>
+              {notesMode !== storedNotesMode && (
+                <CtButton
+                  type="button"
+                  variant="ghost"
+                  disabled={notesModeSaving}
+                  data-testid="review-notes-mode-remember"
+                  onClick={() => void saveNotesModePreference()}
+                >
+                  {notesModeSaving ? 'Saving…' : 'Make this my default'}
+                </CtButton>
+              )}
+              {notesModeSaveError && (
+                <CtBanner variant="warn" data-testid="review-notes-mode-save-error">
+                  {notesModeSaveError}
+                </CtBanner>
+              )}
+            </div>
+
             <div data-testid="review-guidance-field">
               <CtField
                 label="Instructions for this review (optional)"

@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""CI gate (issue #404): the engine's PUBLIC SURFACE must carry no tenant brand.
+"""CI gate (issue #404, rescoped by #591): the public surface must carry no
+FUNCTIONAL reference to the private org, and no corporate-domain leak.
 
 ## What this guards
 
 The toaster is a brand-free empty shell that is being developed in public
-(epic #408). Issues #403/#412/#413/#422 removed the tenant brand from the
-engine; nothing stopped a future edit from putting it back. This lint fails
-loudly on any regression, so "brand-free" is a property the build enforces
-rather than a state someone remembers to maintain.
+(epic #408). Owner ruling, 2026-08-21: "exos or exos legal is always ok to
+publish" -- the tenant brand string is NOT a leak and this gate no longer
+polices it (issue #591 supersedes the brand-string half of #405). What DID
+survive is narrower and functional: anything published publicly must point
+at `contract-opf`, not `exos-legal`, in any position that is actually
+ACTED ON -- an image path a deploy pulls, a CODEOWNERS team that routes
+review, a workflow org ref, a repo URL a clone/checkout would follow. A prose
+mention of the org's name (a changelog note, a historical issue link quoted
+in a test) is not that, and no longer fails the gate.
 
 ## The public surface
 
@@ -19,22 +25,21 @@ cut would publish -- no more, no less.
 
 ## Tiers
 
-1. HARD, zero tolerance: `Exos` / `EXOS`. The tenant brand itself. As of
-   issue #422 there are ZERO occurrences on the public surface, so this tier
-   is a true zero-tolerance gate.
-2. HARD, allowlisted: `teamexos` (the corporate domain). Every remaining
+1. HARD, allowlisted: `teamexos` (the corporate domain). Every remaining
    occurrence is either a de-brand scanner that must name the token as its
    search pattern, or an auth-domain behavior test that uses it as its sample
    allowed-domain. Each allowlist entry carries a justification below.
-3. REPORTED, pending the flip: `exos-legal` (the private GitHub org). These
-   are REPO IDENTITY -- org URLs, the GHCR image path, CodeBuild's source
-   repo, CODEOWNERS teams -- which are functional today and get repointed as
-   part of flipping the public repo primary (issue #406). Repointing them
-   early would break CODEOWNERS against teams that do not exist yet. The gate
-   PRINTS the count every run so the debt cannot be silently forgotten, and
-   `--strict-org` (used after #406) promotes this tier to a hard failure.
-4. HARD: any `.docx` under `tests/` lacking a SYNTHETIC content marker --
+2. HARD: `exos-legal` in a FUNCTIONAL position -- a GHCR/container image
+   path, a `github.com`/SSH repo URL, a CODEOWNERS-style `@exos-legal/team`
+   reference, or a workflow `uses:`/`repository:` org ref. A file that merely
+   NAMES the org in prose (a historical issue link quoted by a test, a
+   comment explaining repo history) does not trip this tier.
+3. HARD: any `.docx` under `tests/` lacking a SYNTHETIC content marker --
    promoting the public-cut SOFT scan into a blocking check.
+
+`--strict-org` is accepted as a no-op for backward compatibility with any
+existing caller; the org tier has been HARD-by-default (not opt-in) since
+issue #406 landed and rescoping it in #591 did not change that.
 
 ## Self-test
 
@@ -58,9 +63,22 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = REPO_ROOT / "public-cut-exclude.txt"
 
-EXOS_RE = re.compile(r"\bExos\b|\bEXOS\b")
 TEAMEXOS_RE = re.compile(r"teamexos", re.IGNORECASE)
-ORG_RE = re.compile(r"exos-legal", re.IGNORECASE)
+
+# `exos-legal` in a FUNCTIONAL position only -- the shapes issue #591 names:
+# an image path, a repo URL (https or SSH), a CODEOWNERS/scoped-team
+# reference, or a workflow org ref. A bare prose mention of "exos-legal" that
+# matches none of these shapes (e.g. "the repo used to live under exos-legal")
+# is not functional and does not trip this gate.
+ORG_FUNCTIONAL_RE = re.compile(
+    r"ghcr\.io/exos-legal\b"           # GHCR/container image path
+    r"|github\.com[:/]exos-legal/"     # repo URL, https:// or git@ SSH form
+    r"|@exos-legal/[\w.-]+"            # CODEOWNERS team / scoped package ref
+    r"|\bexos-legal/[\w.-]+@"          # workflow `uses: org/repo@ref`
+    r"|\brepository:\s*['\"]?exos-legal/"  # workflow `repository:` field
+    r"|\bowner:\s*['\"]?exos-legal\b",     # CDK/workflow `owner:` context field
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Allowlist. The ONLY place a brand token may legitimately live.
@@ -84,26 +102,17 @@ GUARD_FILES = {
     "tests/test_schema_hardening.py": "quotes historical schema URLs",
     "scripts/docs-lint.py": "docs linter; the stale address is its search pattern",
     "scripts/public-cut.sh": "the cut tool; names the private origin by design",
-    # De-brand ASSERTIONS: these tests prove the brand does NOT reach rendered
-    # output / audit rows / emitted documents. The literal IS the thing under
-    # test -- reword it and the test silently stops testing anything. Issue
-    # #422/#404 reworded every PROSE mention repo-wide; what survives here is
-    # only the assertion (and, in one case, a deliberately brand-bearing
-    # fixture that keeps its assertion non-vacuous).
-    "tests/redline/test_inplace_tracked_changes.py": "asserts emitted .docx/report carry no brand",
-    "tests/test_bundle_activate_rollback_79.py": "asserts rendered output/trail carry no brand",
-    "tests/test_example_playbook_registry.py": "asserts sample playbook content carries no brand",
-    "tests/test_form_match_router.py": "banned-token tuple for router-emitted strings",
-    "tests/test_me_capability_route.py": "asserts the capability payload carries no brand",
-    "tests/test_opf_prompt.py": "asserts composed prompt output carries no brand",
-    "tests/test_playbook_version_audit_9.py": "asserts the audit trail carries no brand",
-    "tests/test_playbook_version_notes.py": "brand-bearing note fixture + non-leak assertion",
-    "tests/test_review_api_84.py": "asserts user-facing error copy carries no brand",
-    "tests/test_shipped_playbook_seed.py": "asserts shipped playbook content carries no brand",
-    "tests/test_retention_window_config_34.py": "asserts rendered option labels carry no brand",
     "public-cut-exclude.txt": "the exclusion manifest; naming what it excludes is its job",
     "tests/test_infra_appname_prefix_233.py": "asserts CodeBuild no longer hard-codes the org",
 }
+# NOTE (issue #591): eleven entries were removed from this dict here -- tests
+# that quoted/asserted the tenant brand string alone (redline/tracked-changes,
+# bundle-rollback, playbook-registry/version-audit/version-notes, form-match
+# router, me-capability, opf-prompt, review-api, shipped-playbook-seed,
+# retention-window-config) and had no teamexos/org content of their own. Now
+# that tier 1 (Exos/EXOS) no longer exists, they needed no guard to begin
+# with; leaving them allowlisted would have been dead, misleading
+# documentation for a check that no longer runs.
 
 # Auth/domain behavior tests that use the corporate domain as their SAMPLE
 # allowed-domain. Post-#274 the domain is env-driven, so these are arbitrary
@@ -192,25 +201,28 @@ def self_test() -> None:
         tmp = Path(td)
 
         dirty = tmp / "dirty.md"
-        dirty.write_text("The Exos standard form.\nContact a@teamexos.com\nrepo exos-legal/x\n")
+        dirty.write_text(
+            "Contact a@teamexos.com\nimage: ghcr.io/exos-legal/toaster:latest\n"
+            "owner: @exos-legal/gc\n"
+        )
         text = dirty.read_text()
-        if not scan(text, EXOS_RE):
-            raise AssertionError("self-test failed: did not flag 'Exos'")
         if not scan(text, TEAMEXOS_RE):
             raise AssertionError("self-test failed: did not flag 'teamexos'")
-        if not scan(text, ORG_RE):
-            raise AssertionError("self-test failed: did not flag 'exos-legal'")
+        if not scan(text, ORG_FUNCTIONAL_RE):
+            raise AssertionError("self-test failed: did not flag a functional 'exos-legal' ref")
 
-        caps = tmp / "caps.md"
-        caps.write_text("EXOS OWNS THIS\n")
-        if not scan(caps.read_text(), EXOS_RE):
-            raise AssertionError("self-test failed: did not flag 'EXOS'")
-
+        # Issue #591: a plain brand string, and a bare PROSE mention of the
+        # private org's name (no image path / URL / team-scope / workflow
+        # ref shape), are both publishable now -- neither may flag.
         clean = tmp / "clean.md"
-        clean.write_text("Contract Toaster is a trademark of Athletes' Performance, Inc.\n")
+        clean.write_text(
+            "The Exos standard form is a trademark of Athletes' Performance, Inc.\n"
+            "EXOS OWNS THIS.\n"
+            "This project used to live under exos-legal before the public cut.\n"
+        )
         ct = clean.read_text()
-        if scan(ct, EXOS_RE) or scan(ct, TEAMEXOS_RE) or scan(ct, ORG_RE):
-            raise AssertionError("self-test failed: flagged a clean, brand-free line")
+        if scan(ct, TEAMEXOS_RE) or scan(ct, ORG_FUNCTIONAL_RE):
+            raise AssertionError("self-test failed: flagged brand-string / prose-org text")
 
         # A non-SYNTHETIC .docx must be flagged; a marked one must not.
         for marker, expect_flag in (("nothing here", True), ("SYNTHETIC sample", False)):
@@ -227,20 +239,22 @@ def self_test() -> None:
                     f"self-test failed: .docx marker detection wrong for {marker!r}"
                 )
 
-    print("Self-test OK: scanner catches Exos/EXOS/teamexos/exos-legal and unmarked .docx,")
-    print("              and does not flag brand-free text.")
+    print("Self-test OK: scanner catches teamexos + functional exos-legal refs + unmarked .docx,")
+    print("              and does not flag the brand string or a bare prose org mention.")
 
 
 def main(argv: list[str]) -> int:
-    strict_org = "--strict-org" in argv
+    # Retained as an accepted no-op: the org tier has been HARD-by-default
+    # (not opt-in) since issue #406, and rescoping it in #591 to functional-
+    # position-only did not reintroduce an opt-in mode.
+    _ = "--strict-org" in argv
     self_test()
 
     surface = public_surface()
     print(f"\nPublic surface: {len(surface)} tracked files (excl. public-cut-exclude.txt paths)")
 
-    exos_hits: list[str] = []
     teamexos_hits: list[str] = []
-    org_files: list[str] = []
+    org_functional_hits: list[str] = []
     docx_hits: list[str] = []
 
     for rel in surface:
@@ -251,27 +265,16 @@ def main(argv: list[str]) -> int:
         text = _read(rel)
         if text is None:
             continue
-        if rel not in GUARD_FILES:
-            for lineno in scan(text, EXOS_RE):
-                exos_hits.append(f"{rel}:{lineno}")
         if rel not in GUARD_FILES and rel not in TEAMEXOS_BEHAVIOR_FILES:
             for lineno in scan(text, TEAMEXOS_RE):
                 teamexos_hits.append(f"{rel}:{lineno}")
-        if rel not in GUARD_FILES and scan(text, ORG_RE):
-            org_files.append(rel)
+        if rel not in GUARD_FILES:
+            for lineno in scan(text, ORG_FUNCTIONAL_RE):
+                org_functional_hits.append(f"{rel}:{lineno}")
 
     failures = 0
 
-    print("\nCheck 1: zero 'Exos'/'EXOS' on the public surface …")
-    if exos_hits:
-        failures += 1
-        print(f"  FAIL — {len(exos_hits)} occurrence(s):")
-        for h in exos_hits[:40]:
-            print(f"    {h}")
-    else:
-        print("  OK — none.")
-
-    print("\nCheck 2: zero 'teamexos' outside the reviewed allowlist …")
+    print("\nCheck 1: zero 'teamexos' outside the reviewed allowlist …")
     if teamexos_hits:
         failures += 1
         print(f"  FAIL — {len(teamexos_hits)} occurrence(s) in non-allowlisted files:")
@@ -281,6 +284,19 @@ def main(argv: list[str]) -> int:
     else:
         print("  OK — only allowlisted guards/behavior tests carry it.")
 
+    print("\nCheck 2: zero 'exos-legal' in a FUNCTIONAL position (image path / repo URL /")
+    print("         CODEOWNERS-style team / workflow org ref) …")
+    if org_functional_hits:
+        failures += 1
+        print(f"  FAIL — {len(org_functional_hits)} occurrence(s):")
+        for h in org_functional_hits[:40]:
+            print(f"    {h}")
+        print("  Point at contract-opf instead (e.g. github.repository_owner, a CDK context")
+        print("  value, or a host-supplied ${VAR}) -- this is a routing/pull-path leak, not")
+        print("  a brand mention. Naming the private org in PROSE is fine and not flagged.")
+    else:
+        print("  OK — none.")
+
     print("\nCheck 3: no unmarked .docx under tests/ …")
     if docx_hits:
         failures += 1
@@ -289,20 +305,6 @@ def main(argv: list[str]) -> int:
             print(f"    {h}")
     else:
         print("  OK — every tests/ .docx carries a SYNTHETIC marker.")
-
-    # Issue #406 landed (the public repo is primary as of 2026-07-26), so this
-    # tier is HARD by default now. `--strict-org` is retained as an accepted
-    # no-op so any existing caller keeps working.
-    print("\nCheck 4: zero 'exos-legal' repo-identity references …")
-    if org_files:
-        failures += 1
-        print(f"  FAIL — {len(org_files)} file(s) still name the private org:")
-        for f in org_files[:40]:
-            print(f"    {f}")
-        print("  Derive the owner from context (e.g. github.repository_owner, a CDK")
-        print("  context value, or a host-supplied ${VAR}) instead of hard-coding it.")
-    else:
-        print("  OK — none.")
 
     if failures:
         print(f"\nBRAND-FREE LINT: FAIL ({failures} check(s) failed)")

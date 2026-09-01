@@ -7,9 +7,11 @@ mirror of #81's `scripts/primary_review_pass.py:run_primary_pass`.
 
 Implements ARCHITECTURE.md -> "Data flow -- a single review" step 16 (the
 critic half): invoke `critic_model_id` from the active model policy against
-the playbook, the standard-form diff, the anchored clause text, and the
-primary reviewer's output (never the raw counterparty document -- see
-ARCHITECTURE.md -> "Per-pass prompt manifest"). Every attempt is ledgered in
+the playbook, the standard-form diff, the anchored clause text, the
+counterparty document the primary pass read (issue #618 -- the original
+manifest withheld it, which stopped being defensible once issue #380 retired
+the standard-form diff and left the critic reasoning over the primary's JSON
+alone), and the primary reviewer's output. Every attempt is ledgered in
 a finally path, exactly like the primary pass. On schema failure, exactly
 ONE bounded structured-output retry; if the retry also fails,
 `status=ERROR_MANUAL_REVIEW_REQUIRED` -- ARCHITECTURE.md -> Two-pass review:
@@ -55,6 +57,7 @@ import replacement_text_enforcement as _rte  # noqa: E402
 # (issue #81's convention: each module owns its own copy of these small
 # shared sentinels; tests/test_critic_reconciliation_82.py cross-checks
 # against pp's copy, which is itself cross-checked against reviews.py).
+MAX_INPUT_TOKENS = pp.MAX_INPUT_TOKENS
 MAX_OUTPUT_TOKENS = pp.MAX_OUTPUT_TOKENS
 MAX_RETRIES_PER_PASS = pp.MAX_RETRIES_PER_PASS
 
@@ -62,13 +65,13 @@ MAX_RETRIES_PER_PASS = pp.MAX_RETRIES_PER_PASS
 def run_critic_pass(
     *,
     review_id: str,
-    diff_hunks: list[dict[str, Any]],
-    anchored_clauses: list[dict[str, Any]],
     primary_output: dict[str, Any],
     playbook: dict[str, Any],
     model_client: "_model_client.BedrockModelClient",
     model_id: str,
     ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],
+    doc_text: str = "",
+    max_input_tokens: int = MAX_INPUT_TOKENS,
     toaster_guidance: str = "",
     instructions_text: str = "",
     notes_mode: str = "external",
@@ -76,12 +79,31 @@ def run_critic_pass(
     max_retries: int = MAX_RETRIES_PER_PASS,
     system_blocks_override: list[dict[str, Any]] | None = None,
     playbook_hash_override: str | None = None,
+    output_schema_path: Path = pp.OUTPUT_SCHEMA_PATH,
     cancel_checkpoint: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run the adversarial critic pass end-to-end (data-flow step 16, critic
     half).
 
+    `output_schema_path` (issue #624): the same seam as
+    `primary_review_pass.run_primary_pass` -- see that function's own
+    identical argument. Defaults to `pp.OUTPUT_SCHEMA_PATH`
+    (`playbooks/output-schema-v3.json` since issue #627's hard cutover), the
+    ACTIVE contract, and feeds this pass's three schema seams (tool schema,
+    provider-projected schema, `pp.validate_model_response`) from one place.
+    A caller running the two passes against different artifacts would be
+    reconciling two different response shapes, so both passes take the
+    argument and neither derives it from the other.
+
     Returns one of:
+      {"status": "MANUAL_REVIEW_REQUIRED", "reason": "document_too_large", ...}
+        -- issue #618: the assembled critic prompt exceeded
+        `max_input_tokens`. The critic's own mirror of the primary pass's
+        step-14 gate (`primary_review_pass.run_primary_pass`), and like it
+        the single authoritative failure point for an oversized prompt: NO
+        model call is attempted. It matters more here than it looks, because
+        the critic prompt is the larger of the two -- it now carries the
+        document AND the primary's full structured output on top of it.
       {"status": "OK", "response": {...}, "attempts": N}
         -- schema-valid critic response obtained within the retry budget.
       {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "attempts": N, "last_error": ...}
@@ -102,6 +124,25 @@ def run_critic_pass(
     same standing instructions, and the same judged-NL Floor obligations the
     primary pass saw -- the critic can therefore catch a Floor violation, or
     a guidance/instructions conflict, the primary pass missed.
+
+    `doc_text` (issue #618, default `""`): the counterparty document text
+    the PRIMARY pass reviewed, verbatim -- `scripts/review_spine.py::
+    run_review` passes the identical string to both passes. Before this, the
+    critic reasoned over the primary's JSON alone: with issue #380's retired
+    standard-form diff, the `STANDARD_FORM_DIFF`/`ANCHORED_CLAUSES` blocks
+    arrived permanently empty, so the critic could not check a single one of
+    the primary's claims against the document they came from. Those two
+    blocks are gone entirely since issue #627 (see
+    `pp.assemble_user_prompt_primary` for why), which leaves this document
+    block as the critic's only evidence -- and the reason it is not
+    optional in practice. Default
+    `""` omits the block entirely (see
+    `pp.assemble_user_prompt_critic`), reproducing pre-#618 prompts exactly
+    for callers that pass no document.
+
+    `max_input_tokens` (issue #618, default `MAX_INPUT_TOKENS`): the
+    pre-call cap the assembled prompt is checked against -- see the
+    `document_too_large` return above.
 
     `notes_mode` (issue #520, epic #519 item A, default `"external"`): the
     audience this review's footnotes are written for. Accepted here and
@@ -133,13 +174,24 @@ def run_critic_pass(
     # Issue #418: same seam as run_primary_pass -- see that function's
     # identical comment. Resolved once, threaded into invoke() below ONLY
     # when set.
-    tool_spec = _mos.model_facing_output_schema() if _config.structured_output_enabled() else None
+    # Issue #522: `notes_mode` reaches both projections here for the same
+    # reason it does in run_primary_pass -- see that function's identical
+    # comment. The critic's own `critic_delta.added_issues` `$ref` the same
+    # `Issue` definition, so an added issue may carry an internal note in
+    # exactly the modes the primary pass may.
+    tool_spec = (
+        _mos.model_facing_output_schema(output_schema_path, notes_mode=notes_mode)
+        if _config.structured_output_enabled()
+        else None
+    )
 
     # Issue #567: same seam as run_primary_pass -- see that function's
     # identical comment. Resolved once from the SAME model_capabilities
     # above, threaded into invoke() below ONLY when set.
     output_schema = (
-        _mos.project_output_schema_for_provider()
+        _mos.project_output_schema_for_provider(
+            path=output_schema_path, notes_mode=notes_mode
+        )
         if (model_capabilities or {}).get("structured_outputs")
         else None
     )
@@ -151,6 +203,14 @@ def run_critic_pass(
     # states the same per-topic modes this enforcement judges it against.
     pen_rules_bundle = pp.resolve_pen_rules_bundle(playbook)
 
+    # Issue #627: OFF under a block-transcript contract, for exactly the
+    # reason and by exactly the seam the primary pass uses -- see
+    # `pp.authors_block_transcripts`. Both passes read the SAME artifact, so
+    # they cannot disagree about whether the model authors replacement text.
+    pass_time_replacement_text_enforcement_off = pp.authors_block_transcripts(
+        pp.load_output_schema(output_schema_path)
+    )
+
     system_blocks = (
         system_blocks_override
         if system_blocks_override is not None
@@ -160,9 +220,8 @@ def run_critic_pass(
     )
     system_prompt_text = pp.render_system_prompt(system_blocks)
     user_prompt = pp.assemble_user_prompt_critic(
-        diff_hunks=diff_hunks,
-        anchored_clauses=anchored_clauses,
         primary_output=primary_output,
+        doc_text=doc_text,
     )
     # Issue #267: same projection as the primary pass -- assemble_system_blocks
     # is the single shared seam, so this hash is identical to the primary
@@ -172,6 +231,22 @@ def run_critic_pass(
         if playbook_hash_override is not None
         else pp.projected_playbook_hash(pp.project_playbook_for_prompt(playbook))
     )
+
+    # Issue #618: the critic's mirror of the primary pass's step-14 gate --
+    # SAME `pp.assembled_prompt_tokens` measurement, SAME cap, SAME
+    # `document_too_large` token -- checked BEFORE any model call, so an
+    # oversized prompt costs nothing and fails closed instead of being
+    # rejected mid-flight by the provider. Fails closed rather than dropping
+    # the document: a critic silently critiquing a review of a document it
+    # was not shown is the outcome this gate exists to prevent.
+    assembled_tokens = pp.assembled_prompt_tokens(system_blocks, user_prompt)
+    if assembled_tokens > max_input_tokens:
+        return {
+            "status": "MANUAL_REVIEW_REQUIRED",
+            "reason": "document_too_large",
+            "assembled_tokens": assembled_tokens,
+            "max_input_tokens": max_input_tokens,
+        }
 
     attempts_allowed = 1 + max_retries
     last_error: Any = None
@@ -217,15 +292,21 @@ def run_critic_pass(
             raw_response = model_client.invoke(**invoke_kwargs)
             attempt_duration_ms = int((time.monotonic() - attempt_started_monotonic) * 1000)
             is_valid, parsed_or_error = pp.validate_model_response(
-                raw_response, issue_provenance="critic-added"
+                raw_response,
+                issue_provenance="critic-added",
+                schema_path=output_schema_path,
             )
             if is_valid:
                 # Issue #293 scope item 6: same post-validation
                 # replacement-text enforcement as the primary pass, reusing
                 # the SAME bounded-retry budget -- retry once, then demote
                 # the violating issue(s) to flag-only on the final attempt.
-                rt_failures = _rte.check_issues_replacement_text(
-                    _rte.collect_checkable_issues(parsed_or_error), pen_rules_bundle
+                rt_failures = (
+                    []
+                    if pass_time_replacement_text_enforcement_off
+                    else _rte.check_issues_replacement_text(
+                        _rte.collect_checkable_issues(parsed_or_error), pen_rules_bundle
+                    )
                 )
                 if rt_failures and attempt < attempts_allowed:
                     replacement_text_failures = [result.failure for _issue, result in rt_failures]

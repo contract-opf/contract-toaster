@@ -16,11 +16,9 @@ reads with:
 -- `text` only. On a real 30-paragraph target document (all 30 carrying a
 heading), 29 of 30 headings never appeared anywhere in `doc_text`, so the
 model reviewed the agreement's body with every clause title stripped, even
-though `INPUT_MODE_FULL_DOCUMENT` (the common case) sends `doc_text`
-straight into the `COUNTERPARTY_DOCUMENT` prompt block with no other
-heading channel at all (`primary_review_pass.py::assemble_user_prompt_
-primary` only reads `doc_paragraphs` -- and therefore headings -- in the
-degraded `INPUT_MODE_SECTION_OUTLINE` branch).
+though `primary_review_pass.py::assemble_user_prompt_primary` sends
+`doc_text` straight into the `COUNTERPARTY_DOCUMENT` prompt block with no
+other heading channel at all.
 
 This test file:
 
@@ -182,8 +180,7 @@ def test_untitled_sentinel_treated_as_no_heading(failures: list[str]) -> None:
     `normalize_paragraphs`/`extract_document_paragraphs`). Rendering that
     placeholder verbatim as a document heading on every untitled paragraph
     would be noise, not fidelity -- it should behave like no heading at
-    all, exactly like `primary_review_pass.render_section_outline`'s own
-    `"(untitled)"` fallback treats it as absent-of-a-real-title."""
+    all."""
     paragraphs = [{"heading": "<untitled>", "text": "Recital text with no heading."}]
     doc_text = review_spine.document_text_for_review(paragraphs)
     if "<untitled>" in doc_text:

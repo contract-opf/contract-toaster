@@ -62,6 +62,54 @@ Four gates, matching issue #513's acceptance criteria:
     in the fixture .docx, the PWA manifest, two infra stack headers, and a
     phase-0 issue doc through a prior fix round.
 
+## What issue #524 added (epic #519 item G)
+
+Issue #513 retired the framing; the rest of epic #519 then built the
+machinery the docs had been describing prematurely. Item G reconciles the
+two, and three more gates hold that reconciliation in place:
+
+  GATE 5 — RUNBOOK.md: the marker section states what a ship-ready
+    document actually CONTAINS, per notes mode
+    - names all four notes modes (`none`/`external`/`internal`/`both`) in
+      that section, with what each one puts in the delivered `.docx`
+    - says footnotes survive accept-all -- the `<w:footnoteReference>` sits
+      inside `<w:ins>`, so accepting all tracked changes PROMOTES a
+      footnote to body text rather than removing it. Without this, "accept
+      all and send" reads like a clean-copy procedure; it is not one.
+    - does not hand third-party counterparty paper a first-page cover
+      note: issue #629 moved that path onto the shared block compiler, so
+      it takes the header/footer placement like every other delivered
+      redline
+    - says the download filename carries no internal-notes signpost
+      (`backend/src/download.py::redline_filename_for` emits
+      `<stem>-redline.docx` in every mode; the filename half of epic #519
+      item E did not land -- `frontend/src/notesMode.ts` says so too)
+
+  GATE 6 — docs/threat-model.md: the leakage-scan categories describe
+    #522's machinery, and #521's citation decision is recorded
+    - the pre-#522 claim "Any rationale marked internal-only is held back
+      from the external-facing footnote" is gone: nothing filters an
+      internal-marked rationale out of the counterparty-facing footnote.
+      What shipped is a SEPARATE field (`internal_rationale_for_footnote`)
+      solicited only in `internal`/`both` and rendered only behind the
+      `[INTERNAL]` marking.
+    - records #521's decision at threat-model level: on the internal
+      channel `citation_leakage` PERMITS naming a past counterparty and
+      citing a past deal (`scripts/leakage_scan.py` check 3), which is a
+      statement about what an internal-notes artifact IS -- a document that
+      may carry a third party's confidential terms -- and the justification
+      for keeping the export marker at all.
+
+  GATE 7 — ARCHITECTURE.md: documented marker placement matches the code
+    path being described
+    - no "redundant export marker" framing: the marker is conditional on
+      the review's notes mode (`include_marker`), not belt-and-braces
+    - every "cover note" mention names the path that actually emits one
+      (the standalone writer / fixture generation). The live first-party
+      path (`redline_generate.inject_export_marker_and_footnotes`) emits
+      header + footer ONLY, so an unattributed cover-note claim is false
+      for every real redline.
+
 Exit codes: 0 = pass, 1 = fail
 """
 
@@ -403,6 +451,253 @@ def gate_4_additional_surfaces() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# GATE 5 — RUNBOOK.md: what a ship-ready document contains, per notes mode
+# ---------------------------------------------------------------------------
+
+# The RUNBOOK heading Gate 1 already requires. Gate 5's checks are scoped to
+# THAT section rather than the whole file: "the word `both` appears somewhere
+# in a 2,000-line runbook" proves nothing about the marker procedure, and the
+# operator reading this section must not have to hunt elsewhere for what the
+# document in their hands actually contains.
+RUNBOOK_MARKER_SECTION_SLICE = re.compile(
+    r"^###\s+(?:Internal.notes\s+marker|Export\s+marker|The\s+export\s+marker)[^\n]*\n"
+    r"(?P<body>(?:.|\n)*?)(?=^##\s|\Z)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Pattern R5b: footnotes survive accept-all (promoted to body text), so
+# "accept all changes and send it" is not a clean-copy procedure.
+RUNBOOK_ACCEPT_ALL_PROMOTION_PATTERN = re.compile(
+    r"accept(?:ing)?[- ]all(?:.|\n){0,300}(?:promot|does\s+not\s+remove|survive)"
+    r"|(?:promot|survive)(?:.|\n){0,300}accept(?:ing)?[- ]all",
+    re.IGNORECASE,
+)
+
+# Pattern R5c: the download filename is NOT a signpost. Documenting a
+# safeguard the pipeline does not apply is the failure this whole file
+# exists to prevent -- `backend/src/download.py::redline_filename_for`
+# returns `<stem>-redline.docx` in every notes mode.
+RUNBOOK_FILENAME_NOT_A_SIGNPOST_PATTERN = re.compile(
+    r"filename(?:.|\n){0,300}(?:no\s+signpost|carries\s+no|is\s+not\s+a\s+signpost"
+    r"|does\s+not\s+(?:say|signal|indicate|change))"
+    r"|(?:no\s+signpost|not\s+a\s+signpost)(?:.|\n){0,300}filename",
+    re.IGNORECASE,
+)
+
+# The four notes-mode ids, as the operator will see them written.
+_NOTES_MODE_IDS = ("`none`", "`external`", "`internal`", "`both`")
+
+
+def gate_5_runbook_ship_ready(runbook_text: str) -> list[str]:
+    """RUNBOOK.md's marker section must state what a ship-ready document
+    CONTAINS under each notes mode (issue #524) -- the marker alone does not
+    answer that, and the earlier procedure never mentioned footnotes at all
+    even though accept-all preserves them."""
+    failures: list[str] = []
+
+    match = RUNBOOK_MARKER_SECTION_SLICE.search(runbook_text)
+    if match is None:
+        return [
+            "  Gate R5: could not locate the RUNBOOK.md internal-notes marker section\n"
+            "  to check it (Gate 1 covers the heading itself)."
+        ]
+    section = match.group("body")
+
+    missing_modes = [mode for mode in _NOTES_MODE_IDS if mode not in section]
+    if missing_modes:
+        failures.append(
+            "  Gate R5a: RUNBOOK.md's marker section does not state, per notes mode,\n"
+            "  what the delivered .docx contains. Missing mode id(s): "
+            f"{', '.join(missing_modes)}.\n"
+            "  Required: all four modes (`none`, `external`, `internal`, `both`) with\n"
+            "  the footnotes and marker each one produces."
+        )
+
+    if "footnote" not in section.lower():
+        failures.append(
+            "  Gate R5b: RUNBOOK.md's marker section never mentions footnotes, so it\n"
+            "  does not say what the document actually carries -- the marker is a\n"
+            "  signpost for content the footnotes hold."
+        )
+    elif not RUNBOOK_ACCEPT_ALL_PROMOTION_PATTERN.search(section):
+        failures.append(
+            "  Gate R5b: RUNBOOK.md's marker section does not state that footnotes\n"
+            "  survive accept-all (the <w:footnoteReference> sits inside <w:ins>, so\n"
+            "  accepting all tracked changes PROMOTES the footnote to body text).\n"
+            "  Without it, 'accept all and send' reads like a clean-copy procedure.\n"
+            f"  Missing pattern: {RUNBOOK_ACCEPT_ALL_PROMOTION_PATTERN.pattern[:160]!r}"
+        )
+
+    # R5d: the cover-note placement belongs to the standalone writer. Issue
+    # #629 moved third-party counterparty paper onto the block compiler, so
+    # that path now takes the live header/footer placement -- a RUNBOOK
+    # sentence still handing third-party paper a first-page cover note sends
+    # the operator looking for a page that is not there.
+    for sentence in re.split(r"(?<=[.!?])\s+", section):
+        lowered_sentence = sentence.lower()
+        if "cover note" not in lowered_sentence or "third-party" not in lowered_sentence:
+            continue
+        if "629" in lowered_sentence or "until" in lowered_sentence:
+            continue  # an explicitly historical statement is fine
+        failures.append(
+            "  Gate R5d: RUNBOOK.md's marker section still attributes the first-page\n"
+            "  cover note to third-party counterparty paper. Issue #629 moved that\n"
+            "  path onto the block compiler (`generate_redline_from_blocks`), which\n"
+            "  takes the header/footer placement; only the standalone writer used for\n"
+            "  fixture generation appends a cover marker.\n"
+            f"  Offending sentence: {sentence.strip()[:200]!r}"
+        )
+
+    if not RUNBOOK_FILENAME_NOT_A_SIGNPOST_PATTERN.search(section):
+        failures.append(
+            "  Gate R5c: RUNBOOK.md's marker section does not say that the download\n"
+            "  filename carries no internal-notes signpost.\n"
+            "  backend/src/download.py::redline_filename_for emits <stem>-redline.docx\n"
+            "  in every notes mode; the filename half of epic #519 item E did not land.\n"
+            f"  Missing pattern: {RUNBOOK_FILENAME_NOT_A_SIGNPOST_PATTERN.pattern[:160]!r}"
+        )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# GATE 6 — docs/threat-model.md: #522's machinery, #521's citation decision
+# ---------------------------------------------------------------------------
+
+# The pre-#522 claim. It described a filter that never existed: nothing
+# takes a rationale "marked internal-only" and holds it back from the
+# external-facing footnote. Checked as a plain substring in both dash
+# spellings, like the retired marker strings above.
+_RETIRED_HOLDBACK_STRINGS = (
+    "Any rationale marked internal-only is held back from the external-facing footnote",
+    "any rationale marked internal only is held back from the external-facing footnote",
+)
+
+# Pattern T3: what actually shipped -- a separate internal field, solicited
+# only in `internal`/`both`, rendered only behind the `[INTERNAL]` marking.
+THREAT_INTERNAL_FIELD_MACHINERY_PATTERN = re.compile(
+    r"internal_rationale_for_footnote(?:.|\n){0,600}\[INTERNAL\]"
+    r"|\[INTERNAL\](?:.|\n){0,600}internal_rationale_for_footnote",
+)
+
+# Pattern T4: #521's citation decision, recorded as a threat-model statement
+# about the artifact rather than only as a comment in the scanner
+# (`scripts/leakage_scan.py` check 3 permits on the internal channel).
+THREAT_CITATION_DECISION_PATTERN = re.compile(
+    r"(?:may|can)\s+name\s+a\s+past\s+counterparty",
+    re.IGNORECASE,
+)
+
+# Pattern T5: and what that makes the artifact.
+THREAT_THIRD_PARTY_TERMS_PATTERN = re.compile(
+    r"third.part(?:y|ies)(?:’|')?s?\s+confidential"
+    r"|confidential\s+terms\s+of\s+a\s+third\s+part",
+    re.IGNORECASE,
+)
+
+
+def gate_6_threat_model_notes_machinery(threat_text: str) -> list[str]:
+    """docs/threat-model.md must describe the internal-notes machinery that
+    #522 actually built, and must record #521's citation decision (issue
+    #524)."""
+    failures: list[str] = []
+
+    lowered = threat_text.lower()
+    for retired in _RETIRED_HOLDBACK_STRINGS:
+        if retired.lower() in lowered:
+            failures.append(
+                "  Gate T3: docs/threat-model.md still claims "
+                f"{retired!r}.\n"
+                "  No such filter exists. #522 built a SEPARATE field\n"
+                "  (internal_rationale_for_footnote), solicited only in the\n"
+                "  `internal`/`both` notes modes and rendered only behind the\n"
+                "  [INTERNAL] marking -- internal content is requested to exist, never\n"
+                "  generated into a counterparty-bound field and filtered on the way out."
+            )
+
+    if not THREAT_INTERNAL_FIELD_MACHINERY_PATTERN.search(threat_text):
+        failures.append(
+            "  Gate T3: docs/threat-model.md does not describe the shipped machinery\n"
+            "  (internal_rationale_for_footnote rendered behind the [INTERNAL] marking).\n"
+            f"  Missing pattern: {THREAT_INTERNAL_FIELD_MACHINERY_PATTERN.pattern[:160]!r}"
+        )
+
+    if not THREAT_CITATION_DECISION_PATTERN.search(threat_text):
+        failures.append(
+            "  Gate T4: docs/threat-model.md does not record issue #521's citation\n"
+            "  decision -- that an internal note MAY name a past counterparty and cite\n"
+            "  a past deal (scripts/leakage_scan.py check 3 permits citation leakage on\n"
+            "  the internal channel). Today it lives only in the scanner's comments.\n"
+            f"  Missing pattern: {THREAT_CITATION_DECISION_PATTERN.pattern[:160]!r}"
+        )
+
+    if not THREAT_THIRD_PARTY_TERMS_PATTERN.search(threat_text):
+        failures.append(
+            "  Gate T5: docs/threat-model.md does not state what that decision makes\n"
+            "  the artifact -- an internal-notes document is a document that may carry\n"
+            "  a THIRD PARTY's confidential terms, which is the justification for\n"
+            "  keeping the export marker at all.\n"
+            f"  Missing pattern: {THREAT_THIRD_PARTY_TERMS_PATTERN.pattern[:160]!r}"
+        )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# GATE 7 — ARCHITECTURE.md: marker placement matches the path described
+# ---------------------------------------------------------------------------
+
+# Retired belt-and-braces framing: the marker was "redundant" (cover note
+# AND header AND footer) only while it was unconditional. Issue #513 made it
+# conditional on the review's notes mode.
+_ARCHITECTURE_REDUNDANT_MARKER_PHRASE = "redundant export marker"
+
+# A "cover note" claim is only true of the path that emits one. The live
+# first-party path (`redline_generate.inject_export_marker_and_footnotes`)
+# emits header + footer ONLY, so an unattributed cover-note sentence is
+# false for every real redline. Any of these tokens on the same line counts
+# as attribution.
+_COVER_NOTE_ATTRIBUTION_TOKENS = (
+    "standalone writer",
+    "fixture generation",
+    "include_marker",
+    "mock fixture",
+)
+
+
+def gate_7_architecture_marker_placement(architecture_text: str) -> list[str]:
+    """ARCHITECTURE.md must not describe the marker as redundant/
+    unconditional, and every cover-note mention must name the path that
+    actually emits a cover note (issue #524)."""
+    failures: list[str] = []
+
+    if _ARCHITECTURE_REDUNDANT_MARKER_PHRASE in architecture_text.lower():
+        failures.append(
+            "  Gate A1: ARCHITECTURE.md still calls the export marker "
+            f"{_ARCHITECTURE_REDUNDANT_MARKER_PHRASE!r}.\n"
+            "  It is conditional on the review's notes mode (`include_marker`, issue\n"
+            "  #513), not a belt-and-braces triple placement on every redline."
+        )
+
+    for lineno, line in enumerate(architecture_text.splitlines(), start=1):
+        if "cover note" not in line.lower():
+            continue
+        lowered_line = line.lower()
+        if not any(token in lowered_line for token in _COVER_NOTE_ATTRIBUTION_TOKENS):
+            failures.append(
+                f"  Gate A2: ARCHITECTURE.md line {lineno} claims a first-page cover\n"
+                "  note without naming the path that emits one. Only the standalone\n"
+                "  writer (fixture generation) appends a cover marker\n"
+                "  (redline_docx_writer._append_cover_marker); the live first-party\n"
+                "  path emits header + footer only, so an unattributed claim is false\n"
+                "  for every real redline.\n"
+                f"  Expected one of {_COVER_NOTE_ATTRIBUTION_TOKENS} on that line."
+            )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -421,6 +716,12 @@ def main() -> int:
     g2 = gate_2_output_contract(output_contract_text)
     g3 = gate_3_threat_model(threat_text)
     g4 = gate_4_additional_surfaces()
+    g5 = gate_5_runbook_ship_ready(runbook_text)
+    g6 = gate_6_threat_model_notes_machinery(threat_text)
+    try:
+        g7 = gate_7_architecture_marker_placement(read_text(ARCHITECTURE_PATH))
+    except FileNotFoundError as e:
+        g7 = [f"  {e}"]
 
     print(
         "Gate 1: RUNBOOK.md — internal-notes marker documented accurately "
@@ -472,14 +773,56 @@ def main() -> int:
         print("  PASS")
 
     print()
+    print(
+        "Gate 5: RUNBOOK.md — what a ship-ready document contains per notes "
+        "mode (four modes, footnotes survive accept-all, filename is not a "
+        "signpost)"
+    )
+    if g5:
+        for f in g5:
+            print(f)
+        all_failures.extend(g5)
+    else:
+        print("  PASS")
+
+    print()
+    print(
+        "Gate 6: docs/threat-model.md — describes #522's internal-notes "
+        "machinery; records #521's citation decision and what it makes the "
+        "artifact"
+    )
+    if g6:
+        for f in g6:
+            print(f)
+        all_failures.extend(g6)
+    else:
+        print("  PASS")
+
+    print()
+    print(
+        "Gate 7: ARCHITECTURE.md — marker is conditional, and every "
+        "cover-note claim names the path that emits one"
+    )
+    if g7:
+        for f in g7:
+            print(f)
+        all_failures.extend(g7)
+    else:
+        print("  PASS")
+
+    print()
     if all_failures:
         print(
             f"FAIL: {len(all_failures)} issue(s) found. "
-            "See issue #513 for the full remediation plan."
+            "See issue #513 (gates 1-4) and issue #524 (gates 5-7) for the "
+            "full remediation plan."
         )
         return 1
 
-    print("PASS: attorney-approval framing retired; export marker is conditional (issue #513).")
+    print(
+        "PASS: attorney-approval framing retired; export marker is conditional "
+        "(issue #513); docs match the notes-mode machinery that shipped (issue #524)."
+    )
     return 0
 
 

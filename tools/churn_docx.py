@@ -56,8 +56,8 @@ not to introduce randomness.
     (more than one pending cluster/author no longer fails closed).
   - `curly_punctuation` -- every straight `'`/`"`/` - ` in every `<w:t>` run
     becomes its Word-autocorrect typographic equivalent. Exercises
-    `quote_locate.py`'s `_TYPOGRAPHIC_FOLD` table (15 of 16 documents in the
-    real EIAA corpus carry curly punctuation -- see that module's
+    `scripts/text_fold.py`'s `TYPOGRAPHIC_FOLD` table (15 of 16 documents in
+    the real EIAA corpus carry curly punctuation -- see that module's
     docstring).
   - `split_paragraphs` -- the Definitions clause's three sentences become
     three sibling `<w:p>` elements instead of one. Exercises issue #564's
@@ -93,7 +93,7 @@ No LibreOffice round-trip transform -- `soffice` is not a repo dependency;
 see `docs/document-spine-smoke.md` for that as a manual, human-run extra.
 
 See also: `scripts/extraction_normalization_stage.py`,
-`scripts/quote_locate.py`, `scripts/redline_quote_apply.py`,
+`scripts/block_transcript.py`, `scripts/redline_block_apply.py`,
 `tests/fixtures/adversarial/` and `tests/test_reserved_namespace_prefix_
 560.py` for the same generated-fixture / zipfile+ElementTree conventions
 this module follows.
@@ -278,14 +278,15 @@ def _rewrite_document_xml(docx_bytes: bytes, mutate: Callable[[ET.Element], None
     tree in place), and reserializes -- every other zip part survives
     byte-for-byte, and every original root `xmlns` declaration survives too.
 
-    Same root-namespace-preservation technique `redline_quote_apply.
-    _rewrite_revision_dates` / `redline_generate.
-    inject_export_marker_and_footnotes` use (issue #560/#561): a straight
+    Same root-namespace-preservation technique the shared
+    `scripts/ooxml_util.py` helpers give every writer that rewrites
+    `word/document.xml` -- `redline_block_apply` among them (issue
+    #560/#561, extracted to one module by issue #621): a straight
     `ET.fromstring` -> mutate -> `ET.tostring` round trip silently drops any
     root `xmlns` declaration ElementTree does not see used, which is exactly
     what a python-docx base document's document.xml is full of (a dozen
     declared-but-unused drawing/VML namespaces). Reused via
-    `redline_inplace`, not reimplemented.
+    `redline_inplace`'s aliases onto `ooxml_util`, not reimplemented.
     """
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
         infos = zf.infolist()
@@ -406,7 +407,7 @@ def tracked_changes_multi_author(docx_bytes: bytes, *, seed: int = 0) -> bytes:
 
 
 # Word autocorrects a typed apostrophe/quote/dash to its typographic
-# equivalent -- see `scripts/quote_locate.py`'s `_TYPOGRAPHIC_FOLD` table
+# equivalent -- see `scripts/text_fold.py`'s `TYPOGRAPHIC_FOLD` table
 # docstring: 15 of 16 normalizable documents in the real EIAA corpus carry
 # curly punctuation. This transform reproduces exactly that encoding-only
 # divergence, nothing else.

@@ -32,19 +32,24 @@
  * caller's prop update round-trips back down — `.focus()` doesn't require
  * `tabindex="0"`, only the browser's native Tab-key cycle does.
  *
- * Multiple independent tablists (issue #477): App.tsx renders two of these
- * side by side (the primary Review/History row, and a labeled Admin group)
- * so the standard "wrap inside a labeled section" pattern beats an
- * eight-peer flat row wrapping an orphaned last tab. `active` is a single
- * id shared across both instances, so at most one instance ever has a tab
- * matching `active` at a time. `label` sets that instance's `aria-label`
- * (defaults to "Sections" — the pre-#477 value — so the primary row's
- * accessible name is unchanged). Roving tabindex still needs exactly one
- * `tabindex="0"` PER INSTANCE for the native Tab key to ever reach it: if
- * `active` belongs to the other group, none of this instance's tabs are
- * "selected", so `_renderTab` falls back to index 0 rather than leaving
- * every button at `tabindex="-1"` (which would silently drop the whole
- * group from the Tab order the first time a user hasn't visited it yet).
+ * Single flat instance (issue #599 REVERSES issue #477's two-tablist
+ * DECISION, per owner directive, 2026-08-20): App.tsx now renders exactly
+ * one `<ct-tab-bar>` — one ordered array of up to seven tabs, admin-only
+ * entries filtered out for a non-admin caller — instead of #477's primary
+ * row plus a separately labeled Admin group. `label` still sets this
+ * instance's `aria-label` (defaults to "Sections", App.tsx's only value).
+ * A wide flat row risking an orphaned last tab, the worry #477 answered
+ * with a second tablist, is instead handled by this element's own
+ * `flex-wrap: wrap` (`ct-tab-bar.css`; see `frontend/scripts/layout-audit.mjs`
+ * check 3), which lets the row wrap onto a second line at narrow widths.
+ *
+ * The roving-tabindex fallback below still matters with a single instance:
+ * `active` can name a tab this instance isn't currently rendering — e.g. a
+ * non-admin caller's hash still resolves to an admin-only id (`tabFromHash`
+ * doesn't consult `isAdmin`) even though `tabs` has already filtered that
+ * id out. `_renderTab` falls back to `tabindex="0"` on index 0 in that
+ * case rather than leaving every button at `tabindex="-1"`, which would
+ * silently drop the whole tablist from the Tab order.
  */
 import { LitElement, html, type PropertyValues } from 'lit';
 import { defineOnce } from '../define';
@@ -96,10 +101,10 @@ export class CtTabBar extends LitElement {
   }
 
   render() {
-    // No tab in this instance is `active` when `active` belongs to the
-    // other tablist (see the class docstring) — fall back to treating
-    // index 0 as the roving-tabindex stop so this group stays reachable
-    // by Tab even before the user has visited it.
+    // No tab in `tabs` matches `active` when the caller's active id names a
+    // tab this instance isn't rendering (see the class docstring) — fall
+    // back to treating index 0 as the roving-tabindex stop so this tablist
+    // stays reachable by Tab rather than dropping out of it entirely.
     const hasActiveInGroup = this.tabs.some((t) => t.id === this.active);
     return html`
       <div class="ct-tab-bar__track" role="tablist" aria-label=${this.label} @keydown=${this._onKeyDown}>

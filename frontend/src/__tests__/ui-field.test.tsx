@@ -133,4 +133,67 @@ describe('CtField', () => {
     await expect(import('../ui/react')).resolves.toBeDefined();
     await expect(import('../ui/components/ct-field')).resolves.toBeDefined();
   });
+
+  // Issue #601: `narrow` is a reflected Lit boolean property (unlike
+  // label/hint/error's hand-rolled accessors above), so it drives no
+  // synchronous DOM build — only the `ct-field[narrow]` CSS attribute
+  // selector ct-field.css reads (unverifiable under `css: false`, §3.2/§10).
+  // What's asserted here is the attribute-reflection contract itself: off
+  // by default, present when set, gone when unset — that's the DOM fact the
+  // CSS selector depends on existing at all.
+  it('reflects `narrow` as a boolean attribute, off by default', async () => {
+    const { rerender } = render(
+      <CtField label="Days">
+        <input data-testid="ctl" type="number" />
+      </CtField>,
+    );
+    const host = document.querySelector('ct-field') as HTMLElement & { updateComplete: Promise<unknown> };
+    await host.updateComplete;
+    expect(host).not.toHaveAttribute('narrow');
+
+    rerender(
+      <CtField label="Days" narrow>
+        <input data-testid="ctl" type="number" />
+      </CtField>,
+    );
+    await host.updateComplete;
+    expect(host).toHaveAttribute('narrow');
+
+    rerender(
+      <CtField label="Days">
+        <input data-testid="ctl" type="number" />
+      </CtField>,
+    );
+    await host.updateComplete;
+    expect(host).not.toHaveAttribute('narrow');
+  });
+
+  // Issue #601 fix round 2: the assertions above go through the JSX/React
+  // prop path, which React's own attribute passthrough can satisfy even if
+  // ct-field.ts declares no `narrow` property at all (@lit/react only
+  // routes a prop to the element *property* when it's `in` the prototype;
+  // otherwise React stamps it on as a plain attribute regardless of Lit).
+  // The gallery drives `narrow` imperatively instead
+  // (`gallery/sections.ts`: `f.narrow = true`), so assert through that path
+  // directly: it fails on a tree with the `narrow` property removed, and
+  // only passes when ct-field.ts actually declares & reflects the property.
+  it('reflects `narrow` as a boolean attribute when set via the element property directly', async () => {
+    const host = document.createElement('ct-field') as HTMLElement & {
+      narrow: boolean;
+      updateComplete: Promise<unknown>;
+    };
+    document.body.appendChild(host);
+    await host.updateComplete;
+    expect(host).not.toHaveAttribute('narrow');
+
+    host.narrow = true;
+    await host.updateComplete;
+    expect(host).toHaveAttribute('narrow');
+
+    host.narrow = false;
+    await host.updateComplete;
+    expect(host).not.toHaveAttribute('narrow');
+
+    host.remove();
+  });
 });

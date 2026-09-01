@@ -93,6 +93,7 @@ import io
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -433,6 +434,16 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     if body is None:
         return []
 
+    # Physical-paragraph IDENTITY, carried alongside the text (issue #621
+    # fix round 1). `docx_editor` numbers paragraphs by minidom's
+    # `getElementsByTagName("w:p")` -- preorder over the WHOLE part -- so
+    # `p_index` here is that numbering minus one, and a writer holding a
+    # normalized paragraph can address the exact `<w:p>` it came from
+    # instead of scanning the live document for the first `<w:p>` whose
+    # text happens to be equal (which slides onto a LATER duplicate the
+    # moment a paragraph fails to match itself).
+    p_index_by_element = {id(el): index for index, el in enumerate(root.iter(_w("p")))}
+
     logical: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
 
@@ -464,7 +475,11 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
             # function's docstring for why siblings must not be merged
             # before normalization.
             current["physical_paragraphs"].append(
-                {"text": record["text"], "revisions": record["revisions"]}
+                {
+                    "text": record["text"],
+                    "revisions": record["revisions"],
+                    "p_index": p_index_by_element[id(p_el)],
+                }
             )
 
     _flush()
@@ -475,12 +490,13 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 # Accept-all materialization (issue #563)
 #
 # `normalize_paragraphs` (below) accepts a paragraph's pending tracked
-# changes in TEXT SPACE ONLY -- the `resulting_text` the model reads and
-# `quote_locate` searches. The uploaded `.docx` bytes themselves still carry
-# the raw `<w:ins>`/`<w:del>` markup at that point. `materialize_accept_all`
+# changes in TEXT SPACE ONLY -- the `resulting_text` the model reads and a
+# block transcript is proven against. The uploaded `.docx` bytes themselves
+# still carry the raw `<w:ins>`/`<w:del>` markup at that point.
+# `materialize_accept_all`
 # closes that gap: it applies the SAME accept-all disposition directly to
 # `word/document.xml`, so a caller (`scripts/review_spine.py`) can thread ONE
-# canonical, already-accepted document through quote-locate, patch-apply, and
+# canonical, already-accepted document through block-mapping, patch-apply, and
 # the delivered redline, rather than text-space and byte-space ever
 # disagreeing about what "the document" says.
 # ---------------------------------------------------------------------------
@@ -555,10 +571,12 @@ def materialize_accept_all(docx_bytes: bytes) -> bytes:
 
     This is issue #563's physical half of accept-all: `normalize_paragraphs`
     already accepts a paragraph's pending changes in TEXT SPACE (the
-    `resulting_text` the model reads and `quote_locate` searches); this
+    `resulting_text` the model reads and a block transcript is proven
+    against); this
     function applies the identical disposition to the BYTES, so a caller
-    threading its output through `redline_generate.generate_redline`'s
-    `normalized_docx_bytes` gets `redline_quote_apply.apply_quote_patches`
+    threading its output through
+    `redline_generate.generate_redline_from_blocks`'s
+    `normalized_docx_bytes` gets `redline_block_apply.apply_block_transcript`
     operating on a document that already carries no pending markup of its
     own -- only the toaster's own new redline lands on top of it, matching
     this issue's decided product posture ("the redline is delivered ON the
@@ -651,6 +669,68 @@ def materialize_accept_all(docx_bytes: bytes) -> bytes:
 # Normalization (delegates the documented rule to normalize_input.py)
 # ---------------------------------------------------------------------------
 
+#: Format of a logical-paragraph block id (issue #619): `p` + the 1-based
+#: document-order position, zero-padded to four digits (`p0001`, `p0042`).
+#: Four digits is a display width, not a ceiling -- position 10000 simply
+#: renders as `p10000` and stays unique and ordered.
+BLOCK_ID_FORMAT = "p%04d"
+
+
+def _block_id(position: int) -> str:
+    """The block id for a 1-based logical-paragraph position. Single
+    definition so the id format can never drift between the stamping site
+    and any reader (issue #619)."""
+    return BLOCK_ID_FORMAT % position
+
+
+def build_block_map(
+    normalized_paragraphs: list[dict[str, Any]],
+) -> "OrderedDict[str, dict[str, Any]]":
+    """
+    Addressing view over `normalize_paragraphs`' logical-paragraph records
+    (issue #619): an ORDERED mapping `block_id -> {"text", "heading",
+    "physical_spans", "index"}`, in document order.
+
+    This is the lookup half of the block-addressing foundation for
+    model-authored redline transcripts (Candidate E): the model names a
+    `block_id` and a reader resolves it here, instead of having to prove a
+    document-wide-unique quote.
+
+    `index` is the 0-based position of the record in
+    `normalized_paragraphs` -- i.e. `int(block_id[1:]) - 1` for ids this
+    module stamped -- so a caller holding only the map can still index back
+    into the paragraph list it was built from. `physical_spans` is the
+    record's own span list (issue #564), passed through unchanged: this
+    function never re-derives spans, and a block's `text`/`heading` are the
+    record's own values, so `build_block_map(paras)[bid]["text"]` is always
+    exactly that paragraph's `text`.
+
+    Fails closed rather than inventing addressing: a record with no
+    `block_id`, or a duplicate id, raises `ValueError`. A block map is only
+    trustworthy if it is 1:1 with the paragraphs it addresses.
+    """
+    block_map: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+    for index, paragraph in enumerate(normalized_paragraphs):
+        block_id = paragraph.get("block_id")
+        if not block_id:
+            raise ValueError(
+                f"normalized paragraph at index {index} carries no block_id; "
+                "block ids are stamped by normalize_paragraphs() and must not "
+                "be stripped downstream."
+            )
+        if block_id in block_map:
+            raise ValueError(
+                f"duplicate block_id {block_id!r} at index {index}: block ids "
+                "must be 1:1 with logical paragraphs."
+            )
+        block_map[block_id] = {
+            "text": paragraph.get("text", ""),
+            "heading": paragraph.get("heading", "<untitled>"),
+            "physical_spans": paragraph.get("physical_spans", []),
+            "index": index,
+        }
+    return block_map
+
 
 def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]:
     """
@@ -661,12 +741,24 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
 
     Unlike `normalize_input.normalize()`, this does NOT flatten the result
     into one joined `clean_body` string -- it returns a structured
-    paragraph list, `[{"heading": ..., "text": ..., "physical_spans": [...]},
-    ...]`, matching the `scripts/diff_standard_form.py` / `backend/src/
-    corpus.py` draft-input contract (see module docstring), so each
-    paragraph stays independently anchorable downstream. `physical_spans`
-    is ADDITIVE (issue #564): existing readers of `heading`/`text` alone
-    are unaffected.
+    paragraph list, `[{"heading": ..., "text": ..., "physical_spans": [...],
+    "block_id": ...}, ...]`, matching the `scripts/diff_standard_form.py` /
+    `backend/src/corpus.py` draft-input contract (see module docstring), so
+    each paragraph stays independently anchorable downstream.
+    `physical_spans` is ADDITIVE (issue #564) and so is `block_id` (issue
+    #619): existing readers of `heading`/`text` alone are unaffected.
+
+    `block_id` is an IMMUTABLE, CODE-ASSIGNED address for the logical
+    paragraph -- `BLOCK_ID_FORMAT % position`, 1-based over the logical
+    paragraphs in document order (`p0001`, `p0002`, ...). It is assigned
+    exactly once per review, here, from the materialized bytes, and is
+    never reused for a different paragraph and never renumbered downstream:
+    everything after this stage treats it as an opaque handle. This is the
+    addressing foundation for model-authored redline transcripts, where a
+    block is named by id instead of by a quote that must be proven
+    document-wide unique. `build_block_map()` (above) is the lookup view.
+    Because a document normalizes all-or-nothing (below), the ids are dense
+    and gapless whenever any are returned at all.
 
     A document normalizes iff every paragraph normalizes -- one
     un-normalizable paragraph fails the whole document closed, same
@@ -683,22 +775,34 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     joined together AFTER each has normalized on its own.
 
     Sibling clean texts are joined with `"\\n"` (issue #564; was `" "`
-    before this issue) -- `scripts/quote_locate.py`'s whitespace-collapse
-    matcher treats a newline exactly like a space, so this changes no
+    before this issue) -- `scripts/text_fold.py`'s whitespace-collapse
+    fold treats a newline exactly like a space, so this changes no
     matching outcome, but it makes the physical-paragraph join visible in
     TEXT space, distinct from the `"\\n\\n"` a caller (`review_spine.py`)
     uses to join separate LOGICAL paragraphs together. `physical_spans` is
     the `[start, end)` character range each physical paragraph's own clean
     text occupies in the joined `text`, in order -- concatenating
     `text[s:e]` for each span with `"\\n"` between reconstructs `text`
-    exactly. This is what lets `quote_locate.py` (issue #564) tell a quote
-    that stays within one physical `<w:p>` (`docx_editor` can turn it into
-    a tracked change) from one that spans a join (located, but nowhere for
-    `docx_editor` -- which edits PHYSICAL paragraphs -- to write the edit).
+    exactly. This is what lets `scripts/redline_block_apply.py` (issue
+    #564) tell an edit span that stays within one physical `<w:p>` (it can
+    be written as a tracked change) from one that spans a join (proven, but
+    nowhere for a PHYSICAL-paragraph writer to put the edit --
+    `spans_physical_paragraph`).
     A physical paragraph whose own clean text is empty (e.g. one entirely
     inside a `<w:ins>` still pending, or a hidden-text-only paragraph)
     contributes no entry to `physical_spans` and no `"\\n"` join, same as
     it always contributed nothing to the joined text.
+
+    `physical_p_indexes` is the IDENTITY list parallel to `physical_spans`
+    (issue #621 fix round 1): entry i is the `<w:p>` position (0-based, in
+    the part's preorder `w:p` numbering -- `docx_editor`'s own numbering
+    minus one) that span i's clean text came from. A writer resolving a
+    block back onto the live document uses this instead of scanning for the
+    first `<w:p>` whose text is equal: the normalizer's clean text is
+    `.strip()`ped and drops hidden text, so a paragraph can fail to match
+    itself, and a forward text scan then slides onto a LATER paragraph with
+    the same text and writes the edit into the wrong clause. An entry is
+    None when `raw_paragraphs` was hand-built without `p_index`.
 
     Returns:
       {"status": "normalized", "paragraphs": [...],
@@ -718,6 +822,7 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
         physical_paragraphs = paragraph.get("physical_paragraphs", [])
 
         clean_texts: list[str] = []
+        clean_p_indexes: list[Any] = []
         paragraph_failed = False
         for physical in physical_paragraphs:
             result = normalize_input._normalize_paragraph(
@@ -733,6 +838,7 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
                 continue
             if result["clean_text"]:
                 clean_texts.append(result["clean_text"])
+                clean_p_indexes.append(physical.get("p_index"))
             if result.get("note"):
                 accept_notes.append(result["note"])
 
@@ -747,7 +853,24 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
             pos += len(clean_text) + 1  # +1 for the "\n" join just written
 
         clean_paragraphs.append(
-            {"heading": heading, "text": text, "physical_spans": physical_spans}
+            {
+                "heading": heading,
+                "text": text,
+                "physical_spans": physical_spans,
+                # Identity, parallel to `physical_spans` (issue #621 fix
+                # round 1): the `<w:p>`'s own 0-based position in the part's
+                # preorder `w:p` numbering, carried through from
+                # `extract_document_paragraphs`. An entry is None when the
+                # caller hand-built raw paragraphs without `p_index`, which a
+                # writer must treat as "no identity" and fail closed on
+                # rather than fall back to matching text.
+                "physical_p_indexes": clean_p_indexes,
+                # Immutable, code-assigned block id (issue #619). 1-based
+                # document order over LOGICAL paragraphs, zero-padded to
+                # four digits. Assigned exactly once per review, from the
+                # materialized bytes; never reused, never renumbered.
+                "block_id": _block_id(len(clean_paragraphs) + 1),
+            }
         )
 
     if fail_notes:

@@ -95,7 +95,6 @@ def _make_docx(paragraphs: list[str]) -> bytes:
 def _accept_response(verdict_summary: str) -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -106,29 +105,81 @@ def _accept_response(verdict_summary: str) -> str:
     )
 
 
+_DOC_B_REPLACEMENT_TEXT = "Liability shall be capped at $150,000 in the aggregate."
+
+
+def _doc_b_transcript() -> dict:
+    """docB's liability edit, transcribed against the document's real
+    blocks (issue #627).
+
+    Note the shape this derivation reveals and a hand-written fixture would
+    have got wrong: docB's two paragraphs carry no heading between them, so
+    `normalize_paragraphs` joins them into ONE logical block. The transcript
+    therefore has to keep the header sentence, delete the liability
+    sentence, and keep whatever follows -- a patch addressed at "the second
+    paragraph" would name a block that does not exist.
+    """
+    import extraction_normalization_stage as ens
+
+    docx_bytes = _make_docx([_DOC_B_HEADER_TEXT, _DOC_B_FINDING_TEXT])
+    normalized = ens.extract_and_normalize(docx_bytes)
+    assert normalized["status"] == "normalized", normalized
+    for block_id, block in ens.build_block_map(normalized["paragraphs"]).items():
+        text = block["text"]
+        if _DOC_B_FINDING_TEXT in text:
+            at = text.index(_DOC_B_FINDING_TEXT)
+            segments = [{"op": "keep", "text": text[:at]}] if at else []
+            segments.append(
+                {"op": "delete", "text": _DOC_B_FINDING_TEXT, "issue_key": "I1"}
+            )
+            segments.append(
+                {"op": "insert", "text": _DOC_B_REPLACEMENT_TEXT, "issue_key": "I1"}
+            )
+            tail = text[at + len(_DOC_B_FINDING_TEXT):]
+            if tail:
+                segments.append({"op": "keep", "text": tail})
+            return {"block_id": block_id, "segments": segments}
+    raise AssertionError("docB no longer carries the liability paragraph")
+
+
 def _request_change_response(verdict_summary: str) -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [
                 {
+                    "issue_key": "I1",
                     "section_ref": "sec-1",
                     "section_title": "Limitation on Liability",
-                    "counterparty_change_summary": "Counterparty removed the liability cap.",
+                    # Carries SENTINEL_FINDING (issue #627): under v2 the
+                    # sentinel reached `findings` through the issue's
+                    # `source_quote`, and v3 removed that field -- the
+                    # document's own characters now live in the transcript,
+                    # which is not part of the RESULT the dump serializes.
+                    # Part 5 below still has to prove `--dump-dir` writes
+                    # per-issue substance and the report does not, so the
+                    # sentinel moves to a substance field the result really
+                    # carries.
+                    "counterparty_change_summary": (
+                        f"Counterparty removed the liability cap ({SENTINEL_FINDING})."
+                    ),
                     "decision": "REQUEST_CHANGE",
                     "external_rationale_for_footnote": "Standard liability cap applies.",
-                    "proposed_replacement_text": (
-                        "Liability shall be capped at $150,000 in the aggregate."
-                    ),
                     "playbook_topic_id": "limitation-of-liability",
                     "internal_precedent_citation": None,
                     "provenance": "model",
-                    "source_quote": _DOC_B_FINDING_TEXT,
+                    "replacement_scope_note": (
+                        "The clause states unlimited liability outright, so the "
+                        "cap cannot be added by a local repair."
+                    ),
                 }
             ],
+            # Issue #627: the edit as a block transcript over docB's own
+            # paragraph, id and source text both derived from the fixture.
+            "block_patches": [_doc_b_transcript()],
+            "block_ops": [],
             "critic_delta": None,
             "verdict_summary": verdict_summary,
         }
@@ -138,7 +189,6 @@ def _request_change_response(verdict_summary: str) -> str:
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -152,7 +202,6 @@ def _critic_no_delta_response() -> str:
 def _critic_accept_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_state": "OK",
             "confidence_band": None,
@@ -185,7 +234,6 @@ _INVALID_JSON_RAW_FRAGMENT = "Expecting value"
 def _schema_invalid_primary_response() -> str:
     return json.dumps(
         {
-            "schema_version": "output-schema-v1",
             "decision": "ACCEPT",
             "confidence_band": None,
             "issues": [],

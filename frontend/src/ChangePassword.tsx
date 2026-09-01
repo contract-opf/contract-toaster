@@ -24,10 +24,20 @@ import { CtBanner, CtButton, CtCard, CtField } from './ui/react';
 
 const CHANGE_PASSWORD_FALLBACK = "We couldn't change your password. Please try again.";
 
+/**
+ * `controlId` (issue #603) lands on whichever root this renders — the
+ * "Change password" button when closed, the form card when open — so it is
+ * a STABLE fragment target in both states. The default-password warning now
+ * sits at the foot of the page, far from this control, and links here; an id
+ * that vanished the moment the form opened would be a broken link half the
+ * time.
+ */
 export default function ChangePassword({
   onChanged,
+  controlId,
 }: {
   onChanged: () => void;
+  controlId?: string;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -75,6 +85,7 @@ export default function ChangePassword({
   if (!open) {
     return (
       <CtButton
+        id={controlId}
         type="button"
         variant="ghost"
         data-testid="change-password-open"
@@ -90,7 +101,7 @@ export default function ChangePassword({
   }
 
   return (
-    <CtCard pad="md" data-testid="change-password-form">
+    <CtCard id={controlId} pad="md" data-testid="change-password-form">
       <form onSubmit={(event) => void handleSubmit(event)}>
         <CtField label="Current password">
           <input

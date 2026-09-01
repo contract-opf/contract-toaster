@@ -55,7 +55,7 @@ const INERT_SELECTION = {
   model_provider: 'openrouter',
   selectable: [],
   default_primary: {
-    model_id: 'anthropic/claude-opus-4.8',
+    model_id: 'anthropic/claude-opus-5',
     cost_per_million_input_usd: 5,
     cost_per_million_output_usd: 25,
   },
@@ -68,7 +68,7 @@ const INERT_SELECTION = {
   pricing_basis_critic: { input_tokens: 70000, output_tokens: 5000 },
   selected_primary_model_id: '',
   selected_critic_model_id: '',
-  effective_primary_model_id: 'anthropic/claude-opus-4.8',
+  effective_primary_model_id: 'anthropic/claude-opus-5',
   effective_critic_model_id: 'anthropic/claude-sonnet-4.6',
   primary_source: 'default',
   critic_source: 'default',

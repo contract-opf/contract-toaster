@@ -1,6 +1,31 @@
 /**
- * AdminPlaybooks — the playbook lifecycle admin surface (issue #434,
- * docs/frontend-design-system.md §15.1).
+ * AdminPlaybooks — the merged Playbooks admin screen (issue #605), covering
+ * both playbook LIFECYCLE (issue #434, docs/frontend-design-system.md
+ * §15.1: upload, activate, roll back, rename, remove, per-version notes)
+ * and, since #605, each playbook's standing INSTRUCTIONS (issue #484,
+ * `AdminInstructions.tsx` — now rendered here instead of its own tab).
+ *
+ * ## The merge (issue #605)
+ *
+ * Owner-confirmed 2026-08-22: the two screens are about one object, a
+ * playbook, and installing one then writing its standing instructions used
+ * to mean crossing tabs, with the instructions tab's own selector
+ * duplicating this table. Per the confirmed scope, this screen now reads
+ * top to bottom as: the playbook list (below) → the version history →
+ * the selected playbook's standing instructions (`<AdminInstructions>`,
+ * new) → the upload forms, LAST.
+ *
+ * SUPERSEDED IN PART: #605 made a row's "Version history" action the single
+ * selection driving both the version-history table and the instructions pane.
+ * #598 then moved version history into an overlay and #611 gave standing
+ * instructions their own row action, so those are now two selections with two
+ * controls — see the sections on both below, and `selectPlaybook` /
+ * `showHistoryFor`.
+ *
+ * Destructive lifecycle actions (Remove, Activate, Roll back) all live
+ * above the instructions pane, in their own cards, never sharing one with
+ * the text box an admin types standing guidance into — the spatial
+ * separation the confirmation comment called for.
  *
  * The catalog had no administration UI at all: the backend routed upload,
  * activate, roll back, rename, remove, and per-version notes (issues #242 /
@@ -50,6 +75,31 @@
  *      never pretends otherwise. The server's own refusal message is
  *      surfaced verbatim rather than replaced with a generic failure
  *      string.
+ *
+ *      Issue #594: the one row that must NOT offer approval is one that is
+ *      already `active` and was never approved. Only the deploy seed can
+ *      produce that — `seed_shipped_playbook` bypasses Gate 7 deliberately
+ *      (see sample_playbooks.py) — and on such a row approval is not a
+ *      precondition for anything, because the version is already live.
+ *      The button is withdrawn there, and replaced by a note that SAYS the
+ *      version went live unapproved. Hiding the button without saying so
+ *      would leave this audit surface implying the live playbook had been
+ *      approved. Backfilling an approval at seed time was rejected outright:
+ *      `record_legal_approval`'s own docstring refuses it, and fabricating a
+ *      record for bytes nobody with legal authority reviewed widens the
+ *      bypass rather than honoring it.
+ *
+ *      Issue #595: approval and activation are now ONE control,
+ *      "Approve & activate". Approval was always the precheck activation
+ *      requires, so two clicks for one decision bought nothing. What Gate 7
+ *      protects survives untouched: an explicit human act, naming the exact
+ *      bytes, recorded in the audit trail, DISTINCT FROM UPLOAD. Merging
+ *      upload → approve would have destroyed it (an upload would then be
+ *      self-approving — `record_legal_approval`'s docstring says so
+ *      outright) and is not done. A version that is already approved but
+ *      not active keeps a plain Activate that calls only the activate
+ *      route, so rolling forward to a previously-approved version never
+ *      demands re-approval.
  *   2. **Rollback only accepts a `retired` target.** `rollback_playbook_version`
  *      rejects a version that was never active ("rolling back to a version
  *      that was never active is just a (second) activation"). Since only
@@ -58,13 +108,105 @@
  *      active row offers no Roll back button at all (hidden, not disabled;
  *      issue #476) rather than a dead one with nowhere to go. The backend's
  *      409 is still the authority and is rendered verbatim if it disagrees.
- *   3. **Creating a playbook never takes an operator-typed identifier.**
+ *   3. **Installing a playbook never takes an operator-typed identifier —
+ *      not the playbook_id, and since issue #597 not the version either.**
  *      `POST /api/admin/playbooks` (issue #485) derives the new
  *      playbook_id from the uploaded OPF document's own `agreement_type.id`
- *      — the create form has no playbook_id field at all, only a file and a
- *      version identifier, and the derived id is read back from the
- *      response and shown to the admin (and used to select that playbook's
- *      version history) rather than guessed client-side.
+ *      — the "Upload a new playbook" form has no playbook_id field at all,
+ *      and the derived id is read back from the response and shown to the
+ *      admin (and used to select that playbook's version history) rather
+ *      than guessed client-side.
+ *
+ *      Issue #597 finished the job: the VERSION identifier is now read out
+ *      of the artifact too (`opfIdentity.ts`, owner decision 2026-08-22 —
+ *      `identity.version` when the document declares one, otherwise
+ *      upload-date + `content_hash` prefix), displayed read-only BEFORE
+ *      submit, and never editable. So this form now has exactly two operator
+ *      inputs: the file, and a free-text Note. Everything identifying is
+ *      read from the bytes. A file carrying no derivable identity is refused
+ *      here with an explanation rather than falling back to a typed value —
+ *      prefill-but-editable (option b) was considered and rejected by the
+ *      owner. The "Upload version" form for an EXISTING playbook still asks
+ *      for a typed identifier; #597 put that in a follow-up on purpose, so
+ *      both screens derive identically once the rule settled here.
+ *
+ * ## Version history is an overlay, and row actions are a group (issue #598)
+ *
+ * Two presentation defects the owner hit on the live screen. Version history
+ * used to expand INLINE beneath the playbook list — a whole second table that
+ * pushed the page down and left them unsure what they were looking at
+ * ("version history should maybe be in a, like, an overlay window"). And the
+ * Actions cell rendered three full-size buttons which, in a narrow table
+ * column, wrapped one per line, so a two-row table read as a wall of six with
+ * the one-way door carrying the same weight as Rename ("it's like a stack of
+ * jumbley buttons").
+ *
+ * The overlay is LOCAL to this screen: CTDS has no dialog primitive and #598
+ * says not to invent a shared one here. If a second consumer ever appears,
+ * that is the moment to promote `.ct-overlay` to a `ct-dialog` component.
+ *
+ * It is a `div[role=dialog][aria-modal]` with hand-written focus management
+ * rather than a native `<dialog>` + `showModal()`, because jsdom implements
+ * no `showModal` at all — a native dialog would have made the role, the
+ * Escape handling and the focus return untestable, which is precisely the
+ * wrong trade for a brand-new overlay surface. It renders in the same DOM
+ * position the inline panel occupied, so the top-to-bottom reading order
+ * #605 established survives for anything walking the document.
+ *
+ * `historyPlaybookId` is deliberately its OWN state rather than a reuse of
+ * `selectedPlaybookId`: selection also drives the standing-instructions pane
+ * (#605), and those stopped being the same question the moment history became
+ * dismissible. Closing the overlay leaves the selection — and the instructions
+ * pane — exactly where they were.
+ *
+ * ## Standing instructions are discoverable (issue #611)
+ *
+ * Two regressions #605's merge introduced, caught in its own independent
+ * review. Standing instructions became reachable ONLY through a button
+ * labelled "Version history" — and once #598 made that button open a modal,
+ * the label was not merely vague, it pointed somewhere else. And #484's "one
+ * playbook installed: preselected and quiet" was lost, so a single-playbook
+ * deployment had to hunt behind that mislabelled button for its own guidance.
+ *
+ * The two jobs that button was doing are now split. "Version history" opens
+ * the overlay and nothing else; a sibling "Standing instructions" action
+ * chooses whose guidance the pane below shows, and opens nothing. Opening one
+ * playbook's trail while another's guidance is on screen is an ordinary thing
+ * to do and no longer switches both.
+ *
+ * The restored auto-select is NARROWER than #484's original, which defaulted
+ * to the FIRST playbook however many were installed. With two or more, a
+ * guess renders one playbook's standing guidance under a heading naming
+ * another — and a Save from that state writes it there. Standing instructions
+ * steer every review run against a playbook, which is exactly the blast
+ * radius #605's own "case against" section warned about. So: exactly one
+ * installed, preselect it; more than one, ask.
+ *
+ * ## Two-column layout (issue #609, the AdminPlaybooks split of #602)
+ *
+ * Two pairs, and only two, use `ct-columns` (#601): the "upload a version"
+ * form's two short fields (which playbook / which version), and the "upload a
+ * new playbook" form's file drop beside the version identifier derived from
+ * it — since #597 those two are one thought, and side by side they say so.
+ *
+ * Everything else on this screen is deliberately left alone. `ct-columns.ts`
+ * says not to use it for "a single logical control (nothing to pair it
+ * with)", and the rename field and the per-version note field are each alone
+ * in a table cell. The file drops and the free-text notes are legitimately
+ * full width; halving them would be a new defect, not #602's fix. The
+ * standing-instructions pane is `AdminInstructions.tsx` — panel 5 of #602,
+ * its own ticket.
+ *
+ * ## Operator language: uploaded, never created (issue #596)
+ *
+ * A playbook is authored elsewhere (playbook-engine) and UPLOADED here.
+ * Nothing on this screen creates one, so no operator-facing string calls the
+ * action "Create playbook": the toolbar action, the card heading and the
+ * submit all say "Upload new playbook" / "Upload a new playbook". The REST
+ * spelling stays `POST /api/admin/playbooks` — that route really does create
+ * the resource, and renaming it would be churn with no reader. The internal
+ * `create*` state and testids are likewise left alone deliberately; they name
+ * the request, not the operator's model of it.
  *
  * Activate is likewise hidden — not merely disabled — on the row that is
  * already `active` (issue #476): re-running activation on the active
@@ -81,15 +223,18 @@
  * legal positions a review is run against).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import { linkifyText } from './linkify';
+import { deriveVersionIdentifier, readOpfIdentity } from './opfIdentity';
+import AdminInstructions from './AdminInstructions';
 import {
   CtBanner,
   CtButton,
   CtCard,
   CtChip,
+  CtColumns,
   CtField,
   CtFileDrop,
   CtProgress,
@@ -242,6 +387,23 @@ export default function AdminPlaybooks({
   // Derived views, so the render below reads exactly as it did.
   const versions = versionsLoad.status === 'ready' ? versionsLoad.data : null;
 
+  // Issue #598: version history is an OVERLAY, not an inline expansion. It
+  // used to render as a second table below the playbook list, pushing the
+  // rest of the page down — the owner could not tell what they were looking
+  // at.
+  //
+  // Issue #611 made this hold the playbook id rather than a bare open/closed
+  // flag, because the overlay's subject and the instructions pane's subject
+  // are two different questions. `selectedPlaybookId` above answers "whose
+  // standing instructions am I editing?" and persists; this answers "whose
+  // trail is the overlay showing?" and is null whenever it is closed. Opening
+  // one playbook's history while another's guidance is on screen below is a
+  // perfectly reasonable thing to do, and used to silently switch both.
+  const [historyPlaybookId, setHistoryPlaybookId] = useState<string | null>(null);
+  const historyDialogRef = useRef<HTMLDivElement | null>(null);
+  // The control that opened the overlay, so focus can go back to it.
+  const historyOpenerRef = useRef<HTMLElement | null>(null);
+
   // Rename — inline on the row being renamed, never a second screen.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -269,7 +431,11 @@ export default function AdminPlaybooks({
   // the uploaded OPF document itself (POST /api/admin/playbooks derives it
   // server-side), never operator free-text.
   const [createOpen, setCreateOpen] = useState(false);
-  const [createVersion, setCreateVersion] = useState('');
+  // Issue #597: the version identifier is DERIVED from the chosen artifact,
+  // not typed. `null` means "no file yet, or a file we could not derive one
+  // from" — either way there is nothing to submit. There is deliberately no
+  // editable counterpart to fall back to.
+  const [createVersion, setCreateVersion] = useState<string | null>(null);
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [createNotes, setCreateNotes] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
@@ -335,15 +501,115 @@ export default function AdminPlaybooks({
     void loadPlaybooks();
   }, [loadPlaybooks]);
 
-  const selectPlaybook = useCallback(
+  /**
+   * Issue #611, restoring #484's "one playbook installed: preselected and
+   * quiet". #605's merge dropped it — `selectedPlaybookId` started `null`
+   * unconditionally — so a single-playbook deployment had to hunt for its own
+   * standing instructions behind a button labelled "Version history".
+   *
+   * NARROWER than #484's original, deliberately. That version defaulted to
+   * the FIRST playbook however many were installed. With two or more, a guess
+   * renders one playbook's standing guidance under a heading naming another,
+   * and a Save from that state writes it there — standing instructions steer
+   * every review run against a playbook, which is exactly the blast radius
+   * #605's own "case against" section warned about. With one installed there
+   * is no ambiguity to resolve, so there is nothing to ask.
+   *
+   * `current ?? …` never overrides a choice the operator has already made.
+   */
+  useEffect(() => {
+    if (playbooks === null || playbooks.length !== 1) {
+      return;
+    }
+    const only = playbooks[0]!.playbook_id;
+    setSelectedPlaybookId((current) => current ?? only);
+  }, [playbooks]);
+
+  /**
+   * Issue #611: choose the playbook whose STANDING INSTRUCTIONS are shown —
+   * and nothing else.
+   *
+   * #605 gave this screen one selection driving both the version-history
+   * table and the instructions pane, with a row's "Version history" button as
+   * its only trigger. #598 then made version history a modal, at which point
+   * that button was not merely a vague name for the instructions selector: it
+   * pointed somewhere else entirely. So the two jobs are split, and this one
+   * gets its own control (see the row's "Standing instructions" action).
+   *
+   * Setting `selectedPlaybookId` is all the pane needs: it is mounted keyed
+   * on this same id, so a switch here fully remounts it onto the newly-chosen
+   * playbook (and a dead instance's late response is dropped by React rather
+   * than painted over the live one).
+   */
+  const selectPlaybook = useCallback((playbookId: string) => {
+    setActionError(null);
+    setSelectedPlaybookId(playbookId);
+  }, []);
+
+  /**
+   * Issue #598/#611: show one playbook's version trail in the overlay. Does
+   * NOT touch `selectedPlaybookId` — opening a playbook's history while
+   * another's standing guidance is on screen below is an ordinary thing to
+   * do, and it used to silently switch both.
+   */
+  const showHistoryFor = useCallback(
     (playbookId: string) => {
       setActionError(null);
       setNotesVersion(null);
-      setSelectedPlaybookId(playbookId);
+      setHistoryPlaybookId(playbookId);
       void loadVersions(playbookId);
     },
     [loadVersions],
   );
+
+  /**
+   * Issue #598: open the overlay from a table row, remembering the control
+   * that opened it so focus can be handed back on close.
+   *
+   * The opener is looked up by its own testid rather than taken from the
+   * click event: `ct-button` MOVES `data-testid` onto the real inner
+   * `<button>` it builds (see ct-button.ts), so the event's `currentTarget`
+   * is the custom-element host — which is not focusable, and focusing it
+   * would silently do nothing.
+   */
+  const openHistory = useCallback(
+    (playbookId: string) => {
+      // Quoted attribute selector with `"` and `\` escaped by hand — not
+      // CSS.escape, which is for IDENT contexts and is not guaranteed present
+      // in every runtime this suite runs under.
+      const quoted = playbookId.replace(/["\\]/g, '\\$&');
+      historyOpenerRef.current = document.querySelector<HTMLElement>(
+        `[data-testid="playbook-versions-${quoted}"]`,
+      );
+      showHistoryFor(playbookId);
+    },
+    [showHistoryFor],
+  );
+
+  /**
+   * Close the overlay and RETURN FOCUS to whatever opened it. A modal that
+   * strands focus on the document body is worse than the inline panel it
+   * replaced — a keyboard user has to tab from the top of the page to get
+   * back to where they were.
+   */
+  const closeHistory = useCallback(() => {
+    setHistoryPlaybookId(null);
+    const opener = historyOpenerRef.current;
+    historyOpenerRef.current = null;
+    if (opener !== null && document.contains(opener)) {
+      opener.focus();
+    }
+  }, []);
+
+  // Move focus INTO the overlay when it opens, or a keyboard user is left
+  // behind a modal with nothing to Escape from. The dialog container itself
+  // takes it (tabIndex -1), rather than guessing which control matters —
+  // from there Tab reaches everything inside in document order.
+  useEffect(() => {
+    if (historyPlaybookId !== null) {
+      historyDialogRef.current?.focus();
+    }
+  }, [historyPlaybookId]);
 
   /**
    * One request + one refresh, with the server's own refusal message shown
@@ -414,25 +680,99 @@ export default function AdminPlaybooks({
     [refreshAfterVersionChange, runAction],
   );
 
+  // Issue #595 retired the standalone `approveVersion`. Approval on its own
+  // is no longer an action this screen offers — it is the first half of
+  // `approveAndActivateVersion` below, which is the ONLY caller of
+  // POST .../legal-approval now. There is deliberately no "approve but
+  // don't activate" path left: it was the second click that bought nothing.
+
   /**
-   * Records legal approval of EXACTLY the hash already shown on this row
-   * (issue #485) — never an operator-typed value. The server independently
-   * re-checks it against the row's own `content_hash` and 409s a mismatch,
-   * but this client never gives an admin a free-text field to get it wrong
-   * in the first place.
+   * Issue #595: approve and activate as ONE operator act.
+   *
+   * Approval is the precheck activation requires, so making an admin click
+   * twice for one decision bought nothing. What it must NOT become is a
+   * self-approving upload: `record_legal_approval`'s docstring is explicit
+   * that widening upload or activation to write `legal_approval` on their own
+   * "would delete Gate 7 rather than satisfy it". Nothing here does that.
+   * This is still an explicit human act, still strictly AFTER upload, still
+   * naming the exact bytes, still recorded in the audit trail — the control
+   * Gate 7 exists to preserve. Only the click count changed.
+   *
+   * Two existing calls, sequenced client-side, deliberately NOT a new
+   * combined route: a server-side "approve and activate" would duplicate the
+   * gate and give it a second place to drift from `activate_release_bundle`.
+   *
+   * The half-completed sequence is the interesting case. If activation fails
+   * after approval succeeded, the approval record STANDS — that is correct
+   * and auditable, and pretending otherwise would mean either lying about the
+   * trail or inventing an un-approve route. So the failure is surfaced with
+   * both facts: the server's own refusal, verbatim, plus the plain statement
+   * that approval landed and the version did not go live. The trail is then
+   * re-read either way, so the row shows the approval it really recorded and
+   * the operator can retry the activation alone from the plain Activate the
+   * refreshed row now offers.
    */
-  const approveVersion = useCallback(
-    (playbookId: string, version: string, contentHash: string) =>
-      runAction({
-        key: `approve:${version}`,
-        path: `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions/${encodeURIComponent(version)}/legal-approval`,
-        method: 'POST',
-        body: { content_hash: contentHash },
-        technical: `POST legal-approval ${playbookId}/${version}`,
-        fallback: "We couldn't record approval for that version. Please try again.",
-        onSuccess: () => refreshAfterVersionChange(playbookId),
-      }),
-    [refreshAfterVersionChange, runAction],
+  const approveAndActivateVersion = useCallback(
+    async (playbookId: string, version: string, contentHash: string) => {
+      const base = `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions/${encodeURIComponent(version)}`;
+      setActionError(null);
+      setPendingAction(`approve-activate:${version}`);
+      try {
+        const approvalResponse = await jsonFetch(`${base}/legal-approval`, {
+          method: 'POST',
+          body: JSON.stringify({ content_hash: contentHash }),
+        });
+        if (approvalResponse.status === 403) {
+          setIsForbidden(true);
+          return;
+        }
+        if (!approvalResponse.ok) {
+          const detail = await readErrorDetail(approvalResponse);
+          throw new Error(
+            detail ??
+              friendlyErrorMessage(
+                `POST legal-approval ${playbookId}/${version}`,
+                "We couldn't record approval for that version. Please try again.",
+              ),
+          );
+        }
+
+        const activateResponse = await jsonFetch(`${base}/activate`, { method: 'POST' });
+        if (activateResponse.status === 403) {
+          setIsForbidden(true);
+          return;
+        }
+        if (!activateResponse.ok) {
+          const detail = await readErrorDetail(activateResponse);
+          const refusal =
+            detail ??
+            friendlyErrorMessage(
+              `POST activate ${playbookId}/${version}`,
+              "We couldn't activate that version.",
+            );
+          throw new Error(
+            `${refusal} The approval was recorded and stands, but this version is not live — ` +
+              'activate it from its row once that is resolved.',
+          );
+        }
+        refreshAfterVersionChange(playbookId);
+      } catch (err) {
+        setActionError(
+          err instanceof Error
+            ? err.message
+            : friendlyErrorMessage(
+                err,
+                "We couldn't approve and activate that version. Please try again.",
+              ),
+        );
+        // Re-read even on failure: a half-completed sequence must show the
+        // approval it really did record, not the pre-click state.
+        refreshAfterVersionChange(playbookId);
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [refreshAfterVersionChange],
   );
 
   const rollBackVersion = useCallback(
@@ -494,11 +834,13 @@ export default function AdminPlaybooks({
         technical: `DELETE playbook ${playbookId}`,
         fallback: "We couldn't remove that playbook. Please try again.",
         onSuccess: () => {
-          // The removed playbook's trail is gone with it; drop the selection
-          // rather than leaving a table of rows that no longer exist.
+          // The removed playbook's trail and instructions are gone with it;
+          // drop BOTH references (issue #611 split them) rather than leaving
+          // a pane or a table of rows that no longer exist.
           setSelectedPlaybookId((current) => (current === playbookId ? null : current));
+          setHistoryPlaybookId((current) => (current === playbookId ? null : current));
           setVersionsLoad((current) =>
-            selectedPlaybookId === playbookId ? { status: 'loading' } : current,
+            historyPlaybookId === playbookId ? { status: 'loading' } : current,
           );
           void loadPlaybooks();
           // Issue #464: a removed playbook must stop being a selectable
@@ -506,7 +848,7 @@ export default function AdminPlaybooks({
           onCatalogChange?.();
         },
       }),
-    [loadPlaybooks, onCatalogChange, runAction, selectedPlaybookId],
+    [historyPlaybookId, loadPlaybooks, onCatalogChange, runAction],
   );
 
   const submitUpload = useCallback(
@@ -594,9 +936,12 @@ export default function AdminPlaybooks({
         setUploadNotes('');
         setUploadFile(null);
         setFileDropNonce((n) => n + 1);
-        setSelectedPlaybookId(targetId);
+        // Show the trail the upload just landed in, so the admin can go
+        // straight to approving and activating it (issue #611: the overlay,
+        // not the instructions selection — an upload says nothing about whose
+        // standing guidance they were editing).
         void loadPlaybooks();
-        void loadVersions(targetId);
+        showHistoryFor(targetId);
       } catch (err) {
         setUploadError(
           err instanceof Error
@@ -607,8 +952,57 @@ export default function AdminPlaybooks({
         setUploading(false);
       }
     },
-    [loadPlaybooks, loadVersions, uploadFile, uploadNotes, uploadPlaybookId, uploadVersion],
+    [loadPlaybooks, showHistoryFor, uploadFile, uploadNotes, uploadPlaybookId, uploadVersion],
   );
+
+  /**
+   * Issue #597: read the chosen artifact and derive its version identifier,
+   * the moment it is chosen — so the operator SEES the value before submit
+   * rather than discovering it in the response.
+   *
+   * Owner decision 2026-08-22, option (a): `identity.version` wins when the
+   * artifact has an opinion; otherwise the value is derived from the upload
+   * date plus a short `content_hash` prefix. The rule itself lives in
+   * `opfIdentity.ts` as a pure function — see that module for why the date is
+   * UTC and why a same-day re-upload of identical bytes SHOULD collide.
+   *
+   * A file we cannot derive from is refused here with an explanation. There
+   * is deliberately no fallback to a typed value: option (b) was rejected.
+   *
+   * This is a read for display and for the `version` form field, never a
+   * gate. The server re-parses the bytes it actually received and validates
+   * them (`opf_load._validate_doc`, `require_identity=True`); a client that
+   * read the file wrong is refused there.
+   */
+  const chooseCreateFile = useCallback(async (file: File | null) => {
+    setCreateFile(file);
+    setCreateVersion(null);
+    setCreateError(null);
+    setCreateResult(null);
+    if (file === null) {
+      return;
+    }
+
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setCreateError("We couldn't read that file. Please choose it again.");
+      return;
+    }
+
+    const identity = readOpfIdentity(text);
+    const derived = identity === null ? null : deriveVersionIdentifier(identity, new Date());
+    if (derived === null) {
+      setCreateError(
+        "We couldn't read a version identifier from that file. An OPF document has to carry " +
+          'an identity block — either identity.version, or identity.content_hash to derive ' +
+          'one from. Nothing here is typed by hand, so there is no way to supply it another way.',
+      );
+      return;
+    }
+    setCreateVersion(derived);
+  }, []);
 
   /**
    * Create a brand-new playbook_id + its first version (issue #485). Unlike
@@ -622,13 +1016,20 @@ export default function AdminPlaybooks({
       setCreateError(null);
       setCreateResult(null);
 
-      const version = createVersion.trim();
-      if (version === '') {
-        setCreateError("Give this playbook's first version an identifier.");
-        return;
-      }
       if (!createFile) {
         setCreateError('Choose the OPF file this new playbook is compiled from.');
+        return;
+      }
+      // Issue #597: `createVersion` is derived from `createFile` and cannot be
+      // anything else. A null here means the chosen file carried no identity
+      // to derive from — `chooseCreateFile` has already said so, and there is
+      // no typed value to fall back to, so the only correct move is to refuse.
+      const version = createVersion;
+      if (version === null) {
+        setCreateError(
+          "That file carries no version identifier and none could be derived from it. " +
+            'Choose an OPF document with an identity block.',
+        );
         return;
       }
 
@@ -655,7 +1056,7 @@ export default function AdminPlaybooks({
             detail ??
               friendlyErrorMessage(
                 'POST /api/admin/playbooks',
-                "We couldn't create that playbook. Please try again.",
+                "We couldn't upload that playbook. Please try again.",
               ),
           );
         }
@@ -679,37 +1080,36 @@ export default function AdminPlaybooks({
               detail ??
                 friendlyErrorMessage(
                   `PATCH notes ${created.playbook_id}/${created.version}`,
-                  'The playbook was created, but its note could not be saved. Edit it from the version history below.',
+                  'The playbook was uploaded, but its note could not be saved. Edit it from the version history below.',
                 ),
             );
           }
         }
 
         setCreateResult(
-          `Created "${created.playbook_id}". It is a draft until you approve and activate it — nothing about the live review flow has changed yet.`,
+          `Uploaded "${created.playbook_id}". It is a draft until you approve and activate it — nothing about the live review flow has changed yet.`,
         );
-        setCreateVersion('');
+        setCreateVersion(null);
         setCreateNotes('');
         setCreateFile(null);
         setCreateFileDropNonce((n) => n + 1);
-        // The identity was derived server-side, not chosen here — select
-        // whatever the server actually created, so the admin can go
-        // straight to approving/activating it.
-        setSelectedPlaybookId(created.playbook_id);
+        // The identity was derived server-side, not chosen here — open
+        // whatever the server actually created, so the admin can go straight
+        // to approving and activating it.
         void loadPlaybooks();
-        void loadVersions(created.playbook_id);
+        showHistoryFor(created.playbook_id);
         onCatalogChange?.();
       } catch (err) {
         setCreateError(
           err instanceof Error
             ? err.message
-            : friendlyErrorMessage(err, "We couldn't create that playbook. Please try again."),
+            : friendlyErrorMessage(err, "We couldn't upload that playbook. Please try again."),
         );
       } finally {
         setCreating(false);
       }
     },
-    [createFile, createNotes, createVersion, loadPlaybooks, loadVersions, onCatalogChange],
+    [createFile, createNotes, createVersion, loadPlaybooks, onCatalogChange, showHistoryFor],
   );
 
   if (isForbidden) {
@@ -718,6 +1118,10 @@ export default function AdminPlaybooks({
 
   const selectedPlaybook =
     playbooks?.find((entry) => entry.playbook_id === selectedPlaybookId) ?? null;
+  // Issue #611: the overlay's subject, which is NOT necessarily the one whose
+  // standing instructions are on screen below it.
+  const historyPlaybook =
+    playbooks?.find((entry) => entry.playbook_id === historyPlaybookId) ?? null;
 
   return (
     <section data-testid="admin-playbooks-panel" className="ct-section ct-stack">
@@ -733,7 +1137,7 @@ export default function AdminPlaybooks({
               setCreateOpen((open) => !open);
             }}
           >
-            Create playbook
+            Upload new playbook
           </CtButton>
           <CtButton
             type="button"
@@ -783,171 +1187,6 @@ export default function AdminPlaybooks({
         <CtBanner variant="danger" data-testid="admin-playbooks-action-error">
           {actionError}
         </CtBanner>
-      )}
-
-      {createOpen && (
-        <CtCard data-testid="admin-playbooks-create-panel">
-          <form className="ct-stack" noValidate onSubmit={submitCreate}>
-            <CtToolbar title="Create a playbook" />
-
-            {/* No playbook_id field here at all (issue #485): identity is
-                derived server-side from the uploaded document's own
-                agreement_type, never typed by an operator. */}
-            <CtBanner variant="muted" data-testid="admin-playbooks-create-identity-note">
-              The playbook_id is read from the document itself — its
-              agreement_type — not typed here. If the file's agreement_type
-              already matches an existing playbook, the server refuses and
-              names it: upload a new version onto that one instead.
-            </CtBanner>
-
-            {createError && (
-              <CtBanner variant="danger" data-testid="admin-playbooks-create-error">
-                {createError}
-              </CtBanner>
-            )}
-            {createResult && (
-              <CtBanner variant="ok" data-testid="admin-playbooks-create-success">
-                {createResult}
-              </CtBanner>
-            )}
-
-            <CtField
-              label="Version identifier"
-              hint="The identifier for this playbook's first version."
-            >
-              <input
-                data-testid="admin-playbooks-create-version"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                className="ct-mono"
-                value={createVersion}
-                onChange={(e) => setCreateVersion(e.target.value)}
-              />
-            </CtField>
-
-            {/* OPF only — a legacy v1 playbook carries no agreement_type to
-                derive an identity from, so the create route refuses one
-                (unlike "Upload version" above, which also accepts v1 JSON
-                for an EXISTING playbook_id). */}
-            <CtFileDrop
-              key={createFileDropNonce}
-              data-testid="admin-playbooks-create-file"
-              label="Drop the OPF document (.opf.html or .opf.json) here or browse"
-              accept=".opf.html,.opf.json"
-              onFiles={(event) => setCreateFile(event.detail.files[0] ?? null)}
-            />
-
-            <CtField
-              label="Note (optional)"
-              hint="Free text stored against this first version — what it is, and why. You can edit it later."
-            >
-              <textarea
-                data-testid="admin-playbooks-create-notes"
-                rows={3}
-                value={createNotes}
-                onChange={(e) => setCreateNotes(e.target.value)}
-              />
-            </CtField>
-
-            <div className="ct-actions">
-              <CtButton
-                type="submit"
-                variant="primary"
-                data-testid="admin-playbooks-create-submit"
-                disabled={creating}
-                loading={creating}
-              >
-                {creating ? 'Creating…' : 'Create playbook'}
-              </CtButton>
-            </div>
-          </form>
-        </CtCard>
-      )}
-
-      {uploadOpen && (
-        <CtCard data-testid="admin-playbooks-upload-panel">
-          <form className="ct-stack" noValidate onSubmit={submitUpload}>
-            <CtToolbar title="Upload a version" />
-
-            {uploadError && (
-              <CtBanner variant="danger" data-testid="admin-playbooks-upload-error">
-                {uploadError}
-              </CtBanner>
-            )}
-            {uploadResult && (
-              <CtBanner variant="ok" data-testid="admin-playbooks-upload-success">
-                {uploadResult}
-              </CtBanner>
-            )}
-
-            <CtField label="Playbook" hint="The catalog entry this version belongs to.">
-              <select
-                data-testid="admin-playbooks-upload-playbook"
-                value={uploadPlaybookId}
-                onChange={(e) => setUploadPlaybookId(e.target.value)}
-              >
-                <option value="">Choose a playbook…</option>
-                {(playbooks ?? []).map((entry) => (
-                  <option key={entry.playbook_id} value={entry.playbook_id}>
-                    {entry.display_name}
-                  </option>
-                ))}
-              </select>
-            </CtField>
-
-            <CtField
-              label="Version identifier"
-              hint="Uploads are append-only: a version identifier that was used before is refused, so a corrected file needs a new one."
-            >
-              <input
-                data-testid="admin-playbooks-upload-version"
-                type="text"
-                autoComplete="off"
-                spellCheck={false}
-                className="ct-mono"
-                value={uploadVersion}
-                onChange={(e) => setUploadVersion(e.target.value)}
-              />
-            </CtField>
-
-            {/* The accept list is a browse-dialog hint only — the upload
-                route hashes whatever bytes it receives and enforces no
-                extension. It lists the OPF document forms plus the plain
-                JSON a v1 playbook artifact ships as. */}
-            <CtFileDrop
-              key={fileDropNonce}
-              data-testid="admin-playbooks-upload-file"
-              label="Drop this version's file here or browse"
-              accept=".opf.html,.opf.json,.json"
-              onFiles={(event) => setUploadFile(event.detail.files[0] ?? null)}
-            />
-
-            <CtField
-              label="Note (optional)"
-              hint="Free text stored against this version — what changed, and why. You can edit it later."
-            >
-              <textarea
-                data-testid="admin-playbooks-upload-notes"
-                rows={3}
-                value={uploadNotes}
-                onChange={(e) => setUploadNotes(e.target.value)}
-              />
-            </CtField>
-
-            <div className="ct-actions">
-              <CtButton
-                type="submit"
-                variant="primary"
-                data-testid="admin-playbooks-upload-submit"
-                disabled={uploading}
-                loading={uploading}
-              >
-                {uploading ? 'Uploading…' : 'Upload version'}
-              </CtButton>
-            </div>
-          </form>
-        </CtCard>
       )}
 
       {playbooksLoad.status === 'loading' ? (
@@ -1024,40 +1263,83 @@ export default function AdminPlaybooks({
                       </td>
                       <td>{entry.notes === '' ? '—' : linkifyText(entry.notes)}</td>
                       <td>
-                        <div className="ct-actions" role="group">
-                          <CtButton
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            data-testid={`playbook-versions-${entry.playbook_id}`}
-                            onClick={() => selectPlaybook(entry.playbook_id)}
+                        {/* Issue #598: ONE group, two bands. The cell used to
+                            be three full-size buttons in a plain
+                            `.ct-actions`, which in a narrow table column wrap
+                            one-per-line — so a two-row table read as a wall of
+                            six stacked buttons, with the one-way door carrying
+                            the same visual weight as Rename. The routine
+                            actions now sit together in their own band, and the
+                            destructive one sits in a separate band that
+                            `.ct-row-actions` pushes to the end and separates
+                            with a rule (see app.css). Grouping, not just
+                            ordering: "third in a stack" is exactly what this
+                            replaces. */}
+                        <div
+                          className="ct-row-actions"
+                          role="group"
+                          data-testid={`playbook-row-actions-${entry.playbook_id}`}
+                          aria-label={`Actions for ${entry.display_name}`}
+                        >
+                          <div
+                            className="ct-row-actions__main"
+                            data-testid={`playbook-row-actions-main-${entry.playbook_id}`}
                           >
-                            Version history
-                          </CtButton>
-                          <CtButton
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            data-testid={`playbook-rename-${entry.playbook_id}`}
-                            onClick={() => {
-                              setActionError(null);
-                              setRenamingId(entry.playbook_id);
-                              setRenameDraft(entry.display_name);
-                            }}
+                            {/* Issue #611: standing instructions get their
+                                OWN control. #605 left them reachable only
+                                through "Version history", and #598 then made
+                                that button open a modal — so the label was
+                                not merely vague, it pointed elsewhere. This
+                                one only chooses whose guidance the pane below
+                                shows; it opens nothing. */}
+                            <CtButton
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              data-testid={`playbook-instructions-${entry.playbook_id}`}
+                              onClick={() => selectPlaybook(entry.playbook_id)}
+                            >
+                              Standing instructions
+                            </CtButton>
+                            <CtButton
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              data-testid={`playbook-versions-${entry.playbook_id}`}
+                              onClick={() => openHistory(entry.playbook_id)}
+                            >
+                              Version history
+                            </CtButton>
+                            <CtButton
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              data-testid={`playbook-rename-${entry.playbook_id}`}
+                              onClick={() => {
+                                setActionError(null);
+                                setRenamingId(entry.playbook_id);
+                                setRenameDraft(entry.display_name);
+                              }}
+                            >
+                              Rename
+                            </CtButton>
+                          </div>
+                          <div
+                            className="ct-row-actions__danger"
+                            data-testid={`playbook-row-actions-danger-${entry.playbook_id}`}
                           >
-                            Rename
-                          </CtButton>
-                          <CtButton
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            confirm="Click again to remove"
-                            data-testid={`playbook-remove-${entry.playbook_id}`}
-                            disabled={pendingAction === `remove:${entry.playbook_id}`}
-                            onClick={() => void removePlaybook(entry.playbook_id)}
-                          >
-                            Remove
-                          </CtButton>
+                            <CtButton
+                              type="button"
+                              variant="danger"
+                              size="sm"
+                              confirm="Click again to remove"
+                              data-testid={`playbook-remove-${entry.playbook_id}`}
+                              disabled={pendingAction === `remove:${entry.playbook_id}`}
+                              onClick={() => void removePlaybook(entry.playbook_id)}
+                            >
+                              Remove
+                            </CtButton>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -1069,11 +1351,66 @@ export default function AdminPlaybooks({
         </CtCard>
       )}
 
-      {selectedPlaybookId !== null && (
+      {/* Issue #598: version history is an OVERLAY. It used to expand inline
+          here as a second table, pushing the page down under the list it
+          belonged to.
+
+          Not a native `<dialog>` + `showModal()`: jsdom implements no
+          `showModal` at all (`typeof dialog.showModal === 'undefined'` under
+          this harness), so every property that matters about a new overlay —
+          its role, Escape, the focus return — would have been untestable.
+          A `div[role=dialog][aria-modal]` with explicit focus management is
+          testable, and the behaviour a native dialog gives for free is
+          written out here instead. CTDS has no dialog primitive and #598 says
+          not to invent a shared one in this ticket, so this stays local to
+          this screen.
+
+          It renders in the SAME DOM position the inline panel occupied, so
+          the top-to-bottom reading order #605 established (list → version
+          history → standing instructions → forms) is unchanged for anything
+          walking the document. */}
+      {historyPlaybookId !== null && (
+        <div
+          className="ct-overlay"
+          data-testid="admin-playbooks-versions-overlay"
+          // A click on the backdrop itself (never a click that bubbled up
+          // from inside the card) dismisses, the ordinary modal convention.
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeHistory();
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              closeHistory();
+            }
+          }}
+        >
+        <div
+          ref={historyDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Version history — ${historyPlaybook?.display_name ?? historyPlaybookId}`}
+          tabIndex={-1}
+          className="ct-overlay__panel"
+        >
         <CtCard data-testid="admin-playbooks-versions-panel">
           <CtToolbar
-            title={`Version history — ${selectedPlaybook?.display_name ?? selectedPlaybookId}`}
-          />
+            title={`Version history — ${historyPlaybook?.display_name ?? historyPlaybookId}`}
+          >
+            <div slot="actions">
+              <CtButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid="admin-playbooks-versions-close"
+                onClick={closeHistory}
+              >
+                Close
+              </CtButton>
+            </div>
+          </CtToolbar>
 
           {/* Permanent, not conditional: an upload is never self-activating,
               and an admin who is not told that will read a refused activation
@@ -1081,7 +1418,10 @@ export default function AdminPlaybooks({
           <CtBanner variant="muted" data-testid="admin-playbooks-activation-note">
             Activating a version checks its content against the approved hash recorded for it.
             A version whose exact bytes were never approved is refused — uploading is not the
-            same as putting a version in front of a counterparty.
+            same as putting a version in front of a counterparty. Approving is that separate
+            act, and it goes live in the same step: &ldquo;Approve &amp; activate&rdquo; records
+            approval of this version&apos;s exact bytes and then activates it, so every new
+            review runs against it.
           </CtBanner>
 
           {versionsLoad.status === 'failed' ? (
@@ -1095,7 +1435,7 @@ export default function AdminPlaybooks({
                   variant="secondary"
                   size="sm"
                   data-testid="admin-playbooks-versions-retry"
-                  onClick={() => selectedPlaybookId && void loadVersions(selectedPlaybookId)}
+                  onClick={() => historyPlaybookId && void loadVersions(historyPlaybookId)}
                 >
                   Try again
                 </CtButton>
@@ -1132,7 +1472,22 @@ export default function AdminPlaybooks({
                       </td>
                     </tr>
                   ) : (
-                    versions.map((row) => (
+                    versions.map((row) => {
+                      // The three facts the whole Actions cell below is a
+                      // function of. Named once here rather than recomputed
+                      // inline, because issues #476/#485/#594/#595 have each
+                      // added a case to that decision and an inline chain of
+                      // them stopped being readable.
+                      const approved = isApproved(row);
+                      const isActive = row.status === 'active';
+                      // A row with no content_hash at all (written before
+                      // issue #478) has nothing an approval could name, so it
+                      // is neither approvable nor merged-actionable — it
+                      // keeps the plain Activate and lets the server state
+                      // the Gate-7 refusal in its own words.
+                      const canApprove = row.content_hash !== undefined && !approved;
+
+                      return (
                       <tr key={row.version} data-testid={`playbook-version-row-${row.version}`}>
                         <td className="ct-table__mono">{row.version}</td>
                         <td data-testid={`playbook-version-status-${row.version}`}>
@@ -1203,47 +1558,61 @@ export default function AdminPlaybooks({
                         </td>
                         <td>
                           <div className="ct-actions" role="group">
-                            {/* Gate 7 (issue #485): a row with a
-                                content_hash that has never been approved
-                                for THAT exact hash offers "Approve for
-                                activation", sending back exactly the hash
-                                already shown in this row's own Content hash
-                                cell — never operator free-text. Once
-                                approved (content_hash/legal_approval are
-                                both immutable once set, so this can never
-                                go false again for the same row), the button
-                                is replaced with a quiet note, the same
-                                hide-don't-disable convention as Activate/
-                                Roll back below (issue #476). A row with no
-                                content_hash at all (written before issue
-                                #478) offers neither — there is nothing to
-                                approve. */}
-                            {row.content_hash && isApproved(row) ? (
+                            {/* The APPROVAL STATE of this row, as a note —
+                                never a control. Since issue #595 the only
+                                approval control is the merged action below.
+
+                                Approved (issue #485): a quiet note, the same
+                                hide-don't-disable convention as Activate /
+                                Roll back (issue #476). content_hash and
+                                legal_approval are both immutable once set,
+                                so this can never go false again for the row.
+
+                                Active but never approved (issue #594): only
+                                the deploy seed can produce that, because it
+                                bypasses Gate 7 on purpose (see
+                                sample_playbooks.py). Approving it now is not
+                                a precondition for anything — the version is
+                                already live — so no control is offered, and
+                                the bypass is STATED rather than hidden:
+                                silently omitting it would leave an audit
+                                screen implying the live playbook had been
+                                approved when it never was.
+
+                                A row with no content_hash at all (written
+                                before issue #478) has nothing an approval
+                                could name, so it gets neither. */}
+                            {approved ? (
                               <span
                                 className="ct-muted"
                                 data-testid={`playbook-version-approved-note-${row.version}`}
                               >
                                 Approved
                               </span>
-                            ) : row.content_hash ? (
-                              <CtButton
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                data-testid={`playbook-version-approve-${row.version}`}
-                                disabled={pendingAction === `approve:${row.version}`}
-                                onClick={() =>
-                                  void approveVersion(
-                                    row.playbook_id,
-                                    row.version,
-                                    row.content_hash as string,
-                                  )
-                                }
+                            ) : isActive && row.content_hash !== undefined ? (
+                              <span
+                                className="ct-muted"
+                                data-testid={`playbook-version-unapproved-active-note-${row.version}`}
                               >
-                                Approve for activation
-                              </CtButton>
+                                Never approved — it went live without one (the deploy seed
+                                bypasses the approval gate).
+                              </span>
                             ) : null}
-                            {row.status === 'active' ? (
+
+                            {/* The one ACTION that puts a version live.
+                                Issue #595 collapsed Approve + Activate into
+                                it: approval is the precheck activation
+                                requires, so two clicks bought nothing. Still
+                                one explicit, audited act naming exact bytes,
+                                still strictly after upload — Gate 7 intact.
+
+                                An already-approved version keeps a PLAIN
+                                Activate that calls only the activate route
+                                (the rollback-to-a-previously-approved-version
+                                path must not demand re-approval), and a
+                                hashless row keeps it too so the server can
+                                state the Gate-7 refusal in its own words. */}
+                            {isActive ? (
                               // Activating the already-active version can't
                               // mean anything — no button to click, not a
                               // disabled one (issue #476). The status chip
@@ -1257,6 +1626,23 @@ export default function AdminPlaybooks({
                               >
                                 Currently active
                               </span>
+                            ) : canApprove ? (
+                              <CtButton
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                data-testid={`playbook-version-approve-activate-${row.version}`}
+                                disabled={pendingAction === `approve-activate:${row.version}`}
+                                onClick={() =>
+                                  void approveAndActivateVersion(
+                                    row.playbook_id,
+                                    row.version,
+                                    row.content_hash as string,
+                                  )
+                                }
+                              >
+                                Approve &amp; activate
+                              </CtButton>
                             ) : (
                               <CtButton
                                 type="button"
@@ -1293,12 +1679,235 @@ export default function AdminPlaybooks({
                           </div>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </CtTable>
           )}
+        </CtCard>
+        </div>
+        </div>
+      )}
+
+      {/* Standing instructions (issue #605's merge) — the SAME selection as
+          the version history above, never a second picker. Keyed on the
+          playbook id so switching selection fully remounts this pane onto
+          the newly-selected playbook (see AdminInstructions.tsx's
+          docstring, "Selection"). */}
+      {selectedPlaybookId !== null && (
+        <AdminInstructions
+          key={selectedPlaybookId}
+          playbookId={selectedPlaybookId}
+          playbookDisplayName={selectedPlaybook?.display_name ?? selectedPlaybookId}
+        />
+      )}
+
+      {/* Create/upload forms, LAST (issue #605's confirmed scope order) —
+          moved here from just under the toolbar so the screen reads
+          list → version history → standing instructions → forms, even
+          though the buttons that open them stay in the toolbar above. */}
+      {createOpen && (
+        <CtCard data-testid="admin-playbooks-create-panel">
+          <form className="ct-stack" noValidate onSubmit={submitCreate}>
+            <CtToolbar title="Upload a new playbook" />
+
+            {/* No playbook_id field here at all (issue #485): identity is
+                derived server-side from the uploaded document's own
+                agreement_type, never typed by an operator. */}
+            <CtBanner variant="muted" data-testid="admin-playbooks-create-identity-note">
+              The playbook_id is read from the document itself — its
+              agreement_type — not typed here. If the file's agreement_type
+              already matches an existing playbook, the server refuses and
+              names it: upload a new version onto that one instead.
+            </CtBanner>
+
+            {createError && (
+              <CtBanner variant="danger" data-testid="admin-playbooks-create-error">
+                {createError}
+              </CtBanner>
+            )}
+            {createResult && (
+              <CtBanner variant="ok" data-testid="admin-playbooks-create-success">
+                {createResult}
+              </CtBanner>
+            )}
+
+            {/* The file comes FIRST now (issue #597): the version identifier
+                below is read out of it, so asking for it first and showing
+                the derived value underneath is the order the form actually
+                works in.
+
+                OPF only — a legacy v1 playbook carries no agreement_type to
+                derive an identity from, so the create route refuses one
+                (unlike "Upload version" below, which also accepts v1 JSON
+                for an EXISTING playbook_id). */}
+            {/* Issue #609 (#602's AdminPlaybooks split): these two ARE one
+                thought since #597 — choose the artifact, and read back the
+                version identifier extracted from it. Side by side they say
+                that; stacked full-width they read as two unrelated steps.
+                `ct-columns` only repositions them visually, so the DOM and
+                tab order (file, then the value it produces) is untouched and
+                the collapsed single-column reading is still correct. */}
+            <CtColumns>
+              <CtFileDrop
+                key={createFileDropNonce}
+                data-testid="admin-playbooks-create-file"
+                label="Drop the OPF document (.opf.html or .opf.json) here or browse"
+                accept=".opf.html,.opf.json"
+                onFiles={(event) => void chooseCreateFile(event.detail.files[0] ?? null)}
+              />
+
+              {/* Issue #597: DERIVED, never typed. There is no input here on
+                  purpose — the owner rejected prefill-but-editable, so the
+                  only way to change this value is to compile a different
+                  artifact. `<output>` rather than a `<p>` because it is
+                  literally the result of a calculation, and because it is a
+                  labelable element, which keeps ct-field's `label[for]`
+                  wiring valid (a `<p>` would leave the label pointing at
+                  nothing). Operator prose belongs in the Note field below,
+                  which is exactly where the owner said to put it.
+
+                  Deliberately NOT marked `narrow` (issue #609): `<output>` is
+                  inline, so it was never stretched by ct-field's
+                  `align-items: stretch`, and ct-field.css's narrow rule only
+                  targets `:is(input, select, textarea)` anyway — the
+                  attribute here would be inert decoration. */}
+              <CtField
+                label="Version identifier"
+                hint="Read from the document itself: its identity.version when the artifact declares one, otherwise derived from today's date and the document's content hash. Not editable — put your own wording in the Note below."
+              >
+                <output className="ct-mono" data-testid="admin-playbooks-create-version">
+                  {createVersion ?? 'Choose a file above — the identifier is read from it.'}
+                </output>
+              </CtField>
+            </CtColumns>
+
+            <CtField
+              label="Note (optional)"
+              hint="Free text stored against this first version — what it is, and why. You can edit it later."
+            >
+              <textarea
+                data-testid="admin-playbooks-create-notes"
+                rows={3}
+                value={createNotes}
+                onChange={(e) => setCreateNotes(e.target.value)}
+              />
+            </CtField>
+
+            <div className="ct-actions">
+              <CtButton
+                type="submit"
+                variant="primary"
+                data-testid="admin-playbooks-create-submit"
+                disabled={creating}
+                loading={creating}
+              >
+                {creating ? 'Uploading…' : 'Upload new playbook'}
+              </CtButton>
+            </div>
+          </form>
+        </CtCard>
+      )}
+
+      {uploadOpen && (
+        <CtCard data-testid="admin-playbooks-upload-panel">
+          <form className="ct-stack" noValidate onSubmit={submitUpload}>
+            <CtToolbar title="Upload a version" />
+
+            {uploadError && (
+              <CtBanner variant="danger" data-testid="admin-playbooks-upload-error">
+                {uploadError}
+              </CtBanner>
+            )}
+            {uploadResult && (
+              <CtBanner variant="ok" data-testid="admin-playbooks-upload-success">
+                {uploadResult}
+              </CtBanner>
+            )}
+
+            {/* Issue #609 (#602's AdminPlaybooks split): the two SHORT
+                fields on this form — which playbook, and which version —
+                are one question, and were each spanning the whole panel.
+                The file drop and the note below stay out of the grid on
+                purpose: both are legitimately full width, and halving them
+                would be a new defect rather than the fix #602 asked for. */}
+            <CtColumns>
+              <CtField label="Playbook" hint="The catalog entry this version belongs to.">
+                <select
+                  data-testid="admin-playbooks-upload-playbook"
+                  value={uploadPlaybookId}
+                  onChange={(e) => setUploadPlaybookId(e.target.value)}
+                >
+                  <option value="">Choose a playbook…</option>
+                  {(playbooks ?? []).map((entry) => (
+                    <option key={entry.playbook_id} value={entry.playbook_id}>
+                      {entry.display_name}
+                    </option>
+                  ))}
+                </select>
+              </CtField>
+
+              {/* `narrow` (ct-field.ts, #601): a version identifier is a
+                  short mono token, so it keeps its own intrinsic width
+                  instead of filling the column. The Playbook select next to
+                  it is deliberately NOT narrow — a display name is
+                  arbitrarily long, and clipping it to intrinsic width would
+                  be a new defect. */}
+              <CtField
+                narrow
+                label="Version identifier"
+                hint="Uploads are append-only: a version identifier that was used before is refused, so a corrected file needs a new one."
+              >
+                <input
+                  data-testid="admin-playbooks-upload-version"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="ct-mono"
+                  value={uploadVersion}
+                  onChange={(e) => setUploadVersion(e.target.value)}
+                />
+              </CtField>
+            </CtColumns>
+
+            {/* The accept list is a browse-dialog hint only — the upload
+                route hashes whatever bytes it receives and enforces no
+                extension. It lists the OPF document forms plus the plain
+                JSON a v1 playbook artifact ships as. */}
+            <CtFileDrop
+              key={fileDropNonce}
+              data-testid="admin-playbooks-upload-file"
+              label="Drop this version's file here or browse"
+              accept=".opf.html,.opf.json,.json"
+              onFiles={(event) => setUploadFile(event.detail.files[0] ?? null)}
+            />
+
+            <CtField
+              label="Note (optional)"
+              hint="Free text stored against this version — what changed, and why. You can edit it later."
+            >
+              <textarea
+                data-testid="admin-playbooks-upload-notes"
+                rows={3}
+                value={uploadNotes}
+                onChange={(e) => setUploadNotes(e.target.value)}
+              />
+            </CtField>
+
+            <div className="ct-actions">
+              <CtButton
+                type="submit"
+                variant="primary"
+                data-testid="admin-playbooks-upload-submit"
+                disabled={uploading}
+                loading={uploading}
+              >
+                {uploading ? 'Uploading…' : 'Upload version'}
+              </CtButton>
+            </div>
+          </form>
         </CtCard>
       )}
     </section>

@@ -104,10 +104,20 @@ BEDROCK_PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 # model-policy/bedrock-us-east-1.json: declares neither field -> all-False.
 BEDROCK_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 
-# model-policy/openrouter.json: pinned primary/critic declare NEITHER
-# capability field -> all-False.
-OPENROUTER_PRIMARY_MODEL_ID = "anthropic/claude-opus-4.8"
+# model-policy/openrouter.json: the pinned CRITIC declares NEITHER capability
+# field -> all-False.
 OPENROUTER_CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
+# DO NOT "tidy" THIS TO anthropic/claude-opus-5. What this constant carries is
+# the PROPERTY "an id the policy artifact accepts but declares no capability
+# for", which is what makes the fail-closed assertions below mean anything.
+# This used to be anthropic/claude-opus-4.8 (declared nothing, was selectable).
+# Issue #604 moved the primary pin to anthropic/claude-opus-5, which DOES
+# declare `structured_outputs: true`, and the owner then deleted 4.8 from
+# `selectable` entirely -- so sonnet-4.6 is now the ONLY id in that file that
+# is both allowed by enforce_openrouter_policy_model_id and capability-False.
+# It coincides with OPENROUTER_CRITIC_MODEL_ID today; that is the artifact's
+# doing, not this test's intent, hence the separate name.
+OPENROUTER_NO_CAPABILITY_MODEL_ID = OPENROUTER_CRITIC_MODEL_ID
 # model-policy/openrouter.json `selectable`: structured_outputs true.
 OPENROUTER_SELECTABLE_MODEL_ID = "anthropic/claude-opus-5"
 
@@ -145,7 +155,7 @@ def _fill_absent_source_quote_with_null(obj: dict[str, Any]) -> dict[str, Any]:
     strict-mode provider cannot OMIT a required key, even to say "none",
     the way the fallback (non-enforced) prompt path can. A no-op wherever
     the fixture already carries a real value (present on-disk in exactly
-    one fixture, `primary_request_change_with_source_quote_valid.json`).
+    one fixture, `primary_request_change_with_block_transcript_valid.json`).
 
     Fix round 3's companion piece, `primary_review_pass.py::
     _denullify_unrepresentable_issue_fields`, is what makes a `null` this
@@ -162,14 +172,39 @@ def _fill_absent_source_quote_with_null(obj: dict[str, Any]) -> dict[str, Any]:
     tripping it back through `validate_model_response` -- exactly how that
     fix missed the incompatibility fix round 2 caught, and precisely the
     gap `TestProjectedSchemaRoundTripsThroughFullValidation` exists to
-    close for good)."""
+    close for good).
+
+    Issue #627 generalized it. The set of "required by the projection but
+    optional in the full schema" Issue fields is no longer just
+    `source_quote`: the active v3 contract has no `source_quote` at all, and
+    instead has `replacement_scope_note` (optional in the full schema, forced
+    required by `_force_all_properties_required_in_place`). So this reads the
+    PROJECTED SCHEMA rather than naming fields, filling each missing required
+    property with the honest value that projection permits -- `null` where it
+    added a null branch, `""` where it did not. Naming the field by hand is
+    what made this helper wrong the moment the contract moved.
+    """
     filled = json.loads(json.dumps(obj))  # deep copy, stdlib-only
-    for issue in filled.get("issues") or []:
-        issue.setdefault("source_quote", None)
+    projected = mos.project_output_schema_for_provider()
+    issue_def = projected["definitions"]["Issue"]
+    issue_properties = issue_def.get("properties") or {}
+
+    def _permits_null(spec: dict[str, Any]) -> bool:
+        declared = spec.get("type")
+        if isinstance(declared, list):
+            return "null" in declared
+        return declared == "null"
+
+    issues = list(filled.get("issues") or [])
     critic_delta = filled.get("critic_delta")
     if isinstance(critic_delta, dict):
-        for added in critic_delta.get("added_issues") or []:
-            added.setdefault("source_quote", None)
+        issues += list(critic_delta.get("added_issues") or [])
+    for issue in issues:
+        for name in issue_def.get("required") or []:
+            if name in issue:
+                continue
+            spec = issue_properties.get(name) or {}
+            issue[name] = None if _permits_null(spec) else ""
     return filled
 
 
@@ -196,6 +231,8 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         # stays excluded (both from `properties`, asserted above, and thus
         # from `required`) -- the stamped-field removal this test's name
         # refers to.
+        # Issue #627: v3 added the two top-level edit carriers, which the
+        # same rule forces required.
         self.assertEqual(
             set(self.schema["required"]),
             {
@@ -203,6 +240,8 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
                 "confidence_state",
                 "confidence_band",
                 "issues",
+                "block_patches",
+                "block_ops",
                 "critic_delta",
                 "verdict_summary",
             },
@@ -252,25 +291,48 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         gaps = self._find_required_gaps(self.schema)
         self.assertEqual(gaps, [], f"`required` omits a property at: {gaps}")
 
-    def test_source_quote_kept_and_forced_nullable(self) -> None:
-        # Issue #567 fix round 3, finding 1: fix round 2 DROPPED
-        # `source_quote` from the projected schema (the FULL schema's
+    def test_a_required_but_nullable_projected_field_is_kept_not_dropped(self) -> None:
+        # Issue #567 fix round 3, finding 1: fix round 2 DROPPED v2's
+        # optional quote field from the projected schema (the FULL schema's
         # `minLength: 1` with no `null`/`anyOf` branch left no honest value
-        # to force it into `required` with) -- but since #379/#380 retired
-        # the anchor-joined patch path, `source_quote` is the ONLY way a
-        # REQUEST_CHANGE issue locates its redline target, so dropping it
-        # meant every issue on a structured-outputs-capable model shipped
-        # zero redlines. It is kept and given a NEW `null` branch instead
-        # (see `model_output_schema.py::_ISSUE_FIELDS_NEEDING_A_NEW_NULL_
-        # BRANCH`), a real value a strict-mode provider can honestly emit
-        # for "no quote" -- paired with a post-hoc normalization
+        # to force it into `required` with) -- but that field was then the
+        # ONLY way a REQUEST_CHANGE issue located its redline target, so
+        # dropping it meant every issue on a structured-outputs-capable model
+        # shipped zero redlines. It was kept and given a NEW `null` branch
+        # instead (see `model_output_schema.py::_ISSUE_FIELDS_NEEDING_A_NEW_
+        # NULL_BRANCH`), a real value a strict-mode provider can honestly
+        # emit for "no value" -- paired with a post-hoc normalization
         # (`primary_review_pass._denullify_unrepresentable_issue_fields`)
-        # that strips it back to absent before the FULL schema ever sees
-        # it.
+        # that strips it back to absent before the FULL schema ever sees it.
+        #
+        # Issue #627 removed that field from the ACTIVE contract (a block
+        # transcript locates the target now) and issue #628 deleted the
+        # locator that read it, so it is out of the null-branch list
+        # entirely. The MECHANISM this test proves is still live and still
+        # load-bearing for `internal_rationale_for_footnote`, which has the
+        # identical `minLength: 1`-with-no-null-escape shape -- so the
+        # assertions live on that field, and the v3 Issue is asserted to
+        # carry no quote field at all.
         issue_props = self.schema["definitions"]["Issue"]["properties"]
-        self.assertIn("source_quote", issue_props)
-        self.assertIn("source_quote", self.schema["definitions"]["Issue"]["required"])
-        self.assertEqual(issue_props["source_quote"]["type"], ["string", "null"])
+        self.assertNotIn("source_quote", issue_props)
+
+        internal_notes = mos.project_output_schema_for_provider(notes_mode="internal")
+        internal_issue = internal_notes["definitions"]["Issue"]
+        self.assertIn("internal_rationale_for_footnote", internal_issue["properties"])
+        self.assertIn("internal_rationale_for_footnote", internal_issue["required"])
+        self.assertEqual(
+            internal_issue["properties"]["internal_rationale_for_footnote"]["type"],
+            ["string", "null"],
+        )
+
+        # The pairing is what makes the widening safe: a field given a null
+        # branch in the REQUEST must have a de-nullifier before the full
+        # schema check, or a strict-mode-compliant response is the exact one
+        # validation throws away.
+        self.assertEqual(
+            tuple(mos._ISSUE_FIELDS_NEEDING_A_NEW_NULL_BRANCH),
+            ("internal_rationale_for_footnote",),
+        )
 
     def test_arrays_and_critic_suggested_replacement_required_without_nullable_union(
         self,
@@ -820,13 +882,13 @@ class TestOpenRouterInvokeOutputSchema(unittest.TestCase):
         http_b = FakeHttpClient(_content_response('{"decision":"ACCEPT","issues":[]}'))
         with patch.dict("os.environ", {}, clear=True):
             self._client(http_a).invoke(
-                model_id=OPENROUTER_PRIMARY_MODEL_ID,
+                model_id=OPENROUTER_NO_CAPABILITY_MODEL_ID,
                 system_prompt="SYS",
                 user_prompt="USER",
                 max_output_tokens=100,
             )
             self._client(http_b).invoke(
-                model_id=OPENROUTER_PRIMARY_MODEL_ID,
+                model_id=OPENROUTER_NO_CAPABILITY_MODEL_ID,
                 system_prompt="SYS",
                 user_prompt="USER",
                 max_output_tokens=100,
@@ -942,8 +1004,6 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             result = pp.run_primary_pass(
                 review_id="r-1",
-                diff_hunks=_sample_diff_hunks(),
-                anchored_clauses=_sample_anchored_clauses(),
                 retrieved_precedent=[],
                 playbook=_sample_playbook(),
                 model_client=legacy,
@@ -971,8 +1031,6 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
         records: list[Any] = []
         result = pp.run_primary_pass(
             review_id="r-2",
-            diff_hunks=_sample_diff_hunks(),
-            anchored_clauses=_sample_anchored_clauses(),
             retrieved_precedent=[],
             playbook=_sample_playbook(),
             model_client=client,
@@ -992,8 +1050,6 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
         client = mc.FakeBedrockClient({"anthropic.claude-opus-4-8": [json.dumps(stamped)]})
         result = pp.run_primary_pass(
             review_id="r-3",
-            diff_hunks=_sample_diff_hunks(),
-            anchored_clauses=_sample_anchored_clauses(),
             retrieved_precedent=[],
             playbook=_sample_playbook(),
             model_client=client,
@@ -1013,8 +1069,6 @@ class TestRunCriticPassThreading(unittest.TestCase):
         records: list[Any] = []
         result = cp.run_critic_pass(
             review_id="r-4",
-            diff_hunks=_sample_diff_hunks(),
-            anchored_clauses=_sample_anchored_clauses(),
             primary_output=primary_output,
             playbook=_sample_playbook(),
             model_client=legacy,
@@ -1035,8 +1089,6 @@ class TestRunCriticPassThreading(unittest.TestCase):
         records: list[Any] = []
         result = cp.run_critic_pass(
             review_id="r-5",
-            diff_hunks=_sample_diff_hunks(),
-            anchored_clauses=_sample_anchored_clauses(),
             primary_output=primary_output,
             playbook=_sample_playbook(),
             model_client=client,
@@ -1115,7 +1167,7 @@ class TestJulyIncidentRegressionStillCovered(unittest.TestCase):
             )
         ok, parsed = pp.validate_model_response(raw, issue_provenance="model")
         self.assertTrue(ok, parsed)
-        self.assertEqual(parsed["schema_version"], "output-schema-v1")
+        self.assertEqual(parsed["schema_version"], pp.OUTPUT_SCHEMA_VERSION)
         self.assertEqual(parsed["issues"][0]["provenance"], "model")
         # The request itself DID carry response_format (capability-True
         # selectable id) -- proving the fallback extractor is exercised

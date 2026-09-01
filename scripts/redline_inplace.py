@@ -128,13 +128,18 @@ Usage:
 """
 
 import io
-import re
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
-from xml.sax.saxutils import quoteattr
+from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import ooxml_util  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -154,171 +159,20 @@ def _w(tag: str) -> str:
 # ---------------------------------------------------------------------------
 # Root-namespace preservation (see module docstring, "Preserve")
 #
-# `xml.etree.ElementTree` discards `xmlns:*` bindings from `Element.attrib`
-# at parse time and, at serialize time, only re-declares a namespace it
-# decides is actually "used" by some tag or attribute it walks -- so a
-# straight `ET.fromstring` -> mutate -> `ET.tostring` round trip silently
-# drops any root xmlns declaration that isn't referenced by a qname
-# ElementTree can see (e.g. one referenced only inside an attribute VALUE
-# such as `mc:Ignorable="w14 wp14"`). The functions below read the root
-# element's start tag directly out of the original bytes -- never through
-# ElementTree -- so it can be spliced back in verbatim after serialization.
+# The implementations live in `scripts/ooxml_util.py` (issue #621): five
+# modules plus `tools/churn_docx.py` perform the same read-the-original-root-
+# tag / register / splice / merge dance, so it is defined once and imported.
+# The names below are kept as module-level aliases -- every existing caller
+# and test reaches for `redline_inplace._root_open_tag` and friends, and this
+# extraction changes no behaviour.
 # ---------------------------------------------------------------------------
 
-_ATTR_RE = re.compile(r"([^\s=/>]+)\s*=\s*(\"[^\"]*\"|'[^']*')")
-
-
-def _scan_tag_end(text: str, start: int) -> int:
-    """Return the index of the `>` that closes the start tag beginning at
-    `text[start]` (`text[start] == '<'`), skipping over `>` characters that
-    appear inside quoted attribute values."""
-    i = start + 1
-    in_quote = None
-    while i < len(text):
-        ch = text[i]
-        if in_quote:
-            if ch == in_quote:
-                in_quote = None
-        elif ch in "'\"":
-            in_quote = ch
-        elif ch == ">":
-            return i
-        i += 1
-    raise ValueError("redline_inplace: malformed root start tag (no closing '>' found)")
-
-
-def _root_open_tag(xml_text: str) -> str:
-    """Return the root element's start tag exactly as it appears in
-    `xml_text` -- attribute order, quoting, and every `xmlns` declaration
-    preserved verbatim -- skipping a leading XML declaration if present."""
-    idx = 0
-    if xml_text.startswith("<?"):
-        idx = xml_text.index("?>") + 2
-    start = xml_text.index("<", idx)
-    end = _scan_tag_end(xml_text, start)
-    open_tag = xml_text[start : end + 1]
-    if open_tag.endswith("/>"):
-        raise ValueError(
-            "redline_inplace: word/document.xml root element must not be self-closing"
-        )
-    return open_tag
-
-
-def _declared_namespaces(open_tag: str) -> list:
-    """`(prefix, uri)` pairs for every `xmlns[:prefix]="uri"` declaration on
-    `open_tag` (a default-namespace declaration, `xmlns="uri"`, yields
-    prefix `""` and is skipped by the caller -- registering an empty prefix
-    with `ET.register_namespace` would make it the default for every URI
-    that has none, which is not what we want here)."""
-    out = []
-    for match in _ATTR_RE.finditer(open_tag):
-        name, quoted_value = match.group(1), match.group(2)
-        value = quoted_value[1:-1]
-        if name == "xmlns":
-            out.append(("", value))
-        elif name.startswith("xmlns:"):
-            out.append((name.split(":", 1)[1], value))
-    return out
-
-
-_XMLNS_RE = re.compile(r"\sxmlns(?::([A-Za-z_][\w.-]*))?\s*=\s*(\"[^\"]*\"|'[^']*')")
-
-
-def register_declared_namespaces(namespace_pairs) -> None:
-    """`ET.register_namespace` every `(prefix, uri)` pair that can be
-    registered, skipping the ones that cannot.
-
-    TWO prefixes must be skipped, for different reasons.
-
-    The DEFAULT prefix (`""`, from `xmlns="uri"`): registering it would make
-    that URI the default for every element that has no prefix, which is not
-    what any caller here wants.
-
-    ElementTree's RESERVED `ns<digits>` format: it reserves that pattern for
-    its own auto-generated bindings and raises `ValueError` rather than
-    registering one. Real uploaded documents -- especially any that have been
-    round-tripped through another tool -- do carry such prefixes, so this must
-    not be fatal. And it needn't be: registering only stops the serializer
-    RENAMING a prefix on elements it writes. An unregistered prefix means the
-    serializer picks its own for that URI and declares it on the root, which
-    `_merge_hoisted_namespaces` carries across; a genuine prefix/URI collision
-    raises there rather than corrupting anything.
-
-    This exists as one shared function rather than three copies of the same
-    try/except because it was already TWO copies and one omission (issue
-    #560): `redline_generate.inject_export_marker_and_footnotes` looped over
-    the same pairs without the guard, and that single unguarded call raised on
-    65% of a real 31-agreement corpus -- turning a document that had located
-    every one of its patches into a review that produced nothing.
-    """
-    for prefix, uri in namespace_pairs:
-        if not prefix:
-            continue
-        try:
-            ET.register_namespace(prefix, uri)
-        except ValueError:
-            continue
-
-
-def _declared_namespaces_anywhere(xml_text: str) -> list:
-    """`(prefix, uri)` for every `xmlns[:prefix]` declaration in `xml_text`,
-    wherever it appears -- root or not. Order-preserving and de-duplicated on
-    the pair, so a prefix legitimately rebound on different subtrees still
-    yields both bindings (and `register_namespace`, last-write-wins, keeps the
-    final one -- the serializer's own behaviour anyway)."""
-    out = []
-    seen = set()
-    for match in _XMLNS_RE.finditer(xml_text):
-        prefix = match.group(1) or ""
-        uri = match.group(2)[1:-1]
-        if (prefix, uri) not in seen:
-            seen.add((prefix, uri))
-            out.append((prefix, uri))
-    return out
-
-
-def _merge_hoisted_namespaces(original_open_tag: str, auto_open_tag: str) -> str:
-    """Return `original_open_tag` plus any `xmlns` declaration that appears on
-    `auto_open_tag` but not on the original.
-
-    The splice above keeps the ORIGINAL root start tag because ElementTree
-    drops declarations it cannot see being used. The reverse case exists too:
-    a real Word document may declare a prefix on a NON-root element (`a` /
-    `a14`, on a `<w:drawing>` subtree), and ElementTree HOISTS those bindings
-    to the root when it serializes. Splicing the original tag over that output
-    drops the hoisted declaration while the body still uses the prefix, so
-    `word/document.xml` comes back with an unbound prefix -- not well-formed.
-    Merging the two keeps both properties: every original declaration byte-for-
-    byte in its original order, and every binding the serialized body relies on.
-
-    A prefix bound to different URIs by the two tags is unmergeable: keeping
-    the original silently rebinds every use of that prefix in the body. That is
-    a corrupt document with a plausible shape, so it raises instead.
-    """
-    original = _declared_namespaces(original_open_tag)
-    original_uri_by_prefix = {prefix: uri for prefix, uri in original}
-
-    missing = []
-    for prefix, uri in _declared_namespaces(auto_open_tag):
-        if prefix not in original_uri_by_prefix:
-            missing.append((prefix, uri))
-        elif original_uri_by_prefix[prefix] != uri:
-            raise ValueError(
-                f"redline_inplace: cannot preserve the original root tag -- "
-                f"prefix {prefix!r} is bound to {original_uri_by_prefix[prefix]!r} "
-                f"on the original root but to {uri!r} on the serialized output. "
-                f"Splicing the original would silently rebind every use of "
-                f"{prefix!r} in the document body."
-            )
-
-    if not missing:
-        return original_open_tag
-
-    additions = "".join(
-        f" xmlns={quoteattr(uri)}" if prefix == "" else f" xmlns:{prefix}={quoteattr(uri)}"
-        for prefix, uri in missing
-    )
-    return original_open_tag[:-1].rstrip() + additions + ">"
+_scan_tag_end = ooxml_util.scan_tag_end
+_root_open_tag = ooxml_util.root_open_tag
+_declared_namespaces = ooxml_util.declared_namespaces
+register_declared_namespaces = ooxml_util.register_declared_namespaces
+_declared_namespaces_anywhere = ooxml_util.declared_namespaces_anywhere
+_merge_hoisted_namespaces = ooxml_util.merge_hoisted_namespaces
 
 
 @dataclass

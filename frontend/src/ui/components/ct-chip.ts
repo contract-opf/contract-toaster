@@ -48,7 +48,10 @@ export class CtChip extends LitElement {
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      font-size: 0.78rem;
+      /* Issue #600: was 0.78rem (12.48px) — the smallest text measured on the
+         live Review screen. Custom properties inherit THROUGH the shadow
+         boundary, so the token resolves here exactly as it does in light DOM. */
+      font-size: var(--ct-text-sm);
       font-weight: 600;
       line-height: 1.4;
       padding: 0.15rem 0.6rem;

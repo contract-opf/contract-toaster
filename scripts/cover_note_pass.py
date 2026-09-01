@@ -107,6 +107,24 @@ COVER_NOTE_DIGEST_TAG = "REVIEW_ANALYSIS_DIGEST"
 # ---------------------------------------------------------------------------
 
 
+# Issue #585, ticket Notes verification: `#499`'s `has_cover_note_draft`
+# was `false` on live prod run `c81d29c0` (2026-08-21) NOT because of the
+# empty-`proposed_replacement_text` bug this ticket fixes -- verified by
+# replaying that run's exact two issues (nda-confidentiality-scope /
+# nda-compelled-disclosure) through `build_edit_digest` below: both carry
+# `counterparty_change_summary` and `external_rationale_for_footnote`
+# (neither field this function reads is `proposed_replacement_text`, per
+# this function's own docstring, "Deliberately excludes proposed_
+# replacement_text"), so the digest is non-empty and `render_cover_note_
+# user_prompt` produces real content regardless of whether either issue's
+# replacement text was empty. `has_cover_note_draft` is `bool(item.get(
+# "cover_note_draft"))` (backend/src/reviews.py) -- true only once a caller
+# hits `POST /reviews/{id}/cover-note` ("butter it", an on-demand, billed,
+# user-triggered action per `backend/src/review_routes.py::
+# post_review_cover_note`), which nothing in the pipeline or in this fix
+# calls automatically. `false` on that run means the endpoint was simply
+# never invoked for it -- this fix does not, and was never going to,
+# change `has_cover_note_draft` for any past or future review by itself.
 def build_edit_digest(issues: Any) -> list[dict[str, str]]:
     """The review's `issues[]` reduced to exactly the externally-facing
     fields a cover note may describe: a human-readable label

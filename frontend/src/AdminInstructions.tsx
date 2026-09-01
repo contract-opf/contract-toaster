@@ -1,6 +1,8 @@
 /**
- * AdminInstructions — the "Playbook instructions" admin tab (issue #484,
- * epic #481, sub-issue C), replacing the old "Pen rules & posture" tab.
+ * AdminInstructions — the "Standing instructions" pane on the merged
+ * Playbooks admin screen (issue #605 folded this in from its own
+ * standalone "Playbook instructions" tab; issue #484, epic #481 sub-issue C
+ * originated it there, itself replacing the old "Pen rules & posture" tab).
  *
  * ## What this is
  *
@@ -21,16 +23,15 @@
  * Unlike the pen-rules/posture layer it replaces (ARCHITECTURE.md →
  * "Guidance-precedence model" item 4), standing instructions are LIVE: a
  * saved version is picked up by the very next review run against this
- * playbook (issue #483 composes it into both review passes). So this
- * screen carries no permanent "nothing here does anything yet" banner —
- * the status line is the whole truth, not a caveat on top of an inert
- * control.
+ * playbook (issue #483 composes it into both review passes). So this pane
+ * carries no permanent "nothing here does anything yet" banner — the
+ * status line is the whole truth, not a caveat on top of an inert control.
  *
  * ## Precedence
  *
  * Floor > per-review guidance (the Review screen's own box) > standing
- * instructions (this screen) > the playbook's own positions. The
- * mid-clause of that sentence is `guidancePrecedenceCopy.ts`'s
+ * instructions (this pane) > the playbook's own positions. The mid-clause
+ * of that sentence is `guidancePrecedenceCopy.ts`'s
  * `GUIDANCE_PRECEDENCE_COPY`, shared verbatim with `ReviewSubmission.tsx`'s
  * per-review guidance field so the two surfaces can never drift on wording
  * for the same underlying (non-mechanical) guarantee.
@@ -46,25 +47,66 @@
  * and saving again (now with the refreshed `expected_current_version`)
  * re-applies the same edit against the version everyone can now see.
  *
+ * ## Selection (issue #605)
+ *
+ * This component used to own its own playbook picker (a `<select>`) and
+ * its own `GET /api/playbooks` catalog fetch, because it rendered as a
+ * standalone tab with nothing else on screen to pick a playbook from.
+ * `AdminPlaybooks.tsx` now owns selection instead — its "Version history"
+ * action is the SAME click that drives this pane, per the merge ticket's
+ * coupling requirement ("selecting a playbook in the list drives the
+ * instructions pane") — so this component takes the selected playbook as
+ * a prop and renders only once one is chosen. `AdminPlaybooks` also mounts
+ * it keyed on that id (`key={playbookId}`): switching the selection fully
+ * unmounts and remounts this component rather than asking it to track "am
+ * I still showing the selected playbook?" itself, which is what the old
+ * `selectedPlaybookIdRef` stale-response guard existed for — deleted here,
+ * since a freshly-mounted instance can never race a dead one (React drops
+ * a state update against an unmounted component rather than ever getting
+ * the chance to paint it).
+ *
+ * ## Layout: deliberately one column (issue #610)
+ *
+ * #602 applied the `ct-columns` two-column primitive (#601) across the
+ * admin panels, and #610 re-checked this pane as part of that wave. The
+ * answer here is a deliberate NO CHANGE, and this note exists so nobody
+ * has to re-derive it:
+ *
+ *   - There is exactly ONE form control on this pane — the standing-
+ *     instructions `<textarea>`. #602's own Notes single it out ("the
+ *     standing-instructions textarea is legitimately wide; do not force
+ *     it into a narrow column"), and docs/frontend-design-system.md §6
+ *     says a single logical control with nothing to pair against stays
+ *     in `ct-stack`.
+ *   - The `<select>` playbook picker that used to be the second control
+ *     on this screen is gone — #605 moved selection to
+ *     `AdminPlaybooks.tsx` (see "Selection" above), so the pairing
+ *     opportunity #610 was written against no longer exists in this file
+ *     at all.
+ *
+ * If a later ticket adds a second short control here, re-evaluate then.
+ * The textarea itself is not a candidate either way.
+ *
  * ## Retiring "Pen rules & posture"
  *
- * `AdminPenRules.tsx` and its test are deleted by this same issue; the
+ * `AdminPenRules.tsx` and its test were deleted by issue #484; the
  * `POST /api/admin/playbooks/{id}/pen-rules/validate` route it called stays
  * — it is now an API/CLI-only tooling endpoint (see ARCHITECTURE.md's
- * "Guidance-precedence model" item 4, updated by this issue).
+ * "Guidance-precedence model" item 4).
  *
  * ## Privilege
  *
- * Every route here 403s a non-admin caller; a 403 from any of them is the
- * sole signal to hide this panel, same defense-in-depth posture as every
- * other admin screen (App.tsx's `/api/me` probe decides whether this
- * component mounts at all; the server stays authoritative).
+ * Every route here 403s a non-admin caller; a 403 from any of them hides
+ * this pane on its own (returns `null`) — the same defense-in-depth
+ * posture as every other admin screen, and independent of whatever the
+ * rest of the merged Playbooks screen is doing (App.tsx's `/api/me` probe
+ * decides whether the whole screen mounts at all; the server stays
+ * authoritative for every action within it).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
 import { GUIDANCE_PRECEDENCE_COPY } from './guidancePrecedenceCopy';
-import type { PlaybookCatalogEntry } from './AdminPlaybooks';
 import { CtBanner, CtButton, CtCard, CtField, CtProgress, CtToolbar } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -110,7 +152,7 @@ function formatDateTime(epochSeconds: number | null): string {
  * "v3 in effect for every new review · saved by admin · 8/2/2026" (or, for
  * an explicitly-cleared version, "v5 cleared · …" — issue #484's Notes:
  * "Saving empty text is allowed and reads back as 'cleared (v5)'."). This
- * is the ONLY state banner this screen renders — no permanent liveness
+ * is the ONLY state banner this pane renders — no permanent liveness
  * caveat (see this module's docstring for why that would misdescribe a
  * live feature).
  */
@@ -127,11 +169,26 @@ function statusLine(current: InstructionsVersion | null): string {
   return `${headline} · saved by ${who} · ${when}`;
 }
 
-export default function AdminInstructions(): React.ReactElement | null {
-  const [playbooks, setPlaybooks] = useState<PlaybookCatalogEntry[] | null>(null);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [selectedPlaybookId, setSelectedPlaybookId] = useState<string>('');
+export interface AdminInstructionsProps {
+  /**
+   * The playbook this pane edits. `AdminPlaybooks` only mounts this
+   * component once a playbook is selected (see this module's docstring),
+   * and keys the mount on this same id — never blank, and never changes
+   * without a full remount.
+   */
+  playbookId: string;
+  /**
+   * Only for this pane's own heading, e.g. "Standing instructions — EIAA".
+   * Never used to pick which playbook's instructions load — `playbookId`
+   * alone decides that.
+   */
+  playbookDisplayName: string;
+}
 
+export default function AdminInstructions({
+  playbookId,
+  playbookDisplayName,
+}: AdminInstructionsProps): React.ReactElement | null {
   const [current, setCurrent] = useState<InstructionsVersion | null>(null);
   const [history, setHistory] = useState<InstructionsVersion[] | null>(null);
   const [instructionsError, setInstructionsError] = useState<string | null>(null);
@@ -144,85 +201,25 @@ export default function AdminInstructions(): React.ReactElement | null {
   const [expandedVersions, setExpandedVersions] = useState<Set<number>>(new Set());
   const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
 
-  // Any admin route answering 403 hides the whole panel — no client-side
-  // admin claim is trusted here (see this module's docstring).
+  // A 403 from any route below hides this pane only — see this module's
+  // docstring's "Privilege" section.
   const [isForbidden, setIsForbidden] = useState(false);
 
-  // Mirrors `selectedPlaybookId` for synchronous reads inside async
-  // callbacks (`loadInstructions` below). Switching playbook A→B while A's
-  // GET is still in flight must not let A's late-arriving response paint
-  // over B's textarea/status/`current.version` — this ref is what
-  // `loadInstructions` checks, after every await, to discard a response for
-  // a playbook that is no longer selected. Same problem `App.tsx`'s several
-  // `let cancelled = false` guards solve for their own effects; a ref
-  // (rather than a per-effect boolean) is used here because
-  // `loadInstructions` is also invoked outside the selection effect — from
-  // `saveText`'s post-save/409 refresh — and must honor the same "still the
-  // selected playbook?" check no matter who called it.
-  const selectedPlaybookIdRef = useRef(selectedPlaybookId);
-  useEffect(() => {
-    selectedPlaybookIdRef.current = selectedPlaybookId;
-  }, [selectedPlaybookId]);
-
-  const loadPlaybooks = useCallback(async () => {
-    try {
-      const response = await jsonFetch('/api/playbooks');
-      if (response.status === 403) {
-        setIsForbidden(true);
-        return;
-      }
-      if (!response.ok) {
-        throw new Error(
-          friendlyErrorMessage(
-            `GET /api/playbooks returned HTTP ${response.status}`,
-            "We couldn't load your playbooks. Please try again.",
-          ),
-        );
-      }
-      const data = (await response.json()) as { playbooks: PlaybookCatalogEntry[] };
-      setPlaybooks(data.playbooks);
-      // One playbook installed: preselected and quiet (issue #484). More
-      // than one: default to the first rather than leaving the screen with
-      // nothing selected and nothing to look at.
-      if (data.playbooks.length > 0) {
-        setSelectedPlaybookId((currentId) =>
-          currentId !== '' && data.playbooks.some((p) => p.playbook_id === currentId)
-            ? currentId
-            : data.playbooks[0].playbook_id,
-        );
-      }
-    } catch (err) {
-      setCatalogError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load your playbooks. Please try again."),
-      );
-    }
-  }, []);
-
-  const loadInstructions = useCallback(async (playbookId: string) => {
+  const loadInstructions = useCallback(async () => {
     setInstructionsError(null);
     setCurrent(null);
     setHistory(null);
     setConflict(null);
-    // A failed save against the previously-selected playbook must not leave
-    // its red banner sitting above a different playbook's form.
+    // A failed save must not leave its red banner sitting above a reload
+    // that just succeeded.
     setSaveError(null);
     try {
       const response = await jsonFetch(
         `/api/admin/playbooks/${encodeURIComponent(playbookId)}/instructions`,
       );
-      // Stale-response guard: if the selected playbook has moved on since
-      // this request was issued, this response describes a playbook that
-      // is no longer on screen — discard it rather than let it paint over
-      // whatever the (later-selected) playbook's own in-flight/loaded state
-      // is. See `selectedPlaybookIdRef`'s comment above for why.
-      if (playbookId !== selectedPlaybookIdRef.current) {
-        return undefined;
-      }
       if (response.status === 403) {
         setIsForbidden(true);
-        return;
+        return undefined;
       }
       if (!response.ok) {
         throw new Error(
@@ -233,17 +230,11 @@ export default function AdminInstructions(): React.ReactElement | null {
         );
       }
       const data = (await response.json()) as InstructionsGetResponse;
-      if (playbookId !== selectedPlaybookIdRef.current) {
-        return undefined;
-      }
       setCurrent(data.current);
       setHistory(data.history);
       setDraftText(data.current?.text ?? '');
       return data;
     } catch (err) {
-      if (playbookId !== selectedPlaybookIdRef.current) {
-        return undefined;
-      }
       setInstructionsError(
         err instanceof Error
           ? err.message
@@ -254,18 +245,11 @@ export default function AdminInstructions(): React.ReactElement | null {
       );
       return undefined;
     }
-  }, []);
+  }, [playbookId]);
 
   useEffect(() => {
-    void loadPlaybooks();
-  }, [loadPlaybooks]);
-
-  useEffect(() => {
-    if (selectedPlaybookId !== '') {
-      setExpandedVersions(new Set());
-      void loadInstructions(selectedPlaybookId);
-    }
-  }, [selectedPlaybookId, loadInstructions]);
+    void loadInstructions();
+  }, [loadInstructions]);
 
   const saveText = useCallback(
     async (text: string) => {
@@ -273,7 +257,7 @@ export default function AdminInstructions(): React.ReactElement | null {
       setSaving(true);
       try {
         const response = await jsonFetch(
-          `/api/admin/playbooks/${encodeURIComponent(selectedPlaybookId)}/instructions`,
+          `/api/admin/playbooks/${encodeURIComponent(playbookId)}/instructions`,
           {
             method: 'POST',
             body: JSON.stringify({
@@ -291,7 +275,7 @@ export default function AdminInstructions(): React.ReactElement | null {
           // `current`/`history` reflect the version that just won, and
           // leave the admin's own unsaved draft exactly as typed so it can
           // be reviewed and re-applied deliberately.
-          const refreshed = await loadInstructions(selectedPlaybookId);
+          const refreshed = await loadInstructions();
           setDraftText(text);
           setConflict(refreshed?.current ?? null);
           return;
@@ -317,7 +301,7 @@ export default function AdminInstructions(): React.ReactElement | null {
         setConflict(null);
         // The history list is append-only and this save just added to it —
         // refresh rather than reconstruct it client-side.
-        await loadInstructions(selectedPlaybookId);
+        await loadInstructions();
       } catch (err) {
         setSaveError(
           err instanceof Error
@@ -328,7 +312,7 @@ export default function AdminInstructions(): React.ReactElement | null {
         setSaving(false);
       }
     },
-    [current, loadInstructions, selectedPlaybookId],
+    [current, loadInstructions, playbookId],
   );
 
   const handleSave = useCallback(
@@ -365,185 +349,149 @@ export default function AdminInstructions(): React.ReactElement | null {
   }
 
   return (
-    <section data-testid="admin-instructions-panel" className="ct-section ct-stack">
-      <CtToolbar title="Playbook instructions" />
+    <div data-testid="admin-instructions-panel" className="ct-stack">
+      <CtToolbar title={`Standing instructions — ${playbookDisplayName}`} />
 
-      {catalogError && (
-        <CtBanner variant="danger" data-testid="admin-instructions-catalog-error">
-          {catalogError}
+      {instructionsError && (
+        <CtBanner variant="danger" data-testid="admin-instructions-error">
+          {instructionsError}
         </CtBanner>
       )}
 
-      {playbooks === null ? (
-        <CtProgress data-testid="admin-instructions-loading" label="Loading playbooks…" />
-      ) : playbooks.length === 0 ? (
-        // Zero installed: instructions attach to a playbook, so there is
-        // nothing to point this screen at yet (issue #484's spec). Mirrors
-        // ReviewSubmission.tsx's own no-playbooks empty state in tone.
-        <CtBanner variant="muted" data-testid="admin-instructions-empty">
-          <p>Standing instructions attach to a playbook, and none are installed yet.</p>
-          <p>An admin needs to install and activate a playbook first, from the Playbooks tab.</p>
-        </CtBanner>
+      {history === null && !instructionsError ? (
+        <CtProgress
+          data-testid="admin-instructions-loading"
+          label="Loading standing instructions…"
+        />
       ) : (
-        <>
-          <CtCard data-testid="admin-instructions-picker-card">
-            <CtField label="Playbook" hint="Standing instructions are saved per playbook.">
-              <select
-                data-testid="admin-instructions-picker"
-                value={selectedPlaybookId}
-                onChange={(e) => setSelectedPlaybookId(e.target.value)}
-              >
-                {playbooks.map((entry) => (
-                  <option key={entry.playbook_id} value={entry.playbook_id}>
-                    {entry.display_name}
-                  </option>
-                ))}
-              </select>
-            </CtField>
-          </CtCard>
+        history !== null && (
+          <>
+            <CtCard data-testid="admin-instructions-form-card">
+              <div className="ct-stack">
+                {/* The ONLY state banner (issue #484's spec) — no
+                    permanent liveness caveat, this feature is live. */}
+                <p data-testid="admin-instructions-status" className="ct-muted">
+                  {statusLine(current)}
+                </p>
 
-          {instructionsError && (
-            <CtBanner variant="danger" data-testid="admin-instructions-error">
-              {instructionsError}
-            </CtBanner>
-          )}
-
-          {history === null && !instructionsError ? (
-            <CtProgress
-              data-testid="admin-instructions-loading-detail"
-              label="Loading standing instructions…"
-            />
-          ) : (
-            history !== null && (
-              <>
-                <CtCard data-testid="admin-instructions-form-card">
-                <div className="ct-stack">
-                  {/* The ONLY state banner (issue #484's spec) — no
-                      permanent liveness caveat, this feature is live. */}
-                  <p data-testid="admin-instructions-status" className="ct-muted">
-                    {statusLine(current)}
-                  </p>
-
-                  {conflict && (
-                    <CtBanner variant="warn" data-testid="admin-instructions-conflict">
-                      <div className="ct-stack">
-                        <p>
-                          Someone saved v{conflict.version} while you were editing — review their
-                          version below, then re-apply your edit.
-                        </p>
-                        <div className="ct-row" data-testid="admin-instructions-conflict-diff">
-                          <div data-testid="admin-instructions-conflict-mine">
-                            <strong>Your edit (unsaved)</strong>
-                            <p style={{ whiteSpace: 'pre-wrap' }}>
-                              {draftText === '' ? '(empty)' : draftText}
-                            </p>
-                          </div>
-                          <div data-testid="admin-instructions-conflict-theirs">
-                            <strong>
-                              v{conflict.version} · {conflict.saved_by ?? 'someone'} ·{' '}
-                              {formatDateTime(conflict.saved_at)}
-                            </strong>
-                            <p style={{ whiteSpace: 'pre-wrap' }}>
-                              {conflict.text === '' ? '(cleared)' : conflict.text}
-                            </p>
-                          </div>
+                {conflict && (
+                  <CtBanner variant="warn" data-testid="admin-instructions-conflict">
+                    <div className="ct-stack">
+                      <p>
+                        Someone saved v{conflict.version} while you were editing — review their
+                        version below, then re-apply your edit.
+                      </p>
+                      <div className="ct-row" data-testid="admin-instructions-conflict-diff">
+                        <div data-testid="admin-instructions-conflict-mine">
+                          <strong>Your edit (unsaved)</strong>
+                          <p style={{ whiteSpace: 'pre-wrap' }}>
+                            {draftText === '' ? '(empty)' : draftText}
+                          </p>
+                        </div>
+                        <div data-testid="admin-instructions-conflict-theirs">
+                          <strong>
+                            v{conflict.version} · {conflict.saved_by ?? 'someone'} ·{' '}
+                            {formatDateTime(conflict.saved_at)}
+                          </strong>
+                          <p style={{ whiteSpace: 'pre-wrap' }}>
+                            {conflict.text === '' ? '(cleared)' : conflict.text}
+                          </p>
                         </div>
                       </div>
-                    </CtBanner>
-                  )}
-
-                  {saveError && (
-                    <CtBanner variant="danger" data-testid="admin-instructions-save-error">
-                      {saveError}
-                    </CtBanner>
-                  )}
-
-                  <form className="ct-stack" noValidate onSubmit={handleSave}>
-                    <CtField
-                      label="Standing instructions for this contract type (optional)"
-                      hint={`These apply to every review run with this playbook. They ${GUIDANCE_PRECEDENCE_COPY} The instructions box on the Review screen still wins for a single review. Leave blank to let the playbook speak for itself.`}
-                    >
-                      <textarea
-                        data-testid="admin-instructions-text"
-                        rows={8}
-                        value={draftText}
-                        onChange={(e) => setDraftText(e.target.value)}
-                      />
-                    </CtField>
-
-                    <div className="ct-row">
-                      <CtButton
-                        type="submit"
-                        variant="primary"
-                        data-testid="admin-instructions-save"
-                        disabled={saving}
-                        loading={saving}
-                      >
-                        {saving ? 'Saving…' : 'Save — takes effect for the next review'}
-                      </CtButton>
                     </div>
-                  </form>
-                </div>
-              </CtCard>
-
-              <CtCard data-testid="admin-instructions-history-card">
-                <CtToolbar title="History" />
-                {history.length === 0 ? (
-                  <p className="ct-muted" data-testid="admin-instructions-history-empty">
-                    Nothing has been saved for this playbook yet.
-                  </p>
-                ) : (
-                  <div className="ct-stack">
-                    {history.map((row) => {
-                      const isExpanded = expandedVersions.has(row.version);
-                      return (
-                        <div key={row.version} data-testid={`admin-instructions-history-row-${row.version}`}>
-                          <div className="ct-row">
-                            <span>
-                              v{row.version} · {row.saved_by ?? 'someone'} ·{' '}
-                              {formatDateTime(row.saved_at)}
-                              {row.text.trim() === '' ? ' · cleared' : ''}
-                            </span>
-                            <CtButton
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              data-testid={`admin-instructions-history-toggle-${row.version}`}
-                              onClick={() => toggleHistoryVersion(row.version)}
-                            >
-                              {isExpanded ? 'Hide text' : 'Show text'}
-                            </CtButton>
-                            <CtButton
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              data-testid={`admin-instructions-history-restore-${row.version}`}
-                              disabled={restoringVersion !== null}
-                              loading={restoringVersion === row.version}
-                              onClick={() => void restoreVersion(row)}
-                            >
-                              Restore as new version
-                            </CtButton>
-                          </div>
-                          {isExpanded && (
-                            <p
-                              style={{ whiteSpace: 'pre-wrap' }}
-                              data-testid={`admin-instructions-history-text-${row.version}`}
-                            >
-                              {row.text === '' ? '(cleared — empty text)' : row.text}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  </CtBanner>
                 )}
-              </CtCard>
-            </>
-            )
-          )}
-        </>
+
+                {saveError && (
+                  <CtBanner variant="danger" data-testid="admin-instructions-save-error">
+                    {saveError}
+                  </CtBanner>
+                )}
+
+                <form className="ct-stack" noValidate onSubmit={handleSave}>
+                  <CtField
+                    label="Standing instructions for this contract type (optional)"
+                    hint={`These apply to every review run with this playbook. They ${GUIDANCE_PRECEDENCE_COPY} The instructions box on the Review screen still wins for a single review. Leave blank to let the playbook speak for itself.`}
+                  >
+                    <textarea
+                      data-testid="admin-instructions-text"
+                      rows={8}
+                      value={draftText}
+                      onChange={(e) => setDraftText(e.target.value)}
+                    />
+                  </CtField>
+
+                  <div className="ct-row">
+                    <CtButton
+                      type="submit"
+                      variant="primary"
+                      data-testid="admin-instructions-save"
+                      disabled={saving}
+                      loading={saving}
+                    >
+                      {saving ? 'Saving…' : 'Save — takes effect for the next review'}
+                    </CtButton>
+                  </div>
+                </form>
+              </div>
+            </CtCard>
+
+            <CtCard data-testid="admin-instructions-history-card">
+              <CtToolbar title="History" />
+              {history.length === 0 ? (
+                <p className="ct-muted" data-testid="admin-instructions-history-empty">
+                  Nothing has been saved for this playbook yet.
+                </p>
+              ) : (
+                <div className="ct-stack">
+                  {history.map((row) => {
+                    const isExpanded = expandedVersions.has(row.version);
+                    return (
+                      <div key={row.version} data-testid={`admin-instructions-history-row-${row.version}`}>
+                        <div className="ct-row">
+                          <span>
+                            v{row.version} · {row.saved_by ?? 'someone'} ·{' '}
+                            {formatDateTime(row.saved_at)}
+                            {row.text.trim() === '' ? ' · cleared' : ''}
+                          </span>
+                          <CtButton
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            data-testid={`admin-instructions-history-toggle-${row.version}`}
+                            onClick={() => toggleHistoryVersion(row.version)}
+                          >
+                            {isExpanded ? 'Hide text' : 'Show text'}
+                          </CtButton>
+                          <CtButton
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            data-testid={`admin-instructions-history-restore-${row.version}`}
+                            disabled={restoringVersion !== null}
+                            loading={restoringVersion === row.version}
+                            onClick={() => void restoreVersion(row)}
+                          >
+                            Restore as new version
+                          </CtButton>
+                        </div>
+                        {isExpanded && (
+                          <p
+                            style={{ whiteSpace: 'pre-wrap' }}
+                            data-testid={`admin-instructions-history-text-${row.version}`}
+                          >
+                            {row.text === '' ? '(cleared — empty text)' : row.text}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CtCard>
+          </>
+        )
       )}
-    </section>
+    </div>
   );
 }

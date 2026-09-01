@@ -112,7 +112,7 @@ ct-file-drop {
 
 .ct-file-drop__pill-size {
   font-family: var(--ct-font-mono);
-  font-size: var(--ct-text-xs);
+  font-size: var(--ct-text-sm);
   color: var(--ct-text-muted);
   white-space: nowrap;
 }

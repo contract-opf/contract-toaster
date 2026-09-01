@@ -1,6 +1,7 @@
 /**
  * header-notice-placement.test.tsx — the default-password warning belongs in
- * the shell's full-width notice row, never inside the identity cluster.
+ * the shell's full-width notice row, never inside the identity cluster, and
+ * (issue #603) that row now sits at the FOOT of the page.
  *
  * Reported 2026-08-04 from a screenshot of the live deployment: the header
  * read as a broken layout, with "Contract Toaster Review Tool" stacked one
@@ -17,6 +18,14 @@
  * This test asserts the DOM relationship rather than any visual property,
  * because the relationship is what the grid reacts to: a jsdom test cannot
  * see the stacking, but it can see the containment that causes it.
+ *
+ * Issue #603 moved the row to the bottom of the page. The assertions added
+ * for it are deliberately about DOCUMENT ORDER, not CSS position: jsdom
+ * computes no layout, so an assertion about where the banner is PAINTED
+ * would be worthless here — and document order is the stronger property
+ * anyway, since it is also what a screen reader and the tab ring follow. A
+ * CSS-only reorder (a `grid-area` move with the element left in the header)
+ * would pass a paint-position check and fail these.
  *
  * Fully offline — aws-amplify/auth and @aws-amplify/ui-react are mocked,
  * fetch is stubbed. No live AWS/Cognito/network.
@@ -113,6 +122,62 @@ describe('default-password warning placement', () => {
     await waitFor(() => expect(screen.getByTestId('user-email')).toBeTruthy(), APPEAR_TIMEOUT);
     expect(screen.queryByTestId('default-credentials-warning')).toBeNull();
     expect(document.querySelector('[slot="notice"]')).toBeNull();
+  });
+
+  // ---- issue #603: the row moved to the foot of the page ----------------
+
+  it('renders the warning AFTER every tabpanel in document order', async () => {
+    stubFetch({ '/api/me': ME_WITH_WARNING, '/version': { version: '0', commit: 'abcdef12' } });
+    vi.stubEnv('VITE_AUTH_MODE', 'password');
+    render(<App />);
+
+    const banner = await screen.findByTestId('default-credentials-warning', {}, APPEAR_TIMEOUT);
+    const panels = Array.from(document.querySelectorAll('[role="tabpanel"]'));
+    expect(panels.length).toBeGreaterThan(0);
+
+    for (const panel of panels) {
+      // DOCUMENT_POSITION_FOLLOWING: the banner comes after this panel in
+      // the tree. Not "is painted below" — see this file's docstring.
+      const relation = panel.compareDocumentPosition(banner);
+      expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it('renders the warning BEFORE the footer, not adrift past it', async () => {
+    stubFetch({ '/api/me': ME_WITH_WARNING, '/version': { version: '0', commit: 'abcdef12' } });
+    vi.stubEnv('VITE_AUTH_MODE', 'password');
+    render(<App />);
+
+    const banner = await screen.findByTestId('default-credentials-warning', {}, APPEAR_TIMEOUT);
+    const footer = document.querySelector('[slot="footer"]');
+    expect(footer).not.toBeNull();
+    expect(footer!.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('keeps a working change-password affordance in the moved warning', async () => {
+    stubFetch({ '/api/me': ME_WITH_WARNING, '/version': { version: '0', commit: 'abcdef12' } });
+    vi.stubEnv('VITE_AUTH_MODE', 'password');
+    render(<App />);
+
+    const banner = await screen.findByTestId('default-credentials-warning', {}, APPEAR_TIMEOUT);
+    // "Move it" must not silently become "drop it": the warning still says
+    // what is wrong AND still offers the remedy, now that it no longer sits
+    // beside the identity cluster's own button.
+    expect(banner.textContent).toContain('shipped default password');
+
+    const link = screen.getByTestId('default-credentials-change-link') as HTMLAnchorElement;
+    expect(banner.contains(link)).toBe(true);
+    const fragment = link.getAttribute('href') ?? '';
+    expect(fragment.startsWith('#')).toBe(true);
+
+    // The link must point at something that EXISTS — a fragment with no
+    // target is a dead affordance, which is the failure this guards.
+    // ct-button forwards data-testid to the inner <button> it builds, so the
+    // id sits on the ct-button HOST — the anchor target is that host, and the
+    // control it opens must be inside it.
+    const target = document.getElementById(fragment.slice(1));
+    expect(target).not.toBeNull();
+    expect(target!.contains(screen.getByTestId('change-password-open'))).toBe(true);
   });
 
   it('keeps the identity cluster to identity controls only', async () => {

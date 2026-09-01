@@ -192,6 +192,11 @@ describe('AdminPlaybooks — version history', () => {
       if (pathname === '/api/playbooks') {
         return { ok: true, status: 200, json: async () => CATALOG } as Response;
       }
+      // Issue #605: selecting the playbook (below) also mounts its
+      // standing-instructions pane, which fetches this on its own.
+      if (pathname.endsWith('/instructions')) {
+        return { ok: true, status: 200, json: async () => ({ current: null, history: [] }) } as Response;
+      }
       return { ok: true, status: 200, json: async () => ({}) } as Response;
     });
   }

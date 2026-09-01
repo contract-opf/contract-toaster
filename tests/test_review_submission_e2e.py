@@ -265,11 +265,13 @@ class TestSpendReservation(unittest.TestCase):
         )
 
     def test_reservation_matches_architecture_md_worst_case(self):
-        """The reservation must match ARCHITECTURE.md's documented $2.11
-        worst-case/review, not the pre-fix $9.68 (issue #189: applying a
-        single blended 'Opus output' rate to ALL tokens overshot by 4.6x
-        and 429'd the third review of any day against the $20/day cap)."""
-        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 211)
+        """The reservation must match ARCHITECTURE.md's documented $2.46
+        worst-case/review (issue #625 raised MAX_INPUT_TOKENS to 100_000;
+        it was $2.11 at 80_000), not the pre-fix blended-rate figure (issue
+        #189: applying a single blended 'Opus output' rate to ALL tokens
+        overshot by 4.6x and 429'd the third review of any day against the
+        $20/day cap)."""
+        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 246)
 
     def test_reservation_fails_closed_over_daily_cap(self):
         ddb = FakeDynamoDBResource()

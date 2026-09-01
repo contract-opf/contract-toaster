@@ -151,8 +151,6 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
         primary_ledger: list[model_client.ModelInvocationRecord] = []
         primary_result = pp.run_primary_pass(
             review_id="ledger-414",
-            diff_hunks=[],
-            anchored_clauses=[],
             retrieved_precedent=[],
             playbook=_playbook(),
             model_client=client,
@@ -183,8 +181,6 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
         critic_ledger: list[model_client.ModelInvocationRecord] = []
         critic_result = cp.run_critic_pass(
             review_id="ledger-414",
-            diff_hunks=[],
-            anchored_clauses=[],
             primary_output=primary_result["response"],
             playbook=_playbook(),
             model_client=client,
@@ -231,8 +227,6 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
         ledger: list[model_client.ModelInvocationRecord] = []
         result = pp.run_primary_pass(
             review_id="ledger-414-clen",
-            diff_hunks=[],
-            anchored_clauses=[],
             retrieved_precedent=[],
             playbook=_playbook(),
             model_client=client,
@@ -288,8 +282,6 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
         with self.assertRaises(model_client.ModelContextLengthExceededError):
             cp.run_critic_pass(
                 review_id="ledger-414-clen-critic",
-                diff_hunks=[],
-                anchored_clauses=[],
                 primary_output={"issues": []},
                 playbook=_playbook(),
                 model_client=client,
@@ -388,8 +380,6 @@ class TestMakeLedgerWrite(unittest.TestCase):
         )
         result = pp.run_primary_pass(
             review_id="ledger-414-putfail",
-            diff_hunks=[],
-            anchored_clauses=[],
             retrieved_precedent=[],
             playbook=_playbook(),
             model_client=client,
