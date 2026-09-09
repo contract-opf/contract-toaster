@@ -83,6 +83,8 @@ the shipped index will name paths that are not in it.
 - `docs/plans/2026-09-08-public-cutover-plan.md` — The plan for moving the development trunk to the public contract-opf repo and reducing exos-legal to the Exos overlay: the four owner decisions, the six findings that gate publication, the phased sequence, and why the open backlog is not a blocker. anchors: decisions, where-things-actually-stand, what-gates-publication, the-overlay-seam, sequencing, the-85-open-issues, parked-for-you
 
 ## docs/reports/
+- `docs/reports/2026-09-05-audit-hardening-diagnostic.md` — The first 2026-09-05 sweep — stability, accuracy, security and performance findings, each naming its file and intended remediation. The rationale behind the ten-step hardening series. anchors: priority-summary, pillar-1--stability--resilience, pillar-2--accuracy--fidelity, pillar-3--security-posture, pillar-4--performance--efficiency, owner-decisions-2026-09-05, github-issues-execution-order, execution-order
+- `docs/reports/2026-09-05-stability-maintainability-qol-diagnostic.md` — The second 2026-09-05 sweep, on what makes the project hard to run, hard to change and tedious to use. The rationale behind the fifteen-step stability series. anchors: priority-summary, details-and-remediation, owner-decisions-2026-09-05, github-issues-execution-order, proposed-order, questions
 - `docs/reports/2026-09-07-orbit-diner-04p1-review.md` — The accept verdict on the designer's 04p1 patch, checked against the code rather than its prose, with seven findings and the round-two questions they raised. anchors: integrity-and-build--verified, answers-spot-checked-against-the-code-not-the-prose, findings, what-the-answers-change-in-the-filed-plan, round-two-questions
 
 ## docs/walkthroughs/
