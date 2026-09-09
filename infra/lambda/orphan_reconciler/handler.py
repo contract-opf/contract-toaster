@@ -65,8 +65,19 @@ STALE_PENDING_THRESHOLD_SECONDS = int(
 # constant automatically (the formula below), and rise with it.
 # ---------------------------------------------------------------------------
 MAX_INPUT_TOKENS = 100_000
-MAX_OUTPUT_TOKENS = 8_000
+# Issue #658: the worst-case per-attempt OUTPUT budget. reviews.py derives
+# this from `model_client.output_budget_for_document(MAX_INPUT_TOKENS,
+# model_client.DEFAULT_MAX_OUTPUT_TOKENS)` -- the sizing function both review
+# passes call. This deployable cannot import it (it ships as its own
+# standalone Lambda asset with neither backend/src nor model-policy/ on its
+# filesystem, see the module docstring), so the RESULT is mirrored here as a
+# literal and tests/test_spend_reservation_settlement.py fails CI if the two
+# ever disagree.
+MAX_OUTPUT_TOKENS = 32_000
 MAX_RETRIES_PER_PASS = 1
+# Issue #658: truncation's own retry allowance -- a real extra model call the
+# reservation must price. Mirror of reviews.py's constant of the same name.
+MAX_TRUNCATION_RETRIES_PER_PASS = 1
 REGIONAL_PRICING_PREMIUM = 1.10
 PRIMARY_INPUT_RATE_USD_PER_MILLION = 5.50
 PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 27.50
@@ -89,7 +100,7 @@ def compute_worst_case_reservation_usd_cents() -> int:
     deleted), in the same commit reviews.py dropped it -- so this
     settlement-side copy cannot drift from the reserve-side figure.
     """
-    attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
+    attempts_per_pass = 1 + MAX_RETRIES_PER_PASS + MAX_TRUNCATION_RETRIES_PER_PASS
     primary_usd = MAX_INPUT_TOKENS * (
         PRIMARY_INPUT_RATE_USD_PER_MILLION / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (PRIMARY_OUTPUT_RATE_USD_PER_MILLION / 1_000_000)
@@ -149,9 +160,12 @@ def _release_reservation(review_id: str, submission: dict[str, Any]) -> None:
 
     Issue #189 fix: this previously only set a `reservation_released` flag
     on the submission row and never touched daily_spend.reserved_usd_cents,
-    so a dead execution's worst-case reservation (then $2.11, $2.46 since
-    issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model rates, see
-    the module constants above) held its slice of the daily cap PERMANENTLY,
+    so a dead execution's worst-case reservation ($6.86 today -- 3 attempts
+    x 100K in + 3 attempts x 32K out per pass, since issue #658 raised the
+    output budget and gave truncation its own attempt; $2.46 before that,
+    $2.11 before issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model
+    rates, see the module constants above) held its slice of the daily cap
+    PERMANENTLY,
     accumulating until UTC midnight regardless of how many reviews actually
     completed. The flag is retained (audit marker + the idempotency guard
     below) but the credit-back to daily_spend now actually happens.

@@ -23,10 +23,11 @@ honestly answer:
     issue ("model" / "critic-added" / "detector:<rule_id>"), likewise
     stamped after the fact, never emitted by the model itself.
 
-Under `OPENROUTER_STRUCTURED_OUTPUT=1` (issue #418,
-`backend/src/config.py::structured_output_enabled`), the model is FORCED
-(via a tool call) to emit an object matching a schema -- so that schema
-must not require fields the model was never asked to produce. This module
+When `backend/src/config.py::structured_output_enabled` is on (issue #418
+built the flag; issue #673 made ON its default, so this is now the
+ordinary path, not an opt-in), the model is FORCED (via a tool call) to
+emit an object matching a schema -- so that schema must not require fields
+the model was never asked to produce. This module
 derives that model-facing schema by removing both fields from
 output-schema-v2.json.
 
@@ -39,7 +40,7 @@ mode -- so the projection takes a `notes_mode` and keeps the property in
 `_ISSUE_FIELDS_REQUESTED_ONLY_WITH_INTERNAL_NOTES` below. An
 unconditional property would be a standing request on every review, which
 is the one thing that epic forbids; a permanently absent one would leave
-the renderer that consumes the field (`redline_docx_writer.
+the renderer that consumes the field (`footnote_audience.
 footnote_texts_for_notes_mode`) with nothing able to produce it, since
 under provider enforcement the projected schema -- not the prompt's prose
 -- decides what the model may emit.
@@ -218,7 +219,7 @@ def authors_block_transcripts(schema: dict[str, Any]) -> bool:
 # emitted, and `additionalProperties: false` is forced on every object
 # node); a schema property alone would be a key the prompt's "EXACTLY these
 # keys and no others" sentence forbids. Either half left closed leaves
-# `redline_docx_writer.footnote_texts_for_notes_mode` rendering a field
+# `footnote_audience.footnote_texts_for_notes_mode` rendering a field
 # nothing can populate -- a renderer that is dead on every real review.
 #
 # The FULL schema declares the field optional in every mode, so this
@@ -230,7 +231,7 @@ _ISSUE_FIELDS_REQUESTED_ONLY_WITH_INTERNAL_NOTES = ("internal_rationale_for_foot
 # (epic #519 axis 1). Deliberately a local copy of the same one-line
 # predicate `primary_review_pass._notes_mode_includes_internal`,
 # `redline_generate._notes_mode_includes_internal_content` and
-# `redline_docx_writer.footnote_texts_for_notes_mode` each keep: this
+# `footnote_audience.footnote_texts_for_notes_mode` each keep: this
 # module is imported BY `primary_review_pass`, so importing it back would
 # be a cycle, and a shared constants module for one boolean would be a
 # layer for its own sake. Unrecognized/blank is NOT internal -- the same

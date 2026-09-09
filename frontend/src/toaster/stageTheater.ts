@@ -1,22 +1,36 @@
 /**
- * Toasting theater — the one map of what each real pipeline stage is called
- * and what it looks like (issue #496).
+ * Toasting theater — what each real pipeline stage is called and what it is
+ * called on screen (issue #496), now read off ONE table (issue #727).
  *
- * The wait is minutes long, and the architecture underneath is genuinely
- * dramatic: a primary reviewer marks the document up, then an ADVERSARIAL
- * critic argues with the markup before anything is decided. That second pass
- * existing is the product's best trust story, and a progress bar hides it.
+ * ## Where the captions live
  *
- * ## Why this is a separate module
+ * They live in `orbit-diner/state.ts`'s `stages`, the console's own table, and
+ * this module is a projection of it. Until #727 there were two: the console
+ * carried `stages` and this file carried a hand-written `STAGE_VIGNETTES` with
+ * the same four labels and the same four captions. Two tables mean the glass
+ * and the tab can disagree about what the backend just said, and the moment
+ * they do, both become untrustworthy. #727's acceptance criteria say it in as
+ * many words — exactly one stage caption table exists — so the wording is
+ * `stages`', once, and everything here is derived.
  *
- * The captions have to come from ONE place. #497 puts the same stage into the
- * tab title and the favicon; if the glass and the tab disagree about what is
- * happening, both become untrustworthy. Everything stage-shaped that any
- * surface renders is defined here and imported.
+ * ## Why this module still exists
+ *
+ * The tab title and the favicon stay ours (final plan, designer answer D6),
+ * and they are not console code: `tabChrome.ts` and `faviconFrames.ts` are
+ * plain modules that run whether or not the console is mounted. They need the
+ * stage as an ORDERED LIST with a browning ramp, which is not the shape
+ * `stages` has — `stages` is a keyed record whose fourth field is a CSS
+ * filter for the toast slice. This module is that reshaping, and it is the
+ * only place it happens.
+ *
+ * Issue #667 removed the `art` field. Each stage used to name a small scene
+ * drawn beside the darkening toast slice, which meant two illustrations for
+ * one state; the owner kept the toast. The CAPTION is what carried the
+ * meaning and is what remains.
  *
  * ## Truthful, or silent
  *
- * Every entry below is keyed to a token the backend actually reports
+ * Every entry is keyed to a token the backend actually reports
  * (`scripts/review_spine.py`'s four `PROGRESS_*` tokens, written as each
  * sub-stage STARTS). There is deliberately no entry for "probably nearly
  * done", no interpolation between stages, and no timer: `vignetteForStage`
@@ -28,9 +42,13 @@
  * land there, and all three are better served by an honest "still working"
  * than by a stage we guessed.
  */
+import { stages } from '../orbit-diner/state';
+import type { Stage } from '../orbit-diner/types';
 
-/** The four sub-stages `run_review` reports, in the order they happen. */
-export type ReviewStageToken = 'primary_pass' | 'critic_pass' | 'reconciliation' | 'redline';
+/** The four sub-stages `run_review` reports, in the order they happen. The
+ *  console's `Stage` union and this one are the same wire contract, so it is
+ *  aliased rather than restated — a stage added there cannot be missed here. */
+export type ReviewStageToken = Stage;
 
 export interface StageVignette {
   readonly token: ReviewStageToken;
@@ -39,51 +57,34 @@ export interface StageVignette {
   /** The plain-language sentence shown under the glass and in the tab title. */
   readonly caption: string;
   /**
-   * Which vignette to draw. Named for what it DEPICTS, not for its stage, so
-   * two stages could share one if the art ever consolidates.
-   */
-  readonly art: 'marking-up' | 'arguing' | 'merging' | 'rolling';
-  /**
-   * How far along the browning ramp this stage sits, 0..1. Drives the slice's
-   * darkening and (via #497) the favicon, so both read the same progress off
-   * one number instead of each deriving their own.
+   * How far along the browning ramp this stage sits, 0..1. Drives the
+   * favicon (#497), so the tab and the caption read the same progress off one
+   * number instead of each deriving their own.
    */
   readonly browning: number;
 }
 
-export const STAGE_VIGNETTES: readonly StageVignette[] = [
-  {
-    token: 'primary_pass',
-    label: 'First read-through',
-    caption: 'Reading your contract against the playbook…',
-    art: 'marking-up',
-    browning: 0.25,
-  },
-  {
-    token: 'critic_pass',
-    label: 'Adversarial critic',
-    // Said plainly on purpose. "A second model is arguing with the markup" is
-    // the most reassuring true sentence this product can show a lawyer, and
-    // burying it behind "Step 2 of 4" wastes it.
-    caption: 'A second model is arguing with the markup…',
-    art: 'arguing',
-    browning: 0.5,
-  },
-  {
-    token: 'reconciliation',
-    label: 'Reconciling both passes',
-    caption: 'Settling what survives…',
-    art: 'merging',
-    browning: 0.75,
-  },
-  {
-    token: 'redline',
-    label: 'Writing your redline',
-    caption: 'Writing your redline…',
-    art: 'rolling',
-    browning: 1,
-  },
-];
+/**
+ * The four vignettes, in pipeline order, projected from the console's table.
+ *
+ * The order is `stages`' own `step`, sorted rather than assumed: object key
+ * order happens to match today, and relying on it would make a reordered
+ * literal silently renumber every "Step n of 4" the tab title shows.
+ *
+ * `browning` is `step / count` — the same 0.25 / 0.5 / 0.75 / 1 ramp this
+ * module used to state by hand, now a consequence of where the stage sits
+ * rather than a fifth thing to keep in sync.
+ */
+export const STAGE_VIGNETTES: readonly StageVignette[] = (
+  Object.keys(stages) as ReviewStageToken[]
+)
+  .sort((a, b) => stages[a].step - stages[b].step)
+  .map((token, _index, all) => ({
+    token,
+    label: stages[token].label,
+    caption: stages[token].caption,
+    browning: stages[token].step / all.length,
+  }));
 
 /**
  * The vignette for a reported token, or null when there is no honest one to

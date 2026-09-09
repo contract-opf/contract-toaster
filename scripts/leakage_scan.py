@@ -31,7 +31,7 @@ Scanned fields (per the output-contract.md scope table):
   - internal_rationale_for_footnote   (per issue; the one INTERNAL-channel
     field -- see below -- rendered into the .docx footnotes only in the
     `internal`/`both` notes modes, behind
-    `redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX`)
+    `footnote_audience.INTERNAL_FOOTNOTE_PREFIX`)
   - counterparty_change_summary       (per issue, reviewer UI)
   - proposed_replacement_text         (per issue, generated .docx redline)
   - critic_delta contested-replacement critic_objection / suggested text
@@ -74,7 +74,7 @@ Checks 1 and 4 are the never-acceptable set: blocked on BOTH channels.
 (issue #522, epic #519 item D -- the renderer that keeps it out of the
 counterparty-bound document landed with it, never one without the other;
 `redline_generate.INTERNAL_RATIONALE_FIELD`,
-`redline_docx_writer.footnote_texts_for_notes_mode`). It is SCANNED, not
+`footnote_audience.footnote_texts_for_notes_mode`). It is SCANNED, not
 skipped: the never-acceptable set (checks 1 and 4) blocks it exactly as it
 blocks an external field, and only the permissive column differs. Every
 other field in `_FIELD_CHANNELS` is `external`.
@@ -165,7 +165,7 @@ legal decision (docs/output-contract.md -> "The decision is binary;
 uncertainty is a system status"). `run_leakage_gate` raises
 `LeakageDetectedError` rather than returning a degraded/sanitized result,
 matching the "fail closed, do not guess" convention used by
-scripts/redline_patch.py's anchor/hash-mismatch path and
+the retired anchor/hash-mismatch path and
 backend/src/upload_validation.py's hostile-file gauntlet. An audit row is
 written via an injected `audit_write` callable (same dependency-injection
 convention as backend/src/upload_validation.py's `AuditWrite`), and it
@@ -265,6 +265,16 @@ def _token_pattern(token: str) -> "re.Pattern[str]":
 # document is what this category exists to catch.
 _MIN_PRECEDENT_SPAN_CHARS = 40
 
+# Minimum token count for an OPF-derived check-2/2b n-gram (issue #616). A
+# one-word gram is a term of art, not internal strategy: a digest
+# `text_summary` whose entire content is the bare clause name
+# ("indemnification") is indistinguishable from the playbook's own PUBLIC
+# taxonomy label, and blocking it blocks every honest review, because you
+# cannot review a contract without naming its clauses. See
+# `_opf_public_vocabulary` for the whole rule and for why it is scoped to the
+# OPF builder.
+_MIN_OPF_NGRAM_TOKENS = 2
+
 # Structural / pattern checks for internal-strategy phrasing that should
 # never reach an external-facing footnote or summary, even when it does not
 # quote the playbook verbatim (docs/threat-model.md -> "Internal-policy
@@ -325,7 +335,7 @@ _FIELD_CHANNELS: dict[str, str] = {
     "external_rationale_for_footnote": CHANNEL_EXTERNAL,
     # The ONE internal-bound field (issue #522, epic #519 item D). Written
     # into the delivered `.docx` footnotes only in the `internal`/`both`
-    # notes modes, behind `redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX`
+    # notes modes, behind `footnote_audience.INTERNAL_FOOTNOTE_PREFIX`
     # -- see `redline_generate.INTERNAL_RATIONALE_FIELD`. Its audience is a
     # fixed property of the field, NOT of the review's runtime notes mode
     # (owner decision 2026-08-11 on #521): a review that never renders it
@@ -544,6 +554,123 @@ def _resolve_system_prompt_ngrams(
     return resolved
 
 
+# ---------------------------------------------------------------------------
+# Public clause vocabulary (issue #616): what must never enter a corpus of
+# CONFIDENTIAL reasoning.
+# ---------------------------------------------------------------------------
+
+
+def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
+    """The normalized strings an OPF document publishes as the NAMES of the
+    clauses it governs.
+
+    Issue #616, layer 3. A real `EDUCATIONAL-AFFILIATION` review died at the
+    leakage gate with `playbook_leakage / playbook-ngram / verdict_summary`
+    on every attempt. The gram that matched was the single word
+    `indemnification` (15 characters), and the model output that tripped it
+    was an ordinary, entirely counterparty-safe executive summary that named
+    the clause it was discussing. **You cannot review a contract without
+    naming its clauses**, so that is a false positive, not a disclosure.
+
+    The gram got into the corpus honestly: `from_opf_document` derives
+    `playbook_ngrams` from each digest clause's `concessions` /
+    `unacceptable` / `exemplar_forms` `text_summary` entries, and
+    `$defs.digestObservationSummary.text_summary` in
+    `playbooks/opf/playbook.schema-0.3.json` carries no `minLength`. A
+    playbook whose author wrote a `text_summary` that summarises nothing --
+    just the clause name back again -- therefore contributes a blocked gram
+    byte-identical to that same document's PUBLIC taxonomy `label`. The
+    owner measured 18 such fields in the real bound playbook.
+
+    The toaster is an empty shell consuming a playbook authored elsewhere
+    (`playbook-engine`), so it cannot assume those fields are well-formed.
+    The guard belongs here.
+
+    This returns the document's own public clause vocabulary: taxonomy entry
+    `id`s and `label`s, plus the `title` and `taxonomy_id` of every clause in
+    `evidence.clauses` and in the model-facing `digest.clauses`, plus
+    `evidence.clause_library` `taxonomy_id`s. Those strings are how the model
+    is *asked* to refer to a clause -- `opf_prompt._digest_clause_block`
+    renders `title` to the model as that clause's heading -- so they are
+    published vocabulary by construction and cannot simultaneously be
+    confidential reasoning.
+
+    Deliberately NOT sourced from anything else. This is a narrowing of the
+    corpus, and every string added here is a string check 2 stops blocking,
+    so it stays limited to the fields whose whole purpose is to name a
+    clause.
+    """
+    vocabulary: set[str] = set()
+
+    def _add(value: Any) -> None:
+        if isinstance(value, str):
+            norm = _normalize(value)
+            if norm:
+                vocabulary.add(norm)
+
+    taxonomy = opf_doc.get("taxonomy")
+    if isinstance(taxonomy, dict):
+        for entry in taxonomy.get("entries") or []:
+            if isinstance(entry, dict):
+                _add(entry.get("id"))
+                _add(entry.get("label"))
+
+    clause_groups: list[Any] = []
+    evidence = opf_doc.get("evidence")
+    if isinstance(evidence, dict):
+        clause_groups.append(evidence.get("clauses"))
+        clause_groups.append(evidence.get("clause_library"))
+    digest = opf_doc.get("digest")
+    if isinstance(digest, dict):
+        clause_groups.append(digest.get("clauses"))
+
+    for group in clause_groups:
+        for clause in group or []:
+            if isinstance(clause, dict):
+                _add(clause.get("title"))
+                _add(clause.get("taxonomy_id"))
+
+    return vocabulary
+
+
+def _without_public_vocabulary(
+    grams: list[str], vocabulary: set[str]
+) -> list[str]:
+    """Drop the grams that are the playbook's public clause vocabulary rather
+    than its confidential reasoning (issue #616). Two rules, both narrow:
+
+      1. a gram whose whole normalized content is a taxonomy `label`/`id` or
+         a clause `title`/`taxonomy_id` from the SAME document -- see
+         `_opf_public_vocabulary`;
+      2. a gram of fewer than `_MIN_OPF_NGRAM_TOKENS` whole words -- one word
+         is a term of art, not internal strategy, and matching on it
+         fail-closes any summary that happens to use that word.
+
+    Both are whole-gram tests. A long confidential statement that merely
+    CONTAINS a clause name is untouched and still blocks, which is the
+    property that distinguishes this from weakening the gate: what is dropped
+    is a gram that says nothing beyond the clause's public name.
+
+    Scoped to `from_opf_document` on purpose. `from_playbook`'s v1
+    `playbook_ngrams` are `hard_rejections` rule `id`s -- deliberately short,
+    deliberately single-token, and confidential identifiers rather than
+    public vocabulary -- so applying rule 2 there would disable a detection
+    that is working as designed, and a v1 playbook has no `taxonomy` section
+    to supply rule 1 in the first place.
+    """
+    kept: list[str] = []
+    for gram in grams:
+        norm = _normalize(gram or "")
+        if not norm:
+            continue
+        if norm in vocabulary:
+            continue
+        if len(norm.split()) < _MIN_OPF_NGRAM_TOKENS:
+            continue
+        kept.append(gram)
+    return kept
+
+
 @dataclass
 class ConfidentialCorpus:
     """The known-confidential token corpus the deterministic scanner checks
@@ -693,6 +820,18 @@ class ConfidentialCorpus:
         OPF analogue of `from_playbook`'s parameters of the same name; here
         the blocks are `review_spine._assemble_opf_system_blocks`' output
         (the control blocks plus `knowledge.system_blocks()`).
+
+        Public clause vocabulary is excluded from BOTH derived lists (issue
+        #616). A `text_summary` or an `our_standard.text` whose whole content
+        is the clause's own name is the playbook's published label, not its
+        confidential reasoning, and admitting it blocked every honest review
+        against the real playbook -- see `_opf_public_vocabulary` for the
+        measured incident and `_without_public_vocabulary` for the two rules.
+        `standard_clause_ngrams` is filtered on the same terms as
+        `playbook_ngrams` because check 2b would otherwise re-fire the same
+        false positive under a different `rule_id`: it is allowlisted only
+        for replacement text, so a bare clause name there would still
+        fail-close `verdict_summary`.
         """
         playbook_ngrams: list[str] = []
         standard_clause_ngrams: list[str] = []
@@ -735,6 +874,20 @@ class ConfidentialCorpus:
                     if value:
                         playbook_ngrams.append(value)
 
+        # Issue #616: drop the grams that are only this document's own public
+        # clause vocabulary before they become blocked content. The UNFILTERED
+        # lists still feed the check-1 exemption below, so check 1's corpus is
+        # byte-identical to before this narrowing -- the exemption is what
+        # keeps one text in one category, and removing a text from check 2
+        # must not silently promote it into check 1.
+        vocabulary = _opf_public_vocabulary(opf_doc)
+        blocked_playbook_ngrams = _without_public_vocabulary(
+            playbook_ngrams, vocabulary
+        )
+        blocked_standard_clause_ngrams = _without_public_vocabulary(
+            standard_clause_ngrams, vocabulary
+        )
+
         return cls(
             system_prompt_ngrams=_resolve_system_prompt_ngrams(
                 explicit=system_prompt_ngrams,
@@ -743,8 +896,8 @@ class ConfidentialCorpus:
                 playbook_ngrams=playbook_ngrams,
                 standard_clause_ngrams=standard_clause_ngrams,
             ),
-            playbook_ngrams=playbook_ngrams,
-            standard_clause_ngrams=standard_clause_ngrams,
+            playbook_ngrams=blocked_playbook_ngrams,
+            standard_clause_ngrams=blocked_standard_clause_ngrams,
             internal_precedent_ids=[],
             counterparty_names=list(counterparty_names or []),
             precedent_verbatim_spans=list(precedent_verbatim_spans or []),
@@ -1317,7 +1470,7 @@ def run_leakage_gate(
 
     On a positive detection, writes an audit row and raises
     LeakageDetectedError instead of returning a degraded/sanitized result --
-    fail closed, same posture as scripts/redline_patch.py's anchor/hash
+    fail closed, same posture as the retired anchor/hash
     mismatch path. The caller (pipeline persist/status stage) is
     responsible for catching LeakageDetectedError and writing
     status=MANUAL_REVIEW_REQUIRED / confidence_state=ERROR_MANUAL_REVIEW_REQUIRED

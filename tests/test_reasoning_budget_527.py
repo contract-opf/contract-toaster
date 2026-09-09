@@ -73,6 +73,7 @@ import model_client as mc  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import reviews  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 # The property this id carries is `reasoning_max_tokens: 0` (plus being an id
 # enforce_openrouter_policy_model_id allows). Was anthropic/claude-opus-4.8
@@ -105,6 +106,10 @@ class FakeHttpClient:
     def __init__(self, response: FakeResponse):
         self.response = response
         self.calls: list[dict] = []
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, json=None, headers=None):  # noqa: A002
         self.calls.append({"url": url, "json": json, "headers": headers})
@@ -140,17 +145,26 @@ class TestReasoningAllowanceLookup(unittest.TestCase):
 
     def test_every_other_known_model_defaults_to_zero(self) -> None:
         policy = mc.load_openrouter_policy()
-        non_reasoning_ids = [PRIMARY_MODEL_ID, policy["models"]["critic"]["model_id"]] + [
-            e["model_id"]
-            for e in policy["selectable"]
-            if e["model_id"] not in (KIMI_MODEL_ID, GEMINI_MODEL_ID)
+        # Issue #677: the primary and critic pins are no longer zero -- a
+        # reasoning-class model with a zero allowance spends its thinking out of
+        # the caller's content budget, which broke the floor judge on every real
+        # document. The INVARIANT this test protects is unchanged: a model this
+        # file declares no allowance for reports zero.
+        pinned = {
+            KIMI_MODEL_ID,
+            GEMINI_MODEL_ID,
+            PRIMARY_MODEL_ID,
+            policy["models"]["critic"]["model_id"],
+        }
+        non_reasoning_ids = [
+            e["model_id"] for e in policy["selectable"] if e["model_id"] not in pinned
         ]
         for model_id in non_reasoning_ids:
             with self.subTest(model_id=model_id):
                 self.assertEqual(mc.openrouter_reasoning_max_tokens(model_id), 0)
 
     def test_an_unlisted_override_id_defaults_to_zero(self) -> None:
-        self.assertEqual(mc.openrouter_reasoning_max_tokens("some/unlisted-model"), 0)
+        self.assertEqual(mc.openrouter_reasoning_max_tokens("anthropic/claude-sonnet-5"), 0)
 
 
 class TestReasoningAllowanceAppliedToRequest(unittest.TestCase):
@@ -168,14 +182,21 @@ class TestReasoningAllowanceAppliedToRequest(unittest.TestCase):
     def test_non_reasoning_model_request_is_byte_identical(self) -> None:
         """The prompt-fixture guarantee (amended AC3): a model with a 0
         allowance sends the EXACT max_tokens value it sent before this
-        issue -- nothing added, nothing carved out."""
+        issue -- nothing added, nothing carved out.
+
+        Issue #677 moved the primary pin off zero, so this asserts the
+        invariant on an id that genuinely carries no allowance rather than on
+        whichever model happens to be pinned today.
+        """
         http = FakeHttpClient(_choice_response())
+        self.assertEqual(mc.openrouter_reasoning_max_tokens("anthropic/claude-sonnet-5"), 0)
         with patch.dict("os.environ", {}, clear=True):
             _client(http).invoke(
-                model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
+                model_id="anthropic/claude-sonnet-5", system_prompt="s", user_prompt="u",
                 max_output_tokens=8000,
             )
         self.assertEqual(http.calls[0]["json"]["max_tokens"], 8000)
+        self.assertNotIn("reasoning", http.calls[0]["json"])
 
 
 # ---------------------------------------------------------------------------

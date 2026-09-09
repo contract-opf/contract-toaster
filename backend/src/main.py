@@ -86,6 +86,19 @@ Endpoints:
                       and is a CALENDAR window, not a row count.
                       Read-only: the reconcile ACTION is not part of this
                       slice.
+                      Since #653 it also carries the ceiling actually
+                      ENFORCED (an admin-set cap outranks the compose file),
+                      what today has spent against it, what is left, and
+                      whether the next review would be admitted.
+  POST /api/admin/spend-cap      — admin: set that ceiling without a redeploy
+                      (#653); null reverts to DAILY_SPEND_CAP_USD_CENTS. It
+                      has no GET of its own — the cap is read off
+                      /api/admin/spend beside the spend it bounds.
+  GET  /api/review-cost-estimate — authenticated: what the NEXT review costs
+                      (#653) — the expected figure and the worst case it
+                      reserves, and nothing else. No instance-wide totals, no
+                      cap, no model ids: it is the price of the caller's own
+                      next action, which is why it is not admin-gated.
   GET  /api/admin/health         — admin: pipeline health (#252) — review
                       counts by status, stale in-flight (PENDING/RUNNING)
                       reviews with a bounded oldest-first sample, and
@@ -219,6 +232,12 @@ Endpoints:
                         only, never document substance. Empty list for a
                         playbook with no uploads.
 
+  GET /api/admin/playbooks/{playbook_id}/versions/{version}/download
+                      — admin: generate a short-lived presigned S3 download URL
+                        for a stored playbook version artifact. Scoped to
+                        playbooks/{playbook_id}/, returns 410 if purged from S3,
+                        appends one playbook_version_downloaded audit row.
+
   POST /api/admin/playbooks/{playbook_id}/versions/{version}/rollback
                       — admin: roll back to a previously-activated version
                         (#430, resolver wiring fixed by #462) — restores it
@@ -306,6 +325,13 @@ Environment variables (DynamoDB, consumed by src/user_preferences.py — #523):
                                 Read and written ONLY for the caller's own
                                 sub; there is no admin-over-others path.
 
+These lists are documentation, not the check. `_lifespan` calls
+`src.startup_checks.verify_required_env` (issue #655), which derives the
+required set from the source at boot — every `os.environ[<name>]` under
+`backend/src`, in this module and every other — and exits non-zero naming
+every missing variable at once. A prose list here could drift; that pass
+cannot. Names only ever reach the log, never values.
+
 Security invariants:
   - /health is public and returns ONLY liveness status.  Build details must
     not leak on the unauthenticated path (threat model: information disclosure).
@@ -337,6 +363,7 @@ from fastapi.responses import JSONResponse
 
 from src import config
 from src import purge_scheduler
+from src import startup_checks
 from src.admin_dashboard import (
     MANUAL_REVIEW_DEFAULT_LIMIT,
     RELEASE_ACTIVITY_DEFAULT_LIMIT,
@@ -351,6 +378,7 @@ from src.audit_queries import AUDIT_QUERY_DEFAULT_LIMIT, run_audit_query
 from src.auth import get_current_user
 from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
+from src.download import generate_presigned_playbook_download_url
 from src.demo_auth import (
     add_user,
     change_own_password,
@@ -365,10 +393,15 @@ from src.demo_auth import (
     set_auth_mode,
     set_demo_session_cookie,
 )
+from src.entity_roster import (
+    get_entity_roster,
+    set_entity_roster,
+)
 from src.model_settings import (
     clear_model_key,
     get_model_key_settings,
     get_model_selection_settings,
+    set_daily_spend_cap_cents,
     set_model_key,
     set_model_selection,
 )
@@ -393,8 +426,10 @@ from src.playbook_versions import (
     PlaybookVersionNotFoundError,
     PlaybookVersionRollbackError,
     activate_release_bundle,
+    get_playbook_version_record,
     list_playbook_version_trail,
     record_legal_approval,
+    record_playbook_version_download,
     record_playbook_version_upload,
     remove_playbook,
     rename_playbook,
@@ -403,7 +438,11 @@ from src.playbook_versions import (
     version_already_recorded,
 )
 from src.review_routes import router as review_router
-from src.reviews import RECENT_FAILURES_DEFAULT_LIMIT, list_recent_failures
+from src.reviews import (
+    RECENT_FAILURES_DEFAULT_LIMIT,
+    list_recent_failures,
+    review_cost_estimate,
+)
 from src.upload_validation import MAX_UPLOAD_SIZE_BYTES
 from src.retention import (
     RETENTION_WINDOW_FOREVER,
@@ -482,7 +521,18 @@ def _is_admin(caller_user_row: dict[str, Any]) -> bool:
 
 @contextlib.asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """Start and stop the DTS retention purge cadence (issue #509).
+    """Verify the environment, then start and stop the DTS retention purge
+    cadence (issue #509).
+
+    `verify_required_env` (issue #655) runs FIRST and outside the
+    never-let-a-cadence-stop-the-API `except` below: every name any module in
+    `backend/src` dereferences with `os.environ[...]` must be set, or the
+    process exits non-zero here instead of starting and 500ing later on
+    whichever endpoint happens to reach the missing name first. That is the
+    #654 incident: the container came up fine with a configuration it could
+    not serve, and the only symptom was a Review tab that looked like an
+    unbuilt feature. See `src/startup_checks.py` for why the required set is
+    derived from source rather than listed by hand.
 
     The sweep itself has been correct since #454, but on the Docker Compose
     target nothing invoked it — `preview_purge_sweep` was the only thing this
@@ -497,6 +547,7 @@ async def _lifespan(_app: FastAPI):
     deliberate: this runs outside any request, and the scheduler holds them for
     the process's life.
     """
+    startup_checks.verify_required_env()
     handle = None
     try:
         handle = purge_scheduler.start_purge_scheduler(
@@ -832,9 +883,10 @@ async def get_admin_model_key(
     """Admin: status of the instance-wide model-provider (OpenRouter) API key.
 
     Returns whether a key is loaded, which source it came from (admin-set row
-    or the OPENROUTER_API_KEY env var), and a last-four hint — never the key
-    itself (src/model_settings.py is write-only by design). Raises HTTP 403
-    for a non-admin caller.
+    or the OPENROUTER_API_KEY env var), when the stored one was last set and
+    by whom, and a non-reversible `key_fingerprint` (issue #651) — never the
+    key itself, and never any substring of it (src/model_settings.py is
+    write-only by design). Raises HTTP 403 for a non-admin caller.
     """
     settings = get_model_key_settings(caller_row, dynamodb_resource)
     return JSONResponse(content=settings)
@@ -849,8 +901,11 @@ async def post_admin_model_key(
     """Admin: set the instance-wide model-provider (OpenRouter) API key.
 
     Body: {"api_key": str}. Overrides OPENROUTER_API_KEY for every subsequent
-    review. Raises HTTP 403 for a non-admin caller, 400 for an invalid key or
-    on a deployment with no admin-managed key store (the AWS/Bedrock target).
+    review. Set-new only: there is no route that reads a stored key back, so
+    a rotation replaces the value rather than editing it. Raises HTTP 403 for
+    a non-admin caller, 400 for a key that is empty, too short, contains
+    whitespace or does not carry OpenRouter's key prefix, or on a deployment
+    with no admin-managed key store (the AWS/Bedrock target).
     """
     result = set_model_key(body.get("api_key", ""), caller_row, dynamodb_resource)
     return JSONResponse(content=result)
@@ -907,6 +962,84 @@ async def post_admin_model_selection(
         caller_row,
         dynamodb_resource,
     )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/admin/spend-cap", include_in_schema=True)
+async def post_admin_spend_cap(
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: set the instance-wide daily spend ceiling (issue #653).
+
+    Body: {"daily_cap_usd_cents": int|null} — null reverts to the deployment's
+    own `DAILY_SPEND_CAP_USD_CENTS`. Takes effect on the next reservation, no
+    redeploy. Lowering it below what today has already committed is allowed and
+    means the next submission is refused; it never claws back spend already
+    made. Raises HTTP 403 for a non-admin caller, 400 for a non-integer or
+    out-of-range value or on a deployment with no settings store.
+    """
+    result = set_daily_spend_cap_cents(
+        body.get("daily_cap_usd_cents"), caller_row, dynamodb_resource
+    )
+    return JSONResponse(content=result)
+
+
+@app.get("/api/review-cost-estimate", include_in_schema=True)
+async def get_review_cost_estimate(
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Authenticated: what the next review will cost (issue #653, epic #649).
+
+    Any active user, not just an admin: this is the price of the thing the
+    reviewer is about to do, and it is the one spend fact they need BEFORE
+    pressing the button. It carries no instance-wide totals, no cap and no
+    model ids — those stay on the admin-only /api/admin/spend, per
+    `admin_dashboard`'s "instance-wide operational view" boundary.
+
+    Returns the expected cost and the worst case the submission reserves; see
+    `reviews.review_cost_estimate` for why both, and for the allowlist that
+    keeps a figure added to the admin ledger from arriving here by accident.
+    """
+    return JSONResponse(content=review_cost_estimate(dynamodb_resource))
+
+
+@app.get("/api/admin/entity-roster", include_in_schema=True)
+async def get_admin_entity_roster(
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: the deployment's roster of OUR OWN legal entity names (issue
+    #678).
+
+    Returns the stored names, whether this deployment has a roster store at
+    all, and when/by whom it was last set. The roster is organisation-scoped
+    configuration — every playbook is reviewed against the same one — and at
+    review time it is unioned with the governing playbook's own
+    `perspective.party` into a single flat recognition set. Raises HTTP 403
+    for a non-admin caller.
+    """
+    return JSONResponse(content=get_entity_roster(caller_row, dynamodb_resource))
+
+
+@app.put("/api/admin/entity-roster", include_in_schema=True)
+async def put_admin_entity_roster(
+    body: dict[str, Any] = Body(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Admin: replace the roster of our own legal entity names (issue #678).
+
+    Body: {"entities": [str, ...]} — a whole-list replace, taking effect on
+    the next review with no redeploy. An empty list clears the roster and
+    reviews fall back to the playbook's own `perspective.party` alone.
+    Raises HTTP 403 for a non-admin caller, 400 for a malformed list (a
+    non-string entry, an over-long name, a name carrying a control
+    character, or too many names) or on a deployment with no roster store.
+    """
+    result = set_entity_roster(body.get("entities"), caller_row, dynamodb_resource)
     return JSONResponse(content=result)
 
 
@@ -1373,6 +1506,17 @@ async def post_admin_playbook_create(
                 f"derived from its agreement_type: {exc}"
             ),
         ) from exc
+    except PlaybookUploadRejected as exc:
+        # Issue #676: `_load_opf_from_bytes` now also enforces the
+        # spec-normative minimums (`playbook_upload.OPF_UPLOAD_MINIMUMS`),
+        # which raise PlaybookUploadRejected rather than OpfValidationError.
+        # Without this branch that rejection would escape this route as an
+        # unhandled 500 instead of the actionable 4xx the admin needs -- the
+        # `_finish_opf` call further down already catches the same exception
+        # type for the same reason.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     except UnicodeDecodeError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1823,6 +1967,64 @@ async def get_admin_playbook_versions(
     return JSONResponse(content={"versions": trail})
 
 
+@app.get(
+    "/api/admin/playbooks/{playbook_id}/versions/{version}/download",
+    include_in_schema=True,
+)
+async def get_admin_playbook_version_download(
+    playbook_id: str = Path(...),
+    version: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    s3_client: Any = Depends(get_s3_client),
+) -> JSONResponse:
+    """Admin: generate a presigned download URL for a stored playbook version artifact.
+
+    Validates that:
+      1. Caller is an admin (HTTP 403 otherwise).
+      2. Version row exists and has a storage_key recorded (HTTP 404 otherwise).
+      3. Storage key is scoped to playbooks/{playbook_id}/ with no path traversal (HTTP 403).
+      4. Object exists in S3 (HTTP 410 if purged/missing).
+
+    On success:
+      - Appends a playbook_version_downloaded audit entry.
+      - Returns a 60-second presigned URL with Cache-Control: no-store.
+    """
+    if not _is_admin(caller_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to download a playbook version.",
+        )
+    record = get_playbook_version_record(playbook_id, version, dynamodb_resource)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Playbook version '{playbook_id}' '{version}' not found.",
+        )
+    storage_key = record.get("storage_key")
+    if not storage_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Playbook version '{playbook_id}' '{version}' has no stored artifact.",
+        )
+
+    response = generate_presigned_playbook_download_url(
+        playbook_id=playbook_id,
+        version=version,
+        storage_key=storage_key,
+        caller_user_row=caller_row,
+        s3_client=s3_client,
+    )
+    record_playbook_version_download(
+        playbook_id=playbook_id,
+        version=version,
+        actor_identity=caller_row.get("cognito_sub", ""),
+        storage_key=storage_key,
+        dynamodb_resource=dynamodb_resource,
+    )
+    return response
+
+
 @app.post(
     "/api/admin/playbooks/{playbook_id}/versions/{version}/rollback",
     include_in_schema=True,
@@ -1980,18 +2182,30 @@ async def post_admin_playbook_pen_rules_validate(
     return JSONResponse(content=result)
 
 
-def _require_registered_playbook(playbook_id: str) -> None:
-    """404 for a playbook_id the registry does not list. The registry is the
-    catalog's source of truth (see `src.review_routes._load_playbook_catalog`),
-    so renaming/removing an unlisted id is a client error, not a silent
-    no-op that writes an orphan `playbooks` row."""
+def _require_registered_playbook(
+    playbook_id: str, dynamodb_resource: Any = None
+) -> None:
+    """404 for a playbook_id neither registered nor created in the DB.
+    The catalog's source of truth (see `src.review_routes._load_playbook_catalog`)
+    is the union of registered playbooks and DB-created playbooks with versions.
+    """
     import playbook_registry  # local import: same sys.path seam src.sample_playbooks uses
 
-    if playbook_id not in playbook_registry.list_playbook_ids():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Unknown playbook_id: {playbook_id!r}",
-        )
+    if playbook_id in playbook_registry.list_playbook_ids():
+        return
+    if dynamodb_resource is not None:
+        try:
+            from src import playbook_versions
+
+            if playbook_versions.list_playbook_version_trail(playbook_id, dynamodb_resource):
+                return
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Unknown playbook_id: {playbook_id!r}",
+    )
 
 
 @app.get(
@@ -2020,7 +2234,7 @@ async def get_admin_playbook_instructions(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to view standing instructions.",
         )
-    _require_registered_playbook(playbook_id)
+    _require_registered_playbook(playbook_id, dynamodb_resource)
 
     current = get_current_instructions(playbook_id, dynamodb_resource)
     history = list_instructions_history(playbook_id, dynamodb_resource)
@@ -2080,7 +2294,7 @@ async def post_admin_playbook_instructions(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to save standing instructions.",
         )
-    _require_registered_playbook(playbook_id)
+    _require_registered_playbook(playbook_id, dynamodb_resource)
 
     text = body.get("text")
     if not isinstance(text, str):
@@ -2162,7 +2376,7 @@ async def patch_admin_playbook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Body must include a string 'display_name' field.",
         )
-    _require_registered_playbook(playbook_id)
+    _require_registered_playbook(playbook_id, dynamodb_resource)
     result = rename_playbook(
         playbook_id=playbook_id,
         display_name=display_name,
@@ -2201,7 +2415,7 @@ async def delete_admin_playbook(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to remove a playbook.",
         )
-    _require_registered_playbook(playbook_id)
+    _require_registered_playbook(playbook_id, dynamodb_resource)
     result = remove_playbook(
         playbook_id=playbook_id,
         actor_identity=caller_row.get("cognito_sub", ""),

@@ -28,6 +28,11 @@ ct-button {
   position: relative;
 }
 
+ct-button[disabled],
+ct-button:has(:disabled) {
+  cursor: not-allowed;
+}
+
 .ct-button__el {
   display: inline-flex;
   align-items: center;
@@ -43,7 +48,8 @@ ct-button {
   transition:
     background-color var(--ct-dur-fast) var(--ct-ease-out),
     border-color var(--ct-dur-fast) var(--ct-ease-out),
-    color var(--ct-dur-fast) var(--ct-ease-out);
+    color var(--ct-dur-fast) var(--ct-ease-out),
+    box-shadow var(--ct-dur-fast) var(--ct-ease-out);
 }
 
 /* Transparent outline, not `outline: none` — forced-colors: active discards
@@ -56,7 +62,8 @@ ct-button {
 
 .ct-button__el:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.55;
+  filter: grayscale(0.15);
 }
 
 /* Sizes */
@@ -65,7 +72,7 @@ ct-button[size='md'] .ct-button__el {
   font-size: var(--ct-text-sm);
 }
 ct-button[size='sm'] .ct-button__el {
-  padding: 0.3rem 0.7rem;
+  padding: 0.35rem 0.75rem;
   font-size: var(--ct-text-sm);
 }
 
@@ -78,6 +85,7 @@ ct-button[variant='primary'] .ct-button__el {
 ct-button[variant='primary'] .ct-button__el:hover:not(:disabled) {
   background: var(--ct-accent-strong);
   border-color: var(--ct-accent-strong);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 
 ct-button[variant='secondary'] .ct-button__el {
@@ -86,7 +94,9 @@ ct-button[variant='secondary'] .ct-button__el {
   color: var(--ct-text);
 }
 ct-button[variant='secondary'] .ct-button__el:hover:not(:disabled) {
-  background: var(--ct-neutral-bg);
+  background: var(--ct-surface-sunken);
+  border-color: var(--ct-accent);
+  color: var(--ct-accent-strong);
 }
 
 ct-button[variant='ghost'] .ct-button__el {

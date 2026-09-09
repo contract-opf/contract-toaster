@@ -132,6 +132,11 @@ _TABLES = [
     # preferences row, and every known preference is an attribute on it.
     ("USER_PREFERENCES_TABLE", "cognito_sub", None, []),
     ("MODEL_SETTINGS_TABLE", "setting_id", None, []),
+    # Our own legal entity roster (issue #678) -- one row, `setting_id
+    # ="global"`, holding the deployment-scoped list of entity names a
+    # review recognises as us. Same one-row settings shape as the two
+    # settings tables above.
+    ("ENTITY_ROSTER_TABLE", "setting_id", None, []),
     ("SYNC_STATUS_TABLE", "sync_type", None, []),
     # Model-invocation ledger (issue #414) -- metadata-only record of every
     # model-invocation attempt the primary/critic passes make. Sort key is a

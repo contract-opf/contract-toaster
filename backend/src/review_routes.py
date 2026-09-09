@@ -130,9 +130,15 @@ PLAYBOOK_REGISTRY_PATH = REPO_ROOT / "playbooks" / "registry.json"
 
 # Issue #491 (preflight): this module previously had no reason to import
 # anything under scripts/ -- every scripts/ module it now needs
-# (document_injection_scan, preflight_pass, playbook_registry) is a
-# bare-name import, same convention backend/src/pipeline_runner.py already
-# established for the same reason (see that module's own sys.path comment).
+# (document_injection_scan, preflight_pass) is a bare-name import, same
+# convention backend/src/pipeline_runner.py already established for the
+# same reason (see that module's own sys.path comment).
+#
+# `playbook_registry` was in this list until issue #659: preflight's
+# agreement-type lookup no longer resolves the registry itself, it goes
+# through `pipeline_runner._load_playbook_bundle` (which owns that
+# resolution, including the active-OPF-artifact branch the direct registry
+# read could not see).
 _SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -140,7 +146,6 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import cover_note_pass  # noqa: E402
 import document_injection_scan  # noqa: E402
 import leakage_scan  # noqa: E402
-import playbook_registry  # noqa: E402
 import preflight_pass  # noqa: E402
 
 
@@ -633,11 +638,12 @@ def _put_upload_object(s3_client: Any, key: str, contents: bytes) -> None:
 # POST /api/reviews/preflight -- issue #491
 #
 # A cheap, fast, ADVISORY check run the moment a file is chosen -- BEFORE
-# "Upload for review" -- so a reviewer sees word count/page estimate/title
+# the go button ("Start Toaster", renamed from "Upload for review" by issue
+# #667) -- so a reviewer sees word count/page estimate/title
 # and a does-this-match-the-dial signal without waiting for the full
 # two-pass review. Never blocks a submission: every failure mode below
 # degrades to a smaller response rather than an error the frontend would
-# have to gate the Upload button on.
+# have to gate the go button on.
 #
 # Nothing is persisted except the spend-ledger row for an actual cheap-
 # model call (`reviews.record_preflight_spend`) -- no S3 write, no reviews/
@@ -647,35 +653,209 @@ def _put_upload_object(s3_client: Any, key: str, contents: bytes) -> None:
 # ---------------------------------------------------------------------------
 
 
+# Issue #659: an installed playbook's agreement type, resolved from the
+# version that is ACTUALLY ACTIVE -- the one and only resolver behind BOTH
+# preflight call sites (the classifier's vocabulary and the match verdict).
+#
+# What it replaces: a read of `data["playbook"]["agreement_type"]` off the
+# registry's on-disk JSON. That shape is legacy v1 only, so an OPF playbook
+# -- which carries `agreement_type` as a TOP-LEVEL `{id, name, aliases}`
+# object, identically in `playbooks/opf/playbook.schema-0.3.json` and
+# `...-0.2.json` -- resolved to `(None, [])`, `compute_match_verdict`
+# returned "unclear", and the amber `review-preflight-match-unlikely`
+# banner never rendered. A playbook installed purely through the admin
+# upload flow (a `playbook_versions` row, never in `playbooks/
+# registry.json`) resolved to nothing at all.
+#
+# The active-version bind is REUSED, not re-implemented:
+# `pipeline_runner._load_playbook_bundle` is the same function the live
+# review path calls -- active OPF row -> `storage_key` bytes out of
+# `UPLOADS_BUCKET` -> re-validation through
+# `playbook_upload._load_opf_from_bytes`, falling through to the registry's
+# on-disk v1 read when no OPF version is active. Importing `pipeline_runner`
+# into the request path is already this module's established direction
+# (`_default_cover_note_leakage_corpus` above does exactly this, for exactly
+# the same "must not drift from the pipeline's own resolution" reason).
+# Because it is that function, "only the ACTIVE version's type" is not a
+# rule restated here: an uploaded-but-not-activated version is invisible to
+# `playbook_versions.get_active_version_record`, so it can no more reach
+# this vocabulary than it can govern a review.
+
+
+_AGREEMENT_TYPE_CACHE: dict[tuple[str, str], tuple[str | None, tuple[str, ...]]] = {}
+
+
+def _active_version_cache_key(
+    playbook_id: str, dynamodb_resource: Any
+) -> tuple[str, str] | None:
+    """Cache identity for `playbook_id`'s currently-active version, or None
+    when there is nothing worth caching.
+
+    Issue #659 asks for an in-process cache "keyed by the active version's
+    identity (version id or content hash), so one preflight does not issue
+    an S3 GET per installed playbook on every upload". The DynamoDB read
+    that yields the identity is cheap and always fresh; the S3 GET +
+    re-validation behind it is what this saves. Keyed on the identity rather
+    than on `playbook_id` alone precisely so ACTIVATING a different version
+    changes the key and the next lookup re-reads -- a `playbook_id`-keyed
+    cache would serve the retired version's agreement type until the process
+    restarted.
+
+    Returns None (meaning "resolve, do not cache") when there is no active
+    version row -- that is the registry-on-disk path, which does no S3 GET
+    and whose file a developer may edit under a running process. Also None
+    when the deployment has no `playbook_versions` table at all, mirroring
+    `pipeline_runner._load_opf_bundle_if_active`'s own guard for the same
+    reason.
+    """
+    if dynamodb_resource is None or not os.environ.get("PLAYBOOK_VERSIONS_TABLE"):
+        return None
+    try:
+        record = playbook_versions.get_active_version_record(playbook_id, dynamodb_resource)
+    except Exception:  # noqa: BLE001 -- advisory lookup: fall back to resolving uncached
+        return None
+    if record is None:
+        return None
+    identity = record.get("content_hash") or record.get("version")
+    if not isinstance(identity, str) or not identity:
+        return None
+    return (playbook_id, identity)
+
+
+def _agreement_type_from_bundle(bundle: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """`(name, aliases)` off whichever bundle shape
+    `pipeline_runner._load_playbook_bundle` returned.
+
+    OPF (`opf_bundle_v2`, both 0.2 and 0.3 -- the two schemas declare an
+    identical `agreement_type` object): `name` is the label; `aliases` plus
+    the machine `id` are the match aliases. OPF's own schema documents
+    `aliases` as "Other names this agreement type is known by, e.g. a
+    consuming app's own dial key", which is exactly this use.
+
+    Legacy v1 (the registry's on-disk playbook JSON): today's
+    `playbook.agreement_type` string plus `playbook.agreement_aliases`.
+
+    Every label goes through `preflight_pass.normalize_agreement_type_label`
+    -- the SAME normalization the vocabulary entries get -- so the name this
+    returns is character-for-character the string the model was offered.
+    """
+    opf_bundle_v2 = bundle.get("opf_bundle_v2")
+    if opf_bundle_v2 is not None:
+        agreement_type = (opf_bundle_v2.get("opf") or {}).get("agreement_type")
+        if not isinstance(agreement_type, dict):
+            return None, []
+        raw_name = agreement_type.get("name")
+        raw_aliases = list(agreement_type.get("aliases") or [])
+        raw_aliases.append(agreement_type.get("id"))
+    else:
+        playbook_section = bundle.get("playbook") or {}
+        raw_name = playbook_section.get("agreement_type")
+        raw_aliases = list(playbook_section.get("agreement_aliases") or [])
+
+    name = preflight_pass.normalize_agreement_type_label(raw_name)
+    aliases = [
+        alias
+        for alias in (
+            preflight_pass.normalize_agreement_type_label(a) for a in raw_aliases
+        )
+        if alias
+    ]
+    return name, aliases
+
+
 def _resolve_playbook_agreement_type(
     playbook_id: str,
+    dynamodb_resource: Any = None,
+    s3_client: Any = None,
 ) -> tuple[str | None, list[str]]:
-    """The SELECTED playbook's own `agreement_type` + `agreement_aliases`,
-    read straight off its on-disk playbook JSON via `playbook_registry` --
-    the comparison target `preflight_pass.compute_match_verdict` needs.
+    """`playbook_id`'s ACTIVE agreement type + match aliases -- the
+    comparison target `preflight_pass.compute_match_verdict` needs, and the
+    per-playbook half of the classifier's vocabulary.
 
-    Best-effort and fail-open to `(None, [])` on ANY problem (unregistered
-    playbook_id, missing file, malformed JSON): this only feeds an
-    ADVISORY match verdict (`compute_match_verdict` already treats a
-    missing `playbook_agreement_type` as "unclear", never a refusal), so a
-    catalog problem here must never turn into a 500 on an otherwise-healthy
-    preflight request the way it would if this propagated.
+    Best-effort and fail-open to `(None, [])` on ANY problem (an
+    unregistered playbook_id with no active version, an artifact whose bytes
+    are gone from object storage or no longer re-validate, malformed JSON):
+    this only feeds an ADVISORY match verdict (`compute_match_verdict`
+    already treats a missing `playbook_agreement_type` as "unclear", never a
+    refusal), so a catalog problem here must never turn into a 500 on an
+    otherwise-healthy preflight request the way it would if this propagated
+    -- and, for the vocabulary, one unreadable playbook must cost that
+    playbook its enum entry, not cost the reviewer their whole preflight.
+
+    `dynamodb_resource`/`s3_client` default to None so a caller with no
+    handle to either still gets the registry-on-disk answer, exactly as
+    `pipeline_runner._load_playbook_bundle` does for the same reason.
+
+    Note on "active version only": that rule bites where it can -- a
+    DB-installed playbook whose versions are all drafts, or whose active
+    version was rolled back, yields nothing here, and an OLDER uploaded
+    version can never be read. It is not extended into a precondition on
+    the legacy v1 branch: a registry playbook's on-disk artifact is what
+    `_load_playbook_bundle` gives a REVIEW when no OPF version is active, so
+    demanding a `playbook_versions` row before naming its agreement type
+    would make preflight describe a different deployment than the pipeline
+    runs (and issue #659's own Scope spells the v1 branch out as the plain
+    `playbook.agreement_type` read, with no active-row condition attached).
     """
+    cache_key = _active_version_cache_key(playbook_id, dynamodb_resource)
+    if cache_key is not None:
+        cached = _AGREEMENT_TYPE_CACHE.get(cache_key)
+        if cached is not None:
+            return cached[0], list(cached[1])
     try:
-        entry = playbook_registry.resolve_playbook(playbook_id)
-        if entry.playbook_path is None:
-            return None, []
-        with open(entry.playbook_path, encoding="utf-8") as f:
-            data = json.load(f)
-        playbook_section = data.get("playbook") or {}
-        agreement_type = playbook_section.get("agreement_type")
-        aliases = playbook_section.get("agreement_aliases") or []
-        return (
-            agreement_type if isinstance(agreement_type, str) else None,
-            [a for a in aliases if isinstance(a, str)],
+        bundle = pipeline_runner._load_playbook_bundle(
+            playbook_id, dynamodb_resource, s3_client
         )
+        name, aliases = _agreement_type_from_bundle(bundle)
     except Exception:  # noqa: BLE001 -- advisory lookup, never fail preflight over it
         return None, []
+    if cache_key is not None:
+        _AGREEMENT_TYPE_CACHE[cache_key] = (name, tuple(aliases))
+    return name, aliases
+
+
+def _preflight_agreement_vocabulary(
+    registry_path: pathlib.Path,
+    dynamodb_resource: Any,
+    s3_client: Any,
+) -> list[str]:
+    """The closed vocabulary the cheap classifier picks from: the active
+    agreement-type name of every playbook the catalog would show, plus
+    `preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE`.
+
+    "Every playbook the catalog would show" is not a rule restated here --
+    the id set comes from `_catalog_playbook_entries`, the same helper
+    `_load_playbook_catalog` (GET /api/playbooks, which populates the review
+    dial) builds its rows from, so the classifier's vocabulary and the dial's
+    options can never describe two different deployments.
+
+    Best-effort as a whole: if the catalog itself cannot be read the
+    vocabulary is empty (just the null answer), which the caller turns into
+    `classification: "unavailable"` with the deterministic stats. There is
+    deliberately no fallback to a shipped list -- see
+    `preflight_pass.known_agreement_types`.
+    """
+    try:
+        entries = _catalog_playbook_entries(registry_path, dynamodb_resource)
+    except Exception:  # noqa: BLE001 -- advisory: an unreadable catalog degrades, never 500s
+        logger.warning("PREFLIGHT: playbook catalog unreadable; vocabulary is empty")
+        entries = []
+    names: list[str] = []
+    for playbook_id, _raw, _overrides in entries:
+        name, _aliases = _resolve_playbook_agreement_type(
+            playbook_id, dynamodb_resource, s3_client
+        )
+        if name:
+            names.append(name)
+    return preflight_pass.known_agreement_types(names)
+
+
+def _vocabulary_has_installed_types(known_types: list[str]) -> bool:
+    """True when the vocabulary offers at least one real contract type.
+    `UNCLASSIFIED_AGREEMENT_TYPE` is the null answer, not a type, so a
+    vocabulary of only that one entry is EMPTY -- asking the model to
+    classify against it could only ever produce "Other"."""
+    return any(t != preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE for t in known_types)
 
 
 @router.post(
@@ -686,6 +866,8 @@ async def post_review_preflight(
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
     caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001 -- auth gate only
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    s3_client: Any = Depends(get_s3_client),
+    registry_path: pathlib.Path = Depends(get_playbook_registry_path),
     av_client: upload_validation.AvClient = Depends(get_av_client),
     preflight_model_client: Any = Depends(get_preflight_model_client),
 ) -> JSONResponse:
@@ -757,9 +939,35 @@ async def post_review_preflight(
     usage: dict[str, int] | None = None
     served_model_id: str | None = None
 
+    # Issue #659: the vocabulary is this deployment's installed playbooks'
+    # active agreement types -- never a shipped list. Built ONCE per request
+    # and used twice (the enum sent to the model, and the exact-match check
+    # the response is sanitized against), per
+    # `build_preflight_output_schema`'s own "one list, not two that could
+    # drift" contract. Resolved only when a model call is actually on the
+    # table, so a deployment with no cheap-model key pays none of its
+    # catalog reads -- and `known_types` stays empty in that case, which is
+    # what gates the model call below (no client, no excerpt, or no
+    # installed type all reach it as "nothing to classify against").
+    known_types: list[str] = []
     if preflight_model_client is not None and stats["excerpt"]:
+        known_types = _preflight_agreement_vocabulary(
+            registry_path, dynamodb_resource, s3_client
+        )
+        if not _vocabulary_has_installed_types(known_types):
+            # Nothing installed yields an agreement type, so there is
+            # nothing to classify against and the only answer the enum
+            # could carry is the null one. Skip the call and the spend:
+            # `classification: "unavailable"` plus the deterministic stats
+            # is the honest response, and there is deliberately no shipped
+            # list to fall back to.
+            logger.warning(
+                "PREFLIGHT: no installed playbook yields an agreement type; "
+                "classification unavailable"
+            )
+
+    if _vocabulary_has_installed_types(known_types):
         try:
-            known_types = preflight_pass.known_agreement_types()
             model_id = model_client.openrouter_preflight_model_id()
             raw_response = preflight_model_client.invoke(
                 model_id=model_id,
@@ -799,7 +1007,7 @@ async def post_review_preflight(
     match: str | None = None
     if classification == "ok":
         playbook_agreement_type, playbook_aliases = _resolve_playbook_agreement_type(
-            playbook_id
+            playbook_id, dynamodb_resource, s3_client
         )
         match = preflight_pass.compute_match_verdict(
             agreement_type_guess, playbook_agreement_type, playbook_aliases
@@ -849,6 +1057,8 @@ async def post_review_preflight_match(
     agreement_type_guess: str = Form(""),
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
     caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001 -- auth gate only
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    s3_client: Any = Depends(get_s3_client),
 ) -> JSONResponse:
     """Recompute just the match verdict against `playbook_id`, the exact
     same way `post_review_preflight` computes it
@@ -859,7 +1069,9 @@ async def post_review_preflight_match(
     unresolvable `playbook_id` degrades to `match: "unclear"`, never an
     error.
     """
-    playbook_agreement_type, playbook_aliases = _resolve_playbook_agreement_type(playbook_id)
+    playbook_agreement_type, playbook_aliases = _resolve_playbook_agreement_type(
+        playbook_id, dynamodb_resource, s3_client
+    )
     match = preflight_pass.compute_match_verdict(
         agreement_type_guess or None, playbook_agreement_type, playbook_aliases
     )
@@ -920,6 +1132,50 @@ async def post_review_preflight_match(
 # ---------------------------------------------------------------------------
 
 
+def _catalog_playbook_entries(
+    registry_path: pathlib.Path, dynamodb_resource: Any
+) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """The catalog's MEMBERSHIP rule, on its own: `(playbook_id, registry
+    entry, admin overrides)` for every playbook the catalog shows, sorted by
+    id -- registry ids UNION `playbook_versions` ids (issue #485/#490's
+    DB-created playbooks), minus `"test_only": true` entries (issue #412)
+    and minus admin-`removed` tombstones (issue #412's remove).
+
+    Extracted from `_load_playbook_catalog` (its only caller until now) by
+    issue #659 so the preflight classifier's agreement-type vocabulary
+    (`_preflight_agreement_vocabulary`) is built over EXACTLY the set of
+    playbooks the review dial offers, with one implementation of the rule
+    rather than two that can drift. The per-entry `raw`/`overrides` dicts
+    are returned rather than re-read by the caller so this costs the catalog
+    no extra DynamoDB reads.
+
+    The `PLAYBOOK_VERSIONS_TABLE` guard mirrors
+    `pipeline_runner._load_opf_bundle_if_active`'s own, for the reason that
+    function documents: a deployment target that never configured the
+    upload flow (and every test fixture predating it) must read the registry
+    exactly as before rather than raise a KeyError on an env var it had no
+    reason to set. Where the table IS configured -- every AWS deployment --
+    this changes nothing.
+    """
+    with open(registry_path, encoding="utf-8") as f:
+        registry = json.load(f)
+    entries = registry.get("playbooks", {})
+    all_ids = set(entries)
+    if os.environ.get("PLAYBOOK_VERSIONS_TABLE"):
+        all_ids |= playbook_versions.list_all_version_playbook_ids(dynamodb_resource)
+
+    rows: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    for playbook_id in sorted(all_ids):
+        raw = entries.get(playbook_id) or {}
+        if raw.get("test_only"):
+            continue
+        overrides = playbook_versions.get_playbook_overrides(playbook_id, dynamodb_resource)
+        if overrides["removed"]:
+            continue
+        rows.append((playbook_id, raw, overrides))
+    return rows
+
+
 def _load_playbook_catalog(
     registry_path: pathlib.Path, dynamodb_resource: Any
 ) -> list[dict[str, Any]]:
@@ -950,20 +1206,16 @@ def _load_playbook_catalog(
     to the id upper-cased exactly like any other unnamed registry entry --
     every other rule (removed tombstone, display_name override, active/
     coming_soon resolution, live notes) applies identically regardless of
-    which set an id came from."""
-    with open(registry_path, encoding="utf-8") as f:
-        registry = json.load(f)
-    entries = registry.get("playbooks", {})
-    all_ids = set(entries) | playbook_versions.list_all_version_playbook_ids(dynamodb_resource)
+    which set an id came from.
 
+    Issue #659 moved the membership rule itself (the id union and the
+    `test_only`/`removed` filters) into `_catalog_playbook_entries` above,
+    unchanged, so the preflight classifier's agreement-type vocabulary is
+    built over exactly this set of playbooks."""
     catalog: list[dict[str, Any]] = []
-    for playbook_id in sorted(all_ids):
-        raw = entries.get(playbook_id) or {}
-        if raw.get("test_only"):
-            continue
-        overrides = playbook_versions.get_playbook_overrides(playbook_id, dynamodb_resource)
-        if overrides["removed"]:
-            continue
+    for playbook_id, raw, overrides in _catalog_playbook_entries(
+        registry_path, dynamodb_resource
+    ):
         display_name = (
             overrides["display_name"] or raw.get("display_name") or playbook_id.upper()
         )

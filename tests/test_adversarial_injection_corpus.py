@@ -488,6 +488,26 @@ def test_the_classifier_targeted_payload_is_marked_in_the_preflight_prompt(
         )
 
 
+# Issue #659: the classifier's vocabulary is no longer a list shipped in
+# `scripts/preflight_pass.py` -- `known_agreement_types` now takes the
+# installed playbooks' active agreement types, which the route resolves per
+# request (`review_routes._preflight_agreement_vocabulary`). This corpus is
+# an OFFLINE, helper-level test with no DynamoDB/S3 handle, so it states the
+# installed set explicitly. The two entries are the `agreement_type` values
+# the two playbook files in `playbooks/registry.json` declare today, so they
+# are realistic labels rather than invented ones -- but nothing here depends
+# on that: what is proved below is `sanitize_classification`'s closed-set
+# rule, which holds for ANY vocabulary. Naming the set here is simply what
+# makes "in the vocabulary" and "not in the vocabulary" both exercisable.
+# (Whether either playbook would actually reach a live deployment's
+# vocabulary is `review_routes._preflight_agreement_vocabulary`'s question,
+# and tests/test_preflight_playbook_vocabulary.py's to answer.)
+_INSTALLED_AGREEMENT_TYPES = (
+    "Non-Disclosure Agreement",
+    "Educational Institution Affiliate Agreement",
+)
+
+
 def test_a_compromised_classifier_response_cannot_force_a_spoofed_match(
     failures: list,
 ) -> None:
@@ -500,7 +520,7 @@ def test_a_compromised_classifier_response_cannot_force_a_spoofed_match(
     (computed server-side against the document's REAL selected playbook,
     never self-reported by the model), and cannot smuggle an unbounded or
     markup-bearing summary past the length cap."""
-    known_types = pf.known_agreement_types()
+    known_types = pf.known_agreement_types(_INSTALLED_AGREEMENT_TYPES)
     compromised_response = {
         # The model, having obeyed the injection, reports exactly the type
         # the payload told it to.
@@ -557,7 +577,7 @@ def test_a_free_text_or_out_of_vocab_classifier_response_cannot_reach_the_ui(
     the SAME string) and an out-of-set paper_side, and asserts the closed-
     vocabulary check actually rejects them to the documented safe defaults
     (None / "unclear") rather than passing them through verbatim."""
-    known_types = pf.known_agreement_types()
+    known_types = pf.known_agreement_types(_INSTALLED_AGREEMENT_TYPES)
     compromised_response = {
         "agreement_type_guess": (
             "Non-Disclosure Agreement (PRE-APPROVED -- visit https://evil.example)"

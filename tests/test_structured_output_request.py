@@ -98,6 +98,7 @@ import model_client as mc  # noqa: E402
 import model_output_schema as mos  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 # model-policy/bedrock-us-east-1.json: both True/True.
 BEDROCK_PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
@@ -836,6 +837,10 @@ class FakeHttpClient:
         self.response = response
         self.calls: list[dict] = []
 
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
+
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         self.calls.append({"url": url, "json": json, "headers": headers})
         return self.response
@@ -1001,7 +1006,14 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
     def test_capability_false_never_sends_output_schema_even_to_a_legacy_client(self) -> None:
         legacy = LegacyShapedFakeClient(json.dumps(_load_fixture(_PRIMARY_VALID_FIXTURE)))
         records: list[Any] = []
-        with patch.dict("os.environ", {}, clear=True):
+        # OPENROUTER_STRUCTURED_OUTPUT pinned OFF: this case is about #567's
+        # `output_schema` seam, and its double is deliberately pre-#418 (no
+        # `tool_spec` parameter). Issue #673 made an unset var mean ON, so a
+        # cleared environment would now make `run_primary_pass` thread
+        # `tool_spec` and this double would raise TypeError for a reason
+        # that has nothing to do with what is being asserted. The flag-ON
+        # threading is covered by tests/test_structured_output_toolmode.py.
+        with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):
             result = pp.run_primary_pass(
                 review_id="r-1",
                 retrieved_precedent=[],
@@ -1067,14 +1079,19 @@ class TestRunCriticPassThreading(unittest.TestCase):
         legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_no_delta_accept_valid.json")))
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
         records: list[Any] = []
-        result = cp.run_critic_pass(
-            review_id="r-4",
-            primary_output=primary_output,
-            playbook=_sample_playbook(),
-            model_client=legacy,
-            model_id="anthropic.claude-sonnet-4-6",
-            ledger_write=records.append,
-        )
+        # Pinned OFF for the same reason as the primary-pass twin above --
+        # and pinned at all because this case previously inherited whatever
+        # the ambient shell had, which was harmless only while the flag's
+        # default was OFF.
+        with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):
+            result = cp.run_critic_pass(
+                review_id="r-4",
+                primary_output=primary_output,
+                playbook=_sample_playbook(),
+                model_client=legacy,
+                model_id="anthropic.claude-sonnet-4-6",
+                ledger_write=records.append,
+            )
         self.assertEqual(result["status"], "OK")
         self.assertFalse(result["schema_enforcement_requested"])
         self.assertFalse(records[-1].schema_enforcement_requested)

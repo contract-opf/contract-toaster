@@ -23,9 +23,18 @@
  * existed, every mock run, every provider that omits it — is NOT a mismatch.
  * Rendering "asked X, served nothing" as a discrepancy would flag the entire
  * history of the product as suspicious on the day this shipped.
+ *
+ * ## Where the full ids live (issue #668)
+ *
+ * The cell paints model NAMES now, not `provider/model` — the provider
+ * segment is identical on every row of the page and was costing the table
+ * horizontal width to distinguish nothing. "Asked X, served Y" still has to
+ * be answerable FROM THE ROW, which is what these tests check; it is just
+ * answerable from the name's hover text and the row's own full-id
+ * disclosure rather than from the painted string.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import ReviewHistory from '../ReviewHistory';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -79,12 +88,22 @@ describe('issues #508/#514 — a served-model mismatch is visible', () => {
       ]),
     );
     render(<ReviewHistory />);
-    const cell = await screen.findByTestId('history-models-rev-1');
-    // Both ids, so "asked X, served Y" is answerable from the row itself
-    // rather than from a support ticket.
-    expect(cell.textContent).toContain('deepseek/deepseek-v4-pro');
-    expect(cell.textContent).toContain('deepseek/deepseek-chat-v3');
+    await screen.findByTestId('history-models-rev-1');
     expect(screen.getByTestId('history-model-mismatch-rev-1')).toBeTruthy();
+
+    // Both ids, so "asked X, served Y" is answerable from the row itself
+    // rather than from a support ticket. Asked and served are visibly
+    // DIFFERENT names, not two spellings of one…
+    expect(screen.getByTestId('history-model-primary-rev-1').textContent).toBe('deepseek-v4-pro');
+    expect(screen.getByTestId('history-model-served-primary-rev-1').textContent).toBe(
+      'deepseek-chat-v3',
+    );
+    // …and the exact recorded ids, which is what a support ticket would
+    // quote, are on the row's own disclosure.
+    fireEvent.click(screen.getByTestId('history-model-ids-toggle-rev-1'));
+    const ids = screen.getByTestId('history-model-ids-rev-1').textContent ?? '';
+    expect(ids).toContain('deepseek/deepseek-v4-pro');
+    expect(ids).toContain('deepseek/deepseek-chat-v3');
   });
 
   it('a critic pass served by a different model is flagged too', async () => {
@@ -100,7 +119,10 @@ describe('issues #508/#514 — a served-model mismatch is visible', () => {
     render(<ReviewHistory />);
     await screen.findByTestId('history-models-rev-1');
     expect(screen.getByTestId('history-model-mismatch-rev-1')).toBeTruthy();
-    expect(screen.getByTestId('history-models-rev-1').textContent).toContain('openai/gpt-5.6-sol');
+    expect(screen.getByTestId('history-model-served-critic-rev-1').textContent).toBe('gpt-5.6-sol');
+    expect(screen.getByTestId('history-model-served-critic-rev-1').getAttribute('title')).toBe(
+      'openai/gpt-5.6-sol',
+    );
   });
 
   it('agreement is QUIET — no badge when both passes served what was asked', async () => {

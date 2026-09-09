@@ -1,0 +1,487 @@
+{
+  "version": 1,
+  "sample_rate": 44100,
+  "channels": 1,
+  "codec": "MP3 64 kbps CBR",
+  "effects": [
+    {
+      "id": "register-key",
+      "title": "Register key",
+      "url": "effects/register-key.mp3",
+      "duration_seconds": 0.36,
+      "bytes": 3134,
+      "gain": 0.32,
+      "trigger": "Configuration choice",
+      "license": "CC0-1.0",
+      "sources": [
+        858919
+      ],
+      "recipe": {
+        "source_id": 858919,
+        "start_seconds": 0.13,
+        "duration_seconds": 0.36,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.62169911,
+      "peak_dbfs": -6.0,
+      "max_50ms_rms_dbfs": -27.36,
+      "sha256": "1048accc8a829e49b57d782680cfed05909f0579c669cb18dd827020afd724c6"
+    },
+    {
+      "id": "till-open",
+      "title": "Till opens",
+      "url": "effects/till-open.mp3",
+      "duration_seconds": 0.95,
+      "bytes": 7941,
+      "gain": 0.34,
+      "trigger": "Reservation confirmed by server",
+      "license": "CC0-1.0",
+      "sources": [
+        584168
+      ],
+      "recipe": {
+        "source_id": 584168,
+        "start_seconds": 1.28,
+        "duration_seconds": 0.95,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.31709906,
+      "peak_dbfs": -8.0,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "1f5f74bf3a0532dd3943c676629ea10d99413f21dfda05b9f3d0af8503bc7575"
+    },
+    {
+      "id": "till-close",
+      "title": "Till closes",
+      "url": "effects/till-close.mp3",
+      "duration_seconds": 0.84,
+      "bytes": 7105,
+      "gain": 0.34,
+      "trigger": "Ledger settlement complete",
+      "license": "CC0-1.0",
+      "sources": [
+        83915
+      ],
+      "recipe": {
+        "source_id": 83915,
+        "start_seconds": 13.67,
+        "duration_seconds": 0.84,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.19149826,
+      "peak_dbfs": -10.35,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "cf5b9fc216fd841328f1923c30d8f032ad2127ac95cd04549135b6c9f68d00e6"
+    },
+    {
+      "id": "receipt-print",
+      "title": "Receipt feed",
+      "url": "effects/receipt-print.mp3",
+      "duration_seconds": 0.98,
+      "bytes": 8150,
+      "gain": 0.25,
+      "trigger": "DONE receipt becomes available",
+      "license": "CC0-1.0",
+      "sources": [
+        202531
+      ],
+      "recipe": {
+        "source_id": 202531,
+        "start_seconds": 0.24,
+        "duration_seconds": 0.98,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 2.90966843,
+      "peak_dbfs": -7.19,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "19310ade38486be5f326b794d1ebc48d50ed1eb44bde0efe5b23c07395979277"
+    },
+    {
+      "id": "receipt-tear",
+      "title": "Receipt tear",
+      "url": "effects/receipt-tear.mp3",
+      "duration_seconds": 0.83,
+      "bytes": 6896,
+      "gain": 0.28,
+      "trigger": "Successful receipt copy or save request",
+      "license": "CC0-1.0",
+      "sources": [
+        366909
+      ],
+      "recipe": {
+        "source_id": 366909,
+        "start_seconds": 0.4,
+        "duration_seconds": 0.83,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 1.1523468,
+      "peak_dbfs": -9.53,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "2b106cedeab3d23d25cd8ccb7bd7f5c9ce94a98339056c3c0edd5934f65ec5ef"
+    },
+    {
+      "id": "ka-ching",
+      "title": "Register completion alternative",
+      "url": "effects/ka-ching.mp3",
+      "duration_seconds": 0.95,
+      "bytes": 7941,
+      "gain": 0.3,
+      "trigger": "Optional alternative to original pop",
+      "license": "CC0-1.0",
+      "sources": [
+        108278
+      ],
+      "recipe": {
+        "source_id": 108278,
+        "start_seconds": 7.68,
+        "duration_seconds": 0.95,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.14170747,
+      "peak_dbfs": -13.4,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "323e484d91ccbdd9196f6b772bb03733374d93ad0b01acec4cc8376536462fd9"
+    },
+    {
+      "id": "paper-slide",
+      "title": "Paper slide",
+      "url": "effects/paper-slide.mp3",
+      "duration_seconds": 0.68,
+      "bytes": 5851,
+      "gain": 0.18,
+      "trigger": "Pad gains focus; once per focus",
+      "license": "CC0-1.0",
+      "sources": [
+        730078
+      ],
+      "recipe": {
+        "source_id": 730078,
+        "start_seconds": 0.015,
+        "duration_seconds": 0.68,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 2.74442422,
+      "peak_dbfs": -9.1,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "e9a79f8f0fdd86bde8b1da4633747c3c6f9398556575098a95277d715bf12513"
+    },
+    {
+      "id": "pen-scratch",
+      "title": "Pen stroke",
+      "url": "effects/pen-scratch.mp3",
+      "duration_seconds": 0.51,
+      "bytes": 4388,
+      "gain": 0.15,
+      "trigger": "Applied-guidance readback opened",
+      "license": "CC0-1.0",
+      "sources": [
+        471081
+      ],
+      "recipe": {
+        "source_id": 471081,
+        "start_seconds": 21.02,
+        "duration_seconds": 0.51,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 2.19340855,
+      "peak_dbfs": -8.65,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "c52b72e0ca96fbec50c216f8d61d6b5b6dbb71be3b411cdbf228e2816194daa6"
+    },
+    {
+      "id": "slice-insert",
+      "title": "Slice insert \u00b7 recorded paper foley",
+      "url": "effects/slice-insert.mp3",
+      "duration_seconds": 0.46,
+      "bytes": 3970,
+      "gain": 0.27,
+      "trigger": "Document accepted locally",
+      "license": "CC0-1.0",
+      "sources": [
+        730078
+      ],
+      "recipe": {
+        "source_id": 730078,
+        "start_seconds": 0.025,
+        "duration_seconds": 0.46,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 2.74442422,
+      "peak_dbfs": -9.1,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "33ce3ba17b90dcb50d4c2afe35aea8ae8ac1b06a1e2a0e4e10222dcc5132a8a7"
+    },
+    {
+      "id": "slice-eject",
+      "title": "Slice eject \u00b7 recorded paper foley",
+      "url": "effects/slice-eject.mp3",
+      "duration_seconds": 0.5,
+      "bytes": 4388,
+      "gain": 0.24,
+      "trigger": "Document removed",
+      "license": "CC0-1.0",
+      "sources": [
+        730078
+      ],
+      "recipe": {
+        "source_id": 730078,
+        "start_seconds": 0.16,
+        "duration_seconds": 0.5,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 5.26757711,
+      "peak_dbfs": -11.13,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "610c2bb32e9cb35ad39cfd7ec33520ee912b94a84849c6b2d52a1ae019c22208"
+    },
+    {
+      "id": "stop-release",
+      "title": "Toaster spring release",
+      "url": "effects/stop-release.mp3",
+      "duration_seconds": 0.68,
+      "bytes": 5851,
+      "gain": 0.46,
+      "trigger": "CANCELLED confirmed; never on request alone",
+      "license": "CC0-1.0",
+      "sources": [
+        119107
+      ],
+      "recipe": {
+        "source_id": 119107,
+        "start_seconds": 0.22,
+        "duration_seconds": 0.68,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.5193352,
+      "peak_dbfs": -10.38,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "0d75fb019bfcdd964b11c350336598a243e365991faa5831d657826d44a583db"
+    },
+    {
+      "id": "burnt-hiss",
+      "title": "Short steam release",
+      "url": "effects/burnt-hiss.mp3",
+      "duration_seconds": 0.82,
+      "bytes": 6896,
+      "gain": 0.17,
+      "trigger": "ERROR, under existing failure clunk",
+      "license": "CC0-1.0",
+      "sources": [
+        234782
+      ],
+      "recipe": {
+        "source_id": 234782,
+        "start_seconds": 0.16,
+        "duration_seconds": 0.82,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.207542,
+      "peak_dbfs": -10.78,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "a5ae980d14687a106563d4c4607e3d67e29bba66905dfce85e16a911bfc9880c"
+    },
+    {
+      "id": "handoff-bell",
+      "title": "Gentle counter bell",
+      "url": "effects/handoff-bell.mp3",
+      "duration_seconds": 0.98,
+      "bytes": 8150,
+      "gain": 0.23,
+      "trigger": "Manual review status",
+      "license": "CC0-1.0",
+      "sources": [
+        453763
+      ],
+      "recipe": {
+        "source_id": 453763,
+        "start_seconds": 0.75,
+        "duration_seconds": 0.98,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.17549991,
+      "peak_dbfs": -12.24,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "ad8e1c41ef2d00e73efba7aa348bf3b02dc10d1a7eec0a80a0fcb41949bf0152"
+    },
+    {
+      "id": "refusal",
+      "title": "Dull mechanism thud",
+      "url": "effects/refusal.mp3",
+      "duration_seconds": 0.27,
+      "bytes": 2507,
+      "gain": 0.16,
+      "trigger": "Optional invalid operation feedback",
+      "license": "CC0-1.0",
+      "sources": [
+        83915
+      ],
+      "recipe": {
+        "source_id": 83915,
+        "start_seconds": 13.74,
+        "duration_seconds": 0.27,
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.19149826,
+      "peak_dbfs": -10.35,
+      "max_50ms_rms_dbfs": -22.0,
+      "sha256": "99a98e402940eda37936bc8b877512bc4f674c098c2191f90c2140491a58f2a8"
+    },
+    {
+      "id": "stage-primary",
+      "title": "Primary pass",
+      "url": "effects/stage-primary.mp3",
+      "duration_seconds": 0.16,
+      "bytes": 1671,
+      "gain": 0.2,
+      "trigger": "Reported stage change",
+      "license": "CC0-1.0",
+      "sources": [
+        858919
+      ],
+      "recipe": {
+        "source_id": 858919,
+        "source_start_seconds": 0.185,
+        "hit_duration_seconds": 0.12,
+        "hit_offsets_seconds": [
+          0
+        ],
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.62169911,
+      "peak_dbfs": -6.0,
+      "max_50ms_rms_dbfs": -27.36,
+      "sha256": "452dd1374b78dd97bbf962e0b17e6952ac19f7a3de9c5b6f8f83e2bc3a7e5895"
+    },
+    {
+      "id": "stage-critic",
+      "title": "Critic pass",
+      "url": "effects/stage-critic.mp3",
+      "duration_seconds": 0.34,
+      "bytes": 3134,
+      "gain": 0.18,
+      "trigger": "Reported stage change",
+      "license": "CC0-1.0",
+      "sources": [
+        858919
+      ],
+      "recipe": {
+        "source_id": 858919,
+        "source_start_seconds": 0.185,
+        "hit_duration_seconds": 0.12,
+        "hit_offsets_seconds": [
+          0,
+          0.18
+        ],
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.62169911,
+      "peak_dbfs": -6.0,
+      "max_50ms_rms_dbfs": -27.36,
+      "sha256": "168a8874fdd7faad24e7531baccdac20fc13c6e32169450834e2df77d8a5ca73"
+    },
+    {
+      "id": "stage-reconciliation",
+      "title": "Reconciliation",
+      "url": "effects/stage-reconciliation.mp3",
+      "duration_seconds": 0.48,
+      "bytes": 4179,
+      "gain": 0.17,
+      "trigger": "Reported stage change",
+      "license": "CC0-1.0",
+      "sources": [
+        858919
+      ],
+      "recipe": {
+        "source_id": 858919,
+        "source_start_seconds": 0.185,
+        "hit_duration_seconds": 0.12,
+        "hit_offsets_seconds": [
+          0,
+          0.12,
+          0.32
+        ],
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.62169911,
+      "peak_dbfs": -6.0,
+      "max_50ms_rms_dbfs": -27.36,
+      "sha256": "34eda38452f75867e7cfaa52865a23a2f7e035d2585f844dea9833ad6ec12540"
+    },
+    {
+      "id": "stage-redline",
+      "title": "Redline",
+      "url": "effects/stage-redline.mp3",
+      "duration_seconds": 0.35,
+      "bytes": 3134,
+      "gain": 0.17,
+      "trigger": "Reported stage change",
+      "license": "CC0-1.0",
+      "sources": [
+        858919
+      ],
+      "recipe": {
+        "source_id": 858919,
+        "source_start_seconds": 0.185,
+        "hit_duration_seconds": 0.12,
+        "hit_offsets_seconds": [
+          0,
+          0.095,
+          0.19
+        ],
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.62169911,
+      "peak_dbfs": -6.0,
+      "max_50ms_rms_dbfs": -27.36,
+      "sha256": "a69caf0e2403683fb3996c6ea1148d527c9b2910d2cf3bd4175e6ce787febf60"
+    },
+    {
+      "id": "odometer-roll",
+      "title": "Odometer ratchet",
+      "url": "effects/odometer-roll.mp3",
+      "duration_seconds": 0.355,
+      "bytes": 3134,
+      "gain": 0.15,
+      "trigger": "Confirmed odometer update",
+      "license": "CC0-1.0",
+      "sources": [
+        858919
+      ],
+      "recipe": {
+        "source_id": 858919,
+        "source_start_seconds": 0.185,
+        "hit_duration_seconds": 0.12,
+        "hit_offsets_seconds": [
+          0,
+          0.065,
+          0.13,
+          0.195
+        ],
+        "fade_in_ms": 3,
+        "fade_out_ms": 9
+      },
+      "normalization_multiplier": 0.62169911,
+      "peak_dbfs": -6.0,
+      "max_50ms_rms_dbfs": -27.36,
+      "sha256": "04c39aa77b88d553f78b21a709831f2d7030e62cc87c0f971d94b890b28dff0b"
+    }
+  ]
+}

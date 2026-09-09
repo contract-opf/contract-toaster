@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Unit tests for issue #418: structured output via forced tool-use,
-env-flagged (`OPENROUTER_STRUCTURED_OUTPUT`, default OFF).
+env-flagged (`OPENROUTER_STRUCTURED_OUTPUT`, default ON since issue #673).
 
 ## What is asserted here (mirrors the issue's Acceptance criteria)
 
-  1. `backend/src/config.py::structured_output_enabled()` -- default OFF,
-     truthy strings ("1"/"true"/"yes", any case) turn it on, anything else
-     (including unset) stays off.
+  1. `backend/src/config.py::structured_output_enabled()` -- default ON
+     (issue #673 flipped it, on a live A/B), explicit off spellings
+     ("0"/"false"/"no"/"off", any case, whitespace tolerated) turn it off,
+     anything else (including unset, empty, and an unrecognized value)
+     is on.
   2. `scripts/model_output_schema.py::model_facing_output_schema()` --
      valid JSON Schema; top-level `required` carries `decision`/
      `confidence_state`/`issues` but NOT `schema_version` (and the property
@@ -79,6 +81,7 @@ import model_client as mc  # noqa: E402
 import model_output_schema as mos  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 # model-policy/openrouter.json's two pinned ids. These are here ONLY so
 # `OpenRouterModelClient.invoke`'s runtime policy assertion
@@ -125,21 +128,44 @@ def _unstamp(parsed: dict[str, Any]) -> dict[str, Any]:
 
 
 class TestStructuredOutputEnabledFlag(unittest.TestCase):
-    def test_unset_is_off(self) -> None:
+    """Issue #673 flipped this default from OFF to ON. These cases are the
+    default's only guard: a silent revert to the `in {"1","true","yes"}`
+    spelling would leave production back on the prose-JSON path that failed
+    schema validation on two consecutive critic attempts, with no other
+    test in the repo noticing (every other flag-on test sets the var
+    explicitly)."""
+
+    def test_unset_is_on(self) -> None:
+        # The production shape: no OPENROUTER_STRUCTURED_OUTPUT anywhere in
+        # the process environment. #673's whole payload is that this is now
+        # True.
         with patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(config.structured_output_enabled())
+            self.assertTrue(config.structured_output_enabled())
 
-    def test_empty_string_is_off(self) -> None:
+    def test_empty_string_is_on(self) -> None:
+        # An env var declared with no value (compose's `VAR:` pass-through
+        # form, or `export VAR=`) is not an opt-OUT -- only an explicit off
+        # spelling is.
         with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": ""}, clear=True):
-            self.assertFalse(config.structured_output_enabled())
+            self.assertTrue(config.structured_output_enabled())
 
-    def test_zero_is_off(self) -> None:
-        with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):
-            self.assertFalse(config.structured_output_enabled())
+    def test_explicit_off_values_are_off(self) -> None:
+        # The rollback the ticket insists the flag keeps being. Whitespace
+        # and case are tolerated because a compose file / deploy-host UI
+        # value is hand-typed.
+        for value in ("0", "false", "False", "FALSE", "no", "NO", "off", "OFF", "  0  "):
+            with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": value}, clear=True):
+                self.assertFalse(
+                    config.structured_output_enabled(), f"{value!r} should disable it"
+                )
 
-    def test_garbage_value_is_off(self) -> None:
+    def test_garbage_value_is_on(self) -> None:
+        # Default-ON means an unrecognized value falls to ON, matching
+        # `backend/src/purge_scheduler.py::scheduler_enabled`, the repo's
+        # existing default-ON flag. A typo'd rollback ("of", "flase") does
+        # NOT silently disable the path -- it stays on, loudly.
         with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "nope"}, clear=True):
-            self.assertFalse(config.structured_output_enabled())
+            self.assertTrue(config.structured_output_enabled())
 
     def test_truthy_values_are_on(self) -> None:
         for value in ("1", "true", "True", "TRUE", "yes", "YES"):
@@ -242,6 +268,10 @@ class FakeHttpClient:
     def __init__(self, response: FakeResponse):
         self.response = response
         self.calls: list[dict] = []
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         self.calls.append({"url": url, "json": json, "headers": headers})
@@ -497,7 +527,10 @@ def _sample_anchored_clauses() -> list[dict[str, Any]]:
 class TestRunPrimaryPassThreading(unittest.TestCase):
     def test_flag_off_never_sends_tool_spec_even_to_a_legacy_shaped_client(self) -> None:
         legacy = LegacyShapedFakeClient(json.dumps(_load_fixture(_PRIMARY_VALID_FIXTURE)))
-        with patch.dict("os.environ", {}, clear=True):
+        # Explicit "0", not a cleared environment: issue #673 made UNSET
+        # mean ON, so `{}` would now exercise the flag-ON path and this
+        # regression guard would assert nothing about the OFF one.
+        with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):
             result = pp.run_primary_pass(
                 review_id="r-1",
                 retrieved_precedent=[],
@@ -533,7 +566,8 @@ class TestRunCriticPassThreading(unittest.TestCase):
     def test_flag_off_never_sends_tool_spec_even_to_a_legacy_shaped_client(self) -> None:
         legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_no_delta_accept_valid.json")))
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
-        with patch.dict("os.environ", {}, clear=True):
+        # Explicit "0" for the same reason as the primary-pass twin above.
+        with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):
             result = cp.run_critic_pass(
                 review_id="r-3",
                 primary_output=primary_output,

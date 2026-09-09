@@ -12,7 +12,9 @@
  * (the ticket's format — SVG does not paste inline into most deal threads),
  * and the content identity with the text copy holds by construction rather
  * than by a pixel comparison, which is what makes it assertable in an offline
- * jsdom gate at all.
+ * jsdom gate at all. The drawing itself lives in `./receiptImage` — the one
+ * canvas exporter in the app (issue #721), shared with the Orbit Diner
+ * console so the two homes cannot grow two ideas of what the PNG says.
  */
 import { useCallback, useRef, useState } from 'react';
 
@@ -24,55 +26,31 @@ import {
   type ReceiptLine,
   type ReceiptSource,
 } from './receipt';
+import {
+  RECEIPT_IMAGE_COLUMNS,
+  drawReceiptRows,
+  saveReceiptImage,
+} from './receiptImage';
 
 export interface ReceiptProps {
   review: ReceiptSource;
   playbookName?: string | null;
 }
 
-// Image geometry, in device pixels at 2x so the slip stays legible when it is
-// dropped into a thread and scaled down.
-const SCALE = 2;
-const IMAGE_WIDTH = 420;
-const LINE_HEIGHT = 22;
-const PADDING = 24;
-const FONT = '13px ui-monospace, SFMono-Regular, Menlo, monospace';
-
-/** The image's pixel height, at 1x. A `wrap` line (issue #570 follow-up) can
- *  reflow into more than one physical text row, so the height is sized off
- *  the actual rendered row count — the same `receiptText(lines, 40)` split
- *  the draw loop below iterates — never off `lines.length`, which
- *  undercounts whenever a wrapped row is present and truncates it against
- *  the bottom of the canvas. */
-function imageHeight(lines: ReceiptLine[]): number {
-  const rowCount = receiptText(lines, 40).split('\n').length;
-  return PADDING * 2 + rowCount * LINE_HEIGHT;
+/** The rows both the image and the export path draw — the rendered receipt,
+ *  split back into physical rows. A `wrap` line (issue #570 follow-up) can
+ *  reflow into more than one row, so everything downstream counts ROWS and
+ *  never `lines.length`, which undercounts and truncates a wrapped receipt
+ *  against the bottom of the canvas. */
+function receiptRows(lines: ReceiptLine[]): string[] {
+  return receiptText(lines, RECEIPT_IMAGE_COLUMNS).split('\n');
 }
 
-/** Draw the receipt onto a 2D context. Exported so the export path and its
- *  test drive the same code — the test captures what was drawn. */
+/** Draw the receipt onto a 2D context, from the canonical lines. A thin shim
+ *  over the shared exporter, kept so this component's own test drives the
+ *  same code the "Save receipt" button does. */
 export function drawReceipt(ctx: CanvasRenderingContext2D, lines: ReceiptLine[]): void {
-  const height = imageHeight(lines);
-  ctx.fillStyle = '#fdfbf5';
-  ctx.fillRect(0, 0, IMAGE_WIDTH, height);
-  ctx.scale(SCALE, SCALE);
-  ctx.font = FONT;
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = '#2a2119';
-  receiptText(lines, 40)
-    .split('\n')
-    .forEach((text, index) => {
-      ctx.fillText(text, PADDING / SCALE, PADDING / SCALE + index * (LINE_HEIGHT / SCALE));
-    });
-}
-
-function triggerDownload(href: string, filename: string): void {
-  const anchor = document.createElement('a');
-  anchor.href = href;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+  drawReceiptRows(ctx, receiptRows(lines));
 }
 
 export function ToastReceipt({ review, playbookName }: ReceiptProps): React.ReactElement | null {
@@ -93,16 +71,14 @@ export function ToastReceipt({ review, playbookName }: ReceiptProps): React.Reac
 
   const handleSave = useCallback(() => {
     setSaveError(null);
-    const canvas = canvasRef.current ?? document.createElement('canvas');
-    canvas.width = IMAGE_WIDTH * SCALE;
-    canvas.height = imageHeight(lines) * SCALE;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
+    const saved = saveReceiptImage(
+      receiptRows(lines),
+      receiptFilename(review.review_id, 'png'),
+      canvasRef.current ?? undefined,
+    );
+    if (!saved) {
       setSaveError('This browser could not render the receipt image. Use “Copy as text”.');
-      return;
     }
-    drawReceipt(ctx, lines);
-    triggerDownload(canvas.toDataURL('image/png'), receiptFilename(review.review_id, 'png'));
   }, [lines, review.review_id]);
 
   return (

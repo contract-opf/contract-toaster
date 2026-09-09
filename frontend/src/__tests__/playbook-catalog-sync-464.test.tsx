@@ -37,6 +37,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
+import { playbookStop, playbookStops } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -91,7 +92,7 @@ const STATIC_ROUTES: Record<string, unknown> = {
     model_provider: 'openrouter',
     key_set: false,
     key_source: null,
-    key_hint: '',
+    key_fingerprint: '',
     updated_at: '',
     updated_by: '',
   },
@@ -173,9 +174,9 @@ describe('contract-type dial stays in sync with admin Playbooks mutations (#464)
 
     // The Review tab's dial starts with the ORIGINAL name.
     await screen.findByTestId('review-playbook-dial');
-    expect(screen.getByTestId('review-playbook-option-synthetic-nda-sample')).toHaveTextContent(
-      'Synthetic NDA Sample',
-    );
+    // Issue #733: the console lists the catalog as <option>s, the old tree as
+    // radio stops — the NAME is what this is about either way.
+    expect(playbookStop('synthetic-nda-sample')!.label).toContain('Synthetic NDA Sample');
 
     // Rename it from the Playbooks admin tab — the real UI flow, not a
     // direct state poke.
@@ -198,7 +199,7 @@ describe('contract-type dial stays in sync with admin Playbooks mutations (#464)
     await goToTab('Review');
 
     await waitFor(() => {
-      expect(screen.getByTestId('review-playbook-option-synthetic-nda-sample')).toHaveTextContent(
+      expect(playbookStop('synthetic-nda-sample')!.label).toContain(
         'Renamed NDA Playbook (464)',
       );
     });
@@ -237,10 +238,9 @@ describe('contract-type dial stays in sync with admin Playbooks mutations (#464)
     await goToTab('Review');
 
     await waitFor(() => {
-      expect(screen.queryByTestId('review-playbook-dial')).toBeNull();
-      expect(
-        screen.queryByTestId('review-playbook-option-synthetic-nda-sample'),
-      ).toBeNull();
+      // Nothing left to offer. The old tree drops the dial entirely; the
+      // console keeps an empty control with its placeholder (issue #733).
+      expect(playbookStops()).toEqual([]);
     });
     expect(screen.getByTestId('review-no-playbooks')).toBeInTheDocument();
   });

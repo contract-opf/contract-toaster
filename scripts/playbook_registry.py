@@ -19,7 +19,7 @@ artifact paths:
   - `anchor_map_path`       the built anchor-map JSON artifact
   - `section_config_path`   the per-playbook section config + coverage
                              exemptions data file (see
-                             scripts/build_anchor_map.py)
+                             the anchor-map artifacts)
   - `fixtures_dir`          the gold-fixtures directory for this playbook's
                              eval suite (issue #209's namespacing requirement)
   - `standard_form_docx`    optional path to the canonical standard-form
@@ -149,9 +149,8 @@ def default_playbook_id(registry_path: Optional[Path] = None) -> str:
 
 
 # Deprecated module attribute, kept ONLY because many existing callers
-# (scripts/build_anchor_map.py, scripts/canonicalize.py,
-# scripts/diff_standard_form.py, scripts/eval_harness.py,
-# scripts/generate_synthetic_standard_form.py, scripts/review_spine.py,
+# (scripts/canonicalize.py, scripts/eval_harness.py,
+# scripts/review_spine.py,
 # scripts/seed_active_bundle.py, and several tests) read
 # `playbook_registry.DEFAULT_PLAYBOOK_ID` at IMPORT time -- a module-level
 # assignment or a function-default argument, both evaluated once when the
@@ -173,7 +172,7 @@ def resolve_playbook(
     `registry_path` is late-bound to the CURRENT value of the module-level
     REGISTRY_PATH global when not given explicitly (rather than a default
     argument bound once at import time), so tests can point every caller in
-    the repo (build_anchor_map, diff_standard_form, canonicalize,
+    the repo (canonicalize,
     eval_harness -- none of which thread a registry_path of their own
     through to here) at a synthetic registry by monkeypatching
     `playbook_registry.REGISTRY_PATH`, with zero code edits to those

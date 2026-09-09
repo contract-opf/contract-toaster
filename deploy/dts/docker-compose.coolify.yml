@@ -37,6 +37,11 @@
 #                             setting the key in the admin UI's "Model & API
 #                             key" tab, which overrides this var and can be
 #                             rotated without a redeploy.
+#   OPENROUTER_STRUCTURED_OUTPUT
+#                           - OPTIONAL. Defaults to 1 (forced tool-call
+#                             output, issue #673). Set to 0 to roll back to
+#                             the prose-JSON request without a redeploy of
+#                             new code.
 #   S3_PUBLIC_ENDPOINT_URL  - public https URL of the minio service's domain,
 #                             e.g. https://<your-minio-subdomain>.
 #   IMAGE_DIGEST            - OPTIONAL. The pushed image's sha256 digest, shown
@@ -71,6 +76,7 @@ x-resource-names: &resource-names
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
   USER_PREFERENCES_TABLE: contract-toaster-user-preferences-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
+  ENTITY_ROSTER_TABLE: contract-toaster-entity-roster-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
   MODEL_INVOCATIONS_TABLE: contract-toaster-model-invocations-dts
   UPLOADS_BUCKET: contract-toaster-uploads-dts
@@ -161,6 +167,14 @@ services:
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL}
       DEMO_TOKEN_SECRET: ${DEMO_TOKEN_SECRET:?set DEMO_TOKEN_SECRET}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Issue #418 built this, issue #673 turned it on: the OpenRouter
+      # request carries the review object as a forced tool call instead of
+      # prose JSON. Named explicitly (rather than left to the code default,
+      # which is now also ON) so this file says what the live deployment
+      # actually runs. Rollback without a code change: set
+      # OPENROUTER_STRUCTURED_OUTPUT=0 in the deploy host's UI.
+      # See backend/src/config.py::structured_output_enabled.
+      OPENROUTER_STRUCTURED_OUTPUT: ${OPENROUTER_STRUCTURED_OUTPUT:-1}
     depends_on:
       bootstrap:
         condition: service_completed_successfully

@@ -38,7 +38,7 @@ on strings that live in three files:
   6. `frontend/src/notesMode.ts`'s four ids, and its default, are the SAME
      vocabulary as `src.reviews.NOTES_MODES` / `DEFAULT_NOTES_MODE`.
   7. The marker sentence the control PROMISES the document will carry is
-     character-identical to `scripts/redline_docx_writer.MARKER_TEXT`, the
+     character-identical to `scripts/redline_generate.py`'s `MARKER_TEXT`, the
      one the document actually carries (#495's transparency rule applied to
      #513's marker).
 
@@ -87,7 +87,7 @@ import boto3  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
-import redline_docx_writer  # noqa: E402
+import redline_generate  # noqa: E402
 import src.main as backend_main  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
 import src.user_preferences as prefs  # noqa: E402
@@ -468,9 +468,9 @@ class TestFrontendBackendAgreement(unittest.TestCase):
         self.assertIsNotNone(match, "INTERNAL_MARKER_TEXT not found in notesMode.ts")
         self.assertEqual(
             match.group(1),
-            redline_docx_writer.MARKER_TEXT,
+            redline_generate.MARKER_TEXT,
             "The marker the control promises is not the marker "
-            "scripts/redline_docx_writer.py stamps on the document.",
+            "scripts/redline_generate.py stamps on the document.",
         )
 
 

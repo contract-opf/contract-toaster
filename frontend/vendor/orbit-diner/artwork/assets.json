@@ -1,0 +1,58 @@
+[
+  {
+    "name": "toaster",
+    "width": 1536,
+    "height": 1024,
+    "file": "artwork/toaster.webp",
+    "bytes": 221298,
+    "clipping": "MaterialArt.tsx contains the production silhouette; sources are opaque image plates, not alpha PNGs."
+  },
+  {
+    "name": "register",
+    "width": 1536,
+    "height": 1024,
+    "file": "artwork/register.webp",
+    "bytes": 150164,
+    "clipping": "MaterialArt.tsx contains the production silhouette; sources are opaque image plates, not alpha PNGs."
+  },
+  {
+    "name": "counter",
+    "width": 1672,
+    "height": 941,
+    "file": "artwork/counter.webp",
+    "bytes": 226872,
+    "clipping": "MaterialArt.tsx contains the production silhouette; sources are opaque image plates, not alpha PNGs."
+  },
+  {
+    "name": "toast",
+    "width": 1254,
+    "height": 1254,
+    "file": "artwork/toast.webp",
+    "bytes": 564682,
+    "clipping": "MaterialArt.tsx contains the production silhouette; sources are opaque image plates, not alpha PNGs."
+  },
+  {
+    "name": "pad",
+    "width": 1024,
+    "height": 1536,
+    "file": "artwork/pad.webp",
+    "bytes": 109066,
+    "clipping": "MaterialArt.tsx contains the production silhouette; sources are opaque image plates, not alpha PNGs."
+  },
+  {
+    "name": "dial",
+    "width": 1254,
+    "height": 1254,
+    "file": "artwork/dial.webp",
+    "bytes": 206982,
+    "clipping": "MaterialArt.tsx contains the production silhouette; sources are opaque image plates, not alpha PNGs."
+  },
+  {
+    "name": "toaster-phone",
+    "width": 1536,
+    "height": 1024,
+    "file": "artwork/toaster-phone.webp",
+    "bytes": 233432,
+    "clipping": "Same toaster silhouette in MaterialArt.tsx. Alternate phone plate; load only the selected toaster variant."
+  }
+]

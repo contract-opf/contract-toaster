@@ -29,10 +29,15 @@ hand-built op shapes, no offsets written by the test.
   4. Two insertions naming one anchor keep their transcript order.
   5. AC 2 -- a `delete_block` renders as a full-paragraph tracked deletion:
      every run wrapped in `<w:del>` with `<w:delText>` (never `<w:t>`, the
-     incorrect shortcut `scripts/redline_inplace.py` documents) and the
-     paragraph MARK marked deleted; reject-all restores the original
-     paragraph structure exactly in text space, and accept-all removes the
-     clause's text.
+     incorrect shortcut Word renders as ordinary body text); reject-all
+     restores the original paragraph structure exactly in text space, and
+     accept-all removes the clause's text. Since issue #646 a clause whose
+     heading the batch would leave empty keeps that heading and reads
+     `[Intentionally omitted.]` instead, tracked-INSERTED into its LAST
+     `<w:p>` -- which therefore keeps its paragraph MARK, while every other
+     struck `<w:p>` has its mark deleted as before. That rule's own slice
+     test is `tests/test_omitted_placeholder_646.py`; the assertions here
+     only account for it.
   6. A `delete_block` covers EVERY physical `<w:p>` of a multi-paragraph
      (list) block, not just the first ...
   7. ... and every run those paragraphs SHOW, including ones nested in a
@@ -49,12 +54,21 @@ hand-built op shapes, no offsets written by the test.
  11. Round-trip verification passes on every produced document, and
      `docx-editor` itself reopens the output and cleanly
      `accept_all()`/`reject_all()`s it.
+ 12. (Issue #663) A block whose text lives partly inside a `<w:hyperlink>`
+     survives BOTH the transcript proof and the compiler -- edited inside
+     the hyperlink, edited across its boundary, and struck whole. #663
+     recovered that text into what the model reads; a model must never
+     redline text the writer cannot reach, so this is the other half of
+     that fix rather than a nice-to-have.
 
 Fixtures are built with python-docx (a test-only dependency, matching
 `tests/test_redline_block_apply.py`), plus a dependency-free raw-OOXML
 builder for the two shapes python-docx cannot author -- `<w:ins>` and
 `<w:fldSimple>` -- the same convention this repo's other OOXML fixture
-builders use.
+builders use. The one exception is the #663 hyperlink fixture, which is a
+COMMITTED document produced by a real word-processor toolchain precisely
+because a hand-built one proves only that the compiler handles the shape a
+test author imagined (see its `.PROVENANCE.md`).
 All SYNTHETIC: never a real document, never real party names.
 
 Exit codes: 0 = pass, 1 = fail
@@ -83,6 +97,11 @@ WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 AUTHOR = "contract-toaster"
 TIMESTAMP = "2026-01-01T00:00:00Z"
+
+# Bound to its single definition (issue #646), never re-spelled here: a test
+# with the literal in it would stay green if the compiler and the constant
+# drifted apart.
+PLACEHOLDER = block_transcript.OMITTED_CLAUSE_PLACEHOLDER
 
 
 def _qn(tag: str) -> str:
@@ -581,17 +600,28 @@ def test_delete_block_deletes_runs_and_paragraph_mark(failures: list) -> None:
 
     target = _paragraphs(out)[3]  # 0 h1, 1 body1, 2 h2, 3 body2
 
-    # Every run is inside a <w:del> ...
+    # Every ORIGINAL run is inside a <w:del>. The one run that is not is the
+    # issue #646 placeholder, which this op tracked-INSERTED.
+    placeholder_runs = [
+        run
+        for ins in target.iter(_qn("ins"))
+        if ins.get(_qn("author")) == AUTHOR
+        for run in ins.iter(_qn("r"))
+    ]
     for run in target.iter(_qn("r")):
+        if run in placeholder_runs:
+            continue
         if not any(run in list(d.iter(_qn("r"))) for d in target.iter(_qn("del"))):
             failures.append(f"[{case}] a run of the deleted block is not inside a <w:del>")
             break
     # ... using <w:delText>, never <w:t>: `<w:t>` inside a `<w:del>` renders
-    # wrong in Word's Reviewing pane (scripts/redline_inplace.py, "Rewrite").
-    if list(target.iter(_qn("t"))):
+    # wrong in Word's Reviewing pane (scripts/redline_block_apply.py, `_DELETED_TEXT_TAGS`).
+    # The only surviving <w:t> is the placeholder's.
+    surviving = "".join(t.text or "" for t in target.iter(_qn("t")))
+    if surviving != PLACEHOLDER:
         failures.append(
-            f"[{case}] the deleted paragraph still carries <w:t> -- deleted text must be "
-            f"<w:delText>"
+            f"[{case}] the deleted paragraph's undeleted text is {surviving!r}, expected "
+            f"only {PLACEHOLDER!r} -- deleted text must be <w:delText>"
         )
     if not list(target.iter(_qn("delText"))):
         failures.append(f"[{case}] the deleted paragraph carries no <w:delText> at all")
@@ -600,17 +630,16 @@ def test_delete_block_deletes_runs_and_paragraph_mark(failures: list) -> None:
             failures.append(f"[{case}] a <w:del> is not stamped with this call's author/date")
             break
 
-    # The paragraph MARK is deleted too -- the difference between deleting a
-    # paragraph and emptying one.
-    mark = _paragraph_mark_revision(target, "del")
-    if mark is None:
+    # The paragraph MARK is NOT deleted here (issue #646): this is the `<w:p>`
+    # the placeholder lives in, and a paragraph whose mark is deleted is
+    # merged away by accept-all, taking the placeholder into the next clause
+    # with it. A struck `<w:p>` with no placeholder to carry still loses its
+    # mark -- see `test_delete_block_covers_every_physical_paragraph`.
+    if _paragraph_mark_revision(target, "del") is not None:
         failures.append(
-            f"[{case}] the paragraph MARK is not deleted "
-            f"(<w:pPr><w:rPr><w:del/></w:rPr></w:pPr> missing) -- accepting the change "
-            f"would leave a blank paragraph behind"
+            f"[{case}] the paragraph carrying {PLACEHOLDER!r} had its MARK deleted -- "
+            f"accepting the change would merge it into the following clause"
         )
-    elif mark.get(_qn("id")) in (None, ""):
-        failures.append(f"[{case}] the paragraph-mark <w:del> carries no w:id")
 
     # The OTHER section is untouched.
     if list(_paragraphs(out)[1].iter(_qn("del"))):
@@ -619,16 +648,29 @@ def test_delete_block_deletes_runs_and_paragraph_mark(failures: list) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         # AC 2: rejecting all changes restores the original paragraph
-        # structure exactly, in text space.
+        # structure exactly, in text space -- the placeholder included, since
+        # it is content this compiler injected.
         rejected = _paragraph_texts(_resolved(out, tmp_path, "reject", "reject_all"))
         if rejected != before:
             failures.append(f"[{case}] reject_all text {rejected!r} != {before!r}")
-        # ... and accepting removes the clause's text.
+        # ... and accepting removes the clause's text, leaving the heading
+        # with the omission notice under it (issue #646). Read through
+        # `docx-editor`'s OWN accept, not this repo's materializer, so the
+        # shape is proven against a second implementation.
         accepted = _visible_paragraph_texts(_resolved(out, tmp_path, "accept", "accept_all"))
         if _RENEWAL_BODY in "".join(accepted):
             failures.append(f"[{case}] accept_all left the deleted clause behind: {accepted!r}")
         if _TERM_BODY not in "".join(accepted):
             failures.append(f"[{case}] accept_all also removed the untouched clause")
+        if "Section 2. Renewal" not in accepted:
+            failures.append(
+                f"[{case}] accept_all lost the struck clause's HEADING: {accepted!r}"
+            )
+        if PLACEHOLDER not in accepted:
+            failures.append(
+                f"[{case}] accept_all shows {accepted!r}; the emptied clause must read "
+                f"{PLACEHOLDER!r} rather than leave its heading bare"
+            )
 
 
 def test_delete_block_covers_every_physical_paragraph(failures: list) -> None:
@@ -670,8 +712,19 @@ def test_delete_block_covers_every_physical_paragraph(failures: list) -> None:
                 f"[{case}] physical paragraph {index} of the block was NOT deleted -- "
                 f"a whole-block delete must cover every <w:p> the block joins"
             )
-        if _paragraph_mark_revision(target, "del") is None:
-            failures.append(f"[{case}] physical paragraph {index} kept an undeleted mark")
+    # The mark rule, both branches in one document (issue #646): the LAST
+    # struck `<w:p>` carries the placeholder and keeps its mark; every
+    # earlier one is an ordinary whole-paragraph deletion and loses it.
+    if _paragraph_mark_revision(_paragraphs(out)[1], "del") is None:
+        failures.append(
+            f"[{case}] physical paragraph 1 kept an undeleted mark -- only the "
+            f"placeholder-carrying <w:p> may"
+        )
+    if _paragraph_mark_revision(_paragraphs(out)[2], "del") is not None:
+        failures.append(
+            f"[{case}] physical paragraph 2 lost its mark; it carries {PLACEHOLDER!r} "
+            f"and accept-all would merge it into whatever follows"
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         rejected = _paragraph_texts(_resolved(out, Path(tmp), "reject", "reject_all"))
@@ -731,13 +784,19 @@ def test_delete_block_reaches_runs_nested_in_containers(failures: list) -> None:
 
     target = _paragraphs(out)[1]
     surviving = "".join(t.text or "" for t in target.iter(_qn("t")))
-    if surviving:
+    # The only text left undeleted is the issue #646 placeholder this op
+    # inserted; anything else is source text that escaped the deletion.
+    if surviving != PLACEHOLDER:
         failures.append(
             f"[{case}] {surviving!r} SURVIVED the whole-block deletion -- a run nested "
             f"inside <w:ins>/<w:fldSimple> was not wrapped in a <w:del>"
         )
-    if _paragraph_mark_revision(target, "del") is None:
-        failures.append(f"[{case}] the paragraph mark was not deleted")
+    # This `<w:p>` carries the placeholder, so its mark stays (issue #646).
+    if _paragraph_mark_revision(target, "del") is not None:
+        failures.append(
+            f"[{case}] the placeholder's paragraph mark was deleted -- accept-all "
+            f"would merge {PLACEHOLDER!r} into the following paragraph"
+        )
     # The counterparty's own pending insertion is not re-authored: our
     # <w:del> nests INSIDE their <w:ins>, which is how Word records
     # "inserted, then deleted before either was accepted".
@@ -939,7 +998,8 @@ def test_block_ops_and_span_edits_in_one_transcript(failures: list) -> None:
     }:
         failures.append(f"[{case}] applied kinds {[e['kind'] for e in result['applied']]!r}")
 
-    # 0 h1, 1 body1 (edited), 2 h2, 3 body2, 4 NEW, 5 h3, 6 body3 (deleted).
+    # 0 h1, 1 body1 (edited), 2 h2, 3 body2, 4 NEW, 5 h3 (kept), 6 body3
+    # (deleted, and carrying the issue #646 placeholder).
     # The insertion renumbers <w:p> 4 onward -- if the deletion had been
     # applied against the post-insertion numbering it would have landed on
     # Section 3's HEADING instead.
@@ -955,6 +1015,11 @@ def test_block_ops_and_span_edits_in_one_transcript(failures: list) -> None:
     if list(paragraphs[5].iter(_qn("delText"))):
         failures.append(
             f"[{case}] the deletion landed on Section 3's HEADING -- the insertion's "
+            f"renumbering corrupted its target, and issue #646 keeps the heading"
+        )
+    if list(paragraphs[4].iter(_qn("delText"))):
+        failures.append(
+            f"[{case}] the deletion landed on the INSERTED clause -- the insertion's "
             f"renumbering corrupted its target"
         )
 
@@ -971,7 +1036,11 @@ def test_block_ops_and_span_edits_in_one_transcript(failures: list) -> None:
             "Section 2. Fees",
             _FEES_BODY,
             _NEW_CLAUSE,
+            # "Section 3. Renewal" stays: its clause was struck whole, so
+            # issue #646 leaves the omission notice under its heading rather
+            # than a bare heading or a vanished section.
             "Section 3. Renewal",
+            PLACEHOLDER,
         ]
         if accepted != want:
             failures.append(f"[{case}] accept_all text {accepted!r} != {want!r}")
@@ -982,6 +1051,203 @@ def test_block_ops_and_span_edits_in_one_transcript(failures: list) -> None:
         ]
         if rejected != [text for text in before if text]:
             failures.append(f"[{case}] reject_all text {rejected!r} != {before!r}")
+
+
+# ---------------------------------------------------------------------------
+# Issue #663 blast radius: a block whose text lives partly inside a
+# `<w:hyperlink>`
+# ---------------------------------------------------------------------------
+
+_HYPERLINK_FIXTURE = (
+    REPO_ROOT
+    / "tests"
+    / "fixtures"
+    / "extraction_normalization_80"
+    / "hyperlink-cross-reference.SYNTHETIC.docx"
+)
+
+
+def test_hyperlink_bearing_block_proves_and_applies(failures: list) -> None:
+    """Issue #663 recovered `<w:hyperlink>` text into the extracted block
+    text. That is only safe if the WRITER can act on it: a model must never
+    redline text the writer cannot reach, the mirror image of never
+    redlining text it did not receive. So this drives a hyperlink-bearing
+    block through the real validator and the real compiler three ways --
+    an edit strictly INSIDE the hyperlink, an edit CROSSING its boundary,
+    and a whole-block delete covering it.
+
+    The fixture is a committed document produced by a real word-processor
+    toolchain, not markup written in this file
+    (`hyperlink-cross-reference.PROVENANCE.md`): a hand-built hyperlink only
+    proves the compiler handles the shape a test author imagined, and #663
+    was exactly the case where nobody had.
+    """
+    case = "hyperlink_bearing_block"
+    if not _HYPERLINK_FIXTURE.exists():
+        failures.append(f"[{case}] missing committed fixture: {_HYPERLINK_FIXTURE}")
+        return
+    docx_bytes = _HYPERLINK_FIXTURE.read_bytes()
+
+    # The fixture must actually exercise what this test claims.
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
+        document_xml = zf.read("word/document.xml").decode("utf-8")
+    if "<w:hyperlink" not in document_xml:
+        failures.append(f"[{case}] the fixture carries no <w:hyperlink> at all")
+        return
+
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    if norm.get("status") != "normalized":
+        failures.append(f"[{case}] fixture did not normalize: {norm!r}")
+        return
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_id = next(
+        (bid for bid, block in block_map.items() if "Section 7.2" in block["text"]), None
+    )
+    if block_id is None:
+        failures.append(
+            f"[{case}] no block carries the hyperlinked text -- the fixture cannot "
+            f"exercise #663. Blocks: {block_map!r}"
+        )
+        return
+    source_text = block_map[block_id]["text"]
+    linked_texts = ("Section 7.2", "Data Protection Addendum")
+
+    def _span_edit(target: str, replacement: str, issue_key: str) -> list:
+        start = source_text.index(target)
+        return [
+            {
+                "block_id": block_id,
+                "segments": [
+                    {"op": "keep", "text": source_text[:start]},
+                    {"op": "delete", "text": target, "issue_key": issue_key},
+                    {"op": "insert", "text": replacement, "issue_key": issue_key},
+                    {"op": "keep", "text": source_text[start + len(target):]},
+                ],
+            }
+        ]
+
+    scenarios = [
+        # Strictly inside the hyperlink: the whole edited span is the linked
+        # text itself.
+        ("inside", "Section 7.2", "Section 8.4"),
+        # Crossing the hyperlink's boundary: the span starts in a plain run,
+        # runs through the linked text, and ends in another plain run.
+        ("crossing", "under Section 7.2 and", "under Section 8.4 and"),
+    ]
+    for label, target, replacement in scenarios:
+        issue_key = f"HL-{label}"
+        proven, _ = _prove(docx_bytes, patches=_span_edit(target, replacement, issue_key))
+        if proven["status"] != "proven":
+            failures.append(
+                f"[{case}/{label}] the transcript did not prove against the document's "
+                f"own block map: {proven['failures']!r}"
+            )
+            continue
+        result = redline_block_apply.apply_block_transcript(
+            docx_bytes,
+            proven,
+            author=AUTHOR,
+            timestamp_iso=TIMESTAMP,
+            rationale_by_issue={issue_key: "Synthetic rationale."},
+        )
+        if result["failures"]:
+            failures.append(
+                f"[{case}/{label}] the writer could not reach text the extractor now "
+                f"hands the model: {result['failures']!r}"
+            )
+            continue
+        out = result["docx_bytes"]
+        if not out:
+            failures.append(f"[{case}/{label}] no docx_bytes returned")
+            continue
+        _round_trips(case + "/" + label, out, failures)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            accepted = "".join(
+                _visible_paragraph_texts(_resolved(out, tmp_path, "accept", "accept_all"))
+            )
+            rejected = "".join(
+                _visible_paragraph_texts(_resolved(out, tmp_path, "reject", "reject_all"))
+            )
+        if replacement not in accepted or target in accepted:
+            failures.append(
+                f"[{case}/{label}] accept_all did not apply the edit across the "
+                f"hyperlink: {accepted!r}"
+            )
+        if target not in rejected or replacement in rejected:
+            failures.append(
+                f"[{case}/{label}] reject_all did not restore the original text: "
+                f"{rejected!r}"
+            )
+
+        # Round two of a negotiation re-uploads the delivered redline, so
+        # the extractor has to read back what this compiler just wrote --
+        # here a `<w:del>`/`<w:ins>` pair nested INSIDE a `<w:hyperlink>`.
+        # That shape is produced by non-test code (this very call), not
+        # imagined by a fixture author, which is what makes it worth
+        # asserting over.
+        reread = extraction_normalization_stage.extract_document_paragraphs(out)
+        clusters = [
+            revision
+            for group in reread
+            for physical in group["physical_paragraphs"]
+            for revision in physical["revisions"]
+            if revision.get("type") == "tracked_change"
+        ]
+        if len(clusters) != 1:
+            failures.append(
+                f"[{case}/{label}] re-reading the delivered redline found "
+                f"{len(clusters)} pending clusters, expected 1: {clusters!r}"
+            )
+        elif (
+            target not in clusters[0].get("original_text", "")
+            or replacement not in clusters[0].get("resulting_text", "")
+        ):
+            failures.append(
+                f"[{case}/{label}] re-reading the delivered redline lost the revision "
+                f"nested in the <w:hyperlink>: {clusters[0]!r}"
+            )
+
+    # A whole-block delete must strike the hyperlinked runs too -- text
+    # surviving inside a clause reported deleted is the worst outcome here,
+    # and a hyperlink is exactly the container an allowlist-shaped walk
+    # would miss.
+    proven, _ = _prove(
+        docx_bytes, ops=[{"op": "delete_block", "block_id": block_id, "issue_key": "HL-del"}]
+    )
+    if proven["status"] != "proven":
+        failures.append(f"[{case}/delete] transcript did not prove: {proven['failures']!r}")
+        return
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes,
+        proven,
+        author=AUTHOR,
+        timestamp_iso=TIMESTAMP,
+        rationale_by_issue={"HL-del": "Synthetic rationale."},
+    )
+    if result["failures"]:
+        failures.append(f"[{case}/delete] unexpected failures: {result['failures']!r}")
+        return
+    out = result["docx_bytes"]
+    if not out:
+        failures.append(f"[{case}/delete] no docx_bytes returned")
+        return
+    _round_trips(case + "/delete", out, failures)
+    with tempfile.TemporaryDirectory() as tmp:
+        accepted = "".join(
+            _visible_paragraph_texts(_resolved(out, Path(tmp), "accept", "accept_all"))
+        )
+    for linked in linked_texts:
+        if linked in accepted:
+            failures.append(
+                f"[{case}/delete] {linked!r} SURVIVED the whole-block deletion -- text "
+                f"inside a <w:hyperlink> escaped a clause reported deleted"
+            )
+    if PLACEHOLDER not in accepted:
+        failures.append(
+            f"[{case}/delete] the emptied clause must read {PLACEHOLDER!r}: {accepted!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -999,6 +1265,7 @@ TESTS = [
     test_block_ops_in_a_table_fail_structured,
     test_span_edit_inside_a_table_cell_still_applies,
     test_block_ops_and_span_edits_in_one_transcript,
+    test_hyperlink_bearing_block_proves_and_applies,
 ]
 
 

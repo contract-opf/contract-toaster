@@ -32,6 +32,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+  stateBadge,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -43,6 +49,9 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 function stubFetch(routes: Record<string, unknown>): void {
+  // Issue #733: the catalog is a fixture every scenario needs — the console
+  // will not arm its lever without an active playbook.
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -82,8 +91,8 @@ async function submitAndSettle(detail: Record<string, unknown>): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
-  await screen.findByTestId('review-result');
+  await pressSubmit();
+  await findReviewResult();
 }
 
 /** A clean, successful review: nothing to change, output ready to download. */
@@ -120,8 +129,10 @@ describe('A9 — MANUAL_REVIEW_REQUIRED vs DONE, as rendered', () => {
   it('pops the toast out of the toaster on a clean DONE', async () => {
     await submitAndSettle(DONE_ACCEPT);
 
-    expect(screen.getByTestId('toaster-state-done')).toBeInTheDocument();
-    expect(screen.queryByTestId('toaster-state-sober')).toBeNull();
+    // Issue #733: `-sober` was one appearance for every bad ending; the
+    // console names the STATUS, so the badge to look for is resolved.
+    expect(screen.getByTestId(stateBadge('done'))).toBeInTheDocument();
+    expect(screen.queryByTestId(stateBadge('sober', 'MANUAL_REVIEW_REQUIRED'))).toBeNull();
     expect(screen.getByTestId('review-result').textContent).toContain(
       'No requested changes identified by tool.',
     );
@@ -134,8 +145,10 @@ describe('A9 — MANUAL_REVIEW_REQUIRED vs DONE, as rendered', () => {
     // Differentiator 1 — the hero. These two are mutually exclusive states of
     // the same illustration, so the completed-review picture cannot appear on
     // a review that was NOT completed.
-    expect(screen.getByTestId('toaster-state-sober')).toBeInTheDocument();
-    expect(screen.queryByTestId('toaster-state-done')).toBeNull();
+    expect(
+      screen.getByTestId(stateBadge('sober', 'MANUAL_REVIEW_REQUIRED')),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId(stateBadge('done'))).toBeNull();
   });
 
   it('tells the attorney a human is taking it over, in words DONE never uses', async () => {
@@ -170,7 +183,13 @@ describe('A9 — MANUAL_REVIEW_REQUIRED vs DONE, as rendered', () => {
     // `reason` is system metadata (backend/src/reviews.py: "carried separately
     // as system metadata, not rendered as its own message"). It may appear in
     // the small technical trailer, but must not stand in for the explanation.
+    // Issue #733: on the console the trailer lives INSIDE the result panel, so
+    // "not in the result" would forbid the trailer itself. The claim is the
+    // same either way — the token is trailer material, never the explanation —
+    // so it is asserted as "only there".
     const result = screen.getByTestId('review-result').textContent ?? '';
-    expect(result).not.toContain('document_too_large');
+    const trailer = screen.queryByTestId('review-failure-reason')?.textContent ?? '';
+    expect(result.replace(trailer, '')).not.toContain('document_too_large');
+    expect(screen.getByTestId('review-outcome').textContent).not.toContain('document_too_large');
   });
 });

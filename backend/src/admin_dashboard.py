@@ -42,17 +42,23 @@ field from a module-level allowlist tuple, so a field added to a stored row
 tomorrow cannot appear here by accident. Adding a field to one of those
 tuples is a deliberate disclosure decision.
 
-NO SECRETS, EVER. Nothing here reads a settings/credential table: no model
-API key, no session material, no password hash is reachable from any of
-these four reads.
+NO SECRETS, EVER. No model API key, no session material and no password hash
+is reachable from any of these reads. The ONE settings-table read that exists
+is `get_spend_ledger`'s (issue #653): `model_settings.get_spend_cap_settings`
+reads the `spend` row — a ceiling in cents and who last changed it — and never
+the `global` row the API key lives on. Nothing about a credential can reach
+this module through it.
 
 Environment variables consumed:
   REVIEWS_TABLE             reviews table name (PK: review_id)
   DAILY_SPEND_TABLE         daily-spend counter table name (PK: spend_date)
   AUDIT_TABLE               append-only audit table (PK: partition,
                             SK: timestamp#event_id)
-  DAILY_SPEND_CAP_USD_CENTS the configured daily ceiling, used only as the
-                            fallback when a day's row carries no stored cap
+  MODEL_SETTINGS_TABLE      model-settings table (PK: setting_id), OPTIONAL —
+                            read only for the admin-set daily cap (#653);
+                            unset means the env cap below is the ceiling
+  DAILY_SPEND_CAP_USD_CENTS the daily ceiling when no admin cap is stored, and
+                            the fallback when a day's row carries no cap
   PIPELINE_MAX_CONCURRENCY  in-process pipeline concurrency cap, read for the
                             occupancy denominator (see `_concurrency_limit`)
   MODEL_INVOCATIONS_TABLE   model-invocation ledger (#414), OPTIONAL — see
@@ -72,10 +78,12 @@ from boto3.dynamodb.conditions import Key
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import model_settings as model_settings_module
     from src import reviews as reviews_module
     from src.disposition import TRIAGE_STATUS_PENDING, TRIAGE_STATUS_TRIAGED
     from src.users import json_safe
 except ImportError:  # pragma: no cover
+    import model_settings as model_settings_module  # type: ignore[no-redef]
     import reviews as reviews_module  # type: ignore[no-redef]
     from disposition import TRIAGE_STATUS_PENDING, TRIAGE_STATUS_TRIAGED  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
@@ -162,25 +170,7 @@ _SPEND_DAY_FIELDS = (
 )
 
 
-def _configured_daily_cap_cents() -> int:
-    """The env-configured daily ceiling — the fallback for a day row that has
-    no stored `daily_cap_usd_cents` (rows written before `reserve_spend`
-    started seeding the cap, and synthesized zero-rows for a day with no
-    spend at all). Read exactly the way `reviews.reserve_spend` reads it, so
-    the number the dashboard shows is the number the reservation path
-    enforces."""
-    try:
-        return int(
-            os.environ.get(
-                "DAILY_SPEND_CAP_USD_CENTS",
-                str(reviews_module.DAILY_SPEND_CAP_USD_CENTS_DEFAULT),
-            )
-        )
-    except (TypeError, ValueError):
-        return reviews_module.DAILY_SPEND_CAP_USD_CENTS_DEFAULT
-
-
-def _spend_day_view(row: dict[str, Any]) -> dict[str, Any]:
+def _spend_day_view(row: dict[str, Any], fallback_cap_cents: int) -> dict[str, Any]:
     """Project one daily-spend row and derive the reconcile figure.
 
     `outstanding_reservation_usd_cents = reserved - settled` is THE reconcile
@@ -197,12 +187,20 @@ def _spend_day_view(row: dict[str, Any]) -> dict[str, Any]:
     NEGATIVE, which would read as "negative reservations outstanding". The
     two raw counters are returned unmodified alongside it, so nothing is
     hidden by the floor.
+
+    `daily_cap_usd_cents` ON A DAY ROW is the cap as it WAS when a reservation
+    on that day last wrote it — history, not the ceiling in force. Since issue
+    #653 an admin can change the cap mid-day, so the ENFORCED figure is
+    reported once at the top level of `get_spend_ledger` and that is the one
+    the UI compares today's spend against. `fallback_cap_cents` is that same
+    resolved figure, threaded in so a request resolves the store-backed cap
+    ONCE rather than once per row in the window.
     """
     view = {field: row.get(field) for field in _SPEND_DAY_FIELDS}
     view["reserved_usd_cents"] = int(view.get("reserved_usd_cents") or 0)
     view["settled_usd_cents"] = int(view.get("settled_usd_cents") or 0)
     if view.get("daily_cap_usd_cents") is None:
-        view["daily_cap_usd_cents"] = _configured_daily_cap_cents()
+        view["daily_cap_usd_cents"] = fallback_cap_cents
     else:
         view["daily_cap_usd_cents"] = int(view["daily_cap_usd_cents"])
     view["outstanding_reservation_usd_cents"] = max(
@@ -211,10 +209,10 @@ def _spend_day_view(row: dict[str, Any]) -> dict[str, Any]:
     return view
 
 
-def _empty_spend_day(spend_date: str) -> dict[str, Any]:
+def _empty_spend_day(spend_date: str, fallback_cap_cents: int) -> dict[str, Any]:
     """A well-formed zero row for a day with no spend at all, so the tile
     always renders rather than 404ing on a quiet morning."""
-    return _spend_day_view({"spend_date": spend_date})
+    return _spend_day_view({"spend_date": spend_date}, fallback_cap_cents)
 
 
 def get_spend_ledger(
@@ -248,9 +246,57 @@ def get_spend_ledger(
     render "outstanding ≈ N reservations" without duplicating the pricing
     formula.
 
+    ISSUE #653 — the numbers a person deciding whether to press the button
+    actually needs, answered here rather than computed by the client:
+
+      `daily_cap_usd_cents`      the ceiling the reservation path enforces
+                                 RIGHT NOW (admin row > env > default). NOT the
+                                 same thing as `today.daily_cap_usd_cents`,
+                                 which is whatever the cap was when a
+                                 reservation last wrote that row and is left as
+                                 the historical record it is.
+      `spent_today_usd_cents`    `today.reserved_usd_cents` — the ONE counter
+                                 `reserve_spend`'s condition is evaluated
+                                 against. After a review settles this counter
+                                 holds that review's ACTUAL cost, so it reads
+                                 as "spent today, with in-flight reviews still
+                                 held at their worst case". It is deliberately
+                                 NOT reserved+settled: settlement adds the
+                                 actual to `settled_usd_cents` while moving
+                                 `reserved_usd_cents` to the same figure, so
+                                 summing them double-counts every settled
+                                 review. `settled_usd_cents` stays reported on
+                                 its own, and is the only place preflight
+                                 (#491) and cover-note (#499) spend appears —
+                                 neither reserves, so neither is inside the
+                                 ceiling this compares against.
+      `remaining_usd_cents`      cap − spent, floored at zero.
+      `estimated_review_usd_cents`  what the next review is EXPECTED to cost,
+                                 beside the worst case it reserves.
+      `next_review_admissible`   whether reserving `worst_case_reservation_
+                                 usd_cents` right now would pass
+                                 `reserve_spend`. This is the whole question
+                                 the screen exists to answer, so it MIRRORS
+                                 that gate — including the explicit
+                                 whole-reservation check #653 added there, so
+                                 it can neither promise a submission the server
+                                 would refuse nor predict a refusal it would
+                                 not perform.
+
+    `cap_setting` is `model_settings.get_spend_cap_settings` — where the cap is
+    set, the bounds a new one must satisfy, and whether this deployment even
+    has a store to set it in. Read here rather than from a route of its own so
+    the cap and the spend it bounds are always one answer taken at one moment.
+
     Raises HTTPException(403) for a non-admin caller.
     """
     _require_admin(caller_user_row, "the spend ledger")
+    # Admin-gated in its own right, and gated again above — the cap setting
+    # never rides along on a read a non-admin could reach.
+    cap_setting = model_settings_module.get_spend_cap_settings(
+        caller_user_row, dynamodb_resource
+    )
+    enforced_cap_cents = int(cap_setting["daily_cap_usd_cents"])
     window = _clamp(days, SPEND_LEDGER_DEFAULT_DAYS, 1, SPEND_LEDGER_MAX_DAYS)
     now = time.time() if now_epoch is None else now_epoch
     today_key = time.strftime("%Y-%m-%d", time.gmtime(now))
@@ -267,12 +313,12 @@ def get_spend_ledger(
         resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
         rows.extend(resp.get("Items", []))
 
-    projected = [_spend_day_view(row) for row in rows]
+    projected = [_spend_day_view(row, enforced_cap_cents) for row in rows]
     projected.sort(key=lambda d: str(d.get("spend_date") or ""), reverse=True)
 
     today = next(
         (d for d in projected if d.get("spend_date") == today_key),
-        _empty_spend_day(today_key),
+        _empty_spend_day(today_key, enforced_cap_cents),
     )
     # Bounded on BOTH ends: a row dated after today is not part of "the last
     # N days" either, whatever wrote it.
@@ -282,13 +328,33 @@ def get_spend_ledger(
         if window_start_key <= str(d.get("spend_date") or "") <= today_key
     ]
 
+    next_review_cents = reviews_module.compute_worst_case_reservation_usd_cents(
+        dynamodb_resource
+    )
+    spent_today_cents = int(today["reserved_usd_cents"])
+
     return json_safe(
         {
             "today": today,
             "days": in_window,
             "window_days": window,
-            "worst_case_reservation_usd_cents": (
-                reviews_module.compute_worst_case_reservation_usd_cents(dynamodb_resource)
+            "worst_case_reservation_usd_cents": next_review_cents,
+            # Issue #653: the EXPECTED cost of the next review beside the worst
+            # case it reserves. Both, because the two differed by 4x on the
+            # measurement this was filed on — an operator reading only the
+            # reservation would conclude the cap buys a quarter of the reviews
+            # it actually buys. None on a provider with no per-review basis;
+            # see `reviews.estimate_review_usd_cents`.
+            "estimated_review_usd_cents": (
+                reviews_module.estimate_review_usd_cents(dynamodb_resource)
+            ),
+            "daily_cap_usd_cents": enforced_cap_cents,
+            "daily_cap_source": cap_setting["daily_cap_source"],
+            "cap_setting": cap_setting,
+            "spent_today_usd_cents": spent_today_cents,
+            "remaining_usd_cents": max(0, enforced_cap_cents - spent_today_cents),
+            "next_review_admissible": (
+                spent_today_cents + next_review_cents <= enforced_cap_cents
             ),
         }
     )

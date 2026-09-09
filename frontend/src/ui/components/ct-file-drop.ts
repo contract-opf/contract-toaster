@@ -122,9 +122,11 @@ export class CtFileDrop extends LitElement {
     // Built as real SVG DOM nodes — never raw-HTML/React's unsafe-HTML prop
     // (§72 XSS posture) — even though this markup is a static,
     // developer-authored constant with nothing untrusted flowing through it.
+    // Standard, recognizable upload icon (arrow pointing up from tray)
     for (const d of [
-      'M12 4v11m0-11 4 4m-4-4-4 4',
-      'M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2',
+      'M12 16V4',
+      'M8 8L12 4L16 8',
+      'M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
     ]) {
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('d', d);

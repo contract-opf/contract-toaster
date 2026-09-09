@@ -18,7 +18,7 @@ stack described in docs/REVIEW-GUIDE.md.
   B. The layout block does not list a canonical standard-form `.docx`
      entry annotated "not yet committed" — the committed file is a
      brand-neutral SYNTHETIC placeholder.
-  C. README's Redlining bullet describes `scripts/redline_docx_writer.py`
+  C. README's Redlining bullet describes `scripts/redline_block_apply.py`
      as owned/original code, not a library "vendored" from a third party.
   D. README's review-prompt bullet points at the real prompt-assembly
      script (`scripts/primary_review_pass.py`), not a `prompts/` directory.
@@ -138,8 +138,8 @@ def check_c_redline_writer_owned() -> list[str]:
     text = _read(README)
     failures = []
     failures += _assert(
-        "scripts/redline_docx_writer.py" in text,
-        "README references scripts/redline_docx_writer.py",
+        "scripts/redline_block_apply.py" in text,
+        "README references scripts/redline_block_apply.py",
     )
     failures += _assert(
         "vendored into our own tree" not in text,

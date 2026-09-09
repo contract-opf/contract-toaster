@@ -15,14 +15,14 @@ ONE "Synthetic NDA Sample" playbook with a seeded note).
   - "synthetic-nda-sample" is a "knowledge" profile entry (no
     `anchor_map_path`/`section_config_path` -- see
     `scripts/playbook_registry.py::profile()`), by design (issue #402: it
-    ships with no standard-form docx). The six scripts that read
+    ships with no standard-form docx). The scripts that read
     `playbook_registry.DEFAULT_PLAYBOOK_ID` as a module-level constant at
-    import time (scripts/build_anchor_map.py, diff_standard_form.py,
-    canonicalize.py, eval_harness.py, seed_active_bundle.py,
-    generate_synthetic_standard_form.py) must not crash under a KNOWLEDGE
+    import time (scripts/canonicalize.py, eval_harness.py,
+    seed_active_bundle.py) must not crash under a KNOWLEDGE
     default -- unlike #343's fix (give the default a precision shape), #412
-    fixes this at the six scripts' own module-level defaults instead (see
-    scripts/build_anchor_map.py's profile-guarded `_DEFAULT_SECTION_CONFIG`).
+    fixes this at those scripts' own module-level defaults instead. (Issue
+    #631 deleted three more such consumers along with the anchor-map /
+    standard-form-diff subsystem; the guard covers the survivors.)
   - "synthetic-generic" (the registry entry #412 renamed from "eiaa") remains
     separately registered and loadable, for the anchor/detector test suite
     that still resolves fixtures through it -- but is marked `"test_only":
@@ -125,20 +125,19 @@ class TestRegistryDefaultRepointed(unittest.TestCase):
         doc = playbook_validation.load_and_validate_playbook("synthetic-generic")
         self.assertEqual(doc["playbook"]["id"], "synthetic-generic")
 
-    def test_the_six_import_time_default_consumers_do_not_crash(self):
-        """The six scripts that read playbook_registry.DEFAULT_PLAYBOOK_ID
+    def test_the_import_time_default_consumers_do_not_crash(self):
+        """Every script that reads playbook_registry.DEFAULT_PLAYBOOK_ID
         as a module-level constant (or a function-default argument bound
         once at import time) must not raise, even though the default is now
         a KNOWLEDGE profile entry (issue #412) -- importing every one of
         them fresh (this test process has not imported any of them yet)."""
-        import build_anchor_map  # noqa: F401
         import canonicalize  # noqa: F401
-        import diff_standard_form  # noqa: F401
         import eval_harness  # noqa: F401
-        import generate_synthetic_standard_form  # noqa: F401
         import seed_active_bundle  # noqa: F401
 
-        self.assertEqual(build_anchor_map.PLAYBOOK_PATH.name, "synthetic-nda-sample-v1.0.0.json")
+        self.assertEqual(
+            canonicalize.PLAYBOOK_PATH.name, "synthetic-nda-sample-v1.0.0.json"
+        )
         # A knowledge-profile default legitimately has no detector-scorable
         # gold fixtures -- score_all() returning an empty list (not raising)
         # is the correct, non-degraded behavior here, not a regression of

@@ -16,7 +16,7 @@ fails until someone tries to add a second playbook and discovers the
 special-casing. Issue #289 swept the five call sites that had drifted into
 this pattern (playbook_registry.DEFAULT_PLAYBOOK_ID,
 backend/src/corpus.py's PLAYBOOK_PATH/DEFAULT_PLAYBOOK_ID,
-scripts/diff_standard_form.py's _SYNTHETIC_TEXT_SUPPLEMENTS,
+the retired standard-form diff's _SYNTHETIC_TEXT_SUPPLEMENTS,
 backend/src/pipeline_runner.py's _mock_decision,
 backend/src/review_routes.py's Form default) so they resolve through
 playbooks/registry.json instead. This lint is what stops the pattern from

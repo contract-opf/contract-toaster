@@ -178,9 +178,11 @@ export class CtButton extends LitElement {
   }
 
   set disabled(value: boolean) {
-    this._disabled = value;
+    const isDis = Boolean(value);
+    this._disabled = isDis;
+    this.toggleAttribute('disabled', isDis);
     if (this._btn) {
-      this._btn.disabled = value;
+      this._btn.disabled = isDis;
     }
   }
 

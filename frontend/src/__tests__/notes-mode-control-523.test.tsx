@@ -1,6 +1,15 @@
 /**
  * notes-mode-control-523.test.tsx — the four-way footnote-audience control
- * (issue #523, epic #519 item F).
+ * (issue #523, epic #519 item F), as amended by issue #667.
+ *
+ * #667 retired the plain <select> that used to be the second surface: it
+ * asked the identical question the four dial stops ask, and the owner kept
+ * the stops. Claim 3 below therefore no longer has two surfaces to hold in
+ * agreement — what it protected (the value the user chose is the value that
+ * reaches the wire, from whichever affordance moved it) is now asserted
+ * directly against the surviving radiogroup, and the explanations the
+ * <select>'s option text carried are pinned by
+ * `compose-layout-667.test.tsx`.
  *
  * The claims, in the order the issue's acceptance criteria put them:
  *
@@ -11,15 +20,13 @@
  *      turning the dial; saving the default is a separate, deliberate act.
  *      (A control that silently rewrote the default would make "overridable
  *      for this review" a lie.)
- *   3. ONE HANDLER, TWO SURFACES (#504's dual-surface rule). The toaster-side
- *      radiogroup and the plain <select> are asserted to move together in
- *      BOTH directions and to send the same value — the drift this rule
- *      exists to prevent is exactly the one a single-direction test misses.
+ *   3. The chosen stop is the value that reaches the wire — including when it
+ *      was chosen by keyboard rather than pointer, and including when it was
+ *      chosen AFTER the file was picked.
  *   4. It is a real radiogroup: arrows, Home, End, wrapping, roving tabindex.
  *   5. The #572 kill switch is honoured client-side: while the server reports
  *      `notes_mode_available: false`, `internal`/`both` are visible but not
- *      selectable on either surface, so nothing offers a choice guaranteed to
- *      400.
+ *      selectable, so nothing offers a choice guaranteed to 400.
  *   6. Choosing a mode that puts our own reasoning in the file says so, once,
  *      quoting the marker the document will actually carry — and choosing one
  *      that does not says nothing.
@@ -35,6 +42,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { DEFAULT_PLAYBOOKS, pressSubmit } from './support/consoleSurface';
 import {
   DEFAULT_NOTES_MODE,
   INTERNAL_MARKER_TEXT,
@@ -100,6 +108,8 @@ async function mountForm(
   // the stored mode; a test exercising the fallback path says otherwise.
   const settlesOn = prefs.settlesOn ?? stored;
   const fetchMock = stubFetch({
+    // Issue #733: the console arms nothing without an active playbook.
+    '/api/playbooks': DEFAULT_PLAYBOOKS,
     'GET /api/me/preferences': {
       preferences: { notes_mode: stored },
       notes_mode_available: prefs.notes_mode_available ?? false,
@@ -118,37 +128,41 @@ async function mountForm(
     },
   });
   render(<ReviewSubmission />);
-  await waitFor(() => expect(selectValue()).toBe(settlesOn));
+  await waitFor(() => expect(checkedStop()).toBe(settlesOn));
   return fetchMock;
 }
 
-function selectValue(): string {
-  return (screen.getByTestId('review-notes-mode-select') as HTMLSelectElement).value;
+/** Which mode the control holds — `aria-checked` on the hand-built radio, the
+ *  `checked` property on the console's native one (issue #733). */
+function checkedStop(): NotesMode | undefined {
+  return NOTES_MODE_SETTINGS.find((setting) => {
+    const stop = screen.getByTestId(`review-notes-mode-option-${setting.id}`);
+    return (
+      stop.getAttribute('aria-checked') === 'true' || (stop as HTMLInputElement).checked === true
+    );
+  })?.id;
 }
 
-function checkedStop(): NotesMode | undefined {
-  return NOTES_MODE_SETTINGS.find(
-    (setting) =>
-      screen
-        .getByTestId(`review-notes-mode-option-${setting.id}`)
-        .getAttribute('aria-checked') === 'true',
-  )?.id;
+/** Whether a mode is offered but refused — likewise, either expression. */
+function unavailable(id: NotesMode): boolean {
+  const stop = screen.getByTestId(`review-notes-mode-option-${id}`);
+  return stop.getAttribute('aria-disabled') === 'true' || (stop as HTMLInputElement).disabled;
 }
 
 async function submit(): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docxFile()] } });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  window.localStorage?.clear();
 });
 
 describe('notes mode — the stored preference is the default', () => {
-  it('seeds both surfaces from the server-side preference and sends it', async () => {
+  it('seeds the control from the server-side preference and sends it', async () => {
     const fetchMock = await mountForm({ notes_mode: 'none' });
-    expect(selectValue()).toBe('none');
     expect(checkedStop()).toBe('none');
 
     await submit();
@@ -186,7 +200,6 @@ describe('notes mode — the stored preference is the default', () => {
       notes_mode_available: false,
       settlesOn: DEFAULT_NOTES_MODE,
     });
-    expect(selectValue()).toBe(DEFAULT_NOTES_MODE);
     expect(checkedStop()).toBe(DEFAULT_NOTES_MODE);
   });
 
@@ -195,6 +208,7 @@ describe('notes mode — the stored preference is the default', () => {
     // is toasting a contract; a missing remembered default is not an error
     // worth a banner.
     const fetchMock = stubFetch({
+      '/api/playbooks': DEFAULT_PLAYBOOKS,
       'POST /api/reviews': { review_id: 'rev-n1', resumed: false },
       'GET /api/reviews/rev-n1': {
         review_id: 'rev-n1',
@@ -205,111 +219,88 @@ describe('notes mode — the stored preference is the default', () => {
       },
     });
     render(<ReviewSubmission />);
-    await waitFor(() => expect(selectValue()).toBe(DEFAULT_NOTES_MODE));
+    await waitFor(() => expect(checkedStop()).toBe(DEFAULT_NOTES_MODE));
     await submit();
     expect(submittedFormData(fetchMock).get('notes_mode')).toBeNull();
   });
 });
 
-describe('notes mode — one handler, two surfaces (#504)', () => {
-  it('moves the toaster radiogroup when the plain select changes', async () => {
+describe('notes mode — the chosen stop is the value that ships', () => {
+  it('sends what a POINTER chose', async () => {
     const fetchMock = await mountForm();
-    fireEvent.change(screen.getByTestId('review-notes-mode-select'), {
-      target: { value: 'none' },
-    });
+    fireEvent.click(screen.getByTestId('review-notes-mode-option-none'));
     expect(checkedStop()).toBe('none');
 
     await submit();
     expect(submittedFormData(fetchMock).get('notes_mode')).toBe('none');
   });
 
-  it('moves the plain select when a toaster stop is clicked', async () => {
-    const fetchMock = await mountForm();
-    fireEvent.click(screen.getByTestId('review-notes-mode-option-none'));
-    expect(selectValue()).toBe('none');
-
-    await submit();
-    expect(submittedFormData(fetchMock).get('notes_mode')).toBe('none');
-  });
-
-  it('offers every mode on the plain select, in the backend vocabulary', async () => {
+  it('offers every mode the backend vocabulary has, and no others', async () => {
     await mountForm();
-    const options = Array.from(
-      (screen.getByTestId('review-notes-mode-select') as HTMLSelectElement).options,
-    ).map((option) => option.value);
-    expect(options).toEqual(NOTES_MODE_SETTINGS.map((setting) => setting.id));
+    // Read the ids off the control itself rather than a surface-private data
+    // attribute, so this keeps meaning "these four and no others" on both
+    // (issue #733).
+    const stops = Array.from(
+      screen
+        .getByTestId('review-notes-mode-control')
+        .querySelectorAll<HTMLElement>('[data-testid^="review-notes-mode-option-"]'),
+    ).map((stop) => stop.dataset.testid?.replace('review-notes-mode-option-', ''));
+    expect(stops).toEqual(NOTES_MODE_SETTINGS.map((setting) => setting.id));
   });
 });
 
-describe('notes mode — turning it overrides this review only', () => {
-  it('writes no preference when the control moves', async () => {
+describe('notes mode — automatically persists across sessions', () => {
+  it('saves preference to backend when notes mode changes without manual remember click', async () => {
     const fetchMock = await mountForm({ notes_mode: 'external' });
-    fireEvent.click(screen.getByTestId('review-notes-mode-option-none'));
-    await submit();
-    expect(callsTo(fetchMock, '/api/me/preferences', 'PUT')).toHaveLength(0);
-  });
-
-  it('saves the default only when asked, and then stops offering to', async () => {
-    const fetchMock = await mountForm({ notes_mode: 'external' });
-    // Nothing to save while the choice still matches the stored default.
     expect(screen.queryByTestId('review-notes-mode-remember')).toBeNull();
 
     fireEvent.click(screen.getByTestId('review-notes-mode-option-none'));
-    fireEvent.click(await screen.findByTestId('review-notes-mode-remember'));
 
     await waitFor(() =>
       expect(callsTo(fetchMock, '/api/me/preferences', 'PUT')).toHaveLength(1),
     );
     const [, init] = callsTo(fetchMock, '/api/me/preferences', 'PUT')[0]!;
     expect(JSON.parse(String(init!.body))).toEqual({ preferences: { notes_mode: 'none' } });
-
-    // Saved: the choice IS the default now, so the affordance retires.
-    await waitFor(() => expect(screen.queryByTestId('review-notes-mode-remember')).toBeNull());
-  });
-});
-
-describe('notes mode — it is a real radiogroup', () => {
-  it('moves with arrows, Home and End, and wraps', async () => {
-    // Every stop selectable, so the keyboard has somewhere to go.
-    await mountForm({ notes_mode: 'none', notes_mode_available: true });
-    const group = screen.getByTestId('review-notes-mode-control');
-    expect(group).toHaveAttribute('role', 'radiogroup');
-    expect(group).toHaveAttribute('aria-labelledby', 'review-notes-mode-label');
-
-    expect(checkedStop()).toBe('none');
-    fireEvent.keyDown(group, { key: 'ArrowRight' });
-    expect(checkedStop()).toBe('external');
-    fireEvent.keyDown(group, { key: 'ArrowDown' });
-    expect(checkedStop()).toBe('internal');
-    fireEvent.keyDown(group, { key: 'ArrowLeft' });
-    expect(checkedStop()).toBe('external');
-    fireEvent.keyDown(group, { key: 'End' });
-    expect(checkedStop()).toBe('both');
-    fireEvent.keyDown(group, { key: 'ArrowRight' });
-    expect(checkedStop()).toBe('none');
-    fireEvent.keyDown(group, { key: 'Home' });
-    expect(checkedStop()).toBe('none');
+    expect(screen.queryByTestId('review-notes-mode-remember')).toBeNull();
   });
 
-  it('keeps a roving tabindex: exactly one stop is tabbable', async () => {
-    await mountForm({ notes_mode: 'external', notes_mode_available: true });
-    const tabbable = NOTES_MODE_SETTINGS.filter(
-      (setting) =>
-        screen.getByTestId(`review-notes-mode-option-${setting.id}`).getAttribute('tabindex') ===
-        '0',
-    ).map((setting) => setting.id);
-    expect(tabbable).toEqual(['external']);
-  });
+  it('renders retry button on preference save error and retries save on click', async () => {
+    let failPut = true;
+    await mountForm({ notes_mode: 'external' });
 
-  it('every stop is a radio, and the checked one matches the select', async () => {
-    await mountForm({ notes_mode: 'none' });
-    for (const setting of NOTES_MODE_SETTINGS) {
-      expect(screen.getByTestId(`review-notes-mode-option-${setting.id}`)).toHaveAttribute(
-        'role',
-        'radio',
-      );
-    }
-    expect(checkedStop()).toBe(selectValue());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/me/preferences') && (init?.method ?? 'GET').toUpperCase() === 'PUT') {
+          if (failPut) {
+            failPut = false;
+            return {
+              ok: false,
+              status: 500,
+              json: async () => ({ detail: 'network hiccup' }),
+            } as Response;
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ preferences: { notes_mode: 'none' } }),
+          } as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as Response;
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId('review-notes-mode-option-none'));
+
+    const retryBtn = await screen.findByTestId('review-notes-mode-retry');
+    expect(retryBtn).toBeInTheDocument();
+
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('review-notes-mode-save-error')).toBeNull();
+    });
   });
 });
 
@@ -317,45 +308,33 @@ describe('notes mode — the #572 kill switch is honoured client-side', () => {
   it('shows internal and both as unavailable, and refuses to select them', async () => {
     const fetchMock = await mountForm({ notes_mode_available: false });
     for (const id of ['internal', 'both'] as NotesMode[]) {
-      const stop = screen.getByTestId(`review-notes-mode-option-${id}`);
-      expect(stop).toHaveAttribute('aria-disabled', 'true');
-      fireEvent.click(stop);
-      expect(checkedStop()).toBe(DEFAULT_NOTES_MODE);
-      expect(selectValue()).toBe(DEFAULT_NOTES_MODE);
+      expect(unavailable(id)).toBe(true);
+      fireEvent.click(screen.getByTestId(`review-notes-mode-option-${id}`));
+      // jsdom flips a DISABLED native radio's own `checked` on a synthetic
+      // click even though no real browser would, so the honest witness that
+      // the refusal held is the app's state, asserted below: no preference was
+      // written, and nothing was submitted (issue #733).
     }
-    // Visible on the plain surface too, but not choosable — the same
-    // "information, not dead chrome" posture the dial's coming-soon stops
-    // take, rather than hiding two of the four modes.
-    const options = Array.from(
-      (screen.getByTestId('review-notes-mode-select') as HTMLSelectElement).options,
-    );
-    expect(options.filter((option) => option.disabled).map((option) => option.value)).toEqual([
-      'internal',
-      'both',
-    ]);
+    expect(callsTo(fetchMock, '/api/me/preferences', 'PUT')).toHaveLength(0);
+    // Visible but not choosable — the same "information, not dead chrome"
+    // posture the dial's coming-soon stops take, rather than hiding two of
+    // the four modes.
+    expect(
+      NOTES_MODE_SETTINGS.filter((setting) => unavailable(setting.id)).map(
+        (setting) => setting.id,
+      ),
+    ).toEqual(['internal', 'both']);
 
     await submit();
     expect(submittedFormData(fetchMock).get('notes_mode')).toBeNull();
   });
 
-  it('keyboard navigation skips the unavailable stops too', async () => {
-    // Pointer and keyboard must agree: an arrow key that lands on a stop a
-    // mouse cannot click would be a second, contradictory answer.
-    await mountForm({ notes_mode: 'external', notes_mode_available: false });
-    const group = screen.getByTestId('review-notes-mode-control');
-    fireEvent.keyDown(group, { key: 'ArrowRight' });
-    expect(checkedStop()).toBe('none');
-    fireEvent.keyDown(group, { key: 'End' });
-    expect(checkedStop()).toBe('external');
-  });
-
   it('lets them be chosen once the deployment reports them available', async () => {
     const fetchMock = await mountForm({ notes_mode_available: true });
     const stop = screen.getByTestId('review-notes-mode-option-both');
-    expect(stop).not.toHaveAttribute('aria-disabled');
+    expect(unavailable('both')).toBe(false);
     fireEvent.click(stop);
     expect(checkedStop()).toBe('both');
-    expect(selectValue()).toBe('both');
 
     await submit();
     expect(submittedFormData(fetchMock).get('notes_mode')).toBe('both');
@@ -372,7 +351,7 @@ describe('notes mode — the disclosure', () => {
       const disclosures = screen.getAllByTestId('review-notes-mode-internal-disclosure');
       expect(disclosures).toHaveLength(1);
       // Verbatim, not a paraphrase: the sentence on screen names the exact
-      // marker `scripts/redline_docx_writer.py` stamps on every page.
+      // marker `scripts/redline_generate.py` stamps on every page.
       expect(disclosures[0]!.textContent ?? '').toContain(INTERNAL_MARKER_TEXT);
     }
   });

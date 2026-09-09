@@ -11,19 +11,46 @@
  * The one thing worth stating plainly: `runningAnimations()` is the assertion
  * surface for "a hidden tab does zero animation work". Without it that claim
  * is unfalsifiable, which is how battery regressions ship.
+ *
+ * ISSUE #723 added the second half of the file. The Review console has its own
+ * controller, `orbit-diner/motion.ts`, and that module is now the single
+ * `element.animate` call site in the frontend — this one reaches WAAPI through
+ * its `animateElement` seam. The blocks at the end sweep the source for a
+ * second call site and prove the console's three suppression rails
+ * (reduced motion, forced colours, hidden tab) each cancel what is running and
+ * refuse to start anything new. The two controllers keep separate rails
+ * deliberately: the hero above PAUSES and resumes on a hidden tab, the console
+ * CANCELS its finite transitions and replays nothing when the tab comes back.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as motion from '../toaster/motion';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createMotion, motionStyles } from '../orbit-diner/motion';
+import type { MotionEvent } from '../orbit-diner/types';
 
 // --- a fake WAAPI ----------------------------------------------------------
 
 class FakeAnimation {
   playState: 'running' | 'paused' | 'finished' = 'running';
   readonly listeners = new Map<string, Set<() => void>>();
+  /** The console's controller chains off `finished` to forget the handle, so
+   *  the fake has to settle like the real thing: resolve on finish, reject on
+   *  cancel. Pre-caught here so a cancelled fake never surfaces as an
+   *  unhandled rejection and turns an unrelated test red. */
+  readonly finished: Promise<FakeAnimation>;
+  private settle!: (animation: FakeAnimation) => void;
+  private abort!: (reason: unknown) => void;
   constructor(
     readonly keyframes: Keyframe[],
     readonly options: KeyframeAnimationOptions,
-  ) {}
+  ) {
+    this.finished = new Promise<FakeAnimation>((resolve, reject) => {
+      this.settle = resolve;
+      this.abort = reject;
+    });
+    void this.finished.catch(() => {});
+  }
   pause() {
     this.playState = 'paused';
   }
@@ -33,10 +60,12 @@ class FakeAnimation {
   cancel() {
     this.playState = 'finished';
     this.listeners.get('cancel')?.forEach((fn) => fn());
+    this.abort(new Error('cancelled'));
   }
   finish() {
     this.playState = 'finished';
     this.listeners.get('finish')?.forEach((fn) => fn());
+    this.settle(this);
   }
   addEventListener(type: string, fn: () => void) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set());
@@ -49,8 +78,31 @@ let reduceMotion = false;
 let forced = false;
 let visibility: DocumentVisibilityState = 'visible';
 
+/**
+ * Every `MediaQueryList` handed out this test, so a preference can be CHANGED
+ * mid-test and the change delivered. The console's controller queries once at
+ * construction and keeps the list, so a stub that froze `matches` at creation
+ * would make "reduced motion cancels what is already running" untestable — the
+ * rail would never be told.
+ */
+let mediaLists: { media: string; fire: () => void }[] = [];
+
+/** Flip a preference and deliver the change to everyone listening. */
+function setPreference(which: 'reduced-motion' | 'forced-colors', value: boolean) {
+  if (which === 'reduced-motion') reduceMotion = value;
+  else forced = value;
+  for (const list of mediaLists) if (list.media.includes(which)) list.fire();
+}
+
+/** Flip tab visibility and deliver the change, as the browser would. */
+function setVisibility(next: DocumentVisibilityState) {
+  visibility = next;
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
 function installFakes() {
   created = [];
+  mediaLists = [];
   (Element.prototype as unknown as { animate: unknown }).animate = function (
     keyframes: Keyframe[],
     options: KeyframeAnimationOptions,
@@ -59,15 +111,39 @@ function installFakes() {
     created.push(a);
     return a as unknown as Animation;
   };
-  vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query.includes('reduced-motion') ? reduceMotion : query.includes('forced-colors') ? forced : false,
-    media: query,
-    addEventListener() {},
-    removeEventListener() {},
-  }));
+  vi.stubGlobal('matchMedia', (query: string) => {
+    const listeners = new Set<() => void>();
+    const list = {
+      // A getter, not a snapshot: a holder of this list reads the CURRENT
+      // preference, exactly as a real MediaQueryList does.
+      get matches() {
+        return query.includes('reduced-motion')
+          ? reduceMotion
+          : query.includes('forced-colors')
+            ? forced
+            : false;
+      },
+      media: query,
+      addEventListener(_type: string, fn: () => void) {
+        listeners.add(fn);
+      },
+      removeEventListener(_type: string, fn: () => void) {
+        listeners.delete(fn);
+      },
+    };
+    mediaLists.push({ media: query, fire: () => listeners.forEach((fn) => fn()) });
+    return list;
+  });
   Object.defineProperty(document, 'visibilityState', {
     configurable: true,
     get: () => visibility,
+  });
+  // jsdom derives `hidden` from its own internal state, not from the
+  // `visibilityState` override above, and the console's controller reads
+  // `document.hidden`. Both have to answer for the same fake.
+  Object.defineProperty(document, 'hidden', {
+    configurable: true,
+    get: () => visibility === 'hidden',
   });
 }
 
@@ -79,192 +155,261 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  motion.stopAll();
   vi.unstubAllGlobals();
 });
 
-function el(): HTMLElement {
-  const node = document.createElement('div');
-  document.body.appendChild(node);
-  return node;
+// ---------------------------------------------------------------------------
+// The Review console's controller (issue #723)
+// ---------------------------------------------------------------------------
+
+/**
+ * `orbit-diner/motion.ts` is the OTHER motion owner, and since #723 it is the
+ * only module in the frontend that calls `element.animate` — this one reaches
+ * WAAPI through its `animateElement` seam. The two keep separate rails on
+ * purpose: the legacy hero pauses and resumes on a hidden tab, the console
+ * cancels its finite transitions outright.
+ *
+ * What is pinned below is the console's half of that: each of the three
+ * suppression rails cancels what is running AND refuses to start anything new,
+ * the CSS half of the rail is switched on at the same moment, and coming back
+ * replays nothing.
+ */
+
+/** Every part the controller queries, in one detached console root. */
+const CONSOLE_PARTS = [
+  'slice',
+  'instructions-pad',
+  'lever-handle',
+  'slot-glow',
+  'steam',
+  'ready-lamp',
+  'butter',
+  'receipt-dialog',
+  'receipt-paper',
+  'disposition-stamp',
+  'till-drawer',
+  'odometer',
+] as const;
+
+function consoleRoot(): HTMLElement {
+  const root = document.createElement('div');
+  root.className = 'od-console';
+  const figure = document.createElement('div');
+  figure.className = 'od-toaster-figure';
+  root.append(figure);
+  const key = document.createElement('button');
+  key.className = 'od-key';
+  root.append(key);
+  for (const name of CONSOLE_PARTS) {
+    const node = document.createElement('div');
+    node.dataset.part = name;
+    (name === 'slice' ? figure : root).append(node);
+  }
+  document.body.append(root);
+  return root;
 }
 
-// --- the state chart -------------------------------------------------------
+/**
+ * The complete `MotionEvent` union as a runtime list. Written as a total
+ * `Record` rather than an array so TypeScript fails the build when a new event
+ * is added to the union and not swept here — an unswept event is exactly how a
+ * `height` keyframe gets in.
+ */
+const EVERY_EVENT: Record<MotionEvent, true> = {
+  'file-loaded': true,
+  'file-removed': true,
+  'submit-accepted': true,
+  stage: true,
+  done: true,
+  error: true,
+  manual: true,
+  cancelled: true,
+  'cover-ready': true,
+  'receipt-open': true,
+  'receipt-copy': true,
+  'receipt-save': true,
+  'disposition-saved': true,
+  'reservation-confirmed': true,
+  settled: true,
+  odometer: true,
+  key: true,
+  'pad-focus': true,
+  'guidance-readback': true,
+  refusal: true,
+};
+const EVENTS = Object.keys(EVERY_EVENT) as MotionEvent[];
 
-describe('toaster state chart', () => {
-  it('walks the ordinary path: idle → loaded → toasting → pop → idle', () => {
-    let s = motion.INITIAL_STATE;
-    s = motion.reduce(s, { type: 'file_selected' });
-    expect(s.name).toBe('loaded');
-    s = motion.reduce(s, { type: 'submit' });
-    expect(s).toEqual({ name: 'toasting', stage: null });
-    s = motion.reduce(s, { type: 'stage', stage: 'critic_pass' });
-    expect(s).toEqual({ name: 'toasting', stage: 'critic_pass' });
-    s = motion.reduce(s, { type: 'done' });
-    expect(s.name).toBe('pop');
-    s = motion.reduce(s, { type: 'reset' });
-    expect(s.name).toBe('idle');
+describe('issue #723 — the console controller has one WAAPI call site', () => {
+  it('no module under src/ except orbit-diner/motion.ts calls element.animate', () => {
+    const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== '__tests__') walk(full);
+          continue;
+        }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        if (/\.animate\(/.test(fs.readFileSync(full, 'utf8'))) {
+          offenders.push(path.relative(src, full));
+        }
+      }
+    };
+    walk(src);
+    expect(offenders).toEqual(['orbit-diner/motion.ts']);
   });
 
-  it('cancel returns the appliance to rest and NEVER burns the toast', () => {
-    // CANCELLED is its own terminal status, not an error — the chart has to
-    // agree with `outcome.ts`, where the chip is `muted` and not `danger`.
-    const s = motion.reduce({ name: 'toasting', stage: 'primary_pass' }, { type: 'cancel' });
-    expect(s.name).toBe('idle');
-  });
-
-  it('an error burns rather than pops', () => {
-    expect(motion.reduce({ name: 'toasting', stage: null }, { type: 'error' }).name).toBe('burnt');
-  });
-
-  it('resume enters toasting directly, so a page reload does not replay the ritual', () => {
-    expect(motion.reduce({ name: 'idle' }, { type: 'resume', stage: 'redline' })).toEqual({
-      name: 'toasting',
-      stage: 'redline',
-    });
-  });
-
-  it('throws on an illegal transition in dev rather than ignoring it', () => {
-    expect(() => motion.reduce({ name: 'idle' }, { type: 'done' })).toThrow(
-      motion.IllegalTransitionError,
-    );
-  });
-});
-
-// --- the rails -------------------------------------------------------------
-
-describe('motion rails', () => {
-  it('reduced motion applies the end state and starts no animation', () => {
-    reduceMotion = true;
-    const node = el();
-    const result = motion.popSlice(node);
-    expect(result).toBeNull();
-    expect(created).toHaveLength(0);
-    // The art still ARRIVES; only the travel is skipped.
-    expect(node.style.transform).toContain('translateY');
-  });
-
-  it('forced-colors suppresses motion the same way', () => {
-    forced = true;
-    expect(motion.popSlice(el())).toBeNull();
-    expect(created).toHaveLength(0);
-  });
-
-  it('a hidden tab does zero animation work', () => {
-    const node = el();
-    motion.popSlice(node);
-    expect(created).toHaveLength(1);
-    expect(created[0].playState).toBe('running');
-
-    visibility = 'hidden';
-    motion.onVisibilityChange();
-    expect(created[0].playState).toBe('paused');
-
-    visibility = 'visible';
-    motion.onVisibilityChange();
-    expect(created[0].playState).toBe('running');
-  });
-
-  it('an animation started while hidden begins paused, not running', () => {
-    visibility = 'hidden';
-    motion.popSlice(el());
-    expect(created[0].playState).toBe('paused');
-  });
-
-  it('finished animations leave the running set, so it cannot grow forever', () => {
-    motion.popSlice(el());
-    expect(motion.runningAnimations().size).toBe(1);
-    created[0].finish();
-    expect(motion.runningAnimations().size).toBe(0);
-  });
-
-  it('nothing animates layout — only transform, opacity and filter', () => {
-    motion.popSlice(el());
-    motion.leverTo(el(), true);
-    motion.steam([el(), el()]);
-    motion.receiptSpool(el());
-    motion.odometerRoll(el(), 3);
-    const animated = new Set<string>();
-    for (const a of created) for (const frame of a.keyframes) for (const key of Object.keys(frame)) animated.add(key);
-    animated.delete('offset');
-    expect([...animated].sort()).toEqual(['opacity', 'transform']);
+  it('the inline style block carries all three CSS rails', () => {
+    // `focus-audit` asserts the GLOBAL base.css guard. The console is styled
+    // by this string, which the component renders into its own <style>, so it
+    // needs its own copy of the same kill switch — and the paused-attribute
+    // rail, which is what a hidden tab actually flips.
+    expect(motionStyles).toContain('prefers-reduced-motion: reduce');
+    expect(motionStyles).toContain('forced-colors: active');
+    expect(motionStyles).toContain('[data-motion-paused="true"]');
   });
 });
 
-describe('vocabulary', () => {
-  it('the pop is a parabola, not a slide — it rises, hangs, and settles back down', () => {
-    motion.popSlice(el(), { height: 100 });
-    const ys = created[0].keyframes.map((f) =>
-      Number(/translateY\((-?[\d.]+)px\)/.exec(String(f.transform))?.[1] ?? 0),
-    );
-    const peak = Math.min(...ys);
-    expect(peak).toBe(-100);
-    // It does not END at the peak: the slice falls back and settles.
-    expect(ys[ys.length - 1]).toBeGreaterThan(peak);
-    expect(ys[ys.length - 1]).toBeLessThan(0);
+describe('issue #723 — the console controller\'s three suppression rails', () => {
+  it('reduced motion cancels what is running and starts nothing new', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    controller.play('done');
+    expect(created.length).toBeGreaterThan(0);
+    const before = created.length;
+
+    setPreference('reduced-motion', true);
+    for (const animation of created) expect(animation.playState).toBe('finished');
+    expect(root.dataset.motionPaused).toBe('true');
+
+    controller.play('done');
+    expect(created).toHaveLength(before);
+    controller.dispose();
   });
 
-  it('the lever detents on the way down and overshoots on release', () => {
-    motion.leverTo(el(), true, { travel: 40 });
-    motion.leverTo(el(), false, { travel: 40 });
-    const down = created[0].keyframes.map((f) => String(f.transform));
-    const up = created[1].keyframes.map((f) => String(f.transform));
-    expect(down[1]).toContain('41.6'); // past the stop, then back to it
-    expect(down[2]).toContain('40');
-    expect(up[1]).toContain('-3.2'); // springs past rest before settling
-    expect(up[2]).toBe('translateY(0)');
+  it('forced colours cancels what is running and starts nothing new', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    controller.play('stage');
+    const before = created.length;
+    expect(before).toBeGreaterThan(0);
+
+    setPreference('forced-colors', true);
+    for (const animation of created) expect(animation.playState).toBe('finished');
+    expect(root.dataset.motionPaused).toBe('true');
+
+    controller.play('stage');
+    expect(created).toHaveLength(before);
+    controller.dispose();
   });
 
-  it('steam wisps are staggered, never synchronised', () => {
-    motion.steam([el(), el(), el()]);
-    const delays = created.map((a) => a.options.delay);
-    expect(new Set(delays).size).toBe(3);
+  it('a hidden tab cancels finite transitions and suppresses new ones', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    controller.play('done');
+    const before = created.length;
+    expect(before).toBeGreaterThan(0);
+
+    setVisibility('hidden');
+    for (const animation of created) expect(animation.playState).toBe('finished');
+    expect(root.dataset.motionPaused).toBe('true');
+
+    controller.play('done');
+    expect(created).toHaveLength(before);
+    controller.dispose();
   });
 
-  it('looping steam loops; spawn-once steam does not', () => {
-    motion.steam([el()], { loop: true });
-    expect(created[0].options.iterations).toBe(Infinity);
-    created.length = 0;
-    motion.steam([el()], { loop: false });
-    expect(created[0].options.iterations).toBe(1);
+  it('coming back from a hidden tab replays nothing', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    controller.play('stage');
+    setVisibility('hidden');
+    const cancelled = created.length;
+
+    setVisibility('visible');
+    // The rail re-arms — but a stage event that already happened is spent, and
+    // the controller holds no queue to drain. Anything else would replay old
+    // theatre at the moment the reviewer looks back at the tab.
+    expect(created).toHaveLength(cancelled);
+    expect(root.dataset.motionPaused).toBe('false');
+
+    // Still live, though: the next REAL event animates again.
+    controller.play('stage');
+    expect(created.length).toBeGreaterThan(cancelled);
+    controller.dispose();
   });
 
-  it('the heat shimmer is a no-op under reduced motion and returns a stop fn', () => {
-    reduceMotion = true;
-    const stop = motion.heatShimmer(document.createElementNS('http://www.w3.org/2000/svg', 'feTurbulence'));
-    expect(typeof stop).toBe('function');
-    expect(() => stop()).not.toThrow();
+  it('the departing-slice ghost is removed the moment motion is disallowed', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    controller.play('file-removed');
+    expect(root.querySelector('[data-part="slice-exit"]')).not.toBeNull();
+
+    setVisibility('hidden');
+    expect(root.querySelector('[data-part="slice-exit"]')).toBeNull();
+    controller.dispose();
   });
 
-  it('the glow ramp clamps to 0..1 and writes a custom property, not an opacity', () => {
-    const node = el();
-    motion.glowRamp(node, 2.5);
-    expect(node.style.getPropertyValue('--ct-glow-level')).toBe('1.000');
-    motion.glowRamp(node, -1);
-    expect(node.style.getPropertyValue('--ct-glow-level')).toBe('0.000');
-    expect(node.style.opacity).toBe('');
+  it('the lever preview is suppressed under every rail', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    const handle = root.querySelector('[data-part="lever-handle"]') as HTMLElement;
+    controller.preview(handle, 12);
+    expect(handle.style.transform).toBe('translateY(12px)');
+
+    handle.style.transform = '';
+    setPreference('reduced-motion', true);
+    controller.preview(handle, 12);
+    expect(handle.style.transform).toBe('');
+    controller.dispose();
   });
 
-  it('the butter pat slides straight across and settles, never rises or falls (#499)', () => {
-    motion.butterSlide(el(), { distance: 100 });
-    const xs = created[0].keyframes.map((f) =>
-      Number(/translateX\((-?[\d.]+)px\)/.exec(String(f.transform))?.[1] ?? 0),
-    );
-    // Monotonic travel in one direction only -- no vertical component at all.
-    expect(xs[0]).toBe(0);
-    expect(xs[xs.length - 1]).toBe(100);
-    expect(xs.every((x, i) => i === 0 || x >= xs[i - 1])).toBe(true);
-    for (const frame of created[0].keyframes) {
-      expect(String(frame.transform)).not.toMatch(/translateY/);
+  it('dispose cancels everything and stops listening', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    controller.play('done');
+    const started = created.length;
+    expect(started).toBeGreaterThan(0);
+
+    controller.dispose();
+    for (const animation of created) expect(animation.playState).toBe('finished');
+    // A disposed controller must not react to a later preference change: the
+    // console can be unmounted while a review is still running elsewhere.
+    setVisibility('hidden');
+    expect(created).toHaveLength(started);
+  });
+});
+
+describe('issue #723 — the console animates nothing that costs layout', () => {
+  it('every event in the union touches only transform, opacity and filter', () => {
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    for (const event of EVENTS) controller.play(event);
+
+    const properties = new Set<string>();
+    for (const animation of created) {
+      for (const frame of animation.keyframes) {
+        for (const key of Object.keys(frame)) properties.add(key);
+      }
     }
+    properties.delete('offset');
+    expect([...properties].sort()).toEqual(['filter', 'opacity', 'transform']);
+    controller.dispose();
   });
 
-  it('the butter pat respects reduced motion like every other rail', () => {
-    reduceMotion = true;
-    const node = el();
-    const result = motion.butterSlide(node, { distance: 64 });
-    expect(result).toBeNull();
-    expect(created.length).toBe(0);
-    expect(node.style.transform).toContain('translateX(64px)');
+  it('every animation is finite — nothing the console starts loops forever', () => {
+    // A looping animation survives the rails' cancel only until the next one
+    // starts, and a console that never idles is the battery regression the
+    // rails exist to prevent.
+    const root = consoleRoot();
+    const controller = createMotion(root);
+    for (const event of EVENTS) controller.play(event);
+    for (const animation of created) {
+      expect(animation.options.iterations ?? 1).toBe(1);
+      expect(Number(animation.options.duration)).toBeGreaterThan(0);
+      expect(Number.isFinite(Number(animation.options.duration))).toBe(true);
+    }
+    controller.dispose();
   });
 });

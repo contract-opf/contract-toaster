@@ -8,7 +8,7 @@ AST lint".
 
 Before this slice, "eiaa" was a Python literal hard-coded at five call
 sites (playbook_registry.DEFAULT_PLAYBOOK_ID, corpus.py's
-PLAYBOOK_PATH/DEFAULT_PLAYBOOK_ID, diff_standard_form.py's
+PLAYBOOK_PATH/DEFAULT_PLAYBOOK_ID, the standard-form diff's
 _SYNTHETIC_TEXT_SUPPLEMENTS, pipeline_runner.py's _mock_decision, and
 review_routes.py's Form default) instead of being resolved through
 playbooks/registry.json -- so a second contract type could not become the
@@ -56,6 +56,12 @@ for _dir in (BACKEND_ROOT, BACKEND_SRC, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631).
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 os.environ.setdefault("REVIEWS_TABLE", "reviews-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "submissions-test")
@@ -65,7 +71,7 @@ import boto3  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
 import corpus  # noqa: E402
-import diff_standard_form as dsf  # noqa: E402
+import synthetic_form_paragraphs as sfp  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import playbook_registry  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
@@ -222,26 +228,28 @@ class TestCorpusResolvesDefaultViaRegistry(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Spot 3: scripts/diff_standard_form.py's _SYNTHETIC_TEXT_SUPPLEMENTS moves
+# Spot 3: the standard-form diff's _SYNTHETIC_TEXT_SUPPLEMENTS moved
 # into the per-playbook section-config file's "synthetic_text_supplements"
-# key (e.g. playbooks/<playbook_id>-v1.0.0.sections.json).
+# key (e.g. playbooks/<playbook_id>-v1.0.0.sections.json). The module that
+# owned the literal was deleted by issue #631; the synthetic body builder
+# that inherited its job must not grow the literal back.
 # ---------------------------------------------------------------------------
 
 
-class TestDiffStandardFormSupplementsAreData(unittest.TestCase):
+class TestSyntheticTextSupplementsAreData(unittest.TestCase):
     def test_no_module_level_python_literal(self):
         self.assertFalse(
-            hasattr(dsf, "_SYNTHETIC_TEXT_SUPPLEMENTS"),
-            "scripts/diff_standard_form.py's _SYNTHETIC_TEXT_SUPPLEMENTS dict "
-            "literal must move into the per-playbook section-config file's "
-            "synthetic_text_supplements key (issue #289 spot 3).",
+            hasattr(sfp, "_SYNTHETIC_TEXT_SUPPLEMENTS"),
+            "the _SYNTHETIC_TEXT_SUPPLEMENTS dict literal must stay in the "
+            "per-playbook section-config file's synthetic_text_supplements "
+            "key, never back in a module (issue #289 spot 3).",
         )
 
     def test_sec8_still_carries_the_consequential_damages_supplement(self):
         """Guard: same resulting text as before the data move (the real
         tests/test_dts_pipeline_runner_real_review.py fixture depends on
         this exact substring)."""
-        paragraphs = dsf.load_standard_form_paragraphs(docx_path=None, playbook_id="synthetic-generic")
+        paragraphs = sfp.load(playbook_id="synthetic-generic")
         sec8 = next(p for p in paragraphs if p["anchor"] == "sec-8")
         self.assertIn(
             "Neither party shall be liable to the other for consequential damages.",

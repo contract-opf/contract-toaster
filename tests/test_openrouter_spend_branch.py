@@ -22,8 +22,11 @@ This test proves:
      reservation from `model-policy/openrouter.json`'s
      `cost_per_million_{input,output}_usd` rates; the Bedrock path (default /
      any other value) is byte-for-byte unchanged (still the documented
-     Bedrock worst case -- $2.46 / 246 cents since issue #625 raised
-     MAX_INPUT_TOKENS to 100_000; $2.11 / 211 cents before that).
+     Bedrock worst case -- $6.86 / 686 cents, per ARCHITECTURE.md -> Cost
+     shape, the authority for every cost figure in this repo; it was
+     $2.46 / 246 cents between issue #625 raising MAX_INPUT_TOKENS to
+     100_000 and issue #658 raising the worst-case output budget to
+     32_000, and $2.11 / 211 cents before #625).
   2. `OpenRouterModelClient.invoke()` captures the REAL token usage
      (`usage.prompt_tokens` / `usage.completion_tokens`) an OpenAI-compatible
      OpenRouter response carries, exposed as `.last_usage` after each call --
@@ -37,6 +40,11 @@ This test proves:
      amount (not the reservation, not a hardcoded $0).
   4. Daily-cap breach (`reserve_spend` raising `HTTPException(429)`) behaves
      identically whether `MODEL_PROVIDER` is unset (Bedrock) or `openrouter`.
+  5. Issue #661: capturing the provider's reasoning-token count changes no
+     settled figure -- two responses identical but for a
+     `completion_tokens_details.reasoning_tokens` block settle to the same
+     cents, because the provider already counts those tokens inside
+     `completion_tokens`.
 
 MUST FAIL on the pre-fix tree:
   - `compute_worst_case_reservation_usd_cents()` ignores `MODEL_PROVIDER`
@@ -149,6 +157,7 @@ os.environ.setdefault(
 
 import reviews as _reviews_module  # noqa: E402
 import model_client as _model_client_module  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 HTTPException = sys.modules["fastapi"].HTTPException
 
@@ -228,6 +237,10 @@ class _FakeHttpClient:
         self._queue = list(responses)
         self.calls: list[dict] = []
 
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
+
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         self.calls.append({"url": url, "json": json, "headers": headers})
         payload = self._queue.pop(0)
@@ -252,10 +265,11 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
     def test_bedrock_path_unchanged_by_default(self):
         """No MODEL_PROVIDER (or any value other than 'openrouter') must
         still reserve the documented Bedrock worst case (ARCHITECTURE.md ->
-        Cost shape: $2.46 / 246 cents at MAX_INPUT_TOKENS=100_000, issue
-        #625) -- this branch must not disturb the AWS target."""
+        Cost shape: $6.86 / 686 cents at MAX_INPUT_TOKENS=100_000 and the
+        issue-#658 worst-case output budget of 32_000, over three attempts
+        per pass) -- this branch must not disturb the AWS target."""
         _clear_model_provider()
-        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 246)
+        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 686)
 
     def test_openrouter_reservation_uses_openrouter_json_rates(self):
         """MODEL_PROVIDER=openrouter must price the reservation from
@@ -268,7 +282,11 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
         primary = policy["models"]["primary"]
         critic = policy["models"]["critic"]
 
-        attempts_per_pass = 1 + _reviews_module.MAX_RETRIES_PER_PASS
+        attempts_per_pass = (
+            1
+            + _reviews_module.MAX_RETRIES_PER_PASS
+            + _reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
+        )
         primary_usd = (
             _reviews_module.MAX_INPUT_TOKENS * primary["cost_per_million_input_usd"] / 1_000_000
             + _reviews_module.MAX_OUTPUT_TOKENS * primary["cost_per_million_output_usd"] / 1_000_000
@@ -282,7 +300,7 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
         actual_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(actual_cents, expected_cents)
         self.assertNotEqual(
-            actual_cents, 246,
+            actual_cents, 686,
             "Must diverge from the Bedrock worst case, not silently reuse it.",
         )
 
@@ -417,6 +435,72 @@ class TestSettleFromActualProviderUsage(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# (3b) Issue #661: recording reasoning tokens must not move the settled cost
+#
+# Reasoning tokens are billed as output tokens, and the provider ALREADY
+# counts them inside `usage.completion_tokens` -- so the number is new to the
+# ledger only, never to the money. If it ever leaked into `output_tokens` (or
+# into `cumulative_usage`), every settled review would be over-billed by the
+# thinking it already paid for once. These two responses are identical
+# except for the reasoning detail block, which is exactly the comparison
+# that catches such a leak.
+# ---------------------------------------------------------------------------
+
+class TestReasoningTokensNeverChangeTheSettledCost(unittest.TestCase):
+    def tearDown(self):
+        _clear_model_provider()
+
+    @staticmethod
+    def _usage_from(payload: dict) -> dict:
+        """`last_usage` as produced by the REAL client over the REAL
+        streaming transport -- never a hand-built dict."""
+        http = _FakeHttpClient([payload])
+        client = _model_client_module.OpenRouterModelClient(
+            api_key="sk-test", http_client=http
+        )
+        client.invoke(
+            model_id=_model_client_module.openrouter_primary_model_id(),
+            system_prompt="s",
+            user_prompt="u",
+            max_output_tokens=100,
+        )
+        return client.last_usage
+
+    def test_settled_cents_identical_with_and_without_a_reasoning_block(self):
+        os.environ["MODEL_PROVIDER"] = "openrouter"
+        plain = _openrouter_response("text", 61000, 9400)
+        reasoning = _openrouter_response("text", 61000, 9400)
+        reasoning["usage"]["completion_tokens_details"] = {"reasoning_tokens": 2100}
+
+        plain_usage = self._usage_from(plain)
+        reasoning_usage = self._usage_from(reasoning)
+
+        # The new field is genuinely present on one and absent on the other
+        # -- without this the equality below would be vacuous.
+        self.assertEqual(reasoning_usage["reasoning_tokens"], 2100)
+        self.assertNotIn("reasoning_tokens", plain_usage)
+
+        self.assertEqual(
+            _reviews_module.compute_actual_usd_cents_from_usage(reasoning_usage, None),
+            _reviews_module.compute_actual_usd_cents_from_usage(plain_usage, None),
+        )
+        self.assertEqual(
+            _reviews_module.compute_actual_usd_cents_from_usage(
+                reasoning_usage, reasoning_usage
+            ),
+            _reviews_module.compute_actual_usd_cents_from_usage(plain_usage, plain_usage),
+        )
+
+    def test_reasoning_tokens_stay_out_of_the_base_counts(self):
+        reasoning = _openrouter_response("text", 61000, 9400)
+        reasoning["usage"]["completion_tokens_details"] = {"reasoning_tokens": 2100}
+        usage = self._usage_from(reasoning)
+        # Already inside `completion_tokens`: adding them would double-bill.
+        self.assertEqual(usage["input_tokens"], 61000)
+        self.assertEqual(usage["output_tokens"], 9400)
+
+
+# ---------------------------------------------------------------------------
 # (4) Daily-cap breach behaves identically on both targets
 # ---------------------------------------------------------------------------
 
@@ -458,6 +542,7 @@ def main() -> int:
         TestOpenRouterReservationPricingBranch,
         TestOpenRouterModelClientCapturesUsage,
         TestSettleFromActualProviderUsage,
+        TestReasoningTokensNeverChangeTheSettledCost,
         TestCapBreachIdenticalOnBothTargets,
     ):
         suite.addTests(loader.loadTestsFromTestCase(test_case))

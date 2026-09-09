@@ -8,7 +8,7 @@ uploaded .docx into self-anchored clause records".
 Once the router (#247) sends an upload down the `THIRD_PARTY_POSITIONS`
 route, the document is the counterparty's OWN template -- it has no
 relationship to your form's headings or anchor map, so none of the
-first-party machinery (`diff_standard_form.py` heading-anchor matching, the
+first-party machinery (the retired standard-form heading-anchor matching, the
 section-anchor map, `sec-_new`) can segment it. Before this slice, nothing
 turned a normalized third-party `.docx` into an ordered list of clause
 records anchored to the uploaded document itself.
@@ -18,7 +18,7 @@ not exist on the pre-fix tree) end-to-end over a hand-built synthetic
 counterparty-own-form `.docx` fixture (built with nothing but `zipfile` +
 `xml.etree.ElementTree`, the same dependency-free convention as
 `tests/test_extraction_normalization_stage_80.py` /
-`scripts/redline_docx_writer.py`) and FAILS on a tree where that module
+`scripts/docx_parts.py`) and FAILS on a tree where that module
 does not exist.
 
 ## What this test asserts (mirrors the issue's Required verification)

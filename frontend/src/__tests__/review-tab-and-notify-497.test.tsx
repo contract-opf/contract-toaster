@@ -16,6 +16,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+} from './support/consoleSurface';
 import { FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED } from '../toaster/faviconFrames';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -111,6 +116,10 @@ function stubPollingFetch(reviewId: string, detail: { current: Record<string, un
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
+      // Issue #733: the console needs an active playbook before it will submit.
+      if (pathname === '/api/playbooks') {
+        return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
+      }
       if (method === 'POST' && pathname === '/api/reviews') {
         return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
       }
@@ -131,7 +140,7 @@ function docxFile(): File {
 async function submit(): Promise<void> {
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docxFile()] } });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 
@@ -218,10 +227,17 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
     });
     await submit();
 
+    // One control, two states — off, then on (issue #733). The accessible
+    // name carries the full sentence, because the key's face is a two-line
+    // label.
     const toggle = screen.getByTestId('notify-toggle');
-    expect(toggle.textContent).toContain('Notify me when toasts finish');
+    expect(toggle).toHaveAccessibleName(/browser completion alerts off/i);
     fireEvent.click(toggle);
-    await waitFor(() => expect(toggle.textContent).toContain('Notifications on'));
+    await waitFor(() =>
+      expect(screen.getByTestId('notify-toggle')).toHaveAccessibleName(
+        /browser completion alerts on/i,
+      ),
+    );
   });
 
   it('a terminal DONE while hidden and opted-in fires a Notification carrying the real outcome label, never a filename', async () => {
@@ -239,7 +255,11 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
     await submit();
 
     fireEvent.click(screen.getByTestId('notify-toggle'));
-    await waitFor(() => expect(screen.getByTestId('notify-toggle').textContent).toContain('on'));
+    await waitFor(() =>
+      expect(
+        (screen.getByTestId('notify-toggle').textContent ?? '').toLowerCase(),
+      ).toContain('on'),
+    );
 
     setHidden(true);
     detail.current = {
@@ -276,7 +296,11 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
     await submit();
 
     fireEvent.click(screen.getByTestId('notify-toggle'));
-    await waitFor(() => expect(screen.getByTestId('notify-toggle').textContent).toContain('on'));
+    await waitFor(() =>
+      expect(
+        (screen.getByTestId('notify-toggle').textContent ?? '').toLowerCase(),
+      ).toContain('on'),
+    );
 
     setHidden(true);
     detail.current = { ...detail.current, status: 'ERROR', failing_stage: 'critic_pass', reason: 'llm_timeout' };
@@ -304,7 +328,7 @@ describe('issue #497 — wired into the real ReviewSubmission panel', () => {
 
     setHidden(true);
     detail.current = { ...detail.current, status: 'DONE', decision: 'ACCEPT', has_output: false };
-    await screen.findByTestId('review-result', {}, { timeout: 6000 });
+    await findReviewResult({ timeout: 6000 });
 
     expect(MockNotification.instances).toHaveLength(0);
   });

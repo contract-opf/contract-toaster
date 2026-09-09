@@ -312,3 +312,87 @@ describe('unnormalizable_input no longer sends the reader to re-save a .docx (#5
     expect(screen.queryByTestId('review-failure-normalization-notes')).toBeNull();
   });
 });
+
+/**
+ * Issue #662 — `model_output_truncated` used to send the reader after a
+ * "reasoning allowance". There is no such lever on this path: both ROLE pins
+ * in `model-policy/openrouter.json` carry a reasoning allowance of zero and
+ * the request never asks for reasoning. What actually ran out is the CONTENT
+ * budget, which `model_client.output_budget_for_document` sizes from the
+ * document and `widen_output_budget` widens exactly once on the pass's single
+ * truncation retry (#658). On the shipped default pins that document-sized
+ * budget plus its one widen is the binding constraint — not the model's
+ * declared output cap, which both pins put at 128000 and a short agreement
+ * never approaches. So an unchanged resubmit is sized identically and fails
+ * identically (a plain retry is wasted), and the copy must not offer a bigger
+ * model as the lever: no selectable entry declares a larger cap than the
+ * default primary, and the Models screen does not surface output room at all.
+ * The honest lever is the deployment's own output budget.
+ */
+describe('model_output_truncated points at the budget that actually bound (#662)', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('never sends the reader after a reasoning allowance', async () => {
+    await submitAndFail('run_review', 'model_output_truncated');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).not.toHaveTextContent(/reasoning/i);
+    expect(panel).not.toHaveTextContent(/allowance/i);
+  });
+
+  it('names the output room the review was allowed as what ran out', async () => {
+    await submitAndFail('run_review', 'model_output_truncated');
+
+    const panel = await screen.findByTestId('review-failure');
+    // The invariant: the copy attributes the failure to the room the review
+    // was ALLOWED TO WRITE, not to the document being unreadable and not to
+    // an unspecified model hiccup.
+    expect(panel).toHaveTextContent(/your document/i);
+    expect(panel).toHaveTextContent(/(room|space) to write/i);
+    expect(panel).toHaveTextContent(/cut off/i);
+  });
+
+  it('tells the reader an unchanged resubmit will fail the same way', async () => {
+    await submitAndFail('run_review', 'model_output_truncated');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/same document again/i);
+    expect(panel).toHaveTextContent(/same limit/i);
+    // ...and it must not do what the neighbouring transient tokens do and
+    // invite a bare retry, which is precisely the wasted round trip above.
+    expect(panel).not.toHaveTextContent(/worth submitting again/i);
+    expect(panel).not.toHaveTextContent(/usually temporary/i);
+  });
+
+  it('does not offer picking another model as the lever', async () => {
+    // The dead knob: on the shipped default no selectable model declares a
+    // larger output cap than the pinned primary, and the Models screen never
+    // renders that cap, so "pick a model that writes more" is advice a reader
+    // cannot act on. The lever the copy names has to be the deployment's own
+    // output budget instead.
+    await submitAndFail('run_review', 'model_output_truncated');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).not.toHaveTextContent(/different model/i);
+    expect(panel).not.toHaveTextContent(/select a model/i);
+    expect(panel).not.toHaveTextContent(/under “Models”/i);
+    expect(panel).toHaveTextContent(/output budget/i);
+  });
+
+  it('leaves the transient model_empty_content advice intact — a retry IS its lever', async () => {
+    // The second variant of the same branch: `model_empty_content` reaches
+    // this table from the SAME `run_review` stage but has no budget behind
+    // it, so "try again / try another model" stays honest there. Pinning it
+    // here keeps a future edit to the truncation copy from smearing across
+    // its neighbour.
+    await submitAndFail('run_review', 'model_empty_content');
+
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/returned an empty response/i);
+    expect(panel).toHaveTextContent(/worth submitting again/i);
+    expect(panel).not.toHaveTextContent(/reasoning/i);
+    expect(panel).not.toHaveTextContent(/allowance/i);
+  });
+});

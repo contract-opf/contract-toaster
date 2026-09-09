@@ -48,6 +48,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
 import critic_review_pass as cp  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 MODEL_RESPONSES_DIR = REPO_ROOT / "tests" / "fixtures" / "model_responses"
 PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
@@ -199,6 +200,10 @@ class AlwaysFailingHttp:
 
     def __init__(self) -> None:
         self.posts = 0
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url: str, **kwargs: Any) -> Any:
         self.posts += 1

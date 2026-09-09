@@ -9,8 +9,8 @@ and the playbook-lint gate). At runtime, every consumer trusted the artifact
 blindly: `backend/src/reviews.py`'s active-bundle resolver (issue #194) read
 `playbooks.active_release_bundle_hash` and handed the hash straight back to
 callers with no check that the ON-DISK playbook body for that hash's
-`playbook_id` was even schema-valid; `scripts/diff_standard_form.py` (and,
-transitively, `scripts/build_anchor_map.py`) fell back to substituting an
+`playbook_id` was even schema-valid; the retired standard-form diff (and,
+transitively, its anchor-map builder) fell back to substituting an
 empty string (or, for a genuinely uncovered anchor, the heading text) for a
 topic's standard-form paragraph whenever `our_standard` was missing/blank
 -- corrupting the deterministic diff with no error at all. A schema
@@ -24,7 +24,7 @@ This module is the single place both failure modes are checked, reused by:
     never resolve as the active bundle -- validation failure is treated
     exactly like "no active bundle at all" (the documented 503 "no active
     playbook" fail-closed refusal, issue #214), never a partial load.
-  - `scripts/diff_standard_form.py`'s `_topic_text_by_anchor`: a covering
+  - the synthetic body builder's `topic_text_by_anchor`: a covering
     topic missing `our_standard` now raises `PlaybookValidationError`
     instead of silently substituting.
 
@@ -37,24 +37,23 @@ use exclusively -- see playbooks/schema.json's topic-level description).
 Only covering topics are required to carry non-blank `our_standard` text;
 `not_in_standard` topics (and topics with no anchors at all) have no
 standard-form paragraph to substitute in the first place, so they are
-exempt -- same semantics `scripts/diff_standard_form.py` already documented.
+exempt -- same semantics the retired standard-form diff already documented.
 
 ## Why jsonschema is imported LAZILY here, not at module top level
 
 Unlike `scripts/primary_review_pass.py` (which hard-imports jsonschema at
 module level, since it only ever runs inside the real pipeline chain where
 `requirements-dev.txt`/`backend/requirements.txt` are always installed),
-THIS module is also imported by `scripts/diff_standard_form.py` --
-including from the "Deterministic standard-form diff gate" CI job
-(.github/workflows/standard-form-diff-gate.yml), which deliberately runs
-`python3 tests/diff/test_deterministic_diff.py` with NO `pip install` step
-at all ("synthetic mode uses only the stdlib"). A module-level
-`import jsonschema` here would make `scripts/diff_standard_form.py` fail to
-import in that job, breaking a BLOCKING GATE (issue #64) that has nothing to
-do with jsonschema or schema validation. jsonschema is therefore imported
-only inside `validate_playbook_document`, the one function that actually
-calls into it -- `topic_missing_standard_text` / `PlaybookValidationError`
-(diff_standard_form.py's own use) need no such import.
+THIS module is reached from stdlib-only callers -- notably
+`tests/synthetic_form_paragraphs.py`, which builds a synthetic document body
+out of a playbook using nothing but the standard library, and which runs in
+CI jobs that deliberately have NO `pip install` step. A module-level
+`import jsonschema` here would make every such caller fail at IMPORT,
+breaking work that has nothing to do with jsonschema or schema validation.
+jsonschema is therefore imported only inside `validate_playbook_document`,
+the one function that actually calls into it --
+`topic_missing_standard_text` / `PlaybookValidationError` (the structural
+checks) need no such import.
 """
 
 from __future__ import annotations
@@ -76,7 +75,7 @@ SCHEMA_PATH = REPO_ROOT / "playbooks" / "schema.json"
 
 # Reserved pseudo-anchor for wholly-new inserted hunks (ARCHITECTURE.md ->
 # "Reserved pseudo-anchor sec-_new"). Duplicated from
-# scripts/diff_standard_form.py's own SEC_NEW per this repo's existing
+# the retired standard-form diff's own SEC_NEW per this repo's existing
 # convention of each module owning its own copy of small shared sentinels
 # (see scripts/primary_review_pass.py's comment on MAX_INPUT_TOKENS etc.).
 SEC_NEW = "sec-_new"
@@ -105,7 +104,7 @@ def topic_missing_standard_text(topic: dict[str, Any]) -> bool:
     its `our_standard` position text is missing or blank -- the exact
     condition that used to silently substitute an empty string (or the
     heading text, for a genuinely uncovered anchor) in
-    `scripts/diff_standard_form.py`. Pure stdlib -- no jsonschema needed."""
+    its callers. Pure stdlib -- no jsonschema needed."""
     if topic.get("not_in_standard", False):
         return False
     real_anchors = [a for a in (topic.get("section_anchors") or []) if a != SEC_NEW]
@@ -143,7 +142,7 @@ def validate_playbook_document(doc: dict[str, Any], playbook_id: str | None = No
     best-effort result -- either `doc` is fully valid, or this raises.
 
     jsonschema is imported HERE (not at module top level) -- see this
-    module's docstring for why: `scripts/diff_standard_form.py` imports
+    module's docstring for why: stdlib-only callers import
     this module from a CI job that installs no dependencies at all, and
     never calls this function (only `topic_missing_standard_text` /
     `PlaybookValidationError`, which need no jsonschema).

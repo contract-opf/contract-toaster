@@ -65,7 +65,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import extraction_normalization_stage as ens  # noqa: E402
 import leakage_scan  # noqa: E402
 import redline_generate  # noqa: E402
-import redline_inplace  # noqa: E402
+import ooxml_util  # noqa: E402
 
 CLAUSE = (
     "The Recipient shall indemnify the Discloser against all claims arising "
@@ -234,7 +234,7 @@ def test_a_legitimate_prefix_is_still_registered(failures: list) -> None:
     serializer rename bindings this module exists to preserve."""
     before = dict(getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),
                           "_namespace_map"))
-    redline_inplace.register_declared_namespaces(
+    ooxml_util.register_declared_namespaces(
         [("ns0", "http://example.com/reserved"), ("mc", "http://example.com/legit")]
     )
     after = getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),
@@ -254,7 +254,7 @@ def test_the_default_prefix_is_still_skipped(failures: list) -> None:
     """
     ET = __import__("xml.etree.ElementTree", fromlist=["_namespace_map"])
     before = dict(ET._namespace_map)
-    redline_inplace.register_declared_namespaces([("", "http://example.com/default")])
+    ooxml_util.register_declared_namespaces([("", "http://example.com/default")])
     if "http://example.com/default" in ET._namespace_map:
         failures.append("the default (empty) prefix was registered")
     ET._namespace_map.clear()

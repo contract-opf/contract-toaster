@@ -78,6 +78,7 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 import model_client as mc  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000442"
 
@@ -107,6 +108,10 @@ class FakeResponse:
 class FakeHttpClient:
     def __init__(self, response: FakeResponse):
         self.response = response
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         return self.response
@@ -222,6 +227,10 @@ class TestModelInvocationErrorCarriesStatusCode(unittest.TestCase):
         not a guess, so the classifier falls back rather than mislabelling."""
 
         class BoomClient:
+            # Issue #657: the client streams; route .stream() through the
+            # canned .post() below (tests/openrouter_sse_double.py).
+            stream = sse_stream_adapter
+
             def post(self, url, json=None, headers=None):  # noqa: A002
                 raise OSError("connection reset")
 

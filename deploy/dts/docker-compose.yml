@@ -54,6 +54,7 @@ x-resource-names: &resource-names
   RETENTION_SETTINGS_TABLE: contract-toaster-retention-settings-dts
   USER_PREFERENCES_TABLE: contract-toaster-user-preferences-dts
   MODEL_SETTINGS_TABLE: contract-toaster-model-settings-dts
+  ENTITY_ROSTER_TABLE: contract-toaster-entity-roster-dts
   SYNC_STATUS_TABLE: contract-toaster-sync-status-dts
   MODEL_INVOCATIONS_TABLE: contract-toaster-model-invocations-dts
   UPLOADS_BUCKET: contract-toaster-uploads-dts
@@ -160,13 +161,18 @@ services:
       # entirely from the admin UI.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # Issue #418: forces the OpenRouter request to carry the review object
-      # as a tool call (forced tool_choice) instead of prose JSON. Default
-      # OFF (unset) -- behavior is byte-identical to today either way until
-      # a human flips this ON after a live smoke run against this
-      # deployment's actual OpenRouter traffic; OpenRouter's Anthropic
-      # tool-use pass-through cannot be proven from the offline test suite.
+      # as a tool call (forced tool_choice) instead of prose JSON. ON here,
+      # and ON by default in code (issue #673) -- the live A/B this
+      # deployment's own OpenRouter traffic was measured under turned two
+      # consecutive critic schema failures (a terminal
+      # ERROR_MANUAL_REVIEW_REQUIRED, reason "critic") into a first-attempt
+      # success, at roughly half the latency and 75% of the cost. Named
+      # explicitly rather than left to the code default so this file says
+      # what the deployment actually runs, and so the rollback is a
+      # one-line edit to deploy/dts/.env: set OPENROUTER_STRUCTURED_OUTPUT
+      # to 0 (or false/no/off) there to restore the prose-JSON request.
       # See backend/src/config.py::structured_output_enabled.
-      # OPENROUTER_STRUCTURED_OUTPUT: "1"
+      OPENROUTER_STRUCTURED_OUTPUT: ${OPENROUTER_STRUCTURED_OUTPUT:-1}
     depends_on:
       bootstrap:
         condition: service_completed_successfully
@@ -190,6 +196,20 @@ services:
     build:
       context: ../..
       dockerfile: deploy/dts/frontend.Dockerfile
+      args:
+        # Baked into the BUNDLE (not the container env) by
+        # deploy/dts/frontend.Dockerfile, which turns them into
+        # VITE_BUILD_VERSION/VITE_COMMIT_SHA before `npm run build` — Vite
+        # inlines those at build time. Read by frontend/src/deployIdentity.ts
+        # so the Settings tab can say whether the server stamp and the shipped
+        # bundle agree (issue #652). Same host-override convention and same
+        # defaults as the backend anchor above, so ONE pair of values stamps
+        # both images:
+        #   VERSION=$(git describe --tags --always) \
+        #   COMMIT_SHA=$(git rev-parse --short HEAD) \
+        #   docker compose -f deploy/dts/docker-compose.yml build
+        VERSION: ${VERSION:-dev}
+        COMMIT_SHA: ${COMMIT_SHA:-unknown}
     depends_on:
       - backend
     restart: unless-stopped
