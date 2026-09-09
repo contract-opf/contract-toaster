@@ -5,7 +5,7 @@ either an ACCEPT decision or a redlined `.docx` with in-place tracked changes
 and footnoted rationales, reviewed against your codified negotiating position
 (a "playbook").
 
-> **Reviewing this repo?** Start with **[docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md)** — an honest orientation to what actually works today (the review pipeline is currently a mock), the two deployment targets (AWS and a self-contained Docker Compose stack), how to see it running, and the roadmap.
+> **Reviewing this repo?** Start with **[docs/REVIEW-GUIDE.md](docs/REVIEW-GUIDE.md)** — an honest orientation to what actually works today (the Docker Compose target runs the real review pipeline; the AWS target still runs a mock review stage), the two deployment targets, how to see it running, and the roadmap.
 
 ## Status
 
@@ -57,12 +57,14 @@ Every playbook resolves to one of two review modes:
   against the playbook's codified negotiating positions directly — no
   canonical standard form is required, so this mode works for any
   counterparty-authored paper from day one.
-- **Precision** (opt-in, per playbook). When a playbook carries a canonical
-  standard form and a matching anchor map (`standard-forms/`), a
-  deterministic router (`scripts/form_match_router.py`) detects when an
-  upload is close enough to that form to run a section-anchored diff
-  instead of the knowledge comparison — catching smaller, clause-level
-  edits a pure-knowledge pass could miss.
+- **Precision** (per-playbook registry profile). A playbook may additionally
+  register a canonical standard form and a matching anchor map
+  (`standard-forms/`), which `scripts/playbook_registry.py::profile()`
+  reports as the `precision` profile. The deterministic section-anchored
+  diff that profile once selected was retired from issue generation by the
+  2026-07-22 LLM-native decision and deleted in 2026-09 (issue #631); the
+  artifacts remain governed history and the profile still namespaces a
+  playbook's evaluation fixtures.
 
 The default `synthetic-nda-sample` playbook ships in knowledge mode (no
 standard form required), so a fresh install is reviewable end to end with
@@ -102,7 +104,7 @@ fixtures paths — adding a contract type never requires a code change.
 - **Corpus governance.** Corpus ingestion creates a draft snapshot. Only a curated, regression-tested snapshot can become active, and every review records the corpus snapshot it used.
 - **Storage.** S3 (uploads, redlines, corpus, audit; governance object lock on corpus and audit; admin-configurable document retention plus storage-level legal hold). DynamoDB (users, playbooks, playbook versions, reviews, audit log, cost ledger). Immutable audit rows contain only non-substantive audit facts; model rationales and critic deltas live only in retention-governed confidential storage.
 - **Infrastructure as code.** AWS CDK (TypeScript). Everything is `cdk deploy`.
-- **Redlining.** `scripts/redline_docx_writer.py` is a small, dependency-free OOXML tracked-changes writer we own outright, built entirely on the Python standard library (`zipfile` + `xml.etree.ElementTree`). There is no `backend/vendor/` directory in this repo; see [ARCHITECTURE.md → Redlining](ARCHITECTURE.md#redlining--owned-docx-library).
+- **Redlining.** `scripts/redline_block_apply.py` is a small, dependency-free OOXML tracked-changes writer we own outright, built entirely on the Python standard library (`zipfile` + `xml.etree.ElementTree`); it edits the uploaded package in place against a proven block transcript, with the non-`document.xml` parts it attaches (footnotes, header/footer, styles) in `scripts/docx_parts.py`. There is no `backend/vendor/` directory in this repo; see [ARCHITECTURE.md → Redlining](ARCHITECTURE.md#redlining--owned-docx-library).
 - **Review prompt and playbook structure.** Prompts are assembled in code by `scripts/primary_review_pass.py` (system prompt = review guidance + binary-decision overlay + playbook JSON, per a fixed manifest), not stored as a `prompts/` directory. The review guidance was informed by [`anthropics/claude-for-legal`](https://github.com/anthropics/claude-for-legal)'s `contract-review` skill as reference material, with our own overlay for the binary-decision output format. Active releases are a governed bundle: playbook hash, prompt hash, standard-form hash, model-policy hash, corpus snapshot, evaluation run, and legal approval. Precedent citations are internal-only; generated external footnotes cite the contract position, not prior counterparties.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
@@ -126,10 +128,8 @@ contract-toaster/
 │   └── README.md                 # directory guide and build instructions
 ├── scripts/                      # the review pipeline: pure, tested modules (no separate prompts/ or vendor/ tree)
 │   ├── docs-lint.py              # documentation lint
-│   ├── build_anchor_map.py       # anchor-map builder: docx -> anchor map artifact
-│   ├── form_match_router.py      # deterministic knowledge-vs-precision routing
 │   ├── primary_review_pass.py    # prompt assembly + primary review pass (code-assembled, not a prompts/ directory)
-│   └── redline_docx_writer.py    # dependency-free OOXML tracked-changes writer we own outright
+│   └── redline_block_apply.py    # dependency-free OOXML tracked-changes writer we own outright
 ├── infra/                        # AWS CDK (TypeScript)
 ├── backend/                      # Python service for App Runner + pipeline tasks
 │   ├── Dockerfile

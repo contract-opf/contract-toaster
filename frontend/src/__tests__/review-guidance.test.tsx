@@ -31,6 +31,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -44,6 +49,9 @@ vi.mock('aws-amplify/auth', () => ({
 // fetch stub — routes by "METHOD path" (falls back to path-only for GETs),
 // mirroring review-download-gate.test.tsx.
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // Issue #733: the catalog is a fixture every scenario needs, not a scenario
+  // of its own — the console will not arm its lever without an active playbook.
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -133,7 +141,7 @@ describe('per-review guidance field — ReviewSubmission.tsx', () => {
     render(<ReviewSubmission />);
     typeGuidance(GUIDANCE);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
     await screen.findByTestId('review-status');
 
     expect(submittedFormData(fetchMock).get('toaster_guidance')).toBe(GUIDANCE);
@@ -153,7 +161,7 @@ describe('per-review guidance field — ReviewSubmission.tsx', () => {
 
     render(<ReviewSubmission />);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
     await screen.findByTestId('review-status');
 
     // Absent, not an empty string: the request must stay byte-identical to
@@ -176,7 +184,7 @@ describe('per-review guidance field — ReviewSubmission.tsx', () => {
     render(<ReviewSubmission />);
     typeGuidance('   \n  ');
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
     await screen.findByTestId('review-status');
 
     expect(submittedFormData(fetchMock).has('toaster_guidance')).toBe(false);
@@ -201,8 +209,8 @@ describe('guidance readback on the result view — ReviewSubmission.tsx', () => 
     render(<ReviewSubmission />);
     typeGuidance(GUIDANCE);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     const readback = await screen.findByTestId('review-applied-guidance');
     // The server's record of what governed wins over anything held locally.
@@ -225,8 +233,8 @@ describe('guidance readback on the result view — ReviewSubmission.tsx', () => 
     render(<ReviewSubmission />);
     typeGuidance(GUIDANCE);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     const readback = await screen.findByTestId('review-applied-guidance');
     expect(readback.textContent).toContain(GUIDANCE);
@@ -247,8 +255,8 @@ describe('guidance readback on the result view — ReviewSubmission.tsx', () => 
     render(<ReviewSubmission />);
     typeGuidance(GUIDANCE);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     // Editing the input afterwards must not rewrite the record of what the
     // running review actually ran under.
@@ -280,8 +288,8 @@ describe('guidance readback on the result view — ReviewSubmission.tsx', () => 
     render(<ReviewSubmission />);
     typeGuidance(GUIDANCE);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     expect(screen.queryByTestId('review-applied-guidance')).toBeNull();
   });
@@ -301,8 +309,8 @@ describe('guidance readback on the result view — ReviewSubmission.tsx', () => 
 
     render(<ReviewSubmission />);
     chooseFile();
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     expect(screen.queryByTestId('review-applied-guidance')).toBeNull();
   });

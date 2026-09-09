@@ -17,7 +17,7 @@ only if the fixture's content needs to change -- otherwise the committed
 Every other hand-built fixture in this repo that needs a "realistic" draft
 (`tests/test_review_spine.py::_build_draft_docx`,
 `tests/fixtures/gold_docx_204/_generate.py::build_draft_body_xml`) starts
-from `diff_standard_form.load_standard_form_paragraphs()` and carries every
+from the retired standard-form loader and carries every
 anchor's heading/text over VERBATIM except the one or two anchors it plants
 a change at -- i.e. the draft still matches the standard form
 section-for-section. Issue #381's whole point is the OPPOSITE: prove the

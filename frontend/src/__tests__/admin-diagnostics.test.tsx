@@ -20,6 +20,11 @@
  *     coalesced it into `reason` this row rendered the "no cause was
  *     recorded" fallback — the admin told nothing while the submitter's own
  *     Review tab showed the true cause;
+ *   - a CRITIC-PASS failure gets a real cause (#665). It used to store the
+ *     stage name "critic" in `reason`, which matches no REASON_EXPLANATIONS
+ *     key, so it rendered "the exact cause was not identified" — on the one
+ *     screen built to identify it — and the critic's attempt count is shown
+ *     beside it;
  *   - a 403 hides the panel entirely (defense in depth — the server is
  *     authoritative);
  *   - the empty state is an IN-TABLE row, not a stray paragraph (#443 AC,
@@ -33,6 +38,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import AdminDiagnostics, {
+  criticAttemptsDetail,
+  detectConsecutiveIncidents,
   detectorDetail,
   formatFailureTime,
   RecentFailure,
@@ -632,6 +639,228 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     expect(detectorDetail(failure({ review_id: 'r-y' }))).toBeNull();
   });
 
+  // -------------------------------------------------------------------------
+  // Issue #665 — a critic-pass failure has a CAUSE, not just a stage.
+  //
+  // `scripts/review_spine.py` used to store the STAGE NAME "critic" in
+  // `reason`. No REASON_EXPLANATIONS key matched it, so every critic failure
+  // fell through to the `run_review` stage copy — "The exact cause was not
+  // identified" — and a real paid production review (2026-09-02) could not be
+  // diagnosed from this very screen.
+  // -------------------------------------------------------------------------
+
+  // `critic_attempts` is the WHOLE budget `run_critic_pass` was allowed
+  // (`attempts_allowed`), not the attempt it stopped on: its floor is
+  // `1 + MAX_RETRIES_PER_PASS` = 2, and a truncation grant is the only thing
+  // that raises it (to 3). Those are the two values a row can carry, so those
+  // are the two seeded here — a count of 1 is not a producible state.
+  const CRITIC_ATTEMPTS_BASELINE = 2;
+  const CRITIC_ATTEMPTS_AFTER_A_TRUNCATION_GRANT = 3;
+
+  const criticFailure = (overrides: Partial<RecentFailure> = {}): RecentFailure =>
+    failure({
+      review_id: 'r-critic',
+      // The class issue #673 measured in live traffic: the critic's JSON was
+      // rejected by the output contract.
+      reason: 'critic_schema_invalid',
+      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      critic_attempts: CRITIC_ATTEMPTS_BASELINE,
+      ...overrides,
+    });
+
+  it('gives a critic-pass failure a real cause instead of "cause was not identified"', async () => {
+    stubDiagnosticsFetch({ status: 200, body: { failures: [criticFailure()] } });
+    render(<AdminDiagnostics />);
+
+    const cause = await screen.findByTestId('failure-cause-r-critic');
+    expect(cause).toHaveTextContent(REASON_EXPLANATIONS.critic_schema_invalid.cause);
+    expect(screen.getByTestId('failure-fix-r-critic')).toHaveTextContent(
+      REASON_EXPLANATIONS.critic_schema_invalid.fix,
+    );
+    // THE regression: the vague stage fallback must not be what an operator
+    // reads for this failure any more.
+    expect(screen.getByTestId('failure-fix-r-critic')).not.toHaveTextContent(
+      /exact cause was not identified/i,
+    );
+    // The stage itself is still recorded — it just no longer stands in for
+    // the cause.
+    expect(within(screen.getByTestId('failure-row-r-critic')).getAllByRole('cell')[3])
+      .toHaveTextContent('run_review');
+  });
+
+  it('tells the three critic failure classes apart', async () => {
+    // Every critic terminal an operator can meet. Before #665 all of them
+    // stored the stage name "critic" and rendered the SAME vague fallback;
+    // `document_too_large` was discarded by the composition entirely.
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          criticFailure(),
+          criticFailure({ review_id: 'r-critic-json', reason: 'critic_invalid_json' }),
+          criticFailure({
+            review_id: 'r-critic-oversize',
+            reason: 'document_too_large',
+            critic_attempts: null,
+          }),
+        ],
+      },
+    });
+    render(<AdminDiagnostics />);
+
+    await screen.findByTestId('failure-cause-r-critic');
+    const causes = [
+      screen.getByTestId('failure-cause-r-critic').textContent,
+      screen.getByTestId('failure-cause-r-critic-json').textContent,
+      screen.getByTestId('failure-cause-r-critic-oversize').textContent,
+    ];
+    expect(new Set(causes).size).toBe(3);
+    expect(screen.getByTestId('failure-cause-r-critic-json')).toHaveTextContent(
+      REASON_EXPLANATIONS.critic_invalid_json.cause,
+    );
+    expect(screen.getByTestId('failure-cause-r-critic-oversize')).toHaveTextContent(
+      REASON_EXPLANATIONS.document_too_large.cause,
+    );
+    // Differing is not enough: before #665 rows differed too, because some of
+    // them were rendering the stage fallback. None may.
+    for (const id of ['r-critic', 'r-critic-json', 'r-critic-oversize']) {
+      expect(screen.getByTestId(`failure-fix-${id}`)).not.toHaveTextContent(
+        /exact cause was not identified/i,
+      );
+    }
+  });
+
+  it('shows the budget the critic spent, and nothing when no count was recorded', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          criticFailure(),
+          criticFailure({
+            review_id: 'r-critic-widened',
+            critic_attempts: CRITIC_ATTEMPTS_AFTER_A_TRUNCATION_GRANT,
+          }),
+          { ...failure({ review_id: 'r-credits' }), critic_attempts: null },
+        ],
+      },
+    });
+    render(<AdminDiagnostics />);
+
+    const line = await screen.findByTestId('failure-critic-attempts-r-critic');
+    expect(line).toHaveTextContent(`${CRITIC_ATTEMPTS_BASELINE} attempts`);
+    expect(line).toHaveTextContent(/critic/i);
+    // A budget above the baseline is the one thing this line distinguishes:
+    // the critic was granted an extra attempt after an output truncation, so
+    // the run hit its output ceiling as well as failing to be read.
+    expect(screen.getByTestId('failure-critic-attempts-r-critic-widened')).toHaveTextContent(
+      `${CRITIC_ATTEMPTS_AFTER_A_TRUNCATION_GRANT} attempts`,
+    );
+    expect(
+      screen.getByTestId('failure-critic-attempts-r-critic').textContent,
+    ).not.toEqual(screen.getByTestId('failure-critic-attempts-r-critic-widened').textContent);
+    // A row with no count grows no empty label.
+    expect(screen.queryByTestId('failure-critic-attempts-r-credits')).toBeNull();
+  });
+
+  it('builds the critic attempt line from one allowlisted field and nothing else', () => {
+    const overStuffed = {
+      ...failure({ review_id: 'r-z' }),
+      critic_attempts: '3',
+      last_error: 'SENTINEL-VALIDATOR-ECHO-OF-MODEL-OUTPUT',
+      verdict_summary: 'SENTINEL-VERDICT',
+    } as RecentFailure;
+
+    expect(criticAttemptsDetail(overStuffed)).toBe('3 attempts');
+    expect(criticAttemptsDetail(overStuffed)).not.toContain('SENTINEL');
+    expect(criticAttemptsDetail(failure({ review_id: 'r-y' }))).toBeNull();
+    // A value that is not a number is treated as absent rather than rendered
+    // raw — the row is the only thing between this formatter and the DOM.
+    expect(
+      criticAttemptsDetail({ ...failure({ review_id: 'r-w' }), critic_attempts: 'lots' }),
+    ).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #670 — a primary-pass failure has a cause too.
+  //
+  // Two of `scripts/primary_review_pass.py`'s fail-closed terminals returned
+  // no `reason` key at all, so the row stored null and this screen showed the
+  // `run_review` stage copy. A real paid production review (2026-09-02,
+  // `cc20ea07`) died that way, and a real counterparty document then failed
+  // repeatedly on the OTHER one — two different defects, both blank, and
+  // indistinguishable here until `last_error` was read out of the row by
+  // hand.
+  //
+  // `structured_output_retry_exhausted` is the sharper half of the story: it
+  // was mapped in `backend/src/reviews.py` and explained in
+  // REASON_EXPLANATIONS all along, while nothing under `scripts/` ever
+  // emitted it. The copy below has therefore been shipped, unreachable, since
+  // issue #442.
+  // -------------------------------------------------------------------------
+
+  const primaryFailure = (reason: string, reviewId: string): RecentFailure =>
+    failure({
+      review_id: reviewId,
+      reason,
+      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+    });
+
+  it('tells the two primary-pass terminals apart, and neither reads as the stage fallback', async () => {
+    stubDiagnosticsFetch({
+      status: 200,
+      body: {
+        failures: [
+          primaryFailure('structured_output_retry_exhausted', 'r-primary-schema'),
+          primaryFailure('primary_block_transcript_rejected', 'r-primary-transcript'),
+        ],
+      },
+    });
+    render(<AdminDiagnostics />);
+
+    await screen.findByTestId('failure-cause-r-primary-schema');
+    expect(screen.getByTestId('failure-cause-r-primary-schema')).toHaveTextContent(
+      REASON_EXPLANATIONS.structured_output_retry_exhausted.cause,
+    );
+    expect(screen.getByTestId('failure-fix-r-primary-schema')).toHaveTextContent(
+      REASON_EXPLANATIONS.structured_output_retry_exhausted.fix,
+    );
+    expect(screen.getByTestId('failure-cause-r-primary-transcript')).toHaveTextContent(
+      REASON_EXPLANATIONS.primary_block_transcript_rejected.cause,
+    );
+    expect(screen.getByTestId('failure-fix-r-primary-transcript')).toHaveTextContent(
+      REASON_EXPLANATIONS.primary_block_transcript_rejected.fix,
+    );
+
+    // Differing is not enough — a row still rendering the stage fallback
+    // differs from one that isn't. Neither may be the fallback.
+    for (const id of ['r-primary-schema', 'r-primary-transcript']) {
+      expect(screen.getByTestId(`failure-cause-${id}`)).not.toHaveTextContent(
+        /model could not complete the review/i,
+      );
+      expect(screen.getByTestId(`failure-fix-${id}`)).not.toHaveTextContent(
+        /exact cause was not identified/i,
+      );
+    }
+    expect(screen.getByTestId('failure-cause-r-primary-schema').textContent).not.toEqual(
+      screen.getByTestId('failure-cause-r-primary-transcript').textContent,
+    );
+  });
+
+  it('still shows the stage fallback when the row really carries no reason', async () => {
+    // The pre-#670 state, kept as the contrast: a null `reason` is what made
+    // the assertions above impossible, and it is still what an old row or an
+    // unclassified failure looks like.
+    stubDiagnosticsFetch({
+      status: 200,
+      body: { failures: [failure({ review_id: 'r-blank', reason: null })] },
+    });
+    render(<AdminDiagnostics />);
+
+    expect(await screen.findByTestId('failure-fix-r-blank')).toHaveTextContent(
+      /exact cause was not identified/i,
+    );
+  });
+
   it('offers no re-run action — re-running a review spends money and is out of scope', async () => {
     stubDiagnosticsFetch({ status: 200, body: { failures: [failure({ review_id: 'r-1' })] } });
     const { container } = render(<AdminDiagnostics />);
@@ -643,5 +872,104 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     for (const label of labels) {
       expect(label).not.toMatch(/re-?run|retry this review|resubmit/i);
     }
+  });
+
+  describe('detectConsecutiveIncidents', () => {
+    it('returns null for fewer than 3 failures', () => {
+      expect(detectConsecutiveIncidents([])).toBeNull();
+      expect(
+        detectConsecutiveIncidents([
+          failure({ reason: 'model_account_out_of_credits' }),
+          failure({ reason: 'model_account_out_of_credits' }),
+        ]),
+      ).toBeNull();
+    });
+
+    it('detects 3 or more consecutive failures sharing the same reason', () => {
+      const items = [
+        failure({ review_id: 'r-1', reason: 'model_rate_limit' }),
+        failure({ review_id: 'r-2', reason: 'model_rate_limit' }),
+        failure({ review_id: 'r-3', reason: 'model_rate_limit' }),
+        failure({ review_id: 'r-4', reason: 'document_too_large' }),
+      ];
+      expect(detectConsecutiveIncidents(items)).toEqual({
+        type: 'reason',
+        value: 'model_rate_limit',
+        count: 3,
+      });
+    });
+
+    it('detects 3 or more consecutive failures sharing the same stage when reasons differ', () => {
+      const items = [
+        failure({ review_id: 'r-1', failing_stage: 'run_review', reason: 'err_1' }),
+        failure({ review_id: 'r-2', failing_stage: 'run_review', reason: 'err_2' }),
+        failure({ review_id: 'r-3', failing_stage: 'run_review', reason: 'err_3' }),
+      ];
+      expect(detectConsecutiveIncidents(items)).toEqual({
+        type: 'stage',
+        value: 'run_review',
+        count: 3,
+      });
+    });
+  });
+
+  describe('search and incident alert UI', () => {
+    it('filters failure rows by review ID, reason or stage', async () => {
+      stubDiagnosticsFetch({
+        status: 200,
+        body: {
+          failures: [
+            failure({ review_id: 'rev-alpha', reason: 'model_rate_limit', failing_stage: 'stage_a' }),
+            failure({ review_id: 'rev-beta', reason: 'document_too_large', failing_stage: 'stage_b' }),
+          ],
+        },
+      });
+      render(<AdminDiagnostics />);
+
+      expect(await screen.findByTestId('failure-row-rev-alpha')).toBeInTheDocument();
+      expect(screen.getByTestId('failure-row-rev-beta')).toBeInTheDocument();
+
+      const searchInput = screen.getByTestId('diagnostics-search-input');
+      fireEvent.change(searchInput, { target: { value: 'alpha' } });
+
+      expect(screen.getByTestId('failure-row-rev-alpha')).toBeInTheDocument();
+      expect(screen.queryByTestId('failure-row-rev-beta')).toBeNull();
+
+      fireEvent.change(searchInput, { target: { value: 'document_too_large' } });
+      expect(screen.queryByTestId('failure-row-rev-alpha')).toBeNull();
+      expect(screen.getByTestId('failure-row-rev-beta')).toBeInTheDocument();
+
+      fireEvent.change(searchInput, { target: { value: 'nonexistent-query' } });
+      expect(screen.getByTestId('admin-diagnostics-no-matches')).toBeInTheDocument();
+    });
+
+    it('shows incident banner and filters on click when 3+ consecutive failures occur', async () => {
+      stubDiagnosticsFetch({
+        status: 200,
+        body: {
+          failures: [
+            failure({ review_id: 'r-1', reason: 'model_account_out_of_credits' }),
+            failure({ review_id: 'r-2', reason: 'model_account_out_of_credits' }),
+            failure({ review_id: 'r-3', reason: 'model_account_out_of_credits' }),
+            failure({ review_id: 'r-4', reason: 'other_reason' }),
+          ],
+        },
+      });
+      render(<AdminDiagnostics />);
+
+      const banner = await screen.findByTestId('diagnostics-incident-banner');
+      expect(banner).toHaveTextContent(/3 consecutive failures/);
+      expect(banner).toHaveTextContent(/model_account_out_of_credits/);
+
+      const filterBtn = screen.getByTestId('diagnostics-filter-incident-btn');
+      fireEvent.click(filterBtn);
+
+      const searchInput = screen.getByTestId('diagnostics-search-input') as HTMLInputElement;
+      expect(searchInput.value).toBe('model_account_out_of_credits');
+      expect(screen.getByTestId('failure-row-r-1')).toBeInTheDocument();
+      expect(screen.getByTestId('failure-row-r-2')).toBeInTheDocument();
+      expect(screen.getByTestId('failure-row-r-3')).toBeInTheDocument();
+      expect(screen.queryByTestId('failure-row-r-4')).toBeNull();
+    });
   });
 });

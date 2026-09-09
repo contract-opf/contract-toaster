@@ -17,19 +17,29 @@ advice.
 
 ## Current state — read this first
 
-- **The review "brain" is currently a mock.** The live pipeline returns a
-  pre-baked, clearly-synthetic redline for the `eiaa` playbook, not a real
-  model review. The real chain (extract → diff → primary pass → adversarial
-  critic → reconcile → redline → leakage-scan) exists as **pure, tested
-  `scripts/` modules** and is exercised offline by `scripts/eval_harness.py`,
-  but it is **not wired into any live request path yet** (neither AWS nor Docker Compose).
-  This is the single most important thing to understand before judging the app.
-  See issues #187 / #210 and the deferred #80–#83 epic.
-- **The mock pipeline now completes end-to-end.** A review moves
-  PENDING → RUNNING → DONE and produces a downloadable output `.docx`
-  (recent work: #236, #188). The reviewer UI shows the result with the required
-  pre-download trust-calibration gate (confidence band + critic-delta indicator;
-  partial #85, PR #255).
+- **The two deployment targets differ, and this is the single most important
+  thing to understand before judging the app.**
+
+  | Target | Review pipeline |
+  |---|---|
+  | Docker Compose | **Real.** `scripts/review_spine.py::run_review` driven by a live model client. |
+  | AWS | **Mock.** A Lambda stage returns a pre-baked, clearly-synthetic redline. |
+
+- **Docker Compose runs the real review.** `backend/src/pipeline_runner.py`
+  selects `run_real_pipeline` when `MODEL_PROVIDER=openrouter`, running the full
+  chain — extract → diff → primary pass → adversarial critic → reconcile →
+  redline → leakage-scan — against the activated playbook. With `MODEL_PROVIDER`
+  unset it falls back to `run_mock_pipeline`, which is the escape hatch for
+  tests and for callers that do not want a live model call.
+- **AWS does not.** `infra/lib/nested/pipeline-stack.ts` still wires
+  `MockReviewStageFunction` as the review stage. Replacing it is #243, which was
+  **deliberately deferred past the open-source launch** by an owner decision on
+  2026-07-14 — it is not an oversight, and it is tracked by its own milestone
+  ("AWS real-pipeline acceptance — deferred") so that Phase 2 completing on the
+  Docker Compose target can never be read as cross-deployment parity.
+- **A review completes end-to-end on both.** PENDING → RUNNING → DONE with a
+  downloadable `.docx`. The reviewer UI shows the result behind the required
+  pre-download trust-calibration gate (confidence band + critic-delta indicator).
 - **What ships vs. what's stubbed/planned** for the admin-UI and observability
   surfaces is tracked plainly in
   [docs/implementation-status.md](implementation-status.md) (a lint-enforced
@@ -145,12 +155,11 @@ with real infra failures hidden in the FLAKY bucket.
 
 ## Next steps (roadmap for a reviewer)
 
-**To make this a real (not mock) review tool:**
-1. **Wire the real pipeline into a live path** — replace the mock body of the
-   in-process runner (and the AWS mock Step Functions stage) with the tested
-   `scripts/` chain, driven by a real model client. The `OpenRouterModelClient`
-   already exists; the AWS Bedrock client is still deferred. This is the #80–#83
-   epic and benefits both deployment targets (neither runs the real brain today).
+**To bring the AWS target to parity with Docker Compose:**
+1. **Replace the AWS mock Step Functions stage** with the same tested `scripts/`
+   chain the Docker Compose target already runs, driven by a real model client.
+   The `OpenRouterModelClient` exists; the AWS Bedrock client is still deferred.
+   This is #243, and it carries its own milestone.
 2. **Add an OpenRouter pricing branch** to the spend model so the daily cost cap
    protects against real-provider spend.
 

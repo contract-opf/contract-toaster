@@ -16,6 +16,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { submitArmed } from './support/consoleSurface';
+
+/**
+ * Issue #733. The lever survived the replacement — it is still a thing you
+ * pull, still with a latch two thirds of the way down — so the physics below
+ * are asserted against whichever lever is mounted. What did NOT survive is the
+ * scaffolding around it: the hero's lever is a `div` given `role="button"`,
+ * `tabindex` and its own Enter/Space handling, while the console's is a real
+ * `<button>` whose activation is the platform's. Those tests stay with the
+ * surface that implements them.
+ *
+ * The console derives its travel from the lever's OWN height, which jsdom
+ * reports as zero for everything. `armed()` gives it a height chosen so one
+ * clientY pixel is one lever unit, which makes every distance below mean the
+ * same thing on both surfaces rather than silently becoming a no-op.
+ */
+const LEVER_TRAVEL = 46;
 
 function docxFile(): File {
   return new File(['x'], 'contract.docx', {
@@ -55,7 +72,15 @@ async function armed(status = 'RUNNING') {
   vi.stubGlobal('fetch', mockFetch(status));
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docxFile()] } });
-  return await screen.findByTestId('toaster-lever');
+  const lever = await screen.findByTestId('review-submit-button');
+  // The console will not arm until the catalog has landed and a playbook is
+  // selected — the same gate a person sees.
+  await waitFor(() => expect(submitArmed()).toBe(true));
+  Object.defineProperty(lever, 'clientHeight', {
+    configurable: true,
+    value: LEVER_TRAVEL / 0.45,
+  });
+  return lever;
 }
 
 /** A full pull: grab, travel past the latch, release. */
@@ -104,29 +129,11 @@ describe('issue #494 — the lever submits', () => {
     const lever = await armed();
     fireEvent.pointerDown(lever, { pointerId: 1, clientY: 0 });
     fireEvent.pointerUp(lever, { pointerId: 1, clientY: 0 });
+    // The browser turns that pointer pair into a click; jsdom does not
+    // synthesise one, and the console's lever is a real button that acts on
+    // the click (issue #733).
+    fireEvent.click(lever);
     await waitFor(() => expect(posts).toHaveLength(1));
-  });
-
-  it.each(['Enter', ' '])('%s submits from the keyboard', async (key) => {
-    const lever = await armed();
-    fireEvent.keyDown(lever, { key });
-    await waitFor(() => expect(posts).toHaveLength(1));
-  });
-
-  it('Space does not also scroll the page', async () => {
-    // Default-scrolling on a control whose entire job is to move downward is
-    // the specific wrong behaviour, not a general tidiness point.
-    const lever = await armed();
-    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
-    lever.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(true);
-  });
-
-  it('an unrelated key does nothing', async () => {
-    const lever = await armed();
-    fireEvent.keyDown(lever, { key: 'a' });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(posts).toHaveLength(0);
   });
 
   it('a cancelled pointer (a drag interrupted by the OS) submits nothing', async () => {
@@ -139,37 +146,6 @@ describe('issue #494 — the lever submits', () => {
   });
 });
 
-describe('issue #494 — the lever is a control only when pulling is legitimate', () => {
-  it('is not a button before a file is chosen', async () => {
-    vi.stubGlobal('fetch', mockFetch());
-    render(<ReviewSubmission />);
-    const lever = await screen.findByTestId('toaster-lever');
-    expect(lever.getAttribute('role')).toBeNull();
-    expect(lever.getAttribute('tabindex')).toBeNull();
-  });
-
-  it('is a keyboard-reachable button once a file is chosen', async () => {
-    const lever = await armed();
-    expect(lever).toHaveAttribute('role', 'button');
-    expect(lever).toHaveAttribute('tabindex', '0');
-    expect(lever.getAttribute('aria-label')).toMatch(/lever/i);
-  });
-
-  it('cannot start a second review while one is already running', async () => {
-    // The guard the button already had, preserved through the new affordance:
-    // a running review disarms the lever entirely rather than letting a pull
-    // race the poll.
-    const lever = await armed('RUNNING');
-    pull(lever, 46);
-    await waitFor(() => expect(posts).toHaveLength(1));
-    await screen.findByTestId('review-status');
-    await waitFor(() => expect(screen.getByTestId('toaster-lever').getAttribute('role')).toBeNull());
-    pull(screen.getByTestId('toaster-lever'), 46);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(posts).toHaveLength(1);
-  });
-});
-
 describe('issue #494 — the button path is preserved, not replaced', () => {
   it('the submit button is still present and still submits', async () => {
     await armed();
@@ -177,11 +153,17 @@ describe('issue #494 — the button path is preserved, not replaced', () => {
     await waitFor(() => expect(posts).toHaveLength(1));
   });
 
-  it('the lever hint appears only while the lever is actually armed', async () => {
-    vi.stubGlobal('fetch', mockFetch());
-    render(<ReviewSubmission />);
-    expect(screen.queryByTestId('lever-hint')).toBeNull();
-    fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docxFile()] } });
-    await screen.findByTestId('lever-hint');
+  // Once a review is running the lever will not start a second one.
+  it('disarms while a review is running', async () => {
+    const lever = await armed('RUNNING');
+    pull(lever, LEVER_TRAVEL);
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await screen.findByTestId('review-status');
+    // The lever is now the STOP control, and there is no submit control at
+    // all: one element, one meaning at a time.
+    await screen.findByTestId('review-cancel-button');
+    expect(screen.queryByTestId('review-submit-button')).toBeNull();
+    expect(posts).toHaveLength(1);
   });
+
 });

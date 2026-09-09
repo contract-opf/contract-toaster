@@ -52,6 +52,19 @@ directly into the UI. Two structural defenses, both in this module:
      frontend renders `one_line_summary` as a plain text node on top of
      that, never through `dangerouslySetInnerHTML` or a link parser.
 
+     Issue #659 widened WHERE that closed set comes from -- it is now the
+     installed playbooks' own agreement types (`known_agreement_types`),
+     not a list shipped in this file -- WITHOUT loosening the rule that
+     makes it a defense. `agreement_type_guess` is still kept only on an
+     EXACT match against a vocabulary entry, so the model still cannot
+     author the string that reaches the DOM; it can only pick one the
+     deployment already installed. What a vocabulary entry may now contain
+     is admin-supplied (`agreement_type.name` inside an uploaded,
+     schema-validated OPF artifact), so labels are additionally normalized
+     and capped on the way in (`normalize_agreement_type_label` /
+     `AGREEMENT_TYPE_MAX_CHARS`) -- the same treatment `one_line_summary`
+     and `title` already get.
+
 A preflight variant of this corpus lives in
 tests/test_adversarial_injection_corpus.py's "classifier-targeted" payload:
 a document whose lead paragraphs instruct the classifier to misreport its
@@ -64,7 +77,6 @@ and is not, proved without a live model call.
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -75,7 +87,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import extraction_normalization_stage as ens  # noqa: E402
-import playbook_registry  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -111,26 +122,28 @@ TITLE_MAX_CHARS = 160
 PAPER_SIDES = ("ours", "counterparty", "unclear")
 MATCH_VERDICTS = ("likely", "unclear", "unlikely")
 
-# The closed vocabulary `agreement_type_guess` is constrained to (injection-
-# defense rider, item 2) is this list UNION every installed playbook's own
-# `agreement_type` (see `known_agreement_types` below) -- a union, not just
-# the installed set, because the amber "this reads like an MSA, not an NDA"
-# mismatch note (see the issue's Acceptance criteria) needs the classifier to
-# be able to name a type no playbook is installed for.
-CANONICAL_AGREEMENT_TYPES = (
-    "Non-Disclosure Agreement",
-    "Master Services Agreement",
-    "Statement of Work",
-    "Software License Agreement",
-    "Data Processing Agreement",
-    "Employment Agreement",
-    "Consulting Agreement",
-    "Purchase Agreement",
-    "Lease Agreement",
-    "Other",
-)
-
 UNCLASSIFIED_AGREEMENT_TYPE = "Other"
+
+# `agreement_type_guess` render/enum cap -- issue #659's Notes ("decide
+# whether a length cap belongs on a type label the way SUMMARY_MAX_CHARS /
+# TITLE_MAX_CHARS cap the other two fields"). Decision: yes. Before #659 the
+# vocabulary was a shipped tuple of ten short literals, so no label could be
+# long; it is now built from `agreement_type.name` inside an admin-uploaded
+# OPF artifact, where the schema bounds the field's TYPE (a string) but not
+# its length -- and every entry is both sent to the model as an enum member
+# and rendered into the DOM by the frontend's "This reads like ___" line.
+# Larger than the 160-char summary/title caps would buy nothing, so a type
+# LABEL gets a tighter budget than a sentence: a genuine agreement-type name
+# ("Educational Institution Affiliate Agreement" is 43 characters) fits with
+# room to spare.
+AGREEMENT_TYPE_MAX_CHARS = 120
+
+# Shared by `normalize_agreement_type_label` and `_sanitize_summary` -- both
+# strip the same C0/C1 control characters out of text that reaches the DOM.
+# Declared up here with the caps it works alongside rather than beside its
+# second caller, so the vocabulary builder above the sanitizing section can
+# use it without a forward reference readers have to chase.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 PREFLIGHT_EXCERPT_TAG = "PREFLIGHT_DOCUMENT_EXCERPT"
 
@@ -157,13 +170,59 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
     extract_document_paragraphs` (the same allowlisted-OOXML extraction the
     real review pipeline uses, issue #80).
 
-    Deliberately the RAW (pre-normalization) paragraph extraction, not
-    `extract_and_normalize` -- normalization can fail closed on a genuinely
-    ambiguous pending tracked change (`normalize_input`'s documented rule),
-    which has nothing to do with this function's job of reporting how long
-    the document is and what it looks like. A preflight stats card should
-    still render for a document whose full review will later route to
-    MANUAL_REVIEW_REQUIRED on normalization grounds.
+    Measured on the ACCEPT-ALL document -- what the review will actually
+    read -- not on the upload exactly as it arrived (issue #660).
+    `extraction_normalization_stage._build_paragraph_record` sets a physical
+    paragraph's `text` to its ORIGINAL text, with every pending `<w:ins>`
+    removed, so a counterparty draft that arrives AS a redline was measured
+    and excerpted as its pre-markup skeleton. Issue #660 measured this on a
+    real upload carrying 312 pending insertions and 68 deletions: the card
+    reported ~464 words and one page (465 original-text words) for a
+    document the review itself reads as 2,494 words, and the excerpt handed
+    to the cheap classifier was 3,562 chars -- well under
+    `EXCERPT_CHAR_BUDGET`, so the cap was not the limiter; roughly a fifth
+    of the document was simply absent from it.
+
+    So the bytes go through `extraction_normalization_stage.
+    materialize_accept_all` first and the stats are read off its output.
+    That is issue #660's option (a), chosen over option (b)'s
+    per-paragraph `resulting_text` for two reasons: it is the SAME
+    byte-level accept-all `scripts/review_spine.py` materializes before
+    quote-locate, patch-apply and the delivered redline (issue #563), so
+    preflight and the review describe one canonical document rather than
+    two readings that can drift; and `extract_document_paragraphs` derives
+    the heading text AND the clause-boundary grouping from a paragraph's
+    original text, which option (b) would leave on the pre-markup skeleton
+    -- an inserted heading would still be invisible to `title` and to
+    `paragraph_count`.
+
+    The allowlist is untouched by this: `materialize_accept_all` copies
+    every other zip entry through byte-for-byte and the extraction below
+    still opens nothing but `word/document.xml`.
+
+    Deliberately still NOT `extract_and_normalize` -- normalization can fail
+    closed on a genuinely ambiguous pending tracked change
+    (`normalize_input`'s documented rule), which has nothing to do with this
+    function's job of reporting how long the document is and what it looks
+    like. A preflight stats card should still render for a document whose
+    full review will later route to MANUAL_REVIEW_REQUIRED on normalization
+    grounds. `materialize_accept_all` keeps that property: it is a
+    byte-level splice of `<w:ins>`/`<w:del>` with no ambiguity rule and no
+    fail-closed path of its own.
+
+    A materializer failure is NOT fatal here, and is reachable: it
+    round-trip-verifies its output by parsing every `.xml`/`.rels` part with
+    ElementTree (`redline_generate.verify_docx_round_trip`), while the
+    upload gauntlet ahead of this ran expat with namespace processing OFF
+    (`backend/src/upload_validation._parse_xml_hardened`) -- so a sidecar
+    part carrying an unbound namespace prefix passes the gauntlet and then
+    makes `materialize_accept_all` raise `ValueError`. Preflight is advisory
+    and "never blocking" (module docstring), and its caller turns
+    `DocumentStatsError` into an HTTP 400, so a document this function could
+    describe before issue #660 must still get a card after it: a
+    materializer failure degrades to the upload's own bytes -- the pre-#660
+    reading, which understates a redlined document rather than refusing to
+    describe it at all -- and only a failure of the EXTRACTION raises.
 
     `paragraph_count` counts logical, clause-boundary-detected paragraphs
     (the same grouping `normalize_paragraphs` operates over -- one entry per
@@ -177,7 +236,12 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
     class's docstring for why this is expected to be rare).
     """
     try:
-        logical_paragraphs = ens.extract_document_paragraphs(docx_bytes)
+        reviewable_bytes = ens.materialize_accept_all(docx_bytes)
+    except Exception:  # noqa: BLE001 -- advisory pass: degrade, never refuse
+        reviewable_bytes = docx_bytes
+
+    try:
+        logical_paragraphs = ens.extract_document_paragraphs(reviewable_bytes)
     except Exception as exc:  # noqa: BLE001 -- normalized into one error type
         raise DocumentStatsError(str(exc)) from exc
 
@@ -267,27 +331,74 @@ def render_preflight_user_prompt(excerpt: str) -> str:
     return render_preflight_excerpt_block(excerpt)
 
 
-def known_agreement_types() -> list[str]:
-    """The closed vocabulary `agreement_type_guess` must pick from --
-    `CANONICAL_AGREEMENT_TYPES` union every installed, non-`test_only`
-    playbook's own `playbook.agreement_type` (playbooks/registry.json via
-    `scripts/playbook_registry`). Best-effort: a playbook this cannot read
-    is skipped rather than failing the whole preflight over a catalog
-    problem -- this list feeds an ADVISORY classifier, not a legal
-    decision."""
-    types = set(CANONICAL_AGREEMENT_TYPES)
-    for playbook_id in playbook_registry.list_playbook_ids():
-        try:
-            entry = playbook_registry.resolve_playbook(playbook_id)
-            if entry.test_only or entry.playbook_path is None:
-                continue
-            with open(entry.playbook_path, encoding="utf-8") as f:
-                data = json.load(f)
-            agreement_type = (data.get("playbook") or {}).get("agreement_type")
-            if isinstance(agreement_type, str) and agreement_type.strip():
-                types.add(agreement_type.strip())
-        except Exception:  # noqa: BLE001 -- best-effort catalog build
-            continue
+def normalize_agreement_type_label(value: Any) -> str | None:
+    """One agreement-type LABEL, made safe to put in the model's enum and on
+    screen: control characters stripped, newlines/runs of whitespace
+    collapsed to single spaces, and capped at `AGREEMENT_TYPE_MAX_CHARS`.
+    Returns None for a non-string or an empty-after-normalizing value.
+
+    Every producer of a vocabulary entry AND every producer of the
+    comparison target `compute_match_verdict` matches against must run
+    through this one function -- otherwise a label long enough to be
+    truncated in the vocabulary would no longer be string-equal to the
+    playbook's own agreement type, and a correct guess would silently
+    report `unlikely`. (`compute_match_verdict` itself compares
+    case-insensitively on stripped text, so the collapse/cap is the only
+    part that has to be applied consistently.)
+
+    IDEMPOTENT, and it has to be: a label passes through here once as the
+    resolver's answer and again as a vocabulary entry, so a second pass must
+    return the first pass's own output unchanged. That is why the trailing
+    strip happens AFTER the cap -- truncating mid-gap ("...Agreement " cut
+    at the space) would otherwise leave a trailing space that the next pass
+    removed, making the enum entry one character shorter than the match
+    target it is compared against.
+    """
+    if not isinstance(value, str):
+        return None
+    text = " ".join(_CONTROL_CHAR_RE.sub("", value).split())[
+        :AGREEMENT_TYPE_MAX_CHARS
+    ].strip()
+    return text or None
+
+
+def known_agreement_types(installed_agreement_types: Any) -> list[str]:
+    """The closed vocabulary `agreement_type_guess` must pick from: the
+    agreement types of the playbooks THIS DEPLOYMENT actually has installed
+    (their active versions' -- see `backend/src/review_routes.py::
+    _preflight_agreement_vocabulary`, which resolves them and is this
+    function's only production caller), plus `UNCLASSIFIED_AGREEMENT_TYPE`.
+
+    Issue #659, owner decision 2026-09-01: there is NO shipped list any
+    more. `CANONICAL_AGREEMENT_TYPES` -- nine contract types plus the null
+    answer, hard-coded here and unioned in so the classifier could name a
+    type no playbook was installed for -- is deleted. It made the vocabulary a list the tool shipped with
+    rather than a description of this deployment, and a document whose real
+    type was only installed in DynamoDB (an admin-uploaded OPF playbook,
+    invisible to `playbooks/registry.json`) was forced onto the closest
+    shipped literal instead: a real educational-affiliation agreement was
+    reported to a reviewer as "This reads like a Non-Disclosure Agreement."
+    A document matching nothing installed now answers
+    `UNCLASSIFIED_AGREEMENT_TYPE` -- which the frontend renders as "an
+    unrecognized type" -- and that is the honest answer.
+
+    `UNCLASSIFIED_AGREEMENT_TYPE` is NOT a contract type; it is how the
+    model says "nothing installed fits", so it is always offered and never
+    counts toward "does this deployment have any types at all". A caller
+    that gets back a list of just that one entry has an empty vocabulary and
+    must degrade to `classification: "unavailable"` rather than ask the
+    model to classify against nothing.
+
+    Every entry is run through `normalize_agreement_type_label`; anything
+    that normalizes away (a non-string, an empty/whitespace name) is
+    dropped. Sorted and de-duplicated, so two playbooks sharing an agreement
+    type contribute one enum member.
+    """
+    types = {UNCLASSIFIED_AGREEMENT_TYPE}
+    for raw in installed_agreement_types or ():
+        label = normalize_agreement_type_label(raw)
+        if label:
+            types.add(label)
     return sorted(types)
 
 
@@ -373,8 +484,6 @@ def extract_json_object(raw_text: str) -> str:
 # Response sanitizing -- UNTRUSTED MODEL OUTPUT rendered to the DOM
 # (injection-defense rider, item 2)
 # ---------------------------------------------------------------------------
-
-_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def _clamp_confidence(value: Any) -> float:

@@ -113,6 +113,7 @@ local-uploads/
 local-outputs/
 scratch/
 tmp/
+dump/
 
 # Submodule build artifacts that shouldn't ship up
 backend/vendor/*/build/
@@ -122,3 +123,19 @@ backend/vendor/*/__pycache__/
 # Tenant production overlay secrets (never committed)
 overlay/.env
 overlay/*.secret
+
+# Generated: the Orbit Diner mockup page inlines every image as base64 (3.6 MB).
+# Rebuild with `python3 docs/assets/orbit-diner-mockup/build.py`.
+docs/assets/orbit-diner-mockup/mockup.html
+
+# Orbit Diner (epic #729). The tracked source of record is
+# frontend/vendor/orbit-diner/ (2.3 MB, see its README). The 129 MB of supplier
+# drops — PNG masters, preview bundles, reference renders, their tooling — is
+# archived outside the repo at
+# ~/Dev/_vendor-archive/contract-toaster/orbit-diner/2026-09-07/.
+# These patterns keep a future drop from cluttering `git status` and from being
+# swept up by a careless `git add -A`. (They would not have blocked the
+# autonomous loop: its sync gate ignores "??" lines.)
+frontend/orbit-diner-*/
+frontend/orbit-diner-*.zip
+frontend/orbit-diner-handoff.md

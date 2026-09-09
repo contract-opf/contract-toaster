@@ -1,9 +1,33 @@
-# Publish the two Docker Compose deploy images to GHCR.
+# Publish the two Docker Compose deploy images to GHCR, and roll the DTS
+# deployment (the live Coolify deployment) forward onto them.
 #
-# Manual-dispatch ONLY (workflow_dispatch, no push/PR trigger) — matches this
-# repo's "no auto-deploy; a human runs it deliberately" convention. Builds the
-# backend and frontend images from the deploy/dts/ Dockerfiles (repo-root
-# context) and pushes each as :latest and :<short-sha> to
+# AUTOMATIC ON GREEN (owner decision, 2026-09-08). This workflow now runs on
+# its own when "CI pipeline" finishes successfully on main, and it triggers the
+# Coolify pull itself. No human clicks anything on the happy path.
+#
+# WHAT THIS DOES **NOT** CHANGE. ci-pipeline.yml's security invariant 1 — "No
+# auto-deploy from main", promotion to App Runner is a deliberate, audited,
+# cosign-verified step with an audit row, and AppStack pins
+# autoDeploymentsEnabled=false (issue #55) — is UNTOUCHED. That governs the AWS
+# production path. This workflow governs the DTS/Coolify path only. The two
+# deployment targets deliberately have different rules, and loosening this one
+# is not licence to loosen that one.
+#
+# The gate is "CI pipeline" completing successfully, because that is the
+# workflow that already runs the whole bar: the full Python suite, docs-lint,
+# the detector-correctness gates, the dependency/container scan, and
+# scripts/check-frontend.sh (its GATES A-E). Keying off it rather than
+# re-running the checks here keeps one definition of green.
+#
+# HONEST LIMIT ON WHAT GREEN PROVES. vitest runs jsdom with `css: false`, so no
+# gate in that set can see a stylesheet. Issue #727 shipped a receipt whose CSS
+# had been deleted out from under it and every gate stayed green; a human
+# reading the diff caught it. Automatic promotion here means that class of
+# defect reaches the live Coolify deployment without a human in the loop. That is
+# the accepted trade, recorded so the next reader knows it was a choice.
+#
+# Builds the backend and frontend images from the deploy/dts/ Dockerfiles
+# (repo-root context) and pushes each as :latest and :<short-sha> to
 # ghcr.io/<repository-owner>/contract-toaster-dts-{backend,frontend}.
 #
 # Auth uses the built-in GITHUB_TOKEN (packages: write) — no extra secret. The
@@ -17,6 +41,13 @@
 name: Publish Docker Compose images
 
 on:
+  # Automatic: the moment the full gate goes green on main.
+  workflow_run:
+    workflows: ["CI pipeline"]
+    types: [completed]
+    branches: [main]
+  # Manual is kept, for republishing a commit whose CI run has aged out and for
+  # deploying from a branch deliberately.
   workflow_dispatch:
 
 permissions:
@@ -26,7 +57,22 @@ permissions:
 jobs:
   publish:
     name: Build and push
+    # A failed, cancelled or skipped CI pipeline must not publish. On a manual
+    # dispatch there is no workflow_run payload and the operator is the gate.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+    env:
+      # workflow_run reports the triggering run's head commit here. github.sha
+      # in that context can point at the default branch tip instead, which
+      # would silently publish a DIFFERENT commit than the one that passed.
+      TARGET_SHA: >-
+        ${{ github.event_name == 'workflow_run'
+            && github.event.workflow_run.head_sha
+            || github.sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +84,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Build the commit that passed, not whatever main points at now.
+          ref: ${{ env.TARGET_SHA }}
 
       - name: Compute image ref and short SHA
         id: meta
@@ -46,7 +95,7 @@ jobs:
           # publishes under whichever org hosts it (issue #406).
           owner="$(echo "${{ github.repository_owner }}" | tr "[:upper:]" "[:lower:]")"
           echo "image=ghcr.io/${owner}/contract-toaster-dts-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
-          short_sha="${GITHUB_SHA::7}"
+          short_sha="${TARGET_SHA::7}"
           echo "sha=${short_sha}" >> "$GITHUB_OUTPUT"
           # VERSION follows the AWS path's convention (ci-pipeline.yml:320-321):
           # "<short-sha>-<UTC build timestamp>", unique per build so two builds
@@ -62,17 +111,24 @@ jobs:
 
       - name: Build image
         run: |
-          # Version metadata is baked into the BACKEND image only: it is what
-          # serves GET /version (issue #424). deploy/dts/frontend.Dockerfile
-          # declares no such ARGs, so passing them there would only produce an
-          # unconsumed-build-arg warning.
+          # Version metadata is baked into BOTH images (issues #424, #652).
+          #
+          #   backend  — ARG/ENV VERSION, COMMIT_SHA: what GET /version serves.
+          #   frontend — the same two ARGs, turned into VITE_BUILD_VERSION /
+          #              VITE_COMMIT_SHA and inlined into the bundle by Vite,
+          #              so the SPA can say which commit IT was built from.
+          #              Without that the Settings tab cannot distinguish "the
+          #              two halves agree" from #613's stale backend stamp.
+          #
+          # Both legs pass the SAME --build-arg names, so this is now
+          # unconditional; the per-leg `version` output still differs (each
+          # matrix leg computes its own build timestamp), which is exactly why
+          # agreement is decided on COMMIT_SHA and not on the version string.
           # Seeded with -f so the array is never empty (expanding an empty array
           # is an error on bash < 4.4 under `set -u`).
           build_flags=(-f "${{ matrix.dockerfile }}")
-          if [ "${{ matrix.component }}" = "backend" ]; then
-            build_flags+=(--build-arg "VERSION=${{ steps.meta.outputs.version }}")
-            build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.sha }}")
-          fi
+          build_flags+=(--build-arg "VERSION=${{ steps.meta.outputs.version }}")
+          build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.sha }}")
           docker build \
             "${build_flags[@]}" \
             -t "${{ steps.meta.outputs.image }}:latest" \
@@ -94,3 +150,67 @@ jobs:
             "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}" \
             | cut -d@ -f2)"
           echo "Pushed image digest: ${digest}"
+
+  deploy:
+    name: Roll the DTS deployment forward
+    needs: publish
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Trigger the Coolify pull
+        env:
+          # The URL that tells Coolify to redeploy. This is a GITHUB ACTIONS
+          # SECRET (repo Settings -> Secrets and variables -> Actions), not a
+          # Coolify environment variable — the runner is the thing that needs to
+          # read it. Its VALUE comes from Coolify:
+          #
+          #   https://<your-coolify-host>/api/v1/deploy?uuid=<resource-uuid>&force=false
+          #
+          # where <resource-uuid> is the last path segment of the resource's own
+          # page in the Coolify UI.
+          #
+          # While it is unset this step says so and stops WITHOUT failing: the
+          # images stay published and the deployment simply does not move, which
+          # is the safe direction to fail.
+          WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK }}
+          # Coolify's API deploy endpoint authenticates with a bearer token
+          # (Coolify -> Keys & Tokens -> API tokens). A plain per-resource
+          # webhook URL that already carries its own token does not need this.
+          TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          # Coolify's /api/v1/deploy is a GET endpoint — POSTing to it returns
+          # 405 and fails this job. Override to POST only for a webhook style
+          # that wants it (repo Settings -> Secrets and variables -> Variables).
+          METHOD: ${{ vars.COOLIFY_DEPLOY_METHOD || 'GET' }}
+          SHA: ${{ needs.publish.outputs.sha }}
+        run: |
+          set -uo pipefail
+          if [ -z "${WEBHOOK}" ]; then
+            echo "::warning title=DTS deploy not wired::COOLIFY_DEPLOY_WEBHOOK is unset."
+            echo "Images for ${SHA} are published; the deployment was NOT rolled forward."
+            echo "Add the secret, or pull manually in Coolify (Contract Toaster -> Restart)."
+            exit 0
+          fi
+          auth=()
+          if [ -n "${TOKEN}" ]; then auth=(-H "Authorization: Bearer ${TOKEN}"); fi
+          # --fail-with-body so a 4xx/5xx fails the job AND still prints
+          # Coolify's reason, instead of exiting 0 on an error page.
+          if ! code="$(curl -sS --fail-with-body --max-time 60 \
+                -o /tmp/coolify-response.txt -w '%{http_code}' \
+                "${auth[@]}" -X "${METHOD}" "${WEBHOOK}")"; then
+            echo "Coolify refused the deploy (HTTP ${code:-none}):"
+            cat /tmp/coolify-response.txt || true
+            exit 1
+          fi
+          echo "Coolify accepted the deploy for ${SHA} (HTTP ${code})."
+          cat /tmp/coolify-response.txt || true
+
+      - name: Say what to verify
+        run: |
+          # NOT GET /version: issue #613 is open — the backend build cache can
+          # ignore a changed --build-arg COMMIT_SHA, so that endpoint may serve
+          # a stale stamp even after a good pull. The SPA bakes its own commit
+          # in at build time (VITE_COMMIT_SHA), so the Settings tab showing the
+          # two halves agree is the honest check.
+          echo "Rolled ${SHA} onto the DTS host."
+          echo "Verify in the app's Settings tab, not GET /version (issue #613)."
+        env:
+          SHA: ${{ needs.publish.outputs.sha }}

@@ -24,6 +24,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { pressSubmit } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -91,7 +92,7 @@ const RUNNING = {
  * file and submit. The submission response supplies the review_id that starts
  * polling.
  */
-function submitAReview(): void {
+async function submitAReview(): Promise<void> {
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   const file = new File(['x'], 'contract.docx', {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -101,7 +102,9 @@ function submitAReview(): void {
   // directly anyway.
   Object.defineProperty(input, 'files', { value: [file], configurable: true });
   fireEvent.change(input);
-  fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+  // Issue #733: the console has no <form> — its lever IS the submit — so the
+  // review is started through the go control on either surface.
+  await pressSubmit();
 }
 
 describe('stopping a running review', () => {
@@ -124,16 +127,16 @@ describe('stopping a running review', () => {
     // reported review was wedged in, and precisely when a stop is most needed.
     stubFetch({ detail: RUNNING });
     render(<ReviewSubmission catalogVersion={0} />);
-    await waitFor(() => expect(document.querySelector('form')).toBeTruthy(), WAIT);
-    submitAReview();
+    await screen.findByTestId('review-file-input');
+    await submitAReview();
     await screen.findByTestId('review-cancel-button', {}, WAIT);
   });
 
   it('POSTs the cancel and switches to an honest stopping state', async () => {
     const { cancelCalls } = stubFetch({ detail: RUNNING });
     render(<ReviewSubmission catalogVersion={0} />);
-    await waitFor(() => expect(document.querySelector('form')).toBeTruthy(), WAIT);
-    submitAReview();
+    await screen.findByTestId('review-file-input');
+    await submitAReview();
 
     const button = await screen.findByTestId('review-cancel-button', {}, WAIT);
     // ct-button renders a real <button> into its light DOM; click that.
@@ -145,16 +148,24 @@ describe('stopping a running review', () => {
     );
     // The button must not simply sit there looking unpressed, and must not
     // claim the review has stopped either — the pipeline is still running.
-    const pending = await screen.findByTestId('review-cancel-pending', {}, WAIT);
-    expect(pending.textContent).toMatch(/stopping/i);
-    expect(screen.queryByTestId('review-cancel-button')).toBeNull();
+    // The control must not sit there looking unpressed, and must not claim the
+    // review has stopped either — the pipeline is still running. The console's
+    // lever is one element that relabels itself and disarms (issue #733).
+    await waitFor(
+      () =>
+        expect(
+          screen.getByTestId('review-cancel-button').getAttribute('aria-disabled'),
+        ).toBe('true'),
+      WAIT,
+    );
+    expect(screen.getByTestId('review-cancel-button').textContent).toMatch(/stopping/i);
   });
 
   it('says so plainly when the review finished before it could be stopped', async () => {
     stubFetch({ detail: RUNNING, cancelStatus: 409 });
     render(<ReviewSubmission catalogVersion={0} />);
-    await waitFor(() => expect(document.querySelector('form')).toBeTruthy(), WAIT);
-    submitAReview();
+    await screen.findByTestId('review-file-input');
+    await submitAReview();
 
     const button = await screen.findByTestId('review-cancel-button', {}, WAIT);
     fireEvent.click(button.querySelector('button') ?? button);

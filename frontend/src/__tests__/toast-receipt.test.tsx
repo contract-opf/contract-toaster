@@ -21,7 +21,7 @@
  *
  * Fully offline: Amplify auth is mocked, fetch is stubbed, canvas is stubbed.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { ToastReceipt, drawReceipt } from '../toaster/ToastReceipt';
 import {
@@ -32,6 +32,10 @@ import {
   toastedIn,
   type ReceiptLine,
 } from '../toaster/receipt';
+import { receiptImageWidth, saveReceiptImage } from '../toaster/receiptImage';
+import { OrbitDiner } from '../orbit-diner/OrbitDiner';
+import type { Playbook, ReviewModel } from '../orbit-diner/types';
+import { resolveStyle } from './support/orbitCss';
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -513,5 +517,287 @@ describe('History prints the same receipt for a past review', () => {
     // One detail request, not two: the receipt rides the fetch the
     // instructions expander was already making.
     expect(detailCalls).toHaveLength(1);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Issue #721: ONE receipt owner. `toaster/receiptImage.ts` is the only canvas
+// drawing left in the app -- this component's "Save receipt" and the Orbit
+// Diner console's "Save image" are two CALLERS of it, never two
+// implementations. The kit shipped its own 840 px / 28 px exporter; two
+// exporters mean two ideas of what the saved PNG contains, which is the drift
+// `toaster/receipt.ts` exists to prevent.
+// ---------------------------------------------------------------------------
+describe('the one canvas exporter, shared with the console', () => {
+  it('draws the rows it was handed, verbatim, and never re-flows them', () => {
+    // The console hands it rows wrapped at the receipt's own width. If the
+    // exporter re-wrapped them, the PNG and the clipboard would disagree the
+    // moment the two widths differed -- so it must draw exactly what it got.
+    const { drawn } = stubCanvas();
+    const rows = receiptText(receiptLines(FULL, 'Synthetic NDA Sample')).split('\n');
+    expect(saveReceiptImage(rows, receiptFilename(FULL.review_id, 'png'))).toBe(true);
+    expect(drawn).toEqual(rows);
+    expect(lastDownload()?.download).toBe('toast-receipt-abcd1234.png');
+  });
+
+  it('widens the image to hold an over-long row instead of clipping it', () => {
+    // A long value -- the filename line, once #518 puts `original_filename`
+    // on the row -- must survive the export whole. The image is sized off its
+    // longest row, so nothing is cut against the right edge.
+    const long = `Original file ${'.'.repeat(20)} ${'a'.repeat(120)}.docx`;
+    expect(receiptImageWidth([long])).toBeGreaterThan(receiptImageWidth(['CONTRACT TOASTER']));
+    expect(receiptImageWidth([long])).toBeGreaterThan(long.length * 7);
+    // ...and a short receipt is still receipt-shaped rather than a label.
+    expect(receiptImageWidth(['CONTRACT TOASTER'])).toBe(420);
+  });
+
+  it('says it failed rather than reporting a save that never happened', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    expect(saveReceiptImage(['CONTRACT TOASTER'], 'toast-receipt-abcd1234.png')).toBe(false);
+    expect(lastDownload()).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #740 (owner decision N7): printing the Review route prints the
+// RECEIPT, not a screenshot of the appliances.
+//
+// The console keeps the printed sheet as its own element — hidden on screen,
+// rendered on every status — and `orbit.css`'s `@media print` block lets that
+// element through and nothing else. Three claims are worth pinning, because
+// each fails silently:
+//
+//   1. The sheet says the canonical lines VERBATIM. It is the fourth
+//      rendering of `receiptLines()` (slip, clipboard, PNG, paper), so the
+//      same rule applies: a line the row cannot source is dropped, never
+//      filled in. Asserted against `receiptText(receiptLines(...))` directly,
+//      never against a fixture of expected words.
+//   2. It prints with the overlay CLOSED. `Cmd/Ctrl+P` is not a button the
+//      console owns, so a sheet that only existed inside the open dialog
+//      would print a blank page for everyone who used the browser's own
+//      command — which is what the rule this replaces actually did.
+//   3. Only the sheet prints. That is a claim about the CASCADE, so it is
+//      resolved off the shipped stylesheet and joined to the rendered DOM by
+//      `Element.matches` (`support/orbitCss`): `.od-console > *:not(…)` is a
+//      structural selector, and reading the CSS as text would prove only that
+//      somebody typed it. Every negative below is paired with the same
+//      element resolved in `screen` mode, which fails if the resolver stops
+//      discriminating between the two.
+//
+// Mutation-checked while written: deleting the `display: none !important`
+// rule, deleting the `.od-print-receipt { display: block }` rule, and
+// swapping the sheet's content for a fixture each turn a different subset of
+// these red.
+// ---------------------------------------------------------------------------
+
+/** Exactly what `ReviewSubmission` projects onto `model.receiptLines`. */
+const printedRows = (review: object, playbookName?: string): string[] =>
+  receiptText(receiptLines(review, playbookName)).split('\n');
+
+const CONSOLE_PLAYBOOKS: Playbook[] = [
+  { playbook_id: 'synthetic-nda', display_name: 'Synthetic NDA Sample', status: 'active' },
+];
+
+function consoleModel(patch: Partial<ReviewModel> = {}): ReviewModel {
+  return {
+    status: 'DONE',
+    fileSelected: true,
+    hasOutput: true,
+    preferences: {
+      playbookId: 'synthetic-nda',
+      intensity: 'medium',
+      notesMode: 'none',
+      instructions: '',
+      dispositionNote: '',
+    },
+    playbooks: CONSOLE_PLAYBOOKS,
+    internalNotesAvailable: false,
+    browningReadback: 'Medium markup.',
+    browningNote: 'Medium markup.',
+    guidancePrecedence: 'Your instructions govern the playbook’s positions.',
+    cost: { kind: 'unavailable' },
+    muted: true,
+    notification: 'unsupported',
+    receiptLines: printedRows(FULL, 'Synthetic NDA Sample'),
+    ...patch,
+  };
+}
+
+function renderConsole(model: ReviewModel): { onAction: ReturnType<typeof vi.fn> } {
+  const onAction = vi.fn();
+  render(
+    <OrbitDiner
+      model={model}
+      keyboardShortcuts={false}
+      onFile={() => {}}
+      onPreferences={() => {}}
+      onAction={onAction}
+    />,
+  );
+  return { onAction };
+}
+
+function consoleRoot(): HTMLElement {
+  const node = document.querySelector<HTMLElement>('.od-console');
+  if (!node) throw new Error('the Orbit Diner console did not render');
+  return node;
+}
+
+/** Open the receipt overlay the way a person does. */
+function openReceiptOverlay(): void {
+  fireEvent.click(screen.getByRole('button', { name: /view review receipt/i }));
+}
+
+/** `window.print`, replaced rather than spied: jsdom declares it but does not
+ *  implement it, so calling the real one logs a virtual-console error. */
+function stubPrint(): ReturnType<typeof vi.fn> {
+  const print = vi.fn();
+  Object.defineProperty(window, 'print', { value: print, configurable: true, writable: true });
+  return print;
+}
+
+describe('issue #740 — the Review route prints the receipt', () => {
+  afterEach(() => {
+    delete (window as { print?: unknown }).print;
+  });
+
+  it('offers Print receipt in the overlay, and hands the page to the browser', () => {
+    const print = stubPrint();
+    const { onAction } = renderConsole(consoleModel());
+    openReceiptOverlay();
+
+    fireEvent.click(screen.getByTestId('review-receipt-print-button'));
+    expect(print).toHaveBeenCalledTimes(1);
+    // Printing is a view affordance the console performs on itself, like
+    // open/close — not a hand-off to the host's guarded action handler. A
+    // `receipt-print` Action would be a fourth place for this wiring to
+    // drift from the other three renderings.
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('does nothing, rather than throwing, where the browser cannot print', () => {
+    Object.defineProperty(window, 'print', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    renderConsole(consoleModel());
+    openReceiptOverlay();
+    expect(() => fireEvent.click(screen.getByTestId('review-receipt-print-button'))).not.toThrow();
+  });
+
+  it('prints the canonical lines verbatim, with the overlay never opened', () => {
+    renderConsole(consoleModel());
+    // No click: this is the `Cmd/Ctrl+P` path, and it must produce the same
+    // sheet as the key inside the overlay.
+    expect(screen.getByTestId('review-receipt-print-text').textContent).toBe(
+      printedRows(FULL, 'Synthetic NDA Sample').join('\n'),
+    );
+  });
+
+  it('drops on paper exactly what the receipt drops', () => {
+    const rows = printedRows(SPARSE);
+    renderConsole(consoleModel({ receiptLines: rows }));
+    const sheet = screen.getByTestId('review-receipt-print-text').textContent ?? '';
+
+    expect(sheet).toBe(rows.join('\n'));
+    // The sparse row's omissions survive the trip to paper: a sheet that
+    // filled any of these in would be a fourth rendering with its own idea of
+    // the facts, which is the drift `toaster/receipt.ts` exists to prevent.
+    expect(sheet).toContain('CONTRACT TOASTER');
+    expect(sheet).not.toContain('Playbook version');
+    expect(sheet).not.toContain('Primary');
+    expect(sheet).not.toContain('Critic');
+    expect(sheet.split('\n').length).toBeLessThan(
+      printedRows(FULL, 'Synthetic NDA Sample').length,
+    );
+  });
+
+  it('explains itself on paper when there is no receipt, rather than printing blank', () => {
+    renderConsole(consoleModel({ status: 'RUNNING', receiptLines: undefined }));
+
+    expect(screen.queryByTestId('review-receipt-print-text')).toBeNull();
+    const empty = screen.getByTestId('review-receipt-print-empty');
+    expect(empty.textContent ?? '').toMatch(/receipt/i);
+    expect((empty.textContent ?? '').trim().length).toBeGreaterThan(20);
+    // ...and it is what the print stylesheet actually lets through.
+    expect(resolveStyle(empty.parentElement as Element, ['display'], 'print')).toBe('block');
+  });
+
+  it('lets ONLY the sheet onto the printed page', () => {
+    renderConsole(consoleModel());
+    openReceiptOverlay();
+    const sheet = screen.getByTestId('review-receipt-print');
+    const root = consoleRoot();
+
+    // The console renders the sheet where the print rule can reach it: a
+    // direct child, which is what `.od-console > *:not(.od-print-receipt)`
+    // discriminates on.
+    expect(sheet.parentElement).toBe(root);
+    expect(resolveStyle(sheet, ['display'], 'print')).toBe('block');
+    // ...and it is never on screen, in either mode of the console.
+    expect(resolveStyle(sheet, ['display'], 'screen')).toBe('none');
+
+    const others = Array.from(root.children).filter((child) => child !== sheet);
+    expect(others.length).toBeGreaterThan(1);
+    for (const child of others) {
+      expect(
+        resolveStyle(child, ['display'], 'print'),
+        child.tagName + '.' + (child.getAttribute('class') ?? ''),
+      ).toBe('none');
+    }
+    // The resolver discriminates: the same children are not display:none on
+    // screen, so the loop above is reading the print block and not a stray
+    // unconditional rule.
+    expect(others.some((child) => resolveStyle(child, ['display'], 'screen') !== 'none')).toBe(
+      true,
+    );
+  });
+
+  it('keeps the artwork, the controls and every overlay off the paper', () => {
+    renderConsole(consoleModel());
+    openReceiptOverlay();
+    const sheet = screen.getByTestId('review-receipt-print');
+
+    // The sheet itself carries no appliance imagery and no control — it is a
+    // block of text, and nothing else can ride along inside it.
+    expect(
+      sheet.querySelector('img, svg, canvas, video, input, select, textarea, button, details, form'),
+    ).toBeNull();
+
+    // The generic "print whichever dialog happens to be open" rule this
+    // replaces printed the cover note, the disposition form, the review
+    // record or the shortcuts list depending on what was last opened. The
+    // dialog is OPEN here and still resolves to nothing on paper.
+    const dialog = consoleRoot().querySelector('dialog');
+    expect(dialog?.hasAttribute('open')).toBe(true);
+    expect(resolveStyle(dialog as Element, ['display'], 'print')).toBe('none');
+    // The critic/result disclosure and the instructions pad live inside it,
+    // so they go with it.
+    expect(dialog?.contains(screen.getByTestId('review-receipt-text'))).toBe(true);
+  });
+
+  it('paginates a long receipt instead of clipping it', () => {
+    // 200 rows is longer than any sheet of paper; the assertion is that
+    // nothing in the print cascade caps or clips the block, and that a page
+    // break may fall between its rows.
+    const long = Array.from({ length: 200 }, (_, i) => `Line ${i + 1}`);
+    renderConsole(consoleModel({ receiptLines: long }));
+    const text = screen.getByTestId('review-receipt-print-text');
+
+    expect(text.textContent).toBe(long.join('\n'));
+    expect(resolveStyle(text, ['max-height'], 'print')).toBe('none');
+    expect(resolveStyle(text, ['overflow'], 'print')).toBe('visible');
+    expect(resolveStyle(text, ['break-inside'], 'print')).toBe('auto');
+    expect(resolveStyle(text, ['page-break-inside'], 'print')).toBe('auto');
+    // The console is the sheet's ancestor, so its own clipping box would
+    // guillotine the overflow the rules above allow.
+    expect(resolveStyle(consoleRoot(), ['overflow'], 'print')).toBe('visible');
+    // Black on white, and selectable: real text at the type floor, never an
+    // image of a receipt.
+    expect(resolveStyle(text, ['color'], 'print')).toBe('#000');
+    expect(resolveStyle(text, ['background'], 'print')).toBe('#fff');
+    expect(resolveStyle(text, ['font-size'], 'print')).toBe('14px');
   });
 });

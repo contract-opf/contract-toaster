@@ -76,10 +76,10 @@ two, and three more gates hold that reconciliation in place:
       inside `<w:ins>`, so accepting all tracked changes PROMOTES a
       footnote to body text rather than removing it. Without this, "accept
       all and send" reads like a clean-copy procedure; it is not one.
-    - does not hand third-party counterparty paper a first-page cover
-      note: issue #629 moved that path onto the shared block compiler, so
-      it takes the header/footer placement like every other delivered
-      redline
+    - does not promise a first-page cover note on ANY path: issue #629
+      moved third-party paper onto the shared block compiler and issue
+      #631 deleted the standalone writer that was the last emitter, so
+      every delivered redline takes the header/footer placement
     - says the download filename carries no internal-notes signpost
       (`backend/src/download.py::redline_filename_for` emits
       `<stem>-redline.docx` in every mode; the filename half of epic #519
@@ -104,11 +104,12 @@ two, and three more gates hold that reconciliation in place:
     path being described
     - no "redundant export marker" framing: the marker is conditional on
       the review's notes mode (`include_marker`), not belt-and-braces
-    - every "cover note" mention names the path that actually emits one
-      (the standalone writer / fixture generation). The live first-party
-      path (`redline_generate.inject_export_marker_and_footnotes`) emits
-      header + footer ONLY, so an unattributed cover-note claim is false
-      for every real redline.
+    - every "cover note" mention is marked RETIRED. No shipping path
+      emits one: `redline_generate.inject_export_marker_and_footnotes`
+      (reached by first-party and third-party paper alike) emits header +
+      footer ONLY, and the standalone writer that placed a cover note was
+      deleted by issue #631 -- so an unqualified cover-note claim is false
+      for every redline anyone can obtain.
 
 Exit codes: 0 = pass, 1 = fail
 """
@@ -136,7 +137,7 @@ FIXTURE_DOCX_PATH = (
     REPO_ROOT / "infra" / "fixtures" / "mock-outputs" / "eiaa" / "pre-baked-redline.docx"
 )
 
-# The retired literal marker string (scripts/redline_docx_writer.py's old
+# The retired literal marker string (the standalone writer's old
 # MARKER_TEXT, pre-#513), plus its short form (the leading clause quoted on
 # its own elsewhere in these docs, e.g. the old attorney-approval watermark
 # copy). Its continued presence anywhere in these three docs would mean a
@@ -528,23 +529,23 @@ def gate_5_runbook_ship_ready(runbook_text: str) -> list[str]:
             f"  Missing pattern: {RUNBOOK_ACCEPT_ALL_PROMOTION_PATTERN.pattern[:160]!r}"
         )
 
-    # R5d: the cover-note placement belongs to the standalone writer. Issue
-    # #629 moved third-party counterparty paper onto the block compiler, so
-    # that path now takes the live header/footer placement -- a RUNBOOK
-    # sentence still handing third-party paper a first-page cover note sends
-    # the operator looking for a page that is not there.
+    # R5d: no delivered redline carries a first-page cover note. Issue #629
+    # moved third-party counterparty paper onto the block compiler and issue
+    # #631 deleted the standalone writer that was the last emitter, so a
+    # RUNBOOK sentence promising the operator a cover page -- on ANY path --
+    # sends them looking for a page that is not there.
     for sentence in re.split(r"(?<=[.!?])\s+", section):
         lowered_sentence = sentence.lower()
-        if "cover note" not in lowered_sentence or "third-party" not in lowered_sentence:
+        if "cover note" not in lowered_sentence and "cover page" not in lowered_sentence:
             continue
-        if "629" in lowered_sentence or "until" in lowered_sentence:
-            continue  # an explicitly historical statement is fine
+        if any(token in lowered_sentence for token in _COVER_NOTE_RETIREMENT_TOKENS):
+            continue  # an explicitly retired/historical statement is fine
         failures.append(
-            "  Gate R5d: RUNBOOK.md's marker section still attributes the first-page\n"
-            "  cover note to third-party counterparty paper. Issue #629 moved that\n"
-            "  path onto the block compiler (`generate_redline_from_blocks`), which\n"
-            "  takes the header/footer placement; only the standalone writer used for\n"
-            "  fixture generation appends a cover marker.\n"
+            "  Gate R5d: RUNBOOK.md's marker section still promises a first-page\n"
+            "  cover note without marking it retired. Issue #629 moved third-party\n"
+            "  paper onto the block compiler and issue #631 deleted the standalone\n"
+            "  writer that was the last emitter -- every path now places the marker\n"
+            "  in the header/footer only.\n"
             f"  Offending sentence: {sentence.strip()[:200]!r}"
         )
 
@@ -652,23 +653,32 @@ def gate_6_threat_model_notes_machinery(threat_text: str) -> list[str]:
 # conditional on the review's notes mode.
 _ARCHITECTURE_REDUNDANT_MARKER_PHRASE = "redundant export marker"
 
-# A "cover note" claim is only true of the path that emits one. The live
-# first-party path (`redline_generate.inject_export_marker_and_footnotes`)
-# emits header + footer ONLY, so an unattributed cover-note sentence is
-# false for every real redline. Any of these tokens on the same line counts
-# as attribution.
-_COVER_NOTE_ATTRIBUTION_TOKENS = (
-    "standalone writer",
-    "fixture generation",
-    "include_marker",
-    "mock fixture",
+# A "cover note" claim is true of NO path as of issue #631. It belonged to
+# the standalone whole-document writer, which is deleted; every surviving
+# path (`redline_generate.inject_export_marker_and_footnotes`, reached by
+# first-party and third-party paper alike since issue #629) emits header +
+# footer ONLY. So an unqualified cover-note sentence is false for every
+# redline anyone can obtain, and only an explicitly RETIRED/historical
+# mention is allowed. Any of these tokens on the same line marks it as such.
+#
+# (Before #631 this list named the path that emitted one -- "standalone
+# writer", "fixture generation". Those tokens are deliberately NOT accepted
+# any more: a sentence attributing a cover note to the standalone writer in
+# the present tense is now just as wrong as an unattributed one, because
+# that writer no longer exists.)
+_COVER_NOTE_RETIREMENT_TOKENS = (
+    "retired",
+    "deleted",
+    "#631",
+    "no delivered redline",
+    "gone with it",
 )
 
 
 def gate_7_architecture_marker_placement(architecture_text: str) -> list[str]:
     """ARCHITECTURE.md must not describe the marker as redundant/
-    unconditional, and every cover-note mention must name the path that
-    actually emits a cover note (issue #524)."""
+    unconditional, and every cover-note mention must be marked RETIRED --
+    no shipping path emits one (issue #524, updated by issue #631)."""
     failures: list[str] = []
 
     if _ARCHITECTURE_REDUNDANT_MARKER_PHRASE in architecture_text.lower():
@@ -683,15 +693,14 @@ def gate_7_architecture_marker_placement(architecture_text: str) -> list[str]:
         if "cover note" not in line.lower():
             continue
         lowered_line = line.lower()
-        if not any(token in lowered_line for token in _COVER_NOTE_ATTRIBUTION_TOKENS):
+        if not any(token in lowered_line for token in _COVER_NOTE_RETIREMENT_TOKENS):
             failures.append(
                 f"  Gate A2: ARCHITECTURE.md line {lineno} claims a first-page cover\n"
-                "  note without naming the path that emits one. Only the standalone\n"
-                "  writer (fixture generation) appends a cover marker\n"
-                "  (redline_docx_writer._append_cover_marker); the live first-party\n"
-                "  path emits header + footer only, so an unattributed claim is false\n"
-                "  for every real redline.\n"
-                f"  Expected one of {_COVER_NOTE_ATTRIBUTION_TOKENS} on that line."
+                "  note without marking it retired. NO shipping path emits one: the\n"
+                "  standalone writer that did was deleted by issue #631, and every\n"
+                "  surviving path emits header + footer only, so an unqualified claim\n"
+                "  is false for every redline anyone can obtain.\n"
+                f"  Expected one of {_COVER_NOTE_RETIREMENT_TOKENS} on that line."
             )
 
     return failures
@@ -801,7 +810,7 @@ def main() -> int:
     print()
     print(
         "Gate 7: ARCHITECTURE.md — marker is conditional, and every "
-        "cover-note claim names the path that emits one"
+        "cover-note claim is marked retired"
     )
     if g7:
         for f in g7:

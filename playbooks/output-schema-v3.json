@@ -79,8 +79,8 @@
         {
           "type": "string",
           "minLength": 1,
-          "maxLength": 2000,
-          "description": "Non-empty summary string. Subject to the leakage scan (same scope as other human-surfaced model prose). Must not disclose counterparty names, precedent deal dates, verbatim precedent text, internal playbook IDs, or system-prompt fragments."
+          "maxLength": 8000,
+          "description": "Non-empty summary string. Subject to the leakage scan (same scope as other human-surfaced model prose). Must not disclose counterparty names, precedent deal dates, verbatim precedent text, internal playbook IDs, or system-prompt fragments. LENGTH BUDGET (issue #674): MEASURED -- largest observed verdict_summary was 2635 characters (live scripts/live_smoke_eval.py --dump-dir runs of the #671 ladder on 2026-09-02, against the real educational-affiliation playbook over a SYNTHETIC multi-clause affiliation agreement; three observations -- 2068, 2202, 2635 -- ALL THREE rejected outright by the old 2000 cap, and in one run the informed retry came back at exactly the same length, 2202 again, spending the whole attempt budget). Cap set to 8000: 3.0x the largest observed value, 5365 characters of headroom. 8000 is NOT itself a measured number -- it is the FREE-PROSE class bound this schema already gives every model-authored field with no layout constraint (primary_replacement_text, critic_suggested_replacement, Segment.text, BlockOp.new_text), so no new number enters the artifact; what the measurement supplies is the margin. Raised from 2000, a LAYOUT-class cap this field never belonged in: verdict_summary is never rendered verbatim into the delivered .docx (redline_generate carries it into the result payload and cover_note_pass reads it as ONE input line), so nothing about where it lands justified a cap at all. The number is now also STATED to the model: primary_review_pass.render_length_budget_block reads it off this artifact into the OUTPUT CONTRACT prompt block, because model_output_schema._UNSUPPORTED_STRING_CONSTRAINT_KEYWORDS strips every maxLength out of the provider-facing projection -- structured output enforces shape, never length. See docs/output-contract.md 'Length budgets', which carries the full measurement table."
         }
       ]
     }
@@ -157,8 +157,8 @@
         },
         "playbook_topic_id": {
           "type": "string",
-          "pattern": "^[a-z0-9]+(?:[-.][a-z0-9]+)*$",
-          "description": "The topic id from the ACTIVE playbook that governs this issue, copied verbatim from that playbook's own vocabulary: a v1 playbook's kebab-case topics[].id (indemnification), or an OPF playbook's dotted id (clause.indemnification). Deliberately NOT any string -- this value reaches the audit table and the replacement_text lookup, so uppercase, whitespace and path punctuation stay rejected. Used by the pipeline to look up replacement_text constraints and by the audit table to record topic coverage."
+          "pattern": "^[a-z0-9_]+(?:[-.][a-z0-9_]+)*$",
+          "description": "The topic id from the ACTIVE playbook that governs this issue, copied verbatim from that playbook's own vocabulary: a v1 playbook's kebab-case topics[].id (indemnification), or an OPF playbook's dotted id (clause.indemnification, clause.ferpa_student_records). UNDERSCORE IS A WORD CHARACTER HERE, NOT A SEPARATOR (issue #672): playbooks/opf/playbook.schema-0.2.json and playbook.schema-0.3.json -- the schemas every uploaded playbook is validated against -- constrain an OPF playbook's taxonomy.entries[].id to '^[a-z0-9_]+$', so snake_case is the only spelling a multi-word OPF taxonomy id can have, and the digest names each clause 'clause.<taxonomy_id>'. Rejecting '_' therefore made 39 of the 61 topics in the real educational-affiliation playbook uncitable and discarded every review that correctly cited one (issue #671); the toaster consumes a playbook authored elsewhere and does not get to dictate its id vocabulary. Deliberately still NOT any string -- this value reaches the audit table and the replacement_text lookup, so uppercase, whitespace and path punctuation stay rejected, as does a leading, trailing or doubled '-'/'.' separator. Used by the pipeline to look up replacement_text constraints and by the audit table to record topic coverage."
         },
         "internal_precedent_citation": {
           "description": "Internal audit-only reference to corpus precedent (clause_id, source document, or null). Stripped from generated .docx footnotes. Must not appear in external output. Retained only in retention-governed confidential storage.",
@@ -330,8 +330,8 @@
               },
               "critic_objection": {
                 "type": "string",
-                "maxLength": 800,
-                "description": "Why the critic believes the primary's replacement drifts from the playbook."
+                "maxLength": 8000,
+                "description": "Why the critic believes the primary's replacement drifts from the playbook. LENGTH BUDGET (issue #674): MEASURED -- largest observed critic_objection was 1275 characters (live scripts/live_smoke_eval.py --dump-dir runs of the #671 ladder on 2026-09-02, against the real educational-affiliation playbook over a SYNTHETIC multi-clause affiliation agreement; two observations, 910 and 1275, BOTH rejected by the old 800 cap, and in one run the informed retry came back at the same 910 and burned the attempt budget). Cap set to 8000: 6.3x the largest observed value, 6725 characters of headroom. 8000 is NOT itself a measured number -- it is the FREE-PROSE class bound (see verdict_summary); the measurement supplies the margin, not the value. Raised from 800, which was the DELIVERED-FOOTNOTE cap -- the budget external_rationale_for_footnote carries because its text is typeset into a footnote of the document the counterparty reads. This field is internal audit content that reaches nobody outside the reviewing team, so it never had that justification; it held 800 by copy. It also cannot be an order of magnitude smaller than its own evidence: the critic tasking requires evidence FIRST and objection SECOND, and the wording it is contesting sits in the sibling primary_replacement_text at 8000."
               },
               "critic_suggested_replacement": {
                 "type": "string",
@@ -355,7 +355,8 @@
               },
               "objection": {
                 "type": "string",
-                "maxLength": 800
+                "maxLength": 8000,
+                "description": "Why the critic believes the first reviewer's rationale does not hold up (duties 2 and 3 of the critic tasking: over-flagging, and an external rationale that misstates the clause or the playbook position). LENGTH BUDGET (issue #674): 8000, the FREE-PROSE class bound -- NOT MEASURED, and recorded as such. This field was never populated in any of the ten live scripts/live_smoke_eval.py --dump-dir runs of the #671 ladder on 2026-09-02, against the real educational-affiliation playbook over a SYNTHETIC multi-clause affiliation agreement, so there is no observed length for it. It is raised from 800 on its sibling critic_objection's measurement and argument -- same author, same pass, same internal-audit audience, same evidence-before-conclusion instruction -- because leaving one of the critic's two objection channels on the delivered-footnote cap would have moved the failure rather than fixed it. See docs/output-contract.md 'Length budgets'."
               }
             }
           }

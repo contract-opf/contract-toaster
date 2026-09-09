@@ -206,26 +206,75 @@ def test_prompt_names_mode_none_topics_as_flag_only(failures: list[str]) -> None
     # overlay FORBIDS `proposed_replacement_text` outright, so a modes block
     # still naming it would instruct a field the active validator rejects --
     # the drift this test exists to prevent, inverted.
-    if pp.authors_block_transcripts(pp.load_output_schema()):
-        if "proposed_replacement_text" in block:
-            failures.append(
-                "[1d] Under a block-transcript contract the replacement-text-modes "
-                "block must NOT name \"proposed_replacement_text\" -- the same "
-                "assembled prompt forbids that key, so instructing it here would "
-                "produce a response the active validator rejects."
-            )
-        for token in ("block_patches", "block_ops", "issue_key"):
-            if token not in block:
-                failures.append(
-                    f"[1d] Under a block-transcript contract the replacement-text-modes "
-                    f"block must express flag-only in transcript terms (author no edit); "
-                    f"missing {token!r}."
-                )
-    elif "proposed_replacement_text" not in block:
+    #
+    # BOTH ARMS ARE EXERCISED (issue #641). Until this ticket, only the arm
+    # matching the shipped artifact ran: `pp.load_output_schema()` takes the
+    # module default, which the #627 cutover pinned to v3, so nothing in this
+    # file ever reached the v2 arm and it could not have failed. Proven by
+    # putting `raise AssertionError` in it -- the file still exited 0. A gate
+    # that cannot execute is not a gate, so the v2 artifact is selected here
+    # through the SAME seam production reads, exactly as
+    # `test_v3_flip_627.py::test_the_critic_tasking_wording_is_gated_on_the_active_contract`
+    # does for the critic tasking.
+    if not pp.authors_block_transcripts(pp.load_output_schema()):
         failures.append(
-            "[1d] Replacement-text-modes block must name the proposed_replacement_text "
-            "field it constrains."
+            "[1d] the ACTIVE output contract is not a block-transcript contract; since "
+            "issue #627 it must be, and the v3 assertions below cannot run without it."
         )
+        return
+    if "proposed_replacement_text" in block:
+        failures.append(
+            "[1d] Under a block-transcript contract the replacement-text-modes "
+            "block must NOT name \"proposed_replacement_text\" -- the same "
+            "assembled prompt forbids that key, so instructing it here would "
+            "produce a response the active validator rejects."
+        )
+    for token in ("block_patches", "block_ops", "issue_key"):
+        if token not in block:
+            failures.append(
+                f"[1d] Under a block-transcript contract the replacement-text-modes "
+                f"block must express flag-only in transcript terms (author no edit); "
+                f"missing {token!r}."
+            )
+
+    # The v2 arm, reached the only way anything reaches it: by selecting the
+    # superseded artifact through `pp.load_output_schema`, the seam
+    # `render_replacement_text_modes_block` itself reads. The cutover changed
+    # the wording; it did not delete the superseded path, so that path is
+    # asserted rather than left to rot.
+    original_loader = pp.load_output_schema
+    try:
+        pp.load_output_schema = lambda *_a, **_kw: original_loader(pp.OUTPUT_SCHEMA_V2_PATH)
+        if pp.authors_block_transcripts(pp.load_output_schema()):
+            failures.append(
+                "[1f] output-schema-v2.json reports as a block-transcript contract, so this "
+                "test cannot reach the v2 arm of the gate."
+            )
+            return
+        v2_block = pp.render_replacement_text_modes_block(playbook)
+    finally:
+        pp.load_output_schema = original_loader
+
+    if v2_block is None:
+        failures.append("[1f] the v2 arm rendered no modes block at all.")
+    else:
+        if "proposed_replacement_text" not in v2_block:
+            failures.append(
+                "[1f] with the v2 artifact selected, the modes block must still name the "
+                "`proposed_replacement_text` field it constrains -- under that contract the "
+                "model authors it, so a block that never names it constrains nothing."
+            )
+        for token in ("block_patches", "block_ops"):
+            if token in v2_block:
+                failures.append(
+                    f"[1f] the v2 modes block must not teach the v3 transcript carrier "
+                    f"{token!r}; a v2 model emitting it fails `additionalProperties: false`."
+                )
+        if v2_block == block:
+            failures.append(
+                "[1f] the v2 and v3 modes blocks are byte-identical, so the contract gate in "
+                "`render_replacement_text_modes_block` is not actually gating anything."
+            )
 
     bounded_topics = [t["id"] for t in playbook["topics"] if t["id"] not in mode_none_topics]
     for topic_id in bounded_topics:

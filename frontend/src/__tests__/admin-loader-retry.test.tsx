@@ -41,7 +41,7 @@ const BODIES: Record<string, unknown> = {
     key_store_available: true,
     key_set: false,
     key_source: 'none',
-    key_hint: null,
+    key_fingerprint: null,
     updated_by: null,
     model_provider: 'openrouter',
   },

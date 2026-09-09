@@ -39,9 +39,10 @@ file FAILS on import until it does.
   6. The rationale footnote BODY is itself tracked (issue #615): wrapped in
      a `<w:ins>` carrying `w:id`/`w:author`/`w:date`, so a reject-all leaves
      no orphaned machine-authored commentary behind.
-  7. Scope item 1: the namespace-preservation helpers now live in
-     `scripts/ooxml_util.py` and `redline_inplace` exposes the SAME function
-     objects under its old names -- zero behaviour change for its callers.
+  7. Scope item 1: the namespace-preservation helpers live in
+     `scripts/ooxml_util.py` and NOWHERE else -- every writer that rewrites
+     `word/document.xml` reaches the same function objects rather than
+     carrying a private copy that could drift.
   8. A rejected transcript is a caller-contract violation (`ValueError`):
      an unproven transcript must never reach a writer.
 
@@ -104,7 +105,7 @@ if redline_block_apply is not None:
     import extraction_normalization_stage  # type: ignore
     import ooxml_util  # type: ignore
     import redline_generate  # type: ignore
-    import redline_inplace  # type: ignore
+    import redline_projections  # type: ignore
 
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -873,25 +874,39 @@ def _strip_tracked_insertions(root: ET.Element) -> str:
 
 def test_ooxml_util_is_the_single_definition(failures: list) -> None:
     case = "ooxml_util_is_the_single_definition"
-    pairs = (
-        ("_scan_tag_end", "scan_tag_end"),
-        ("_root_open_tag", "root_open_tag"),
-        ("_declared_namespaces", "declared_namespaces"),
-        ("register_declared_namespaces", "register_declared_namespaces"),
-        ("_declared_namespaces_anywhere", "declared_namespaces_anywhere"),
-        ("_merge_hoisted_namespaces", "merge_hoisted_namespaces"),
+    shared_names = (
+        "scan_tag_end",
+        "root_open_tag",
+        "declared_namespaces",
+        "register_declared_namespaces",
+        "declared_namespaces_anywhere",
+        "merge_hoisted_namespaces",
     )
-    for legacy_name, shared_name in pairs:
-        legacy = getattr(redline_inplace, legacy_name, None)
+    # Every module that rewrites word/document.xml. If one of them ever grows
+    # its own same-named helper, this catches the copy before it can drift.
+    writers = (
+        redline_block_apply,
+        redline_generate,
+        redline_projections,
+        extraction_normalization_stage,
+    )
+    for shared_name in shared_names:
         shared = getattr(ooxml_util, shared_name, None)
         if shared is None:
             failures.append(f"[{case}] ooxml_util.{shared_name} does not exist")
             continue
-        if legacy is not shared:
+        if getattr(shared, "__module__", None) != "ooxml_util":
             failures.append(
-                f"[{case}] redline_inplace.{legacy_name} is not ooxml_util.{shared_name} -- "
-                f"the helper was copied, not extracted"
+                f"[{case}] ooxml_util.{shared_name} is defined in "
+                f"{getattr(shared, '__module__', None)!r}, not in ooxml_util"
             )
+        for writer in writers:
+            local = getattr(writer, shared_name, None)
+            if local is not None and local is not shared:
+                failures.append(
+                    f"[{case}] {writer.__name__}.{shared_name} is not "
+                    f"ooxml_util.{shared_name} -- the helper was copied, not shared"
+                )
 
     # And it still does its job: an xmlns declared only inside an attribute
     # VALUE survives the splice, which is the property the helpers exist for.

@@ -659,3 +659,98 @@ def generate_presigned_download_url(
             "Cache-Control": "no-store",
         },
     )
+
+
+def generate_presigned_playbook_download_url(
+    playbook_id: str,
+    version: str,
+    storage_key: str,
+    caller_user_row: dict[str, Any],
+    s3_client: Any,
+    *,
+    uploads_bucket: str | None = None,
+    filename: str | None = None,
+) -> JSONResponse:
+    """Generate a short-lived presigned URL for a playbook version download.
+
+    Security controls:
+      1. Admin check: caller must be an admin (is_admin in DynamoDB users row).
+      2. Storage key validation: key must be non-empty, start with 'playbooks/{playbook_id}/',
+         and contain no '..' path traversal.
+      3. Object existence: HEAD check in the uploads bucket, returns HTTP 410 Gone if
+         purged/missing.
+      4. Presigned GET URL with 60-second TTL (PRESIGNED_URL_TTL_SECONDS) and
+         ResponseContentDisposition attachment.
+      5. Returned with Cache-Control: no-store.
+    """
+    if not _is_admin(caller_user_row):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privilege required to download a playbook version.",
+        )
+
+    expected_prefix = f"playbooks/{playbook_id}/"
+    if (
+        not storage_key
+        or not storage_key.startswith(expected_prefix)
+        or storage_key.startswith("/")
+        or "\\" in storage_key
+        or ".." in storage_key.split("/")
+        or len(storage_key) <= len(expected_prefix)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Download denied: the requested object key is not scoped to this playbook.",
+        )
+
+    bucket = uploads_bucket or get_uploads_bucket()
+
+    try:
+        s3_client.head_object(Bucket=bucket, Key=storage_key)
+    except ClientError as exc:
+        err_code = exc.response.get("Error", {}).get("Code", "")
+        http_status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if err_code in ("404", "NoSuchKey", "NotFound") or http_status == 404:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="This playbook version is no longer available in storage.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Unable to check whether playbook file is available: {exc!r}",
+        ) from exc
+
+    presigning_client = s3_client
+    if config.s3_public_endpoint_url():
+        presigning_client = boto3.client("s3", **config.presigning_s3_client_kwargs())
+
+    download_filename = filename or f"{playbook_id}-v{version}.json"
+    params: dict[str, Any] = {
+        "Bucket": bucket,
+        "Key": storage_key,
+        "ResponseContentDisposition": f'attachment; filename="{download_filename}"',
+    }
+    try:
+        presigned_url = presigning_client.generate_presigned_url(
+            "get_object",
+            Params=params,
+            ExpiresIn=PRESIGNED_URL_TTL_SECONDS,
+        )
+    except ClientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Unable to generate presigned URL: {exc!r}",
+        ) from exc
+
+    return JSONResponse(
+        content={
+            "url": presigned_url,
+            "expires_in": PRESIGNED_URL_TTL_SECONDS,
+            "playbook_id": playbook_id,
+            "version": version,
+        },
+        headers={
+            "Cache-Control": "no-store",
+        },
+    )
+

@@ -14,7 +14,8 @@
  * AC1 (no orphan lone-tab row) and AC2 (no horizontal body scroll at 375)
  * are layout claims — jsdom does no layout, so THIS FILE DOES NOT VERIFY
  * EITHER, same caveat as the file it replaces. What actually backs "eight
- * [now seven] tabs must still be usable at narrow widths" is unchanged:
+ * [seven at #599, eight again with #650's Settings] tabs must still be
+ * usable at narrow widths" is unchanged:
  * `frontend/scripts/layout-audit.mjs`'s check 3 statically asserts that
  * `.ct-tab-bar__track` keeps `flex-wrap: wrap` and declares neither
  * `overflow-x` nor `white-space: nowrap` (`npm run audit:layout`) — #599
@@ -25,7 +26,8 @@
  *     `ct-tab-bar` default) — never a second "Admin" tablist.
  *   - A non-admin caller sees only Review and History; every admin-only tab
  *     name (old or new label) is absent, not merely hidden/disabled.
- *   - An admin caller sees all seven tabs, in the owner's specified order
+ *   - An admin caller sees all eight tabs (seven at #599, plus Settings —
+ *     issue #650), in the owner's specified order
  *     and with the renamed labels ("Users & access" → "Users",
  *     "Retention & legal hold" → "Retention", "Model & API key" →
  *     "Models"; "Playbooks" and "Diagnostics" keep their labels — there is
@@ -96,13 +98,16 @@ const ADMIN_ROUTES = {
   '/api/admin/retention/holds': { holds: [] },
   '/api/playbooks': { playbooks: [] },
   '/api/admin/diagnostics/recent-failures': { failures: [] },
+  // Issue #650's Settings panel reads the caller's own preferences route for
+  // `notes_mode_available` (the #572 kill switch, projected to the client).
+  '/api/me/preferences': { preferences: {}, notes_mode_available: false },
   '/api/admin/model-key': {
     setting_id: 'global',
     key_store_available: true,
     model_provider: 'openrouter',
     key_set: false,
     key_source: null,
-    key_hint: '',
+    key_fingerprint: '',
     updated_at: '',
     updated_by: '',
   },
@@ -127,12 +132,12 @@ describe('flat tab bar (#599, reverses #477)', () => {
     expect(tabNames).toEqual(['Review', 'History']);
 
     // Every admin-only tab absent under BOTH its old and new label.
-    for (const name of ['Users & access', 'Users', 'Retention & legal hold', 'Retention', 'Model & API key', 'Models', 'Playbooks', 'Diagnostics']) {
+    for (const name of ['Users & access', 'Users', 'Retention & legal hold', 'Retention', 'Model & API key', 'Models', 'Playbooks', 'Settings', 'Diagnostics']) {
       expect(screen.queryByRole('tab', { name })).toBeNull();
     }
   });
 
-  it('renders one flat "Sections" tablist with all seven tabs, in order, for an admin caller', async () => {
+  it('renders one flat "Sections" tablist with all eight tabs, in order, for an admin caller', async () => {
     stubFetch(ADMIN_ROUTES);
 
     render(<App />);
@@ -140,6 +145,13 @@ describe('flat tab bar (#599, reverses #477)', () => {
     const tablists = await screen.findAllByRole('tablist');
     expect(tablists).toHaveLength(1);
     const sections = screen.getByRole('tablist', { name: 'Sections' });
+
+    // The ADMIN tabs arrive asynchronously (the caller's admin capability is
+    // fetched, not known at first paint), so the tablist exists before it is
+    // complete. Wait for the LAST one specifically: asserting the moment the
+    // tablist appears reads whatever subset happens to have rendered, which
+    // passes on a fast machine and fails under any latency (issue #634).
+    await within(sections).findByRole('tab', { name: 'Diagnostics' });
 
     const tabNames = within(sections).getAllByRole('tab').map((tab) => tab.textContent);
     expect(tabNames).toEqual([
@@ -149,6 +161,10 @@ describe('flat tab bar (#599, reverses #477)', () => {
       'Retention',
       'Models',
       'Playbooks',
+      // Settings (issue #650) sits between Playbooks and Diagnostics:
+      // configuration belongs with the configuration tabs, and Diagnostics
+      // keeps its documented last position.
+      'Settings',
       'Diagnostics',
     ]);
   });
@@ -159,6 +175,13 @@ describe('flat tab bar (#599, reverses #477)', () => {
     render(<App />);
 
     const sections = await screen.findByRole('tablist', { name: 'Sections' });
+    // Same asynchrony as the test above: pressing End before the admin tabs
+    // have rendered moves to whatever the last tab is AT THAT MOMENT (History,
+    // under the pre-#599 primary group), and the assertion below then fails on
+    // a tab that only appeared afterwards. Wait for the real last tab first so
+    // this measures the keyboard contract rather than a render race.
+    await within(sections).findByRole('tab', { name: 'Diagnostics' });
+
     const reviewTab = within(sections).getByRole('tab', { name: 'Review' });
     reviewTab.focus();
     fireEvent.keyDown(reviewTab, { key: 'End' });

@@ -91,9 +91,10 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
 
 import block_transcript  # noqa: E402
 import extraction_normalization_stage  # noqa: E402
+import docx_parts  # noqa: E402
+import footnote_audience  # noqa: E402
 import leakage_scan  # noqa: E402
-import redline_docx_writer  # noqa: E402
-import redline_inplace  # noqa: E402
+import ooxml_util  # noqa: E402
 import replacement_text_enforcement as _rte  # noqa: E402
 import upload_validation  # noqa: E402
 
@@ -196,7 +197,7 @@ _NOTES_MODES_WITH_INTERNAL_CONTENT = ("internal", "both")
 # never-acceptable set (system-prompt leakage, excessive verbatim precedent
 # quotation) still blocks it. It reaches the delivered `.docx` ONLY through
 # `footnote_texts_for_notes_mode`, behind
-# `redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX`, and only in the
+# `footnote_audience.INTERNAL_FOOTNOTE_PREFIX`, and only in the
 # `internal`/`both` modes -- which #572's `NOTES_MODE_ENABLED` kill switch
 # keeps unreachable in production until epic #519 ships whole.
 #
@@ -210,6 +211,25 @@ _NOTES_MODES_WITH_INTERNAL_CONTENT = ("internal", "both")
 # on that side.
 INTERNAL_RATIONALE_FIELD = "internal_rationale_for_footnote"
 
+# Internal-notes marker text (docs/output-contract.md -> "Export marker",
+# ARCHITECTURE.md -> "Export / misuse marker"). Issue #513 retired the
+# attorney-approval framing this string used to carry everywhere -- the
+# premise that justified it (a haste-prone reviewer distinct from an
+# approving attorney) was withdrawn; see docs/threat-model.md ->
+# "External-communication guardrail". The marker's only remaining job is an
+# honest signpost: this document carries internal-audience notes, so it is
+# not the version to send externally. It is present on a generated document
+# iff that review's notes mode actually included internal content -- the
+# `include_marker` parameter of `inject_export_marker_and_footnotes` below
+# -- never unconditional.
+#
+# It lives here, next to that seam, rather than in `scripts/docx_parts.py`
+# with the header/footer builders it is stamped into: those builders take
+# the text as a required argument precisely so no default can quietly
+# stamp a marker nobody asked for (issue #631 moved it here when the
+# writer module that used to own it was deleted).
+MARKER_TEXT = "contains internal notes — not for external transmission"
+
 
 def _notes_mode_includes_internal_content(notes_mode: str) -> bool:
     """Whether `notes_mode` puts internal-audience content in scope for this
@@ -222,20 +242,21 @@ def _notes_mode_includes_internal_content(notes_mode: str) -> bool:
     return (notes_mode or "").strip().lower() in _NOTES_MODES_WITH_INTERNAL_CONTENT
 
 
-# NOTE: this module never imports `redline_patch`. The anchor/hash-joined
-# patch path that used to live here (redline_patch.join_patches_from_diff/
-# apply_patches) was retired by issue #380 alongside the deterministic
-# detector engine and the standard-form diff that fed it.
-# scripts/redline_patch.py itself is untouched and still used by
-# scripts/eval_harness.py (issue #629 moved third-party paper off it and
-# onto the block compiler, so that module is no longer a caller) --
-# only THIS module's use of it is gone. The quote-based patcher that
-# briefly replaced it (issue #379) was itself deleted by issue #628; edits
-# now compile through `redline_block_apply.apply_block_transcript`.
+# NOTE: there is no anchor/hash-joined patch path here any more. It was
+# retired by issue #380 alongside the deterministic detector engine and the
+# standard-form comparison that fed it; the quote-based patcher that
+# briefly replaced it (issue #379) was deleted by issue #628; and issue
+# #631 deleted the whole retired subsystem -- the anchor-map builder, the
+# standard-form line diff, the anchor/hash patcher, the in-place patcher
+# and the standalone whole-document writer -- outright. Edits now compile
+# through `redline_block_apply.apply_block_transcript`; the OOXML parts
+# this module still writes come from `scripts/docx_parts.py`, the audience
+# rule from `scripts/footnote_audience.py`, and the namespace-preservation
+# helpers from `scripts/ooxml_util.py`.
 
-WORD_NS = redline_docx_writer.WORD_NS
-REL_NS = redline_docx_writer.REL_NS
-XML_NS = redline_docx_writer.XML_NS
+WORD_NS = ooxml_util.WORD_NS
+REL_NS = ooxml_util.REL_NS
+XML_NS = ooxml_util.XML_NS
 PKG_RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 
@@ -268,7 +289,7 @@ def _check_no_field_codes(zf: zipfile.ZipFile) -> None:
     `<w:fldSimple>`, or `<w:hyperlink>` element exists anywhere in a `word/*.xml`
     part of the generated document. Model-generated text (`proposed_replacement_text`,
     `external_rationale_for_footnote`) reaches this document only as literal
-    `<w:t>`/`<w:delText>` runs (`redline_docx_writer.py`'s only text-insertion
+    `<w:t>`/`<w:delText>` runs (`docx_parts.py`'s only text-insertion
     path), so hostile replacement text containing field syntax (e.g.
     `{ HYPERLINK "https://attacker.example" }`) lands as inert literal
     characters, never as parsed document structure -- this check verifies
@@ -389,16 +410,15 @@ def _max_footnote_id(footnotes_root: ET.Element) -> int:
 
 
 def _find_patched_paragraph(body: ET.Element, source_text: str) -> Optional[ET.Element]:
-    """Locate the paragraph `redline_inplace.apply_tracked_changes_inplace`
-    just rewrote for one applied patch, by its now-unique `<w:del>` delText.
+    """Locate the paragraph the compiler just rewrote for one applied
+    patch, by its now-unique `<w:del>` delText.
 
     Compared STRIPPED on both sides (issue #291 review, second pass), for
-    the same reason `redline_inplace.apply_tracked_changes_inplace` itself
-    locates the target paragraph by stripped comparison (issue #291 review
+    the same reason the writer itself locates a target paragraph by
+    stripped comparison (issue #291 review
     finding 1): `source_text` here is the caller's NORMALIZED/stripped hunk
-    text, while the `<w:delText>` the patcher wrote is the paragraph's
-    ACTUAL raw text (edge whitespace included -- see `redline_inplace.py`'s
-    `apply_tracked_changes_inplace`, `actual_source_text`). Comparing raw
+    text, while the `<w:delText>` the writer wrote is the paragraph's
+    ACTUAL raw text (edge whitespace included). Comparing raw
     delText to stripped source_text unstripped would never match for any
     paragraph whose runs carry leading/trailing whitespace, silently
     dropping the `<w:footnoteReference>` injection for that class of
@@ -464,19 +484,20 @@ def _compute_new_footnote_entries(
 ) -> list[dict[str, Any]]:
     """Deterministic anchor -> footnote-id/text assignment, in
     `inplace_applied_patches` order, skipping any anchor with no footnote
-    text -- the in-place-package analogue of
-    `redline_docx_writer._compute_footnotes`, starting numbering at
-    `next_footnote_id` (1 for a package with no pre-existing footnotes, or
-    one past the existing max for a package that already has some).
+    text, starting numbering at `next_footnote_id` (1 for a package with no
+    pre-existing footnotes, or one past the existing max for a package that
+    already has some). The only such assignment left in the repo: the
+    standalone whole-document writer that carried the other one was deleted
+    by issue #631.
 
     An anchor's value may be a single text or a LIST of texts (issue #522:
     `notes_mode="both"` renders an external and an internal footnote
     against the same patch), normalized by
-    `redline_docx_writer.normalize_footnote_texts` exactly as the
-    standalone writer does -- each text becomes its own entry, in order."""
+    `footnote_audience.normalize_footnote_texts` -- each text becomes its
+    own entry, in order."""
     entries = []
     for patch in inplace_applied_patches:
-        texts = redline_docx_writer.normalize_footnote_texts(
+        texts = footnote_audience.normalize_footnote_texts(
             footnote_text_by_anchor.get(patch["anchor"])
         )
         for text in texts:
@@ -493,19 +514,19 @@ def inject_export_marker_and_footnotes(
     footnote_text_by_anchor: dict[str, Any],
     *,
     include_marker: bool = True,
-    marker_text: str = redline_docx_writer.MARKER_TEXT,
+    marker_text: str = MARKER_TEXT,
 ) -> bytes:
     """Issue #291 scope items 2-3: inject the export marker (header/footer)
-    and footnoted rationales into an ALREADY in-place-patched package (the
-    output of `redline_inplace.apply_tracked_changes_inplace`).
+    and footnoted rationales into an ALREADY-edited package (the output of
+    `redline_block_apply.apply_block_transcript`).
 
-    Every zip entry the in-place patcher didn't touch is preserved as-is.
+    Every zip entry the block compiler didn't touch is preserved as-is.
     This function only ever ADDS to `[Content_Types].xml` and
     `word/_rels/document.xml.rels` -- it never replaces either wholesale, so
     an uploaded document's own existing declarations (`styles.xml`,
     `theme1.xml`, ...) survive untouched. `word/header1.xml`,
     `word/footer1.xml`, and `word/footnotes.xml` are created fresh (reusing
-    `redline_docx_writer`'s part builders verbatim) only when the uploaded
+    `scripts/docx_parts.py`'s part builders) only when the uploaded
     package doesn't already carry them; when it does, the marker paragraph
     or footnote entries are appended to the EXISTING part instead.
 
@@ -521,7 +542,7 @@ def inject_export_marker_and_footnotes(
     Footnoted rationales are not governed by this flag. They ARE governed
     by the review's notes mode (issue #522) -- but upstream, where the
     texts are resolved (`_issues_to_quote_patches` ->
-    `redline_docx_writer.footnote_texts_for_notes_mode`), never here: this
+    `footnote_audience.footnote_texts_for_notes_mode`), never here: this
     function injects exactly the texts `footnote_text_by_anchor` carries,
     and a `notes_mode="none"` review reaches it with an empty mapping, so
     no `word/footnotes.xml` part, relationship, or content-type override is
@@ -532,8 +553,8 @@ def inject_export_marker_and_footnotes(
     `inplace_applied_patches` is the `{"anchor", "source_text", "new_text"}`
     list, filtered to just the anchors `InplaceResult.applied` reports --
     used both to locate each patched paragraph (by its now-unique `<w:del>`
-    delText) and to assign footnote ids in deterministic order, exactly like
-    `redline_docx_writer._compute_footnotes`. An anchor may carry several
+    delText) and to assign footnote ids in deterministic order (see
+    `_compute_new_footnote_entries` above). An anchor may carry several
     footnotes (`notes_mode="both"`), in which case one
     `<w:footnoteReference>` run per footnote is appended to that patch's
     `<w:ins>`, external first.
@@ -544,15 +565,15 @@ def inject_export_marker_and_footnotes(
     names = set(originals.keys())
 
     # ---- word/document.xml: parse with the same root-namespace-preservation
-    # technique redline_inplace.py uses (see that module's docstring,
+    # technique ooxml_util.py owns (see that module's docstring,
     # "Preserve") -- this is a SECOND rewrite pass over document.xml, after
-    # the in-place patcher's own pass, so the same care applies.
-    doc_xml_text = originals[redline_inplace.DOCUMENT_PART].decode("utf-8")
-    original_root_open_tag = redline_inplace._root_open_tag(doc_xml_text)
-    redline_inplace.register_declared_namespaces(
-        redline_inplace._declared_namespaces(original_root_open_tag)
+    # the block compiler's own pass, so the same care applies.
+    doc_xml_text = originals[ooxml_util.DOCUMENT_PART].decode("utf-8")
+    original_root_open_tag = ooxml_util.root_open_tag(doc_xml_text)
+    ooxml_util.register_declared_namespaces(
+        ooxml_util.declared_namespaces(original_root_open_tag)
     )
-    doc_root = ET.fromstring(originals[redline_inplace.DOCUMENT_PART])
+    doc_root = ET.fromstring(originals[ooxml_util.DOCUMENT_PART])
     body = doc_root.find(_w("body"))
 
     # ---- Footnotes: compute the id assignment before touching any XML, so
@@ -604,21 +625,21 @@ def inject_export_marker_and_footnotes(
             next_rid += 1
             rel = ET.SubElement(rels_root, _pkg("Relationship"))
             rel.set("Id", new_header_rid)
-            rel.set("Type", redline_docx_writer.HEADER_REL_TYPE)
+            rel.set("Type", docx_parts.HEADER_REL_TYPE)
             rel.set("Target", "header1.xml")
         if not have_footer:
             new_footer_rid = f"rId{next_rid}"
             next_rid += 1
             rel = ET.SubElement(rels_root, _pkg("Relationship"))
             rel.set("Id", new_footer_rid)
-            rel.set("Type", redline_docx_writer.FOOTER_REL_TYPE)
+            rel.set("Type", docx_parts.FOOTER_REL_TYPE)
             rel.set("Target", "footer1.xml")
     if footnote_entries and not have_footnotes:
         new_footnotes_rid = f"rId{next_rid}"
         next_rid += 1
         rel = ET.SubElement(rels_root, _pkg("Relationship"))
         rel.set("Id", new_footnotes_rid)
-        rel.set("Type", redline_docx_writer.FOOTNOTES_REL_TYPE)
+        rel.set("Type", docx_parts.FOOTNOTES_REL_TYPE)
         rel.set("Target", "footnotes.xml")
 
     # ---- <w:sectPr>: wire header/footer references only for NEWLY created
@@ -641,7 +662,7 @@ def inject_export_marker_and_footnotes(
 
     # A <w:headerReference>/<w:footerReference> we just added carries an
     # `r:id` attribute -- if the ORIGINAL root open tag (spliced back in
-    # verbatim below, see redline_inplace.py's "Preserve") never declared
+    # verbatim below, see ooxml_util.py's "Preserve") never declared
     # the relationships namespace at all (a document with no existing
     # r:-prefixed attribute never needed to), splicing it back unmodified
     # would leave `r:id` an unbound-prefix parse error. Add the declaration
@@ -649,7 +670,7 @@ def inject_export_marker_and_footnotes(
     if new_header_rid or new_footer_rid:
         already_declared = any(
             uri == REL_NS
-            for _prefix, uri in redline_inplace._declared_namespaces(original_root_open_tag)
+            for _prefix, uri in ooxml_util.declared_namespaces(original_root_open_tag)
         )
         if not already_declared:
             original_root_open_tag = (
@@ -657,9 +678,9 @@ def inject_export_marker_and_footnotes(
             )
 
     # ---- Re-serialize document.xml, splicing the ORIGINAL root open tag
-    # back in verbatim (same technique as redline_inplace.py).
+    # back in verbatim (same technique as ooxml_util.py documents).
     serialized = ET.tostring(doc_root, encoding="unicode")
-    auto_root_open_tag = redline_inplace._root_open_tag(serialized)
+    auto_root_open_tag = ooxml_util.root_open_tag(serialized)
     body_and_close = serialized[len(auto_root_open_tag):]
     new_document_xml = (
         b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
@@ -667,7 +688,7 @@ def inject_export_marker_and_footnotes(
         + body_and_close.encode("utf-8")
     )
 
-    new_parts: dict[str, bytes] = {redline_inplace.DOCUMENT_PART: new_document_xml}
+    new_parts: dict[str, bytes] = {ooxml_util.DOCUMENT_PART: new_document_xml}
 
     # ---- word/header1.xml / word/footer1.xml (issue #513: only ever
     # touched when include_marker -- an uploaded document's own pre-existing
@@ -675,13 +696,13 @@ def inject_export_marker_and_footnotes(
     # an appended marker paragraph it wasn't asked for).
     if include_marker:
         if new_header_rid:
-            new_parts["word/header1.xml"] = redline_docx_writer.build_header_xml(marker_text)
+            new_parts["word/header1.xml"] = docx_parts.build_header_xml(marker_text)
         elif have_header:
             new_parts["word/header1.xml"] = _append_marker_paragraph(
                 originals["word/header1.xml"], marker_text
             )
         if new_footer_rid:
-            new_parts["word/footer1.xml"] = redline_docx_writer.build_footer_xml(marker_text)
+            new_parts["word/footer1.xml"] = docx_parts.build_footer_xml(marker_text)
         elif have_footer:
             new_parts["word/footer1.xml"] = _append_marker_paragraph(
                 originals["word/footer1.xml"], marker_text
@@ -705,7 +726,7 @@ def inject_export_marker_and_footnotes(
                 + ET.tostring(footnotes_root, encoding="unicode").encode("utf-8")
             )
         else:
-            new_parts["word/footnotes.xml"] = redline_docx_writer.build_footnotes_xml(
+            new_parts["word/footnotes.xml"] = docx_parts.build_footnotes_xml(
                 footnote_entries
             )
 
@@ -721,11 +742,11 @@ def inject_export_marker_and_footnotes(
     # content-types already declares styles.xml, settings.xml, etc.).
     new_ct_parts = []
     if new_header_rid:
-        new_ct_parts.append(("/word/header1.xml", redline_docx_writer.HEADER_CONTENT_TYPE))
+        new_ct_parts.append(("/word/header1.xml", docx_parts.HEADER_CONTENT_TYPE))
     if new_footer_rid:
-        new_ct_parts.append(("/word/footer1.xml", redline_docx_writer.FOOTER_CONTENT_TYPE))
+        new_ct_parts.append(("/word/footer1.xml", docx_parts.FOOTER_CONTENT_TYPE))
     if new_footnotes_rid:
-        new_ct_parts.append(("/word/footnotes.xml", redline_docx_writer.FOOTNOTES_CONTENT_TYPE))
+        new_ct_parts.append(("/word/footnotes.xml", docx_parts.FOOTNOTES_CONTENT_TYPE))
     if new_ct_parts:
         ct_root = ET.fromstring(originals["[Content_Types].xml"])
         for part_name, content_type in new_ct_parts:
@@ -808,7 +829,7 @@ def generate_redline(
     review_id: Optional[str] = None,
     audit_write: Optional[Callable[..., None]] = None,
     current_counterparty_name: Optional[str] = None,
-    author: str = redline_docx_writer.DEFAULT_AUTHOR,
+    author: str = docx_parts.DEFAULT_AUTHOR,
     date: Any = None,
     notes_mode: str = "external",
 ) -> dict[str, Any]:
@@ -959,8 +980,11 @@ def derived_replacement_text_by_issue(proven: dict[str, Any]) -> dict[str, str]:
 
     ## The rule
 
-    One issue's derived text is that issue's INSERT texts, joined in
-    DOCUMENT ORDER with `DERIVED_REPLACEMENT_TEXT_JOIN` (a single space):
+    One issue's derived text is that issue's INSERT texts AS DELIVERED
+    (`block_transcript.collapse_boundary_spaces`, so the duplicative boundary
+    space issue #644 drops is not in the field either -- read the ops raw and
+    this string would carry a leading space the .docx does not have), joined
+    in DOCUMENT ORDER with `DERIVED_REPLACEMENT_TEXT_JOIN` (a single space):
 
       - segment inserts first, walked block by block in the order
         `validate_block_patches` sorted the blocks into (by the block's
@@ -973,8 +997,38 @@ def derived_replacement_text_by_issue(proven: dict[str, Any]) -> dict[str, str]:
         is appended, which is the only ordering that is stable.
 
     An issue that only DELETES -- every one of its ops is a `delete` segment
-    or a `delete_block` -- derives the EMPTY STRING. That is the honest
-    answer: it proposes no replacement language, it proposes a striking.
+    or a `delete_block` -- proposes no replacement language of its own, and
+    what it derives depends on what the DOCUMENT is then left saying:
+
+      - a pure deletion that strikes text INSIDE a block derives the EMPTY
+        STRING. That is the honest answer: it proposes a striking.
+      - a pure deletion that strikes a WHOLE block (`delete_block`) derives
+        `block_transcript.OMITTED_CLAUSE_PLACEHOLDER` --
+        `[Intentionally omitted.]`. Under issue #646 that is the language the
+        compiler leaves standing where the clause was, so it is the
+        replacement text in the only sense this field has ever meant: what
+        the counterparty ends up reading there.
+
+    The two are told apart by the transcript's SHAPE, never by the string --
+    see `pure_deletion_issue_keys`, which is what the pen-rule filter in
+    `generate_redline_from_blocks` reads so that compiler-authored
+    boilerplate is never judged as though the model had drafted it.
+
+    ## Where the placeholder can overstate what shipped
+
+    `redline_block_apply._plan_omitted_clause_placeholders` gates the
+    placeholder on the block having a heading that the batch empties. This
+    function is computed BEFORE the compiler runs -- the pen rules judge its
+    output, and a failed judgment drops the issue's edits -- so it cannot
+    consult that gate, and two shapes derive the placeholder without
+    receiving one: a block with no heading paragraph at all (the document's
+    preamble), and a heading whose live text no longer matches the record it
+    was extracted from. Both keep the pre-#645 outcome in the document -- the
+    clause is struck and nothing is left in its place -- so the field is a
+    sentence more generous than the artifact, never less. Nothing between
+    here and delivery reads this string back as a fact about the bytes: the
+    accept-all proof reads the COMPILER's own record
+    (`redline_projections._expected_accept_all_texts`), not this mapping.
 
     ## Why derived rather than model-supplied
 
@@ -984,18 +1038,51 @@ def derived_replacement_text_by_issue(proven: dict[str, Any]) -> dict[str, str]:
     `generate_redline_from_blocks`, which overwrites the key): the field is
     what the UI shows, the leakage scan reads, and the pen rules judge, and
     a model-supplied value can differ from what the transcript actually
-    writes into the document. Deriving it makes that drift unrepresentable.
+    writes into the document. Deriving it makes that drift unrepresentable --
+    which is why the derivation reads the ops through the same issue #644
+    boundary trim the compiler applies, and not the raw transcript: a rule
+    anchored at the start of this string has to judge the language the
+    document actually carries.
 
     ## Empty string means two different things in v2 and v3
 
     Under v1/v2 an empty `proposed_replacement_text` means TRUE flag-only
     ("the model proposed no replacement at all", issue #260) -- see
     `_issues_to_quote_patches`. Under v3 it means EITHER that (an issue with
-    no edits at all, which never appears in this mapping) or a pure
-    deletion (an issue with real, deliverable edits). The two are told apart
-    by PRESENCE in this mapping, never by the string, which is why
+    no edits at all, which never appears in this mapping) or a pure deletion
+    INSIDE a block (an issue with real, deliverable edits). The two are told
+    apart by PRESENCE in this mapping, never by the string, which is why
     `generate_redline_from_blocks` uses `proven["by_issue"]` and not
     `== ""` to decide which issues are flag-only.
+    """
+    inserts = _insert_texts_by_issue(proven)
+    strikes_a_whole_block = {
+        block_op.get("issue_key")
+        for block_op in proven.get("block_ops") or []
+        if block_op.get("op") == block_transcript.OP_DELETE_BLOCK
+    }
+
+    derived: dict[str, str] = {}
+    for issue_key, texts in inserts.items():
+        if not texts and issue_key in strikes_a_whole_block:
+            # A whole-block strike leaves language behind (issue #646), and
+            # this field is what the counterparty will read where the clause
+            # was.
+            derived[issue_key] = block_transcript.OMITTED_CLAUSE_PLACEHOLDER
+            continue
+        derived[issue_key] = DERIVED_REPLACEMENT_TEXT_JOIN.join(texts)
+    return derived
+
+
+def _insert_texts_by_issue(proven: dict[str, Any]) -> dict[str, list[str]]:
+    """`issue_key -> its INSERT texts as delivered, in document order` for
+    every issue that authored an edit in `proven`.
+
+    The shared spine of `derived_replacement_text_by_issue` and
+    `pure_deletion_issue_keys`: an issue is present here iff it authored an
+    edit at all, and its list is EMPTY iff every one of those edits is a
+    deletion. Both facts are read off the transcript's shape, so neither
+    caller has to interrogate a derived string.
     """
     inserts: dict[str, list[str]] = {}
 
@@ -1003,7 +1090,7 @@ def derived_replacement_text_by_issue(proven: dict[str, Any]) -> dict[str, str]:
         return inserts.setdefault(issue_key, [])
 
     for block in proven.get("blocks") or []:
-        for op in block.get("ops") or []:
+        for op in block_transcript.collapse_boundary_spaces(block.get("ops") or []):
             issue_key = op.get("issue_key")
             if issue_key is None:  # a `keep` is not an edit and has no author
                 continue
@@ -1016,9 +1103,26 @@ def derived_replacement_text_by_issue(proven: dict[str, Any]) -> dict[str, str]:
         if block_op.get("op") == block_transcript.OP_INSERT_BLOCK_AFTER:
             texts.append(block_op.get("new_text") or "")
 
+    return inserts
+
+
+def pure_deletion_issue_keys(proven: dict[str, Any]) -> set:
+    """The issue keys in `proven` whose every edit is a DELETION -- they
+    author no replacement language at all.
+
+    This is the shape test the pen rules are filtered on
+    (`generate_redline_from_blocks`), and it exists because the derived
+    string can no longer answer the question. Before issue #646 a pure
+    deletion derived `""` and `if text` was enough; now a whole-block strike
+    derives `[Intentionally omitted.]`, which the compiler authored and no
+    model drafted. Judging that boilerplate against a topic's pen rules would
+    burn the issue's whole change set over language nobody proposed, and
+    would do it to every whole-clause striking the pipeline ever produces.
+    """
     return {
-        issue_key: DERIVED_REPLACEMENT_TEXT_JOIN.join(texts)
-        for issue_key, texts in inserts.items()
+        issue_key
+        for issue_key, texts in _insert_texts_by_issue(proven).items()
+        if not texts
     }
 
 
@@ -1183,7 +1287,7 @@ def _joined_footnote_text(issue, notes_mode: str) -> str:
     `redline_block_apply.inject_issue_footnotes` accepts.
 
     The audience resolution itself is
-    `redline_docx_writer.footnote_texts_for_notes_mode` (issue #522) --
+    `footnote_audience.footnote_texts_for_notes_mode` (issue #522) --
     the same function the quote path resolves with, so the two can never
     disagree about what `"internal"` or `"both"` means. That function
     returns an ordered LIST, and `"both"` returns two entries; the block
@@ -1197,7 +1301,7 @@ def _joined_footnote_text(issue, notes_mode: str) -> str:
     caller filters out so no footnote part is written at all.
     """
     issue = issue or {}
-    texts = redline_docx_writer.footnote_texts_for_notes_mode(
+    texts = footnote_audience.footnote_texts_for_notes_mode(
         issue.get("external_rationale_for_footnote"),
         issue.get(INTERNAL_RATIONALE_FIELD),
         notes_mode,
@@ -1213,7 +1317,7 @@ def generate_redline_from_blocks(
     review_id: Optional[str] = None,
     audit_write: Optional[Callable[..., None]] = None,
     current_counterparty_name: Optional[str] = None,
-    author: str = redline_docx_writer.DEFAULT_AUTHOR,
+    author: str = docx_parts.DEFAULT_AUTHOR,
     date: Any = None,
     notes_mode: str = "external",
     pen_rules_bundle: Optional[dict[str, Any]] = None,
@@ -1283,21 +1387,25 @@ def generate_redline_from_blocks(
     DERIVED text, and an issue that fails them loses its edits before the
     compiler ever runs.
 
-    Pen rules are run here only over issues whose derived text is NON-EMPTY.
-    An empty derived text on an edit-bearing issue is a PURE DELETION, which
-    v1/v2's "empty means flag-only" convention cannot express;
-    `check_issues_replacement_text` would read it as a mode violation, burn
-    the issue's redline, and mislabel it. A genuinely flag-only issue -- one
-    with no edits at all -- is identified by absence from
-    `proven["by_issue"]`, never by the string, and reaches the report with
-    the same #585 labelling (`FLAG_ONLY_MODE_NONE` /
+    Pen rules are run here only over issues that actually PROPOSED language
+    -- `pure_deletion_issue_keys`'s complement, read off the transcript's
+    shape and never off the derived string. A pure deletion is not a
+    proposal: under v1/v2's "empty means flag-only" convention
+    `check_issues_replacement_text` would read its empty derived text as a
+    mode violation, burn the issue's redline and mislabel it, and under
+    issue #646 a whole-block strike does not even derive an empty string any
+    more -- it derives the compiler's own `[Intentionally omitted.]`, which
+    no model drafted and no topic's pen rules should judge. A genuinely
+    flag-only issue -- one with no edits at all -- is identified by absence
+    from `proven["by_issue"]`, never by the string, and reaches the report
+    with the same #585 labelling (`FLAG_ONLY_MODE_NONE` /
     `FLAG_ONLY_RETRY_EXHAUSTED` / the legacy fallback) the quote path gives
     it.
 
     ## Notes mode
 
     `notes_mode` resolves each issue's footnote text exactly as the quote
-    path does (`redline_docx_writer.footnote_texts_for_notes_mode`, issue
+    path does (`footnote_audience.footnote_texts_for_notes_mode`, issue
     #522). `redline_block_apply.inject_issue_footnotes` writes ONE footnote
     per issue, so the `"both"` mode's two resolved texts are joined into one
     footnote body, external first, with the internal half still behind
@@ -1438,12 +1546,17 @@ def generate_redline_from_blocks(
         if issue is not None:
             issue["proposed_replacement_text"] = text
 
-    # ---- Pen rules over the DERIVED text (issue #216), non-empty only.
+    # ---- Pen rules over the DERIVED text (issue #216), for the issues that
+    # proposed language. A pure deletion proposed none: its derived text is
+    # either empty or the compiler's own `[Intentionally omitted.]` (issue
+    # #646), and neither is language a topic's pen rules may judge. The test
+    # is the transcript's SHAPE, never the string.
+    pure_deletions = pure_deletion_issue_keys(proven)
     pen_failures: dict[Any, Any] = {}
     checkable = [
         issues_by_key[issue_key]
         for issue_key, text in derived.items()
-        if text and issue_key in issues_by_key
+        if text and issue_key in issues_by_key and issue_key not in pure_deletions
     ]
     if checkable:
         for issue, result in _rte.check_issues_replacement_text(checkable, pen_rules_bundle):
@@ -1472,7 +1585,7 @@ def generate_redline_from_blocks(
             normalized_docx_bytes,
             working,
             author=author,
-            timestamp_iso=redline_docx_writer._iso_date(date),
+            timestamp_iso=docx_parts.iso_date(date),
             rationale_by_issue={
                 key: text for key, text in rationale_by_issue.items() if text
             },

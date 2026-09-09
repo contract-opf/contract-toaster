@@ -4,9 +4,9 @@
  * Five pre-rendered 32x32 PNGs, inlined as `data:` URIs (the CSP is
  * `img-src 'self' data:`, already permitting this — `deploy/dts/nginx.conf`)
  * so swapping the tab icon never issues a network request. Each is a
- * flattened reduction in the same style as `public/favicon.svg` (issue
- * #427's "deliberately NOT the photoreal ToasterHero SVG, which carries far
- * too much detail to survive a 16x16 raster") — same silhouette, same CTDS
+ * flattened reduction in the same style as `public/favicon.svg` (issue #427
+ * ruled out the photoreal appliance artwork, which carries far too much detail
+ * to survive a 16x16 raster) — same silhouette, same CTDS
  * token colors, only the toast-slice fill (and, for the two badges, a corner
  * disc) changes between frames.
  *
@@ -14,23 +14,29 @@
  *
  * The four stage frames are NOT new colors invented for this file. They are
  * the exact `color-mix(in srgb, var(--ct-doneness-deep) P%, var(--ct-toast))`
- * values `Toaster.tsx`'s `.toaster-doneness--step{1..4}` already paints the
- * hero's own toast slice with (P = 0/26/52/78, the real per-stage ramp — see
- * that file's "Staged doneness" block), computed by hand against the LIGHT
- * theme token values: `--ct-toast: #d9a463` (`styles/tokens.css`) and
- * `--ct-doneness-deep: #8a5a2b` (`Toaster.tsx`'s inline `<style>` block, NOT
- * `styles/tokens.css` — and NOT `--ct-toast-crust` either: that file's own
- * comment on the token is emphatic that at night `--ct-toast-crust` is
- * deliberately light, so mixing toward it would make the toast get PALER as
- * the review progressed, the metaphor upside down; `--ct-doneness-deep` is a
- * separate token for exactly that reason). A favicon document has no app CSS
- * to inherit (the same reason `favicon.svg` hardcodes light-theme hex instead
- * of `var(--ct-toast)`), so these are baked, not computed at runtime — and
- * they intentionally bake only the LIGHT-theme ramp: `Toaster.tsx` overrides
- * `--ct-doneness-deep` to `#5c3a1c` at night (against a night `--ct-toast` of
- * `#b98246`), a different set of hexes, so the hero's night ramp and these
- * frames diverge by design rather than staying in lockstep — the same
- * light-only tradeoff `favicon.svg` already makes.
+ * values the deleted hero's `.toaster-doneness--step{1..4}` painted its toast
+ * slice with (P = 0/26/52/78, the real per-stage ramp), computed by hand
+ * against the LIGHT theme values of the ramp's two ends. Only one of those
+ * ends is still a token: `--ct-toast: #d9a463` is declared at
+ * `styles/tokens.css:23`. `--ct-doneness-deep: #8a5a2b` is not — the hero's
+ * inline stylesheet was the only place it was ever declared, and issue #727
+ * deleted it, so #8a5a2b now survives here as a baked constant with no token
+ * left anywhere under `frontend/src` to check it against.
+ *
+ * #8a5a2b is byte-identical to the LIGHT value of `--ct-toast-crust`
+ * (`styles/tokens.css:24`), and that coincidence must NOT be tidied into a
+ * `var(--ct-toast-crust)`: the night themes set that same token to `#f2ede2`
+ * (`tokens.css:145` and `:209`), deliberately light, so mixing toward it
+ * would make the toast get PALER as the review progressed, the metaphor upside
+ * down. A favicon document has no app CSS to inherit (the same reason
+ * `favicon.svg` hardcodes light-theme hex instead of `var(--ct-toast)`), so
+ * these are baked, not computed at runtime, and they bake only the LIGHT-theme
+ * ramp — the same light-only tradeoff `favicon.svg` already makes.
+ *
+ * Issue #727 deleted the hero and its inline stylesheet, so these five frames
+ * are now the ramp's only rendering. They stay exactly as they were: the
+ * numbers are the browning ramp `stageTheater.ts` projects, and the tab is
+ * where the reader sees them (designer answer D6).
  *
  *   step 1 (primary_pass,    browning 0.25): mix   0% -> #d9a463
  *   step 2 (critic_pass,     browning 0.50): mix  26% -> #c49154
@@ -46,9 +52,11 @@
  * the app enforces (`outcome.ts`'s docstring: "ONE resolved token drives BOTH
  * the label and the variant"). The done slice is left fully browned (step 4's
  * #9b6a37 — nothing failed, so nothing is drawn "burnt"); the failed slice
- * uses `--ct-burnt` (#2b211c), the exact color `Toaster.tsx`'s ERROR-state
- * `toaster-burnt-slice` renders (issue #501) — the tab icon and the hero
- * agree about what a burnt slice looks like too.
+ * uses #2b211c, the color the deleted hero's ERROR-state `toaster-burnt-slice`
+ * painted (issue #501) as `--ct-burnt`. Like `--ct-doneness-deep` above, that
+ * token came from the hero's inline stylesheet and is now declared nowhere
+ * under `frontend/src`, so #2b211c is a baked constant too — and the tab is
+ * the only place a burnt slice is still drawn.
  *
  * ## Regenerating
  *

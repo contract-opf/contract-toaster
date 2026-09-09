@@ -37,7 +37,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -58,8 +58,64 @@ import replacement_text_enforcement as _rte  # noqa: E402
 # shared sentinels; tests/test_critic_reconciliation_82.py cross-checks
 # against pp's copy, which is itself cross-checked against reviews.py).
 MAX_INPUT_TOKENS = pp.MAX_INPUT_TOKENS
-MAX_OUTPUT_TOKENS = pp.MAX_OUTPUT_TOKENS
 MAX_RETRIES_PER_PASS = pp.MAX_RETRIES_PER_PASS
+# Issue #658: there is no flat `MAX_OUTPUT_TOKENS` to re-export any more.
+# The critic's budget follows the SAME document sizing the primary pass
+# uses (`model_client.output_budget_for_document`, ceilinged by
+# `model_client.openrouter_model_max_output_tokens`), and truncation gets the
+# same dedicated retry allowance -- if anything the critic needs both more:
+# its prompt carries the primary pass's full output on top of the document,
+# and its own answer restates the issues it contests.
+MAX_TRUNCATION_RETRIES_PER_PASS = pp.MAX_TRUNCATION_RETRIES_PER_PASS
+
+# ---------------------------------------------------------------------------
+# Fail-closed `reason` TOKENS for this pass's bounded-retry terminal
+# (issue #665, moved here by issue #670).
+#
+# Issue #665 minted these and classified the terminal in
+# `review_spine.critic_failure_reason`, which left the pass itself returning
+# a terminal with no `reason` key -- the same reason-less shape issue #670
+# found on the two primary-pass terminals, kept honest here only by the
+# spine remembering to classify it. The classification now happens where the
+# `last_error` is produced, so the pass's own return contract carries the
+# diagnosis; `review_spine` re-exports these names and reads what the pass
+# named (its own classifier stays as the fallback for a result that names
+# nothing, which is what the `reconciliation.run_two_pass_review` contract
+# still permits).
+#
+# The two classes are materially different operator diagnoses:
+#
+#   * `schema_invalid` -- the critic answered with JSON the output contract
+#     rejected. Issue #673 MEASURED this class against live OpenRouter
+#     traffic. The lead is the schema-enforcement setting and the model.
+#   * `invalid_json` -- the body was not readable as JSON at all: the
+#     prose-preamble / markdown-fence class `pp._extract_json_object`
+#     exists to unwrap. A different lead entirely.
+#
+# Anything else keeps the residual `critic_retry_exhausted`, whose copy says
+# only what is actually known.
+REASON_CRITIC_RETRY_EXHAUSTED = "critic_retry_exhausted"
+REASON_CRITIC_INVALID_JSON = "critic_invalid_json"
+REASON_CRITIC_SCHEMA_INVALID = "critic_schema_invalid"
+
+#: `last_error` TOKEN -> the reason token the bounded-retry terminal records
+#: for it. Keyed by `pp._error_token`'s output -- the "TOKEN: detail"
+#: convention `pp.validate_model_response` writes and the invocation ledger
+#: already stores per attempt -- never by the ": detail" remainder, which can
+#: quote the model's own text (the #425/#443 rule: only a controlled token
+#: crosses into an operator-facing string). A token absent from this map
+#: falls back to `REASON_CRITIC_RETRY_EXHAUSTED`; adding an entry here is all
+#: it takes to split a new class out.
+LAST_ERROR_REASONS = {
+    "invalid_json": REASON_CRITIC_INVALID_JSON,
+    "schema_invalid": REASON_CRITIC_SCHEMA_INVALID,
+}
+
+
+def retry_exhausted_reason(last_error: Any) -> str:
+    """The `reason` token for this pass's bounded-retry terminal, classified
+    from `last_error`'s fixed-vocabulary TOKEN half alone."""
+    return LAST_ERROR_REASONS.get(pp._error_token(last_error), REASON_CRITIC_RETRY_EXHAUSTED)
 
 
 def run_critic_pass(
@@ -75,12 +131,13 @@ def run_critic_pass(
     toaster_guidance: str = "",
     instructions_text: str = "",
     notes_mode: str = "external",
-    max_output_tokens: int = MAX_OUTPUT_TOKENS,
     max_retries: int = MAX_RETRIES_PER_PASS,
+    max_truncation_retries: int = MAX_TRUNCATION_RETRIES_PER_PASS,
     system_blocks_override: list[dict[str, Any]] | None = None,
     playbook_hash_override: str | None = None,
     output_schema_path: Path = pp.OUTPUT_SCHEMA_PATH,
     cancel_checkpoint: Callable[[], None] | None = None,
+    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Run the adversarial critic pass end-to-end (data-flow step 16, critic
     half).
@@ -106,11 +163,17 @@ def run_critic_pass(
         document AND the primary's full structured output on top of it.
       {"status": "OK", "response": {...}, "attempts": N}
         -- schema-valid critic response obtained within the retry budget.
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "attempts": N, "last_error": ...}
+      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "reason": <token>,
+       "attempts": N, "last_error": ...}
         -- still schema-invalid after the one bounded retry. Per
         ARCHITECTURE.md -> Two-pass review, this is terminal: the caller
         must NOT reconcile a partial/failed critic response into a silent
-        single-pass DONE result.
+        single-pass DONE result. `reason` is `retry_exhausted_reason`'s
+        classification of `last_error` (issue #665, moved into this module
+        by issue #670): every terminal this pass returns names its cause,
+        because the spine propagates that key onto the reviews row and a
+        null one leaves the operator with "the exact cause was not
+        identified".
 
     `model_id` is config-checked against the single-region-native-only
     policy before any invocation is attempted (raises
@@ -152,6 +215,16 @@ def run_critic_pass(
     counterparty-bound field and stripping it on the way out is exactly the
     posture the leakage scan exists to prevent. Threading it now means B can
     be a prompt change with no plumbing attached.
+
+    `attempt_diagnostic_write` (issue #643, default `None`): the same
+    DEBUG-ONLY per-attempt sink `primary_review_pass.run_primary_pass`
+    takes, emitted from this pass's own ledgering `finally` with
+    `pass_name="critic"` -- see that function's docstring for the shape, and
+    for why the full message and the rejected schema path/value go to an
+    injected sink instead of onto the ledgered record. Both passes take it
+    for the same reason both take `ledger_write`: a live run that cannot say
+    what the critic sent is as undiagnosable as one that cannot say what the
+    primary sent.
 
     `system_blocks_override` / `playbook_hash_override` (issue #479,
     default `None`): the OPF digest-mode seam, mirroring
@@ -249,6 +322,8 @@ def run_critic_pass(
         }
 
     attempts_allowed = 1 + max_retries
+    # Issue #658: truncation's own allowance -- see run_primary_pass.
+    truncation_retries_left = max(0, max_truncation_retries)
     last_error: Any = None
     # Issues #417 / #527 follow-up: identical reasoning to the primary pass
     # (see run_primary_pass) -- the critic runs the same bounded-retry loop
@@ -257,9 +332,18 @@ def run_critic_pass(
     # primary pass's full output on top of the document, and its own answer
     # restates the issues it contests.
     correction: Any = None
-    attempt_max_output_tokens = max_output_tokens
+    # Issue #658: the budget is sized from the same document the primary
+    # pass read, clamped by THIS pass's own model's declared output cap (the
+    # critic may run on a different model). No caller-supplied override --
+    # see run_primary_pass's identical block.
+    output_budget_ceiling = _model_client.openrouter_model_max_output_tokens(model_id)
+    attempt_max_output_tokens = _model_client.output_budget_for_document(
+        pp.estimate_tokens(doc_text), output_budget_ceiling
+    )
 
-    for attempt in range(1, attempts_allowed + 1):
+    attempt = 0
+    while attempt < attempts_allowed:
+        attempt += 1
         # Same contract as run_primary_pass: outside the try, so a raised
         # cancellation reaches the caller instead of consuming a retry. The
         # critic is the slower of the two passes in practice (a single Kimi K3
@@ -270,6 +354,9 @@ def run_critic_pass(
         outcome = "failure"
         raw_response = None
         replacement_text_failures: list[str] = []
+        # Issue #643: same per-attempt schema-rejection box as
+        # run_primary_pass -- see that function's identical comment.
+        schema_errors: list[dict[str, Any]] = []
         # Issue #414: same timing seam as run_primary_pass -- see that
         # function's identical comment.
         attempt_started_monotonic = time.monotonic()
@@ -295,6 +382,11 @@ def run_critic_pass(
                 raw_response,
                 issue_provenance="critic-added",
                 schema_path=output_schema_path,
+                # Issue #643: same "only when a caller asked" wiring as
+                # run_primary_pass.
+                schema_error_sink=(
+                    None if attempt_diagnostic_write is None else schema_errors.append
+                ),
             )
             if is_valid:
                 # Issue #293 scope item 6: same post-validation
@@ -352,7 +444,14 @@ def run_critic_pass(
             # schema failure. No `correction` -- the critic did not get its
             # answer wrong, it ran out of room, and inviting it to shorten
             # its objections is the one thing this retry must not buy.
-            if attempt >= attempts_allowed:
+            # Issue #658: truncation spends its OWN allowance first, granted
+            # as an extra attempt -- see run_primary_pass's identical branch.
+            widened = pp.widen_output_budget(attempt_max_output_tokens, output_budget_ceiling)
+            room_left = widened > attempt_max_output_tokens
+            if truncation_retries_left > 0 and room_left:
+                truncation_retries_left -= 1
+                attempts_allowed += 1
+            elif attempt >= attempts_allowed or not room_left:
                 outcome = "failure"
                 # Issue #573 fix round 1: set even on this raising branch --
                 # see run_primary_pass's identical comment for why (the
@@ -363,7 +462,7 @@ def run_critic_pass(
                 raise
             outcome = "retry"
             last_error = "model_output_truncated: the response did not fit the output budget"
-            attempt_max_output_tokens = pp.widen_output_budget(attempt_max_output_tokens)
+            attempt_max_output_tokens = widened
             continue
         finally:
             # Issue #414: same "only trust last_usage after a genuine
@@ -415,6 +514,10 @@ def run_critic_pass(
                     cache_creation_input_tokens=(actual_usage or {}).get(
                         "cache_creation_input_tokens"
                     ),
+                    # Issue #661: same seam as the primary pass -- the
+                    # reasoning tokens the provider reported for THIS
+                    # attempt, None (not 0) when it reported none.
+                    reasoning_tokens=(actual_usage or {}).get("reasoning_tokens"),
                     # Issue #567: same seam as the primary pass.
                     schema_enforcement_requested=output_schema is not None,
                     # Issue #573 fix round 1 (Slice A): same "only THIS
@@ -423,12 +526,33 @@ def run_critic_pass(
                     error_token=("" if outcome == "success" else pp._error_token(last_error)),
                 )
             )
+            # Issue #643: same DEBUG-ONLY companion to the ledger write as
+            # run_primary_pass, with this pass's own `pass_name` -- see that
+            # function's identical comment.
+            if attempt_diagnostic_write is not None and outcome != "success":
+                diagnostic: dict[str, Any] = {
+                    "review_id": review_id,
+                    "pass_name": "critic",
+                    "attempt_number": attempt,
+                    "outcome": outcome,
+                    "error_token": pp._error_token(last_error),
+                    "error_message": last_error if isinstance(last_error, str) else "",
+                }
+                if schema_errors:
+                    diagnostic["schema_error"] = schema_errors[0]
+                attempt_diagnostic_write(diagnostic)
 
     # Retry budget exhausted, still schema-invalid: terminal, distinct from
     # a pipeline ERROR (ARCHITECTURE.md step 17) and, critically, never a
     # silent single-pass DONE (ARCHITECTURE.md -> Two-pass review).
     return {
         "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+        # Issue #670: the pass names its own diagnosis here rather than
+        # returning a reason-less terminal and relying on the composition to
+        # classify it downstream. `reconciliation.run_two_pass_review`
+        # forwards this key and `review_spine.critic_failure_reason` keeps
+        # what it finds, so the token an operator reads is unchanged.
+        "reason": retry_exhausted_reason(last_error),
         "attempts": attempts_allowed,
         "last_error": last_error,
     }

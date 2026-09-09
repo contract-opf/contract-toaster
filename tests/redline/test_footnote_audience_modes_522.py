@@ -22,18 +22,20 @@ parsed), never on an intermediate patch/entry structure -- the mode contract
 is about what a reader opens in Word, so proving it on a dict would prove
 nothing about the document.
 
-Both writer paths are covered, because both can deliver a `.docx`:
+Both delivering paths are covered:
 
-  - **live first-party**: `redline_generate.generate_redline_from_blocks` ->
+  - **first-party**: `redline_generate.generate_redline_from_blocks` ->
     `redline_block_apply.apply_block_transcript` ->
-    `redline_generate.inject_export_marker_and_footnotes`
-  - **standalone**: `redline_docx_writer.build_tracked_changes_docx` ->
-    `build_document_xml` / `build_footnotes_xml` (third-party paper and the
-    mock fixture generator)
+    `redline_generate.inject_export_marker_and_footnotes` (parts 1-4)
+  - **third-party paper**: the same compiler, reached through
+    `third_party_output_integration` (part 7)
 
 Both resolve the audience through the SAME pure function,
-`redline_docx_writer.footnote_texts_for_notes_mode`, so they cannot drift
-apart on which mode renders what.
+`footnote_audience.footnote_texts_for_notes_mode`, so they cannot drift
+apart on which mode renders what. (A standalone whole-document writer used
+to be a third path; issue #629 moved third-party paper off it and issue
+#631 deleted it, so part 5 now pins the audience resolver's own contract
+directly instead of through a writer that no longer exists.)
 
 ## Accept-all is deliberate, not incidental (issue #522 owner comment)
 
@@ -100,7 +102,7 @@ import extraction_normalization_stage  # noqa: E402
 import leakage_scan  # noqa: E402
 import model_output_schema  # noqa: E402
 import primary_review_pass  # noqa: E402
-import redline_docx_writer  # noqa: E402
+import footnote_audience  # noqa: E402
 import redline_generate  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -330,7 +332,7 @@ def _live_docx(mode: str, *, external=_EXTERNAL_NOTE, internal=_INTERNAL_NOTE):
     return result
 
 
-_MARKED_INTERNAL = redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX + _INTERNAL_NOTE
+_MARKED_INTERNAL = footnote_audience.mark_internal_footnote(_INTERNAL_NOTE)
 
 _EXPECTED_BY_MODE = {
     "none": [],
@@ -423,7 +425,7 @@ def _part_1b_missing_audience_text_emits_no_footnote(failures: list) -> None:
             f"[1i] An issue with no internal_rationale_for_footnote produced a "
             f"footnote in internal mode: {_footnote_texts(docx_bytes)}"
         )
-    if redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX in _all_document_text(docx_bytes):
+    if footnote_audience.INTERNAL_FOOTNOTE_PREFIX in _all_document_text(docx_bytes):
         failures.append("[1j] A bare [INTERNAL] marking was emitted with no note behind it.")
 
 
@@ -494,7 +496,12 @@ def _part_3_both_distinguishable_and_survives_accept_all(failures: list) -> None
         failures.append(
             f"[3d] The internal note is missing or unmarked in the footnote body: {body!r}"
         )
-    if "[INTERNAL]" not in body:
+    # Assert against the CONSTANT, not a hard-coded literal: the marking's
+    # wording is an owner decision that has changed once already (2026-09-01,
+    # "[INTERNAL] NOT FOR THE COUNTERPARTY: x" -> "[INTERNAL NOTE: x]"). What
+    # must never change is that the marking is a literal token in the RENDERED
+    # text rather than a formatting-only cue, which is what this checks.
+    if footnote_audience.INTERNAL_FOOTNOTE_PREFIX not in body:
         failures.append(
             f"[3e] The marking must be an unmissable literal token in the rendered "
             f"text, not a formatting-only cue: {body!r}"
@@ -527,7 +534,7 @@ def _part_3_both_distinguishable_and_survives_accept_all(failures: list) -> None
             "[3i] Accept-all left a <w:ins> wrapper behind -- the fixture no "
             "longer exercises the promoted-to-body-text case this part is about."
         )
-    if redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX not in _all_document_text(accepted):
+    if footnote_audience.INTERNAL_FOOTNOTE_PREFIX not in _all_document_text(accepted):
         failures.append(
             "[3j] The [INTERNAL] marking did not survive accept-all. It is the "
             "only thing standing between an internal note and the counterparty "
@@ -560,83 +567,60 @@ def _part_4_unknown_mode_falls_back_to_external(failures: list) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Part 5 — the standalone writer path, same four outcomes
+# Part 5 — the audience resolver's own contract, directly
 # ---------------------------------------------------------------------------
 
 
-def _standalone_docx(mode: str) -> bytes:
-    """`redline_docx_writer.build_tracked_changes_docx` driven exactly as its
-    remaining caller drives it (`gen_mock_eiaa_redline_fixture`): the
-    audience is resolved by the SHARED `footnote_texts_for_notes_mode` and
-    handed over as the anchor's footnote text. (Third-party paper drove this
-    writer too until issue #629 moved it onto the block compiler -- see
-    Part 7.)
+def _part_5_resolver(failures: list) -> None:
+    """Parts 1-4 and 7 prove the four modes on the DELIVERED BYTES of both
+    writer paths. This part pins the resolver those paths share
+    (`footnote_texts_for_notes_mode`) on the inputs a rendering path cannot
+    easily reach: blank and absent rationales.
+
+    (A standalone whole-document writer used to carry this coverage. Issue
+    #631 deleted it; asserting the four modes through a writer that no longer
+    exists would prove nothing, so the contract is pinned where it actually
+    lives.)
+
+    Deliberately NOT pinned here: the `footnote_text_by_anchor` VALUE shapes
+    `normalize_footnote_texts` accepts. No producer builds that mapping --
+    the sole production caller of `inject_export_marker_and_footnotes`
+    passes `{}` (issue #626 moved footnotes into `apply_block_transcript`),
+    so those cases would be green forever and could not fail for a reason
+    production could hit. See that function's own docstring, which says the
+    same thing.
     """
-    applied_patches = [{"anchor": "sec-8", "new_text": "Liability is capped at fees paid."}]
-    original_by_anchor = {"sec-8": _SEC8_TEXT}
-    texts = redline_docx_writer.footnote_texts_for_notes_mode(
-        _EXTERNAL_NOTE, _INTERNAL_NOTE, mode
-    )
-    return redline_docx_writer.build_tracked_changes_docx(
-        applied_patches,
-        original_by_anchor,
-        footnote_text_by_anchor={"sec-8": texts} if texts else {},
-        include_marker=False,
-    )
-
-
-def _part_5_standalone_writer_four_modes(failures: list) -> None:
     for mode in ALL_MODES:
-        docx_bytes = _standalone_docx(mode)
         expected = _EXPECTED_BY_MODE[mode]
-        actual = _footnote_texts(docx_bytes)
+        actual = footnote_audience.footnote_texts_for_notes_mode(
+            _EXTERNAL_NOTE, _INTERNAL_NOTE, mode
+        )
         if actual != expected:
             failures.append(
-                f"[5a/{mode}] Standalone writer footnote text does not match the "
-                f"mode contract.\n  expected: {expected}\n  actual:   {actual}"
-            )
-        ref_ids = _footnote_reference_ids(docx_bytes)
-        if len(ref_ids) != len(expected):
-            failures.append(
-                f"[5b/{mode}] Standalone writer emitted {len(ref_ids)} footnote "
-                f"reference(s) for {len(expected)} footnote(s): {ref_ids}"
-            )
-        if mode == "none":
-            if FOOTNOTES_PART in _part_names(docx_bytes):
-                failures.append(
-                    "[5c] Standalone writer emitted word/footnotes.xml for "
-                    "notes_mode='none'."
-                )
-            has_rel, has_ct = _declares_footnotes_part(docx_bytes)
-            if has_rel or has_ct:
-                failures.append(
-                    f"[5d] Standalone writer left a dangling footnotes declaration "
-                    f"(relationship={has_rel}, content-type={has_ct})."
-                )
-            try:
-                redline_generate.verify_docx_round_trip(docx_bytes)
-            except ValueError as exc:
-                failures.append(f"[5e] Standalone 'none' document failed round-trip: {exc}")
-        if mode in ("none", "external") and _INTERNAL_NOTE in _all_document_text(docx_bytes):
-            failures.append(
-                f"[5f/{mode}] Standalone writer leaked the internal note into a "
-                f"{mode!r} document."
+                f"[5a/{mode}] The resolver does not match the mode contract the "
+                f"delivered bytes are asserted against.\n"
+                f"  expected: {expected}\n  actual:   {actual}"
             )
 
+    # Blank/absent rationale contributes nothing -- never a bare marking with
+    # nothing after it, never an empty footnote.
+    for mode in ALL_MODES:
+        for external, internal in ((None, None), ("", "   "), ("  ", None)):
+            texts = footnote_audience.footnote_texts_for_notes_mode(external, internal, mode)
+            if texts:
+                failures.append(
+                    f"[5b/{mode}] Blank rationales ({external!r}, {internal!r}) "
+                    f"produced footnotes: {texts!r}"
+                )
 
-def _part_5b_single_string_value_still_supported(failures: list) -> None:
-    """The pre-#522 mapping shape (anchor -> ONE string) is still accepted --
-    `scripts/gen_mock_eiaa_redline_fixture.py` passes exactly that."""
-    docx_bytes = redline_docx_writer.build_tracked_changes_docx(
-        [{"anchor": "sec-8", "new_text": "Liability is capped at fees paid."}],
-        {"sec-8": _SEC8_TEXT},
-        footnote_text_by_anchor={"sec-8": _EXTERNAL_NOTE},
-        include_marker=False,
+    # An internal note with no text is never rendered as a bare marking.
+    only_internal_blank = footnote_audience.footnote_texts_for_notes_mode(
+        _EXTERNAL_NOTE, "  ", "both"
     )
-    if _footnote_texts(docx_bytes) != [_EXTERNAL_NOTE]:
+    if only_internal_blank != [_EXTERNAL_NOTE]:
         failures.append(
-            f"[5g] A single-string footnote value no longer renders one footnote: "
-            f"{_footnote_texts(docx_bytes)}"
+            f"[5c] A blank internal note in 'both' must contribute nothing, "
+            f"leaving only the external rationale: {only_internal_blank!r}"
         )
 
 
@@ -900,7 +884,7 @@ def _part_7_third_party_path_honours_the_mode(failures: list) -> None:
             )
         # The export marker follows the same rule on this path as on the
         # first-party one: present iff the mode carries internal content.
-        marker_present = redline_docx_writer.MARKER_TEXT in _all_document_text(
+        marker_present = redline_generate.MARKER_TEXT in _all_document_text(
             out_bytes
         )
         if marker_present != (mode in ("internal", "both")):
@@ -1074,7 +1058,7 @@ def _part_8_the_prompt_asks_for_the_field_it_renders(failures: list) -> None:
                 f"expected {expected!r}."
             )
         for text in texts:
-            if text.startswith(redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX):
+            if text.startswith(footnote_audience.INTERNAL_FOOTNOTE_PREFIX):
                 continue
             # An UNMARKED footnote is only honest if nothing routes internal
             # content into the field behind it.
@@ -1092,7 +1076,7 @@ def _part_8_the_prompt_asks_for_the_field_it_renders(failures: list) -> None:
         if not docx_bytes:
             failures.append(f"[8o/{mode}] Expected a delivered docx, got {result}")
             continue
-        marked = redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX + _NARRATION_NOTE
+        marked = footnote_audience.mark_internal_footnote(_NARRATION_NOTE)
         texts = _footnote_texts(docx_bytes)
         body = "".join(texts)
         if marked not in body:
@@ -1119,8 +1103,7 @@ def main() -> None:
     _part_2_none_has_no_footnote_part(failures)
     _part_3_both_distinguishable_and_survives_accept_all(failures)
     _part_4_unknown_mode_falls_back_to_external(failures)
-    _part_5_standalone_writer_four_modes(failures)
-    _part_5b_single_string_value_still_supported(failures)
+    _part_5_resolver(failures)
     _part_6_field_is_declared_optional_and_scanned(failures)
     _part_7_third_party_path_honours_the_mode(failures)
     _part_8_the_prompt_asks_for_the_field_it_renders(failures)

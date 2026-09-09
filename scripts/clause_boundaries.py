@@ -6,7 +6,7 @@ Shared clause-boundary detector (issue #277).
 
 The first-party DRAFT loader -- `scripts/extraction_normalization_stage.py`'s
 `extract_document_paragraphs()`, whose output (`draft_paragraphs`) feeds
-`scripts/diff_standard_form.py::diff_draft_against_standard()` at
+the retired `diff_draft_against_standard()` at
 `scripts/review_spine.py:327` -- used to recognise a new logical
 paragraph/section boundary ONLY via a Word `Heading*` style
 (`_paragraph_style_is_heading()`, pre-#277). Real counterparty drafts
@@ -15,7 +15,7 @@ editors, PDF round-trips) and mark section breaks with bold single-line
 paragraphs or manually-typed numbering/lettering instead. With the
 style-only gate, zero headings are detected, every paragraph collapses into
 one `"<untitled>"` logical paragraph, and the draft anchors to nothing but
-the `sec-_new` fallback tier -- see `diff_standard_form.py`'s
+the `sec-_new` fallback tier -- see that diff's
 `SEC_NEW`/`diff_draft_against_standard()` docstring.
 
 This module is the SHARED detector both that draft loader and the future
@@ -28,8 +28,8 @@ present, else a deterministic document-signals fallback.
   1. Style tier (authoritative, unambiguous): `style_name` starts with
      "heading" (case-insensitive) -> boundary, full stop. This is the exact
      rule the CANONICAL standard-form loaders
-     (`scripts/diff_standard_form.py:444`'s `_load_standard_form_paragraphs_
-     from_docx`, `scripts/build_anchor_map.py:242`'s `build_anchors_from_
+     (the retired standard-form docx loader's `_load_standard_form_paragraphs_
+     from_docx`, the retired anchor-map builder's `build_anchors_from_
      docx`) already use and keep using UNCHANGED -- they read *your* docx,
      which this issue's corrected scope (see the issue's "Grind notes" /
      overnight-overseer correction) explicitly leaves alone. This tier is
@@ -53,7 +53,7 @@ present, else a deterministic document-signals fallback.
 `ooxml_paragraph_signals()` reads a raw `<w:p>` `xml.etree.ElementTree`
 element directly (same zipfile+ElementTree-only convention as
 `scripts/extraction_normalization_stage.py` and
-`scripts/redline_docx_writer.py`) -- python-docx stays a docx-mode-only dev
+the OOXML writers) -- python-docx stays a docx-mode-only dev
 dependency (see `requirements-dev.txt`'s python-docx note); this module
 works in the "no-python-docx degraded mode" the repo already supports.
 `is_boundary_paragraph()` itself takes only plain signal values (text,
@@ -64,9 +64,12 @@ pure-text signals (numbering, lettering, ALL-CAPS) as the floor every
 caller gets for free.
 
 See: issue #277, `scripts/extraction_normalization_stage.py`'s module
-docstring, `scripts/generate_synthetic_standard_form.py`'s "Heading text
-convention" (why a numbered/lettered lead-in must be stripped from the
-heading text used for anchor matching -- `clean_heading_text()` below).
+docstring, and `clean_heading_text()` below (why a numbered/lettered
+lead-in must be stripped from the heading text used for anchor matching).
+The synthetic-form generator that used to carry that "Heading text
+convention" section was deleted with the rest of the standard-form
+subsystem by issue #631; `clean_heading_text()` is now where the
+convention is written down.
 """
 
 from __future__ import annotations
@@ -158,11 +161,13 @@ def clean_heading_text(text: str) -> str:
     """
     Strips a leading manually-typed numbered/lettered marker so a
     fallback-detected heading normalizes to the SAME key
-    (`diff_standard_form._normalize_heading`) as the equivalent
+    (the retired diff's `_normalize_heading`) as the equivalent
     Heading-style heading, whose visible number is rendered by Word's
-    auto-numbering (never typed as literal text -- see
-    `scripts/generate_synthetic_standard_form.py`'s "Heading text
-    convention"). A no-op for text with no such leading marker (including
+    auto-numbering (never typed as literal text). That is the "Heading text
+    convention" the retired synthetic-form generator documented and every
+    committed synthetic fixture still follows: a heading's own text carries
+    no literal number, so a manually-typed one is presentation, not
+    identity. A no-op for text with no such leading marker (including
     every real Heading-style heading), so this is always safe to call.
     """
     stripped = (text or "").strip()

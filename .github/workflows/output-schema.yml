@@ -90,6 +90,10 @@ jobs:
 
       - name: Output-contract schema checks
         # Fails if any of:
+        #   - the `ast` resolver that answers "which output contract is ACTIVE?"
+        #     without importing scripts/primary_review_pass.py mis-answers a source
+        #     whose correct answer is known, or silently answers one in which
+        #     OUTPUT_SCHEMA_PATH is rebound in a form it cannot see (issue #641)
         #   - playbooks/output-schema-v1.json does not exist
         #   - every_issue_includes fields are not all properties of issues[] in the schema
         #   - output_contract_hash is not in the release block's required fields

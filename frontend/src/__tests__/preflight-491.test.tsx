@@ -2,7 +2,8 @@
  * preflight-491.test.tsx — the upload-time preflight card (issue #491).
  *
  * A cheap, fast, ADVISORY check fired the moment a file is chosen (before
- * "Upload for review"): deterministic document stats plus a cheap-model
+ * the go button, "Start Toaster" since issue #667): deterministic document
+ * stats plus a cheap-model
  * agreement-type/paper-side guess and a server-computed match verdict.
  * Never blocks a submission.
  *
@@ -14,7 +15,7 @@
  *      an amber mismatch note naming the SELECTED playbook; `"unclear"`
  *      renders neither banner, only the neutral type+side line (or nothing,
  *      if there is no type guess at all).
- *   3. The Upload button is NEVER disabled or gated by preflight -- pending,
+ *   3. The go button is NEVER disabled or gated by preflight -- pending,
  *      resolved, or failed, `!file` is the only thing that can disable it.
  *   4. A preflight failure (network error, non-2xx) renders no card and no
  *      error banner -- upload is unaffected.
@@ -28,6 +29,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { choosePlaybook, submitArmed } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -84,6 +86,17 @@ const BASE_STATS = {
 
 function selectFile(file: File): void {
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [file] } });
+}
+
+/** No verdict, no stats, no type — the console says that with an EMPTY card
+ *  rather than by withholding it. Issue #733. */
+function expectsNoPreflightClaim(): void {
+  const card = screen.getByTestId('review-preflight-card');
+  expect(screen.queryByTestId('review-preflight-match-likely')).toBeNull();
+  expect(screen.queryByTestId('review-preflight-match-unlikely')).toBeNull();
+  expect(screen.queryByTestId('review-preflight-type-side')).toBeNull();
+  expect(screen.queryByTestId('review-preflight-summary')).toBeNull();
+  expect(card).not.toHaveTextContent(/\d+ words/);
 }
 
 describe('preflight card — ReviewSubmission.tsx', () => {
@@ -209,10 +222,12 @@ describe('preflight card — ReviewSubmission.tsx', () => {
 
     // Preflight is still in flight (never resolved) -- Upload is enabled the
     // instant a file is chosen, unconditionally on preflight's state.
-    await waitFor(() => {
-      expect(screen.getByTestId('review-submit-button')).not.toBeDisabled();
-    });
-    expect(screen.queryByTestId('review-preflight-card')).toBeNull();
+    await waitFor(() => expect(submitArmed()).toBe(true));
+    // Nothing is CLAIMED while the check is in flight. The old tree withholds
+    // the card entirely; the console keeps the ticket in place and prints
+    // "checking…" on it — neither states a word count, a type or a verdict
+    // (issue #733).
+    expectsNoPreflightClaim();
 
     // Clean up the pending promise so the test doesn't leak a hung request.
     pending.resolve?.({ ok: true, status: 200, json: async () => ({}) } as Response);
@@ -230,8 +245,8 @@ describe('preflight card — ReviewSubmission.tsx', () => {
 
     // Give the failed fetch a tick to resolve, then assert steady state:
     // no card, no error surface, and Upload still usable.
-    await waitFor(() => expect(screen.getByTestId('review-submit-button')).not.toBeDisabled());
-    expect(screen.queryByTestId('review-preflight-card')).toBeNull();
+    await waitFor(() => expect(submitArmed()).toBe(true));
+    expectsNoPreflightClaim();
     expect(screen.queryByTestId('review-submit-error')).toBeNull();
   });
 
@@ -360,7 +375,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
     expect(preflightCalls).toBe(1);
     expect(matchCalls).toBe(0);
 
-    fireEvent.click(screen.getByTestId('review-playbook-option-msa-sample'));
+    await choosePlaybook('msa-sample');
 
     await screen.findByTestId('review-preflight-match-unlikely');
     // The full, file-uploading request never re-fired -- only the cheap

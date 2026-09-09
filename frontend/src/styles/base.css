@@ -285,7 +285,8 @@ tbody tr:hover {
 }
 
 /* Reduced motion — every ct-* animation/transition sits behind this guard
-   (the toaster hero keeps its own inline-<style> guard, §3.2). */
+   (the Review console's inline <style>, orbit-diner/motion.ts's
+   `motionStyles`, keeps its own guard, §3.2). */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

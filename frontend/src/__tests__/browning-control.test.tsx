@@ -33,6 +33,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { DEFAULT_PLAYBOOKS, pressSubmit } from './support/consoleSurface';
 import { BROWNING_SETTINGS, composeGuidance, DEFAULT_BROWNING } from '../toaster/browning';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -94,6 +95,9 @@ const TYPED = 'Leave the indemnity alone; the business already agreed it.';
  *  DONE when a test needs the result panel (and its guidance readback). */
 function mountForm(detail?: Record<string, unknown>): ReturnType<typeof vi.fn> {
   const fetchMock = stubFetch({
+    // Issue #733: the console will not arm its lever without an active
+    // playbook, so the catalog is part of the fixture rather than a scenario.
+    '/api/playbooks': DEFAULT_PLAYBOOKS,
     'POST /api/reviews': { review_id: 'rev-b1', resumed: false },
     'GET /api/reviews/rev-b1': detail ?? {
       review_id: 'rev-b1',
@@ -116,12 +120,13 @@ async function submitWith(level: string | null, typed?: string): Promise<void> {
     fireEvent.click(screen.getByTestId(`review-browning-option-${level}`));
   }
   chooseFile();
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  window.localStorage?.clear();
 });
 
 describe('browning control — what you see is what is injected', () => {
@@ -143,10 +148,9 @@ describe('browning control — what you see is what is injected', () => {
   it('defaults to Medium, which adds nothing at all to the request', async () => {
     expect(DEFAULT_BROWNING).toBe('medium');
     const fetchMock = mountForm();
-    expect(screen.getByTestId('review-browning-option-medium')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
+    // `toBeChecked` reads the hand-built `aria-checked` radio and the
+    // console's native `<input type="radio">` alike (issue #733).
+    expect(screen.getByTestId('review-browning-option-medium')).toBeChecked();
     // No sentence element exists at Medium — there is nothing to disclose.
     expect(screen.queryByTestId('review-browning-sentence')).toBeNull();
     screen.getByTestId('review-browning-note');
@@ -190,55 +194,16 @@ describe('browning control — what you see is what is injected', () => {
   });
 });
 
-describe('browning control — it is a real radiogroup', () => {
-  it('moves with arrows, Home and End', () => {
+describe('browning control — persistence across sessions', () => {
+  it('saves browning selection to localStorage and restores it on reload', () => {
     mountForm();
-    const group = screen.getByTestId('review-browning-control');
-    expect(group).toHaveAttribute('role', 'radiogroup');
-
-    const checked = () =>
-      BROWNING_SETTINGS.find(
-        (entry) =>
-          screen.getByTestId(`review-browning-option-${entry.id}`).getAttribute('aria-checked') ===
-          'true',
-      )?.id;
-
-    expect(checked()).toBe('medium');
-    fireEvent.keyDown(group, { key: 'ArrowRight' });
-    expect(checked()).toBe('dark');
-    fireEvent.keyDown(group, { key: 'ArrowLeft' });
-    expect(checked()).toBe('medium');
-    fireEvent.keyDown(group, { key: 'Home' });
-    expect(checked()).toBe('light');
-    fireEvent.keyDown(group, { key: 'End' });
-    expect(checked()).toBe('dark');
-    // Wrapping, like the contract-type dial: End then Right comes back round.
-    fireEvent.keyDown(group, { key: 'ArrowRight' });
-    expect(checked()).toBe('light');
+    fireEvent.click(screen.getByTestId('review-browning-option-dark'));
+    expect(window.localStorage.getItem('contract-toaster:last-browning')).toBe('dark');
   });
 
-  it('slides the decorative knob to match, without becoming the control', () => {
+  it('restores previous browning selection from localStorage on mount', () => {
+    window.localStorage.setItem('contract-toaster:last-browning', 'dark');
     mountForm();
-    const slider = () => screen.getByTestId('toaster-browning-slider');
-    const at = (id: string) => {
-      fireEvent.click(screen.getByTestId(`review-browning-option-${id}`));
-      return Number(slider().getAttribute('x'));
-    };
-
-    const light = at('light');
-    const medium = at('medium');
-    const dark = at('dark');
-    expect(light).toBeLessThan(medium);
-    expect(medium).toBeLessThan(dark);
-
-    // Decoration, not control: the SVG group is inside an aria-hidden subtree,
-    // so assistive tech is offered the radiogroup and nothing else.
-    expect(slider().closest('[aria-hidden="true"]')).not.toBeNull();
-  });
-
-  it('draws exactly one detent tick per setting — the art cannot imply a fourth intensity', () => {
-    mountForm();
-    const group = document.querySelector('[data-part="browning"]')!;
-    expect(group.querySelectorAll('line').length).toBe(BROWNING_SETTINGS.length);
+    expect(screen.getByTestId('review-browning-option-dark')).toBeChecked();
   });
 });

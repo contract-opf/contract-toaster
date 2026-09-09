@@ -65,8 +65,12 @@ CONCESSIONS = Term(
 UNACCEPTABLE = Term(
     header="Unacceptable variations — rejected/reversed asks",
     help=(
-        "Counterparty asks that appeared in a draft and were reversed or removed "
-        "before signing — historically refused. Use as pushback precedent."
+        "Wording the COUNTERPARTY asked for and WE REFUSED: it appeared in a draft and "
+        "was reversed or removed before signing. These entries are a record of what we "
+        "turned down. They are NEVER our position, and must NEVER be used as replacement "
+        "language or as a model for an edit. Their only use is precedent for refusing the "
+        "same ask if the counterparty makes it again. If the document already gives us "
+        "something better than one of these, that is a good outcome, not a defect."
     ),
     opf_field="summary.rejected",
     digest_field="unacceptable",

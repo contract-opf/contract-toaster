@@ -163,13 +163,24 @@ describe('History — the provenance record', () => {
     ]);
   });
 
+  // Issue #668 dropped the PROVIDER prefix from what this cell paints, so
+  // the assertion moved off the full `vendor/…` string. The property it was
+  // protecting did not move: each step is still NAMED, the two steps are
+  // still told apart, and the full recorded id is still retrievable from the
+  // row (see history-table-width-668.test.tsx for the disclosure itself).
   it('names the models that ran each step', async () => {
     stubRoutes({ '/api/reviews': listOf(MODERN) });
     render(<ReviewHistory />);
 
-    const cell = await screen.findByTestId('history-models-rev-modern');
-    expect(cell.textContent).toContain('vendor/primary-of-that-day');
-    expect(cell.textContent).toContain('vendor/critic-of-that-day');
+    await screen.findByTestId('history-models-rev-modern');
+    const primary = screen.getByTestId('history-model-primary-rev-modern');
+    const critic = screen.getByTestId('history-model-critic-rev-modern');
+
+    expect(primary.textContent).toBe('primary-of-that-day');
+    expect(critic.textContent).toBe('critic-of-that-day');
+    // Not lost, only unpainted: the recorded id is what the name hovers to.
+    expect(primary.getAttribute('title')).toBe('vendor/primary-of-that-day');
+    expect(critic.getAttribute('title')).toBe('vendor/critic-of-that-day');
   });
 
   it('says "not recorded" for a review that predates the model fields — never today’s model', async () => {
@@ -432,8 +443,13 @@ describe('History — re-downloading past work', () => {
 
     await screen.findByTestId('history-row-rev-historic');
     expect(screen.queryByTestId('history-download-output-rev-historic')).toBeNull();
-    const actions = screen.getByTestId('history-actions-rev-historic');
-    expect(actions.textContent?.toLowerCase()).toContain('no redline');
+    // Issue #668 turned this sentence into a named mark, so the assertion
+    // reads the ACCESSIBLE NAME instead of the cell's visible text. The
+    // property is unchanged and is the point of the test: the row must SAY
+    // there is no redline, not leave an unexplained blank that reads as a
+    // missing button.
+    const noOutput = screen.getByTestId('history-no-output-rev-historic');
+    expect(noOutput.getAttribute('aria-label')?.toLowerCase()).toContain('no redline');
   });
 
   // Issue #466: a download 503's `detail` is server configuration (an unset
@@ -517,5 +533,33 @@ describe('History — load states', () => {
     fireEvent.click(screen.getByTestId('review-history-retry'));
     expect(await screen.findByTestId('history-row-rev-modern')).toBeTruthy();
     expect(screen.queryByTestId('review-history-error')).toBeNull();
+  });
+
+  it('filters rows by outcome chips and search query', async () => {
+    stubRoutes({ '/api/reviews': listOf(MODERN, HISTORIC) });
+    render(<ReviewHistory />);
+
+    expect(await screen.findByTestId('history-row-rev-modern')).toBeTruthy();
+    expect(screen.getByTestId('history-row-rev-historic')).toBeTruthy();
+
+    // Filter by clean (Accepted)
+    fireEvent.click(screen.getByTestId('history-filter-clean'));
+    expect(screen.getByTestId('history-row-rev-historic')).toBeTruthy();
+    expect(screen.queryByTestId('history-row-rev-modern')).toBeNull();
+
+    // Filter by redlines (Changes requested)
+    fireEvent.click(screen.getByTestId('history-filter-redline'));
+    expect(screen.getByTestId('history-row-rev-modern')).toBeTruthy();
+    expect(screen.queryByTestId('history-row-rev-historic')).toBeNull();
+
+    // Reset to All
+    fireEvent.click(screen.getByTestId('history-filter-all'));
+    expect(screen.getByTestId('history-row-rev-modern')).toBeTruthy();
+    expect(screen.getByTestId('history-row-rev-historic')).toBeTruthy();
+
+    // Search by review id
+    fireEvent.change(screen.getByTestId('history-search-input'), { target: { value: 'historic' } });
+    expect(screen.getByTestId('history-row-rev-historic')).toBeTruthy();
+    expect(screen.queryByTestId('history-row-rev-modern')).toBeNull();
   });
 });

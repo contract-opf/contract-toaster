@@ -80,8 +80,10 @@ On success, a ProvenTranscript: `{"status": "proven", "blocks": [...],
 "block_ops": [...], "by_issue": {...}, "failures": []}`. Every `keep`/
 `delete` op carries `(start, end)` offsets into the block's REAL text, every
 `insert` carries a proven `at` offset, each block carries its `final_text`
-(the accept-all projection), and `by_issue` groups every edit -- segment
-edits AND block ops -- under the `issue_key` that authored it.
+(the accept-all projection AS THE MODEL AUTHORED IT -- see
+`collapse_boundary_spaces` and `delivered_final_text` for the one, whitespace
+-only way the DELIVERED text differs), and `by_issue` groups every edit --
+segment edits AND block ops -- under the `issue_key` that authored it.
 
 On failure, `{"status": "rejected", "blocks": [], "block_ops": [],
 "by_issue": {}, "failures": [ ... ]}`, with one structured entry per
@@ -154,6 +156,25 @@ _INSERT_BLOCK_KEYS = {"op", "anchor_block_id", "new_text", "issue_key"}
 # anchor. It is a literal sentinel, never a real id (`build_block_map` stamps
 # `b0001`-style ids), so it can never collide with one.
 ANCHOR_START = "start"
+
+# The text a `delete_block` leaves standing in place of the clause it empties
+# (issue #646). Owner ruling, reviewing the first production redline: the
+# accepted document must never show a section heading with nothing under it,
+# because that reads as a drafting mistake rather than a deliberate striking.
+# The heading survives, the body is tracked-deleted, and THIS string is
+# tracked-INSERTED in its place.
+#
+# It lives here, beside `collapse_boundary_spaces`, for the same reason that
+# rule does: three readers reconstruct what the delivered document says --
+# the compiler (`redline_block_apply`), the accept-all proof
+# (`redline_projections._expected_accept_all_texts`) and the derived
+# `proposed_replacement_text` (`redline_generate.
+# derived_replacement_text_by_issue`) -- and `redline_block_apply` imports
+# both of the others, so the compiler cannot be their shared home without a
+# cycle. One definition, three callers.
+#
+# Exact string, brackets and full stop included (issue #646 Notes).
+OMITTED_CLAUSE_PLACEHOLDER = "[Intentionally omitted.]"
 
 # How much folded context a `source_mismatch` carries from each side. Enough
 # to see the divergence in its sentence without pasting the whole block back
@@ -356,6 +377,22 @@ def _place_source_segments(
 
     trailing = folded_block[pos:]
     if trailing.strip():
+        # Issue #683: the transcript stopped short of the block's end. A `keep`
+        # is unchanged source by definition, so a final keep that omits a tail
+        # is a transcription slip, not an assertion about the document -- the
+        # tail is RECONSTRUCTED from source rather than rejected. Measured on
+        # real counterparty paper: a 4,048-char block merged from 6 physical
+        # paragraphs, whose transcription dropped a 19-character trailing
+        # marker, failed 3 live runs in 5 here.
+        #
+        # Only a trailing KEEP may absorb it. If the transcript ends on a
+        # delete, the tail's disposition is exactly the ambiguity this module
+        # refuses to decide, so that still fails closed -- as does a transcript
+        # that stops before any segment at all.
+        if placements and source_segments[-1]["op"] == "keep":
+            placements[-1][1] = nb
+            gaps.append((nb, nb))
+            return placements, gaps, None
         return (
             placements,
             gaps,
@@ -502,6 +539,108 @@ def _prove_patch(patch: dict[str, Any], block: dict[str, Any]) -> dict[str, Any]
         elif op["op"] == "insert":
             final_parts.append(op["text"])
     return {"ops": ops, "final_text": "".join(final_parts)}
+
+
+# ---------------------------------------------------------------------------
+# Boundary whitespace (issue #644)
+# ---------------------------------------------------------------------------
+
+
+def collapse_boundary_spaces(ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`ops` with each `insert`'s text trimmed of ONLY the space characters
+    that would double a space the neighbouring accepted text on the other
+    side of the boundary already supplies (issue #644).
+
+    The first live-model redline delivered this, correctly segmented and
+    surgically applied:
+
+        keep   : "...for a period of three (3) years "   <- trailing space
+        delete : "- unless earlier terminated by written notice."
+        insert : " from the date of disclosure."         <- leading space
+
+    Both sides supply the space at the join, so accept-all read
+    `"...three (3) years  from the date..."`. It is in the ACCEPTED text, so
+    it survives into the clean copy a lawyer sends out.
+
+    The rule is deliberately the narrowest one that fixes it, because this
+    edits model-authored text:
+
+    - Only the ASCII SPACE is touched. No tabs, no newlines, no `\\u00a0` --
+      a non-breaking space is a typographic choice, not an accident.
+    - Only at a boundary, and only the INSERT side of it. The kept text is
+      the document's own bytes: trimming it would mean widening a proven
+      `delete` span, which changes what the tracked change strikes.
+    - Only spaces that are DUPLICATIVE: an insert is trimmed on a side only
+      where the accepted-view neighbour already ends (or begins) with a
+      space, so the join reads as exactly one. Whitespace anywhere else in
+      the model's text -- including an interior double space it chose to
+      write -- is left exactly as authored.
+    - An all-whitespace insert is never trimmed: emptying it would turn a
+      `replace` into a bare `delete`, changing both the markup Word renders
+      and the text the issue #623 projection gate proves.
+
+    The accepted view of a block is its `keep` and `insert` ops in order
+    (`delete`s contribute no accepted text), so those are the junctions this
+    walks. Trimming happens left to right on THIS list, so when two inserts
+    abut, the left one is already trimmed when the right one is considered
+    and the pair cannot both give up their space.
+
+    NOT in scope: a double space created by a pure DELETION (kept text ending
+    in a space, a span struck, kept text beginning with one). Closing that
+    would require widening the proven delete span over document text the
+    transcript did not name.
+
+    ## Why this lives here rather than in the compiler
+
+    It is a property of the TRANSCRIPT, not of one writer. Three readers
+    reconstruct what the delivered document says -- the compiler
+    (`redline_block_apply._pair_ops_into_edits`), the accept-all proof
+    (`redline_projections._expected_accept_all_texts`, whose
+    `applied_edits=None` mode rebuilds the expected text from the ops rather
+    than from the compiler's record) and the derived
+    `proposed_replacement_text`
+    (`redline_generate.derived_replacement_text_by_issue`). If the rule lived
+    in the compiler, the other two would keep reconstructing the UNTRIMMED
+    text and would silently disagree with the document that shipped. One
+    definition, three callers.
+
+    `ops` is never mutated -- a proven transcript is the record of what the
+    model authored, and `redline_generate._prune_proven_transcript` still
+    reads it.
+    """
+    trimmed = [dict(op) for op in ops]
+    accepted = [op for op in trimmed if op["op"] in ("keep", "insert")]
+    for position, op in enumerate(accepted):
+        if op["op"] != "insert":
+            continue
+        text = op["text"]
+        if not text.strip(" "):
+            continue
+        previous = accepted[position - 1]["text"] if position > 0 else ""
+        if previous.endswith(" ") and text.startswith(" "):
+            text = text.lstrip(" ")
+        following = accepted[position + 1]["text"] if position + 1 < len(accepted) else ""
+        if following.startswith(" ") and text.endswith(" "):
+            text = text.rstrip(" ")
+        op["text"] = text
+    return trimmed
+
+
+def delivered_final_text(ops: list[dict[str, Any]]) -> str:
+    """The accept-all text one block's `ops` actually DELIVER -- the same
+    join a proven block's `final_text` records, but over
+    `collapse_boundary_spaces(ops)`.
+
+    A proven block's `final_text` is the model's promise as authored; this is
+    that promise as the compiler writes it out. The two differ by exactly the
+    duplicative boundary spaces issue #644 drops, and by nothing else. Any
+    reader proving itself against the DELIVERED document wants this one.
+    """
+    return "".join(
+        op["text"]
+        for op in collapse_boundary_spaces(ops)
+        if op["op"] in ("keep", "insert")
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -9,12 +9,18 @@ function -- every check below that calls it fails.
 
 GREEN (after): `profile()` classifies a resolved registry entry as
 "precision" iff BOTH `anchor_map_path` and `section_config_path` are set,
-else "knowledge"; the profile-conditional gates named in the issue
-(tests/anchor/test_form_coverage.py, tests/anchor/test_heading_hash_drift.py,
-tests/lint-acceptable-variations.py, scripts/eval_harness.py's detector
-D-gate) print an explicit "SKIP (knowledge profile): ..." line for a
-knowledge entry instead of hard-failing on a null anchor map, and continue
-to fully enforce a precision entry.
+else "knowledge"; the profile-conditional gates named in the issue print an explicit
+"SKIP (knowledge profile): ..." line for a knowledge entry instead of
+hard-failing on a null anchor map, and continue to fully enforce a
+precision entry.
+
+Issue #631 deleted two of the four gates the issue named
+(tests/anchor/test_form_coverage.py and tests/anchor/test_heading_hash_
+drift.py) together with the anchor-map / standard-form-diff subsystem they
+gated. The two that survive -- tests/lint-acceptable-variations.py and
+scripts/eval_harness.py's detector D-gate -- are exercised below on both
+halves of the contract: they must SKIP a knowledge entry and still ENFORCE
+a precision one.
 
 Uses the synthetic-registry pattern documented in
 scripts/playbook_registry.py's module docstring (see also
@@ -41,10 +47,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-ANCHOR_TESTS_DIR = REPO_ROOT / "tests" / "anchor"
-for _p in (SCRIPTS_DIR, ANCHOR_TESTS_DIR):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 import playbook_registry  # noqa: E402
 
@@ -59,8 +63,6 @@ import playbook_registry  # noqa: E402
 # playbook_id resolution at CALL time (late-bound, per playbook_registry.
 # resolve_playbook's docstring), so importing early and calling later under a
 # patched REGISTRY_PATH is safe and exercises exactly what we want to test.
-import test_form_coverage  # noqa: E402
-import test_heading_hash_drift  # noqa: E402
 import eval_harness  # noqa: E402
 
 
@@ -120,9 +122,11 @@ def _run(fn, *args, **kwargs) -> tuple[int, str]:
 # Callers toggle which artifacts exist via the keyword flags below to
 # exercise the RED/GREEN paths of each gate.
 
-# The heading-hash-drift gate's regression fixture (tests/anchor/
-# test_heading_hash_drift.py) always manufactures a sec-8/sec-9 drift; a
-# precision playbook needs anchor_migrations covering both to pass it.
+# Kept as the precision playbook's realistic shape: a precision entry
+# carries `anchor_migrations` covering its anchors. The gate that consumed
+# them (the heading-hash-drift gate) was deleted by issue #631; the field
+# stays on the fixture so the fixture still resembles a real precision
+# playbook rather than a stripped-down one.
 _DRIFT_COVERING_MIGRATIONS = [
     {"anchor": "sec-8", "note": "synthetic fixture migration"},
     {"anchor": "sec-9", "note": "synthetic fixture migration"},
@@ -315,8 +319,6 @@ def check_guard_rail_no_hard_fail_on_null_anchor_map() -> list[str]:
                 )
 
             for label, fn in (
-                ("tests/anchor/test_form_coverage.py", test_form_coverage.main),
-                ("tests/anchor/test_heading_hash_drift.py", test_heading_hash_drift.main),
                 ("tests/lint-acceptable-variations.py", _LINT_ACCEPTABLE_VARIATIONS.main),
                 ("scripts/eval_harness.py", eval_harness.main),
             ):
@@ -346,44 +348,74 @@ def check_guard_rail_no_hard_fail_on_null_anchor_map() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check 3 — precision entries lose no enforcement: removing/breaking the
-# precision entry's anchor map (or its drift-migration coverage) must still
-# FAIL the corresponding gate.
+# Check 3 — precision entries lose no enforcement: the knowledge SKIP must be
+# SELECTIVE. A gate that skipped unconditionally would satisfy check 2 while
+# silently dropping every precision playbook's enforcement.
 # ---------------------------------------------------------------------------
+#
+# Issue #631 note: this check used to break the precision entry's own
+# artifacts (delete its anchor-map file; strip its anchor_migrations) and
+# assert the two anchor gates went RED. Those gates were deleted with the
+# anchor-map subsystem, and neither surviving gate reads an anchor map at
+# all -- so breaking one is no longer a RED path for anything, and asserting
+# it went red would assert over a state that cannot occur. What IS still
+# assertable, and is the property check 2 cannot see on its own, is that the
+# skip names the knowledge entry and ONLY the knowledge entry.
 
 def check_precision_entry_still_enforced() -> list[str]:
     failures = []
 
-    # 3a. form-coverage: precision entry registered but its anchor-map FILE
-    # is missing -> gate must FAIL (G1), not silently pass or skip.
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        _build_registry(root, omit_precision_anchor_map_file=True)
-        with _RegistryPatch(root / "playbooks" / "registry.json"):
-            code, output = _run(test_form_coverage.main)
-        if code == 0:
-            failures.append(
-                "  tests/anchor/test_form_coverage.py PASSED even though the "
-                "precision-fixture entry's registered anchor_map_path file "
-                "does not exist -- precision enforcement was lost.\n"
-                f"  Output:\n{output}"
-            )
+    gates = (
+        ("tests/lint-acceptable-variations.py", _LINT_ACCEPTABLE_VARIATIONS.main),
+        ("scripts/eval_harness.py", eval_harness.main),
+    )
 
-    # 3b. heading-hash-drift: precision entry's playbook carries NO
-    # anchor_migrations covering the fixture's manufactured sec-8/sec-9
-    # drift -> gate must FAIL (G3), not silently pass or skip.
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        _build_registry(root, precision_anchor_migrations=[])
+        _build_registry(root)  # both entries, both fully valid
         with _RegistryPatch(root / "playbooks" / "registry.json"):
-            code, output = _run(test_heading_hash_drift.main)
-        if code == 0:
-            failures.append(
-                "  tests/anchor/test_heading_hash_drift.py PASSED even though "
-                "the precision-fixture playbook has no anchor_migrations "
-                "covering the fixture's drift -- precision enforcement was "
-                f"lost.\n  Output:\n{output}"
-            )
+            for label, fn in gates:
+                code, output = _run(fn)
+                skip_lines = [
+                    line for line in output.splitlines()
+                    if "SKIP (knowledge profile)" in line
+                ]
+                if not any("knowledge-fixture" in line for line in skip_lines):
+                    failures.append(
+                        f"  {label} did not SKIP the knowledge entry at all "
+                        f"(no 'SKIP (knowledge profile)' line naming "
+                        f"'knowledge-fixture'). Output:\n{output}"
+                    )
+                for line in skip_lines:
+                    if "precision-fixture" in line:
+                        failures.append(
+                            f"  {label} SKIPped the PRECISION entry as though it "
+                            f"were a knowledge one -- the profile check is not "
+                            f"selective, so every precision playbook's "
+                            f"enforcement is silently gone: {line!r}"
+                        )
+                if code != 0:
+                    failures.append(
+                        f"  {label} exited {code} on a registry where both "
+                        f"entries are valid. Output:\n{output}"
+                    )
+
+            # eval_harness reports per-playbook: the precision entry must be
+            # SCORED (enforced), and the summary must count exactly one of
+            # each -- a skip that swallowed the precision entry would show 0
+            # scored while still exiting 0.
+            code, output = _run(eval_harness.main)
+            if "[precision-fixture]" not in output:
+                failures.append(
+                    "  scripts/eval_harness.py never names the precision entry in "
+                    f"its per-playbook output -- it was not scored.\n{output}"
+                )
+            if "1 playbook(s) scored, 1 skipped" not in output:
+                failures.append(
+                    "  scripts/eval_harness.py's summary does not report exactly "
+                    "1 playbook scored and 1 skipped for a registry holding one "
+                    f"precision and one knowledge entry.\n{output}"
+                )
 
     return failures
 

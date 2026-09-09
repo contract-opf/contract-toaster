@@ -6,7 +6,7 @@ NOT part of the test suite (no test_*.py name, not collected by check.sh) --
 this is a build-time tool, run once to produce the committed
 `reject-no-exclusivity-doc-level.SYNTHETIC.docx` + `.json` pair under this directory,
 the same "generate once, commit the output" convention
-`scripts/build_anchor_map.py` uses for `standard-forms/*.anchor-map.json`.
+the retired anchor-map builder used for `standard-forms/*.anchor-map.json`.
 
 Re-run this script (`python3 tests/fixtures/gold_docx_204/_generate.py`) only
 if the planted document's content or the canonical standard form changes --
@@ -31,10 +31,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+TESTS_DIR = REPO_ROOT / "tests"
 FIXTURE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
+sys.path.insert(0, str(TESTS_DIR))
 
-import diff_standard_form as dsf  # noqa: E402
+import synthetic_form_paragraphs as sfp  # noqa: E402
 
 _CONTENT_TYPES_XML = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
@@ -110,7 +112,7 @@ def main() -> None:
     # "synthetic-generic" playbook_id's section layout (issue #403: the real synthetic-generic
     # playbook is evicted; "synthetic-generic" now resolves to a brand-neutral synthetic
     # fixture with the same structure).
-    standard = dsf.load_standard_form_paragraphs(docx_path=None, playbook_id="synthetic-generic")
+    standard = sfp.load(playbook_id="synthetic-generic")
     std_by_anchor = {p["anchor"]: p for p in standard}
 
     excl_text = std_by_anchor[TARGET_ANCHOR]["text"]
@@ -132,8 +134,8 @@ def main() -> None:
 
     # The hunk's own source_text_hash (hash of the OLD standard-side text at
     # sec-10-non-exclusive) -- computed identically to
-    # diff_standard_form.py's _sha256_text(), i.e. redline_checks[] pins the
-    # SAME hash the diff/patch pipeline itself computes, not an
+    # the retired standard-form diff's _sha256_text(), i.e. redline_checks[]
+    # pins the SAME hash that pipeline computed, not an
     # independently-derived one.
     redline_hash = "sha256:" + hashlib.sha256(excl_text.encode("utf-8")).hexdigest()
 
@@ -147,7 +149,7 @@ def main() -> None:
             "'Miscellaneous: Non-Exclusive' section, run through the actual "
             "extract -> normalize -> diff -> detector chain "
             "(scripts/extraction_normalization_stage.py -> "
-            "scripts/diff_standard_form.py -> scripts/detector_common.py) "
+            "the retired standard-form diff -> scripts/detector_common.py) "
             "-- NOT a per-fixture text snippet like the pre-#204 gold set."
         ),
         "input_docx": "tests/fixtures/gold_docx_204/reject-no-exclusivity-doc-level.SYNTHETIC.docx",

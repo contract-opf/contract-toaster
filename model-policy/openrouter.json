@@ -6,7 +6,7 @@
     "OpenAI-compatible API) instead of AWS Bedrock. This file is the DTS",
     "counterpart of bedrock-us-east-1.json: it pins the model matrix and the",
     "per-token pricing used by the spend model. It is NOT scanned by the",
-    "Bedrock-access CI gate (that gate targets bedrock-us-east-1.json only) —",
+    "Bedrock-access CI gate (that gate targets bedrock-us-east-1.json only) \u2014",
     "OpenRouter model IDs use the provider/model form (e.g. anthropic/...)",
     "and the single-region-native-inference residency check does not apply.",
     "",
@@ -15,7 +15,7 @@
     "",
     "Model matrix parity (issue #269): this file's primary/critic model_ids",
     "must agree with model-policy/bedrock-us-east-1.json on role structure",
-    "and model FAMILY per role (Opus-class primary, Sonnet-class critic — see",
+    "and model FAMILY per role (Opus-class primary, Sonnet-class critic \u2014 see",
     "README.md's pinned matrix), allowing only provider-specific ID syntax to",
     "differ (e.g. \"anthropic.claude-opus-4-8\" vs",
     "\"anthropic/claude-opus-4.8\"). tests/lint-model-policy-consistency.py",
@@ -24,7 +24,7 @@
     "GENERATION may now differ in ONE direction (issue #604): this file may",
     "pin a NEWER generation of the same family than Bedrock, and only when the",
     "role entry declares `matrix_divergence_note` saying why. This file",
-    "falling BEHIND Bedrock is still an unconditional gate failure — that was",
+    "falling BEHIND Bedrock is still an unconditional gate failure \u2014 that was",
     "the #269 bug. models.primary carries such a declaration today: the DTS",
     "target ships Claude Opus 5 while the Bedrock artifact still pins Opus",
     "4.8, because a Bedrock repin additionally needs account model access, a",
@@ -44,7 +44,7 @@
     "Re-verify against https://openrouter.ai/models before production use if",
     "this file has aged past the pinned matrix's last update.",
     "The model IDs may also be overridden per-deployment via the env vars",
-    "OPENROUTER_PRIMARY_MODEL_ID / OPENROUTER_CRITIC_MODEL_ID — an override",
+    "OPENROUTER_PRIMARY_MODEL_ID / OPENROUTER_CRITIC_MODEL_ID \u2014 an override",
     "is honored by OpenRouterModelClient.invoke() but logged as an explicit",
     "override (backend/src/model_client.py::enforce_openrouter_policy_model_id).",
     "",
@@ -64,7 +64,7 @@
     "(Gemini, GPT, Kimi, DeepSeek) has no opus/sonnet/haiku family token by",
     "design, and the Bedrock target has no admin-selection concept at all.",
     "",
-    "`tier` is CONSIDERED JUDGEMENT, not a benchmark result — the UI must",
+    "`tier` is CONSIDERED JUDGEMENT, not a benchmark result \u2014 the UI must",
     "label it as guidance, never as a measurement. The cost rates ARE",
     "computed facts and may be stated flatly.",
     "",
@@ -73,7 +73,7 @@
     "`selectable` entries below (opus-5, gpt-5.6-sol, sonnet-5,",
     "gemini-3.1-pro-preview, kimi-k3, deepseek-v4-pro) were present in the",
     "live catalogue, listed a ZDR endpoint, and advertised",
-    "`response_format`/`structured_outputs` (non-negotiable — this app",
+    "`response_format`/`structured_outputs` (non-negotiable \u2014 this app",
     "requires strict JSON) plus `reasoning_effort`. Re-verify the rates",
     "against that endpoint before landing a change here. The one other",
     "`selectable` entry -- anthropic/claude-sonnet-4.6, added by issue #589",
@@ -81,7 +81,7 @@
     "below for what is and is not verified for it (no ZDR-endpoint or",
     "structured-outputs confirmation exists for it in this file). Note that",
     "opus-5 is one of",
-    "the SIX and is ALSO models.primary since issue #604 — it was verified",
+    "the SIX and is ALSO models.primary since issue #604 \u2014 it was verified",
     "here as a selectable id, and the pin inherits exactly that verification",
     "because it is the same model_id.",
     "",
@@ -118,18 +118,34 @@
     "REASONING BUDGET (issue #527): `reasoning_max_tokens` on models.primary,",
     "models.critic, and each `selectable` entry is the token allowance",
     "backend/src/model_client.py::OpenRouterModelClient.invoke ADDS on top of",
-    "the pass's own content budget when it sends `max_tokens` — never carved",
+    "the pass's own content budget when it sends `max_tokens` \u2014 never carved",
     "out of it. OpenRouter's `max_tokens` is a COMBINED ceiling across a",
     "reasoning-class model's `reasoning` AND `content` tokens; a model given",
     "no allowance can silently spend the whole budget on reasoning and return",
     "empty content. An operator-run live probe (issue #527, 2026-08-03)",
     "against real structured-output requests found exactly two of the eight",
-    "model_id values below reasoning-class — moonshotai/kimi-k3 and",
+    "model_id values below reasoning-class \u2014 moonshotai/kimi-k3 and",
     "google/gemini-3.1-pro-preview, both of which return `stop` with valid",
     "JSON once given a several-thousand-token allowance; every other entry",
     "returned 0 reasoning tokens at both a tight and a roomy budget. `0` is",
     "the default for every model this file does not name an allowance for,",
     "which keeps every currently-passing prompt fixture byte-identical.",
+    "",
+    "OUTPUT BUDGET (issue #658): optional per-model `max_output_tokens` on",
+    "the role pins and on each `selectable` entry is the CEILING half of the",
+    "per-review output budget backend/src/model_client.py::",
+    "output_budget_for_document computes (with this field as its ceiling",
+    "argument, read by openrouter_model_max_output_tokens) -- the most",
+    "content the review passes will ever ask that model for, and a hard",
+    "bound: no caller can pass a budget past it. It is a ceiling, not a",
+    "spend: you are",
+    "billed for tokens actually generated. Declared as 128000 for the",
+    "Anthropic models (Opus 5, Sonnet 5, Sonnet 4.6), which support that",
+    "output length. Every other entry deliberately declares NOTHING and",
+    "therefore fails closed to model_client.DEFAULT_MAX_OUTPUT_TOKENS",
+    "(32000) -- absence is never read as an assumed capability, the same",
+    "posture the capability descriptor below documents. Add a figure here",
+    "only with a source for it.",
     "",
     "CAPABILITY DESCRIPTOR (issue #562): optional per-model",
     "`structured_outputs` / `prompt_caching` fields, read by",
@@ -202,12 +218,17 @@
       "matrix_divergence_note": "Issue #604: the DTS/OpenRouter target's primary reviewer is pinned one generation AHEAD of bedrock-us-east-1.json (anthropic.claude-opus-4-8). Owner decision -- Opus 5 has been listed in `selectable` and reachable on OpenRouter since 2026-08-02, so shipping 4.8 as the default was leaving the better model on the shelf. The Bedrock pin deliberately did NOT move with it: that id additionally needs account model access, a re-measured on-demand quota (granted_tpm/granted_rpm and the review_throughput_ceiling / max_eval_parallelism derived from them), an IAM grant scoped to the exact foundation-model ARN in infra/lib/nested/pipeline-stack.ts, and a quarterly recertification run -- none of which this change did. tests/lint-model-policy-consistency.py reads this field; deleting it makes the gate fail.",
       "approx_tokens_per_review_input": 60000,
       "approx_tokens_per_review_output": 8000,
-      "cost_per_million_input_usd": 5.00,
-      "cost_per_million_output_usd": 25.00,
-      "reasoning_max_tokens": 0,
+      "cost_per_million_input_usd": 5.0,
+      "cost_per_million_output_usd": 25.0,
+      "reasoning_max_tokens": 4000,
+      "max_output_tokens": 128000,
       "structured_outputs": true,
       "request_contract": {
-        "omit_sampling_params": ["temperature", "top_p", "top_k"]
+        "omit_sampling_params": [
+          "temperature",
+          "top_p",
+          "top_k"
+        ]
       }
     },
     "critic": {
@@ -215,11 +236,16 @@
       "model_id": "anthropic/claude-sonnet-4.6",
       "approx_tokens_per_review_input": 70000,
       "approx_tokens_per_review_output": 5000,
-      "cost_per_million_input_usd": 3.00,
-      "cost_per_million_output_usd": 15.00,
-      "reasoning_max_tokens": 0,
+      "cost_per_million_input_usd": 3.0,
+      "cost_per_million_output_usd": 15.0,
+      "reasoning_max_tokens": 4000,
+      "max_output_tokens": 128000,
       "request_contract": {
-        "omit_sampling_params": ["temperature", "top_p", "top_k"]
+        "omit_sampling_params": [
+          "temperature",
+          "top_p",
+          "top_k"
+        ]
       }
     },
     "preflight": {
@@ -232,7 +258,11 @@
       "reasoning_max_tokens": 0,
       "structured_outputs": true,
       "request_contract": {
-        "omit_sampling_params": ["temperature", "top_p", "top_k"]
+        "omit_sampling_params": [
+          "temperature",
+          "top_p",
+          "top_k"
+        ]
       }
     },
     "cover_note": {
@@ -240,12 +270,17 @@
       "model_id": "anthropic/claude-sonnet-5",
       "approx_tokens_per_review_input": 4000,
       "approx_tokens_per_review_output": 300,
-      "cost_per_million_input_usd": 2.00,
-      "cost_per_million_output_usd": 10.00,
+      "cost_per_million_input_usd": 2.0,
+      "cost_per_million_output_usd": 10.0,
       "reasoning_max_tokens": 0,
+      "max_output_tokens": 128000,
       "structured_outputs": true,
       "request_contract": {
-        "omit_sampling_params": ["temperature", "top_p", "top_k"]
+        "omit_sampling_params": [
+          "temperature",
+          "top_p",
+          "top_k"
+        ]
       }
     }
   },
@@ -255,28 +290,30 @@
       "display_name": "Claude Sonnet 4.6",
       "tier": "High",
       "note": "The policy default for the critic pass.",
-      "cost_per_million_input_usd": 3.00,
-      "cost_per_million_output_usd": 15.00,
-      "reasoning_max_tokens": 0
+      "cost_per_million_input_usd": 3.0,
+      "cost_per_million_output_usd": 15.0,
+      "reasoning_max_tokens": 4000,
+      "max_output_tokens": 128000
     },
     {
       "model_id": "anthropic/claude-opus-5",
       "display_name": "Claude Opus 5",
       "tier": "Highest",
       "note": "Strongest nuanced legal reasoning.",
-      "cost_per_million_input_usd": 5.00,
-      "cost_per_million_output_usd": 25.00,
+      "cost_per_million_input_usd": 5.0,
+      "cost_per_million_output_usd": 25.0,
       "context_length": 1000000,
-      "reasoning_max_tokens": 0,
+      "reasoning_max_tokens": 4000,
+      "max_output_tokens": 128000,
       "structured_outputs": true
     },
     {
       "model_id": "openai/gpt-5.6-sol",
       "display_name": "GPT-5.6 Sol",
       "tier": "Highest",
-      "note": "Frontier model from a different lab — a genuine second opinion.",
-      "cost_per_million_input_usd": 5.00,
-      "cost_per_million_output_usd": 30.00,
+      "note": "Frontier model from a different lab \u2014 a genuine second opinion.",
+      "cost_per_million_input_usd": 5.0,
+      "cost_per_million_output_usd": 30.0,
       "context_length": 1050000,
       "reasoning_max_tokens": 0,
       "structured_outputs": true
@@ -286,10 +323,11 @@
       "display_name": "Claude Sonnet 5",
       "tier": "High",
       "note": "Near-frontier at roughly 40% of Opus.",
-      "cost_per_million_input_usd": 2.00,
-      "cost_per_million_output_usd": 10.00,
+      "cost_per_million_input_usd": 2.0,
+      "cost_per_million_output_usd": 10.0,
       "context_length": 1000000,
       "reasoning_max_tokens": 0,
+      "max_output_tokens": 128000,
       "structured_outputs": true
     },
     {
@@ -297,8 +335,8 @@
       "display_name": "Gemini 3.1 Pro (preview)",
       "tier": "High",
       "note": "Very strong over long context.",
-      "cost_per_million_input_usd": 2.00,
-      "cost_per_million_output_usd": 12.00,
+      "cost_per_million_input_usd": 2.0,
+      "cost_per_million_output_usd": 12.0,
       "context_length": 1048576,
       "reasoning_max_tokens": 4000,
       "structured_outputs": true
@@ -308,8 +346,8 @@
       "display_name": "Kimi K3",
       "tier": "Good",
       "note": "Strongest open-weight model.",
-      "cost_per_million_input_usd": 3.00,
-      "cost_per_million_output_usd": 15.00,
+      "cost_per_million_input_usd": 3.0,
+      "cost_per_million_output_usd": 15.0,
       "context_length": 1048576,
       "reasoning_max_tokens": 4000,
       "structured_outputs": true

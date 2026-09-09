@@ -74,8 +74,10 @@ def check_a_component_exists_and_is_wired() -> list[str]:
         "App.tsx imports and renders AdminUsers",
         "App.tsx does not import/render AdminUsers — the screen is not wired into the app",
     )
+    # Props allowed (issue #635 added `credentialsRefreshKey`); the claim is
+    # that the element is rendered, not that it is rendered bare.
     failures += check(
-        re.search(r"<AdminUsers\s*/?>", app_text) is not None,
+        re.search(r"<AdminUsers(\s[^>]*)?/?>", app_text) is not None,
         "App.tsx renders <AdminUsers />",
         "App.tsx does not render <AdminUsers /> anywhere",
     )

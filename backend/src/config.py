@@ -81,24 +81,49 @@ def structured_output_enabled() -> bool:
     prose-preamble / markdown-fence failure mode `_extract_json_object`
     exists to paper over (#382) structurally impossible.
 
-    Default OFF: `OPENROUTER_STRUCTURED_OUTPUT` unset (or set to anything
-    other than `1`/`true`/`yes`) keeps `OpenRouterModelClient.invoke`'s
-    request byte-identical to today -- no `tools`/`tool_choice` fields, no
-    `tool_spec` kwarg reaches the client at all (see
-    `scripts/primary_review_pass.py::run_primary_pass` /
-    `scripts/critic_review_pass.py::run_critic_pass`, which thread this only
-    when True).
+    Default ON since issue #673. #418 shipped this default OFF pending the
+    live measurement its own Notes demanded; #673 is that measurement --
+    same synthetic document, same pinned models, same bound playbook, one
+    variable, run through `scripts/live_smoke_eval.py --structured-output
+    both` against real OpenRouter traffic. With the flag OFF the critic
+    pass failed schema validation on two consecutive attempts and the
+    review terminated `ERROR_MANUAL_REVIEW_REQUIRED` (`reason: "critic"` --
+    the same token production recorded); with it ON both passes validated
+    on their FIRST attempt, at 60.9s / $0.55 against 128.5s / $0.74. The
+    OFF-path critic invented a `grounding` property that appears nowhere in
+    the critic prompt or in `output-schema-v3.json`, against an
+    `additionalProperties: false` schema -- exactly the failure class
+    forced tool-use makes structurally impossible.
 
-    Flipping the default ON is a HUMAN step, tracked on the epic, taken only
-    after a live smoke run against real OpenRouter traffic -- OpenRouter's
-    Anthropic tool-use pass-through cannot be proven from an offline test
-    suite (see this issue's Notes). This function's default must not change
-    without that verification.
+    On #418's open question -- whether OpenRouter's Anthropic pass-through
+    actually honours `tool_choice` or silently drops to the prose path --
+    the evidence is BEHAVIOURAL, not a recorded provider assertion: nothing
+    in the request/response plumbing reports "the tool was honoured", and a
+    tool-mode call whose response comes back as plain `content` still
+    parses via the fallback (`OpenRouterModelClient.invoke`). What was
+    measured is that both passes validated first-try with the flag on and
+    the critic failed twice with it off, on the same document. That is why
+    the flag stays.
+
+    The flag survives as the ROLLBACK, and as #418's A/B seam: setting
+    `OPENROUTER_STRUCTURED_OUTPUT` to `0`/`false`/`no`/`off` (any case)
+    restores the prose-JSON request byte-for-byte -- no `tools`/
+    `tool_choice` fields, no `tool_spec` kwarg reaching the client at all
+    (see `scripts/primary_review_pass.py::run_primary_pass` /
+    `scripts/critic_review_pass.py::run_critic_pass`, which thread it only
+    when this is True). Unset, empty, or any other value is ON. The
+    explicit-off spelling set follows the same default-ON convention
+    `backend/src/purge_scheduler.py::scheduler_enabled` already uses.
+
+    Read live per call (never cached), so `live_smoke_eval.py`'s A/B and a
+    test's `patch.dict(os.environ, ...)` both flip it the same way
+    production's deployment env does.
     """
-    return os.environ.get("OPENROUTER_STRUCTURED_OUTPUT", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
+    return os.environ.get("OPENROUTER_STRUCTURED_OUTPUT", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
     }
 
 
@@ -126,7 +151,11 @@ def notes_mode_enabled() -> bool:
     let internal reasoning reach counterparty-facing footnotes before the
     audience-aware leakage scan (#521) exists to stop it. This function's
     default must not change without that evidence, exactly like
-    `structured_output_enabled` above.
+    `structured_output_enabled` above -- whose default DID move, ON, in
+    issue #673, but only once a live A/B against real OpenRouter traffic
+    had been run and written down. The convention borrowed from it is the
+    live per-call env read and that evidence bar, not the direction of the
+    default.
     """
     return os.environ.get("NOTES_MODE_ENABLED", "").strip().lower() in {
         "1",

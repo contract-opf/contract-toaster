@@ -83,6 +83,13 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import os  # noqa: E402
 
 os.environ.setdefault("REVIEWS_TABLE", "reviews-test")
@@ -93,7 +100,7 @@ os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 
 import pipeline_runner as pr  # noqa: E402
-import diff_standard_form as dsf_module  # noqa: E402
+import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000099"
@@ -150,7 +157,7 @@ def _build_draft_docx(overrides: dict[str, str]) -> bytes:
     in `overrides` -- same recipe as tests/test_review_spine.py's
     _build_draft_docx (issue #239), so every anchor NOT overridden diffs as
     "unchanged" and only the planted anchors produce real hunks."""
-    standard = dsf_module.load_standard_form_paragraphs(docx_path=None, playbook_id="synthetic-generic")
+    standard = sfp_module.load(playbook_id="synthetic-generic")
     parts = []
     for std_para in standard:
         if std_para.get("absent_from_form", False):

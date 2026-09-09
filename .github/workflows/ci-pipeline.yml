@@ -19,6 +19,12 @@
 #   B – docs-lint gate (scripts/docs-lint.py) — reconciliation #43
 #   C – Detector-correctness gates (tests/detector/) — reconciliation #1, #2
 #   D – Security/dependency scan (pip-audit + trivy container scan)
+#   E – Frontend suite (scripts/check-frontend.sh: tsc + vite build + vitest +
+#       the CTDS contrast/focus/layout audits) — issue #634. Before this job
+#       existed, NOTHING ran the frontend suite and it sat red on main.
+#
+# (The gate letters above and the STEP letters below are separate sequences:
+#  steps are labelled "STEP E/F/G" in their own job, gates "GATE A…E".)
 #
 # On success (build job):
 #   E – Build container image
@@ -207,6 +213,58 @@ jobs:
           exit-code: '0'  # Warn only at this stage; blocking threshold set per policy
 
   # ---------------------------------------------------------------------------
+  # GATE E: Frontend suite (issue #634)
+  #
+  # Why this job exists: until it did, NOTHING ran the frontend suite. GATE A
+  # is Python-only (scripts/collect_test_failures.sh globs tests/*.py), and no
+  # workflow referenced check-frontend.sh, build:ci or vitest. So when #599
+  # renamed a tab ("Model & API key" -> "Models") and left two assertions in
+  # frontend/src/__tests__/review-failure-diagnosis.test.tsx pointing at the
+  # old label, `bash scripts/check-frontend.sh` sat RED on clean main while
+  # every gate reported green. It was found and fixed only because a later,
+  # unrelated ticket happened to name the frontend gate in its own
+  # verification block — luck of ticket authorship, not a signal.
+  #
+  # This is the same shape as the playbook-lint blindspot that left main red
+  # for two days: a hand-picked gate list whose omission is invisible to both
+  # the local runner and CI.
+  #
+  # The invocation is deliberately NOT piped. A pipeline reports the exit
+  # status of its LAST command, so `bash scripts/check-frontend.sh | tail`
+  # exits 0 over a red gate — the trap scripts/check.sh's own header warns
+  # about in capitals. tests/test_frontend_gate_wired_634.py holds this job's
+  # wiring (existence, triggers, un-piped invocation, main-red reporting,
+  # image-pipeline blocking) in place, and that test runs inside GATE A.
+  # ---------------------------------------------------------------------------
+  frontend-gate:
+    name: Frontend suite (typecheck + build + vitest + CTDS audits)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        # check-frontend.sh installs these itself when node_modules is absent;
+        # doing it here as its own step keeps the install cached and keeps the
+        # gate step's failure unambiguous (a red gate is a red suite, not a
+        # flaky registry).
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run the frontend gate (GATE E)
+        # tsc + production vite build + the vitest component suite + the three
+        # CTDS audits (contrast, focus/reduced-motion, layout). Fully offline
+        # once node_modules is installed: jsdom, no AWS, no network.
+        run: bash scripts/check-frontend.sh
+
+  # ---------------------------------------------------------------------------
   # REPORT MAIN-BRANCH GATE FAILURES (post-merge breakage → GitHub issue)
   #
   # Why this exists: per-PR gate runs execute against the PR branch tip, so
@@ -220,7 +278,7 @@ jobs:
   # ---------------------------------------------------------------------------
   report-main-failure:
     name: File issue when a gate fails on main
-    needs: [test-suite, docs-lint, detector-correctness, security-scan]
+    needs: [test-suite, docs-lint, detector-correctness, security-scan, frontend-gate]
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     if: >-
       always()
@@ -235,7 +293,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FAILED_GATES: >-
-            ${{ needs.test-suite.result == 'failure' && 'test-suite ' || '' }}${{ needs.docs-lint.result == 'failure' && 'docs-lint ' || '' }}${{ needs.detector-correctness.result == 'failure' && 'detector-correctness ' || '' }}${{ needs.security-scan.result == 'failure' && 'security-scan' || '' }}
+            ${{ needs.test-suite.result == 'failure' && 'test-suite ' || '' }}${{ needs.docs-lint.result == 'failure' && 'docs-lint ' || '' }}${{ needs.detector-correctness.result == 'failure' && 'detector-correctness ' || '' }}${{ needs.security-scan.result == 'failure' && 'security-scan ' || '' }}${{ needs.frontend-gate.result == 'failure' && 'frontend-gate' || '' }}
         run: |
           set -euo pipefail
           gh label create ci-main-red \
@@ -288,7 +346,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-sign-push:
     name: Build, sign, and push container image to ECR
-    needs: [test-suite, docs-lint, detector-correctness, security-scan]
+    needs: [test-suite, docs-lint, detector-correctness, security-scan, frontend-gate]
     # Deliberately hardcoded, NOT vars.CI_RUNS_ON: needs Docker + AWS OIDC,
     # which the home-lab runner does not have configured.
     runs-on: ubuntu-latest

@@ -57,8 +57,15 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import critic_review_pass as cp  # noqa: E402
-import diff_standard_form as dsf_module  # noqa: E402
+import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import review_spine  # noqa: E402
@@ -268,7 +275,7 @@ def test_run_review_threads_instructions_text_into_both_passes(failures: list[st
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     instructions_text = "Standing instructions: reconfirm the liability cap on every deal."
 
-    docx_bytes = _build_draft_docx(dsf_module, {})
+    docx_bytes = _build_draft_docx(sfp_module, {})
     client = model_client_module.FakeBedrockClient(
         {primary_id: [_primary_accept_response()], critic_id: [_critic_accept_response()]}
     )
@@ -390,7 +397,7 @@ def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(fail
             critic_id: [_critic_accept_response()],
         }
     )
-    docx_bytes = _build_draft_docx(dsf_module, {})
+    docx_bytes = _build_draft_docx(sfp_module, {})
     s3 = FakeS3({upload_pointer: docx_bytes})
 
     pr.run_real_pipeline(

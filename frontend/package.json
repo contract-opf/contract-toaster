@@ -13,7 +13,7 @@
     "audit:contrast": "node scripts/contrast-audit.mjs",
     "audit:focus": "node scripts/focus-audit.mjs",
     "audit:layout": "node scripts/layout-audit.mjs",
-    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run"
+    "test": "node scripts/run-vitest.mjs"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.0.0",

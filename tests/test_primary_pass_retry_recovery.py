@@ -113,7 +113,17 @@ def _critic_review_with_bad_confidence_state() -> str:
 
 class TruncatingThenValidClient:
     """Raises the client's real truncation error on the first call, then
-    returns a valid review -- recording the budget each attempt asked for."""
+    returns a valid review -- recording the budget each attempt asked for.
+
+    `tool_spec` / `output_schema` are the full `invoke()` Protocol
+    signature (see `backend/src/model_client.py`'s
+    `OpenRouterModelClient.invoke`). They are accepted and recorded, not
+    acted on: this double exists to exercise the truncation retry, and the
+    review it returns is the same either way. They became load-bearing when
+    issue #673 flipped `structured_output_enabled()` to default ON -- the
+    review passes now thread `tool_spec` on every call, so a double stuck
+    on the pre-#418 signature would raise TypeError and this test would be
+    asserting about a request shape production no longer sends."""
 
     def __init__(self, response_text: str) -> None:
         self._response_text = response_text
@@ -126,8 +136,17 @@ class TruncatingThenValidClient:
         system_prompt: str,
         user_prompt: str,
         max_output_tokens: int,
+        tool_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> str:
-        self.calls.append({"max_output_tokens": max_output_tokens, "user_prompt": user_prompt})
+        self.calls.append(
+            {
+                "max_output_tokens": max_output_tokens,
+                "user_prompt": user_prompt,
+                "tool_spec": tool_spec,
+                "output_schema": output_schema,
+            }
+        )
         if len(self.calls) == 1:
             raise model_client.ModelOutputTruncatedError(
                 "OpenRouter truncated the response before it finished "
@@ -138,11 +157,29 @@ class TruncatingThenValidClient:
 
 
 class AlwaysTruncatingClient:
+    """Same full `invoke()` Protocol signature, and the same reason for it,
+    as TruncatingThenValidClient above."""
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def invoke(self, *, model_id: str, system_prompt: str, user_prompt: str, max_output_tokens: int) -> str:
-        self.calls.append({"max_output_tokens": max_output_tokens})
+    def invoke(
+        self,
+        *,
+        model_id: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_output_tokens: int,
+        tool_spec: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "max_output_tokens": max_output_tokens,
+                "tool_spec": tool_spec,
+                "output_schema": output_schema,
+            }
+        )
         raise model_client.ModelOutputTruncatedError(
             "OpenRouter truncated the response before it finished "
             "(finish_reason='length', HTTP 200).",

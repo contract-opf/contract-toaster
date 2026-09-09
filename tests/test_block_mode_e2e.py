@@ -42,9 +42,12 @@ before this slice and this file FAILS on import until it does.
      issue is still delivered (partial-delivery doctrine, issue #203).
   4. **Derived `proposed_replacement_text`.** Stamped from the proven
      transcript's insert texts in document order, overwriting whatever the
-     model supplied, empty for a pure deletion -- and the pen rules
+     model supplied, empty for a pure deletion INSIDE a block and
+     `[Intentionally omitted.]` for a whole-block strike (issue #646, which
+     is the language that strike leaves in the document) -- and the pen rules
      (issue #216) run against the DERIVED text, dropping just that issue's
-     edits when it violates them.
+     edits when it violates them, except for a pure deletion, which proposed
+     no language for them to judge.
   5. **Leakage coverage.** A precedent counterparty name planted in an
      `insert` segment, and in an `insert_block_after`'s `new_text`, each
      blocks the whole review at the gate that runs FIRST, with no document
@@ -137,7 +140,7 @@ extraction_normalization_stage = MODULES.get("extraction_normalization_stage")
 
 AUTHOR = "contract-toaster"
 # `generate_redline_from_blocks` takes the same `date` the quote path takes
-# (`redline_docx_writer._iso_date` formats it), never a pre-formatted string.
+# (`docx_parts.iso_date` formats it), never a pre-formatted string.
 TIMESTAMP = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 
 # ---------------------------------------------------------------------------
@@ -369,7 +372,9 @@ def _atomicity_response(block_ids: list) -> dict:
     }
 
 
-def _run_block_mode(reconciled, docx_bytes, *, corpus=None, notes_mode="external"):
+def _run_block_mode(
+    reconciled, docx_bytes, *, corpus=None, notes_mode="external", pen_rules_bundle=None
+):
     return redline_generate.generate_redline_from_blocks(
         reconciled_result=reconciled,
         corpus=corpus if corpus is not None else _empty_corpus(),
@@ -379,6 +384,7 @@ def _run_block_mode(reconciled, docx_bytes, *, corpus=None, notes_mode="external
         author=AUTHOR,
         date=TIMESTAMP,
         notes_mode=notes_mode,
+        pen_rules_bundle=pen_rules_bundle,
     )
 
 
@@ -531,6 +537,115 @@ def test_pure_deletion_derives_the_empty_string(failures: list) -> None:
     if " from the Effective Date" not in _deleted_texts(result["docx_bytes"]):
         failures.append(
             f"the deletion is not in the document: {_deleted_texts(result['docx_bytes'])}"
+        )
+
+
+def test_a_whole_block_strike_derives_the_placeholder_and_skips_pen_rules(
+    failures: list,
+) -> None:
+    """Issue #646: a `delete_block` leaves `[Intentionally omitted.]` in the
+    document, so that -- and not `""` -- is what the derived
+    `proposed_replacement_text` says.
+
+    And because the compiler authored that string and no model drafted it, it
+    must never be judged as a proposal. The bundle here makes the exemption
+    load-bearing rather than decorative: `mode: "none"` on the struck issue's
+    topic is a pen rule saying "no replacement text is permitted for this
+    topic", which would burn the whole striking over language nobody wrote.
+    The OTHER issue in the same batch is on the same `mode: "none"` topic and
+    DOES propose language, so the rule is proven still live -- an exemption
+    that swallowed it would be a blanket, not a filter.
+    """
+    docx_bytes = _make_docx(SECTIONS)
+    block_ids = _block_ids(docx_bytes)
+    # The `pen_rules` BLOCK shape `resolve_pen_rules` consumes (issue #293):
+    # `per_topic` > `default` > the toaster-global defaults artifact.
+    bundle = {"per_topic": {"notice-method": {"mode": "none"}}}
+    response = {
+        "decision": "REQUEST_CHANGE",
+        "confidence_state": "OK",
+        "issues": [
+            _issue("I1", "notice-method", section="Section 2. Notices"),
+            _issue("I2", "term-length", section="Section 1. Term and Fee"),
+        ],
+        "block_patches": [
+            {
+                "block_id": block_ids[0],
+                "segments": [
+                    {"op": "keep", "text": "The Term shall be "},
+                    {"op": "delete", "text": "sixty (60) days", "issue_key": "I2"},
+                    {"op": "insert", "text": "thirty (30) days", "issue_key": "I2"},
+                    {
+                        "op": "keep",
+                        "text": " from the Effective Date.\nThe Fee shall be "
+                        "one hundred dollars per month.",
+                    },
+                ],
+            }
+        ],
+        "block_ops": [
+            {"op": "delete_block", "block_id": block_ids[1], "issue_key": "I1"}
+        ],
+    }
+    reconciled = _reconciled(response)
+    result = _run_block_mode(reconciled, docx_bytes, pen_rules_bundle=bundle)
+
+    if result["status"] != "OK" or not result.get("docx_bytes"):
+        failures.append(
+            f"a whole-block strike was not delivered: status={result['status']!r} "
+            f"reason={result.get('reason')!r} report={result.get('analysis_report')!r}"
+        )
+        return
+
+    placeholder = MODULES["block_transcript"].OMITTED_CLAUSE_PLACEHOLDER
+    struck = reconciled["issues"][0]
+    if struck.get("proposed_replacement_text") != placeholder:
+        failures.append(
+            f"a whole-block strike derived "
+            f"{struck.get('proposed_replacement_text')!r}, expected {placeholder!r}"
+        )
+    if placeholder not in " ".join(_inserted_texts(result["docx_bytes"])):
+        failures.append(
+            f"the delivered document does not carry {placeholder!r}: "
+            f"{_inserted_texts(result['docx_bytes'])!r}"
+        )
+    if NOTICE_P1 not in " ".join(_deleted_texts(result["docx_bytes"])):
+        failures.append(
+            f"the struck clause is not deleted in the document: "
+            f"{_deleted_texts(result['docx_bytes'])!r}"
+        )
+    if result.get("analysis_report") is not None:
+        failures.append(
+            f"the whole-block strike was reported not-applied: "
+            f"{result['analysis_report']!r}"
+        )
+
+    # The same `mode: "none"` rule, on an issue that DID propose language,
+    # still bites -- so the exemption above is a filter and not a blanket.
+    proposing = dict(response)
+    proposing["issues"] = [_issue("I1", "notice-method", section="Section 2. Notices")]
+    proposing["block_patches"] = [
+        {
+            "block_id": block_ids[1],
+            "segments": [
+                {"op": "keep", "text": "Notices shall be sent by "},
+                {"op": "delete", "text": "prepaid post", "issue_key": "I1"},
+                {"op": "insert", "text": "electronic mail", "issue_key": "I1"},
+                {"op": "keep", "text": " to the address above."},
+            ],
+        }
+    ]
+    proposing.pop("block_ops", None)
+    control = _run_block_mode(_reconciled(proposing), docx_bytes, pen_rules_bundle=bundle)
+    control_reasons = [
+        entry["reason"]
+        for entry in (control.get("analysis_report") or {}).get("changes_not_applied", [])
+    ]
+    if control_reasons != [redline_generate.REASON_DERIVED_REPLACEMENT_TEXT_REJECTED]:
+        failures.append(
+            f"the pen rule that must still bite did not: {control_reasons!r} "
+            f"(status={control['status']!r}) -- if `mode: \"none\"` no longer rejects a "
+            f"proposal, the exemption above proves nothing"
         )
 
 
@@ -1069,7 +1184,7 @@ def test_notes_mode_internal_marks_the_document(failures: list) -> None:
     """Issue #513's invariant on the block path: the export marker is present
     iff internal-audience content is actually included, and the internal note
     carries its unmissable prefix."""
-    import redline_docx_writer
+    import footnote_audience
 
     docx_bytes = _make_docx(SECTIONS)
     block_ids = _block_ids(docx_bytes)
@@ -1086,13 +1201,13 @@ def test_notes_mode_internal_marks_the_document(failures: list) -> None:
     delivered = result["docx_bytes"]
     notes = _footnote_texts(delivered)
     if not notes or not all(
-        redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX.strip() in note for note in notes
+        footnote_audience.INTERNAL_FOOTNOTE_PREFIX.strip() in note for note in notes
     ):
         failures.append(f"internal footnotes are not marked: {notes!r}")
     with zipfile.ZipFile(io.BytesIO(delivered)) as zf:
         names = set(zf.namelist())
         marked = any(
-            redline_docx_writer.MARKER_TEXT in zf.read(name).decode("utf-8", "replace")
+            redline_generate.MARKER_TEXT in zf.read(name).decode("utf-8", "replace")
             for name in names
             if name.startswith("word/header") or name.startswith("word/footer")
         )
@@ -1157,6 +1272,7 @@ TESTS = [
     test_multi_edit_paragraph_inserted_clause_and_per_issue_footnotes,
     test_derived_replacement_text_overwrites_the_model_supplied_value,
     test_pure_deletion_derives_the_empty_string,
+    test_a_whole_block_strike_derives_the_placeholder_and_skips_pen_rules,
     test_partial_change_set_is_rolled_back_and_the_other_issue_delivered,
     test_a_wholly_failed_issue_keeps_its_own_reason,
     test_pen_rules_run_against_the_derived_text,

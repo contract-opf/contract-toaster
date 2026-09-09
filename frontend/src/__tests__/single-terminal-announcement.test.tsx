@@ -20,6 +20,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { pressSubmit } from './support/consoleSurface';
 
 function docxFile(): File {
   return new File(['x'], 'contract.docx', {
@@ -66,7 +67,7 @@ async function submitAndSettle(detail: Record<string, unknown>) {
   vi.stubGlobal('fetch', mockFetch(detail));
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docxFile()] } });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 

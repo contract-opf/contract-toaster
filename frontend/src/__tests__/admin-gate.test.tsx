@@ -161,7 +161,7 @@ describe('admin panel visibility — gated on probed role (#234)', () => {
         model_provider: 'openrouter',
         key_set: false,
         key_source: null,
-        key_hint: '',
+        key_fingerprint: '',
         updated_at: '',
         updated_by: '',
       },

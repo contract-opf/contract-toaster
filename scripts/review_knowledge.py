@@ -74,7 +74,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -227,6 +227,7 @@ def resolve_knowledge(
     accept_stub_basis: bool = False,
     accept_empty_posture: bool = False,
     instructions_text: str = "",
+    entity_roster: Optional[Sequence[str]] = None,
 ) -> ReviewKnowledge:
     """Resolve one review's knowledge, or refuse.
 
@@ -244,6 +245,16 @@ def resolve_knowledge(
     Guidance block -- see that function's own docstring. Included in
     `content_hash()`/`lineage_record()` for free, since both are functions of
     `self.blocks`, which now includes it.
+
+    `entity_roster` (issue #678, optional): the deployment's admin-managed
+    roster of our own legal entity names, resolved by the caller
+    (`backend/src/pipeline_runner.py` from `backend/src/entity_roster.py`)
+    and threaded read-only into `opf_prompt.compose_opf_system_blocks`,
+    which unions it with the playbook's `perspective.party` into one flat
+    recognition set. Like `instructions_text` it lands in
+    `content_hash()`/`lineage_record()` for free, since both are functions
+    of `self.blocks` -- so two reviews run under different rosters do not
+    collide on one prompt hash.
 
     Raises `KnowledgeRefusal` per the module docstring, or
     `opf_prompt.PromptCompositionError` when a declared playbook-mode document
@@ -346,6 +357,7 @@ def resolve_knowledge(
         policy=policy,
         mode=declared_mode,
         instructions_text=instructions_text,
+        entity_roster=entity_roster,
         omissions_out=omissions,
     )
 

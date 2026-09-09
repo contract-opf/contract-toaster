@@ -32,7 +32,7 @@ generate_redline_from_blocks`.
 ## Retired path coverage (issues #380/#628)
 
 This file used to also cover an anchor/hash mismatch -> fail-closed
-analysis report (issue #65's `redline_patch.py` guarantee), and then the
+analysis report (issue #65's anchor/hash-patcher guarantee), and then the
 quote path that replaced it (issue #379's `not_found` / `ambiguous` locate
 outcomes). Both are gone: #380 retired the anchor/hash-joined patch path,
 #628 deleted the quote locator and patcher. The analog guarantee under

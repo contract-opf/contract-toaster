@@ -77,6 +77,7 @@ import src.model_client as model_client  # noqa: E402
 import src.model_settings as model_settings  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
 import src.reviews as reviews  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 POLICY_PATH = REPO_ROOT / "model-policy" / "openrouter.json"
 
@@ -135,6 +136,10 @@ class FakeHttpClient:
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, *, json=None, headers=None):  # noqa: A002 - httpx kwarg name
         self.calls.append({"url": url, "json": json, "headers": headers})
@@ -727,7 +732,9 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
     def _expected_cents(self, primary_id: str, critic_id: str) -> int:
         """The reservation formula recomputed from the artifact, independently
         of backend/src/reviews.py, so this cannot pass against a mirror."""
-        attempts = 1 + reviews.MAX_RETRIES_PER_PASS
+        attempts = (
+            1 + reviews.MAX_RETRIES_PER_PASS + reviews.MAX_TRUNCATION_RETRIES_PER_PASS
+        )
         total = 0.0
         for model_id in (primary_id, critic_id):
             rates = self._rates(model_id)
@@ -850,13 +857,14 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
 
     def test_the_bedrock_target_ignores_the_selection_entirely(self):
         """MODEL_PROVIDER unset is the AWS target, which has no admin-selection
-        concept at all -- its documented $2.46 worst case (ARCHITECTURE.md ->
-        Cost shape, at MAX_INPUT_TOKENS=100_000) must not move."""
+        concept at all -- its documented $6.86 worst case (ARCHITECTURE.md ->
+        Cost shape, at MAX_INPUT_TOKENS=100_000 and the issue-#658 worst-case
+        output budget of 32_000 over three attempts per pass) must not move."""
         model_settings.set_model_selection(DEAREST_ID, DEAREST_ID, ADMIN, self.ddb)
         os.environ.pop("MODEL_PROVIDER", None)
         with _no_env_overrides():
             self.assertEqual(
-                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 246
+                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 686
             )
 
 

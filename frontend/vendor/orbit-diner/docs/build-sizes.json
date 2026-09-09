@@ -1,0 +1,35 @@
+{
+  "note": "Measured production entry with React external; no measurement artifacts written. Runtime image plates are separate.",
+  "files": [
+    {
+      "file": "index.js",
+      "bytes": 40139,
+      "gzipBytes": 13225
+    },
+    {
+      "file": "fonts/instrument-sans-latin-400-normal-GSIYICKK.woff2",
+      "bytes": 16860,
+      "gzipBytes": 16888
+    },
+    {
+      "file": "fonts/instrument-sans-latin-600-normal-4CHHBDS7.woff2",
+      "bytes": 17408,
+      "gzipBytes": 17436
+    },
+    {
+      "file": "fonts/space-grotesk-latin-500-normal-GESQWJQV.woff2",
+      "bytes": 13312,
+      "gzipBytes": 13335
+    },
+    {
+      "file": "fonts/ibm-plex-mono-latin-400-normal-A2WATXFY.woff2",
+      "bytes": 14708,
+      "gzipBytes": 14731
+    },
+    {
+      "file": "index.css",
+      "bytes": 32327,
+      "gzipBytes": 7911
+    }
+  ]
+}
