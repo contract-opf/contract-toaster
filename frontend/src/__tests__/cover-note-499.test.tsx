@@ -9,6 +9,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+} from './support/consoleSurface';
 import ReviewHistory, { type HistoryRow } from '../ReviewHistory';
 
 vi.mock('../auth', () => ({
@@ -22,6 +27,9 @@ afterEach(() => {
 });
 
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // Issue #733: the catalog is a fixture every scenario needs, not a scenario
+  // of its own — the console will not arm its lever without an active playbook.
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -59,8 +67,8 @@ async function submitAndReachResult(): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
-  await screen.findByTestId('review-result');
+  await pressSubmit();
+  await findReviewResult();
 }
 
 const REQUEST_CHANGE_DETAIL = {
@@ -116,7 +124,20 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     expect(card).toBeInTheDocument();
     expect(screen.getByTestId('review-cover-note-text').textContent).toBe(DRAFT_TEXT);
     expect(screen.getByTestId('review-cover-note-cost').textContent).toContain('$0.02');
-    expect(screen.queryByTestId('review-cover-note-butter')).toBeNull();
+
+    // One billed path, not two. The console keeps the key (it re-opens the
+    // same overlay) and says so by refusing to spend again — issue #733
+    // migrates the assertion to the property, which is the one that was ever
+    // worth locking.
+    fireEvent.click(screen.getByTestId('review-cover-note-butter'));
+    expect(
+      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([input, init]) =>
+          new URL(String(input), 'http://localhost').pathname ===
+            '/api/reviews/rev-1/cover-note' &&
+          (init as RequestInit | undefined)?.method === 'POST'
+      )
+    ).toHaveLength(1);
 
     const call = fetchCallFor(fetch as unknown as ReturnType<typeof vi.fn>, 'POST', '/api/reviews/rev-1/cover-note');
     expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ regenerate: false });
@@ -144,7 +165,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
 
     fireEvent.click(screen.getByTestId('review-cover-note-copy'));
     expect(writeText).toHaveBeenCalledWith(DRAFT_TEXT);
-    expect(await screen.findByText('Copied!')).toBeInTheDocument();
+    expect(await screen.findByText('Cover note copied')).toBeInTheDocument();
 
     // No mailto/href anywhere on this card.
     const card = screen.getByTestId('review-cover-note-card');
@@ -169,14 +190,16 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     fireEvent.click(screen.getByTestId('review-cover-note-butter'));
 
     await screen.findByTestId('review-cover-note-card');
-    expect(screen.getByTestId('review-cover-note-cost').textContent).toMatch(/no charge/i);
+    const costLine = screen.getByTestId('review-cover-note-cost').textContent ?? '';
+    expect(costLine).toMatch(/no charge/i);
 
-    // Issue #499 fix round 1: the cached path must still seed the
-    // Regenerate button's cost hint from the backend's stored
-    // `last_generation_cost_usd_cents` -- without it, this is the common
-    // real path (reload / History revisit → "View cover note draft") and
-    // the button would render bare "Regenerate" with no cents.
-    expect(screen.getByTestId('review-cover-note-regenerate').textContent).toContain('$0.02');
+    // Issue #499 fix round 1: the cached path must still surface the stored
+    // `last_generation_cost_usd_cents` -- this is the common real path (reload
+    // / History revisit → "View cover note draft"), and without it the reader
+    // is asked to press Regenerate with no idea what it costs. The console
+    // prints that figure on the cost line beside the key rather than inside
+    // the key's own label (issue #733); the fact stated is the same one.
+    expect(costLine).toContain('$0.02');
   });
 
   it('regenerate posts regenerate:true and replaces the shown draft', async () => {
@@ -193,6 +216,11 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const pathname = new URL(String(input), 'http://localhost').pathname;
         const method = (init?.method ?? 'GET').toUpperCase();
+        // Issue #733: the console needs an active playbook before it will
+        // submit at all.
+        if (pathname === '/api/playbooks') {
+          return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
+        }
         if (pathname === '/api/reviews' && method === 'POST') {
           return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
         }
@@ -283,6 +311,11 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const pathname = new URL(String(input), 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
+      // Issue #733: the console needs an active playbook before it will
+      // submit at all.
+      if (pathname === '/api/playbooks') {
+        return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
+      }
       if (pathname === '/api/reviews' && method === 'POST') {
         submitCall += 1;
         const reviewId = submitCall === 1 ? 'rev-1' : 'rev-2';
@@ -318,8 +351,8 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     fireEvent.click(screen.getByTestId('review-cover-note-butter'));
     await screen.findByTestId('review-cover-note-real-error');
@@ -329,9 +362,9 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
     await waitFor(() => expect(submitCall).toBe(2));
-    await screen.findByTestId('review-result');
+    await findReviewResult();
 
     expect(screen.queryByTestId('review-cover-note-real-error')).toBeNull();
   });

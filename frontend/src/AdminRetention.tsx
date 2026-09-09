@@ -40,6 +40,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import {
@@ -161,7 +162,9 @@ function clampDays(value: number): number {
   return Math.min(1095, Math.max(0, Math.round(value)));
 }
 
-export default function AdminRetention(): React.ReactElement | null {
+export default function AdminRetention({
+  credentialsRefreshKey = 0,
+}: AdminPanelRefreshProps = {}): React.ReactElement | null {
   // Issue #511: two explicit three-state loads. They previously shared ONE
   // `error` string with a `T | null` sentinel each, so a failure in either
   // left the other's spinner running forever under a single banner, with no
@@ -232,6 +235,9 @@ export default function AdminRetention(): React.ReactElement | null {
           ),
         );
       }
+      // Issue #635: the latch tracks the server's CURRENT answer, not its
+      // first one — see adminRefresh.ts.
+      setIsForbidden(false);
       const data = (await response.json()) as RetentionSettings;
       setSettingsLoad({ status: 'ready', data });
       setSliderValue(data.retention_window_days);
@@ -262,6 +268,7 @@ export default function AdminRetention(): React.ReactElement | null {
           ),
         );
       }
+      setIsForbidden(false); // Issue #635 — see adminRefresh.ts.
       const data = (await response.json()) as { holds: LegalHoldRow[] };
       setHoldsLoad({ status: 'ready', data: data.holds });
     } catch (err) {
@@ -321,12 +328,15 @@ export default function AdminRetention(): React.ReactElement | null {
     }
   }, []);
 
+  // `credentialsRefreshKey` (issue #635) is what makes this effect run a
+  // SECOND time: the panel is mounted once and only `hidden` toggles, so
+  // without it a rotation that ends a 403 is never observed.
   useEffect(() => {
     void loadSettings();
     void loadHolds();
     void loadReviews();
     void loadUsers();
-  }, [loadSettings, loadHolds, loadReviews, loadUsers]);
+  }, [loadSettings, loadHolds, loadReviews, loadUsers, credentialsRefreshKey]);
 
   // Keep the numeric field's text in step with `sliderValue` whenever
   // `sliderValue` itself changes (the slider, `loadSettings`, or this
@@ -532,8 +542,6 @@ export default function AdminRetention(): React.ReactElement | null {
 
   return (
     <section data-testid="admin-retention-panel" className="ct-section ct-stack">
-      <CtToolbar title="Document retention & legal hold" />
-
       {/* A failed load is TERMINAL, and each loader now says which one failed
           and offers its own retry (issue #511). One shared banner could not
           do either. */}
@@ -561,186 +569,110 @@ export default function AdminRetention(): React.ReactElement | null {
         </CtBanner>
       )}
 
-      {settingsLoad.status === 'loading' ? (
-        <CtProgress data-testid="admin-retention-loading" label="Loading retention settings…" />
-      ) : settings === null ? null : (
-        <CtCard data-testid="retention-slider-panel">
+      {/* 1. Legal Holds Table at the top */}
+      <CtCard data-testid="legal-hold-list-panel">
+        <CtToolbar title="Legal holds" />
+        {/* Issue #525: the submitter column silently falls back to the raw
+            `owner_sub` when the user list fails to load. That fallback is
+            documented and correct; leaving it unexplained is not — an admin
+            reading a column of subs has no way to tell a directory failure
+            from a directory that genuinely has no entry for them. */}
+        {usersFailed && (
+          <p className="ct-muted" data-testid="legal-holds-identities-degraded">
+            <small>
+              The user directory could not be loaded, so submitters below are shown by
+              their account ID rather than by name.
+            </small>
+          </p>
+        )}
+        {holdsLoad.status === 'failed' ? (
           <div className="ct-stack">
-            <CtToolbar title="Retention window" />
-            <p>
-              Current retention window: <strong data-testid="retention-current-window">
-                {settings.retention_window_days}
-              </strong>{' '}
-              days
-            </p>
-
-            {settings.pending_reduction && (
-              <CtBanner variant="warn" data-testid="retention-pending-reduction">
-                Pending reduction to {settings.pending_reduction.new_window_days} days, requested by{' '}
-                {settings.pending_reduction.requested_by} — will apply automatically after the
-                72-hour delay unless a second admin confirms sooner (GC is alerted).
-              </CtBanner>
-            )}
-
-            {/* Issue #602: the ticket's own named example -- the day-count
-                box paired beside its slider via `ct-columns`, `narrow`
-                (#601) on the day-count field so it keeps its own intrinsic
-                width instead of stretching to fill the column ("the ninety
-                day box that's literally the entire width of the
-                viewport"). Both fields drive the SAME `sliderValue` state
-                (see `daysInputText`'s docstring); pairing them is exactly
-                the "related controls" case #601's own doc names, not a
-                sequence-dependent form -- neither must be read before the
-                other. */}
-            <CtColumns>
-              <CtField label="New retention window (days, 0–1095)" hint={`${sliderValue} days`}>
-                <input
-                  id="retention-slider"
-                  data-testid="retention-slider"
-                  type="range"
-                  min={0}
-                  max={1095}
-                  value={sliderValue}
-                  onChange={(e) => {
-                    setSliderValue(Number(e.target.value));
-                    setPreview(null);
-                  }}
-                />
-              </CtField>
-
-              {/* Issue #475: exact numeric entry alongside the slider. This
-                  field owns its OWN text (`daysInputText`), NOT `sliderValue`
-                  directly -- see that state's docstring for why a controlled
-                  `value={sliderValue}` here would make the field
-                  un-clearable. An empty or not-yet-parseable value is left in
-                  the field as typed and does not touch `sliderValue`;
-                  clamping into [0, 1095] happens on blur rather than on every
-                  keystroke, so a partially-typed value like "36" is never
-                  silently rewritten mid-entry. There is no save-time backstop:
-                  `saveRetentionChange` posts `sliderValue` only, so an
-                  uncommitted edit left in this field (typed, never blurred)
-                  is discarded on save rather than clamped in. */}
-              <CtField
-                label="Days"
-                hint="Type an exact day count — this and the slider stay in sync."
-                narrow
-              >
-                <input
-                  id="retention-days-input"
-                  data-testid="retention-days-input"
-                  type="number"
-                  min={0}
-                  max={1095}
-                  step={1}
-                  inputMode="numeric"
-                  value={daysInputText}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    setDaysInputText(raw);
-                    if (raw === '') {
-                      // Mid-edit (the admin selected-all and is retyping, or
-                      // backspacing to clear it): leave `sliderValue` alone
-                      // until blur/save commits (or reverts) this field.
-                      return;
-                    }
-                    const parsed = Number(raw);
-                    if (!Number.isFinite(parsed)) {
-                      return;
-                    }
-                    if (parsed < 0 || parsed > 1095) {
-                      // Out of range mid-typing (e.g. "5000" on the way to
-                      // being backspaced down to "500"): leave `sliderValue`
-                      // alone rather than clamping on every keystroke -- blur
-                      // (or save) is where this settles, per finding 1.
-                      return;
-                    }
-                    setSliderValue(Math.round(parsed));
-                    setPreview(null);
-                  }}
-                  onBlur={() => {
-                    const parsed = Number(daysInputText);
-                    if (daysInputText === '' || !Number.isFinite(parsed)) {
-                      // Nothing committable was left in the field -- revert
-                      // to the last valid value rather than saving on an
-                      // empty/unparseable state.
-                      setDaysInputText(String(sliderValue));
-                      return;
-                    }
-                    // Write the committed text UNCONDITIONALLY rather than
-                    // routing it through the [sliderValue] effect above: when
-                    // the clamp is a no-op state change (already at a
-                    // boundary -- 1095 or 0), React bails out of the render,
-                    // the effect never re-runs, and the out-of-range text the
-                    // admin typed is left on screen while a different value
-                    // is what Save posts. A retention window is a compliance
-                    // number; showing one and saving another is the one
-                    // failure this field must not have.
-                    const next = clampDays(parsed);
-                    setSliderValue(next);
-                    setDaysInputText(String(next));
-                    setPreview(null);
-                  }}
-                />
-              </CtField>
-            </CtColumns>
-            <p data-testid="retention-window-explainer">
-              Documents are deleted {sliderValue} day{sliderValue === 1 ? '' : 's'} after their
-              review finishes. 0 keeps nothing once a review completes.
-            </p>
-
-            {isRetroactiveReduction && (
-              <CtBanner variant="warn" data-testid="retroactive-reduction-warning">
-                <p>
-                  This is a <strong>retroactive reduction</strong> — it requires a second admin's
-                  confirmation or a 72-hour delay before the sweep runs (dual control, #13/#61).
-                </p>
-                <div className="ct-actions">
-                  <CtButton
-                    type="button"
-                    variant="secondary"
-                    data-testid="retention-preview-button"
-                    onClick={() => void loadPreview()}
-                  >
-                    Preview purge impact
-                  </CtButton>
-                </div>
-                {preview && (
-                  <CtBanner variant="info" data-testid="retention-preview-result">
-                    This change will purge <strong>{preview.purge_count}</strong> object
-                    {preview.purge_count === 1 ? '' : 's'}.
-                  </CtBanner>
-                )}
-                <CtField
-                  label="Confirming admin"
-                  hint="must be a different admin from the requester; leave blank to enter the 72-hour delay instead"
-                >
-                  <input
-                    id="confirming-admin"
-                    data-testid="confirming-admin-input"
-                    type="text"
-                    value={confirmingActor}
-                    onChange={(e) => setConfirmingActor(e.target.value)}
-                  />
-                </CtField>
-              </CtBanner>
-            )}
-
-            <div className="ct-actions">
+            <CtBanner variant="danger" data-testid="legal-holds-error">
+              {holdsLoad.message}
+            </CtBanner>
+            <div className="ct-actions" role="group">
               <CtButton
                 type="button"
-                variant="primary"
-                data-testid="retention-save-button"
-                disabled={saving || sliderValue === settings.retention_window_days}
-                loading={saving}
-                onClick={() => void saveRetentionChange()}
+                variant="secondary"
+                size="sm"
+                data-testid="legal-holds-retry"
+                onClick={retryLoadHolds}
               >
-                Save retention window
+                Try again
               </CtButton>
             </div>
           </div>
-        </CtCard>
-      )}
+        ) : holds === null ? (
+          <p data-testid="legal-holds-loading">Loading legal holds…</p>
+        ) : (
+          <CtTable>
+            <table data-testid="legal-holds-table">
+              <thead>
+                <tr>
+                  <th>Review ID</th>
+                  {/* Issue #475: the same date + submitter context the
+                      picker shows, beside the held id rather than only the
+                      bare UUID — cross-referenced client-side from the
+                      already-fetched review/user lists (`reviewsById`,
+                      `usersBySub`); "—" when either lookup is unavailable
+                      (e.g. `reviews`/`users` failed to load). */}
+                  <th>Date</th>
+                  <th>Submitter</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Set by</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {holds.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="ct-table__empty" data-testid="legal-holds-empty">
+                      No reviews currently under legal hold.
+                    </td>
+                  </tr>
+                ) : (
+                  holds.map((h) => {
+                    const holdReview = reviewsById.get(h.review_id);
+                    return (
+                      <tr key={h.review_id} data-testid={`hold-row-${h.review_id}`}>
+                        <td className="ct-table__mono">{h.review_id}</td>
+                        <td className="ct-table__mono">
+                          {holdReview ? formatFailureTime(holdReview.created_at) : '—'}
+                        </td>
+                        <td>
+                          {holdReview ? submitterIdentity(holdReview.owner_sub, usersBySub) : '—'}
+                        </td>
+                        <td>
+                          <CtChip variant={holdChipVariant(h.legal_hold)}>
+                            {h.legal_hold ? 'active' : 'released'}
+                          </CtChip>
+                        </td>
+                        <td>{h.legal_hold_reason ?? '—'}</td>
+                        <td>{h.legal_hold_set_by ?? '—'}</td>
+                        <td>
+                          <CtButton
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            confirm="Click again to release"
+                            disabled={holdActionPending}
+                            onClick={() => void releaseHold(h.review_id)}
+                          >
+                            Release legal hold
+                          </CtButton>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </CtTable>
+        )}
+      </CtCard>
 
+      {/* 2. Place a Legal Hold Form */}
       <CtCard data-testid="legal-hold-place-panel">
         <div className="ct-stack">
           <CtToolbar title="Place a legal hold" />
@@ -885,107 +817,145 @@ export default function AdminRetention(): React.ReactElement | null {
         </div>
       </CtCard>
 
-      <CtCard data-testid="legal-hold-list-panel">
-        <CtToolbar title="Legal holds" />
-        {/* Issue #525: the submitter column silently falls back to the raw
-            `owner_sub` when the user list fails to load. That fallback is
-            documented and correct; leaving it unexplained is not — an admin
-            reading a column of subs has no way to tell a directory failure
-            from a directory that genuinely has no entry for them. */}
-        {usersFailed && (
-          <p className="ct-muted" data-testid="legal-holds-identities-degraded">
-            <small>
-              The user directory could not be loaded, so submitters below are shown by
-              their account ID rather than by name.
-            </small>
-          </p>
-        )}
-        {holdsLoad.status === 'failed' ? (
+      {/* 3. Retention Window Slider at the bottom */}
+      {settingsLoad.status === 'loading' ? (
+        <CtProgress data-testid="admin-retention-loading" label="Loading retention settings…" />
+      ) : settings === null ? null : (
+        <CtCard data-testid="retention-slider-panel">
           <div className="ct-stack">
-            <CtBanner variant="danger" data-testid="legal-holds-error">
-              {holdsLoad.message}
-            </CtBanner>
-            <div className="ct-actions" role="group">
+            <CtToolbar title="Retention window" />
+            <p>
+              Current retention window: <strong data-testid="retention-current-window">
+                {settings.retention_window_days}
+              </strong>{' '}
+              days
+            </p>
+
+            {settings.pending_reduction && (
+              <CtBanner variant="warn" data-testid="retention-pending-reduction">
+                Pending reduction to {settings.pending_reduction.new_window_days} days, requested by{' '}
+                {settings.pending_reduction.requested_by} — will apply automatically after the
+                72-hour delay unless a second admin confirms sooner (GC is alerted).
+              </CtBanner>
+            )}
+
+            <CtColumns>
+              <CtField label="New retention window (days, 0–1095)" hint={`${sliderValue} days`}>
+                <input
+                  id="retention-slider"
+                  data-testid="retention-slider"
+                  type="range"
+                  min={0}
+                  max={1095}
+                  value={sliderValue}
+                  onChange={(e) => {
+                    setSliderValue(Number(e.target.value));
+                    setPreview(null);
+                  }}
+                />
+              </CtField>
+
+              <CtField
+                label="Days"
+                hint="Type an exact day count — this and the slider stay in sync."
+                narrow
+              >
+                <input
+                  id="retention-days-input"
+                  data-testid="retention-days-input"
+                  type="number"
+                  min={0}
+                  max={1095}
+                  step={1}
+                  inputMode="numeric"
+                  value={daysInputText}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setDaysInputText(raw);
+                    if (raw === '') {
+                      return;
+                    }
+                    const parsed = Number(raw);
+                    if (!Number.isFinite(parsed)) {
+                      return;
+                    }
+                    if (parsed < 0 || parsed > 1095) {
+                      return;
+                    }
+                    setSliderValue(Math.round(parsed));
+                    setPreview(null);
+                  }}
+                  onBlur={() => {
+                    const parsed = Number(daysInputText);
+                    if (daysInputText === '' || !Number.isFinite(parsed)) {
+                      setDaysInputText(String(sliderValue));
+                      return;
+                    }
+                    const next = clampDays(parsed);
+                    setSliderValue(next);
+                    setDaysInputText(String(next));
+                    setPreview(null);
+                  }}
+                />
+              </CtField>
+            </CtColumns>
+            <p data-testid="retention-window-explainer">
+              Documents are deleted {sliderValue} day{sliderValue === 1 ? '' : 's'} after their
+              review finishes. 0 keeps nothing once a review completes.
+            </p>
+
+            {isRetroactiveReduction && (
+              <CtBanner variant="warn" data-testid="retroactive-reduction-warning">
+                <p>
+                  This is a <strong>retroactive reduction</strong> — it requires a second admin's
+                  confirmation or a 72-hour delay before the sweep runs (dual control, #13/#61).
+                </p>
+                <div className="ct-actions">
+                  <CtButton
+                    type="button"
+                    variant="secondary"
+                    data-testid="retention-preview-button"
+                    onClick={() => void loadPreview()}
+                  >
+                    Preview purge impact
+                  </CtButton>
+                </div>
+                {preview && (
+                  <CtBanner variant="info" data-testid="retention-preview-result">
+                    This change will purge <strong>{preview.purge_count}</strong> object
+                    {preview.purge_count === 1 ? '' : 's'}.
+                  </CtBanner>
+                )}
+                <CtField
+                  label="Confirming admin"
+                  hint="must be a different admin from the requester; leave blank to enter the 72-hour delay instead"
+                >
+                  <input
+                    id="confirming-admin"
+                    data-testid="confirming-admin-input"
+                    type="text"
+                    value={confirmingActor}
+                    onChange={(e) => setConfirmingActor(e.target.value)}
+                  />
+                </CtField>
+              </CtBanner>
+            )}
+
+            <div className="ct-actions">
               <CtButton
                 type="button"
-                variant="secondary"
-                size="sm"
-                data-testid="legal-holds-retry"
-                onClick={retryLoadHolds}
+                variant="primary"
+                data-testid="retention-save-button"
+                disabled={saving || sliderValue === settings.retention_window_days}
+                loading={saving}
+                onClick={() => void saveRetentionChange()}
               >
-                Try again
+                Save retention window
               </CtButton>
             </div>
           </div>
-        ) : holds === null ? (
-          <p data-testid="legal-holds-loading">Loading legal holds…</p>
-        ) : (
-          <CtTable>
-            <table data-testid="legal-holds-table">
-              <thead>
-                <tr>
-                  <th>Review ID</th>
-                  {/* Issue #475: the same date + submitter context the
-                      picker shows, beside the held id rather than only the
-                      bare UUID — cross-referenced client-side from the
-                      already-fetched review/user lists (`reviewsById`,
-                      `usersBySub`); "—" when either lookup is unavailable
-                      (e.g. `reviews`/`users` failed to load). */}
-                  <th>Date</th>
-                  <th>Submitter</th>
-                  <th>Status</th>
-                  <th>Reason</th>
-                  <th>Set by</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {holds.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="ct-table__empty" data-testid="legal-holds-empty">
-                      No reviews currently under legal hold.
-                    </td>
-                  </tr>
-                ) : (
-                  holds.map((h) => {
-                    const holdReview = reviewsById.get(h.review_id);
-                    return (
-                      <tr key={h.review_id} data-testid={`hold-row-${h.review_id}`}>
-                        <td className="ct-table__mono">{h.review_id}</td>
-                        <td className="ct-table__mono">
-                          {holdReview ? formatFailureTime(holdReview.created_at) : '—'}
-                        </td>
-                        <td>
-                          {holdReview ? submitterIdentity(holdReview.owner_sub, usersBySub) : '—'}
-                        </td>
-                        <td>
-                          <CtChip variant={holdChipVariant(h.legal_hold)}>
-                            {h.legal_hold ? 'active' : 'released'}
-                          </CtChip>
-                        </td>
-                        <td>{h.legal_hold_reason ?? '—'}</td>
-                        <td>{h.legal_hold_set_by ?? '—'}</td>
-                        <td>
-                          <CtButton
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            confirm="Click again to release"
-                            disabled={holdActionPending}
-                            onClick={() => void releaseHold(h.review_id)}
-                          >
-                            Release legal hold
-                          </CtButton>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </CtTable>
-        )}
-      </CtCard>
+        </CtCard>
+      )}
     </section>
   );
 }

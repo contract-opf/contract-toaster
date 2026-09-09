@@ -316,11 +316,66 @@ describe('AdminPlaybooks — version history', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Download version artifact
+// ---------------------------------------------------------------------------
+
+describe('AdminPlaybooks — download version artifact', () => {
+  it('renders a download button on each version row and invokes browser download on click', async () => {
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/synthetic-nda-sample/versions/v1.0.0/download',
+        status: 200,
+        body: {
+          url: 'https://example.test/presigned-playbook-download.json',
+          expires_in: 60,
+          playbook_id: 'synthetic-nda-sample',
+          version: 'v1.0.0',
+        },
+      },
+    ]);
+    await renderWithVersions();
+
+    expect(screen.getByTestId('playbook-version-download-v1.0.0')).toBeInTheDocument();
+    expect(screen.getByTestId('playbook-version-download-v2.0.0')).toBeInTheDocument();
+    expect(screen.getByTestId('playbook-version-download-v3.0.0')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('playbook-version-download-v1.0.0'));
+
+    await waitFor(() => {
+      expect(requestsMatching('GET', '/synthetic-nda-sample/versions/v1.0.0/download')).toHaveLength(1);
+      expect(anchorClickSpy).toHaveBeenCalledTimes(1);
+    });
+    anchorClickSpy.mockRestore();
+  });
+
+  it('surfaces 410 as unavailable in storage in the action error banner', async () => {
+    stubRoutes([
+      {
+        method: 'GET',
+        suffix: '/synthetic-nda-sample/versions/v1.0.0/download',
+        status: 410,
+        body: { detail: 'This playbook version is no longer available in storage.' },
+      },
+    ]);
+    await renderWithVersions();
+
+    fireEvent.click(screen.getByTestId('playbook-version-download-v1.0.0'));
+
+    const banner = await screen.findByTestId('admin-playbooks-action-error');
+    expect(banner.textContent).toContain('no longer available in storage');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Upload
 // ---------------------------------------------------------------------------
 
 describe('AdminPlaybooks — upload', () => {
   async function openUpload(): Promise<void> {
+    fireEvent.click(screen.getByTestId('playbook-versions-synthetic-nda-sample'));
+    await screen.findByTestId('admin-playbooks-versions-panel');
     fireEvent.click(screen.getByTestId('admin-playbooks-upload-toggle'));
     await screen.findByTestId('admin-playbooks-upload-panel');
   }

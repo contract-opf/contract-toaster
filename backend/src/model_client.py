@@ -236,11 +236,26 @@ def openrouter_reasoning_max_tokens(model_id: str, policy: dict[str, Any] | None
     the request for that model.
 
     Defaults to `0` for a model_id the policy pins no allowance for --
-    including every currently-known non-reasoning model, and an override
-    id (an explicit `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`) that has no
-    entry in this file at all. `0` keeps `max_tokens` byte-identical to
-    before this issue landed, which is exactly why every existing prompt
-    fixture stays unaffected."""
+    including an override id (an explicit
+    `OPENROUTER_{PRIMARY,CRITIC}_MODEL_ID`) that has no entry in this file
+    at all. `0` keeps `max_tokens` byte-identical to before this issue
+    landed, which is exactly why every existing prompt fixture stays
+    unaffected.
+
+    Issue #661: that `0` is a statement about the POLICY FILE, not a claim
+    about which models reason. This docstring used to justify the default
+    as correct "for every currently-known non-reasoning model", which
+    stopped being true when the primary pin moved to
+    `anthropic/claude-opus-5` (issue #604) -- a reasoning-class model whose
+    extended thinking is on unless the request says otherwise, unlike the
+    Opus 4.8 pin it replaced (and that entry declares
+    `reasoning_max_tokens: 0` today). `0` therefore means only "this file
+    pins no allowance for this id" -- and for a reasoning-class id it means
+    that model's thinking is paid for out of the caller's content budget
+    instead of on top of it. `ModelInvocationRecord.reasoning_tokens`
+    (`_reasoning_usage_fields`, this module) is what makes that spend
+    measurable per attempt; an allowance is then pinned from the
+    measurement, never from a guess."""
     policy = policy if policy is not None else load_openrouter_policy()
     models = policy.get("models") or {}
     for role in ("primary", "critic"):
@@ -300,6 +315,143 @@ def openrouter_model_capabilities(
         if isinstance(entry, dict) and entry.get("model_id") == model_id:
             return _capability_dict(entry)
     return _capability_dict(None)
+
+
+# ---------------------------------------------------------------------------
+# Per-review OUTPUT BUDGET sizing (issue #658).
+#
+# WHY THIS EXISTS. `scripts/primary_review_pass.py` asked every model call
+# for a flat 8,000 content tokens from the very first primary-pass commit
+# (18a7434), and that number was never re-derived when the v3 block-transcript
+# contract landed (1aef16e). Under v3 the response is roughly PROPORTIONAL to
+# the reviewed text: `playbooks/output-schema-v3.json`'s `block_patches`
+# require the keep+delete half to reproduce every edited block's real text end
+# to end, plus insert segments carrying the new language, plus per-issue
+# rationale and evidence prose. A five-page agreement (2,445 words, ~4,100
+# tokens of body text) died at `run_review` with `model_output_truncated` on
+# 2026-09-01 -- the flat budget, doubled once by the truncation retry, still
+# was not enough.
+#
+# THE FORMULA (owner decision 2026-09-01: scale with the document, generous
+# enough that an ~80-page agreement reviews end to end, without a short
+# agreement reserving an 80-page agreement's worth of spend):
+#
+#     budget = clamp(FLOOR + K * document_tokens, FLOOR, CEILING)
+#
+# WHERE K = 2.5 COMES FROM -- a full-coverage worst case is the block text
+# reproduced once (1.0x) + the inserted language (~0.3x) + the segment/JSON
+# scaffolding (~0.4x) + the per-issue prose (~0.5x) = ~2.2x. 2.5 is that with
+# headroom. Adjust it if measurement says otherwise, but keep this derivation
+# next to it: the 8,000 it replaces had NO derivation at all, which is exactly
+# how it survived the v3 cutover unexamined.
+#
+# WHERE FLOOR = 16,000 COMES FROM -- twice the budget that was flat before,
+# so even a one-page document that provokes an unusually long answer (many
+# issues, long rationales) has room the old ceiling did not give it.
+#
+# CEILING comes from the POLICY, never a constant: `openrouter_model_max_
+# output_tokens` below reads the per-model `max_output_tokens` declared in
+# model-policy/openrouter.json, and fails closed to
+# `DEFAULT_MAX_OUTPUT_TOKENS` for any model that declares none -- the same
+# posture `openrouter_model_capabilities` documents, where absence is never
+# an assumed capability.
+# ---------------------------------------------------------------------------
+
+# Fail-closed output ceiling for a model whose policy entry declares no
+# `max_output_tokens` (and for every non-OpenRouter model id -- the Bedrock
+# target has no such field). Conservative on purpose: a model that has not
+# declared it may well not accept more.
+DEFAULT_MAX_OUTPUT_TOKENS = 32_000
+
+OUTPUT_BUDGET_FLOOR_TOKENS = 16_000
+OUTPUT_BUDGET_TOKENS_PER_DOCUMENT_TOKEN = 2.5
+
+# How much room a retry-after-truncation adds. ADDITIVE, not the doubling
+# this replaced: once the starting budget is sized from the document, an
+# answer that overflows it is not overflowing by 2x -- it ran a little long.
+# One FLOOR's worth is a meaningful jump (never the +1 a pure `max(current+1)`
+# guard would give) without committing the review to the largest spend and
+# latency the model will accept.
+OUTPUT_BUDGET_WIDEN_STEP_TOKENS = OUTPUT_BUDGET_FLOOR_TOKENS
+
+
+def openrouter_model_max_output_tokens(
+    model_id: str, policy: dict[str, Any] | None = None
+) -> int:
+    """The per-model output-token cap (issue #658) for `model_id`, read from
+    model-policy/openrouter.json's optional `max_output_tokens` field on
+    `models.primary`, `models.critic`, `models.preflight`, `models.cover_note`
+    or a `selectable` entry -- the SAME lookup shape
+    `openrouter_reasoning_max_tokens` / `openrouter_model_capabilities`
+    already use for their own per-model fields, role pins first.
+
+    FAILS CLOSED to `DEFAULT_MAX_OUTPUT_TOKENS` for a model the policy
+    declares no cap for, for a falsy `model_id`, and for a Bedrock-target
+    model id (which never appears in this artifact at all) -- absence is
+    never read as "this model will accept anything". The policy file is also
+    absent from some deployables' filesystems (backend/Dockerfile COPYs only
+    `src/`), so a load failure fails closed the same way rather than turning
+    an unreadable config into a raised review.
+    """
+    if not model_id:
+        return DEFAULT_MAX_OUTPUT_TOKENS
+    if policy is None:
+        try:
+            policy = load_openrouter_policy()
+        except (OSError, ValueError):
+            logger.warning(
+                "model-policy/openrouter.json unreadable; falling back to the "
+                "conservative %s-token output cap.",
+                DEFAULT_MAX_OUTPUT_TOKENS,
+            )
+            return DEFAULT_MAX_OUTPUT_TOKENS
+    models = policy.get("models") or {}
+    for role in ("primary", "critic", "preflight", "cover_note"):
+        entry = models.get(role)
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            declared = entry.get("max_output_tokens")
+            return int(declared) if declared else DEFAULT_MAX_OUTPUT_TOKENS
+    for entry in policy.get("selectable") or []:
+        if isinstance(entry, dict) and entry.get("model_id") == model_id:
+            declared = entry.get("max_output_tokens")
+            return int(declared) if declared else DEFAULT_MAX_OUTPUT_TOKENS
+    return DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def output_budget_for_document(document_tokens: int, ceiling_tokens: int) -> int:
+    """`clamp(FLOOR + K * document_tokens, FLOOR, ceiling_tokens)` -- the
+    content-token budget one model pass asks for when reviewing a document
+    estimated at `document_tokens` (issue #658; see the derivation above).
+
+    `ceiling_tokens` is the HARD bound and wins over the floor: a model that
+    declares a cap below `OUTPUT_BUDGET_FLOOR_TOKENS` would reject a larger
+    request outright, so asking for the floor anyway would buy a guaranteed
+    error rather than a longer answer. No model in the shipped policy is that
+    small, which is precisely why the clamp order is written down here rather
+    than left to whichever `min`/`max` happened to come last.
+
+    Both review passes call this with
+    `openrouter_model_max_output_tokens(model_id)` as `ceiling_tokens`, and
+    keep that ceiling as a local because the truncation retry widens against
+    it. That is why the sizing is deliberately these TWO calls and not one
+    `for_review(document_tokens, model_id)` wrapper: a wrapper would hide
+    the number the retry path needs, and the first cut of issue #658 shipped
+    one that nothing outside the tests ever called.
+    """
+    ceiling = int(ceiling_tokens)
+    budget = OUTPUT_BUDGET_FLOOR_TOKENS + int(
+        OUTPUT_BUDGET_TOKENS_PER_DOCUMENT_TOKEN * max(0, int(document_tokens))
+    )
+    return min(max(budget, OUTPUT_BUDGET_FLOOR_TOKENS), ceiling)
+
+
+def widen_output_budget(current: int, ceiling: int) -> int:
+    """The content budget a retry-after-truncation asks for: one
+    `OUTPUT_BUDGET_WIDEN_STEP_TOKENS` more than `current`, never past
+    `ceiling` (the model's own declared cap). Returns `current` unchanged
+    when it is already at the ceiling -- the caller has no more room to buy.
+    """
+    return min(current + OUTPUT_BUDGET_WIDEN_STEP_TOKENS, int(ceiling))
 
 
 def _resolved_admin_model_id(
@@ -621,6 +773,29 @@ class ModelInvocationRecord:
     # "" so every existing positional/keyword construction elsewhere in this
     # chain (#81/#82/#204/#293/#414/#514/#567/#568) is unaffected.
     error_token: str = ""
+    # Issue #661 -- the reasoning ("thinking") tokens the provider reported
+    # for THIS attempt (`_reasoning_usage_fields`, this module, off
+    # OpenRouter's `usage.completion_tokens_details.reasoning_tokens`).
+    # `None` (never 0) whenever the client cannot report usage at all, the
+    # attempt's invoke() raised before returning anything, OR the response
+    # genuinely carried no reasoning figure -- the same "not measured vs.
+    # genuinely zero" discipline as the two cache fields above, and for the
+    # same reason: a `0` here would read as "this model did not think",
+    # a claim no absent field supports.
+    #
+    # Why the ledger carries it: `max_tokens` on an OpenRouter request is a
+    # COMBINED reasoning+content ceiling, so a served reasoning-class model
+    # quietly shrinks the content budget `OpenRouterModelClient.invoke`
+    # asked for, and no record on this deployment showed by how much. This
+    # row is the measurement the per-model `reasoning_max_tokens` allowance
+    # (`openrouter_reasoning_max_tokens`, this module) is meant to be set
+    # FROM. Recording it changes no budget and no cost: the provider
+    # already counts these tokens inside `completion_tokens`, so they are
+    # already inside `actual_output_tokens` and must never be added to it.
+    # Defaults to None so every existing positional/keyword construction
+    # elsewhere in this chain (#81/#82/#204/#414/#514/#567/#568/#573) is
+    # unaffected.
+    reasoning_tokens: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +942,47 @@ def _cache_usage_fields(usage: dict[str, Any]) -> dict[str, int]:
         if isinstance(value, int):
             fields[key] = value
     return fields
+
+
+def _reasoning_usage_fields(usage: dict[str, Any]) -> dict[str, int]:
+    """Returns `{"reasoning_tokens": int}` when the provider reported
+    OpenRouter's OpenAI-compatible
+    `usage.completion_tokens_details.reasoning_tokens` for this call, and an
+    EMPTY dict otherwise (issue #661) -- never a `0` placeholder, exactly as
+    `_cache_usage_fields` above: absence means "this response did not report
+    reasoning tokens", which is a different fact from "the model spent zero
+    tokens thinking".
+
+    Worth recording because `max_tokens` on an OpenRouter Chat Completions
+    request is a COMBINED ceiling across a model's reasoning AND content
+    tokens (OpenRouter's own documentation: reasoning tokens are output
+    tokens and are charged as such; for Anthropic, `max_tokens` must be
+    strictly higher than the reasoning budget for any content to be left).
+    Whatever a served model spends thinking therefore comes out of the
+    content budget `OpenRouterModelClient.invoke` set, and nothing on this
+    deployment recorded that number -- which is why
+    `openrouter_reasoning_max_tokens`'s per-model allowance could only ever
+    be a guess. This makes the spend observable per attempt; SETTING an
+    allowance from it is a separate policy change.
+
+    Only the documented nested path is read. A response reporting nothing, a
+    non-dict `completion_tokens_details`, or a non-int count all yield
+    absence rather than a fabricated figure -- usage is a non-substantive
+    accounting field, never worth failing an otherwise-successful call over.
+
+    Deliberately NOT added to `output_tokens` and NOT accumulated into
+    `cumulative_usage`: the provider already counts reasoning tokens INSIDE
+    `completion_tokens`, so adding them anywhere a cost is derived
+    (`reviews.compute_actual_usd_cents_from_usage`,
+    `admin_dashboard._cost_outliers`) would bill the same tokens twice.
+    """
+    details = usage.get("completion_tokens_details")
+    if not isinstance(details, dict):
+        return {}
+    value = details.get("reasoning_tokens")
+    if isinstance(value, int):
+        return {"reasoning_tokens": value}
+    return {}
 
 
 class FakeBedrockClientExhausted(RuntimeError):
@@ -929,6 +1145,13 @@ def parse_openrouter_usage(data: dict[str, Any]) -> dict[str, int]:
     through OpenRouter reported them on `usage` -- see `_cache_usage_fields`.
     These two keys are OMITTED (never defaulted to 0) when the provider did
     not report caching for this call, unlike the two base counts above.
+
+    Issue #661: on those same "omitted, never 0" terms, the returned dict
+    also carries `reasoning_tokens` when the response reported
+    `usage.completion_tokens_details.reasoning_tokens` -- see
+    `_reasoning_usage_fields`. It is NOT added to `output_tokens` (the
+    provider already counts reasoning tokens inside `completion_tokens`),
+    so every usage-derived cost figure is unchanged by this issue.
     """
     usage = data.get("usage") or {}
     if not isinstance(usage, dict):
@@ -940,6 +1163,7 @@ def parse_openrouter_usage(data: dict[str, Any]) -> dict[str, int]:
         "output_tokens": output_tokens if isinstance(output_tokens, int) else 0,
     }
     result.update(_cache_usage_fields(usage))
+    result.update(_reasoning_usage_fields(usage))
     return result
 
 
@@ -1155,6 +1379,171 @@ _CONTEXT_LENGTH_ERROR_MESSAGE_MARKERS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Server-Sent-Events accumulation (issue #657).
+#
+# A non-streamed /chat/completions request has to generate its ENTIRE response
+# before the provider writes a single byte, so httpx's read timeout becomes a
+# wall-clock deadline for the whole generation: achievable output was bounded
+# by throughput x timeout no matter what `max_tokens` said, and raising the
+# output budget only converted `model_output_truncated` into `model_timeout`.
+# Streaming turns each SSE chunk into its own socket read, so the SAME read
+# timeout now bounds the gap BETWEEN chunks -- a long, healthy generation runs
+# as long as it needs to, while a genuinely stalled stream still raises
+# `ModelTimeoutError`.
+#
+# The wire format is `text/event-stream`: `data:`-prefixed JSON lines, blank
+# separator lines, `:`-prefixed comments (OpenRouter emits
+# `: OPENROUTER PROCESSING` as a keep-alive), and a terminal
+# `data: [DONE]` sentinel that is NOT JSON.
+# ---------------------------------------------------------------------------
+
+_SSE_DATA_PREFIX = "data:"
+_SSE_COMMENT_PREFIX = ":"
+_SSE_DONE_SENTINEL = "[DONE]"
+
+
+class _CancelledMidStream(Exception):
+    """Internal control-flow wrapper: carries a `cancel_checkpoint`
+    exception out of the streamed-body read, which is wrapped in the same
+    `except Exception` that classifies transport failures. Without it a
+    cancellation raised between chunks would be swallowed and RETRIED as if
+    the provider had dropped the connection. Never escapes `invoke()` --
+    the original exception is re-raised untouched, because it is the
+    caller's control-flow signal, not a transport failure."""
+
+    def __init__(self, original: BaseException) -> None:
+        super().__init__("cancelled mid-stream")
+        self.original = original
+
+
+@dataclass
+class _StreamedCompletion:
+    """What one streamed /chat/completions response accumulates to -- the
+    same facts `invoke()` used to read off a non-streamed body.
+
+    `tool_arguments` is issue #418's forced-tool-use path
+    (`choices[0].delta.tool_calls[0].function.arguments`, a JSON string),
+    which `invoke()` returns in PREFERENCE to `content`; both survive.
+    """
+
+    content: str = ""
+    tool_arguments: str = ""
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
+    served_model: str | None = None
+    generation_id: str | None = None
+
+
+def _accumulate_openrouter_stream(
+    lines: Any, *, cancel_checkpoint: Any = None
+) -> _StreamedCompletion:
+    """Fold an OpenRouter SSE line iterator into a `_StreamedCompletion`.
+
+    `lines` is anything yielding the response body's lines (httpx's
+    `Response.iter_lines()`), `str` or `bytes`, without trailing newlines.
+
+    `cancel_checkpoint` is consulted BETWEEN chunks, so a cancelled review
+    stops paying mid-generation instead of at the next call boundary. Its
+    exception is wrapped in `_CancelledMidStream` purely so `invoke()`'s
+    transport-failure handler cannot mistake it for a dropped connection.
+
+    A structurally broken chunk raises `ModelInvocationError` with the same
+    "malformed response" posture the non-streamed path had -- and, like it,
+    carries no body substance.
+    """
+    acc = _StreamedCompletion()
+    for raw_line in lines:
+        if cancel_checkpoint is not None:
+            try:
+                cancel_checkpoint()
+            except BaseException as exc:  # noqa: BLE001 - re-raised verbatim by invoke()
+                raise _CancelledMidStream(exc) from exc
+
+        if isinstance(raw_line, bytes):
+            raw_line = raw_line.decode("utf-8", errors="replace")
+        line = raw_line.strip()
+        if not line:
+            continue  # SSE event separator
+        if line.startswith(_SSE_COMMENT_PREFIX):
+            continue  # comment / keep-alive (`: OPENROUTER PROCESSING`)
+        if not line.startswith(_SSE_DATA_PREFIX):
+            # `event:` / `id:` / `retry:` fields carry nothing this client
+            # reads. Ignoring them is the SSE spec's own rule for unknown
+            # fields, not laxity.
+            continue
+        data = line[len(_SSE_DATA_PREFIX) :].strip()
+        if data == _SSE_DONE_SENTINEL:
+            break
+        try:
+            chunk = json.loads(data)
+        except ValueError as exc:
+            raise ModelInvocationError(
+                "OpenRouter streamed a chunk that is not valid JSON."
+            ) from exc
+        if not isinstance(chunk, dict):
+            raise ModelInvocationError(
+                "OpenRouter streamed a chunk that is not a JSON object."
+            )
+
+        # Response-side provenance (issue #514) rides on every chunk; keep the
+        # last non-empty value rather than the first, so a provider that
+        # resolves an alias part-way through is recorded as what it ended up
+        # serving. Same parser as the non-streamed body -- one implementation.
+        provenance = parse_openrouter_provenance(chunk)
+        if provenance["served_model"]:
+            acc.served_model = provenance["served_model"]
+        if provenance["generation_id"]:
+            acc.generation_id = provenance["generation_id"]
+
+        # `stream_options.include_usage` makes the provider emit a final
+        # usage-only chunk (empty `choices`). Keep the last one seen.
+        usage = chunk.get("usage")
+        if isinstance(usage, dict):
+            acc.usage = usage
+
+        choices = chunk.get("choices")
+        if not isinstance(choices, list) or not choices:
+            continue
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            raise ModelInvocationError(
+                "OpenRouter streamed a chunk whose choices[0] is not an object."
+            )
+
+        # Last NON-null finish_reason wins: it arrives on the final content
+        # chunk, and the usage-only chunk that follows carries none.
+        finish_reason = choice.get("finish_reason")
+        if finish_reason is not None:
+            acc.finish_reason = finish_reason
+
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        piece = delta.get("content")
+        if isinstance(piece, str):
+            acc.content += piece
+        tool_calls = delta.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                continue
+            # Forced tool-use (issue #418) requests EXACTLY one tool call, so
+            # only index 0 is the structured output -- the non-streamed path
+            # read `tool_calls[0]` for the same reason. A fragment at another
+            # index is not it, and concatenating it would corrupt the JSON.
+            if call.get("index", 0) != 0:
+                continue
+            function = call.get("function")
+            if not isinstance(function, dict):
+                continue
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                acc.tool_arguments += arguments
+    return acc
+
+
 class OpenRouterModelClient:
     """Direct model-provider client (OpenRouter, OpenAI-compatible Chat
     Completions) implementing the `BedrockModelClient.invoke` Protocol.
@@ -1178,12 +1567,26 @@ class OpenRouterModelClient:
     provider. Guarding the response body from logs (below) protects an echo of
     the prompt; this protects the document itself.
 
-    `http_client` (anything exposing `.post(url, *, json, headers) -> resp`
-    where `resp` has `.status_code` and `.json()`) is injectable so tests
-    drive it fully offline. In production it is left None and a single
-    `httpx.Client` is created lazily on first use and REUSED across every
-    `invoke()` call on this instance (issue #270 -- connection reuse instead
-    of a fresh client per call); `close()` releases it.
+    STREAMED RESPONSES (issue #657): every request is sent with
+    `stream: true` + `stream_options.include_usage` and the SSE body is
+    accumulated back into the SAME single string `invoke()` always returned
+    -- nothing streams to the browser, this is transport-level only. It
+    exists so a large `max_tokens` is reachable at all: a non-streamed
+    request must generate its whole answer before the first byte arrives,
+    which turns the read timeout into a wall-clock deadline for the
+    generation and caps achievable output at throughput x timeout. With
+    streaming the same read timeout bounds the gap BETWEEN chunks instead,
+    so a long healthy generation survives and only a genuinely stalled
+    stream raises `ModelTimeoutError`.
+
+    `http_client` (anything exposing
+    `.stream("POST", url, *, json, headers)` returning a context manager
+    whose response has `.status_code`, `.iter_lines()`, `.read()` and
+    `.json()`) is injectable so tests drive it fully offline. In production
+    it is left None and a single `httpx.Client` is created lazily on first
+    use and REUSED across every `invoke()` call on this instance (issue #270
+    -- connection reuse instead of a fresh client per call); `close()`
+    releases it.
 
     Bounded, jittered retries (issue #270): a transient failure (429, any
     5xx, or a transport/connection error) is retried up to `max_retries`
@@ -1221,6 +1624,15 @@ class OpenRouterModelClient:
     0, "output_tokens": 0}` (never None) so a caller can always sum it
     without a null check, and is safe to read after `close()` -- it is a
     plain instance attribute, not a transport call.
+
+    Issue #661: `last_usage` may additionally carry `reasoning_tokens` when
+    the response reported it (`_reasoning_usage_fields` above), on the same
+    "present only when the provider reported it" terms as issue #568's two
+    cache keys. `cumulative_usage` deliberately does NOT accumulate it: the
+    provider already counts reasoning tokens inside `completion_tokens`, so
+    summing it anywhere `compute_actual_usd_cents_from_usage` reads would
+    bill the same tokens twice. It is per-attempt observability, ledgered
+    on `ModelInvocationRecord.reasoning_tokens`, never an input to cost.
     """
 
     def __init__(
@@ -1289,7 +1701,15 @@ class OpenRouterModelClient:
         if self._http_client is None:
             import httpx  # lazy: keep the module importable without httpx
 
-            self._http_client = httpx.Client(timeout=self._timeout)
+            # Issue #657: spelled out as an httpx.Timeout so the READ leg is
+            # named, because that is the one the streamed body depends on.
+            # httpx has no whole-response deadline: `read` bounds a single
+            # socket read, which under `stream: true` is ONE SSE chunk. So
+            # this is an inter-chunk stall bound, not a cap on how long a
+            # generation may take -- which is the entire point of the switch
+            # to streaming. `httpx.Client(timeout=<float>)` sets exactly these
+            # four legs to the same value; this is that, said out loud.
+            self._http_client = httpx.Client(timeout=httpx.Timeout(self._timeout))
         return self._http_client
 
     def close(self) -> None:
@@ -1378,7 +1798,13 @@ class OpenRouterModelClient:
         # ADDED on top of the caller's content budget, never carved out of
         # it, and defaults to 0 for every model the policy pins no allowance
         # for, so `max_tokens` here stays byte-identical to before this
-        # issue landed for every non-reasoning model.
+        # issue landed for every model with no declared allowance. Issue
+        # #661: that set is NOT the same as "every non-reasoning model" --
+        # the current primary pin is reasoning-class and its policy entry
+        # declares a ZERO allowance, so its thinking is spent out of the
+        # caller's content budget until a MEASURED allowance is pinned (see
+        # `openrouter_reasoning_max_tokens` and
+        # `ModelInvocationRecord.reasoning_tokens`).
         reasoning_allowance = openrouter_reasoning_max_tokens(model_id, policy)
 
         # Issue #568: capability-gated pass-through-or-flatten for a
@@ -1398,6 +1824,27 @@ class OpenRouterModelClient:
                 {"role": "user", "content": user_content},
             ],
             "max_tokens": max_output_tokens + reasoning_allowance,
+            # Issue #677: when the policy pins a NON-ZERO allowance, ask the
+            # provider for that much thinking EXPLICITLY. Without this the
+            # allowance only widens `max_tokens` and the provider still chooses
+            # its own reasoning depth out of that same budget -- which is how
+            # `floor_judge.judge_floor_invariants`, running at 1024, hit
+            # `finish_reason='length'` on every real document. A zero pin sends
+            # no `reasoning` key at all, so a model with no declared allowance
+            # keeps a byte-identical payload.
+            **(
+                {"reasoning": {"max_tokens": reasoning_allowance}}
+                if reasoning_allowance > 0
+                else {}
+            ),
+            # Issue #657: stream the response. These two keys are the ONLY
+            # difference from the payload this client sent before streaming
+            # landed -- same routing, same pin, same schema/tool keys.
+            # `include_usage` asks OpenRouter for the terminal usage-only
+            # chunk, without which `last_usage` / `cumulative_usage` (and the
+            # spend settlement that reads them) would go blind.
+            "stream": True,
+            "stream_options": {"include_usage": True},
             # Sampling params (temperature/top_p/top_k) deliberately omitted --
             # request contract (model-policy/openrouter.json).
             #
@@ -1473,8 +1920,37 @@ class OpenRouterModelClient:
             # caught by the `except Exception` below and retried.
             if self._cancel_checkpoint is not None:
                 self._cancel_checkpoint()
+            streamed: _StreamedCompletion | None = None
+            response: Any = None
+            status: int | None = None
             try:
-                response = client.post(url, json=payload, headers=headers)
+                # Issue #657: the body is consumed INSIDE the context manager
+                # -- `iter_lines()` needs the connection still open. A non-200
+                # still arrives as an ordinary (short) body, so it is read
+                # eagerly here, before the context closes, which is what makes
+                # `.json()` legal for the classification branches below.
+                with client.stream(
+                    "POST", url, json=payload, headers=headers
+                ) as response:
+                    status = getattr(response, "status_code", None)
+                    if status == 200:
+                        streamed = _accumulate_openrouter_stream(
+                            response.iter_lines(),
+                            cancel_checkpoint=self._cancel_checkpoint,
+                        )
+                    else:
+                        response.read()
+            except _CancelledMidStream as cancelled:
+                # The caller's control-flow signal, raised between chunks --
+                # re-raised verbatim so it is never mistaken for (and retried
+                # as) a dropped connection. `from None` keeps the internal
+                # wrapper out of the traceback.
+                raise cancelled.original from None
+            except ModelInvocationError:
+                # A malformed streamed chunk is a deterministic rejection, the
+                # same as a malformed non-streamed body was: raised as-is,
+                # never retried, never re-paid.
+                raise
             except Exception as exc:  # transport error -- never echo request body
                 if not is_last_attempt:
                     self._sleep(self._backoff_delay(attempt_index))
@@ -1497,42 +1973,24 @@ class OpenRouterModelClient:
                     f"OpenRouter request failed at transport level: {type(exc).__name__}"
                 ) from exc
 
-            status = getattr(response, "status_code", None)
-            if status == 200:
-                try:
-                    data = response.json()
-                    choice = data["choices"][0]
-                    message = choice["message"]
-                    # Issue #418: under forced tool-use (tool_spec was set
-                    # above), the provider returns the review object as
-                    # `tool_calls[0].function.arguments` -- a JSON STRING,
-                    # the same shape `content` always was, so everything
-                    # downstream of `invoke()` (validate_model_response's
-                    # unwrap-then-parse) is unaffected. Falls back to
-                    # `message.content` when there are no tool_calls -- both
-                    # because tool_spec was never set (the flag-off path,
-                    # unchanged) AND as the documented fallback for a
-                    # tool-mode call that (illegally) comes back as plain
-                    # content anyway: a provider ignoring `tool_choice` must
-                    # not be treated as a malformed response when the prose
-                    # path would have parsed it fine.
-                    tool_calls = message.get("tool_calls") or []
-                    if tool_calls:
-                        content = tool_calls[0]["function"]["arguments"]
-                    else:
-                        content = message["content"]
-                    # `.get`, not `[...]`: `finish_reason` is genuinely absent
-                    # from some canned/older fixtures and is not itself part
-                    # of the "malformed response" contract this try/except
-                    # guards -- a missing finish_reason simply means "not
-                    # truncated" (None never equals the "length" sentinel
-                    # checked below).
-                    finish_reason = choice.get("finish_reason")
-                except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
-                    raise ModelInvocationError(
-                        "OpenRouter response missing choices[0].message.content "
-                        "(and no usable tool_calls[0].function.arguments)."
-                    ) from exc
+            if status == 200 and streamed is not None:
+                # Issue #418, streamed (issue #657): under forced tool-use
+                # (tool_spec was set above) the provider streams the review
+                # object as `delta.tool_calls[0].function.arguments` -- a JSON
+                # STRING, the same shape `content` always was, so everything
+                # downstream of `invoke()` (validate_model_response's
+                # unwrap-then-parse) is unaffected. It WINS over `content`,
+                # and `content` remains the fallback -- both because tool_spec
+                # was never set (the flag-off path, unchanged) AND as the
+                # documented fallback for a tool-mode call that (illegally)
+                # comes back as plain content anyway: a provider ignoring
+                # `tool_choice` must not be treated as a malformed response
+                # when the prose path would have parsed it fine.
+                content = streamed.tool_arguments or streamed.content
+                # A stream that carried no finish_reason at all simply means
+                # "not truncated" -- None never equals the "length" sentinel
+                # checked below, exactly as a body omitting the field did.
+                finish_reason = streamed.finish_reason
 
                 # Issue #527: `finish_reason == "length"` means the provider
                 # stopped generating because `max_tokens` ran out before the
@@ -1562,8 +2020,11 @@ class OpenRouterModelClient:
                 # that omits `usage` (or ships a malformed one) must not fail
                 # the call over a non-substantive accounting field.
                 # parse_openrouter_usage defaults missing/malformed counts to
-                # 0 rather than raising.
-                self.last_usage = parse_openrouter_usage(data)
+                # 0 rather than raising -- issue #657 keeps exactly that
+                # rather than inventing a "streamed responses have no usage"
+                # state: the usage-only terminal chunk is re-wrapped into the
+                # body shape the same parser has always read.
+                self.last_usage = parse_openrouter_usage({"usage": streamed.usage})
                 # Issue #415: accumulate onto the running instance total --
                 # see the class docstring's `cumulative_usage` paragraph.
                 # Additive, never overwritten, so a retry that eventually
@@ -1575,9 +2036,9 @@ class OpenRouterModelClient:
                 # we asked for. Assigned unconditionally (both keys are None
                 # when absent) so a provider that reports ids on one call and
                 # not the next cannot leave the previous call's ids behind.
-                provenance = parse_openrouter_provenance(data)
-                self.last_served_model = provenance["served_model"]
-                self.last_generation_id = provenance["generation_id"]
+                # Off the streamed chunks (issue #657) instead of the body.
+                self.last_served_model = streamed.served_model
+                self.last_generation_id = streamed.generation_id
                 return content
 
             if self._is_context_length_rejection(status, response):

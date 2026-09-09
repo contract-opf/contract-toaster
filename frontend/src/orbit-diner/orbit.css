@@ -1,0 +1,3056 @@
+/* Instrument Sans 600 is the one face this console needs that the app does not
+   already self-host: main.tsx registers Instrument Sans 400/500/700, Space
+   Grotesk 500/700 and IBM Plex Mono 400 through @fontsource, so the kit's own
+   @font-face rules for those weights would register the same families twice.
+   The URL is same-origin and fingerprinted by Vite — the deployed CSP allows
+   no remote font and no data: URI. */
+@font-face {
+  font-family: Instrument Sans;
+  src: url("./artwork/fonts/instrument-sans-latin-600-normal.woff2")
+    format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+.od-console {
+  --od-ink: #243542;
+  --od-muted: #58616a;
+  --od-paper: #fcf0d9;
+  --od-line: #b6aa96;
+  --od-accent: var(--ct-accent, #ba561f);
+  --od-shadow: #07152270;
+  --od-glass: #091e2d;
+  color-scheme: light dark;
+  color: var(--od-ink);
+  font-family:
+    Instrument Sans,
+    Arial,
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  position: relative;
+  isolation: isolate;
+  max-width: 1720px;
+  margin: auto;
+  background: light-dark(#e8dfcb, #172c3b);
+  border-radius: 24px;
+  box-shadow: 0 18px 90px #0003;
+  overflow: clip;
+}
+.od-console * {
+  box-sizing: border-box;
+}
+.od-console [hidden] {
+  display: none !important;
+}
+.od-console h2 {
+  font-family:
+    Space Grotesk,
+    Arial,
+    sans-serif;
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.2;
+  margin: 0 0 15px;
+}
+.od-console p {
+  margin: 0 0 12px;
+}
+.od-console button,
+.od-console input,
+.od-console select,
+.od-console textarea {
+  font: inherit;
+}
+.od-console button {
+  cursor: pointer;
+}
+.od-console button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+.od-console button:focus-visible,
+.od-console input:focus-visible,
+.od-console select:focus-visible,
+.od-console textarea:focus-visible,
+.od-console summary:focus-visible {
+  outline: 3px solid #26719d;
+  outline-offset: 4px;
+}
+.od-console textarea,
+.od-console input[type="search"] {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--od-ink);
+  background: #fff9ed;
+  border: 1px solid #aa9e89;
+  border-radius: 5px;
+  padding: 9px 12px;
+  width: 100%;
+}
+.od-console textarea {
+  resize: vertical;
+}
+.od-console label {
+  font-size: 15px;
+}
+.od-scene {
+  background-image: var(--od-counter-image);
+  background-size: 100% auto;
+  background-repeat: no-repeat;
+  padding: 170px 40px 45px;
+  position: relative;
+}
+.od-scene:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    180deg,
+    transparent 480px,
+    #e8d9be 840px,
+    #ebe3d3
+  );
+}
+.od-appliances {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.02fr);
+  align-items: start;
+  gap: 28px;
+}
+.od-toaster,
+.od-register {
+  min-width: 0;
+}
+.od-toaster-figure,
+.od-register-figure {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.5;
+  filter: drop-shadow(0 17px 9px #19262955);
+}
+.od-material {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+.od-toaster-figure > [data-part="shell"] {
+  position: relative;
+  z-index: 2;
+}
+.od-slot-glow {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 4%;
+  height: 5%;
+  border-radius: 50%;
+  background: #fa9c2b;
+  filter: blur(12px);
+  opacity: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.od-drop-active .od-slot-glow,
+.od-console[data-status="running"] .od-slot-glow {
+  opacity: 0.65;
+}
+.od-slice {
+  position: absolute;
+  left: 31%;
+  width: 40%;
+  top: -33%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  z-index: 1;
+  color: #582b09;
+  aspect-ratio: 1;
+  transform-origin: 50% 100%;
+}
+.od-slice:disabled {
+  opacity: 1 !important;
+  cursor: default;
+}
+.od-toast-name {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 27%;
+  font-family:
+    Space Grotesk,
+    Arial,
+    sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  text-shadow:
+    0 1px 0 #fff2bc88,
+    1px 0 1px #5b260979;
+  overflow-wrap: anywhere;
+  /* Issue #739. `filename.ts` measures the name against this box and emits the
+     line breaks itself, so the browser reproduces the fit rather than
+     re-deciding it — the clamp below cuts the LAST line, which is where
+     `.docx` lives. `pre-wrap`, not `pre`: an unmeasurable host (no 2D context)
+     paints the whole name, and it must still wrap rather than run off the
+     crust. Because this preserves whitespace, `filename.ts` normalizes the
+     name first — otherwise a `\n` or a tab already in the filename would be a
+     forced break nothing measured. */
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  mix-blend-mode: multiply;
+}
+/* 04p2: the finished filename box. The name is inset to the visible crust, not
+   to the slice's full SVG bounding box, and truncates rather than shrinking —
+   the type floor (#600) is 14px and overflow is handled by wrapping. */
+.od-console:not(.od-plain) .od-toast-name {
+  left: 20%;
+  right: 20%;
+  top: 40%;
+  max-height: 24%;
+  text-wrap: balance;
+}
+.od-toast-texture {
+  filter: var(--od-doneness, none);
+}
+.od-toast-save {
+  position: absolute;
+  left: 19%;
+  right: 19%;
+  top: 61%;
+  font-size: 14px;
+  font-weight: 600;
+  background: #fff0bedd;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: #452912;
+}
+.od-console[data-status="running"] .od-slice,
+.od-console[data-status="pending"] .od-slice {
+  top: -26%;
+}
+.od-console[data-status="done"] .od-slice {
+  top: -40%;
+}
+.od-console[data-status="error"] .od-toast-name {
+  color: #fff2cd;
+  mix-blend-mode: normal;
+  text-shadow: 1px 1px 2px #000;
+}
+.od-slot-label {
+  position: absolute;
+  z-index: 4;
+  left: 24%;
+  top: -13%;
+  width: 55%;
+  min-height: 44px;
+  background: #fff3dcf2;
+  border: 1px solid #d8c8aa;
+  box-shadow: 0 4px 12px #07162340;
+  border-radius: 8px;
+  font-size: 15px;
+  color: var(--od-ink);
+}
+.od-playbook-display {
+  position: absolute;
+  z-index: 4;
+  left: 27%;
+  top: 15.8%;
+  width: 46%;
+  height: 10%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff1c5;
+  text-align: center;
+}
+.od-playbook-display > span {
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: #dae6e9;
+}
+/* N6 (issue #725). This label is a FLEX ITEM of `.od-playbook-display`, so it
+   carries `min-width: auto` — an automatic minimum equal to its min-content
+   width. On the phone step the value below is `white-space: nowrap`, which
+   makes min-content the width of the WHOLE playbook name, so a 60-character
+   name (or one long unbroken word) pushes this item wider than the 50%-wide
+   glass it is absolutely positioned inside and spills across the plate. The
+   `text-overflow: ellipsis` never gets a chance to fire, because the box it
+   would clip has already grown to fit. `min-width: 0` is what lets the
+   ellipsis do its job; `max-width: 100%` holds the ceiling for the wrapped
+   two-line desktop case too. */
+.od-playbook-value {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  position: relative;
+}
+.od-playbook-value > span {
+  display: block;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 0 5px #ffeac555;
+}
+.od-playbook-value select {
+  position: absolute;
+  inset: -16px 0 0;
+  width: 100%;
+  height: calc(100% + 16px);
+  opacity: 0;
+  cursor: pointer;
+}
+.od-playbook-value:focus-within {
+  outline: 3px solid #a6d8ff;
+  outline-offset: 4px;
+}
+.od-dial {
+  position: absolute;
+  z-index: 4;
+  left: 32.5%;
+  top: 26.7%;
+  width: 34%;
+  padding: 0;
+  aspect-ratio: 1;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+}
+.od-dial:disabled {
+  opacity: 1 !important;
+}
+.od-dial-index {
+  position: absolute;
+  inset: 9%;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+}
+.od-dial-index:before {
+  content: "";
+  position: absolute;
+  left: calc(50% - 2px);
+  top: 5%;
+  width: 4px;
+  height: 28%;
+  background: linear-gradient(90deg, #151b20, #06111b, #647077);
+  border-radius: 2px;
+  box-shadow: 1px 0 1px #fff5;
+}
+.od-browse {
+  position: absolute;
+  z-index: 4;
+  left: 35%;
+  top: 68.1%;
+  width: 30%;
+  height: 6%;
+  min-height: 30px;
+  background: none;
+  border: 0;
+  color: #243542;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  white-space: nowrap;
+}
+.od-lever {
+  position: absolute;
+  z-index: 4;
+  top: 29%;
+  height: 49%;
+  border: 0;
+  background: none;
+  padding: 0;
+  touch-action: none;
+  color: #1d303f;
+}
+/* 04p2: the lever sits on its moulded track, centred on its own axis. */
+.od-console:not(.od-plain) .od-lever {
+  left: 80.2%;
+  width: 14%;
+  min-width: 44px;
+  transform: translateX(-50%);
+}
+.od-lever-handle {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  filter: drop-shadow(0 4px 3px #07152160);
+}
+.od-lever-handle svg {
+  display: block;
+  width: 100%;
+}
+.od-lever-label {
+  position: absolute;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+/* 04p2 (designer answer O4): centred on the lever track, 4px below its visible
+   end, stationary while the handle travels. It is that control's label, not a
+   word floating on the toaster body. */
+.od-console:not(.od-plain) .od-lever-label {
+  top: calc(78.6% + 4px);
+  left: 50%;
+  width: max-content;
+  transform: translateX(-50%);
+  text-align: center;
+}
+.od-console[data-status="running"] .od-lever-handle,
+.od-console[data-status="pending"] .od-lever-handle {
+  top: 45%;
+}
+.od-lever[aria-disabled="true"] {
+  cursor: default;
+}
+.od-ready {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.15;
+  color: #243542;
+}
+/* 04p2 (designer answer O3): the status background is photographed into the
+   toaster plate, so the readout itself paints nothing — no beige capsule, no
+   border, no shadow. The superseded 145x32px CSS box must not come back. */
+.od-console:not(.od-plain) .od-ready {
+  top: 68.5%;
+  left: 49.8%;
+  width: 28%;
+  height: 7.5%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+/* 04p2 (designer answer O2): one 8px status dot, one implementation. The stray
+   fitting that used to read as a second dot was retouched out of the plate, and
+   the ::before dot the 04p1 stack carried is gone with it. Plain presents the
+   status as text, so the dot is decorative there and stays hidden. */
+.od-ready-lamp {
+  display: none;
+}
+.od-console:not(.od-plain) .od-ready-lamp {
+  display: inline-block;
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #647078;
+  box-shadow: inset 0 1px 2px #0006;
+}
+.od-console[data-status="loaded"]:not(.od-plain) .od-ready-lamp,
+.od-console[data-status="running"]:not(.od-plain) .od-ready-lamp,
+.od-console[data-status="pending"]:not(.od-plain) .od-ready-lamp {
+  background: #ba561f;
+}
+.od-console[data-status="done"]:not(.od-plain) .od-ready-lamp {
+  background: #287c60;
+}
+.od-console[data-status="error"]:not(.od-plain) .od-ready-lamp {
+  background: #a33530;
+}
+.od-console[data-status*="manual"]:not(.od-plain) .od-ready-lamp {
+  background: #26668a;
+}
+.od-steam {
+  position: absolute;
+  width: 22%;
+  left: 39%;
+  top: -42%;
+  z-index: 1;
+  opacity: 0.7;
+}
+.od-intake-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  min-height: 46px;
+  padding: 0 12px;
+}
+.od-file-input {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0;
+  pointer-events: none;
+}
+.od-link-key {
+  background: none;
+  border: 0;
+  padding: 8px 3px;
+  min-height: 40px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  color: var(--od-ink);
+  font-size: 14px !important;
+}
+.od-progress {
+  margin: 12px 3% 0;
+  background: #102738;
+  color: #e5eced;
+  border: 1px solid #7a8e97;
+  border-radius: 10px;
+  padding: 14px 20px;
+  box-shadow:
+    inset 0 2px 7px #0007,
+    0 1px 0 #fff;
+  display: grid;
+  gap: 5px;
+  font-size: 15px;
+  min-height: 80px;
+}
+.od-stage-name {
+  font-family:
+    Space Grotesk,
+    Arial,
+    sans-serif;
+  font-size: 18px;
+  color: #ffe9bc;
+}
+.od-review-tag {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 14px;
+  padding: 5px 12px;
+  overflow-wrap: anywhere;
+}
+.od-register-figure {
+  margin-top: 0;
+}
+.od-register-compact {
+  display: none;
+}
+.od-price {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  top: 11%;
+  height: 9%;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  justify-content: space-between;
+  color: #fff0ce;
+}
+.od-price > span {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  line-height: 1.15;
+  max-width: 60%;
+}
+.od-price output {
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 48px;
+  line-height: 1;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 10px #eebb7e77;
+  white-space: nowrap;
+}
+.od-register-status {
+  position: absolute;
+  left: 18%;
+  width: 46%;
+  top: 28.6%;
+  height: 4.5%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1.15;
+  text-align: center;
+  color: #fff1cd;
+  overflow: hidden;
+}
+.od-register-controls {
+  position: absolute;
+  left: 10%;
+  top: 40%;
+  width: 58%;
+  height: 31%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 10px;
+}
+.od-console fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.od-console legend {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 5px;
+  padding: 0;
+}
+.od-radio-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.od-radio-row.od-four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.od-radio-key {
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+.od-radio-key input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+.od-radio-key > span,
+.od-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  min-height: 44px;
+  padding: 10px 10px 8px;
+  position: relative;
+  color: #243542;
+  border: 1px solid #897e6f;
+  border-radius: 7px;
+  background: linear-gradient(
+    135deg,
+    #fff8e9 0%,
+    #e8d6bb 27%,
+    #f4e5ce 50%,
+    #e6d4b7 79%,
+    #c3b398 100%
+  );
+  box-shadow:
+    inset 0 2px 0 #fffc,
+    inset 2px 0 1px #fff7,
+    inset 0 -3px 1px #8c7e6655,
+    0 3px 1px #776c58,
+    0 5px 7px #10233240;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.od-key:active,
+.od-radio-key:active > span {
+  transform: translateY(2px);
+}
+.od-key:hover:not(:disabled),
+.od-radio-key:hover > span {
+  filter: brightness(1.045);
+}
+.od-radio-key input:checked + span:before,
+.od-key[aria-pressed="true"]:before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: calc(50% - 12px);
+  width: 24px;
+  height: 3px;
+  background: var(--od-accent);
+  border-radius: 2px;
+  box-shadow: 0 0 4px #d58d5066;
+}
+.od-radio-key input:disabled + span {
+  opacity: 0.46;
+}
+.od-radio-key input:focus-visible + span {
+  outline: 3px solid #26719d;
+  outline-offset: 3px;
+}
+.od-receipt-printer {
+  position: absolute;
+  left: 75%;
+  width: 18%;
+  top: 33%;
+  height: 42%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #293947;
+}
+.od-receipt-printer:disabled {
+  opacity: 1 !important;
+}
+.od-receipt-paper {
+  position: absolute;
+  left: 9%;
+  right: 9%;
+  top: 0;
+  bottom: 14%;
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 14px;
+  line-height: 1.8;
+  padding: 20px 5px 10px;
+  background: linear-gradient(110deg, #f9ecd6, #fff9ed 40%, #e8d8c0);
+  box-shadow: inset 0 8px 8px #0004;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% 98%,
+    94% 100%,
+    88% 98%,
+    82% 100%,
+    76% 98%,
+    70% 100%,
+    64% 98%,
+    58% 100%,
+    52% 98%,
+    46% 100%,
+    40% 98%,
+    34% 100%,
+    28% 98%,
+    22% 100%,
+    16% 98%,
+    10% 100%,
+    4% 98%,
+    0 100%
+  );
+  overflow: hidden;
+}
+.od-receipt-paper > span {
+  display: block;
+  margin-top: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.od-receipt-printer:disabled .od-receipt-paper {
+  opacity: 0;
+}
+.od-printer-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1%;
+  color: #f3ebdd;
+  font-size: 14px;
+  text-shadow: 0 1px 2px #000;
+  font-weight: 600;
+}
+.od-till {
+  position: absolute;
+  left: 10%;
+  right: 9%;
+  top: 79%;
+  height: 10%;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.od-till .od-key {
+  flex: 1;
+  min-height: 42px;
+  padding: 8px;
+  background: linear-gradient(
+    110deg,
+    #c0c6c8,
+    #f8f0e3 31%,
+    #c5c1bb 55%,
+    #e5dcd0 75%,
+    #aeb6bb
+  );
+  font-weight: 500 !important;
+}
+.od-readback {
+  margin: 12px 6% 0;
+  font-size: 14px;
+  color: #354451;
+  line-height: 1.5;
+}
+.od-readback p {
+  margin-bottom: 8px;
+}
+.od-result-keys {
+  margin: 20px 5% 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+.od-result-keys > .od-key {
+  flex: 1;
+  padding: 12px;
+  min-height: 54px;
+}
+.od-result-keys > p {
+  font-size: 14px;
+  width: 100%;
+}
+.od-butter-art {
+  width: 42px;
+  flex: 0 0 42px;
+  height: 30px;
+}
+.od-disposition {
+  padding: 22px;
+  margin: 18px 4% 0;
+  border-radius: 12px;
+  border: 1px solid #9c9588;
+  background: linear-gradient(130deg, #e5e3de, #fff3df 30%, #dbd5c8 90%);
+  box-shadow:
+    inset 0 2px 2px #fff,
+    0 7px 13px #10263833;
+}
+.od-disposition p {
+  font-size: 14px;
+}
+.od-disposition textarea {
+  margin: 5px 0 10px;
+}
+.od-disposition-keys {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.od-stamp {
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  border: 2px solid #406c65;
+  border-radius: 3px;
+  padding: 8px;
+  color: #315951;
+  font-size: 16px !important;
+  transform: rotate(-1deg);
+  display: inline-block;
+}
+.od-budget {
+  margin: 12px 6%;
+  font-size: 14px;
+  display: grid;
+  gap: 6px;
+}
+.od-budget meter {
+  width: 100%;
+  height: 12px;
+}
+.od-status-window {
+  margin: 22px 3%;
+  padding: 20px 24px;
+  background: #fff1dc;
+  border: 1px solid #a68761;
+  border-left: 5px solid #bb7335;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px #15293722;
+}
+.od-status-window > div + div {
+  margin-top: 16px;
+  border-top: 1px solid #ccbba2;
+  padding-top: 12px;
+}
+.od-status-window p {
+  margin: 5px 0 10px;
+}
+.od-counter-papers {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  max-width: 1180px;
+  margin: 26px auto 0;
+  gap: 42px;
+  align-items: start;
+}
+.od-ticket-column {
+  padding-top: 28px;
+}
+.od-paper-panel {
+  background: linear-gradient(113deg, #fff8ea, #f5e8d2 70%, #e9d8bb);
+  color: #273c4a;
+  position: relative;
+  padding: 38px 30px 28px;
+  border: 1px solid #dacbb3;
+  box-shadow:
+    0 3px 0 #b5a58e,
+    0 5px 0 #e6dac5,
+    0 18px 21px #081e3540;
+  border-radius: 3px 3px 16px 3px;
+  overflow-wrap: anywhere;
+}
+.od-paper-panel:after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 28px;
+  height: 30px;
+  background: linear-gradient(
+    135deg,
+    transparent 48%,
+    #cfbfa0 50%,
+    #fff5df 75%,
+    #e8d7b8
+  );
+  border-radius: 0 0 15px 0;
+}
+.od-paper-clip {
+  position: absolute;
+  width: 82px;
+  height: 28px;
+  left: calc(50% - 41px);
+  top: -14px;
+  background: linear-gradient(
+    #a0a9af,
+    #faf5e9 17%,
+    #414d58 32%,
+    #f2e8d6 62%,
+    #8b8e8c 83%,
+    #d0c9bb
+  );
+  border: 1px solid #626e75;
+  border-radius: 7px 7px 3px 3px;
+  box-shadow: 0 4px 5px #13253755;
+}
+.od-preflight {
+  transform: rotate(-2deg);
+  font-size: 16px;
+}
+.od-ticket-stat {
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 18px;
+}
+.od-fine {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #53616b;
+}
+.od-warning {
+  border-left: 3px solid #bc7828;
+  padding-left: 12px;
+}
+.od-bread-bin {
+  padding: 20px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.od-odometer {
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 14px;
+  color: #ffedcb;
+  background: #213441;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+.od-pad-shell {
+  position: relative;
+  min-height: 450px;
+  transform: rotate(1deg);
+  transition: transform 180ms ease-out;
+  filter: drop-shadow(0 18px 13px #081c3144);
+}
+.od-pad-shell:focus-within {
+  transform: none;
+}
+.od-pad-shell > .od-material {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.od-pad-content {
+  position: relative;
+  z-index: 1;
+  padding: 13% 11% 12%;
+  min-height: 450px;
+  display: flex;
+  flex-direction: column;
+}
+.od-pad-content > label {
+  font-family:
+    Space Grotesk,
+    Arial,
+    sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.od-pad-content > label > span {
+  font-family:
+    Instrument Sans,
+    Arial,
+    sans-serif;
+  font-size: 14px;
+  color: #56616c;
+}
+.od-pad-content textarea {
+  background: repeating-linear-gradient(
+    transparent,
+    transparent 31px,
+    #9d9b8b60 31px,
+    #9d9b8b60 32px
+  );
+  line-height: 32px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 4px;
+  min-height: 168px;
+  color: #293746;
+  resize: vertical;
+  flex: 1;
+}
+.od-pad-content textarea::placeholder {
+  color: #6a6f6e;
+}
+.od-pad-content > p {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 16px 0 0;
+  color: #576069;
+}
+.od-applied-guidance {
+  font-size: 14px;
+  border-top: 1px solid #b9ae96;
+  margin-top: 16px;
+  padding-top: 10px;
+}
+.od-applied-guidance p {
+  white-space: pre-wrap;
+  margin-top: 12px;
+}
+.od-results {
+  margin: 36px auto 0;
+  max-width: 1250px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+  align-items: start;
+}
+.od-results > .od-paper-panel:only-child {
+  grid-column: 1/-1;
+}
+.od-outcome {
+  font-family:
+    Space Grotesk,
+    Arial,
+    sans-serif;
+  font-size: 26px;
+  color: #314e5b;
+}
+.od-result-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 20px;
+  margin: 18px 0;
+  padding: 15px 0;
+  border-top: 1px solid #c4b79f;
+  border-bottom: 1px solid #c4b79f;
+  font-size: 15px;
+}
+/* Issue #733. A named group of facts (the confidence band) is one region so
+   it can be asserted and styled as a unit, while still being rows of the
+   two-column grid above — `display: contents` gives it an element to hang that
+   identity on without inserting a box that would break the grid. */
+.od-fact-group {
+  display: contents;
+}
+.od-result-facts dd {
+  margin: 0;
+  font-family:
+    IBM Plex Mono,
+    monospace;
+}
+.od-cover-draft {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.od-cover-note .od-receipt-actions {
+  margin: 20px 0;
+}
+.od-failure {
+  border-left: 5px solid #a84a38;
+}
+/* Issue #734. The record key beside a failure's cause and fix. Its own row so
+   it never sits inline with the prose it follows; keys carry their own type
+   and colour, so nothing is declared here but the placement. */
+.od-result-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+.od-local-error {
+  color: #7f3023;
+  padding: 10px 30px;
+}
+.od-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.od-dialog {
+  color: var(--od-ink);
+  max-width: 660px;
+  width: calc(100% - 32px);
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border: 1px solid #c6b89f;
+  border-radius: 8px 8px 20px 8px;
+  background: var(--od-paper);
+  box-shadow: 0 30px 100px #0009;
+  font: inherit;
+}
+.od-dialog::backdrop {
+  background: #061827b8;
+  backdrop-filter: blur(5px);
+}
+.od-dialog-paper {
+  padding: 30px;
+  background: linear-gradient(110deg, #fffaef, #f6ead6 78%, #dfcdb0);
+  overflow-wrap: anywhere;
+}
+.od-dialog-heading {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.od-dialog-heading h2 {
+  margin: 0;
+}
+.od-dialog-heading .od-key {
+  flex: 0 0 auto;
+}
+.od-receipt-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 16px;
+  line-height: 1.8;
+  margin: 24px 0;
+  border-top: 1px dashed #928978;
+  border-bottom: 1px dashed #928978;
+  padding: 20px 0;
+}
+.od-receipt-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.od-search-label {
+  display: block;
+  margin-bottom: 20px;
+}
+.od-search-label input {
+  margin-top: 6px;
+}
+.od-catalog {
+  display: grid;
+  gap: 12px;
+}
+.od-catalog-entry {
+  justify-content: space-between;
+  text-align: left;
+  min-height: 52px;
+  gap: 15px;
+}
+.od-catalog-entry span:last-child:not(:first-child) {
+  font-size: 14px;
+  opacity: 0.75;
+}
+.od-history-row {
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid #bdb099;
+  padding: 16px 0;
+  margin-bottom: 16px;
+}
+.od-shortcuts {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+}
+.od-shortcuts dt {
+  font-family:
+    IBM Plex Mono,
+    monospace;
+  font-size: 14px;
+}
+.od-shortcuts dd {
+  margin: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .od-console {
+    background: #132635;
+  }
+  .od-scene:before {
+    background: linear-gradient(
+      180deg,
+      transparent 400px,
+      #293b43 760px,
+      #1c303e
+    );
+  }
+  .od-readback,
+  .od-review-tag,
+  .od-intake-controls {
+    color: #e8e8de;
+  }
+  .od-readback p,
+  .od-review-tag .od-link-key,
+  .od-intake-controls .od-link-key {
+    color: #e8e8de;
+  }
+  .od-budget {
+    color: #e8e8de;
+  }
+  .od-local-error {
+    color: #ffc9b6;
+  }
+}
+/* The kit's `@media (min-width: 1500px)` roomy step was removed here (issue
+   #725). Inside our shell the console can never be that wide: ct-app-shell
+   caps at --ct-maxw (1320px) and spends 24px of padding per side, so the
+   console's own content box tops out at 1272px. As a container query the
+   block would be permanently false; as a viewport query it fired on a wide
+   window while the console itself was narrow, which is the exact
+   viewport-vs-container confusion this ticket removes. */
+@container od-console (max-width: 1150px) {
+  .od-scene {
+    padding: 140px 22px 32px;
+    background-size: auto 800px;
+    background-position: center top;
+  }
+  .od-appliances {
+    gap: 16px;
+  }
+  .od-radio-row {
+    gap: 5px;
+  }
+  .od-radio-key > span {
+    font-size: 14px !important;
+    padding-left: 3px;
+    padding-right: 3px;
+  }
+  .od-register-controls {
+    left: 9%;
+    width: 60%;
+    top: 38%;
+    height: 35%;
+    gap: 6px;
+  }
+  .od-console legend {
+    margin-bottom: 3px;
+  }
+  .od-till {
+    left: 8%;
+    right: 7%;
+    gap: 6px;
+  }
+  .od-till .od-key {
+    padding: 7px 4px;
+  }
+  .od-price > span {
+    font-size: 14px;
+    max-width: 55%;
+  }
+  .od-playbook-display {
+    left: 27%;
+    width: 46%;
+  }
+  .od-playbook-display > span {
+    font-size: 14px;
+    letter-spacing: 0.02em;
+  }
+  .od-playbook-value > span {
+    font-size: 16px;
+  }
+  .od-ready {
+    font-size: 14px;
+  }
+  .od-register-status {
+    font-size: 14px;
+  }
+  .od-counter-papers {
+    gap: 22px;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  }
+  .od-paper-panel {
+    padding: 32px 24px;
+  }
+  .od-browse {
+    font-size: 14px !important;
+  }
+  .od-disposition {
+    padding: 16px;
+    margin-left: 2%;
+    margin-right: 2%;
+  }
+}
+@container od-console (max-width: 900px) {
+  .od-appliances {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 720px;
+    margin: auto;
+    gap: 40px;
+  }
+  .od-scene {
+    padding-top: 160px;
+    background-size: auto 1000px;
+  }
+  .od-playbook-value > span {
+    font-size: 23px;
+  }
+  .od-playbook-display {
+    top: 16%;
+  }
+  .od-toaster-figure,
+  .od-register-figure {
+    filter: drop-shadow(0 13px 9px #102b3c66);
+  }
+  .od-counter-papers {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 700px;
+    gap: 24px;
+  }
+  .od-ticket-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 20px;
+  }
+  .od-bread-bin {
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+  .od-preflight {
+    transform: none;
+  }
+  .od-pad-shell {
+    transform: none;
+  }
+  .od-pad-content {
+    padding-top: 14%;
+    min-height: 450px;
+  }
+  .od-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .od-disposition-keys {
+    gap: 12px;
+  }
+  .od-register-controls {
+    top: 40%;
+    height: 31%;
+    gap: 12px;
+  }
+  .od-radio-key > span {
+    padding: 10px;
+    min-height: 44px;
+  }
+  .od-radio-row {
+    gap: 10px;
+  }
+  .od-till {
+    gap: 12px;
+  }
+  .od-price output {
+    font-size: 42px;
+  }
+}
+@container od-console (max-width: 560px) {
+  .od-scene {
+    padding: 135px 12px 24px;
+    background-size: auto 800px;
+  }
+  .od-appliances {
+    gap: 24px;
+  }
+  .od-playbook-display {
+    left: 25%;
+    width: 50%;
+    top: 15%;
+  }
+  .od-playbook-display > span {
+    font-size: 14px;
+    line-height: 1.15;
+  }
+  .od-playbook-value > span {
+    font-size: 15px;
+  }
+  .od-browse {
+    left: 32%;
+    width: 37%;
+    top: 67%;
+    min-height: 28px;
+    font-size: 14px !important;
+  }
+  .od-toast-name {
+    font-size: 18px;
+  }
+  .od-slice {
+    width: 50%;
+    left: 26%;
+    top: -45%;
+  }
+  .od-console[data-status="running"] .od-slice,
+  .od-console[data-status="pending"] .od-slice {
+    top: -37%;
+  }
+  .od-console[data-status="done"] .od-slice {
+    top: -48%;
+  }
+  .od-toast-save {
+    font-size: 14px;
+    top: 57%;
+  }
+  .od-intake-controls {
+    gap: 12px;
+    padding: 5px;
+    min-height: 44px;
+  }
+  .od-progress {
+    margin: 8px 0 0;
+    padding: 12px 15px;
+    font-size: 14px;
+  }
+  .od-stage-name {
+    font-size: 17px;
+  }
+  .od-slot-label {
+    font-size: 14px;
+    left: 18%;
+    width: 66%;
+    top: -18%;
+  }
+  .od-register-figure {
+    aspect-ratio: auto;
+    filter: drop-shadow(0 8px 8px #0a283944);
+    padding-bottom: 10px;
+    background: linear-gradient(
+      105deg,
+      #9a9c98,
+      #f5e7d0 6%,
+      #f8e9d0 90%,
+      #7b8588
+    );
+    border-radius: 28px 28px 16px 16px;
+    border: 1px solid #89928c;
+  }
+  .od-register-full {
+    display: none;
+  }
+  .od-register-compact {
+    display: block;
+    position: relative;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+  .od-price {
+    top: 20px;
+    left: 17%;
+    right: 17%;
+    height: 40px;
+    gap: 8px;
+  }
+  .od-price > span {
+    font-size: 14px;
+    max-width: 60%;
+  }
+  .od-price output {
+    font-size: 29px;
+  }
+  .od-register-status {
+    top: calc((100vw - 50px) * 0.186);
+    left: 17%;
+    width: 48%;
+    height: 28px;
+    font-size: 14px;
+  }
+  .od-register-controls {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: auto;
+    height: auto;
+    margin: 10px 18px 14px;
+    gap: 18px;
+    display: flex;
+  }
+  .od-radio-row {
+    gap: 8px;
+  }
+  .od-radio-row.od-four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .od-console legend {
+    margin-bottom: 7px;
+    font-size: 15px;
+  }
+  .od-radio-key > span {
+    min-height: 45px;
+  }
+  .od-receipt-printer {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: calc(100% - 36px);
+    height: 58px;
+    margin: 10px 18px;
+    background: linear-gradient(120deg, #243746, #4e616f 40%, #1b2a36);
+    border: 1px solid #647781;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+  }
+  .od-receipt-paper {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 80px;
+    height: 42px;
+    padding: 2px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+  .od-receipt-paper > span {
+    display: none;
+  }
+  .od-printer-label {
+    position: static;
+    color: #f5ead6;
+    font-size: 16px;
+  }
+  .od-receipt-printer:disabled {
+    opacity: 0.55 !important;
+  }
+  .od-till {
+    position: relative;
+    left: auto;
+    right: auto;
+    top: auto;
+    height: auto;
+    margin: 16px 18px 8px;
+    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .od-till .od-key {
+    min-height: 48px;
+  }
+  .od-readback {
+    margin: 15px 5px;
+  }
+  .od-result-keys {
+    margin: 16px 4px;
+  }
+  .od-disposition {
+    margin: 18px 0 0;
+  }
+  .od-disposition-keys {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .od-ticket-column {
+    display: block;
+    padding-top: 8px;
+  }
+  .od-bread-bin {
+    flex-direction: row;
+    padding: 18px 5px 0;
+  }
+  .od-counter-papers {
+    margin-top: 18px;
+    gap: 20px;
+  }
+  .od-paper-panel {
+    padding: 32px 22px 24px;
+  }
+  .od-pad-shell {
+    min-height: 430px;
+  }
+  .od-pad-content {
+    padding: 18% 10% 13%;
+    min-height: 430px;
+  }
+  .od-pad-content > label {
+    font-size: 18px;
+    display: block;
+  }
+  .od-pad-content > label > span {
+    display: block;
+    margin-top: 3px;
+  }
+  .od-pad-content textarea {
+    font-size: 16px;
+    line-height: 30px;
+    background-size: auto;
+  }
+  .od-results {
+    gap: 24px;
+    margin-top: 28px;
+  }
+  .od-dialog-paper {
+    padding: 22px;
+  }
+  .od-dialog-heading {
+    gap: 10px;
+  }
+  .od-dialog-heading h2 {
+    font-size: 20px;
+  }
+  .od-shortcuts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+  .od-shortcuts dd {
+    margin-bottom: 12px;
+  }
+  .od-status-window {
+    margin: 18px 0;
+    padding: 18px;
+  }
+  .od-receipt-text {
+    font-size: 14px;
+  }
+}
+/* Issue #738 (N5). An essential appliance plate did not arrive, so the console
+   is in the plain layout and says so once, above the counter. Deliberately in
+   the plain layout's own warm palette rather than an error red: nothing about
+   the review failed, and the sentence beside it says exactly that. */
+.od-artwork-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: #f5e9d6;
+  border: 1px solid #b6aa96;
+  border-radius: 9px;
+  color: #243542;
+  font-size: 15px;
+}
+.od-artwork-notice p {
+  margin: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .od-artwork-notice {
+    background: #182e3e;
+    border-color: #637680;
+    color: #f2ebdf;
+  }
+}
+/* `.od-material` stays listed here even though OrbitDiner.tsx renders no plate
+   until its own gate has decoded one (#738): the two guards answer different
+   questions. This one is the reviewer's OWN plain choice and forced colours,
+   where the plates have loaded and simply must not show. */
+.od-plain .od-scene {
+  padding: 24px;
+  background: none;
+}
+.od-plain .od-scene:before {
+  background: #e9e5d9;
+}
+.od-plain .od-material,
+.od-plain .od-slot-glow,
+.od-plain .od-dial,
+.od-plain .od-slice,
+.od-plain .od-steam {
+  display: none;
+}
+.od-plain .od-toaster-figure,
+.od-plain .od-register-figure {
+  aspect-ratio: auto;
+  filter: none;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  background: #f8f3e8;
+  border: 1px solid #b6aa96;
+  border-radius: 12px;
+}
+.od-plain .od-playbook-display,
+.od-plain .od-price,
+.od-plain .od-register-status,
+.od-plain .od-register-controls,
+.od-plain .od-till,
+.od-plain .od-ready,
+.od-plain .od-browse,
+.od-plain .od-slot-label,
+.od-plain .od-receipt-printer,
+.od-plain .od-lever {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  min-height: 44px;
+  color: #243542;
+}
+.od-plain .od-playbook-display {
+  display: block;
+  text-align: left;
+}
+.od-plain .od-playbook-display > span {
+  color: #243542;
+}
+.od-plain .od-playbook-value > span {
+  display: none;
+}
+.od-plain .od-playbook-value select {
+  position: static;
+  opacity: 1;
+  width: 100%;
+  min-height: 44px;
+  background: white;
+  color: #243542;
+  border: 1px solid #7e8a8e;
+  padding: 7px;
+}
+.od-plain .od-lever {
+  border: 1px solid #7d8d94;
+  border-radius: 5px;
+  background: #eadbc1;
+  padding: 10px;
+}
+.od-plain .od-lever-handle {
+  display: none;
+}
+.od-plain .od-lever-label {
+  position: static;
+}
+.od-plain .od-ready {
+  justify-content: flex-start;
+}
+.od-plain .od-browse {
+  border: 1px solid #8e9ba0;
+  border-radius: 5px;
+}
+.od-plain .od-slot-label {
+  box-shadow: none;
+}
+.od-plain .od-receipt-paper {
+  display: none;
+}
+.od-plain .od-printer-label {
+  position: static;
+  color: #243542;
+  text-shadow: none;
+}
+.od-plain .od-receipt-printer {
+  border: 1px solid #8d9da2;
+  border-radius: 5px;
+  background: #f7ead2;
+  padding: 10px;
+  display: block;
+}
+.od-plain .od-price {
+  padding: 12px;
+  background: #153043;
+  color: #fff0c9;
+  border-radius: 5px;
+  display: flex;
+}
+.od-plain .od-register-controls {
+  display: grid;
+  gap: 20px;
+}
+.od-plain .od-till {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.od-plain .od-pad-shell {
+  background: #fff4dc;
+  border: 1px solid #aa9e88;
+  filter: none;
+  transform: none;
+  min-height: 0;
+}
+.od-plain .od-pad-content {
+  padding: 25px;
+  min-height: 350px;
+}
+.od-plain .od-readback,
+.od-plain .od-intake-controls,
+.od-plain .od-review-tag,
+.od-plain .od-link-key {
+  color: #243542;
+}
+.od-plain .od-key,
+.od-plain .od-radio-key > span {
+  box-shadow: none;
+  background: #f3e9d5;
+}
+.od-plain .od-paper-panel {
+  box-shadow: none;
+  transform: none;
+}
+.od-plain .od-paper-clip {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .od-pad-shell,
+  .od-preflight,
+  .od-stamp {
+    transform: none;
+  }
+  .od-key:active,
+  .od-radio-key:active > span {
+    transform: none;
+  }
+}
+@media (forced-colors: active) {
+  .od-console {
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  .od-scene {
+    background: none;
+  }
+  .od-scene:before {
+    background: Canvas;
+  }
+  .od-material,
+  .od-slot-glow,
+  .od-ready-lamp,
+  .od-steam,
+  .od-paper-clip {
+    visibility: hidden;
+  }
+  .od-console button,
+  .od-console input,
+  .od-console textarea,
+  .od-console select,
+  .od-console label,
+  .od-console p,
+  .od-console span,
+  .od-console output {
+    forced-color-adjust: auto;
+  }
+  .od-pad-shell,
+  .od-paper-panel,
+  .od-register-figure,
+  .od-toaster-figure {
+    filter: none;
+    box-shadow: none;
+    background: Canvas;
+    color: CanvasText;
+  }
+  .od-toast-name {
+    mix-blend-mode: normal;
+    color: CanvasText;
+    text-shadow: none;
+  }
+  .od-key,
+  .od-radio-key > span {
+    border: 1px solid ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    box-shadow: none;
+  }
+  .od-playbook-display,
+  .od-register-status,
+  .od-price,
+  .od-ready,
+  .od-lever {
+    background: Canvas;
+    color: CanvasText;
+  }
+  .od-dial {
+    border: 2px solid ButtonText;
+  }
+  .od-price output {
+    text-shadow: none;
+  }
+  .od-preflight,
+  .od-pad-shell {
+    transform: none;
+  }
+}
+/* ------------------------------------------------------------------- Print
+   Issue #740, owner decision N7: printing the Review route prints the
+   RECEIPT — `toaster/receipt.ts`'s canonical lines, selectable black text on
+   white — and never a picture of the appliances.
+
+   What this replaces was `.od-console > *:not(dialog) { display: none }`:
+   "print whichever dialog happens to be open". Which surface that printed
+   depended on what the reviewer had last opened — the cover note, the
+   disposition form, the review record, the shortcuts list — and with the
+   overlay closed it printed a blank page.
+
+   Targeting is now explicit and singular. `.od-print-receipt` is the ONLY
+   thing the printed page carries, it is the only place the receipt is printed
+   from, and the console renders it on every status, so Cmd/Ctrl+P produces
+   the same sheet whether or not the receipt overlay is open. Everything else
+   inside the console is excluded by omission rather than named, so a surface
+   added later cannot arrive on the printed page by default.
+
+   The console is as far as this reaches. `orbit.css` is loaded app-wide, so a
+   rule here that hid the page chrome would change how every OTHER tab
+   prints. */
+.od-print-receipt {
+  display: none;
+}
+@media print {
+  .od-console > *:not(.od-print-receipt) {
+    display: none !important;
+  }
+  .od-console {
+    /* `overflow: clip` on the console would guillotine a receipt longer than
+       one page; the rest is the appliance's furniture, which has no business
+       on a printed sheet. */
+    overflow: visible;
+    max-width: none;
+    margin: 0;
+    background: #fff;
+    color: #000;
+    border-radius: 0;
+    box-shadow: none;
+    isolation: auto;
+  }
+  .od-print-receipt {
+    display: block;
+    background: #fff;
+    color: #000;
+  }
+  .od-print-receipt-text,
+  .od-print-receipt-empty {
+    color: #000;
+    background: #fff;
+    font-family:
+      IBM Plex Mono,
+      monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    /* The rows arrive already wrapped at the receipt's own width, so the
+       sheet preserves them; `pre-wrap` only folds a row too long for the
+       paper rather than clipping it against the right edge. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    /* Paginate. No clipping box, no height cap, and a page break may fall
+       anywhere between rows — a long receipt runs onto a second sheet
+       instead of losing its tail. */
+    max-height: none;
+    overflow: visible;
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+}
+
+.od-butter-on-toast {
+  position: absolute;
+  left: 48%;
+  top: 45%;
+  width: 30%;
+  filter: drop-shadow(1px 3px 2px #44290d55);
+}
+.od-butter-on-toast .od-butter-art {
+  width: 100%;
+  height: auto;
+}
+
+.od-guidance-field {
+  display: contents;
+}
+
+/* Finished counter seam and physical status label alignment. */
+.od-scene {
+  background-image: none;
+  background-color: #e9dec8;
+}
+.od-scene:before {
+  inset: 0 0 auto;
+  height: min(968px, calc((100vw - 36px) * 0.563));
+  background-image: var(--od-counter-image);
+  background-size: 100% auto;
+  background-repeat: no-repeat;
+  mask-image: linear-gradient(#000 78%, transparent 100%);
+  pointer-events: none;
+}
+.od-readback,
+.od-intake-controls,
+.od-review-tag {
+  background: #f5e9d6e8;
+  border: 1px solid #c4b39288;
+  border-radius: 9px;
+  padding: 10px 14px;
+  color: #354451;
+}
+.od-readback p,
+.od-review-tag .od-link-key,
+.od-intake-controls .od-link-key {
+  color: #354451;
+}
+.od-intake-controls {
+  margin: 10px 3%;
+}
+.od-review-tag {
+  margin: 12px 3%;
+}
+.od-console[data-motion-paused="true"] .od-key:active,
+.od-console[data-motion-paused="true"] .od-radio-key:active > span {
+  transform: none;
+}
+@container od-console (max-width: 1150px) {
+  .od-scene:before {
+    height: 800px;
+    background-size: auto 800px;
+    background-position: center top;
+  }
+}
+@container od-console (max-width: 900px) {
+  .od-scene:before {
+    height: 1000px;
+    background-size: auto 1000px;
+  }
+}
+@container od-console (max-width: 560px) {
+  .od-scene:before {
+    height: 800px;
+    background-size: auto 800px;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  .od-scene {
+    background-color: #1c303e;
+  }
+  .od-scene:before {
+    background-image: var(--od-counter-image);
+  }
+  .od-readback,
+  .od-intake-controls,
+  .od-review-tag {
+    background: #182e3e;
+    color: #f2ebdf;
+    border-color: #637680;
+  }
+  .od-readback p,
+  .od-intake-controls .od-link-key,
+  .od-review-tag .od-link-key {
+    color: #f2ebdf;
+  }
+}
+.od-plain .od-scene:before {
+  height: 100%;
+  mask-image: none;
+  background: #e9e5d9;
+}
+.od-plain .od-readback,
+.od-plain .od-intake-controls,
+.od-plain .od-review-tag {
+  background: #f5e9d6;
+  color: #354451;
+}
+.od-plain .od-readback p,
+.od-plain .od-intake-controls .od-link-key,
+.od-plain .od-review-tag .od-link-key {
+  color: #354451;
+}
+@media (forced-colors: active) {
+  .od-scene,
+  .od-scene:before {
+    background: Canvas;
+    mask-image: none;
+  }
+  .od-key:active,
+  .od-radio-key:active > span {
+    transform: none;
+  }
+  .od-readback,
+  .od-intake-controls,
+  .od-review-tag {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+  .od-readback p,
+  .od-intake-controls .od-link-key,
+  .od-review-tag .od-link-key {
+    color: CanvasText;
+  }
+}
+.od-scene {
+  isolation: isolate;
+}
+/* THE CONSOLE IS ITS OWN BREAKPOINT (issue #725).
+   Every arrangement rule in this file queries `od-console`, never the
+   viewport. The console lives inside ct-app-shell, which caps at --ct-maxw
+   (1320px) and spends 24px of padding per side, so the viewport is always
+   wider than the console and a viewport query switches layout at the wrong
+   moment — at a 1600px window the console is 1272px, not 1600px.
+
+   The container is NAMED because this file establishes a second, nested
+   inline-size container on `.od-pad-art` (the notepad's three-section skin,
+   which sizes itself in `cqw` of its own box). An unnamed `@container` query
+   resolves against the NEAREST container ancestor, so every rule inside the
+   pad would silently start asking the pad's width instead of the console's.
+
+   The console's own box cannot query itself — a container query never
+   matches its own container — so the one declaration whose subject is
+   `.od-console` (the phone corner radius, below) is driven by
+   `data-console-size` from `consoleWidth.ts`, the single layout observer that
+   also feeds the toaster plate variant. Its thresholds are the same numbers
+   as the queries here; keep them in step. */
+.od-console {
+  container-type: inline-size;
+  container-name: od-console;
+}
+.od-pad-content textarea {
+  flex: 0 0 auto;
+  overflow-y: hidden;
+}
+@container od-console (max-width: 1220px) {
+  .od-appliances {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 720px;
+    margin: auto;
+    gap: 32px;
+  }
+  .od-register-controls {
+    top: 40%;
+    height: 31%;
+    gap: 12px;
+  }
+  .od-radio-key > span {
+    padding: 10px;
+    min-height: 44px;
+  }
+  .od-radio-row {
+    gap: 10px;
+  }
+  .od-console:not(.od-plain) .od-toast-name {
+    font-size: 18px;
+  }
+  .od-playbook-value > span {
+    font-size: 20px;
+  }
+  .od-till {
+    gap: 12px;
+  }
+  .od-price output {
+    font-size: 36px;
+  }
+  .od-counter-papers {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .od-ticket-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 20px;
+  }
+  .od-preflight {
+    transform: none;
+  }
+  .od-pad-shell {
+    transform: none;
+  }
+  .od-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .od-bread-bin {
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+}
+@container od-console (max-width: 560px) {
+  .od-register-controls {
+    top: auto;
+    height: auto;
+  }
+  .od-radio-row {
+    gap: 8px;
+  }
+  .od-price output {
+    font-size: 29px;
+  }
+  .od-playbook-value > span {
+    font-size: 15px;
+  }
+  .od-ticket-column {
+    display: block;
+  }
+  .od-bread-bin {
+    flex-direction: row;
+  }
+}
+
+@container od-console (max-width: 560px) {
+  .od-register-compact {
+    margin-bottom: 0;
+    min-height: 76px;
+  }
+  .od-register-status {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    height: auto;
+    min-height: 40px;
+    margin: 6px 18px 14px;
+    padding: 9px 12px;
+    border: 2px solid #a7a294;
+    border-radius: 7px;
+    background: linear-gradient(130deg, #102c3d, #081923);
+    box-shadow:
+      inset 0 2px 4px #0008,
+      0 1px 0 #fff9;
+    color: #fff0ce;
+    overflow: visible;
+  }
+  .od-price {
+    top: 18px;
+    height: 34px;
+  }
+  .od-price > span {
+    font-size: 14px;
+  }
+  .od-register-controls {
+    margin-top: 16px;
+  }
+}
+@container od-console (max-width: 350px) {
+  .od-price {
+    left: 14%;
+    right: 14%;
+    gap: 5px;
+  }
+  .od-price output {
+    font-size: 25px;
+  }
+  .od-price > span {
+    letter-spacing: 0;
+    font-size: 14px;
+  }
+  .od-playbook-display > span {
+    letter-spacing: 0;
+  }
+}
+.od-plain .od-register-status {
+  margin: 0;
+  min-height: 44px;
+  color: #243542;
+  background: none;
+  box-shadow: none;
+  border: 0;
+}
+/* The narrow register has its own finished glass bezel; no cropped desktop controls. */
+@container od-console (max-width: 560px) {
+  .od-register-compact {
+    display: none;
+  }
+  .od-price {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    width: auto;
+    height: auto;
+    min-height: 88px;
+    margin: 15px 16px 10px;
+    padding: 13px 12px;
+    gap: 12px;
+    border: 7px ridge #d3c9b7;
+    border-radius: 18px;
+    background: linear-gradient(
+      155deg,
+      #25404f 0%,
+      #091d2b 26%,
+      #0c2231 73%,
+      #324957
+    );
+    box-shadow:
+      inset 0 3px 6px #000b,
+      0 2px 1px #fff9,
+      0 4px 8px #0003;
+  }
+  .od-price > span {
+    font-size: 14px;
+    letter-spacing: 0;
+    flex: 1;
+    max-width: 60%;
+  }
+  .od-price output {
+    font-size: 32px;
+  }
+  .od-register-status {
+    margin-top: 10px;
+  }
+}
+@container od-console (max-width: 350px) {
+  .od-price {
+    margin-left: 12px;
+    margin-right: 12px;
+    padding: 12px 9px;
+    gap: 8px;
+  }
+  .od-price output {
+    font-size: 28px;
+  }
+}
+.od-plain .od-price {
+  margin: 0;
+  border: 1px solid #7e929d;
+  padding: 12px;
+  min-height: 70px;
+  box-shadow: none;
+}
+
+.od-dial {
+  touch-action: none;
+}
+
+/* 04p1: a quiet completion state. Keep every control on its owning appliance. */
+.od-dial {
+  left: 36%;
+  top: 30%;
+  width: 27%;
+}
+.od-toaster-keys {
+  position: absolute;
+  z-index: 4;
+  left: 19%;
+  right: 24%;
+  top: 80%;
+  display: flex;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0;
+}
+.od-toaster-keys > .od-key {
+  flex: 1;
+  padding: 8px;
+  min-height: 44px;
+}
+.od-toaster-keys .od-browse {
+  position: relative;
+  inset: auto;
+  width: auto;
+  height: auto;
+  white-space: normal;
+}
+.od-register-controls {
+  left: 13%;
+  width: 54%;
+  top: 39%;
+  height: 32%;
+}
+.od-radio-key > span {
+  min-height: 44px;
+}
+.od-till {
+  left: 8.5%;
+  right: 7%;
+  top: 78%;
+  height: 14%;
+  gap: 7px;
+  align-items: stretch;
+}
+.od-till .od-key {
+  min-height: 50px;
+  padding: 8px 5px;
+  font-size: 14px !important;
+  line-height: 1.1;
+}
+.od-key-state {
+  display: block;
+  margin-top: 3px;
+  color: #465764;
+  font-weight: 400;
+}
+/* Ink belongs on the photographed paper. The button is the tape itself. */
+.od-receipt-printer {
+  left: 75.3%;
+  width: 16.1%;
+  top: 34%;
+  height: 37.5%;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+}
+.od-receipt-paper {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  inset: 0;
+  padding: 27% 7% 0;
+  background: none;
+  box-shadow: none;
+  clip-path: none;
+  overflow: visible;
+  color: #3c4348;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.od-receipt-paper > .od-paper-ink {
+  display: block;
+  margin: 0;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  transform: rotate(0.8deg);
+  text-shadow: 0 0.3px 0.4px #253c4a45;
+}
+.od-receipt-printer:not(:disabled):hover .od-paper-ink,
+.od-receipt-printer:focus-visible .od-paper-ink {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+.od-console[data-terminal="true"] .od-ticket-column {
+  display: none;
+}
+.od-console[data-terminal="true"] .od-counter-papers {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 740px;
+  margin-top: 32px;
+}
+.od-counter-footer {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  margin-top: 22px;
+  font-size: 14px;
+}
+.od-counter-footer .od-link-key {
+  min-height: 44px;
+}
+.od-scene > [data-testid="review-result"] {
+  max-width: 800px;
+  margin: 34px auto 0;
+}
+.od-dialog .od-paper-panel {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.od-dialog .od-paper-clip,
+.od-dialog .od-paper-panel:after {
+  display: none;
+}
+.od-dialog .od-disposition {
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.od-dialog .od-disposition > h2,
+.od-dialog .od-cover-note > h2 {
+  display: none;
+}
+.od-receipt-detail {
+  margin-top: 24px;
+  border-top: 1px solid #bcaf99;
+  padding-top: 16px;
+}
+.od-receipt-detail > summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+.od-receipt-detail .od-paper-panel {
+  padding: 14px 0 0;
+}
+.od-dialog .od-review-tag {
+  justify-content: flex-start;
+  margin: 20px 0 0;
+}
+.od-console [data-part="lever-handle"] {
+  pointer-events: none;
+}
+@container od-console (min-width: 1221px) {
+  .od-scene {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .od-appliances {
+    gap: 18px;
+  }
+  .od-radio-row {
+    gap: 6px;
+  }
+  .od-radio-key > span {
+    padding: 9px 5px;
+  }
+  .od-register-controls {
+    gap: 7px;
+  }
+  .od-till {
+    gap: 6px;
+  }
+}
+@container od-console (max-width: 1220px) {
+  .od-register-controls {
+    left: 13%;
+    width: 54%;
+  }
+  .od-till {
+    gap: 7px;
+  }
+}
+/* The console's own phone step. Sizes here are the #600 type table's lower
+   bound: 14px filename, 15px playbook name, 28px cost digits. Nothing shrinks
+   below 14px — a long value wraps or truncates instead. */
+@container od-console (max-width: 560px) {
+  .od-console:not(.od-plain) .od-toast-name {
+    font-size: 14px;
+  }
+  .od-console:not(.od-plain) .od-ready {
+    top: 70.5%;
+    width: 41%;
+    height: 10%;
+  }
+  .od-console:not(.od-plain) .od-playbook-value > span {
+    display: block;
+    font-size: 15px;
+    line-height: 1.15;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  .od-price output {
+    font-size: 28px;
+  }
+}
+@container od-console (max-width: 560px) {
+  .od-scene {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .od-toaster-figure {
+    margin-bottom: 57px;
+  }
+  .od-dial {
+    top: 30%;
+    left: 36%;
+    width: 27%;
+  }
+  .od-toaster-keys {
+    top: 99%;
+    left: 3%;
+    right: 3%;
+    padding: 10px;
+    background: linear-gradient(
+      110deg,
+      #a2aaa9,
+      #fff0d8 12%,
+      #f3e5ce 85%,
+      #939fa2
+    );
+    border: 1px solid #9a9d94;
+    border-radius: 0 0 12px 12px;
+    box-shadow: 0 5px 8px #0d22342a;
+  }
+  .od-toaster-keys .od-key {
+    min-height: 46px;
+  }
+  .od-playbook-display > span {
+    font-size: 14px;
+  }
+  .od-register-controls {
+    position: relative;
+    inset: auto;
+    height: auto;
+    width: auto;
+    margin: 16px 18px 18px;
+  }
+  .od-till {
+    position: relative;
+    inset: auto;
+    height: auto;
+    margin: 18px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .od-till .od-key {
+    min-height: 52px;
+    padding: 10px;
+  }
+  .od-till .od-key:last-child:nth-child(odd) {
+    grid-column: 1/-1;
+  }
+  .od-register-status:empty {
+    display: none;
+  }
+  .od-receipt-printer {
+    position: relative;
+    inset: auto;
+    margin: 22px auto 6px;
+    display: block;
+    width: 134px;
+    height: 88px;
+    background: linear-gradient(#f4e4c6, #fff6e5 20%, #f8eddb 80%, #deceb0);
+    border-top: 6px solid #172d3a;
+    box-shadow:
+      0 -3px 0 #a1aaa9,
+      0 5px 7px #24374844;
+    clip-path: polygon(
+      0 0,
+      100% 0,
+      100% 94%,
+      94% 100%,
+      88% 94%,
+      82% 100%,
+      76% 94%,
+      70% 100%,
+      64% 94%,
+      58% 100%,
+      52% 94%,
+      46% 100%,
+      40% 94%,
+      34% 100%,
+      28% 94%,
+      22% 100%,
+      16% 94%,
+      10% 100%,
+      4% 94%,
+      0 100%
+    );
+  }
+  .od-receipt-printer:disabled {
+    display: none;
+  }
+  .od-receipt-paper {
+    position: absolute;
+    width: auto;
+    height: auto;
+    inset: 0;
+    padding: 14px 12px 0;
+  }
+  .od-receipt-paper > .od-paper-ink {
+    display: block;
+  }
+  .od-counter-footer {
+    gap: 16px;
+  }
+}
+/* Plain is a real user escape hatch, also selected automatically in forced colours. */
+.od-plain .od-scene {
+  padding: 20px;
+}
+.od-plain .od-decoration,
+.od-plain .od-lever {
+  display: none;
+}
+.od-plain .od-toaster-figure {
+  margin-bottom: 0;
+}
+.od-plain .od-toaster-keys {
+  position: static;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.od-plain .od-ready {
+  position: static;
+  width: auto;
+  min-height: 44px;
+  justify-content: flex-start;
+}
+.od-plain .od-plain-operations {
+  display: flex;
+  gap: 12px;
+}
+.od-plain .od-plain-operations > * {
+  flex: 1;
+}
+.od-plain .od-register-controls {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+.od-plain .od-playbook-value select {
+  border: 2px solid #617783;
+  border-radius: 4px;
+  min-height: 44px;
+  height: auto;
+}
+.od-plain .od-receipt-printer {
+  position: static;
+  clip-path: none;
+  display: block;
+  margin: 0;
+  padding: 12px;
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  border: 2px solid #617783;
+  background: #fff5df;
+  box-shadow: none;
+}
+.od-plain .od-receipt-printer:disabled {
+  display: none;
+}
+.od-plain .od-receipt-paper {
+  position: static;
+  display: block;
+  padding: 0;
+  width: auto;
+  height: auto;
+}
+.od-plain .od-paper-ink {
+  transform: none;
+}
+.od-plain .od-paper-ink br {
+  display: none;
+}
+.od-plain .od-paper-ink br::after {
+  content: " ";
+}
+.od-plain .od-pad-content textarea {
+  border: 2px solid #617783;
+  padding: 8px;
+  background: #fffaf0;
+}
+.od-plain .od-till {
+  position: static;
+  height: auto;
+  margin: 0;
+  gap: 12px;
+}
+.od-plain .od-till .od-key {
+  min-width: 95px;
+}
+@media (prefers-color-scheme: dark) {
+  .od-counter-footer .od-link-key {
+    color: #f3ebdf;
+  }
+  .od-plain .od-counter-footer .od-link-key {
+    color: #243542;
+  }
+}
+/* System colours and native geometry. No decorative gradient survives this mode. */
+@media (forced-colors: active) {
+  .od-console,
+  .od-console .od-scene,
+  .od-console .od-scene:before {
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+  .od-console .od-material,
+  .od-console .od-decoration,
+  .od-console .od-dial,
+  .od-console .od-dial-index,
+  .od-console .od-lever-handle,
+  .od-console .od-slice,
+  .od-console .od-ready-lamp,
+  .od-console .od-slot-glow,
+  .od-console .od-paper-clip,
+  .od-console .od-paper-panel:after {
+    display: none !important;
+  }
+  .od-console .od-toaster-figure,
+  .od-console .od-register-figure,
+  .od-console .od-pad-shell,
+  .od-console .od-pad-content,
+  .od-console .od-paper-panel,
+  .od-console .od-dialog,
+  .od-console .od-dialog-paper,
+  .od-console .od-disposition {
+    background: Canvas;
+    color: CanvasText;
+    filter: none;
+    box-shadow: none;
+    border-color: CanvasText;
+  }
+  .od-console button,
+  .od-console .od-radio-key > span,
+  .od-console .od-playbook-value select,
+  .od-console .od-pad-content textarea,
+  .od-console textarea,
+  .od-console input[type="search"] {
+    background: ButtonFace;
+    color: ButtonText;
+    border: 2px solid ButtonText;
+    box-shadow: none;
+    filter: none;
+    text-shadow: none;
+    outline-offset: 3px;
+    opacity: 1;
+  }
+  .od-console .od-playbook-value select {
+    position: static;
+    width: 100%;
+    height: auto;
+    min-height: 44px;
+    opacity: 1;
+  }
+  .od-console .od-radio-key input:checked + span {
+    border: 3px solid Highlight;
+  }
+  .od-console .od-radio-key input:checked + span::before,
+  .od-console .od-key[aria-pressed="true"]::before {
+    background: Highlight;
+    box-shadow: none;
+  }
+  .od-console button:disabled,
+  .od-console .od-radio-key input:disabled + span {
+    color: GrayText;
+    border-color: GrayText;
+    opacity: 1;
+  }
+  .od-console :focus-visible {
+    outline: 3px solid Highlight;
+  }
+  .od-console .od-readback,
+  .od-console .od-progress,
+  .od-console .od-price,
+  .od-console .od-register-status,
+  .od-console .od-ready,
+  .od-console .od-review-tag,
+  .od-console .od-status-window {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+  .od-console .od-price output,
+  .od-console .od-key-state,
+  .od-console .od-paper-ink,
+  .od-console .od-fine,
+  .od-console .od-pad-content > p,
+  .od-console .od-pad-content > label > span,
+  .od-console .od-stage-name,
+  .od-console .od-counter-footer .od-link-key,
+  .od-console .od-receipt-text {
+    color: CanvasText;
+    text-shadow: none;
+  }
+  .od-console .od-receipt-paper {
+    background: none;
+    color: ButtonText;
+    box-shadow: none;
+  }
+  .od-console .od-paper-ink {
+    transform: none;
+  }
+  .od-console .od-dialog::backdrop {
+    background: Canvas;
+    opacity: 0.8;
+    backdrop-filter: none;
+  }
+}
+.od-intake-controls .od-link-key {
+  min-width: 44px;
+  min-height: 44px;
+}
+/* H3/N2: the physical unlit glass is already painted into register.webp, so an
+   empty message window shows that glass and nothing else — no painted panel, no
+   glow, no indicator, no accessible wording. */
+.od-console:not(.od-plain) .od-register-status:empty {
+  background: none;
+  box-shadow: none;
+  text-shadow: none;
+  visibility: hidden;
+}
+.od-plain .od-register-status:empty {
+  display: none;
+}
+.od-plain .od-register-controls {
+  justify-content: stretch;
+  width: 100%;
+}
+.od-plain-file {
+  overflow-wrap: anywhere;
+}
+@container od-console (max-width: 560px) {
+  .od-toast-name {
+    font-size: 18px;
+  }
+  .od-toaster-keys {
+    top: 91%;
+  }
+  .od-playbook-display {
+    top: 16.5%;
+  }
+  .od-pad-content > label {
+    font-size: 18px;
+  }
+}
+
+/* The shell's ceiling, restated on the console so it holds wherever the
+   console is mounted (issue #725). --ct-maxw itself is unchanged: this is the
+   same 1320px, not a second opinion about it. */
+.od-console {
+  max-width: 1320px;
+}
+/* The one rule whose subject IS the container. See the container-name comment
+   above: `@container od-console (max-width: 560px) { .od-console { … } }` can
+   never match, so the phone corner radius rides the layout observer's
+   attribute instead. */
+.od-console[data-console-size="phone"] {
+  border-radius: 12px;
+}
+.od-receipt-printer {
+  overflow: hidden;
+}
+@media (forced-colors: active) {
+  .od-console .od-register-controls {
+    justify-content: stretch;
+  }
+}
+/* Three vertical skin sections preserve the metal clip and curled foot as the pad grows. */
+.od-pad-art {
+  position: absolute;
+  inset: 0;
+  container-type: inline-size;
+  pointer-events: none;
+}
+.od-pad-art > .od-pad-top,
+.od-pad-art > .od-pad-bottom {
+  position: absolute;
+  width: 100%;
+  height: auto;
+  left: 0;
+}
+.od-pad-top {
+  top: 0;
+}
+.od-pad-bottom {
+  bottom: 0;
+}
+.od-pad-art > .od-pad-middle {
+  position: absolute;
+  left: 0;
+  top: 34.1796875cqw;
+  width: 100%;
+  height: calc(100% - 66.9921875cqw);
+}
+.od-pad-content {
+  padding-top: 28%;
+  padding-bottom: 19%;
+}
+.od-plain .od-pad-art {
+  display: none;
+}
+.od-plain .od-pad-content {
+  padding: 25px;
+}
+.od-result-facts:empty {
+  display: none;
+}
+@container od-console (max-width: 560px) {
+  .od-playbook-display > span {
+    display: none;
+  }
+  .od-playbook-value > span {
+    display: block;
+    font-size: 15px;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .od-console[data-status="running"] .od-ready,
+  .od-console[data-status="pending"] .od-ready,
+  .od-console[data-status="submitting"] .od-ready {
+    display: none;
+  }
+  .od-plain .od-playbook-display > span {
+    display: block;
+  }
+  .od-plain .od-playbook-value > span {
+    display: none;
+  }
+  .od-console:not(.od-plain) .od-ready {
+    top: 70.5%;
+    width: 41%;
+    height: 10%;
+  }
+  .od-plain .od-ready {
+    display: flex !important;
+  }
+  .od-pad-content {
+    padding-top: 28%;
+    padding-bottom: 19%;
+  }
+  .od-plain .od-pad-content {
+    padding: 25px;
+  }
+  .od-toast-name {
+    font-size: 14px;
+  }
+}
+@media (forced-colors: active) {
+  .od-console .od-pad-art {
+    display: none;
+  }
+}
+/* A short overlap blends the photographed grain across the fixed/growing skin joins. */
+.od-pad-art > .od-pad-middle {
+  top: calc(34.1796875cqw - 8px);
+  height: calc(100% - 66.9921875cqw + 16px);
+  mask-image: linear-gradient(
+    transparent,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent
+  );
+}

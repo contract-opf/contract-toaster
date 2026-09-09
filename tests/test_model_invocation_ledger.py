@@ -75,6 +75,7 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 os.environ.setdefault("MODEL_INVOCATIONS_TABLE", "model-invocations-test")
 
 import critic_review_pass as cp  # noqa: E402
+import floor_judge as fj  # noqa: E402
 import invocation_ledger  # noqa: E402
 import model_client  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
@@ -299,6 +300,179 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
         self.assertEqual(attempt_2.outcome, "failure")
         self.assertIsNone(attempt_2.actual_input_tokens)
         self.assertIsNone(attempt_2.actual_output_tokens)
+
+
+# ---------------------------------------------------------------------------
+# Issue #661: the provider's reasoning-token count has to reach the LEDGER
+# ROW, not just `OpenRouterModelClient.last_usage`.
+#
+# `max_tokens` on an OpenRouter request is a COMBINED reasoning+content
+# ceiling, so a served reasoning-class model quietly spends part of the
+# content budget the pass asked for. The per-attempt row is the only place
+# that spend becomes measurable, and the per-model `reasoning_max_tokens`
+# allowance is meant to be set FROM that measurement rather than guessed.
+#
+# Every usage dict below is produced by the REAL producer --
+# `model_client.parse_openrouter_usage` over an OpenRouter response body --
+# rather than typed out here, so what these passes are handed is exactly the
+# shape production hands them: a body shape the parser would reject cannot
+# quietly become a green assertion.
+# ---------------------------------------------------------------------------
+
+
+def _openrouter_usage(prompt_tokens: int, completion_tokens: int, reasoning_tokens: int | None):
+    """`last_usage` as `OpenRouterModelClient.invoke` sets it, for a response
+    that DID (int) or did NOT (None) report
+    `usage.completion_tokens_details.reasoning_tokens`."""
+    usage: dict[str, Any] = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+    }
+    if reasoning_tokens is not None:
+        usage["completion_tokens_details"] = {"reasoning_tokens": reasoning_tokens}
+    return model_client.parse_openrouter_usage({"usage": usage})
+
+
+class TestLedgerRecordsReasoningTokens(unittest.TestCase):
+    """Issue #661: acceptance criteria 1 and 2, at the ledger seam."""
+
+    def test_the_producer_really_does_report_absence_not_zero(self) -> None:
+        # Guards the two fixtures below: if the parser ever started
+        # defaulting the field to 0, the "absent" case would silently become
+        # a 0 case and the None assertions further down would be testing
+        # nothing.
+        self.assertEqual(_openrouter_usage(100, 20, 2100)["reasoning_tokens"], 2100)
+        self.assertNotIn("reasoning_tokens", _openrouter_usage(100, 20, None))
+
+    def test_primary_pass_ledgers_the_reported_count_per_attempt(self) -> None:
+        """Both branches in one run: attempt 1's response reports reasoning
+        tokens, attempt 2's does not -- so a row that hardcoded either
+        answer, or that carried the previous attempt's number forward, fails
+        here."""
+        client = UsageReportingClient(
+            {
+                _PRIMARY_MODEL_ID: [
+                    _fixture("schema_invalid_missing_issues.json"),
+                    _fixture("primary_request_change_valid.json"),
+                ]
+            },
+            usage_sequence=[
+                _openrouter_usage(100, 20, 2100),
+                _openrouter_usage(150, 40, None),
+            ],
+        )
+        ledger: list[model_client.ModelInvocationRecord] = []
+        result = pp.run_primary_pass(
+            review_id="ledger-661",
+            retrieved_precedent=[],
+            playbook=_playbook(),
+            model_client=client,
+            model_id=_PRIMARY_MODEL_ID,
+            ledger_write=ledger.append,
+            doc_text="Section 8. Each party's aggregate liability shall not exceed $75,000.",
+        )
+        self.assertEqual(result["status"], "OK")
+        self.assertEqual(len(ledger), 2)
+
+        attempt_1, attempt_2 = ledger
+        self.assertEqual(attempt_1.reasoning_tokens, 2100)
+        self.assertIsNone(attempt_2.reasoning_tokens)
+        # The count is already inside the provider's completion_tokens, so
+        # the actual_* figures must be exactly what they always were.
+        self.assertEqual(attempt_1.actual_output_tokens, 20)
+        self.assertEqual(attempt_2.actual_output_tokens, 40)
+
+    def test_a_genuinely_reported_zero_is_recorded_as_zero(self) -> None:
+        """0 and None are different answers on this row: 0 means the model
+        reported that it thought about nothing, None means nothing was
+        reported at all."""
+        client = UsageReportingClient(
+            {_PRIMARY_MODEL_ID: [_fixture("primary_request_change_valid.json")]},
+            usage_sequence=[_openrouter_usage(100, 20, 0)],
+        )
+        ledger: list[model_client.ModelInvocationRecord] = []
+        pp.run_primary_pass(
+            review_id="ledger-661-zero",
+            retrieved_precedent=[],
+            playbook=_playbook(),
+            model_client=client,
+            model_id=_PRIMARY_MODEL_ID,
+            ledger_write=ledger.append,
+            doc_text="Section 8. Each party's aggregate liability shall not exceed $75,000.",
+        )
+        self.assertEqual(ledger[0].reasoning_tokens, 0)
+
+    def test_client_without_last_usage_ledgers_none(self) -> None:
+        client = model_client.FakeBedrockClient(
+            {_PRIMARY_MODEL_ID: [_fixture("primary_request_change_valid.json")]}
+        )
+        ledger: list[model_client.ModelInvocationRecord] = []
+        pp.run_primary_pass(
+            review_id="ledger-661-nousage",
+            retrieved_precedent=[],
+            playbook=_playbook(),
+            model_client=client,
+            model_id=_PRIMARY_MODEL_ID,
+            ledger_write=ledger.append,
+            doc_text="Section 8. Each party's aggregate liability shall not exceed $75,000.",
+        )
+        self.assertIsNone(ledger[0].reasoning_tokens)
+
+    def test_critic_pass_ledgers_the_reported_count(self) -> None:
+        client = UsageReportingClient(
+            {_CRITIC_MODEL_ID: [_fixture("critic_no_delta_accept_valid.json")]},
+            usage_sequence=[_openrouter_usage(80, 30, 900)],
+        )
+        ledger: list[model_client.ModelInvocationRecord] = []
+        result = cp.run_critic_pass(
+            review_id="ledger-661-critic",
+            primary_output={"issues": []},
+            playbook=_playbook(),
+            model_client=client,
+            model_id=_CRITIC_MODEL_ID,
+            ledger_write=ledger.append,
+        )
+        self.assertEqual(result["status"], "OK")
+        self.assertEqual(ledger[0].reasoning_tokens, 900)
+
+    def test_floor_pass_ledgers_the_reported_count(self) -> None:
+        """The floor judge is the third `ModelInvocationRecord` writer and
+        already has `actual_usage` in hand -- the same seam issue #568 had
+        to fix there separately after missing it the first time."""
+        invariant_id = "floor-661-invariant"
+        client = UsageReportingClient(
+            {
+                _PRIMARY_MODEL_ID: [
+                    json.dumps(
+                        {
+                            "invariant_id": invariant_id,
+                            "violated": False,
+                            "evidence_quote": "",
+                        }
+                    )
+                ]
+            },
+            usage_sequence=[_openrouter_usage(100, 20, 450)],
+        )
+        ledger: list[model_client.ModelInvocationRecord] = []
+        judgment = fj.judge_floor_invariants(
+            invariants=[
+                {
+                    "id": invariant_id,
+                    "statement": "statement text",
+                    "rationale": "rationale text",
+                }
+            ],
+            review_context="Section 8. Each party's aggregate liability shall not exceed $75,000.",
+            model_client=client,
+            model_id=_PRIMARY_MODEL_ID,
+            review_id="ledger-661-floor",
+            ledger_write=ledger.append,
+        )
+        self.assertFalse(judgment.fail_closed)
+        self.assertEqual(len(ledger), 1)
+        self.assertEqual(ledger[0].pass_name, "floor")
+        self.assertEqual(ledger[0].reasoning_tokens, 450)
 
 
 class TestMakeLedgerWrite(unittest.TestCase):
@@ -595,6 +769,7 @@ def _run_tests() -> int:
     suite = unittest.TestSuite()
     for case in (
         TestPrimaryAndCriticPassesLedgerRealUsage,
+        TestLedgerRecordsReasoningTokens,
         TestMakeLedgerWrite,
         TestRealPipelineWiresLedgerWrite,
         TestMockPipelineNeedsNoLedgerTable,

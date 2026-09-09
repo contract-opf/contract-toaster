@@ -2,7 +2,7 @@
  * preflight.ts — client for `POST /api/reviews/preflight` (issue #491).
  *
  * A cheap, fast, ADVISORY check `ReviewSubmission.tsx` fires the moment a
- * file is chosen — before "Upload for review" — so a reviewer sees word
+ * file is chosen — before the go button ("Start Toaster") — so a reviewer sees word
  * count/page estimate/title and a does-this-match-the-dial signal without
  * waiting for the full two-pass review. Per the issue's own words: "this is
  * advisory only. It never blocks a submission — no enforcement, ever."

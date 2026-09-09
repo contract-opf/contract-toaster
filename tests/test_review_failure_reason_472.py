@@ -87,6 +87,7 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 import model_client as mc  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000472"
 
@@ -182,6 +183,10 @@ class NoCallHttpClient:
     case is caught BEFORE any provider call, not merely turned into a
     provider 401 after the fact."""
 
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
+
     def post(self, url, json=None, headers=None):  # noqa: A002
         raise AssertionError("no HTTP call should be made when no key is configured")
 
@@ -257,6 +262,10 @@ class TestTimeoutClassified(unittest.TestCase):
         import httpx
 
         class TimingOutHttpClient:
+            # Issue #657: the client streams; route .stream() through the
+            # canned .post() below (tests/openrouter_sse_double.py).
+            stream = sse_stream_adapter
+
             def post(self, url, json=None, headers=None):  # noqa: A002
                 raise httpx.ReadTimeout("timed out", request=None)
 
@@ -287,6 +296,10 @@ class TestTimeoutClassified(unittest.TestCase):
         timeout."""
 
         class BoomClient:
+            # Issue #657: the client streams; route .stream() through the
+            # canned .post() below (tests/openrouter_sse_double.py).
+            stream = sse_stream_adapter
+
             def post(self, url, json=None, headers=None):  # noqa: A002
                 raise OSError("connection reset")
 

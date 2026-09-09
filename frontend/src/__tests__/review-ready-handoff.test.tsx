@@ -26,6 +26,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+} from './support/consoleSurface';
 import * as sounds from '../toaster/sounds';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -52,6 +57,9 @@ const playPopSpy = sounds.playPop as unknown as ReturnType<typeof vi.fn>;
 // Vite hands the sounds module) is served a tiny ArrayBuffer, so a test that
 // installs an AudioContext exercises the real load path without a network.
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // Issue #733: the catalog is a fixture every scenario needs, not a scenario
+  // of its own — the console will not arm its lever without an active playbook.
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -89,8 +97,8 @@ async function submitAndReachResult(): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
-  await screen.findByTestId('review-result');
+  await pressSubmit();
+  await findReviewResult();
 }
 
 const PRESIGNED_URL = 'https://s3.example.test/outputs/rev-448/out.docx?sig=abc';
@@ -216,6 +224,10 @@ describe('completion handoff — automatic save', () => {
       if (pathname.endsWith('.mp3')) {
         return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
       }
+      // Issue #733: the console arms nothing without an active playbook.
+      if (pathname === '/api/playbooks') {
+        return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
+      }
       if (method === 'POST' && pathname === '/api/reviews') {
         submitCount += 1;
         const reviewId = submitCount === 1 ? 'rev-A' : 'rev-B';
@@ -261,8 +273,8 @@ describe('completion handoff — automatic save', () => {
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     // Review A's automatic save is now in flight, blocked on outputAPromise.
     await waitFor(() =>
@@ -274,7 +286,7 @@ describe('completion handoff — automatic save', () => {
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
 
     // Review B lands and saves cleanly on its own.
     await waitFor(() =>
@@ -375,8 +387,8 @@ describe('completion handoff — the ding', () => {
     // Uploading is not "done" — nothing has popped yet.
     expect(playPopSpy).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     await waitFor(() => expect(playPopSpy).toHaveBeenCalledTimes(1));
   });
@@ -392,8 +404,8 @@ describe('completion handoff — the ding', () => {
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
-    await screen.findByTestId('review-result');
+    await pressSubmit();
+    await findReviewResult();
 
     // The component still routes the ding through the sound manager, which is
     // muted — it never reaches for an audio node itself. That a muted manager

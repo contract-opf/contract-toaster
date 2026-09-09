@@ -24,16 +24,29 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    // Never inline audio as a `data:` URI. Vite inlines assets under ~4KB by
-    // default, which would silently turn the small toaster clips
-    // (src/assets/sounds/*.mp3) into data: URIs. sounds.ts loads them with
-    // fetch(), and the deployed CSP allows `connect-src 'self' <cognito>
-    // <api>` with no `data:` — so an inlined clip would be CSP-blocked in
-    // production while working fine locally. Emitting real files keeps every
-    // clip a same-origin request. Other asset types keep the default
-    // behaviour.
+    // Never inline audio, artwork or fonts as a `data:` URI. Vite inlines
+    // assets under ~4KB by default, which would silently turn the small
+    // toaster clips (src/assets/sounds/*.mp3) into data: URIs. sounds.ts
+    // loads them with fetch(), and the deployed CSP allows `connect-src
+    // 'self' <cognito> <api>` with no `data:` — so an inlined clip would be
+    // CSP-blocked in production while working fine locally. Emitting real
+    // files keeps every clip a same-origin request.
+    //
+    // Images and fonts are pinned the same way for the Orbit Diner console
+    // (issue #717). Its seven material plates are all far above the size
+    // threshold today, so the default would emit them anyway — but that is an
+    // accident of how heavy the current artwork happens to be, not a
+    // guarantee. A future re-export, a thinner variant plate or a small
+    // decorative asset dropping under the threshold would become a data: URI
+    // and the same CSP would block it. Stating the rule is what makes the
+    // production behaviour independent of the byte count. Other asset types
+    // keep the default behaviour.
     assetsInlineLimit: (filePath: string) =>
-      /\.(mp3|ogg|wav|m4a)$/i.test(filePath) ? false : undefined,
+      /\.(mp3|ogg|wav|m4a|webp|png|jpe?g|avif|gif|woff2?|ttf|otf)$/i.test(
+        filePath,
+      )
+        ? false
+        : undefined,
     ...(mode === 'production'
       ? {}
       : {

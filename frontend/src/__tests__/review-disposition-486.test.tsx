@@ -20,6 +20,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  openDisposition,
+  pressSubmit,
+} from './support/consoleSurface';
 import ReviewHistory, { HistoryRow } from '../ReviewHistory';
 
 vi.mock('../auth', () => ({
@@ -37,6 +43,9 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 function stubReviewSubmissionFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // Issue #733: the catalog is a fixture every scenario needs, not a scenario
+  // of its own — the console will not arm its lever without an active playbook.
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -79,8 +88,8 @@ async function submitAndReachResult(
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
-  await screen.findByTestId('review-result');
+  await pressSubmit();
+  await findReviewResult();
   void fetchMock;
 }
 
@@ -100,8 +109,12 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
     });
     await submitAndReachResult(fetchMock);
 
-    const block = screen.getByTestId('review-disposition');
-    expect(block.textContent).toContain('Want to note how this one landed? (optional)');
+    const block = await openDisposition();
+    expect(block.textContent).toContain(
+      // Optional, neutral, and about the record rather than about the reader
+      // (issue #733).
+      'Record the outcome'
+    );
     expect(screen.getByTestId('review-disposition-accepted')).toBeInTheDocument();
     expect(screen.getByTestId('review-disposition-edited')).toBeInTheDocument();
     expect(screen.getByTestId('review-disposition-rejected')).toBeInTheDocument();
@@ -127,6 +140,7 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
     });
     await submitAndReachResult(fetchMock);
 
+    await openDisposition();
     fireEvent.click(screen.getByTestId('review-disposition-accepted'));
 
     await screen.findByTestId('review-disposition-recorded');
@@ -156,9 +170,11 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
     });
     await submitAndReachResult(fetchMock);
 
+    await openDisposition();
     fireEvent.change(screen.getByTestId('review-disposition-note'), {
       target: { value: 'Narrowed the indemnification carve-out further.' },
     });
+    await openDisposition();
     fireEvent.click(screen.getByTestId('review-disposition-edited'));
     await screen.findByTestId('review-disposition-recorded');
 
@@ -187,6 +203,7 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
     });
     await submitAndReachResult(fetchMock);
 
+    await openDisposition();
     fireEvent.click(screen.getByTestId('review-disposition-rejected'));
 
     const error = await screen.findByTestId('review-disposition-error');

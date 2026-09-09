@@ -80,12 +80,36 @@
 #     CHECK_LOCK_DIR=P    override the lock path (used by the gate's own
 #                         tests so they never touch the real lock).
 #
+# CLOCK PARITY WITH CI (CHECK_TZ):
+#   The runner is UTC and a machine here is UTC-4, so a date-boundary test can
+#   pass locally on the 31st and fail in CI just after midnight on the 1st.
+#   This gate therefore runs under TZ=UTC. Override with CHECK_TZ=<zone>.
+#   See the export near the top of this script, and issue #639.
+#
 # DETERMINISTIC / OFFLINE:
 #   Infra tests shell out to `cdk synth` (offline; no AWS calls). AWS-touching
 #   tests use moto. No live network or Bedrock is required.
 
 set -u
 cd "$(dirname "$0")/.."
+
+# ---------------------------------------------------------------------------
+# CLOCK PARITY WITH CI (issue #639).
+#   GitHub runners are UTC; a developer machine here is UTC-4. On 2026-09-01
+#   tests/test_audit_query_api_93.py failed in CI at 01:02:39Z while the same
+#   commit's local gate had passed minutes earlier on a machine still reading
+#   08-31 — a date-boundary divergence this gate could not see, fixed in
+#   bed1fa9 after it had already turned main red.
+#
+#   Pinning the gate's timezone to the runner's makes that class of divergence
+#   surface HERE. CHECK_TZ overrides it (e.g. CHECK_TZ=America/New_York) for
+#   the rare case of deliberately reproducing a local-time-specific failure.
+#   tests/test_ci_env_parity_639.py Check 4 reads this line's RESOLVED default:
+#   it fails if the line is removed, if the default is anything but UTC, if it
+#   is indented (conditionally reached), or if it is moved below the
+#   collect_test_failures.sh invocation, where it could not take effect.
+# ---------------------------------------------------------------------------
+export TZ="${CHECK_TZ:-UTC}"
 
 # ---------------------------------------------------------------------------
 # Repo-wide gate lock (see CONCURRENCY LOCK above). Acquired BEFORE anything

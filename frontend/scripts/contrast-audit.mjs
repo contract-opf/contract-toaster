@@ -172,12 +172,15 @@ const PAIRS = [
     bg: '--ct-bg',
     min: 3.0,
   },
-  // Issue #492: the outcome headline (`.ct-outcome-headline`,
-  // ReviewSubmission.tsx) paints its text in one of these five status
-  // tokens via OUTCOME_HEADLINE_COLOR_VAR, on whichever of the app's two
-  // surfaces it ends up rendered against — pinned at the text threshold
-  // (4.5:1), not the 3:1 UI-affordance one, since this is the panel's
-  // largest run of text, not a control.
+  // Issue #492: the result panel's outcome headline painted its text in one
+  // of these five status tokens, on whichever of the app's two surfaces it
+  // was rendered against — pinned at the text threshold (4.5:1), not the
+  // 3:1 UI-affordance one, since it was the panel's largest run of text,
+  // not a control. Issue #727 deleted that panel (and its
+  // `.ct-outcome-headline` rule) with the rest of the surface the Orbit
+  // Diner console replaced; the pairs below stay pinned under their
+  // original labels because they are the status-token-on-surface
+  // thresholds any headline-sized status text still has to clear.
   { label: '--ct-ok vs --ct-bg (outcome headline)', fg: '--ct-ok', bg: '--ct-bg', min: 4.5 },
   { label: '--ct-ok vs --ct-surface (outcome headline)', fg: '--ct-ok', bg: '--ct-surface', min: 4.5 },
   { label: '--ct-warn vs --ct-bg (outcome headline)', fg: '--ct-warn', bg: '--ct-bg', min: 4.5 },

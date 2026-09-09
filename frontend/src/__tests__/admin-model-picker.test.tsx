@@ -122,7 +122,7 @@ const KEY_SETTINGS = {
   model_provider: 'openrouter',
   key_set: true,
   key_source: 'admin',
-  key_hint: '…beef',
+  key_fingerprint: 'a1b2c3d4',
   updated_at: '',
   updated_by: '',
 };

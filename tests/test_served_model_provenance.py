@@ -52,6 +52,7 @@ for path in (str(BACKEND_ROOT), str(SCRIPTS_DIR)):
         sys.path.insert(0, path)
 
 import src.model_client as model_client  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 FAKE_KEY = "sk-or-v1-TEST-FIXTURE-NOT-A-REAL-KEY-0000-beef"
 SECRET_BODY = "the counterparty shall indemnify nobody in particular"
@@ -85,6 +86,10 @@ class _StubHttp:
     def __init__(self, payloads):
         self._payloads = list(payloads)
         self.calls = 0
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, **kwargs):
         self.calls += 1

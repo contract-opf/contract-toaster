@@ -25,6 +25,13 @@ Covered:
      provider.data_collection="deny" / provider.require_parameters=true, and
      no env var can switch the enforcement off. The Bedrock payload is
      unaffected.
+ 10. Reasoning-token usage capture (issue #661): a response reporting
+     `usage.completion_tokens_details.reasoning_tokens` surfaces the count
+     on `last_usage`; one that does not omits the key entirely rather than
+     defaulting it to 0; the count never reaches `cumulative_usage` (it is
+     already inside `completion_tokens`); and the request payload is
+     unchanged, with a declared allowance still ADDED to the caller's
+     content budget.
 
 Run: python3 tests/test_openrouter_model_client.py
 Exit 0 = pass, 1 = fail.
@@ -42,6 +49,7 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 import model_client as mc  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 SECRET_PROMPT = "CONFIDENTIAL clause: liability capped at $150,000."
 
@@ -49,6 +57,7 @@ SECRET_PROMPT = "CONFIDENTIAL clause: liability capped at $150,000."
 # that are NOT exercising the policy-pin assertion itself use these so they
 # stay focused on transport behavior instead of tripping the new check.
 PRIMARY_MODEL_ID = "anthropic/claude-opus-5"  # issue #604 moved this off 4.8
+NO_ALLOWANCE_MODEL_ID = "anthropic/claude-sonnet-5"
 CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
 
 
@@ -69,6 +78,10 @@ class FakeHttpClient:
         self.raise_exc = raise_exc
         self.calls: list[dict] = []
         self.closed = False
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         self.calls.append({"url": url, "json": json, "headers": headers})
@@ -114,7 +127,14 @@ class TestOpenRouterInvoke(unittest.TestCase):
         self.assertTrue(call["url"].endswith("/chat/completions"))
         body = call["json"]
         self.assertEqual(body["model"], PRIMARY_MODEL_ID)
-        self.assertEqual(body["max_tokens"], 8000)
+        # Issue #677: the primary carries a pinned reasoning allowance, and
+        # `max_tokens` is the caller's budget PLUS that allowance -- the
+        # thinking is granted on top of the content budget, not carved out of
+        # it. Read the pin rather than restating a number that moves with it.
+        self.assertEqual(
+            body["max_tokens"],
+            8000 + mc.openrouter_reasoning_max_tokens(PRIMARY_MODEL_ID),
+        )
         self.assertEqual(
             body["messages"],
             [
@@ -396,6 +416,205 @@ class TestOpenRouterDataRetentionPosture(unittest.TestCase):
         self.assertNotIn("provider", json.loads(captured["body"]))
 
 
+# ---------------------------------------------------------------------------
+# Issue #661: reasoning-token usage capture.
+#
+# `max_tokens` on an OpenRouter Chat Completions request is a COMBINED
+# ceiling across a model's reasoning AND content tokens, so whatever the
+# served model spends thinking is silently taken out of the content budget
+# `invoke()` set. Nothing recorded that number, which is why the per-model
+# `reasoning_max_tokens` allowance could only ever be a guess. These tests
+# pin the OBSERVABILITY half: the count reaches `last_usage` when the
+# provider reports it, is ABSENT (never 0) when it does not, and changes
+# neither the request payload nor any usage-derived cost figure.
+#
+# Every response body below is fed through the SAME `stream = sse_stream_
+# adapter` transport double the rest of this file uses, so the count is read
+# off the usage-only terminal SSE chunk production actually parses -- not
+# poked onto `last_usage` directly.
+# ---------------------------------------------------------------------------
+
+
+def _usage_response(content: str, usage: dict) -> FakeResponse:
+    return FakeResponse(200, {"choices": [{"message": {"content": content}}], "usage": usage})
+
+
+class TestOpenRouterReasoningTokenUsage(unittest.TestCase):
+    def _invoke(self, usage: dict, *, model_id: str = PRIMARY_MODEL_ID, max_output_tokens: int = 8000):
+        http = FakeHttpClient(_usage_response('{"decision":"ACCEPT"}', usage))
+        client = mc.OpenRouterModelClient(
+            api_key="sk-test",
+            http_client=http,
+            max_retries=0,
+            sleep_fn=lambda _seconds: None,
+        )
+        with patch.dict("os.environ", {}, clear=True):
+            client.invoke(
+                model_id=model_id,
+                system_prompt="SYS",
+                user_prompt=SECRET_PROMPT,
+                max_output_tokens=max_output_tokens,
+            )
+        return client, http
+
+    def test_parser_carries_reported_reasoning_tokens(self) -> None:
+        parsed = mc.parse_openrouter_usage(
+            {
+                "usage": {
+                    "prompt_tokens": 61000,
+                    "completion_tokens": 9400,
+                    "completion_tokens_details": {"reasoning_tokens": 2100},
+                }
+            }
+        )
+        self.assertEqual(parsed["reasoning_tokens"], 2100)
+        # Reasoning tokens are already counted INSIDE completion_tokens by
+        # the provider, so the base counts must be untouched -- adding them
+        # anywhere would double-bill the same tokens at settlement.
+        self.assertEqual(parsed["input_tokens"], 61000)
+        self.assertEqual(parsed["output_tokens"], 9400)
+
+    def test_parser_omits_reasoning_tokens_when_not_reported(self) -> None:
+        """Absent, never 0: "the response did not report reasoning tokens"
+        and "the model spent zero tokens thinking" are different facts, and
+        only one of them is supported by a missing field."""
+        for label, usage in (
+            ("no details block", {"prompt_tokens": 10, "completion_tokens": 5}),
+            (
+                "details block without the key",
+                {"prompt_tokens": 10, "completion_tokens": 5, "completion_tokens_details": {}},
+            ),
+            (
+                "non-dict details block",
+                {"prompt_tokens": 10, "completion_tokens": 5, "completion_tokens_details": None},
+            ),
+            (
+                "non-int count",
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "completion_tokens_details": {"reasoning_tokens": "2100"},
+                },
+            ),
+        ):
+            with self.subTest(label):
+                parsed = mc.parse_openrouter_usage({"usage": usage})
+                self.assertNotIn("reasoning_tokens", parsed)
+                self.assertEqual(parsed["input_tokens"], 10)
+                self.assertEqual(parsed["output_tokens"], 5)
+
+    def test_parser_keeps_a_genuinely_reported_zero(self) -> None:
+        """The other side of the branch: a provider that DID report the
+        field as 0 (a reasoning-class model that happened not to think on
+        this call) must record 0, not absence."""
+        parsed = mc.parse_openrouter_usage(
+            {
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "completion_tokens_details": {"reasoning_tokens": 0},
+                }
+            }
+        )
+        self.assertEqual(parsed["reasoning_tokens"], 0)
+
+    def test_invoke_surfaces_reasoning_tokens_on_last_usage(self) -> None:
+        client, _http = self._invoke(
+            {
+                "prompt_tokens": 61000,
+                "completion_tokens": 9400,
+                "completion_tokens_details": {"reasoning_tokens": 2100},
+            }
+        )
+        self.assertEqual(client.last_usage["reasoning_tokens"], 2100)
+        self.assertEqual(client.last_usage["input_tokens"], 61000)
+        self.assertEqual(client.last_usage["output_tokens"], 9400)
+
+    def test_invoke_omits_reasoning_tokens_when_the_response_has_none(self) -> None:
+        client, _http = self._invoke({"prompt_tokens": 61000, "completion_tokens": 9400})
+        self.assertNotIn("reasoning_tokens", client.last_usage)
+
+    def test_cumulative_usage_never_accumulates_reasoning_tokens(self) -> None:
+        """The running instance total feeds
+        `reviews.compute_actual_usd_cents_from_usage`. Reasoning tokens are
+        already inside `completion_tokens`, so accumulating them there would
+        bill the same tokens twice."""
+        client, _http = self._invoke(
+            {
+                "prompt_tokens": 61000,
+                "completion_tokens": 9400,
+                "completion_tokens_details": {"reasoning_tokens": 2100},
+            }
+        )
+        self.assertEqual(
+            client.cumulative_usage, {"input_tokens": 61000, "output_tokens": 9400}
+        )
+
+    def test_request_payload_is_unchanged_for_a_model_with_no_allowance(self) -> None:
+        """A model with NO declared allowance must have a byte-identical
+        request: `max_tokens` is exactly the caller's content budget, and no
+        reasoning/thinking key appears anywhere in the body. Recording a
+        provider's reasoning spend never changes what we send.
+
+        Issue #677 pinned an allowance for the PRIMARY model, so this asserts
+        the invariant against an id that genuinely carries none."""
+        # Issue #677 pinned a reasoning allowance for the PRIMARY model, so the
+        # invariant this test protects -- "a model with NO declared allowance
+        # sends the caller's content budget unchanged and no reasoning key" --
+        # is now asserted against an id that genuinely carries none, rather than
+        # against whichever model happens to be pinned today.
+        self.assertEqual(mc.openrouter_reasoning_max_tokens(NO_ALLOWANCE_MODEL_ID), 0)
+        _client, http = self._invoke(
+            {
+                "prompt_tokens": 61000,
+                "completion_tokens": 9400,
+                "completion_tokens_details": {"reasoning_tokens": 2100},
+            },
+            model_id=NO_ALLOWANCE_MODEL_ID,
+        )
+        body = http.calls[0]["json"]
+        self.assertEqual(body["max_tokens"], 8000)
+        self.assertNotIn("reasoning", body)
+        self.assertNotIn("thinking", body)
+        self.assertNotIn("reasoning_tokens", body)
+
+    def test_declared_allowance_is_still_added_on_top_of_the_content_budget(self) -> None:
+        """The allowance stays ADDED to the caller's budget, never carved
+        out of it -- read off the shipped policy rather than hardcoded, so
+        this cannot silently agree with a mirror of the code under test."""
+        policy = mc.load_openrouter_policy()
+        with_allowance = [
+            entry
+            for entry in (policy.get("selectable") or [])
+            if int(entry.get("reasoning_max_tokens") or 0) > 0
+        ]
+        self.assertTrue(
+            with_allowance,
+            "model-policy/openrouter.json must still pin at least one non-zero "
+            "reasoning_max_tokens for this assertion to mean anything.",
+        )
+        entry = with_allowance[0]
+        allowance = int(entry["reasoning_max_tokens"])
+        _client, http = self._invoke(
+            {"prompt_tokens": 10, "completion_tokens": 5},
+            model_id=str(entry["model_id"]),
+            max_output_tokens=8000,
+        )
+        self.assertEqual(http.calls[0]["json"]["max_tokens"], 8000 + allowance)
+
+    def test_record_defaults_reasoning_tokens_to_none(self) -> None:
+        record = mc.ModelInvocationRecord(
+            review_id="r",
+            pass_name="primary",
+            model_id=PRIMARY_MODEL_ID,
+            attempt_number=1,
+            outcome="success",
+            input_tokens_est=1,
+            output_tokens_est=1,
+        )
+        self.assertIsNone(record.reasoning_tokens)
+
+
 def _run_tests() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
@@ -403,6 +622,7 @@ def _run_tests() -> int:
     suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterResolvers))
     suite.addTests(loader.loadTestsFromTestCase(TestEnforceOpenRouterPolicyModelId))
     suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterDataRetentionPosture))
+    suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterReasoningTokenUsage))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

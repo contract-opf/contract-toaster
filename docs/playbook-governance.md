@@ -3,7 +3,8 @@
 Architecture lives in [ARCHITECTURE.md](../ARCHITECTURE.md). This document is the authoritative
 home for **how a playbook is validated and how a legal-behavior release bundle is activated**.
 The playbook JSON Schema is [playbooks/schema.json](../playbooks/schema.json); the seed playbook is
-[playbooks/eiaa-v1.0.0.json](../playbooks/eiaa-v1.0.0.json). The evaluation gates that a bundle must
+[playbooks/samples/synthetic-nda-sample-v1.0.0.json](../playbooks/samples/synthetic-nda-sample-v1.0.0.json),
+resolved as the default through [playbooks/registry.json](../playbooks/registry.json). The evaluation gates that a bundle must
 clear are owned by [docs/evaluation.md](evaluation.md); this document owns the **structural** rules
 (schema, uniqueness, coverage, detector grammar) and the **lifecycle** (`draft → active → retired`).
 
@@ -295,7 +296,7 @@ Golden-hash CI fixture: `tests/gold-fixtures/canonicalize-golden-hash.json`.
 
 Run locally:
 ```
-python3 scripts/canonicalize.py                   # print hash of eiaa-v1.0.0.json
+python3 scripts/canonicalize.py                   # print hash of the default playbook
 python3 scripts/canonicalize.py path/to/play.json # hash any playbook
 python3 scripts/canonicalize.py --record          # update golden-hash fixture
 ```
@@ -328,7 +329,7 @@ Gate 7 is now implementable step-by-step:
    trail purposes) — but the activation gate reads the **DB row**, not the document field.
 
 **CI golden-hash gate.** `tests/gold-fixtures/canonicalize-golden-hash.json` records the
-expected hash of `playbooks/eiaa-v1.0.0.json`. If the canonical form or playbook content drifts,
+expected hash of the registry's default playbook. If the canonical form or playbook content drifts,
 `tests/test_canonicalize.py::test_golden_hash_fixture` fails. After an intentional playbook-content
 change, update the fixture with `python3 scripts/canonicalize.py --record` and commit it.
 

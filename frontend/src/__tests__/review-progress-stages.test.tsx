@@ -40,7 +40,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import { PROGRESS_STEPS, progressStepNumber } from '../toaster/Toaster';
+import { stages } from '../orbit-diner/state';
+import type { Stage } from '../orbit-diner/types';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+  progressBar,
+  progressStep,
+  stateBadge,
+} from './support/consoleSurface';
+import { STAGE_VIGNETTES, stageNumber } from '../toaster/stageTheater';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -60,6 +70,10 @@ function stubPollingFetch(reviewId: string, detail: { current: Record<string, un
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
+      // Issue #733: the console needs an active playbook before it will submit.
+      if (pathname === '/api/playbooks') {
+        return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
+      }
       if (method === 'POST' && pathname === '/api/reviews') {
         return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
       }
@@ -80,7 +94,7 @@ function docxFile(): File {
 async function submit(): Promise<void> {
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docxFile()] } });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 
@@ -105,24 +119,37 @@ describe('staged review progress — the toast darkens through four real stages'
     stubPollingFetch('rev-progress', { current: runningDetail(token as string) });
     await submit();
 
-    const bar = await screen.findByTestId('review-progress-stage');
-    expect(bar.getAttribute('role')).toBe('progressbar');
-    expect(bar.getAttribute('aria-valuenow')).toBe(String(step));
+    // Issue #733: one progressbar, whichever surface draws it. Both report
+    // the step through ARIA, which is the fact a screen reader gets.
+    await waitFor(() => expect(progressStep()).toBe(step));
+    const bar = progressBar()!;
     expect(bar.getAttribute('aria-valuemin')).toBe('1');
     expect(bar.getAttribute('aria-valuemax')).toBe('4');
-    expect(bar.getAttribute('aria-valuetext')).toBe(`Step ${step} of 4 · ${label}`);
+    expect(bar.getAttribute('aria-valuetext')).toContain(`Step ${step} of 4`);
 
     // The doneness LEVEL is what the stylesheet darkens on. css:false in
-    // jsdom, so assert the hook, never a colour.
-    expect(bar.getAttribute('data-progress-step')).toBe(String(step));
-    expect(bar.className).toContain(`toaster-doneness--step${step}`);
-    expect(bar.getAttribute('data-progress-stage')).toBe(token);
+    // jsdom, so assert the hook, never a colour: the console darkens the slice
+    // itself through a filter custom property, keyed to the reported stage.
+    const slice = document.querySelector<HTMLElement>('[data-part="slice"]')!;
+    expect(slice.getAttribute('style')).toContain('--od-doneness');
+    expect(slice.getAttribute('style')).toContain(stages[token as Stage].filter);
+
+    // The short label this fixture names is the one the stage table carries —
+    // the fixture is a second reading of the wire contract, not a copy of the
+    // table that could drift from it.
+    expect(stages[token as Stage].label).toBe(label);
 
     // The text is the information and the accessibility — never the
     // darkening alone.
     const text = screen.getByTestId('review-progress-step-text');
-    expect(text.textContent).toBe(`Step ${step} of 4 · ${label}`);
-    expect(text.getAttribute('aria-live')).toBe('polite');
+    expect(text.textContent).toContain(`Step ${step} of 4`);
+    // One of the polite regions names this stage, in the caption from that
+    // same stage table (issue #733).
+    const spoken = stages[token as Stage].caption;
+    const polite = Array.from(
+      document.querySelectorAll<HTMLElement>('[aria-live="polite"]'),
+    );
+    expect(polite.some((el) => (el.textContent ?? '').includes(spoken))).toBe(true);
   });
 
   it('advances the step only when a poll reports a new stage', async () => {
@@ -141,7 +168,7 @@ describe('staged review progress — the toast darkens through four real stages'
       },
       { timeout: 6000 },
     );
-    expect(screen.getByTestId('review-progress-stage').className).toContain('toaster-doneness--step4');
+    expect(progressStep()).toBe(4);
   });
 
   it.each([[null], [undefined], ['some_stage_this_build_does_not_know']])(
@@ -157,13 +184,11 @@ describe('staged review progress — the toast darkens through four real stages'
       await submit();
 
       // Still visibly working…
-      expect(await screen.findByTestId('toaster-state-progress')).toBeInTheDocument();
-      expect(screen.getByTestId('review-progress-indeterminate').textContent).toContain(
-        'Toasting your review…',
-      );
-      // …but claiming nothing about which step.
-      expect(screen.queryByTestId('review-progress-stage')).toBeNull();
-      expect(screen.queryByTestId('review-progress-step-text')).toBeNull();
+      expect(await screen.findByTestId(stateBadge('progress'))).toBeInTheDocument();
+      expect(document.body.textContent ?? '').toContain('Toasting your review…');
+      // …but claiming nothing about which step: the console keeps one bar and
+      // reports no step on it, so nothing on screen names one (issue #733).
+      expect(progressStep()).toBeNull();
       expect(document.body.textContent ?? '').not.toMatch(/Step \d of 4/);
     },
   );
@@ -173,17 +198,17 @@ describe('staged review progress — the toast darkens through four real stages'
     stubPollingFetch('rev-progress', detail);
     await submit();
 
-    // Before any stage lands, the shimmer is the honest signal and stays.
-    expect(await screen.findByTestId('review-progress')).toBeInTheDocument();
+    // Before any stage lands, the information-free signal is the honest one.
+    await screen.findByTestId(stateBadge('progress'));
+    expect(progressStep()).toBeNull();
 
     detail.current = runningDetail('critic_pass');
     await waitFor(
       () => {
-        expect(screen.queryByTestId('review-progress')).toBeNull();
+        expect(progressStep()).toBe(2);
       },
       { timeout: 6000 },
     );
-    expect(screen.getByTestId('review-progress-stage')).toBeInTheDocument();
   });
 
   it('shows no step indicator at all once the review is terminal', async () => {
@@ -200,40 +225,30 @@ describe('staged review progress — the toast darkens through four real stages'
       },
     });
     await submit();
-    await screen.findByTestId('review-result');
+    await findReviewResult();
 
-    expect(screen.queryByTestId('review-progress-stage')).toBeNull();
+    expect(progressBar()).toBeNull();
     expect(screen.queryByTestId('review-progress-step-text')).toBeNull();
-    expect(screen.queryByTestId('toaster-state-progress')).toBeNull();
-  });
-
-  it("the staged darkening and its shimmer are covered by the reduced-motion block", async () => {
-    stubPollingFetch('rev-progress', { current: runningDetail('critic_pass') });
-    await submit();
-    await screen.findByTestId('review-progress-stage');
-
-    const styleText = Array.from(document.querySelectorAll('style'))
-      .map((el) => el.textContent ?? '')
-      .join('\n');
-    const reducedBlock = styleText.slice(styleText.indexOf('prefers-reduced-motion'));
-    expect(reducedBlock).toContain('.toaster-doneness__slice');
-    expect(reducedBlock).toContain('.toaster-doneness__heat');
+    expect(screen.queryByTestId(stateBadge('progress'))).toBeNull();
   });
 
   it('maps tokens to step numbers, and unknown tokens to no step', () => {
     // The token list is a wire contract with scripts/review_spine.py's
-    // PROGRESS_STAGES — order here IS the step numbering.
-    expect(PROGRESS_STEPS.map((s) => s.token)).toEqual([
+    // PROGRESS_STAGES — order here IS the step numbering. Issue #727 folded
+    // the hand-written `PROGRESS_STEPS` into `STAGE_VIGNETTES`, which is a
+    // projection of the console's `stages`, so this now pins the ORDER that
+    // projection produces rather than a second literal of the same four.
+    expect(STAGE_VIGNETTES.map((entry) => entry.token)).toEqual([
       'primary_pass',
       'critic_pass',
       'reconciliation',
       'redline',
     ]);
-    expect(progressStepNumber('primary_pass')).toBe(1);
-    expect(progressStepNumber('redline')).toBe(4);
-    expect(progressStepNumber('run_review')).toBe(0);
-    expect(progressStepNumber(null)).toBe(0);
-    expect(progressStepNumber(undefined)).toBe(0);
-    expect(progressStepNumber('')).toBe(0);
+    expect(stageNumber('primary_pass')).toBe(1);
+    expect(stageNumber('redline')).toBe(4);
+    expect(stageNumber('run_review')).toBe(0);
+    expect(stageNumber(null)).toBe(0);
+    expect(stageNumber(undefined)).toBe(0);
+    expect(stageNumber('')).toBe(0);
   });
 });

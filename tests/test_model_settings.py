@@ -12,8 +12,12 @@ DynamoDB defensible:
   1. Admin gate -- every read/write 403s a non-admin caller (the `is_admin`
      users-ROW flag, never a JWT claim).
   2. **Write-only** -- get_model_key_settings NEVER returns the stored key,
-     only a last-four `key_hint`. Asserted against the module AND through the
-     HTTP surface, since a JSON route is where a leak would actually escape.
+     nor any part of it: only a non-reversible `key_fingerprint` (issue
+     #651). Asserted against the module AND through the HTTP surface, since a
+     JSON route is where a leak would actually escape. The "not any part of
+     it" half is proved window-by-window in
+     tests/test_secret_rotation_651.py, which is what a last-four hint would
+     fail.
   3. **Never logged / never audited** -- no log record or audit row contains
      the key.
   4. Resolution precedence -- the admin-set row beats OPENROUTER_API_KEY, and
@@ -29,6 +33,7 @@ moto-mocked DynamoDB only -- no live AWS, no network (standing rule 4).
 Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
+import hashlib
 import logging
 import os
 import sys
@@ -72,8 +77,12 @@ NON_ADMIN = {"cognito_sub": NON_ADMIN_SUB, "email": f"{NON_ADMIN_SUB}@example.co
 # cut on exactly these fixtures). set_model_key only checks length, never the
 # body, so an obviously-fake body exercises the same paths scanner-safely.
 FAKE_KEY = "sk-or-v1-TEST-FIXTURE-NOT-A-REAL-KEY-0000-beef"
-FAKE_KEY_HINT = "…beef"
 OTHER_KEY = "sk-or-v1-TEST-FIXTURE-NOT-A-REAL-KEY-1111-9a7c"
+# Computed, never transcribed: a literal would pin the digest instead of the
+# property, and would have to be re-derived by hand every time the fixture or
+# the salt moved.
+FAKE_KEY_FINGERPRINT = model_settings.secret_fingerprint(FAKE_KEY)
+OTHER_KEY_FINGERPRINT = model_settings.secret_fingerprint(OTHER_KEY)
 
 
 class ModelSettingsTestBase(unittest.TestCase):
@@ -140,29 +149,66 @@ class TestWriteOnly(ModelSettingsTestBase):
         self.assertNotIn(FAKE_KEY, repr(settings))
         self.assertTrue(settings["key_set"])
         self.assertEqual(settings["key_source"], "admin")
-        self.assertEqual(settings["key_hint"], FAKE_KEY_HINT)
+        self.assertEqual(settings["key_fingerprint"], FAKE_KEY_FINGERPRINT)
 
     def test_set_return_value_never_returns_the_key(self):
         result = model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
         self.assertNotIn(FAKE_KEY, repr(result))
 
-    def test_hint_reveals_only_last_four(self):
+    def test_no_hint_field_survives(self):
+        """Issue #651 removed the last-four `key_hint` outright. A response
+        that grows it back is a response shipping real key characters again,
+        so its ABSENCE is the assertion."""
         model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
-        hint = model_settings.get_model_key_settings(ADMIN, self.ddb)["key_hint"]
-        # The hint is 4 key characters plus the ellipsis, and nothing else.
-        self.assertEqual(hint, "…beef")
-        self.assertNotIn(FAKE_KEY[:-4], hint)
+        settings = model_settings.get_model_key_settings(ADMIN, self.ddb)
+        self.assertNotIn("key_hint", settings)
 
-    def test_short_key_hint_reveals_nothing(self):
-        """A value too short for a safe 4-char tail hints nothing at all."""
-        self.assertEqual(model_settings._key_hint("abc"), "…")
+    def test_fingerprint_is_the_documented_digest(self):
+        model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
+        fingerprint = model_settings.get_model_key_settings(ADMIN, self.ddb)["key_fingerprint"]
+        expected = hashlib.sha256(
+            model_settings.SECRET_FINGERPRINT_SALT + FAKE_KEY.encode("utf-8")
+        ).hexdigest()[: model_settings.SECRET_FINGERPRINT_LENGTH]
+        self.assertEqual(fingerprint, expected)
+        self.assertEqual(len(fingerprint), 8)
 
-    def test_env_sourced_key_is_also_only_hinted(self):
+    def test_different_keys_fingerprint_differently(self):
+        """The one job the fingerprint has: telling two keys apart."""
+        self.assertNotEqual(FAKE_KEY_FINGERPRINT, OTHER_KEY_FINGERPRINT)
+
+    def test_absent_secret_fingerprints_to_nothing(self):
+        self.assertEqual(model_settings.secret_fingerprint(""), "")
+
+    def test_env_sourced_key_is_also_only_fingerprinted(self):
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": FAKE_KEY}):
             settings = model_settings.get_model_key_settings(ADMIN, self.ddb)
         self.assertEqual(settings["key_source"], "env")
-        self.assertEqual(settings["key_hint"], FAKE_KEY_HINT)
+        self.assertEqual(settings["key_fingerprint"], FAKE_KEY_FINGERPRINT)
         self.assertNotIn(FAKE_KEY, repr(settings))
+
+    def test_a_legacy_row_written_before_fingerprints_still_reports_one(self):
+        """A row this store wrote BEFORE issue #651 carries `key_hint` and no
+        `key_fingerprint`. The read recomputes from the live value, so such a
+        row reports a real fingerprint -- and the next write drops the stale
+        hint attribute rather than leaving four key characters in the table.
+        """
+        table = self.ddb.Table(os.environ["MODEL_SETTINGS_TABLE"])
+        table.put_item(
+            Item={
+                "setting_id": model_settings.MODEL_KEY_SETTING_ID,
+                "api_key": FAKE_KEY,
+                "key_hint": "…beef",
+                "updated_at": "1700000000",
+                "updated_by": ADMIN_SUB,
+            }
+        )
+        settings = model_settings.get_model_key_settings(ADMIN, self.ddb)
+        self.assertEqual(settings["key_fingerprint"], FAKE_KEY_FINGERPRINT)
+
+        model_settings.set_model_key(OTHER_KEY, ADMIN, self.ddb)
+        row = table.get_item(Key={"setting_id": model_settings.MODEL_KEY_SETTING_ID})["Item"]
+        self.assertNotIn("key_hint", row)
+        self.assertEqual(row["key_fingerprint"], OTHER_KEY_FINGERPRINT)
 
 
 class TestNeverLoggedNeverAudited(ModelSettingsTestBase):
@@ -171,8 +217,8 @@ class TestNeverLoggedNeverAudited(ModelSettingsTestBase):
             model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
         blob = "\n".join(captured.output)
         self.assertNotIn(FAKE_KEY, blob)
-        # The hint IS logged -- that is what makes the line useful.
-        self.assertIn(FAKE_KEY_HINT, blob)
+        # The fingerprint IS logged -- that is what makes the line useful.
+        self.assertIn(FAKE_KEY_FINGERPRINT, blob)
 
     def test_clear_does_not_log_the_key(self):
         model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
@@ -188,13 +234,29 @@ class TestNeverLoggedNeverAudited(ModelSettingsTestBase):
         self.assertNotIn(FAKE_KEY, blob)
         self.assertNotIn(OTHER_KEY, blob)
 
-    def test_set_writes_an_audit_row_with_actor_and_hints(self):
+    def test_set_writes_an_audit_row_with_actor_and_fingerprints(self):
         model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
         rows = [r for r in self._audit_rows() if r["action"] == "model_key_change"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["actor"], ADMIN_SUB)
         self.assertEqual(rows[0]["target_type"], "model_settings")
-        self.assertEqual(rows[0]["after_key_hint"], FAKE_KEY_HINT)
+        self.assertEqual(rows[0]["after_key_fingerprint"], FAKE_KEY_FINGERPRINT)
+
+    def test_a_rotation_audits_the_fingerprint_before_and_after(self):
+        """The rotation trail #651 asks for: which key was in force, which one
+        replaced it, and neither value."""
+        model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
+        model_settings.set_model_key(OTHER_KEY, ADMIN, self.ddb)
+        # Found by WHICH key it recorded, not by sort order: the audit
+        # timestamp is `f"{int(now)}#{uuid4}"`, so two writes in the same
+        # second sort by a random suffix.
+        rotation = next(
+            r
+            for r in self._audit_rows()
+            if r["action"] == "model_key_change"
+            and r["after_key_fingerprint"] == OTHER_KEY_FINGERPRINT
+        )
+        self.assertEqual(rotation["before_key_fingerprint"], FAKE_KEY_FINGERPRINT)
 
     def test_clear_writes_an_audit_row(self):
         model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
@@ -202,7 +264,7 @@ class TestNeverLoggedNeverAudited(ModelSettingsTestBase):
         rows = [r for r in self._audit_rows() if r["action"] == "model_key_clear"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["actor"], ADMIN_SUB)
-        self.assertEqual(rows[0]["before_key_hint"], FAKE_KEY_HINT)
+        self.assertEqual(rows[0]["before_key_fingerprint"], FAKE_KEY_FINGERPRINT)
 
 
 class TestValidation(ModelSettingsTestBase):
@@ -228,13 +290,29 @@ class TestValidation(ModelSettingsTestBase):
         model_settings.set_model_key(f"  {FAKE_KEY}\n", ADMIN, self.ddb)
         self.assertEqual(model_settings.resolve_openrouter_api_key(self.ddb), FAKE_KEY)
 
-    def test_non_openrouter_prefix_accepted(self):
-        """The `sk-or-` prefix is deliberately NOT validated -- pinning a
-        provider's key format would reject a good key the day it changes."""
-        model_settings.set_model_key("some-other-provider-key", ADMIN, self.ddb)
-        self.assertEqual(
-            model_settings.resolve_openrouter_api_key(self.ddb), "some-other-provider-key"
-        )
+    def test_non_openrouter_prefix_rejected(self):
+        """Issue #651: a wrong-service or half-pasted key fails at the form,
+        not at the next paid review. REVERSES the pre-#651 decision to
+        validate nothing here."""
+        for bad in ("some-other-provider-key", "sk-ant-api03-not-openrouter", "or-v1-missing-sk"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(HTTPException) as ctx:
+                    model_settings.set_model_key(bad, ADMIN, self.ddb)
+                self.assertEqual(ctx.exception.status_code, 400)
+                # The rejected value must not be echoed back: an error detail
+                # is a log sink like any other, and a key pasted into the
+                # wrong field is still a key.
+                self.assertNotIn(bad, str(ctx.exception.detail))
+        # Nothing was stored by any of those attempts.
+        self.assertEqual(model_settings.resolve_openrouter_api_key(self.ddb), "")
+
+    def test_a_future_key_version_still_passes(self):
+        """`sk-or-`, not `sk-or-v1-`: the version segment is the part that
+        moves, and pinning it would reject a good key the day OpenRouter
+        rolls it."""
+        future = "sk-or-v9-TEST-FIXTURE-NOT-A-REAL-KEY-2222-c0de"
+        model_settings.set_model_key(future, ADMIN, self.ddb)
+        self.assertEqual(model_settings.resolve_openrouter_api_key(self.ddb), future)
 
 
 class TestResolutionPrecedence(ModelSettingsTestBase):
@@ -354,7 +432,7 @@ class TestHttpSurface(ModelSettingsTestBase):
         get = self.client.get("/api/admin/model-key")
         self.assertEqual(get.status_code, 200, get.text)
         self.assertNotIn(FAKE_KEY, get.text)
-        self.assertEqual(get.json()["key_hint"], FAKE_KEY_HINT)
+        self.assertEqual(get.json()["key_fingerprint"], FAKE_KEY_FINGERPRINT)
         self.assertEqual(get.json()["key_source"], "admin")
 
     def test_post_missing_body_field_400s(self):

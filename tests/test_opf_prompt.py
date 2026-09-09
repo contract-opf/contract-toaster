@@ -31,11 +31,13 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    prompt must also stay inside the 50K review budget.
 6. Context block (`perspective` + `de_minimis`) appears only when present
    in the source document.
-7. (issue #579) Guard against naming an unbacked tool: while no tools are
-   sent in the request (`structured_output_enabled()` off, the default),
-   the composed prompt must not name any tool -- the model has no way to
-   honor a call it cannot make. Keyed on the current fact that zero tools
-   reach the request; a future change that wires a real tool loop back in
+7. (issue #579) Guard against naming an unbacked tool: the composed prompt
+   must not name a tool the model cannot actually call -- it has no way to
+   honor such an instruction. Checked under BOTH structured-output states
+   (issue #673 made ON the default), which compose byte-identical prompts:
+   `lookup_clause_evidence` is wired into no tool loop in either state
+   (#580), and the forced structured-output tool reaches the request only
+   in the ON state. A future change that wires a real tool loop back in
    must update this guard deliberately, not trip over it by accident.
 
 Exit code: 0 = all pass, 1 = one or more failed.
@@ -294,45 +296,72 @@ def check_6_context_block_only_when_present() -> list[str]:
 def check_7_no_unbacked_tool_reference() -> list[str]:
     """Issue #579: DIGEST_INTRO used to instruct the model to call
     `lookup_clause_evidence` to verify exact clause language before relying
-    on it. No tool is ever sent when `structured_output_enabled()` is off
-    (the default, and the only path production drives today, per
-    `backend/src/config.py`'s own docstring: no `tools`/`tool_choice`
-    fields, no `tool_spec` kwarg reaches the client at all) -- so the model
-    had no way to honor that instruction. Guard: while no tools are sent,
-    the composed prompt must not name one.
+    on it. That tool is implemented but wired into no tool loop (#580), so
+    it reaches no request under ANY configuration -- the model had no way
+    to honor the instruction. Guard: the composed prompt must not name a
+    tool the model cannot call.
 
-    Keyed on the fact that no tool is currently sent: re-add the removed
-    sentence (or any sentence naming a tool) and this fails; remove it and
-    this passes.
+    Issue #673 flipped `structured_output_enabled()` to default ON, so
+    "which tools reach the request" is no longer a single fixed answer.
+    This check therefore composes the prompt under BOTH flag states, set
+    EXPLICITLY (never inherited from the ambient shell and never left to
+    whichever way the default currently points), and asserts:
+
+      - the two states compose byte-identical prompts. `opf_prompt` reads
+        no config at all today; pinning that here is what lets the rest of
+        this check reason about one string instead of two.
+      - neither state's prompt names `lookup_clause_evidence`, which is
+        sent in neither.
+      - the flag-OFF prompt does not name the forced structured-output tool
+        either, which is sent only in the ON state.
+
+    Keyed on what actually reaches the request: re-add the removed sentence
+    (or any sentence naming a tool) and this fails; remove it and this
+    passes.
     """
     failures: list[str] = []
+    doc = _load_fixture()
 
-    with patch.dict("os.environ", {}, clear=True):
-        if config.structured_output_enabled():
+    composed: dict[str, str] = {}
+    for label, value in (("off", "0"), ("on", "1")):
+        with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": value}, clear=True):
+            if config.structured_output_enabled() is not (label == "on"):
+                failures.append(
+                    f"  [7] OPENROUTER_STRUCTURED_OUTPUT={value!r} did not put "
+                    f"structured_output_enabled() into the {label!r} state -- this "
+                    "guard cannot pin what reaches the request"
+                )
+                return failures
+            composed[label] = "\n".join(opf_prompt.compose_opf_system_blocks(doc))
+
+    if composed["off"] != composed["on"]:
+        failures.append(
+            "  [7] the composed prompt differs between the structured-output "
+            "OFF and ON states -- opf_prompt is supposed to be flag-blind; a "
+            "flag-dependent prompt needs its own tool-naming guard per state"
+        )
+
+    # The clause-lookup tool is sent in NEITHER state (no tool loop, #580),
+    # so naming it is unbacked either way.
+    for label, joined in composed.items():
+        if opf_clause_lookup.TOOL_NAME in joined:
             failures.append(
-                "  [7] structured_output_enabled() is True with a cleared "
-                "environment -- this guard's premise (no tools sent) does not "
-                "hold, so it cannot check anything"
+                f"  [7] composed prompt ({label} state) names tool "
+                f"{opf_clause_lookup.TOOL_NAME!r}, which is wired into no tool "
+                "loop and reaches no request -- the model is asked to call "
+                "something it will never receive"
             )
-            return failures
 
-        doc = _load_fixture()
-        joined = "\n".join(opf_prompt.compose_opf_system_blocks(doc))
-
-    # The two tool names this codebase defines: the clause-lookup tool (never
-    # wired to a tool loop) and the forced structured-output tool (sent only
-    # when `structured_output_enabled()` is on, which this guard's premise
-    # rules out). A composed prompt naming either -- or any future tool --
-    # while no tool reaches the request asks the model to perform a
-    # verification it structurally cannot.
-    known_tool_names = {opf_clause_lookup.TOOL_NAME, model_client.STRUCTURED_OUTPUT_TOOL_NAME}
-    for name in known_tool_names:
-        if name in joined:
-            failures.append(
-                f"  [7] composed prompt names tool {name!r}, but no tool is sent "
-                "in the request (structured_output_enabled() is off) -- the "
-                "model is asked to call something it will never receive"
-            )
+    # The forced structured-output tool IS sent in the ON state, so naming
+    # it there would be backed; in the OFF state no `tools`/`tool_choice`
+    # field is sent at all, so naming it is the same unbacked instruction.
+    if model_client.STRUCTURED_OUTPUT_TOOL_NAME in composed["off"]:
+        failures.append(
+            f"  [7] composed prompt names tool "
+            f"{model_client.STRUCTURED_OUTPUT_TOOL_NAME!r} while structured "
+            "output is OFF -- no tool reaches the request in that state, so "
+            "the model is asked to call something it will never receive"
+        )
     return failures
 
 
@@ -344,7 +373,7 @@ def main() -> int:
         ("4", "no tenant-brand strings in composed output", check_4_no_debrand_leak),
         ("5", "wholesale evidence retired: bulk must not reach the prompt", check_5_wholesale_evidence_is_retired),
         ("6", "Context block appears only when perspective/de_minimis present", check_6_context_block_only_when_present),
-        ("7", "no unbacked tool reference while no tool is sent", check_7_no_unbacked_tool_reference),
+        ("7", "no unbacked tool reference, under both structured-output states", check_7_no_unbacked_tool_reference),
     ]
 
     overall_pass = True

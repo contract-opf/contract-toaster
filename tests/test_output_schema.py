@@ -5,7 +5,13 @@ Output-contract schema gate — issue #4, pointed at output-schema-v2.json
 issues[].source_quote field; v2's Issue shape is a strict superset of v1's,
 so this file's checks and fixtures hold for both).
 
-Three checks (all must pass; exit 1 on any failure):
+Four checks (all must pass; exit 1 on any failure):
+
+0. RESOLVER SELF-CHECK: `_active_output_schema_path` — the `ast` reader that
+   answers "which output contract is ACTIVE?" without importing the module —
+   is exercised against sources whose correct answer is known, including the
+   rebinding forms it must REFUSE rather than answer with a stale value
+   (issue #641). Check 1 is only as trustworthy as this resolver.
 
 1. SUBSET CHECK: every field in output_format.every_issue_includes is a top-level
    property of the ACTIVE output contract (primary_review_pass.OUTPUT_SCHEMA_PATH),
@@ -37,8 +43,19 @@ OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v2.json"
 PRIMARY_REVIEW_PASS_SRC = REPO_ROOT / "scripts" / "primary_review_pass.py"
 
 
-def _active_output_schema_path() -> Path:
+# NOTE the quoted annotation: this file must import on the bare
+# `/usr/bin/python3` the output-schema CI step uses, which on the maintainer's
+# machine is 3.9.6 -- `str | None` in a SIGNATURE is evaluated at def time and
+# is a TypeError before 3.10.
+def _active_output_schema_path(source: "str | None" = None) -> Path:
     """`primary_review_pass.OUTPUT_SCHEMA_PATH`, read WITHOUT importing it.
+
+    `source` (issue #641) overrides the module text to parse, so the RESOLVER
+    SELF-CHECK below can drive this function with the binding forms it must
+    refuse. The input domain of this function is "the Python source of
+    `scripts/primary_review_pass.py`", so a synthetic source string is that
+    real domain, not a stand-in for it. Default `None` reads the real file --
+    the only way any production caller in this file reaches it.
 
     The SUBSET CHECK below asks "does this playbook instruct the field set the
     model is actually validated against?", so it has to read the contract in
@@ -59,27 +76,53 @@ def _active_output_schema_path() -> Path:
     Raises rather than falling back to a guessed path: a silent fallback would
     make this check pass against a contract that is not the live one, which is
     the exact failure mode it exists to prevent.
+
+    COVERAGE IS ASSERTED, not assumed (issue #641). This resolver is a partial
+    re-implementation of Python's own name binding: it reads only top-level
+    `ast.Assign` statements with a bare `Name` target. EVERY other binding
+    operation Python has -- a tuple target, an annotated or augmented
+    assignment, an assignment nested inside any compound statement, an
+    `import`, a `def`, a `class`, a parameter, an `except ... as`, a `global`
+    or `nonlocal` declaration, a match-case capture -- is invisible to it, and
+    an invisible REBINDING is worse than an unresolvable one, because the
+    resolver then returns the earlier value and every check built on it passes
+    against a contract that is not live. Demonstrated on this tree: adding
+    `OUTPUT_SCHEMA_PATH, _UNUSED = OUTPUT_SCHEMA_V2_PATH, None` after the real
+    assignment made Python resolve v2 while this file printed
+    "PASS SUBSET CHECK: ... are properties of output-schema-v3.json" and
+    exited 0. So `_assert_every_binding_was_seen` below refuses any source in
+    which a name on the resolved chain is bound anywhere this scan did not
+    look -- its enumeration of "anywhere" is taken from Python's own list of
+    binding operations, not from what this resolver happens to handle.
     """
-    tree = ast.parse(PRIMARY_REVIEW_PASS_SRC.read_text(encoding="utf-8"))
+    tree = ast.parse(
+        PRIMARY_REVIEW_PASS_SRC.read_text(encoding="utf-8") if source is None else source
+    )
     assignments: dict[str, ast.expr] = {}
+    seen_targets: set[int] = set()
     for node in tree.body:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     assignments[target.id] = node.value
+                    seen_targets.add(id(target))
 
     name = "OUTPUT_SCHEMA_PATH"
+    chain = [name]
     seen: set[str] = set()
     while name in assignments and isinstance(assignments[name], ast.Name):
         if name in seen:
             raise RuntimeError(f"cyclic alias resolving OUTPUT_SCHEMA_PATH at {name!r}")
         seen.add(name)
         name = assignments[name].id  # type: ignore[union-attr]
+        chain.append(name)
 
     if name not in assignments:
         raise RuntimeError(
             f"could not resolve OUTPUT_SCHEMA_PATH in {PRIMARY_REVIEW_PASS_SRC}"
         )
+
+    _assert_every_binding_was_seen(tree, chain, seen_targets)
 
     # Expected shape: REPO_ROOT / "playbooks" / "<artifact>.json"
     parts: list[str] = []
@@ -95,6 +138,114 @@ def _active_output_schema_path() -> Path:
             "update this resolver rather than guessing."
         )
     return REPO_ROOT.joinpath(*reversed(parts))
+
+
+def _binding_sites(tree: ast.Module):
+    """Yield `(name, lineno, form, name_node_id)` for EVERY construct in `tree`
+    that binds a name.
+
+    The enumeration is derived from Python's own list of binding operations
+    (language reference, "Binding of names") rather than from what
+    `_active_output_schema_path` happens to read -- a guard enumerated from its
+    own implementation can only ever confirm what it already handles. Each
+    bullet of that list maps to a branch below:
+
+      * assignment statements, annotated (`AnnAssign`) and augmented
+        (`AugAssign`) assignment, tuple/starred unpacking, `for` targets,
+        `with ... as`, and the walrus operator all produce a `Name` in a
+        `Store` context -- the first branch;
+      * `import x`, `import x as y`, `from m import n`, `from m import n as y`
+        -- `Import`/`ImportFrom`. `import a.b` binds `a`, everything else binds
+        the `as` name or the imported name. `ast.alias` carries no `lineno`
+        before 3.10, so the statement's line is reported;
+      * `def` / `async def` and `class` bind their own name;
+      * function parameters (`ast.arg`);
+      * `except E as X` -- `ExceptHandler.name` is a bare string, NOT a `Name`
+        node, so a `Store`-only walk misses it;
+      * `global` / `nonlocal` declarations;
+      * match-case capture patterns (`MatchAs`, `MatchStar`, `MatchMapping`'s
+        `**rest`), on interpreters that have them -- looked up via `getattr`
+        so this module still imports on 3.9, the bare `python3` the
+        output-schema gate can resolve to (see the note above
+        `_active_output_schema_path`).
+
+    `name_node_id` is the `id()` of the `Name` node for the first branch (so a
+    binding the resolver already read can be recognised) and `None` for every
+    form the resolver cannot read at all.
+    """
+    match_pattern_types = tuple(
+        cls
+        for cls in (
+            getattr(ast, "MatchAs", None),
+            getattr(ast, "MatchStar", None),
+            getattr(ast, "MatchMapping", None),
+        )
+        if cls is not None
+    )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            yield node.id, node.lineno, "an assignment target", id(node)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                yield alias.asname or alias.name.split(".")[0], node.lineno, "an import", None
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node.name, node.lineno, "a def", None
+        elif isinstance(node, ast.ClassDef):
+            yield node.name, node.lineno, "a class definition", None
+        elif isinstance(node, ast.arg):
+            yield node.arg, node.lineno, "a function parameter", None
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            yield node.name, node.lineno, "an `except ... as`", None
+        elif isinstance(node, ast.Global):
+            for declared in node.names:
+                yield declared, node.lineno, "a `global` declaration", None
+        elif isinstance(node, ast.Nonlocal):
+            for declared in node.names:
+                yield declared, node.lineno, "a `nonlocal` declaration", None
+        elif match_pattern_types and isinstance(node, match_pattern_types):
+            captured = getattr(node, "name", None) or getattr(node, "rest", None)
+            if captured:
+                yield captured, node.lineno, "a match-case capture pattern", None
+
+
+def _assert_every_binding_was_seen(
+    tree: ast.Module, chain: list[str], seen_targets: set[int]
+) -> None:
+    """Raise unless every binding of every name on the resolved alias `chain`
+    is one of the top-level plain assignments `_active_output_schema_path`
+    actually read (`seen_targets`, identified by node identity).
+
+    Walks the WHOLE tree via `_binding_sites`, whose branches are enumerated
+    from Python's binding operations, so it sees every form the resolver
+    cannot: tuple/starred targets, `AnnAssign`, `AugAssign`, `for` targets,
+    `with ... as`, `except ... as`, `import`/`import ... as`/`from ... import`,
+    `def`, `class`, parameters, `global`/`nonlocal`, match-case captures, and
+    anything nested inside an `if`/`try`/`def`/`class`. Any of these on one of
+    these names that the resolver did not read is a rebinding it would
+    silently ignore -- answering with the earlier value where Python binds the
+    later one.
+
+    A module-scope reader is not required to model function-local shadowing
+    exactly; it is required not to answer confidently when it might be wrong.
+    So this errs strict: it reports ANY unseen binding of these names and asks
+    a human to extend the resolver, rather than guessing which ones matter.
+    """
+    wanted = set(chain)
+    unseen = [
+        (name, lineno, form)
+        for name, lineno, form, name_node_id in _binding_sites(tree)
+        if name in wanted and (name_node_id is None or name_node_id not in seen_targets)
+    ]
+    if unseen:
+        detail = ", ".join(
+            f"{name} at line {lineno} ({form})" for name, lineno, form in sorted(unseen, key=lambda b: b[1])
+        )
+        raise RuntimeError(
+            f"the parsed source binds a name on the OUTPUT_SCHEMA_PATH alias "
+            f"chain in a form this resolver does not read ({detail}). It would return "
+            f"the earlier value and this gate would then check a contract that is not "
+            f"the live one. Extend _active_output_schema_path rather than ignoring this."
+        )
 
 
 ACTIVE_OUTPUT_SCHEMA_PATH = _active_output_schema_path()
@@ -333,6 +484,207 @@ def validate(obj, schema: dict) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Check 0: resolver self-check (issue #641)
+# ---------------------------------------------------------------------------
+
+# Each case is (label, source, expectation). `None` means "must resolve to
+# playbooks/output-schema-v3.json"; a string means "must raise, and the message
+# must contain this".
+#
+# The REBIND cases are the ones that matter: before this check existed, each of
+# them made Python resolve v2 (or a shadowing object) while `check_subset`
+# printed "...are properties of output-schema-v3.json" and the gate exited 0.
+# They are ordinary Python that a developer flipping the contract could
+# plausibly write, which is exactly why "the resolver did not crash" was never
+# evidence.
+#
+# They are enumerated from PYTHON'S binding operations, not from the forms
+# `_assert_every_binding_was_seen` already handles -- a table written from the
+# implementation can only ever confirm what already works. So the rebind cases
+# below deliberately span the whole list: a `Store`-producing form (tuple
+# target, nested-in-`if`, `AnnAssign`, `for` target, `global`+assign), the
+# `import` forms and the `def`/`class` forms (none of which produce a `Store`
+# `Name`, and all of which answered with the stale earlier value until this
+# round), an `except ... as` (whose bound name is a bare string on the handler,
+# invisible to a `Store`-only walk), and a match-case capture on the
+# interpreters that have one. `from model_output_schema import
+# OUTPUT_SCHEMA_PATH` is not hypothetical: scripts/model_output_schema.py
+# defines its own `OUTPUT_SCHEMA_PATH`, so consolidating on it is a plausible
+# next edit to scripts/primary_review_pass.py.
+_RESOLVER_SELF_CHECK_CASES = (
+    (
+        "the shipped shape",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n',
+        None,
+    ),
+    (
+        "an alias chain",
+        'REPO_ROOT = 1\n_V3 = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "_MID = _V3\nOUTPUT_SCHEMA_PATH = _MID\n",
+        None,
+    ),
+    (
+        "a tuple-target rebind",
+        'REPO_ROOT = 1\n_V2 = REPO_ROOT / "playbooks" / "output-schema-v2.json"\n'
+        'OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "OUTPUT_SCHEMA_PATH, _OTHER = _V2, None\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a rebind nested in an if",
+        'REPO_ROOT = 1\n_V2 = REPO_ROOT / "playbooks" / "output-schema-v2.json"\n'
+        'OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "if True:\n    OUTPUT_SCHEMA_PATH = _V2\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "an annotated rebind",
+        'REPO_ROOT = 1\n_V2 = REPO_ROOT / "playbooks" / "output-schema-v2.json"\n'
+        'OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "OUTPUT_SCHEMA_PATH: object = _V2\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a rebind of a name further up the alias chain",
+        'REPO_ROOT = 1\n_V3 = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "OUTPUT_SCHEMA_PATH = _V3\nfor _V3 in []:\n    pass\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a rebind through `global` inside a function",
+        'REPO_ROOT = 1\n_V2 = REPO_ROOT / "playbooks" / "output-schema-v2.json"\n'
+        'OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "def _flip():\n    global OUTPUT_SCHEMA_PATH\n    OUTPUT_SCHEMA_PATH = _V2\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a `from ... import` rebind",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "from model_output_schema import OUTPUT_SCHEMA_PATH\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "an `import ... as` rebind",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "import model_output_schema as OUTPUT_SCHEMA_PATH\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a `from ... import` rebind of a name further up the alias chain",
+        'REPO_ROOT = 1\n_V3 = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "OUTPUT_SCHEMA_PATH = _V3\nfrom model_output_schema import _V3\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a `def` that shadows the constant",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "def OUTPUT_SCHEMA_PATH():\n    pass\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a `class` that shadows the constant",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "class OUTPUT_SCHEMA_PATH:\n    pass\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "an `except ... as` rebind",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+        "try:\n    pass\nexcept Exception as OUTPUT_SCHEMA_PATH:\n    pass\n",
+        "in a form this resolver does not read",
+    ),
+    (
+        "a renamed constant",
+        'REPO_ROOT = 1\nACTIVE_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n',
+        "could not resolve OUTPUT_SCHEMA_PATH",
+    ),
+    (
+        "a non-literal path expression",
+        "REPO_ROOT = 1\nimport os\n"
+        'OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / os.environ["X"]\n',
+        "unexpected path component",
+    ),
+    (
+        "a path that is no longer REPO_ROOT-anchored",
+        'REPO_ROOT = 1\nOUTPUT_SCHEMA_PATH = SOMEWHERE_ELSE / "output-schema-v3.json"\n',
+        "no longer a REPO_ROOT-anchored path expression",
+    ),
+    (
+        "a cyclic alias",
+        "OUTPUT_SCHEMA_PATH = _A\n_A = OUTPUT_SCHEMA_PATH\n",
+        "cyclic alias",
+    ),
+)
+
+if sys.version_info >= (3, 10):
+    # A bare name in a `case` pattern is a CAPTURE pattern -- it binds. This
+    # case is appended rather than written into the table above because `match`
+    # is a SyntaxError on 3.9, and this file must still parse and run on the
+    # bare `python3` the output-schema CI step uses (3.9.6 on the maintainer's
+    # machine).
+    _RESOLVER_SELF_CHECK_CASES += (
+        (
+            "a match-case capture rebind",
+            'REPO_ROOT = 1\n_V2 = REPO_ROOT / "playbooks" / "output-schema-v2.json"\n'
+            'OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"\n'
+            "match _V2:\n    case OUTPUT_SCHEMA_PATH:\n        pass\n",
+            "in a form this resolver does not read",
+        ),
+    )
+
+
+def check_resolver_self_check(failures: list) -> None:
+    """`_active_output_schema_path` is a partial re-implementation of Python's
+    own name binding, so it is checked against sources whose correct answer is
+    known -- including the rebinding forms it must REFUSE rather than silently
+    answer with a stale value (issue #641). Those forms are enumerated from
+    Python's binding operations, so the table can discover a gap in
+    `_binding_sites` instead of merely restating what it already handles.
+
+    Without this, "the gate is green" only ever proved the resolver did not
+    crash on one file. It never proved the path it returned was the one Python
+    computes -- and a wrong path here makes the SUBSET CHECK below validate the
+    playbook against a contract that is not live, while printing PASS.
+
+    Stays stdlib-only (`ast` only), so it runs in the same bare-interpreter CI
+    step as the rest of this file. Its complement -- resolved value ==
+    `primary_review_pass.OUTPUT_SCHEMA_PATH` as the interpreter itself computes
+    it -- needs the import and therefore lives in `tests/test_v3_flip_627.py`.
+    """
+    label = "RESOLVER SELF-CHECK"
+    before = len(failures)
+    for case_label, source, expected_error in _RESOLVER_SELF_CHECK_CASES:
+        try:
+            resolved = _active_output_schema_path(source=source)
+        except RuntimeError as exc:
+            if expected_error is None:
+                failures.append(
+                    f"{label}: {case_label} must resolve, but the resolver refused it: {exc}"
+                )
+            elif expected_error not in str(exc):
+                failures.append(
+                    f"{label}: {case_label} was refused for the wrong reason -- expected a "
+                    f"message containing {expected_error!r}, got: {exc}"
+                )
+            continue
+        if expected_error is not None:
+            failures.append(
+                f"{label}: {case_label} must be REFUSED -- the resolver cannot see that "
+                f"binding, so it silently answered {resolved.name!r} where Python would not."
+            )
+        elif resolved != REPO_ROOT / "playbooks" / "output-schema-v3.json":
+            failures.append(
+                f"{label}: {case_label} resolved to {resolved}, expected "
+                f"{REPO_ROOT / 'playbooks' / 'output-schema-v3.json'}"
+            )
+    if len(failures) == before:
+        print(
+            f"  PASS {label}: all {len(_RESOLVER_SELF_CHECK_CASES)} resolver cases behaved as "
+            f"specified ({sum(1 for _l, _s, e in _RESOLVER_SELF_CHECK_CASES if e)} refused)."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Check 1: subset check
 # ---------------------------------------------------------------------------
 
@@ -475,6 +827,7 @@ def main() -> int:
     print("Output-contract schema gate (issue #4)\n")
     failures = []
 
+    check_resolver_self_check(failures)
     check_subset(failures)
     check_bundle_composition(failures)
     check_validator_fixtures(failures)

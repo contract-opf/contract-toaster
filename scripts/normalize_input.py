@@ -10,7 +10,7 @@ normalization".
 An uploaded `.docx` can carry pre-existing tracked changes, comments, hidden
 text, fields, footnotes, and embedded objects that would otherwise corrupt
 both the standard-form diff (issue #64) and the redline patch (issue #65,
-scripts/redline_patch.py). Before any review work, the document must pass a
+the redline writer). Before any review work, the document must pass a
 normalization pass that applies a DOCUMENTED accept/reject rule to existing
 revisions and produces a clean canonical body -- or, if it cannot, fails
 closed rather than guessing.

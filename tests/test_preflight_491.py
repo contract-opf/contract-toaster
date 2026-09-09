@@ -36,6 +36,11 @@ rider" addendum (see issue #491's comment thread):
   (8) nothing is persisted except the spend-ledger row: no review/
       review_submissions row, no S3 write to the outputs/uploads bucket
       beyond what the gauntlet itself reads in memory.
+  (9) issue #660: the stats and the classifier excerpt describe the
+      ACCEPT-ALL document -- the one the review actually reads -- not the
+      pre-markup skeleton a counterparty draft that arrives AS a redline
+      presents (`TestStatsMeasureTheAcceptAllDocument`, plus two
+      route-level assertions in `TestDeterministicStatsNoModel`).
 
 This test MUST FAIL on the pre-fix tree (the route does not exist) and PASS
 after the fix. Run standalone: `python tests/test_preflight_491.py`.
@@ -87,6 +92,8 @@ os.environ.setdefault("ENV_NAME", "dev")
 import src.model_client as model_client  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
+import src.upload_validation as upload_validation  # noqa: E402
+import extraction_normalization_stage as ens  # noqa: E402
 import preflight_pass  # noqa: E402
 import primary_review_pass  # noqa: E402
 import test_review_api_84 as api84  # noqa: E402
@@ -194,6 +201,119 @@ def _msa_shaped_docx_bytes() -> bytes:
             ),
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #660: a counterparty draft that ARRIVES as a redline -- pending
+# `<w:ins>`/`<w:del>` markup, which is exactly what Word writes for an
+# unaccepted tracked change and exactly what
+# `backend/src/review_routes.post_review_preflight` is handed for such an
+# upload (the real 2026-09-01 upload in issue #660 carried 312 pending
+# insertions and 68 deletions). The run shapes below are the same ones
+# tests/test_accept_all_materializer.py builds its fixtures from.
+# ---------------------------------------------------------------------------
+
+_INSERTED_CLAUSE = (
+    "Each party shall hold the other party Confidential Information in "
+    "strict confidence and shall not disclose it to any third party."
+)
+_STRUCK_CLAUSE = (
+    "The Recipient shall indemnify the Discloser for any breach of this "
+    "Agreement."
+)
+
+
+def _inserted_paragraph(text: str, revision_id: int) -> str:
+    return (
+        f'<w:p><w:ins w:id="{revision_id}" w:author="alice" '
+        f'w:date="2026-01-01T00:00:00Z">'
+        f"<w:r><w:t>{_escape(text)}</w:t></w:r></w:ins></w:p>"
+    )
+
+
+def _struck_paragraph(text: str, revision_id: int) -> str:
+    return (
+        f'<w:p><w:del w:id="{revision_id}" w:author="alice" '
+        f'w:date="2026-01-01T00:00:00Z">'
+        f"<w:r><w:delText>{_escape(text)}</w:delText></w:r></w:del></w:p>"
+    )
+
+
+# An inline delete+insert pair inside an otherwise-plain paragraph -- the
+# most common redline shape of all, and the one that proves the accept-all
+# reading is not merely "count everything in the file": the old number must
+# be gone from the excerpt, not merely joined by the new one.
+_REDLINED_TERM_PARAGRAPH = (
+    "<w:p><w:r><w:t>This Agreement remains in effect for </w:t></w:r>"
+    '<w:del w:id="3" w:author="alice" w:date="2026-01-01T00:00:00Z">'
+    "<w:r><w:delText>one (1) year</w:delText></w:r></w:del>"
+    '<w:ins w:id="4" w:author="alice" w:date="2026-01-01T00:00:00Z">'
+    "<w:r><w:t>two (2) years</w:t></w:r></w:ins>"
+    "<w:r><w:t> from the Effective Date.</w:t></w:r></w:p>"
+)
+
+# The words a reader sees once the pending changes are accepted -- i.e. the
+# document the review actually reads. Spelled out here rather than
+# recomputed from the fixture pieces, so the expected count below is not the
+# implementation's own arithmetic restated back at it.
+_ACCEPTED_WORDS = (
+    "Confidentiality "
+    + _INSERTED_CLAUSE
+    + " Indemnity Term "
+    + "This Agreement remains in effect for two (2) years from the "
+    + "Effective Date."
+).split()
+
+
+def _redlined_docx_bytes() -> bytes:
+    """Three clauses: one whose body exists ONLY inside `<w:ins>`, one
+    wholly struck by `<w:del>`, and one carrying an inline delete+insert
+    pair."""
+    return _build_docx(
+        [
+            _heading_paragraph("Confidentiality"),
+            _inserted_paragraph(_INSERTED_CLAUSE, 1),
+            _heading_paragraph("Indemnity"),
+            _struck_paragraph(_STRUCK_CLAUSE, 2),
+            _heading_paragraph("Term"),
+            _REDLINED_TERM_PARAGRAPH,
+        ]
+    )
+
+
+def _wholly_struck_clause_docx_bytes() -> bytes:
+    """A document `normalize_input` FAILS CLOSED on -- the clause's only
+    pending revision accepts to empty text. Production reaches it whenever a
+    counterparty strikes an entire clause. The premise is asserted, not
+    assumed, in the test that uses this."""
+    return _build_docx(
+        [_heading_paragraph("Indemnity"), _struck_paragraph(_STRUCK_CLAUSE, 1)]
+    )
+
+
+def _docx_with_unbound_prefix_sidecar(base_docx: bytes) -> bytes:
+    """`base_docx` plus a `docProps/core.xml` whose root uses a namespace
+    prefix nothing declares.
+
+    This is the real, unmocked path on which `materialize_accept_all` fails
+    while the document itself is perfectly readable, and it is reachable
+    from the route: the upload gauntlet parses every XML part with expat and
+    namespace processing OFF (`upload_validation._parse_xml_hardened`), for
+    which an unbound prefix is just a tag name, while
+    `redline_generate.verify_docx_round_trip` -- which
+    `materialize_accept_all` calls on its own output -- parses the same part
+    with namespace-aware ElementTree and raises. Word tolerates plenty that
+    ElementTree will not, so this stands in for any third-party generator's
+    sidecar part; `extract_document_paragraphs` never opens it at all.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(base_docx)) as src, zipfile.ZipFile(
+        buf, "w", zipfile.ZIP_DEFLATED
+    ) as out:
+        for info in src.infolist():
+            out.writestr(info, src.read(info.filename))
+        out.writestr("docProps/core.xml", "<cp:coreProperties/>")
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +498,158 @@ class TestDeterministicStatsNoModel(PreflightRouteTestBase):
         body = resp.json()
         self.assertEqual(len(body["title"]), preflight_pass.TITLE_MAX_CHARS)
 
+    def test_the_route_reports_the_accept_all_word_count_for_a_redlined_upload(self):
+        """Issue #660, end to end through the real route: the card a
+        reviewer sees for a counterparty draft that arrives as a redline
+        describes the document the review will read."""
+        resp = self._preflight("owner-redlined", _redlined_docx_bytes())
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["word_count"], len(_ACCEPTED_WORDS))
+        self.assertEqual(body["title"], "Confidentiality")
+
+    def test_a_document_the_materializer_chokes_on_still_gets_a_card(self):
+        """The degradation path, driven through the REAL gauntlet rather
+        than a patched materializer: the upload below passes
+        `upload_validation`'s expat parse and then makes
+        `materialize_accept_all` raise. Issue #660 must not turn a document
+        preflight could previously describe into an HTTP 400."""
+        docx_bytes = _docx_with_unbound_prefix_sidecar(_nda_shaped_docx_bytes())
+
+        resp = self._preflight("owner-unparseable-sidecar", docx_bytes)
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["title"], "Mutual Non-Disclosure Agreement")
+        self.assertEqual(body["word_count"], 55)
+
+
+# -- issue #660: the stats describe the ACCEPT-ALL document ------------------
+
+
+class TestStatsMeasureTheAcceptAllDocument(unittest.TestCase):
+    """`compute_document_stats` is pure and offline, so these drive it
+    directly rather than through the route harness above.
+
+    The defect: `extraction_normalization_stage._build_paragraph_record`
+    sets a physical paragraph's `text` to its ORIGINAL text -- every pending
+    `<w:ins>` removed -- so preflight measured and excerpted the pre-markup
+    skeleton of a redlined upload. Issue #660 measured a real five-page
+    draft carrying 312 pending insertions: 465 words reported for a
+    2,494-word document.
+    """
+
+    def test_body_text_that_exists_only_inside_w_ins_is_counted(self):
+        stats = preflight_pass.compute_document_stats(_redlined_docx_bytes())
+
+        self.assertEqual(stats["word_count"], len(_ACCEPTED_WORDS))
+        self.assertEqual(
+            stats["page_estimate"],
+            max(
+                1,
+                round(len(_ACCEPTED_WORDS) / preflight_pass.WORDS_PER_PAGE_ESTIMATE),
+            ),
+        )
+
+    def test_the_pre_660_reading_would_have_reported_materially_less(self):
+        """The red half, kept executable: the ORIGINAL-text sum this
+        function used to return is strictly smaller than the accept-all one,
+        so the assertion above is not something the old code satisfied too.
+        """
+        docx_bytes = _redlined_docx_bytes()
+        groups = ens.extract_document_paragraphs(docx_bytes)
+        original_only = sum(
+            len(p.get("text", "").split())
+            for group in groups
+            for p in group.get("physical_paragraphs") or []
+        ) + sum(
+            len(group["heading"].split())
+            for group in groups
+            if group.get("heading") and group["heading"] != "<untitled>"
+        )
+
+        self.assertLess(
+            original_only,
+            preflight_pass.compute_document_stats(docx_bytes)["word_count"],
+        )
+
+    def test_the_excerpt_handed_to_the_classifier_carries_inserted_language(self):
+        stats = preflight_pass.compute_document_stats(_redlined_docx_bytes())
+
+        self.assertIn(_INSERTED_CLAUSE, stats["excerpt"])
+        # ...and not the language the counterparty struck: accept-all means
+        # deleted text is GONE, not merely reordered around the insertion.
+        self.assertNotIn(_STRUCK_CLAUSE, stats["excerpt"])
+        self.assertNotIn("one (1) year", stats["excerpt"])
+        self.assertIn("two (2) years", stats["excerpt"])
+
+    def test_a_document_with_no_tracked_changes_reports_what_it_always_did(self):
+        """Regression pin: the literal values the pre-#660 implementation
+        returned for this fixture. A document with nothing pending must be
+        untouched by the accept-all step -- and `review_spine` makes the
+        same choice, leaving the bytes alone when there is nothing to
+        accept."""
+        stats = preflight_pass.compute_document_stats(_nda_shaped_docx_bytes())
+
+        self.assertEqual(stats["word_count"], 55)
+        self.assertEqual(stats["page_estimate"], 1)
+        self.assertEqual(stats["paragraph_count"], 1)
+        self.assertEqual(stats["title"], "Mutual Non-Disclosure Agreement")
+        self.assertTrue(
+            stats["excerpt"].startswith("Mutual Non-Disclosure Agreement: ")
+        )
+        self.assertIn("2. Term.", stats["excerpt"])
+
+    def test_a_fail_closed_document_still_gets_a_stats_card(self):
+        """The property this function's docstring deliberately defends: a
+        document `normalize_input` refuses still gets described.
+        `materialize_accept_all` is a byte-level splice with no ambiguity
+        rule of its own, so routing the bytes through it does not import
+        normalization's fail-closed path."""
+        docx_bytes = _wholly_struck_clause_docx_bytes()
+
+        # The premise, asserted rather than assumed -- otherwise this test
+        # proves nothing about the fail-closed case.
+        self.assertEqual(
+            ens.extract_and_normalize(docx_bytes).get("status"),
+            "unnormalizable_input",
+        )
+
+        stats = preflight_pass.compute_document_stats(docx_bytes)
+
+        self.assertEqual(stats["title"], "Indemnity")
+        self.assertEqual(stats["paragraph_count"], 1)
+        # The struck clause accepts to nothing, so only the heading counts.
+        self.assertEqual(stats["word_count"], 1)
+
+    def test_a_genuine_extraction_failure_still_raises_document_stats_error(self):
+        not_a_docx = b"PK\x03\x04 this is not a WordprocessingML package"
+
+        with self.assertRaises(preflight_pass.DocumentStatsError):
+            preflight_pass.compute_document_stats(not_a_docx)
+
+    def test_a_materializer_failure_degrades_to_the_upload_bytes(self):
+        """The other branch of the accept-all step, with the failure
+        produced rather than patched in -- see
+        `_docx_with_unbound_prefix_sidecar` for why the gauntlet lets this
+        document through and the materializer then refuses it."""
+        docx_bytes = _docx_with_unbound_prefix_sidecar(_redlined_docx_bytes())
+
+        # Both halves of the premise, asserted: the gauntlet's own parser
+        # accepts the part, and `materialize_accept_all` raises on it.
+        upload_validation._parse_xml_hardened(b"<cp:coreProperties/>")
+        with self.assertRaises(ValueError):
+            ens.materialize_accept_all(docx_bytes)
+
+        stats = preflight_pass.compute_document_stats(docx_bytes)
+
+        # Degraded to the pre-#660 reading rather than refusing: a card,
+        # carrying the original-text word count.
+        self.assertEqual(stats["title"], "Confidentiality")
+        self.assertGreater(stats["word_count"], 0)
+        self.assertLess(stats["word_count"], len(_ACCEPTED_WORDS))
+
 
 # -- (2) + (3) match verdict: likely (both paper sides), unlikely ------------
 
@@ -405,10 +677,20 @@ class TestMatchVerdict(PreflightRouteTestBase):
                 self.assertEqual(body["paper_side"], paper_side)
 
     def test_msa_document_nda_playbook_is_unlikely(self):
+        """Issue #659 changed WHAT the classifier is able to answer here,
+        not the verdict. This deployment installs one playbook (the NDA
+        sample); "Master Services Agreement" was in the vocabulary only
+        because `CANONICAL_AGREEMENT_TYPES` shipped it, and that list is
+        gone -- classification now describes what is actually installed, so
+        a document matching nothing installed comes back as
+        `UNCLASSIFIED_AGREEMENT_TYPE` ("an unrecognized type" in the UI).
+        The mismatch verdict against the selected NDA playbook is unchanged:
+        still `unlikely`, still amber, still advisory.
+        """
         self._set_preflight_client(
             FakePreflightModelClient(
                 {
-                    "agreement_type_guess": "Master Services Agreement",
+                    "agreement_type_guess": preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE,
                     "paper_side": "ours",
                     "confidence": 0.85,
                     "one_line_summary": "A master services agreement.",
@@ -419,11 +701,40 @@ class TestMatchVerdict(PreflightRouteTestBase):
 
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
+        self.assertEqual(
+            body["agreement_type_guess"], preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE
+        )
         self.assertEqual(body["match"], "unlikely")
         # Advisory only -- the response carries nothing that could gate the
         # frontend's Upload button (no "blocked"/"error" field at all).
         self.assertNotIn("blocked", body)
         self.assertNotIn("error", body)
+
+    def test_a_shipped_contract_type_is_no_longer_offered_to_the_model(self):
+        """Issue #659's deletion, asserted where it actually bites: the enum
+        the route sends the cheap model. Only the installed playbook's own
+        type (plus the null answer) may appear -- a type this deployment has
+        no playbook for, however common, must not be offerable."""
+        client = FakePreflightModelClient(
+            {
+                "agreement_type_guess": "Non-Disclosure Agreement",
+                "paper_side": "ours",
+                "confidence": 0.9,
+                "one_line_summary": "A mutual NDA between two parties.",
+            }
+        )
+        self._set_preflight_client(client)
+        resp = self._preflight("owner-enum", _nda_shaped_docx_bytes())
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(client.invocations), 1)
+        enum = client.invocations[0]["output_schema"]["properties"][
+            "agreement_type_guess"
+        ]["enum"]
+        self.assertEqual(
+            sorted(enum),
+            sorted(["Non-Disclosure Agreement", preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE]),
+        )
 
 
 # -- injection-defense rider item 2: closed vocabulary, end-to-end ------------

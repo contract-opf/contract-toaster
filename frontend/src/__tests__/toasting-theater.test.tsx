@@ -1,5 +1,6 @@
 /**
- * toasting-theater.test.tsx — issue #496.
+ * toasting-theater.test.tsx — the stage table itself (issue #496, as amended
+ * by issues #667 and #727).
  *
  * The wait is minutes long and was a progress bar. The architecture underneath
  * is genuinely dramatic — a primary reviewer marks the document up, then an
@@ -9,61 +10,68 @@
  * The load-bearing property is not "the vignettes are pretty". It is that the
  * theater NEVER claims a stage the backend did not report:
  *
- *   - an unknown token renders the indeterminate treatment, not a guess
- *   - a null/absent stage renders today's behaviour, unchanged
- *   - every caption comes from ONE exported map, so the glass and (via #497)
- *     the tab title cannot disagree
+ *   - an unknown token resolves to nothing, so the caller can only render the
+ *     indeterminate treatment rather than a guess
+ *   - a null/absent stage does the same
+ *   - every caption comes from ONE table, so the glass and (via #497) the tab
+ *     title cannot disagree
  *
- * A vignette that advances on a timer would look identical to a truthful one
- * right up until the moment it lied, which is why the map is keyed only to
+ * A vignette that advanced on a timer would look identical to a truthful one
+ * right up until the moment it lied, which is why the table is keyed only to
  * tokens `run_review` actually emits and there is no interpolation between
  * them.
+ *
+ * WHAT #667 CHANGED. Each stage used to draw a small paper-and-pencil scene
+ * beside the darkening toast slice — two illustrations for one state — and the
+ * owner kept the toast. The CAPTION is the carrier, and that is what these
+ * assertions protect.
+ *
+ * WHAT #727 CHANGED. This file used to render `ToasterProgress` and
+ * `ToasterStyles`, the hero's own progress markup and inline stylesheet. #727
+ * deleted that surface, so what is left here is the table on its own — which
+ * is what the module docstring above was always describing. The RENDERED half
+ * moved rather than disappearing:
+ *
+ *   - a reported stage's caption, its step text, its polite announcement and
+ *     its doneness hook — review-progress-stages.test.tsx, against the real
+ *     `ReviewSubmission`;
+ *   - the indeterminate treatment for an unreported or unrecognised stage —
+ *     the same file;
+ *   - the reduced-motion guard — orbit-diner-motion-723.test.tsx and
+ *     `scripts/focus-audit.mjs`, both against `orbit-diner/motion.ts`.
+ *
+ * The one assertion that did NOT move is the old "#510 rail": the hero's
+ * caption had to stay out of the live-region role because its step text
+ * already announced every transition. The console decided that the other way
+ * round — `review-stage-caption` IS its polite region — so the rail belonged
+ * to the deleted surface, not to the table, and it is gone with it rather than
+ * being restated as something the console does not do.
+ *
+ * `STAGE_VIGNETTES` is a projection of `orbit-diner/state.ts`'s `stages` since
+ * #727 (one caption table, per that ticket's acceptance criteria), so these
+ * are assertions about what that projection produces.
  */
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { ToasterHero, ToasterStyles } from '../toaster/Toaster';
+import { stages } from '../orbit-diner/state';
 import { STAGE_VIGNETTES, stageNumber, vignetteForStage } from '../toaster/stageTheater';
 
-const ENTRIES = [
-  { playbook_id: 'eiaa', display_name: 'Affiliation', status: 'active' as const },
-];
-
-function renderWorking(progressStage: string | null) {
-  return render(
-    <>
-      <ToasterStyles />
-      <ToasterHero
-        entries={ENTRIES}
-        value="eiaa"
-        onChange={() => {}}
-        phase="working"
-        progressStage={progressStage}
-      />
-    </>,
-  );
-}
-
-describe('issue #496 — every reported stage gets its own vignette and caption', () => {
+describe('issue #496 — every reported stage gets its caption', () => {
   it.each(STAGE_VIGNETTES.map((v) => [v.token, v] as const))(
-    '%s renders its scene and its caption',
+    '%s resolves to its own caption',
     (token, vignette) => {
-      renderWorking(token);
-      expect(screen.getByTestId('review-stage-caption').textContent).toBe(vignette.caption);
-      expect(screen.getByTestId('review-stage-vignette')).toHaveAttribute(
-        'data-vignette',
-        vignette.art,
-      );
+      expect(vignetteForStage(token)).toBe(vignette);
+      expect(vignette.caption.length).toBeGreaterThan(0);
     },
   );
 
-  it('the two model passes are visually distinguishable, not two shades of one thing', () => {
-    // The critic vignette's whole message is "a DIFFERENT model wrote this
-    // one". If both passes drew the same scene the stage would be truthful
-    // and still say nothing.
+  it('the two model passes are distinguishable, not two shades of one thing', () => {
+    // The critic stage's whole message is "a DIFFERENT model wrote this one".
+    // If both passes said the same thing the stage would be truthful and still
+    // say nothing. Held on the captions since #667 left one illustration.
     const primary = STAGE_VIGNETTES.find((v) => v.token === 'primary_pass');
     const critic = STAGE_VIGNETTES.find((v) => v.token === 'critic_pass');
-    expect(primary?.art).not.toBe(critic?.art);
     expect(primary?.caption).not.toBe(critic?.caption);
+    expect(primary?.label).not.toBe(critic?.label);
   });
 
   it('the critic caption says plainly what the critic is', () => {
@@ -74,26 +82,6 @@ describe('issue #496 — every reported stage gets its own vignette and caption'
 });
 
 describe('issue #496 — it never claims a stage the backend did not report', () => {
-  it('an UNKNOWN token falls back to the indeterminate treatment', () => {
-    // A stage renamed on the backend, or one a newer runner emits that this
-    // build has never heard of. Guessing would be worse than saying nothing.
-    renderWorking('polishing_the_prose');
-    expect(screen.getByTestId('review-progress-indeterminate')).toBeTruthy();
-    expect(screen.queryByTestId('review-stage-vignette')).toBeNull();
-    expect(screen.queryByTestId('review-stage-caption')).toBeNull();
-  });
-
-  it('a NULL stage renders the pre-existing behaviour, unchanged', () => {
-    renderWorking(null);
-    expect(screen.getByTestId('review-progress-indeterminate')).toBeTruthy();
-    expect(screen.queryByTestId('review-stage-vignette')).toBeNull();
-  });
-
-  it('an EMPTY stage token is treated as absent, not as a stage', () => {
-    renderWorking('');
-    expect(screen.getByTestId('review-progress-indeterminate')).toBeTruthy();
-  });
-
   it.each([['polishing_the_prose'], [null], [undefined], ['']])(
     'vignetteForStage(%s) returns null on its own, not just via the caller',
     (stage) => {
@@ -106,11 +94,10 @@ describe('issue #496 — it never claims a stage the backend did not report', ()
     },
   );
 
-  it('the step number and the vignette always agree about which stage it is', () => {
+  it('the step number and the caption always agree about which stage it is', () => {
     // Two derivations of "which stage" that could drift. They come from the
     // same array, and this is what pins that they still do.
     for (const vignette of STAGE_VIGNETTES) {
-      renderWorking(vignette.token).unmount();
       expect(stageNumber(vignette.token)).toBe(STAGE_VIGNETTES.indexOf(vignette) + 1);
     }
     expect(stageNumber('polishing_the_prose')).toBe(0);
@@ -131,42 +118,22 @@ describe('issue #496 — one map, so the glass and the tab cannot disagree', () 
     expect(captions.every((c) => c.length > 0)).toBe(true);
     expect(new Set(captions).size).toBe(captions.length);
   });
-});
 
-describe('issue #496 — the rails', () => {
-  it('the vignette is decoration; the caption carries the meaning', () => {
-    renderWorking('critic_pass');
-    expect(screen.getByTestId('review-stage-vignette')).toHaveAttribute('aria-hidden', 'true');
-  });
-
-  it('the caption is NOT a second live region', () => {
-    // #510: the step text above it already announces every transition, and a
-    // second polite region mutating in the same commit is exactly that defect.
-    renderWorking('critic_pass');
-    const caption = screen.getByTestId('review-stage-caption');
-    expect(caption.getAttribute('aria-live')).toBeNull();
-    expect(caption.getAttribute('role')).toBeNull();
-  });
-
-  it('reduced motion neutralises every vignette animation AND keeps the ink visible', () => {
-    renderWorking('primary_pass');
-    const css = Array.from(document.querySelectorAll('style'))
-      .map((node) => node.textContent ?? '')
-      .join('\n');
-    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
-    for (const part of [
-      'toaster-vignette__pen',
-      'toaster-vignette__mark',
-      'toaster-vignette__strike',
-      'toaster-vignette__merge-a',
-      'toaster-vignette__merge-b',
-      'toaster-vignette__roll',
-    ]) {
-      expect(reduced).toContain(part);
+  it('is the ONLY caption table — it projects the console’s, never restates it', () => {
+    // Issue #727's acceptance criterion, as a fact rather than a promise: the
+    // labels and captions here must BE the console's, so a copy edit in
+    // `orbit-diner/state.ts` cannot leave the tab title saying the old words.
+    // Read out of the shipped module, not out of a fixture.
+    const table = stages;
+    expect(STAGE_VIGNETTES).toHaveLength(Object.keys(table).length);
+    for (const vignette of STAGE_VIGNETTES) {
+      expect(vignette.label).toBe(table[vignette.token].label);
+      expect(vignette.caption).toBe(table[vignette.token].caption);
+      expect(vignette.token).toBe(
+        (Object.keys(table) as (keyof typeof table)[]).find(
+          (key) => table[key].step === STAGE_VIGNETTES.indexOf(vignette) + 1,
+        ),
+      );
     }
-    // The marks animate IN from scaleX(0). Killing the animation without
-    // neutralising the transform would leave the scene permanently blank —
-    // a "reduced motion" that hides the content instead of stilling it.
-    expect(reduced).toMatch(/transform:\s*none\s*!important/);
   });
 });

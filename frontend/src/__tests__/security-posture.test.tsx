@@ -24,6 +24,11 @@ import App from '../App';
 import AdminUsers from '../AdminUsers';
 import AdminRetention from '../AdminRetention';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+} from './support/consoleSurface';
 
 // A hostile string that would execute if it were ever parsed as HTML
 // (e.g. via dangerouslySetInnerHTML or an unescaped template). If any of
@@ -171,6 +176,10 @@ describe('XSS posture — AdminRetention.tsx', () => {
 describe('XSS posture — ReviewSubmission.tsx (model output)', () => {
   it('renders an untrusted model-output message as escaped text, never as HTML', async () => {
     stubFetch({
+      // Routed HERE and not in `stubFetch` itself: the storage-posture tests
+      // above assert that NOTHING is written to localStorage, and a catalog
+      // legitimately writes the allowlisted last-playbook key (issue #733).
+      '/api/playbooks': DEFAULT_PLAYBOOKS,
       'POST /api/reviews': { review_id: 'rev-42', resumed: false },
       'GET /api/reviews/rev-42': {
         review_id: 'rev-42',
@@ -188,9 +197,9 @@ describe('XSS posture — ReviewSubmission.tsx (model output)', () => {
     });
     const input = screen.getByTestId('review-file-input');
     fireEvent.change(input, { target: { files: [file] } });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
 
-    const result = await screen.findByTestId('review-result');
+    const result = await findReviewResult();
     expect(result.textContent).toContain(HOSTILE);
     expect(result.querySelector('img')).toBeNull();
   });
@@ -256,7 +265,13 @@ describe('source posture (regression guard)', () => {
     // starts writing to storage, in ANY subdirectory, still fails this test;
     // and if any of the three grows a SECOND call site, the exact-one-match
     // assertion below fails too.
-    const ALLOWED_SETITEM_FILES = ['toaster/notify.ts', 'toaster/sounds.ts', 'lastPlaybook.ts'];
+    const ALLOWED_SETITEM_FILES = [
+      'toaster/notify.ts',
+      'toaster/sounds.ts',
+      'lastPlaybook.ts',
+      'lastBrowning.ts',
+      'lastNotesMode.ts',
+    ];
     const filesChecked = new Set<string>();
 
     for (const { file, content } of readComponentSources()) {
@@ -324,18 +339,46 @@ describe('localStorage content posture (issue #489)', () => {
     ).toBe(false);
   });
 
-  it('using both allowed preferences together writes exactly those two keys, nothing else', async () => {
+  it('the last-selected browning (lastBrowning.ts) persists only the level, never a token', async () => {
+    window.localStorage.clear();
+    const { LAST_BROWNING_STORAGE_KEY, writeLastBrowning } = await import('../lastBrowning');
+
+    writeLastBrowning('dark');
+    expect(window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY)).toBe('dark');
+    expect(
+      looksLikeAToken(window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY) as string),
+    ).toBe(false);
+  });
+
+  it('the last-selected notes mode (lastNotesMode.ts) persists only the mode, never a token', async () => {
+    window.localStorage.clear();
+    const { LAST_NOTES_MODE_STORAGE_KEY, writeLastNotesMode } = await import('../lastNotesMode');
+
+    writeLastNotesMode('internal');
+    expect(window.localStorage.getItem(LAST_NOTES_MODE_STORAGE_KEY)).toBe('internal');
+    expect(
+      looksLikeAToken(window.localStorage.getItem(LAST_NOTES_MODE_STORAGE_KEY) as string),
+    ).toBe(false);
+  });
+
+  it('using allowed preferences together writes exactly those keys, nothing else', async () => {
     window.localStorage.clear();
     const { MUTE_STORAGE_KEY, setMuted } = await import('../toaster/sounds');
     const { LAST_PLAYBOOK_STORAGE_KEY, writeLastPlaybookId } = await import('../lastPlaybook');
+    const { LAST_BROWNING_STORAGE_KEY, writeLastBrowning } = await import('../lastBrowning');
+    const { LAST_NOTES_MODE_STORAGE_KEY, writeLastNotesMode } = await import('../lastNotesMode');
 
     setMuted(true);
     writeLastPlaybookId('sample-agreement');
+    writeLastBrowning('dark');
+    writeLastNotesMode('none');
 
-    expect(window.localStorage.length).toBe(2);
+    expect(window.localStorage.length).toBe(4);
     const values = [
       window.localStorage.getItem(MUTE_STORAGE_KEY),
       window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY),
+      window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY),
+      window.localStorage.getItem(LAST_NOTES_MODE_STORAGE_KEY),
     ];
     expect(values.every((value) => typeof value === 'string' && !looksLikeAToken(value))).toBe(
       true,

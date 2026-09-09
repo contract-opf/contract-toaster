@@ -70,6 +70,13 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, BACKEND_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import model_client as model_client_module  # noqa: E402
 import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
@@ -343,10 +350,10 @@ def test_v1_review_carries_no_opf_knowledge_lineage(failures: list[str]) -> None
     repo's own convention for every other OPF-only result field."""
     sys.path.insert(0, str(REPO_ROOT / "tests"))
     from test_review_spine import _build_draft_docx, _load_bundle  # noqa: E402 (local import)
-    import diff_standard_form as dsf_module
+    import synthetic_form_paragraphs as sfp_module
 
     bundle = _load_bundle()
-    docx_bytes = _build_draft_docx(dsf_module, {})
+    docx_bytes = _build_draft_docx(sfp_module, {})
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client_module.FakeBedrockClient(

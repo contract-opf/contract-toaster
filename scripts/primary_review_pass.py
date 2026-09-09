@@ -106,7 +106,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -274,7 +274,8 @@ _RETIRED_ISSUE_KEYS = tuple(
 
 # ---------------------------------------------------------------------------
 # Cost-model constants (issue #14). Mirrors backend/src/reviews.py's
-# MAX_INPUT_TOKENS / MAX_OUTPUT_TOKENS / MAX_RETRIES_PER_PASS. Duplicated,
+# MAX_INPUT_TOKENS / MAX_RETRIES_PER_PASS / MAX_TRUNCATION_RETRIES_PER_PASS.
+# Duplicated,
 # not imported, per this repo's existing convention of each module owning
 # its own copy of small shared sentinels/constants (see reviews.py's own
 # comment on TERMINAL_REVIEW_STATUSES / GLOBAL_SETTING_ID duplicated between
@@ -289,26 +290,43 @@ _RETIRED_ISSUE_KEYS = tuple(
 # `document_too_large`. Nothing degrades quietly in between.
 # ---------------------------------------------------------------------------
 MAX_INPUT_TOKENS = 100_000
-MAX_OUTPUT_TOKENS = 8_000
 MAX_RETRIES_PER_PASS = 1
 
-# Issue #527 follow-up: the ceiling a truncation retry may widen the content
-# budget to. MAX_OUTPUT_TOKENS is sized for the ordinary review; a document
-# that genuinely needs more (many clauses, each carrying full replacement
-# text) should get one shot at more room rather than dying at the ordinary
-# ceiling. Bounded, not unbounded: `max_tokens` is a real cost commitment and
-# the point of a budget is that it is finite.
-MAX_OUTPUT_TOKENS_CEILING = 32_000
+# Issue #658: there is no flat output budget any more. `MAX_OUTPUT_TOKENS`
+# was 8_000 from the first primary-pass commit (18a7434) and was never
+# re-derived when the v3 block-transcript contract (1aef16e) made the
+# response roughly proportional to the reviewed text -- a five-page
+# agreement died on `model_output_truncated`. The budget each pass asks for
+# is now sized from the document being reviewed and clamped by the selected
+# model's OWN declared output cap:
+# `model_client.output_budget_for_document(document_tokens,
+# model_client.openrouter_model_max_output_tokens(model_id))`, whose comment
+# carries the FLOOR/K/CEILING derivation. There is NO caller-supplied
+# override: `run_primary_pass` sizes every request itself, which is what
+# makes "the budget never exceeds the selected model's declared cap"
+# structural rather than a convention a caller could break.
+#
+# Issue #658 also gives TRUNCATION its own retry allowance. Before this,
+# MAX_RETRIES_PER_PASS was shared across every failure class, so a schema or
+# `source_mismatch` rejection on attempt 1 left attempt 2 running at the
+# un-widened budget where a truncation was immediately terminal. A response
+# that did not fit must ALWAYS get at least one attempt with more room --
+# that is the one recoverable failure where the model did nothing wrong.
+MAX_TRUNCATION_RETRIES_PER_PASS = 1
 
 
-def widen_output_budget(current: int) -> int:
-    """The content budget a retry-after-truncation asks for.
+def widen_output_budget(current: int, ceiling: int) -> int:
+    """The content budget a retry-after-truncation asks for -- see
+    `model_client.widen_output_budget`, which owns the step size so both
+    review passes and the spend model read one definition.
 
-    Doubling (rather than stepping to the ceiling in one jump) keeps the
-    common case -- an answer that just overshot -- from committing to the
-    largest possible spend, while still converging on the ceiling.
+    `ceiling` is the selected model's own declared output cap (issue #658);
+    it is no longer a module constant, because a budget larger than roughly
+    8-12k was unreachable inside the request timeout until issue #657
+    streamed the response, and a fixed 32_000 is now the FAIL-CLOSED default
+    for a model that declares nothing, not the limit for one that does.
     """
-    return min(max(current * 2, current + 1), MAX_OUTPUT_TOKENS_CEILING)
+    return _model_client.widen_output_budget(current, ceiling)
 
 # ARCHITECTURE.md -> "Per-pass prompt manifest" -> document size policy.
 #
@@ -372,16 +390,65 @@ def estimate_tokens(text: str) -> int:
 # System prompt: (a) guidance, (b) binary-decision overlay, (c) playbook.
 # ---------------------------------------------------------------------------
 
-REVIEW_GUIDANCE_BLOCK = (
-    "You are reviewing a counterparty-modified contract against your "
-    "organization's standard-form position and the codified playbook below. "
-    "Identify every clause the counterparty changed that deviates from an "
-    "acceptable position, and propose replacement language that restores an "
-    "acceptable position while respecting the counterparty's structure "
-    "where possible. This guidance is adapted from claude-for-legal's "
-    "contract-review skill (an internal fork your organization owns; see "
-    "docs/design-notes.md)."
-)
+def render_review_guidance_block(party: str = "", counterparty_type: str = "") -> str:
+    """The review's single stated objective (issues #675/#677).
+
+    ONE objective, rendered for both prompt paths -- `assemble_system_blocks`
+    (v1) and `review_spine._assemble_opf_system_blocks` (OPF) -- so the prompt
+    cannot carry two.
+
+    The previous constant opened every review with "reviewing a
+    counterparty-modified contract against your organization's standard-form
+    position ... restore an acceptable position". On third-party paper that is
+    false, and it was the strongest stated objective in the prompt: four live
+    runs against the real playbook produced findings whose rationales every
+    single time cited the form ("consistent with the standard position", "the
+    form we ordinarily sign", "matching the wording we customarily use") and
+    never cited our interest -- including edits that gave away one-sided terms
+    running IN OUR FAVOUR. The party labels were already correct by then, so
+    this was never a misbinding; it was a conformity objective doing exactly
+    what it said.
+
+    `party` / `counterparty_type` come from the OPF document's `perspective`.
+    When absent -- every v1 playbook, and an OPF artifact carrying no
+    perspective -- the identity lines are omitted and the rest renders
+    unchanged, so a deployment without a perspective is not handed a blank
+    where its client should be.
+    """
+    identity = ""
+    if party or counterparty_type:
+        identity = (
+            f"We are {party}. In this document we are the party that is not "
+            f"the {counterparty_type}; the document may name us differently, "
+            "or not at all.\n"
+        )
+    return (
+        "WHO WE ARE AND WHAT THIS REVIEW IS FOR.\n"
+        f"{identity}"
+        "You are reviewing this document on our behalf against the playbook "
+        "below. It may be our own form marked up by the counterparty, or the "
+        "counterparty's own draft. The objective is the same either way: our "
+        "interest, as the playbook evidences it. It is never conformity to "
+        "our standard form.\n"
+        "The document you are reviewing has already been reviewed by the "
+        "counterparty and reflects terms they accept. A term that favours us "
+        "is therefore a term the other side has agreed to: leave it exactly "
+        "as written. Do not narrow it, balance it, make it mutual, or improve "
+        "its drafting, whatever the drafting argument, because the other side "
+        "has already accepted it. A term that is as good as or better for us "
+        "than what our playbook history shows we accept is acceptable: leave "
+        "it in place, do not edit it, and do not report it as an issue. This "
+        "includes a one-sided term that runs in our favour.\n"
+        "Push back only where a term is worse for us than what our history "
+        "shows we accept, or where it violates a rule that binds this review. "
+        "Propose replacement language that restores an acceptable position "
+        "while respecting the document's structure where possible."
+    )
+
+
+# The no-perspective render, kept as a module constant so existing readers
+# (tests, the v1 assembler) keep working unchanged.
+REVIEW_GUIDANCE_BLOCK = render_review_guidance_block()
 
 # ---------------------------------------------------------------------------
 # Own-words rule for the narrative fields (issue #616).
@@ -466,10 +533,10 @@ OWN_WORDS_SUMMARY_RULE = (
 # Issue #522 (epic #519 item D): the ONE mode-conditional part of the output
 # contract.
 #
-# The renderer this pairs with is `redline_docx_writer.
+# The renderer this pairs with is `footnote_audience.
 # footnote_texts_for_notes_mode`, which renders an issue's
 # `internal_rationale_for_footnote` -- behind
-# `redline_docx_writer.INTERNAL_FOOTNOTE_PREFIX` -- in the `internal`/`both`
+# `footnote_audience.INTERNAL_FOOTNOTE_PREFIX` -- in the `internal`/`both`
 # notes modes. A renderer whose input field no prompt ever asks for is dead
 # on every real review, so the request lives here, in the block that states
 # the issue-object contract, and it is gated on the SAME notes mode the
@@ -554,6 +621,298 @@ MINIMALITY_INSTRUCTION = (
     "terms, drafting voice, and formatting. Do not make stylistic "
     "improvements or normalize the clause to house form."
 )
+
+
+# ---------------------------------------------------------------------------
+# Length budgets (issue #674).
+#
+# THE DEFECT. Every `maxLength` in `playbooks/output-schema-v3.json` was a
+# constraint the model was never told. Structured output does not close that
+# gap and cannot: `model_output_schema._UNSUPPORTED_STRING_CONSTRAINT_KEYWORDS`
+# STRIPS `maxLength` (with `minLength`/`pattern`/`format`) out of the
+# provider-facing projection, because a provider's structured-output
+# validator rejects the request outright when it carries one. So a provider
+# enforces the SHAPE of a response and never its LENGTH, and an over-long
+# field is caught only here, at `validate_model_response`, after the call is
+# paid for. A model writing against a budget it was never given is guessing,
+# and an informed retry that still does not carry the number is the same
+# guess a second time -- observed live twice on the same field, both attempts
+# spent, the review failing closed (issue #674, layers 4 and 5 of #671).
+#
+# THE TWO BUDGET CLASSES. A cap in this schema is one of exactly two things,
+# and conflating them is what sized the two failing fields:
+#
+#   LAYOUT / IDENTITY -- the value lands somewhere with a shape of its own,
+#   so the cap is a product decision: a delivered-document footnote
+#   (`external_rationale_for_footnote`, `internal_rationale_for_footnote`,
+#   800), a result-view heading or table cell (`section_ref` 200,
+#   `section_title` 300, `replacement_scope_note` 300), an audit reference
+#   (`internal_precedent_citation` 500), a code-assigned block id (64).
+#   These are deliberate and are NOT widened here.
+#
+#   FREE PROSE -- model-authored text with no layout constraint, bounded only
+#   so one response cannot be unbounded. This schema's own number for that
+#   class is 8000 (`primary_replacement_text`, `critic_suggested_replacement`,
+#   `Segment.text`, `BlockOp.new_text`).
+#
+# `critic_objection`, `rationale_objections[].objection` and
+# `verdict_summary` are free prose that had been given layout-class caps by
+# copy. Issue #674 moves them to the class bound the artifact already uses,
+# so no new number was invented for any of them; what changed is which class
+# each field is in, which is the thing that was actually wrong.
+#
+# WHAT WAS MEASURED. Ten live `scripts/live_smoke_eval.py --dump-dir` runs on
+# 2026-09-02 -- the #671 ladder, against the real `educational-affiliation`
+# playbook, over a SYNTHETIC multi-clause affiliation agreement. Over-long
+# values reach the dump as `attempts[].schema_error.offending_value`;
+# `_debug_safe_value` clips the echo at `_DEBUG_VALUE_MAX_CHARS` but appends
+# `... (truncated, N chars total)`, and N -- not the clipped length -- is what
+# is reported here:
+#
+#   verdict_summary   2068 / 2202 / 2635 (n=3). Largest 2635 against the old
+#                     cap of 2000, which rejected all three.
+#                     8000 is 3.0x the largest observed (5365 spare).
+#   critic_objection  910 / 1275 (n=2). Both rejected by the old 800.
+#                     8000 is 6.3x the largest observed (6725 spare).
+#   rationale_objections[].objection -- NEVER POPULATED in any of the ten
+#                     runs, so there is NO measurement for it. It moves on
+#                     its sibling's evidence and argument alone, and that is
+#                     said plainly rather than dressed up.
+#
+# So 8000 is inherited, not measured; the measurement is what says the
+# inherited bound is safe and by what margin. The untouched caps were
+# re-checked against the same live output rather than against fixtures --
+# largest observed vs cap: section_ref 35/200, section_title 27/300,
+# replacement_scope_note 173/300, internal_precedent_citation 212/500,
+# external_rationale_for_footnote 256/800, counterparty_change_summary
+# 243/2000. None was ever the field a run died on, so none moves.
+#
+# The retries are the other half of it: in two runs the INFORMED retry came
+# back at EXACTLY the length of the answer it was correcting
+# (verdict_summary 2202 then 2202 again; critic_objection 910 then 910
+# again -- the second figure of each pair recovered by decoding the terminal
+# attempt's `error_message`, which carries jsonschema's repr of the value
+# rather than a truncation record; decoded, the critic_objection retry is
+# byte-identical to the attempt it replaced and the verdict_summary retry
+# matches across all 2000 characters the dump retained). Neither retry is
+# counted as an independent observation above. Both budgets spent, both
+# reviews failed closed. That is the direct evidence for stating the budgets
+# below and for putting N and M in the correction block.
+#
+# WHAT IS STATED, AND WHAT IS DELIBERATELY NOT. Every cap in the artifact is
+# accounted for exactly once across `_PRIMARY_LENGTH_BUDGETS`,
+# `_INTERNAL_NOTES_LENGTH_BUDGETS`, `_CRITIC_LENGTH_BUDGETS` and
+# `LENGTH_BUDGETS_DELIBERATELY_UNSTATED` -- `tests/test_length_budgets_674.py`
+# walks the schema and fails on a cap in none of them, so a future field
+# cannot arrive silently unbudgeted the way these two did. The unstated ones
+# each have a reason, recorded with them below; the load-bearing one is the
+# transcript fields, where telling a model a ceiling would invite it to
+# TRUNCATE a `keep`/`delete` segment to fit, and a truncated transcript is
+# not a shorter answer -- it is a `source_mismatch` rejection
+# (`block_transcript.validate_block_patches`). That budget belongs to the
+# document, not to the model.
+#
+# WHAT THIS CANNOT PROVE: that the model obeys. The distribution above is
+# real but small -- three samples for `verdict_summary`, two for
+# `critic_objection`, none for `rationale_objections[].objection` -- and all
+# of it comes from passes that FAILED on the cap plus the one run that got
+# past it.
+#
+# WHAT A LIFTED CAP DOES BUY, MEASURED. The owner's 2026-09-03 comment on
+# #671 records the first review against `educational-affiliation` ever to
+# succeed: status OK, decision REQUEST_CHANGE, 6 findings, primary AND
+# critic each succeeding on their FIRST attempt with no retry burned, $0.55,
+# 64s, a 7262-byte redline with real OOXML tracked changes and four
+# footnotes. It applied all five #671 layer fixes by hand, these two caps
+# among them, at EXPERIMENT values of 3000 (critic_objection) and 6000
+# (verdict_summary) -- which that comment is explicit are experiment values,
+# not recommendations, to be sized from measurement per this ticket. The
+# caps shipped here are 8000, strictly above both, so nothing that validated
+# in that run can fail against this artifact, and the largest values ever
+# observed (1275, 2635) sit well inside the values that ran clean.
+#
+# WHAT IS STILL OWED. That run proves neither production nor the behaviour
+# of a model TOLD the budgets: it was a hand-edited local export and the
+# prompt-side blocks below did not exist yet. tests/ pins the numbers into
+# the assembled prompt and pins a realistic value through the validator;
+# only a live paid production run shows the behaviour. It is NOT discharged
+# here, and not by omission -- the same #671 comment fixes the order (the
+# fixes land, then a PRODUCTION review against this playbook produces a
+# redline whose run id is recorded on #671, which stays open until one
+# does), and `scripts/live_smoke_eval.py` says in its own module docstring
+# that driving it against live OpenRouter traffic is a HUMAN step ("AFK
+# build, human execute", as #418) that never runs in CI, being live network
+# and a real spend. A green suite closes neither.
+# ---------------------------------------------------------------------------
+
+# JSON pointers, in this artifact's own spelling, so the sets below can be
+# checked against a walk of the schema rather than against each other.
+_VERDICT_SUMMARY_POINTER = "/properties/verdict_summary/oneOf/1"
+_ISSUE_POINTER = "/definitions/Issue/properties"
+_CONTESTED_POINTER = "/definitions/CriticDelta/properties/contested_replacements/items/properties"
+_RATIONALE_OBJECTION_POINTER = (
+    "/definitions/CriticDelta/properties/rationale_objections/items/properties"
+)
+
+# Field label -> JSON pointer, for the budgets stated in the OUTPUT CONTRACT
+# block both passes are sent. Order is the order they are rendered in.
+_PRIMARY_LENGTH_BUDGETS: tuple[tuple[str, str], ...] = (
+    ("verdict_summary", _VERDICT_SUMMARY_POINTER),
+    ("section_ref", f"{_ISSUE_POINTER}/section_ref"),
+    ("section_title", f"{_ISSUE_POINTER}/section_title"),
+    ("counterparty_change_summary", f"{_ISSUE_POINTER}/counterparty_change_summary"),
+    ("external_rationale_for_footnote", f"{_ISSUE_POINTER}/external_rationale_for_footnote"),
+    ("replacement_scope_note", f"{_ISSUE_POINTER}/replacement_scope_note"),
+    ("internal_precedent_citation", f"{_ISSUE_POINTER}/internal_precedent_citation/oneOf/1"),
+)
+
+# Stated ONLY in the notes-mode variant that asks for the field at all
+# (issue #522): a review told nothing about internal notes must not be
+# handed a budget for one.
+_INTERNAL_NOTES_LENGTH_BUDGETS: tuple[tuple[str, str], ...] = (
+    ("internal_rationale_for_footnote", f"{_ISSUE_POINTER}/internal_rationale_for_footnote"),
+)
+
+# Stated in the CRITIC TASKING block, which is critic-only user-prompt text.
+# They cannot go in the shared OUTPUT CONTRACT block: that block tells every
+# reader "include these top-level keys and ONLY these", so naming a
+# critic-only key there would invite the PRIMARY pass to emit it -- the same
+# reason `OWN_WORDS_SUMMARY_RULE` covers the critic's prose without naming
+# `critic_delta`.
+_CRITIC_LENGTH_BUDGETS: tuple[tuple[str, str], ...] = (
+    ("critic_objection", f"{_CONTESTED_POINTER}/critic_objection"),
+    ("objection", f"{_RATIONALE_OBJECTION_POINTER}/objection"),
+    ("critic_suggested_replacement", f"{_CONTESTED_POINTER}/critic_suggested_replacement"),
+    ("primary_replacement_text", f"{_CONTESTED_POINTER}/primary_replacement_text"),
+    ("section_ref", f"{_CONTESTED_POINTER}/section_ref"),
+    ("section_ref", f"{_RATIONALE_OBJECTION_POINTER}/section_ref"),
+)
+
+# Pointer -> why this cap is deliberately NOT stated to the model.
+LENGTH_BUDGETS_DELIBERATELY_UNSTATED: dict[str, str] = {
+    f"{_ISSUE_POINTER}/proposed_replacement_text": (
+        "the v3 OUTPUT CONTRACT block forbids this key outright (the edit IS "
+        "the proposal); a budget for a key the same block says never to emit "
+        "would contradict it"
+    ),
+    "/definitions/BlockPatch/properties/block_id": (
+        "a code-assigned id copied verbatim from the block map, not authored "
+        "text -- the model cannot shorten it and must not try"
+    ),
+    "/definitions/BlockOp/oneOf/0/properties/block_id": (
+        "same copied block id as BlockPatch.block_id"
+    ),
+    "/definitions/BlockOp/oneOf/1/properties/anchor_block_id": (
+        "same copied block id as BlockPatch.block_id"
+    ),
+    "/definitions/Segment/oneOf/0/properties/text": (
+        "transcription, not prose: a stated ceiling invites truncating a "
+        "keep/delete segment to fit, and a truncated transcript is a "
+        "source_mismatch rejection rather than a shorter answer"
+    ),
+    "/definitions/Segment/oneOf/1/properties/text": (
+        "same transcript-fidelity reason as Segment.oneOf/0"
+    ),
+    "/definitions/BlockOp/oneOf/1/properties/new_text": (
+        "whole-paragraph replacement language, sized by the paragraph it "
+        "replaces rather than by anything the model chooses"
+    ),
+}
+
+
+def resolve_schema_pointer(schema: dict[str, Any], pointer: str) -> Any:
+    """The node at `pointer` (a plain JSON pointer over dict keys and list
+    indices), or `None` when any step is missing -- never a raised KeyError,
+    so a renderer degrades to omitting one line rather than failing an entire
+    review at import time. The coverage test is what turns an unresolvable
+    pointer into a failure, and it fails loudly."""
+    node: Any = schema
+    for raw in pointer.split("/"):
+        if raw == "":
+            continue
+        if isinstance(node, list):
+            try:
+                node = node[int(raw)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(node, dict):
+            if raw not in node:
+                return None
+            node = node[raw]
+        else:
+            return None
+    return node
+
+
+def schema_max_length(schema: dict[str, Any], pointer: str) -> int | None:
+    """The `maxLength` the ACTIVE artifact puts on `pointer`, or `None`."""
+    node = resolve_schema_pointer(schema, pointer)
+    if isinstance(node, dict) and isinstance(node.get("maxLength"), int):
+        return node["maxLength"]
+    return None
+
+
+def _render_budget_lines(
+    budgets: "tuple[tuple[str, str], ...]", schema: dict[str, Any]
+) -> str:
+    """`"field" -- N characters` lines for `budgets`, deduplicated on
+    (label, cap) so two pointers at the same field name and the same cap
+    (the critic's two `section_ref`s) render once."""
+    seen: set[tuple[str, int]] = set()
+    lines: list[str] = []
+    for label, pointer in budgets:
+        cap = schema_max_length(schema, pointer)
+        if cap is None or (label, cap) in seen:
+            continue
+        seen.add((label, cap))
+        lines.append(f"    \"{label}\": at most {cap} characters.\n")
+    return "".join(lines)
+
+
+_LENGTH_BUDGET_CEILING_RULE = (
+    "These are HARD ceilings measured in characters, not targets: a response "
+    "one character over the budget for any field is rejected in full and the "
+    "whole review is re-run. Write what the reader needs and no more. If an "
+    "explanation will not fit, condense the prose -- never drop an issue, "
+    "drop an edit, or soften a finding to fit inside a budget.\n"
+)
+
+
+def render_length_budget_block(
+    *, internal_notes: bool = False, schema: dict[str, Any] | None = None
+) -> str:
+    """The OUTPUT CONTRACT block's length-budget section (issue #674).
+
+    Numbers are READ OFF the active artifact, never restated as literals --
+    the same one-value-one-source rule `OUTPUT_SCHEMA_VERSION` follows, and
+    for the same reason: a hand-copied budget that drifts from the validator
+    tells the model to write to a limit that is not the one it is judged
+    against.
+    """
+    active = load_output_schema() if schema is None else schema
+    budgets = _PRIMARY_LENGTH_BUDGETS + (
+        _INTERNAL_NOTES_LENGTH_BUDGETS if internal_notes else ()
+    )
+    return (
+        "LENGTH BUDGETS -- every one of these is enforced:\n"
+        + _render_budget_lines(budgets, active)
+        + _LENGTH_BUDGET_CEILING_RULE
+    )
+
+
+def render_critic_length_budget_block(schema: dict[str, Any] | None = None) -> str:
+    """The critic tasking's own length budgets -- the fields only the critic
+    writes. Same read-off-the-artifact rule as `render_length_budget_block`."""
+    active = load_output_schema() if schema is None else schema
+    return (
+        "LENGTH BUDGETS FOR YOUR OWN FIELDS -- every one of these is "
+        "enforced:\n"
+        + _render_budget_lines(_CRITIC_LENGTH_BUDGETS, active)
+        + "Any issue you add in \"critic_delta\".\"added_issues\" carries the "
+        "SAME per-field budgets the OUTPUT CONTRACT block states for an "
+        "issue.\n"
+        + _LENGTH_BUDGET_CEILING_RULE
+    )
 
 
 def _render_binary_decision_overlay(*, internal_notes: bool) -> str:
@@ -712,6 +1071,8 @@ def _render_binary_decision_overlay(*, internal_notes: bool) -> str:
         "new top-level key. This response must conform exactly to the "
         f"{OUTPUT_SCHEMA_VERSION} response schema.\n"
         + OWN_WORDS_SUMMARY_RULE
+        + "\n\n"
+        + render_length_budget_block(internal_notes=internal_notes)
     )
 
 
@@ -744,7 +1105,15 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
 
 
 # ---------------------------------------------------------------------------
-# Critic tasking (issue #618).
+# Critic tasking (issue #618; contract-gated since issue #637).
+#
+# THE OTHER HALF OF THE OUTPUT CONTRACT. This text is a USER-prompt block,
+# so the v3 cutover's anti-drift assertion -- which reads the assembled
+# SYSTEM prompt -- cannot see it, and duty 4 below went on teaching the v1/v2
+# `proposed_replacement_text` after the same review's system prompt started
+# forbidding that key. Duty 4 is therefore composed from the ACTIVE artifact
+# (`_critic_tasking_duties`), and `tests/test_v3_flip_627.py` now asserts
+# over `assemble_user_prompt_critic`'s output as well as the system prompt.
 #
 # WHAT WAS MISSING. The critic pass shares every system block with the
 # primary pass (`assemble_system_blocks` / the OPF composer), and those
@@ -805,19 +1174,34 @@ _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT = (
     "material you do have."
 )
 
-_CRITIC_TASKING_DUTIES = (
+# Duties 1-3 do not depend on the output contract: they are about the first
+# reviewer's JUDGMENT, which is the same judgment under either contract. Held
+# once, so the two duty variants below cannot drift apart on them (the same
+# shared-pieces doctrine as the role/evidence paragraphs).
+_CRITIC_TASKING_DUTIES_1_TO_3 = (
     "Look for exactly these four things:\n"
-    "1. ISSUES THE FIRST REVIEWER MISSED -- a clause that departs from the "
-    "playbook position and was not flagged at all. Report each one in "
-    "\"critic_delta\".\"added_issues\".\n"
-    "2. OVER-FLAGGING -- an issue the first reviewer raised that the "
-    "document does not actually support, or that the playbook does not "
-    "actually require. Report it in \"critic_delta\".\"rationale_objections\".\n"
+    "1. ISSUES THE FIRST REVIEWER MISSED -- a clause that is WORSE FOR US "
+    "than the playbook's accepted position and was not flagged at all. "
+    "Report each one in \"critic_delta\".\"added_issues\".\n"
+    "2. OVER-FLAGGING AND GIVING TERMS AWAY -- an issue the first reviewer "
+    "raised that the document does not actually support, or that the "
+    "playbook does not actually require; AND any edit or finding the "
+    "first reviewer made on a term that was already acceptable or "
+    "favourable to us (including narrowing, balancing, or mutualising a "
+    "term that runs in our favour: the counterparty has already agreed to it, "
+    "whatever the drafting argument) -- that edit gives away a term we "
+    "already had and must be contested. Report it in "
+    "\"critic_delta\".\"rationale_objections\".\n"
     "3. WEAK EXTERNAL RATIONALE -- an "
     "\"external_rationale_for_footnote\" that does not hold up: it "
     "misstates the clause, misstates the playbook position, or gives the "
     "counterparty a reason that would not survive being read back to them. "
     "Report it in \"critic_delta\".\"rationale_objections\".\n"
+)
+
+# Duty 4 under v1/v2, where the first reviewer's proposal IS a field it filled
+# in. Kept for callers that select the superseded artifact.
+_CRITIC_TASKING_DUTY_4_V2 = (
     "4. REPLACEMENT TEXT THAT DRIFTS FROM THE PLAYBOOK POSITION -- a "
     "\"proposed_replacement_text\" that concedes more than the playbook "
     "position allows, asks for more than it allows, or answers a different "
@@ -827,6 +1211,55 @@ _CRITIC_TASKING_DUTIES = (
     "reconciler decide."
 )
 
+# Duty 4 under v3 (issue #637). Same duty, restated in transcript terms:
+# under a block-transcript contract the first reviewer authors no
+# "proposed_replacement_text" -- the overlay in the SAME review's system
+# prompt forbids that key outright -- so a critic told to contest one is
+# pointed at a field absent from the JSON it is shown, and one of its four
+# jobs is aimed at nothing.
+#
+# What replaces it is the edit itself: the "block_patches" segments and
+# "block_ops" entries carrying that issue's "issue_key" (a keep segment
+# carries none -- nothing authored it). The OUTPUT channel is unchanged:
+# `contested_replacements` still requires "primary_replacement_text", so the
+# critic is told where to read the wording it is contesting, or it cannot
+# fill a required field.
+_CRITIC_TASKING_DUTY_4_V3 = (
+    "4. AN AUTHORED EDIT THAT DRIFTS FROM THE PLAYBOOK POSITION -- the first "
+    "reviewer's proposal IS the edit it authored: the \"block_patches\" "
+    "segments and \"block_ops\" entries carrying that issue's \"issue_key\". "
+    "Contest an edit whose resulting wording concedes more than the playbook "
+    "position allows, asks for more than it allows, or answers a different "
+    "question than the clause raises. Report it in "
+    "\"critic_delta\".\"contested_replacements\", naming that issue's "
+    "\"section_ref\" and putting the wording you are contesting -- read off "
+    "the \"insert\" segments and inserted blocks carrying its \"issue_key\" "
+    "-- in \"primary_replacement_text\". Never silently rewrite the first "
+    "reviewer's edit; contest it and let the reconciler decide."
+)
+
+
+def _critic_tasking_duties() -> str:
+    """The critic's four duties, worded for the ACTIVE output contract.
+
+    Gated on `authors_block_transcripts(load_output_schema())` -- the SAME
+    seam `render_replacement_text_modes_block` reads for the system prompt's
+    modes block and `critic_review_pass.run_critic_pass` reads for pass-time
+    enforcement. One artifact, one answer, so the two halves of a single
+    critic prompt cannot end up speaking different contracts (issue #637).
+
+    Reached through `_mos.` rather than this module's own re-export below:
+    the constants composed from this function are module-level, so they run
+    at IMPORT time, before `authors_block_transcripts` further down this file
+    is bound. Both names are the same implementation.
+    """
+    duty_4 = (
+        _CRITIC_TASKING_DUTY_4_V3
+        if _mos.authors_block_transcripts(load_output_schema())
+        else _CRITIC_TASKING_DUTY_4_V2
+    )
+    return _CRITIC_TASKING_DUTIES_1_TO_3 + duty_4
+
 _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT = (
     "EVIDENCE BEFORE CONCLUSION. For every objection you raise, quote the "
     "document evidence FIRST and state the objection SECOND -- name the "
@@ -835,20 +1268,79 @@ _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT = (
     "you is an objection you must not raise."
 )
 
-_CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT = (
+# The no-document evidence paragraph ENUMERATES the material the critic may
+# reason from, and that material is exactly the first reviewer's output --
+# which is contract-shaped. So this paragraph is gated on the active contract
+# for the same reason duty 4 is, and issue #641 found it still on the v2 side
+# of that gate: it named "the clause text the first reviewer quoted" and "the
+# replacement text it wrote" -- a `source_quote` and a
+# `proposed_replacement_text`, neither of which a v3 primary output carries --
+# in the SAME prompt whose duty 4 had already been restated in transcript
+# terms by #637. Duty 4 was caught because it spelled the field names out;
+# this paragraph escaped because it describes the same two v2 artifacts in
+# PROSE, and the anti-drift assertion that caught duty 4
+# (`test_v3_flip_627.py` [11d]) is a substring search for the literal field
+# names. A critic told to reason from material absent from the JSON it is
+# shown has, again, one of its instructions aimed at nothing.
+_CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT_HEAD = (
     "EVIDENCE BEFORE CONCLUSION. For every objection you raise, quote the "
     "evidence FIRST and state the objection SECOND -- name the clause and "
     "the words you are reasoning from, then say what is wrong. Because the "
     "document is not shown to you on this review, your evidence is the "
-    "material that IS shown to you: the clause text the first reviewer "
-    "quoted, the rationales and replacement text it wrote, and the playbook "
-    "positions. Reason from those, and do not assert what the document says "
-    "beyond what they show. This narrows what you can object to -- an issue "
-    "the first reviewer never quoted is one you usually cannot reach from "
-    "here -- but it does not lower the bar for grounding: an objection you "
-    "cannot ground in the material shown to you is an objection you must "
-    "not raise."
+    "material that IS shown to you: "
 )
+
+_CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT_TAIL = (
+    " Reason from those, and do not assert what the document says beyond "
+    "what they show. This narrows what you can object to -- an issue whose "
+    "clause text the first reviewer never put in front of you is one you "
+    "usually cannot reach from here -- but it does not lower the bar for "
+    "grounding: an objection you cannot ground in the material shown to you "
+    "is an objection you must not raise."
+)
+
+# Under v1/v2 the first reviewer's output carries the clause text it quoted
+# (`source_quote`) and the wording it proposed (`proposed_replacement_text`).
+_CRITIC_TASKING_EVIDENCE_MATERIAL_V2 = (
+    "the clause text the first reviewer quoted, the rationales and "
+    "replacement text it wrote, and the playbook positions."
+)
+
+# Under v3 it carries neither. What it carries instead is a block transcript:
+# the document's own words come back in the "keep"/"delete" segments (that is
+# what `block_transcript.validate_block_patches` PROVES against the document),
+# and the proposed wording is in the "insert" segments and "block_ops". Those
+# are the same carriers duty 4 above already points at, so the critic reads
+# its evidence and its target out of one place.
+_CRITIC_TASKING_EVIDENCE_MATERIAL_V3 = (
+    "the document's own clause text as the first reviewer transcribed it "
+    "into the \"keep\" and \"delete\" segments of its \"block_patches\", the "
+    "wording it proposed in the \"insert\" segments and \"block_ops\", its "
+    "rationales, and the playbook positions."
+)
+
+
+def _critic_tasking_evidence_without_document() -> str:
+    """The no-document evidence paragraph, worded for the ACTIVE output
+    contract -- read through the SAME
+    `authors_block_transcripts(load_output_schema())` seam as
+    `_critic_tasking_duties`, so the two paragraphs of a single critic prompt
+    cannot end up describing different contracts (issue #641).
+
+    Reached through `_mos.` for the same reason `_critic_tasking_duties` is:
+    the constants built from this function are module-level and run at IMPORT
+    time, before this module's own re-export is bound.
+    """
+    material = (
+        _CRITIC_TASKING_EVIDENCE_MATERIAL_V3
+        if _mos.authors_block_transcripts(load_output_schema())
+        else _CRITIC_TASKING_EVIDENCE_MATERIAL_V2
+    )
+    return (
+        _CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT_HEAD
+        + material
+        + _CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT_TAIL
+    )
 
 _CRITIC_TASKING_NO_MINIMUM = (
     "THERE IS NO MINIMUM NUMBER OF FINDINGS. Zero is a legitimate result. "
@@ -858,26 +1350,51 @@ _CRITIC_TASKING_NO_MINIMUM = (
     "downgrade a sound issue in order to have something to report."
 )
 
-# Emitted when the critic prompt carries a `COUNTERPARTY_DOCUMENT` block.
-CRITIC_TASKING_BLOCK = "\n\n".join(
-    (
-        _CRITIC_TASKING_ROLE_WITH_DOCUMENT,
-        _CRITIC_TASKING_DUTIES,
-        _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT,
-        _CRITIC_TASKING_NO_MINIMUM,
+def render_critic_tasking_block(*, with_document: bool) -> str:
+    """The critic tasking, composed for the ACTIVE output contract.
+
+    `with_document` selects the two paragraphs that speak about the
+    `COUNTERPARTY_DOCUMENT` block (see the note above); the contract selects
+    duty 4 (`_critic_tasking_duties`) and, since issue #641, the no-document
+    evidence paragraph (`_critic_tasking_evidence_without_document`) -- the
+    two places the tasking describes the SHAPE of the first reviewer's
+    output rather than its judgment. ONE builder for both axes, so a
+    wording fix can never land on one variant and miss the other -- which is
+    how the v2 duty-4 text survived the v3 cutover in both of them
+    (issue #637).
+
+    The two constants below are this function's output for the active
+    artifact, and are what `assemble_user_prompt_critic` actually emits.
+
+    Issue #674 appends `render_critic_length_budget_block()` last: the
+    critic's own fields (`critic_objection`, `rationale_objections[].
+    objection`, `critic_suggested_replacement`) are the ones the shared
+    OUTPUT CONTRACT block cannot name without inviting the primary pass to
+    emit a critic key, so their budgets have to be stated here or nowhere.
+    Read off the active artifact by the same seam duty 4 uses, so a schema
+    edit moves the number in both halves of this prompt at once.
+    """
+    return "\n\n".join(
+        (
+            _CRITIC_TASKING_ROLE_WITH_DOCUMENT
+            if with_document
+            else _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT,
+            _critic_tasking_duties(),
+            _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT
+            if with_document
+            else _critic_tasking_evidence_without_document(),
+            _CRITIC_TASKING_NO_MINIMUM,
+            render_critic_length_budget_block(),
+        )
     )
-)
+
+
+# Emitted when the critic prompt carries a `COUNTERPARTY_DOCUMENT` block.
+CRITIC_TASKING_BLOCK = render_critic_tasking_block(with_document=True)
 
 # Emitted when it does not (a caller that passes no `doc_text` -- see the
 # note above).
-CRITIC_TASKING_BLOCK_NO_DOCUMENT = "\n\n".join(
-    (
-        _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT,
-        _CRITIC_TASKING_DUTIES,
-        _CRITIC_TASKING_EVIDENCE_WITHOUT_DOCUMENT,
-        _CRITIC_TASKING_NO_MINIMUM,
-    )
-)
+CRITIC_TASKING_BLOCK_NO_DOCUMENT = render_critic_tasking_block(with_document=False)
 
 
 # ---------------------------------------------------------------------------
@@ -904,11 +1421,88 @@ CRITIC_TASKING_BLOCK_NO_DOCUMENT = "\n\n".join(
 RETRY_CORRECTION_HEADING = "PREVIOUS ATTEMPT REJECTED -- CORRECT AND RESEND"
 
 
+# Issue #674: the CORRECTION half of "put the budget in the prompt".
+#
+# jsonschema's own message for a `maxLength` failure is `'<value>' is too
+# long` -- it names neither the limit nor how far over the value was, so a
+# retry built from it told the model only that some unstated target had been
+# missed. Both live failures then repeated the same answer and spent the
+# whole attempt budget arriving at the identical error.
+#
+# `validate_model_response` appends this clause to the returned
+# `schema_invalid: ...` string whenever the rejecting keyword was
+# `maxLength`, so every consumer of `last_error`/`correction` -- the retry
+# block below, the terminal `detail`, `--dump-dir` -- carries the two numbers
+# that make the failure actionable. The MARKER is our own literal, not the
+# validator's wording, so `render_retry_correction_block` recognizes this
+# fault class without depending on how a given jsonschema release spells
+# "is too long".
+LENGTH_BUDGET_MARKER = "[length budget]"
+
+
+def render_length_budget_detail(*, location: str, value_length: int, maximum: int) -> str:
+    """The `[length budget] ...` clause appended to a `maxLength` rejection.
+
+    `location` is the same `"/"`-joined instance path the `(at ...)` suffix
+    carries, or `""` at the root (which no current `maxLength` can be, since
+    the root is an object -- handled anyway rather than rendering an empty
+    quoted name)."""
+    field = f'"{location}"' if location else "that field"
+    return (
+        f" {LENGTH_BUDGET_MARKER} {field} is {value_length} characters long; "
+        f"its maximum is {maximum} characters."
+    )
+
+
 # The `last_error`/`correction` TOKEN a rejected block transcript carries
 # (issue #627), in this module's own "TOKEN: detail" convention -- so
 # `_error_token` ledgers it as `block_transcript_rejected` and
 # `render_retry_correction_block` can frame the retry for the right fault.
 BLOCK_TRANSCRIPT_ERROR_TOKEN = "block_transcript_rejected"
+
+# ---------------------------------------------------------------------------
+# Fail-closed `reason` TOKENS for this pass's terminals (issue #670).
+#
+# Every terminal this pass returns must name WHY in `reason`, because
+# `review_spine.run_review` propagates that key verbatim
+# (`reason=primary_result.get("reason")`) and `pipeline_runner
+# ._write_real_terminal` persists it onto the reviews row, where
+# `frontend/src/ReviewSubmission.tsx::explainFailure` looks it up in
+# `REASON_EXPLANATIONS`. Two of the terminals below returned no `reason` key
+# at all, so the row stored `null`, the lookup could not run, and the
+# Diagnostics tab fell through to the `run_review` STAGE copy -- "the exact
+# cause was not identified". A real paid production review died that way on
+# 2026-09-02 (`cc20ea07`, 203s), and a real counterparty document failed 3
+# runs in 5 the same way, where the cause was sitting in `last_error` the
+# whole time. `document_too_large` on the oversized-prompt gate below is the
+# sibling that always did this correctly.
+#
+# The two are deliberately NOT one token: they are different operator
+# diagnoses, and telling them apart from outside the process is the entire
+# point of the issue.
+#
+#   * the retry budget spent on a response the OUTPUT CONTRACT rejected --
+#     the model never answered in a shape the system could read. This is the
+#     condition `structured_output_retry_exhausted` was specified for at both
+#     ends (`backend/src/reviews.py::STAGE_FAILURE_REASON_STATUS` maps it to
+#     `ERROR_MANUAL_REVIEW_REQUIRED`, and the UI has carried its copy since
+#     issue #442) while NOTHING under `scripts/` ever emitted it.
+REASON_STRUCTURED_OUTPUT_RETRY_EXHAUSTED = "structured_output_retry_exhausted"
+#   * the retry budget spent on a response that PARSED and validated but
+#     whose block transcript did not prove against the document
+#     (`_reject_block_transcript`, issue #627). The model answered in the
+#     right shape and mis-copied the document's own wording, which is a
+#     different fault, a different lead and -- per issue #683 -- a different
+#     underlying defect.
+#
+#     It keeps its own token rather than reusing `redline_generate
+#     .REASON_BLOCK_TRANSCRIPT_REJECTED` (the same string as
+#     `BLOCK_TRANSCRIPT_ERROR_TOKEN` above), which stage 5 already emits for
+#     a transcript that failed the re-derived proof AFTER a successful
+#     review. Sharing one token would merge two materially different rows:
+#     there, the analysis exists and only the marked-up document is missing;
+#     here, the pass never produced a review at all.
+REASON_PRIMARY_BLOCK_TRANSCRIPT_REJECTED = "primary_block_transcript_rejected"
 
 # How many rejected transcript entries a correction block names. A transcript
 # is rejected as a WHOLE (`validate_block_patches` never returns a partial
@@ -1002,6 +1596,29 @@ def render_retry_correction_block(error: Any) -> str:
             "tidied, and no \"[pNNNN]\" marker copied in. Keep every other "
             "part of your response exactly as it was -- same issues, same "
             "issue_keys, same decision, same intended edits."
+        )
+    elif LENGTH_BUDGET_MARKER in text:
+        # Issue #674. Deliberately BEFORE the generic schema branch: a
+        # length failure IS a `schema_invalid`, but the generic remedy
+        # ("re-read the OUTPUT CONTRACT and resend the SAME review") names
+        # no number and gives a model no way to tell how much to cut. The
+        # numbers are already in `text` (see `LENGTH_BUDGET_MARKER`); what
+        # this branch adds is the ONE instruction the generic remedy cannot
+        # give safely -- shorten the prose, never the review. A model told
+        # only "too long" can comply by dropping an issue, which is a
+        # smaller response and a worse review.
+        fault = (
+            "Your response was rejected on length: one field exceeded its "
+            "character budget."
+        )
+        remedy = (
+            "Rewrite ONLY the field named above so it fits within the "
+            "maximum stated there, counting characters. Condense the prose "
+            "-- say the same thing in fewer words. Do NOT drop an issue, "
+            "drop an edit, merge two findings, or soften a conclusion to "
+            "make it fit, and do not shorten any other field. Keep every "
+            "other part of your response exactly as it was -- same issues, "
+            "same issue_keys, same decision, same edits."
         )
     elif text.startswith("replacement_text_violation"):
         fault = (
@@ -1557,7 +2174,7 @@ def assemble_system_blocks(
       `internal_rationale_for_footnote` key at all depends on it. Without
       this half the clause above would name a key the output contract
       forbids, and the renderer that emits it
-      (`redline_docx_writer.footnote_texts_for_notes_mode`) would have no
+      (`footnote_audience.footnote_texts_for_notes_mode`) would have no
       producer. See the module comment above
       `_render_binary_decision_overlay`.
 
@@ -2396,11 +3013,54 @@ def _strip_rendered_heading_markers(parsed: Any) -> None:
                 segment["text"] = _without_leading_heading_line(text)
 
 
+# How much of a rejected instance a DEBUG-ONLY diagnostic carries (issue
+# #643). A schema failure can land on a whole `block_patches` entry, whose
+# instance is the model's entire transcript for that block -- and a pass may
+# reject one such response per attempt. The diagnostic's job is to name the
+# offending shape well enough to act on, not to archive every rejected
+# response in full, so it keeps the first 2000 characters and says so.
+_DEBUG_VALUE_MAX_CHARS = 2000
+
+
+def _debug_safe_value(value: Any, *, limit: int = _DEBUG_VALUE_MAX_CHARS) -> str:
+    """A JSON-safe, LENGTH-BOUNDED rendering of `value` -- ordinarily a
+    `jsonschema.ValidationError.instance`, i.e. the exact sub-object of the
+    model's response the validator rejected (issue #643).
+
+    ALWAYS returns a `str`, never the instance itself: the instance can be
+    any JSON value, including one carrying non-serializable members once
+    `_stamp_pipeline_envelope`/the strippers have run over it, and the sole
+    consumer of this is a `json.dumps`'d debug artifact. `json.dumps(...,
+    default=str)` mirrors what `scripts/live_smoke_eval.py`'s own dump
+    writer already does with `result`, so a value that survives one survives
+    the other.
+
+    THIS IS SUBSTANCE. It echoes model output verbatim (bounded), which is
+    exactly why it is reachable only through `run_primary_pass` /
+    `run_critic_pass`'s opt-in `attempt_diagnostic_write` sink and never
+    through `last_error`, the ledgered `ModelInvocationRecord` (whose
+    METADATA-ONLY invariant `_error_token` exists to preserve), or any
+    persisted review row. Issue #669 does not change that: production now
+    injects a sink that writes what it receives to one S3 object under the
+    review's own `outputs/{review_id}/` prefix (purged with the document,
+    served by no route), which is still the sink -- not the row, not the
+    ledger, and not the returned error string.
+    """
+    try:
+        rendered = value if isinstance(value, str) else json.dumps(value, default=str)
+    except (TypeError, ValueError):
+        rendered = repr(value)
+    if len(rendered) > limit:
+        return f"{rendered[:limit]}... (truncated, {len(rendered)} chars total)"
+    return rendered
+
+
 def validate_model_response(
     raw_text: str,
     *,
     issue_provenance: str = "model",
     schema_path: Path = OUTPUT_SCHEMA_PATH,
+    schema_error_sink: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> tuple[bool, Any]:
     """Unwrap -> parse -> stamp envelope -> strictly schema-validate a raw
     model response.
@@ -2449,6 +3109,27 @@ def validate_model_response(
     `issue_key` uniqueness check (`_duplicate_issue_key_error`), which
     draft-07 cannot express and which is a no-op on any artifact that does
     not define `issue_key`.
+
+    `schema_error_sink` (issue #643, default `None` -> nothing is captured
+    and this function is behaviorally identical to every call before it):
+    called with ONE structured `dict` describing a `schema_invalid`
+    rejection, immediately before the `(False, "schema_invalid: ...")`
+    return it belongs to --
+
+        {"message": str,          # the validator's own message
+         "path": str,             # "/"-joined instance path, "" at the root
+         "validator": str,        # the keyword that rejected it
+         "offending_value": str}  # `_debug_safe_value` of the instance
+
+    -- so a DEBUG consumer can say WHICH field of WHICH object carried WHAT
+    value, rather than only that the class of failure was `schema_invalid`.
+    The returned error string is unchanged by this: `offending_value` is
+    bounded model substance (see `_debug_safe_value`), and `last_error`
+    flows onward into retry corrections and terminal `detail` dicts, so it
+    is deliberately handed only to an explicitly-injected sink and never
+    folded into the return value. Not called for `invalid_json` /
+    `invalid_response_contract`, which reject before there is any instance
+    to point at and whose returned messages are already self-describing.
     """
     try:
         parsed = json.loads(_extract_json_object(raw_text))
@@ -2484,9 +3165,58 @@ def validate_model_response(
         # self-describing), so the suffix is conditional.
         location = "/".join(str(part) for part in exc.absolute_path)
         suffix = f" (at {location})" if location else ""
+        # Issue #674: name the budget and the overage on a `maxLength`
+        # rejection. See `LENGTH_BUDGET_MARKER`. Guarded on the instance
+        # actually being a `str` and the keyword's value actually being an
+        # `int` -- a synthetic schema could carry neither, and this must
+        # degrade to today's message rather than raise inside the handler
+        # for a validation failure.
+        if (
+            exc.validator == "maxLength"
+            and isinstance(exc.instance, str)
+            and isinstance(exc.validator_value, int)
+        ):
+            suffix += render_length_budget_detail(
+                location=location,
+                value_length=len(exc.instance),
+                maximum=exc.validator_value,
+            )
+        # Issue #643: the debug-only structured half of the same rejection.
+        # `exc.instance` is the exact sub-object the validator rejected --
+        # the one fact a `schema_invalid` TOKEN can never carry and the one
+        # a reader of a paid live run actually needs. Bounded and
+        # stringified by `_debug_safe_value`; emitted ONLY to an
+        # explicitly-injected sink, never onto the returned error string.
+        if schema_error_sink is not None:
+            schema_error_sink(
+                {
+                    "message": exc.message,
+                    "path": location,
+                    "validator": str(exc.validator),
+                    "offending_value": _debug_safe_value(exc.instance),
+                }
+            )
         return False, f"schema_invalid: {exc.message}{suffix}"
     duplicate = _duplicate_issue_key_error(parsed, schema)
     if duplicate is not None:
+        # Issue #643: the uniqueness check is reported under the SAME
+        # `schema_invalid` token as the jsonschema branch above (see
+        # `_duplicate_issue_key_error`'s "one contract, one rejection
+        # vocabulary"), so it emits the same structured shape. It is not a
+        # jsonschema failure, so there is no `absolute_path` and no single
+        # rejected instance to slice out: `path` is the root and
+        # `offending_value` is empty because the repeated key IS the
+        # offending value and `message` already quotes it -- restating it
+        # here would be a second copy, not a second fact.
+        if schema_error_sink is not None:
+            schema_error_sink(
+                {
+                    "message": duplicate,
+                    "path": "",
+                    "validator": "issue_key_uniqueness",
+                    "offending_value": "",
+                }
+            )
         return False, f"schema_invalid: {duplicate}"
     return True, parsed
 
@@ -2592,13 +3322,14 @@ def run_primary_pass(
     instructions_text: str = "",
     notes_mode: str = "external",
     max_input_tokens: int = MAX_INPUT_TOKENS,
-    max_output_tokens: int = MAX_OUTPUT_TOKENS,
     max_retries: int = MAX_RETRIES_PER_PASS,
+    max_truncation_retries: int = MAX_TRUNCATION_RETRIES_PER_PASS,
     system_blocks_override: list[dict[str, Any]] | None = None,
     playbook_hash_override: str | None = None,
     output_schema_path: Path = OUTPUT_SCHEMA_PATH,
     block_map: dict[str, Any] | None = None,
     cancel_checkpoint: Callable[[], None] | None = None,
+    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> dict[str, Any]:
     """Run the primary review pass end-to-end (data-flow steps 14-15-17 for
     the primary pass).
@@ -2634,6 +3365,29 @@ def run_primary_pass(
     default) skips the check entirely, so a caller that has no block map
     behaves exactly as it did before this issue.
 
+    The content budget this pass asks the model for is NOT a parameter
+    (issue #658): it is sized from the document, as
+    `model_client.output_budget_for_document(estimate_tokens(doc_text),
+    model_client.openrouter_model_max_output_tokens(model_id))` --
+    `clamp(FLOOR + 2.5 * document_tokens, FLOOR, the model's own declared
+    output cap)`. The flat 8,000 this replaced predated the v3
+    block-transcript contract, under which the response is roughly
+    proportional to the reviewed text, and it killed a real five-page
+    agreement on `model_output_truncated`. The first cut of #658 kept a
+    caller-supplied override that raised the widening ceiling above the
+    declared cap; it is gone. Nothing in this repo passed one, and it was
+    the only path by which a request could ask a model for more than it
+    declares it accepts.
+
+    `max_truncation_retries` (issue #658, default
+    `MAX_TRUNCATION_RETRIES_PER_PASS`): retry allowance reserved for a
+    TRUNCATED response and spendable by nothing else. `max_retries` is
+    shared across every other failure class, so before this a schema or
+    `source_mismatch` rejection on attempt 1 left the last attempt running
+    at the un-widened budget, where a truncation was terminal on the spot.
+    A response that did not fit always gets at least one more attempt with
+    more room.
+
     `cancel_checkpoint` (default `None`): called before each attempt; it
     raises if the reviewer has asked to stop, and that exception propagates
     untouched. Checked HERE, not only between stages, because this loop is
@@ -2641,6 +3395,37 @@ def run_primary_pass(
     at 147s against DeepSeek V4 Pro, and the pass may make two. Whatever it
     raises is deliberately not caught by the attempt loop's own handlers: a
     cancellation is not a model failure and must not consume a retry.
+
+    `attempt_diagnostic_write` (issue #643, default `None` -> nothing is
+    built and nothing is emitted): a DEBUG-ONLY sink called once per
+    non-successful attempt, from the same `finally` that ledgers it, with
+
+        {"review_id", "pass_name", "attempt_number", "outcome",
+         "error_token",                # same token the ledger record carries
+         "error_message",              # the attempt's FULL `last_error`
+         "schema_error": {...}}        # only on a `schema_invalid` attempt
+
+    THE SEPARATION IS THE POINT. `ledger_write`'s `ModelInvocationRecord`
+    is persisted (`backend/src/invocation_ledger.py::_record_to_item` writes
+    every field of it verbatim), so issue #573 correctly reduced each
+    attempt's error to a closed-vocabulary `error_token` there. That left a
+    real-model contract violation observable only as its CLASS: issue #642's
+    live check burned a paid run whose first attempt said `schema_invalid`
+    and nothing else, so what the model actually sent could only be
+    recovered by paying for another run and hoping the nondeterministic
+    failure recurred. This sink carries the missing half -- the full message,
+    and for a schema failure the rejected path and value
+    (`validate_model_response`'s `schema_error_sink`) -- to a consumer that
+    asked for it, and to nowhere else: it is never returned and never
+    ledgered. Issue #669 gave it a second caller: production
+    (`backend/src/pipeline_runner.py::run_real_pipeline`) now injects
+    `backend/src/attempt_diagnostics.py`'s sink, which PERSISTS what it
+    receives to one S3 object under the review's own `outputs/{review_id}/`
+    prefix -- bounded in record count and per-field length, purged with the
+    document by the retention prefix scan, and surfaced by no route (see
+    that module's docstring for the #443 disclosure argument). The other
+    caller remains `scripts/live_smoke_eval.py`'s `--dump-dir` path.
+    Successful attempts are skipped because nothing failed on them.
 
     `doc_text` is always sent in full (issue #625 deleted the
     section-outline fallback): either the whole document reaches the model
@@ -2655,8 +3440,19 @@ def run_primary_pass(
         generic pipeline ERROR.
       {"status": "OK", "response": {...}, "attempts": N, ...}
         -- schema-valid response obtained within the retry budget.
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "attempts": N, ...}
+      {"status": "ERROR_MANUAL_REVIEW_REQUIRED",
+       "reason": REASON_STRUCTURED_OUTPUT_RETRY_EXHAUSTED, "attempts": N, ...}
         -- still schema-invalid after the one bounded retry.
+      {"status": "ERROR_MANUAL_REVIEW_REQUIRED",
+       "reason": REASON_PRIMARY_BLOCK_TRANSCRIPT_REJECTED, "attempts": N, ...}
+        -- the response validated but its block transcript never proved
+        against the document, with the retry budget spent (issue #627).
+
+    EVERY terminal above names its cause in `reason` (issue #670): the spine
+    propagates that key verbatim onto the reviews row, and a terminal that
+    omits it leaves the operator with "the exact cause was not identified".
+    tests/test_terminal_reason_completeness_670.py holds the whole class of
+    terminals to that, so a new reason-less one cannot be added quietly.
 
     `model_id` is config-checked against the single-region-native-only
     policy before any invocation is attempted (raises
@@ -2717,12 +3513,16 @@ def run_primary_pass(
 
     # Issue #418: the model-facing structured-output schema, resolved once
     # up front (it does not vary across retry attempts) -- ONLY when
-    # `OPENROUTER_STRUCTURED_OUTPUT=1`. `None` (the default) means the
-    # `tool_spec` kwarg is never even PASSED to `model_client.invoke` below
-    # (not just passed as None) -- see the attempt loop -- so an injected
-    # `model_client` whose `invoke()` predates this kwarg (every existing
-    # test double) is completely unaffected when the flag is off, and the
-    # request payload stays byte-identical to today.
+    # `config.structured_output_enabled()`, which since issue #673 is the
+    # DEFAULT. `None` (an explicit `OPENROUTER_STRUCTURED_OUTPUT=0`, the
+    # rollback) means the `tool_spec` kwarg is never even PASSED to
+    # `model_client.invoke` below (not just passed as None) -- see the
+    # attempt loop -- so an injected `model_client` whose `invoke()`
+    # predates this kwarg is completely unaffected in that state. Note the
+    # flip reversed which side is the quiet one: on the default path
+    # `tool_spec` now DOES reach `invoke()`, so a test double must carry
+    # the full Protocol signature (`tool_spec` / `output_schema`) or pin
+    # the flag off deliberately.
     # Issue #522: `notes_mode` is threaded into BOTH projections below for
     # the same reason `assemble_system_blocks` gets it -- the prompt half
     # of the gate asks for `internal_rationale_for_footnote` in
@@ -2815,6 +3615,11 @@ def run_primary_pass(
         }
 
     attempts_allowed = 1 + max_retries
+    # Issue #658: truncation gets its OWN allowance, spent only by a
+    # truncation. A schema or `source_mismatch` rejection on attempt 1 used to
+    # leave the last attempt running at the un-widened budget, where a
+    # response that did not fit was terminal on the spot.
+    truncation_retries_left = max(0, max_truncation_retries)
     last_error: Any = None
     # Issue #417: what the NEXT attempt must be told to fix. None on attempt 1
     # (nothing has gone wrong yet), so the first request is byte-identical to
@@ -2824,11 +3629,22 @@ def run_primary_pass(
     # Issue #527 follow-up: the content budget THIS attempt asks for. A
     # `finish_reason == "length"` means the answer did not fit, so replaying
     # the same ceiling would just truncate at the same place; the retry gets
-    # real headroom instead. Tracked as a local rather than mutating the
-    # parameter so the caller's requested budget stays readable.
-    attempt_max_output_tokens = max_output_tokens
+    # real headroom instead.
+    #
+    # Issue #658: that budget is sized HERE from the document this pass is
+    # about to send, clamped by the selected model's own declared output cap
+    # -- see `model_client.output_budget_for_document`. The ceiling is kept
+    # as its own local because the truncation retry widens against it, which
+    # is why this is two calls rather than one wrapper; and because nothing
+    # can pass a budget in, no attempt can ask for more than the cap.
+    output_budget_ceiling = _model_client.openrouter_model_max_output_tokens(model_id)
+    attempt_max_output_tokens = _model_client.output_budget_for_document(
+        estimate_tokens(doc_text), output_budget_ceiling
+    )
 
-    for attempt in range(1, attempts_allowed + 1):
+    attempt = 0
+    while attempt < attempts_allowed:
+        attempt += 1
         # Outside the try: a raised cancellation must reach the caller, not be
         # swallowed by this loop's own except clauses and retried.
         if cancel_checkpoint is not None:
@@ -2837,6 +3653,13 @@ def run_primary_pass(
         raw_response = None
         context_length_rejected = False
         replacement_text_failures: list[str] = []
+        # Issue #643: THIS attempt's structured schema rejections, when it
+        # had any (`validate_model_response` emits at most one). A list so
+        # the sink below is a plain `.append` rather than a closure over a
+        # rebound local, and reset per attempt for the same reason the ledger
+        # write below guards `last_error` -- attempt 2's diagnostic must
+        # never inherit attempt 1's rejected value.
+        schema_errors: list[dict[str, Any]] = []
         # Issue #414: timed around the invoke() call only (assembly/validation
         # are local CPU work, not spend), so `duration_ms` on every ledgered
         # attempt -- success, retry, or terminal failure alike -- reflects the
@@ -2877,7 +3700,14 @@ def run_primary_pass(
             raw_response = model_client.invoke(**invoke_kwargs)
             attempt_duration_ms = int((time.monotonic() - attempt_started_monotonic) * 1000)
             is_valid, parsed_or_error = validate_model_response(
-                raw_response, issue_provenance="model", schema_path=output_schema_path
+                raw_response,
+                issue_provenance="model",
+                schema_path=output_schema_path,
+                # Issue #643: only wired when a caller actually asked for
+                # diagnostics, so a production review builds nothing.
+                schema_error_sink=(
+                    None if attempt_diagnostic_write is None else schema_errors.append
+                ),
             )
             if is_valid:
                 # Issue #627: prove the block transcript against the real
@@ -2908,6 +3738,11 @@ def run_primary_pass(
                     outcome = "failure"
                     return {
                         "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+                        # Issue #670: this exit returned no `reason` key at
+                        # all, so the row stored null and the operator was
+                        # shown the generic stage copy while the real cause
+                        # sat unread in `last_error`.
+                        "reason": REASON_PRIMARY_BLOCK_TRANSCRIPT_REJECTED,
                         "attempts": attempt,
                         "assembled_tokens": assembled_tokens,
                         "last_error": last_error,
@@ -2991,7 +3826,19 @@ def run_primary_pass(
             # `model_output_truncated`, the token Diagnostics and the result
             # panel key their "the answer did not fit" copy off. Swallowing
             # it would send the operator looking for the wrong fault.
-            if attempt >= attempts_allowed:
+            #
+            # Issue #658: a truncation spends `truncation_retries_left`
+            # FIRST -- its own allowance, granted as an EXTRA attempt on top
+            # of `attempts_allowed` rather than taken out of the general
+            # retry budget an earlier schema/transcript rejection may already
+            # have spent. Only once that allowance is gone does a truncation
+            # fall back to whatever general budget is left.
+            widened = widen_output_budget(attempt_max_output_tokens, output_budget_ceiling)
+            room_left = widened > attempt_max_output_tokens
+            if truncation_retries_left > 0 and room_left:
+                truncation_retries_left -= 1
+                attempts_allowed += 1
+            elif attempt >= attempts_allowed or not room_left:
                 outcome = "failure"
                 # Issue #573 fix round 1: set even though this branch raises
                 # immediately (the `finally` below still runs on the way
@@ -3007,7 +3854,7 @@ def run_primary_pass(
             # get its answer wrong, it ran out of room. Telling it "your
             # previous response was rejected" would invite it to shorten its
             # legal judgment, which is the one thing this retry must not buy.
-            attempt_max_output_tokens = widen_output_budget(attempt_max_output_tokens)
+            attempt_max_output_tokens = widened
             continue
         except _model_client.ModelContextLengthExceededError:
             # Issue #270: the provider rejected the assembled prompt as
@@ -3082,6 +3929,16 @@ def run_primary_pass(
                     cache_creation_input_tokens=(actual_usage or {}).get(
                         "cache_creation_input_tokens"
                     ),
+                    # Issue #661: the reasoning ("thinking") tokens the
+                    # provider reported for THIS attempt, read off the SAME
+                    # `actual_usage` dict -- None (not 0) when the client
+                    # cannot report usage or the response carried no
+                    # reasoning figure, same "not measured" discipline as
+                    # the fields above. Observability only: the provider
+                    # already counts these inside `completion_tokens`, so
+                    # they are already inside `actual_output_tokens` and
+                    # nothing derived from cost changes.
+                    reasoning_tokens=(actual_usage or {}).get("reasoning_tokens"),
                     # Issue #567: whether THIS attempt's invoke() was given
                     # the projected schema to enforce -- same value on every
                     # attempt of this pass (resolved once, above the retry
@@ -3096,6 +3953,24 @@ def run_primary_pass(
                     error_token=("" if outcome == "success" else _error_token(last_error)),
                 )
             )
+            # Issue #643: the DEBUG-ONLY companion to the ledger write above
+            # -- same `finally`, so it covers every non-successful attempt
+            # (retry, terminal failure, and the truncation branch that
+            # re-raises on its way out) exactly as the ledger does. Same
+            # "only THIS attempt's own error" guard: a successful attempt is
+            # skipped rather than emitted with a stale earlier `last_error`.
+            if attempt_diagnostic_write is not None and outcome != "success":
+                diagnostic: dict[str, Any] = {
+                    "review_id": review_id,
+                    "pass_name": "primary",
+                    "attempt_number": attempt,
+                    "outcome": outcome,
+                    "error_token": _error_token(last_error),
+                    "error_message": last_error if isinstance(last_error, str) else "",
+                }
+                if schema_errors:
+                    diagnostic["schema_error"] = schema_errors[0]
+                attempt_diagnostic_write(diagnostic)
 
         if context_length_rejected:
             return {
@@ -3109,6 +3984,11 @@ def run_primary_pass(
     # a pipeline ERROR (ARCHITECTURE.md step 17).
     return {
         "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+        # Issue #670: the token both ends already agreed on
+        # (`backend/src/reviews.py`, `frontend/src/ReviewSubmission.tsx`)
+        # while no producer anywhere under `scripts/` ever emitted it. This
+        # exit is exactly the condition it names.
+        "reason": REASON_STRUCTURED_OUTPUT_RETRY_EXHAUSTED,
         "attempts": attempts_allowed,
         "last_error": last_error,
         "assembled_tokens": assembled_tokens,

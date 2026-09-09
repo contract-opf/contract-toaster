@@ -48,7 +48,17 @@
 import { useEffect } from 'react';
 import { vignetteForStage } from './stageTheater';
 import { FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED, FAVICON_STAGE_FRAMES } from './faviconFrames';
-import type { ToasterPhase } from './Toaster';
+
+/**
+ * The Review tab's four coarse phases, as the surfaces that read them see it.
+ *
+ * Issue #727 deleted `Toaster.tsx`, which used to declare this beside the
+ * hero that consumed it. The type outlived that component: the tab title and
+ * the favicon are ours to keep (final plan, designer answer D6), and this is
+ * the parameter `useTabTheater` below is written against, so it lives with
+ * its remaining consumer rather than in a module kept alive only to hold it.
+ */
+export type ToasterPhase = 'idle' | 'working' | 'done' | 'error';
 
 // ---------------------------------------------------------------------------
 // Tab title
@@ -138,8 +148,8 @@ function tabHidden(): boolean {
 
 /**
  * Drives the tab title and favicon off the SAME `phase`/`stage` pair the
- * hero (`ToasterHero`) already renders from, so this can never show a
- * different story than the appliance on screen.
+ * console already renders from, so this can never show a different story than
+ * the appliance on screen.
  *
  * `idle`/`loaded` (AC: "both inert when no review is running"): title and
  * favicon are restored and stay that way — nothing here ever fires with

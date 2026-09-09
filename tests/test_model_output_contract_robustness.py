@@ -235,8 +235,9 @@ def test_a_natural_language_confidence_word_is_still_rejected(failures: list[str
 # correctly. Observed 2026-08-04 against the real educational-affiliation
 # playbook (4 of its 10 ids are dotted).
 #
-# The pattern now accepts kebab-case segments joined by dots -- both formats,
-# neither loosened into "any string": whitespace, uppercase, and punctuation
+# The pattern now accepts kebab-case, snake_case and dotted segments (issue
+# #672 admitted `_`) -- every format a playbook may legitimately use, none of
+# them loosened into "any string": whitespace, uppercase, and punctuation
 # that could smuggle structure into an audit field are still rejected.
 # playbooks/schema.json's own kebab-only constraint on a v1 playbook's
 # `topics[].id` is deliberately NOT touched; that gate governs how a v1
@@ -249,7 +250,25 @@ def _body_with_topic_id(topic_id: str) -> str:
 
 
 def test_opf_dotted_topic_ids_are_accepted(failures: list[str]) -> None:
-    for topic_id in ("clause.confidentiality", "clause.governing-law", "indemnification"):
+    # Issue #672: the underscore forms are here because this fixture's
+    # all-hyphen, all-dot spelling is exactly what hid the NEXT instance of
+    # this same class for another month. An OPF playbook's
+    # `taxonomy.entries[].id` is constrained by `playbooks/opf/
+    # playbook.schema-0.{2,3}.json` to `^[a-z0-9_]+$` -- snake_case is the
+    # only spelling a multi-word OPF topic id can have -- and the digest
+    # names each clause `clause.<taxonomy_id>`. 39 of the real
+    # educational-affiliation playbook's 61 topics were uncitable until
+    # then. The general containment claim lives in
+    # `tests/test_playbook_topic_id_underscore_672.py`; these are the
+    # instances that belong beside the dotted ones they generalize.
+    for topic_id in (
+        "clause.confidentiality",
+        "clause.governing-law",
+        "indemnification",
+        "clause.ferpa_student_records",
+        "audit_rights",
+        "term_termination",
+    ):
         is_valid, err = pp.validate_model_response(_body_with_topic_id(topic_id))
         if not is_valid:
             failures.append(

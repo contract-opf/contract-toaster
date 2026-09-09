@@ -90,8 +90,15 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import critic_review_pass as cp  # noqa: E402
-import diff_standard_form as dsf_module  # noqa: E402
+import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import review_spine  # noqa: E402
@@ -351,7 +358,7 @@ def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: l
 
 def _primary_request_change_response_for_unmodified_draft(docx_bytes: bytes) -> str:
     """Run B below drives `run_review` over the UNMODIFIED draft
-    (`_build_draft_docx(dsf_module, {})` -- no override, so sec-8's text IS
+    (`_build_draft_docx(sfp_module, {})` -- no override, so sec-8's text IS
     the standard form's own text verbatim), unlike
     `test_review_spine._primary_request_change_response_with_transcript`,
     whose transcript addresses THAT file's own OVERRIDDEN sec-8 draft text.
@@ -393,7 +400,7 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
     # Same input document for both runs (unmodified relative to the
     # standard form) -- isolates the flip to toaster_guidance + the
     # model's own (canned) response, not to a different draft.
-    docx_bytes = _build_draft_docx(dsf_module, {})
+    docx_bytes = _build_draft_docx(sfp_module, {})
 
     # -- Run A: no toaster_guidance, model (canned) ACCEPTs. -----------
     accept_client = model_client.FakeBedrockClient(

@@ -21,6 +21,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from '../App';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  expectNoReviewAttached,
+  findReviewResult,
+  openReceipt,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -94,7 +99,7 @@ const ADMIN_ROUTES = {
     model_provider: 'openrouter',
     key_set: false,
     key_source: null,
-    key_hint: '',
+    key_fingerprint: '',
     updated_at: '',
     updated_by: '',
   },
@@ -389,12 +394,17 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
     // The second poll (POLL_INTERVAL_MS later) reports DONE; give it real
     // wall-clock time to fire.
     await waitFor(
-      () => expect(screen.getByTestId('review-status').textContent).toContain('Accepted'),
+      // Issue #733: the console's lamp reports the machine's state ("Review
+      // complete"); the OUTCOME is the result panel's headline on both.
+      async () =>
+        expect((await findReviewResult()).textContent).toContain('Accepted'),
       { timeout: 8000 },
     );
 
     expect(screen.getByTestId('toaster-state-done')).toBeInTheDocument();
-    expect(screen.getByTestId('review-receipt')).toBeInTheDocument();
+    // The provenance slip. Old panel: printed on the page. Console: printed
+    // from the register into the receipt overlay (issue #733).
+    expect(await openReceipt()).toBeInTheDocument();
     expect(screen.queryByTestId('review-meta-filename')).toBeNull();
     expect(screen.queryByTestId('review-submitted-playbook')).toBeNull();
   }, 12000);
@@ -414,7 +424,7 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(screen.queryByTestId('review-status')).toBeNull();
+    expectNoReviewAttached();
     expect(
       fetchMock.mock.calls.some(([input]) => {
         const pathname = new URL(String(input), 'http://localhost').pathname;
@@ -432,7 +442,7 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
     render(<ReviewSubmission />);
 
     await screen.findByTestId('review-submission');
-    expect(screen.queryByTestId('review-status')).toBeNull();
+    expectNoReviewAttached();
   });
 
   it('a failed "?scope=mine" probe degrades to a fresh submit form, no crash', async () => {
@@ -444,6 +454,6 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
     render(<ReviewSubmission />);
 
     await screen.findByTestId('review-submission');
-    expect(screen.queryByTestId('review-status')).toBeNull();
+    expectNoReviewAttached();
   });
 });

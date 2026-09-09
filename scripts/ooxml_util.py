@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 """
-Shared OOXML root-namespace-preservation helpers (issue #621, scope item 1).
+Shared OOXML primitives: namespaces, part names, and the
+root-namespace-preservation dance (issue #621, scope item 1).
 
 Every module in this repo that rewrites `word/document.xml` does the same
 dance: read the ORIGINAL root start tag out of the raw bytes, register the
 namespace prefixes so `xml.etree.ElementTree` does not rename them, serialize
 the mutated tree, then splice the original start tag back in (merged with any
-namespace the serializer hoisted). That dance lived in
-`scripts/redline_inplace.py` and was reached into from four other modules
-(`redline_generate`, `redline_block_apply`, `extraction_normalization_stage`,
-`tools/churn_docx.py`) through its private, underscore-prefixed names.
+namespace the serializer hoisted). That dance lived in the retired in-place
+patcher and was reached into from four other modules (`redline_generate`,
+`redline_block_apply`, `extraction_normalization_stage`, `tools/churn_docx.py`)
+through its private, underscore-prefixed names.
 
-Issue #621 adds a fifth writer (`scripts/redline_block_apply.py`), so the
-helpers move here and every writer imports them from one place. This module is
-a pure EXTRACTION -- the function bodies are the originals, byte for byte,
-with only the exception-message prefix renamed from `redline_inplace:` to
-`ooxml_util:` so a raised error names the module it actually came from. No
-caller's behaviour changes; `redline_inplace` keeps its `_scan_tag_end` /
-`_root_open_tag` / `_declared_namespaces` / `register_declared_namespaces` /
-`_declared_namespaces_anywhere` / `_merge_hoisted_namespaces` names as
-aliases onto these functions, so its existing tests (and `tools/churn_docx.py`)
-run unmodified.
+Issue #621 added a fifth writer (`scripts/redline_block_apply.py`), so the
+helpers moved here and every writer imports them from one place. The function
+bodies are the originals, byte for byte, with only the exception-message
+prefix renamed to `ooxml_util:` so a raised error names the module it actually
+came from.
+
+Issue #631 retired that in-place patcher itself (the anchor/hash patcher the
+2026-07-22 LLM-native decision D3 replaced with the block-transcript
+compiler). The four names its callers still reached for
+that were NOT namespace helpers -- the `w:`/`xml:` namespace URIs, the
+`word/document.xml` part name, the `_w()` qname helper and the
+`_max_existing_id()` revision-id sweep -- moved here with it, unchanged, so
+the surviving writers keep one shared definition of each instead of
+re-declaring the same string constants five times.
 
 ## Why the dance is necessary at all
 
@@ -209,3 +214,65 @@ def merge_hoisted_namespaces(original_open_tag: str, auto_open_tag: str) -> str:
         for prefix, uri in missing
     )
     return original_open_tag[:-1].rstrip() + additions + ">"
+
+
+# ---------------------------------------------------------------------------
+# Namespaces, part names, qname helpers (issue #631: moved from the retired
+# retired in-place patcher / standalone writer, unchanged)
+# ---------------------------------------------------------------------------
+
+#: The WordprocessingML main namespace -- the `w:` prefix on every element
+#: this repo reads or writes inside `word/document.xml`.
+WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+#: The XML namespace, for `xml:space="preserve"` on text runs.
+XML_NS = "http://www.w3.org/XML/1998/namespace"
+#: The officeDocument relationships namespace, for `r:id` and the
+#: `.../relationships/<kind>` relationship-type URIs.
+REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+ET.register_namespace("w", WORD_NS)
+ET.register_namespace("r", REL_NS)
+
+#: The one part every writer in this repo rewrites.
+DOCUMENT_PART = "word/document.xml"
+
+
+def w(tag: str) -> str:
+    """`tag` as a WordprocessingML qname, e.g. ``w("p")``."""
+    return f"{{{WORD_NS}}}{tag}"
+
+
+def r(tag: str) -> str:
+    """`tag` as an officeDocument-relationships qname, e.g. ``r("id")``."""
+    return f"{{{REL_NS}}}{tag}"
+
+
+def max_existing_id(root: ET.Element) -> int:
+    """Scan every element in the parsed document for an existing `w:id`
+    attribute and return the maximum integer value found (0 if none), so
+    newly assigned revision ids never collide with ids a human-edited
+    upload already carries.
+
+    This deliberately does NOT distinguish id SPACES. OOXML gives revisions
+    (`w:ins`/`w:del`) and comments (`w:comment` and its anchors) independent
+    `w:id` counters, and this sweep takes the max across both: a document whose
+    only `w:id` is a comment's 41 pushes the next revision id to 42. That is
+    merely conservative for revision ids -- it skips values, never collides --
+    and it is why the sweep is safe today.
+
+    It is NOT a comment-id allocator, and any code that authors its own
+    `<w:comment>` elements must not reuse it as one: it reads only the parsed
+    `word/document.xml`, so a comment id that exists in `word/comments.xml`
+    would be invisible to it. Allocating an authored comment id from this max
+    would be reading the wrong part.
+    """
+    max_id = 0
+    for el in root.iter():
+        val = el.get(w("id"))
+        if val is None:
+            continue
+        try:
+            max_id = max(max_id, int(val))
+        except ValueError:
+            continue
+    return max_id

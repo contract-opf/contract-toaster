@@ -8,6 +8,12 @@
  * AudioContext plus a stubbed `fetch` — that clips load and the right nodes
  * get started (or don't, when muted).
  *
+ * Since issue #722 the same module also owns the console's nineteen recorded
+ * effects, the shared voice budget and the tick duck, so the mock below records
+ * every started source and every gain ramp: that is the only way to assert
+ * "at most three voices", "terminal outranks texture" and "the tick drops to
+ * 12%" without a real audio device.
+ *
  * Fully offline and deterministic: no real audio, no real network, no
  * advancing of timers. The ticking is asserted via a `setInterval` spy and torn
  * down immediately with `stopTicking()`, so no interval leaks between tests.
@@ -20,36 +26,87 @@
  * whose own assertion depends on the load-time default clears it again
  * itself first, for a self-contained repro if it is ever run in isolation.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 type SoundsModule = typeof import('../toaster/sounds');
 
 // --- A minimal mock of the Web Audio surface the module actually touches. ---
+interface Ramp {
+  value: number;
+  time: number;
+}
+
 interface MockStats {
   contexts: number;
   resumed: number;
   decoded: number;
   sourcesStarted: number;
+  /** Created gains, in creation order. `play` builds source-then-gain, one of
+   *  each per voice, so `gains[i]` belongs to `sources[i]`. */
+  gains: { gain: { value: number }; ramps: Ramp[] }[];
+  sources: { stopped: boolean; end: () => void }[];
+}
+
+/** How many voices the module still holds open: started, not stopped, not
+ *  ended. The budget assertion the ticket's acceptance criterion asks for. */
+function liveVoices(stats: MockStats): number {
+  return stats.sources.filter((source) => !source.stopped).length;
 }
 
 function makeMockAudioContext(state: 'running' | 'suspended' = 'suspended'): {
   Ctor: new () => unknown;
   stats: MockStats;
 } {
-  const stats: MockStats = { contexts: 0, resumed: 0, decoded: 0, sourcesStarted: 0 };
+  const stats: MockStats = {
+    contexts: 0,
+    resumed: 0,
+    decoded: 0,
+    sourcesStarted: 0,
+    gains: [],
+    sources: [],
+  };
 
   class MockGain {
-    gain = { value: 1 };
+    ramps: Ramp[] = [];
+    gain = {
+      value: 1,
+      linearRampToValueAtTime: (value: number, time: number): void => {
+        this.ramps.push({ value, time });
+      },
+    };
+    constructor() {
+      stats.gains.push(this);
+    }
     connect(): void {}
+    disconnect(): void {}
   }
   class MockBufferSource {
     buffer: unknown = null;
+    stopped = false;
+    onended: (() => void) | null = null;
+    constructor() {
+      stats.sources.push(this);
+    }
     connect(): void {}
+    disconnect(): void {}
     start(): void {
       stats.sourcesStarted += 1;
     }
-    stop(): void {}
+    /** A real AudioBufferSourceNode fires `onended` when it is stopped as well
+     *  as when it runs out; synchronously here, which is the only divergence. */
+    stop(): void {
+      this.end();
+    }
+    /** Simulate the clip finishing on its own. */
+    end(): void {
+      if (this.stopped) return;
+      this.stopped = true;
+      this.onended?.();
+    }
   }
   class MockAudioContext {
     state = state;
@@ -148,7 +205,7 @@ describe('sounds — graceful behaviour without AudioContext', () => {
 });
 
 describe('sounds — clip loading', () => {
-  it('primeAudio creates/resumes the context and decodes all three clips once', async () => {
+  it('primeAudio creates/resumes the context and decodes all twenty-two clips once', async () => {
     const { Ctor, stats } = makeMockAudioContext('suspended');
     setAudioContext(Ctor);
     stubAudioFetch();
@@ -159,12 +216,14 @@ describe('sounds — clip loading', () => {
     expect(stats.resumed).toBe(1);
 
     await flushLoads();
-    expect(stats.decoded).toBe(3); // lever, tick, pop
+    // The three original toaster clips plus the console's nineteen recorded
+    // effects (issue #722) — one bus, one load pass, no second fetcher.
+    expect(stats.decoded).toBe(22);
 
     // Loading is started exactly once, however often we prime.
     sounds.primeAudio();
     await flushLoads();
-    expect(stats.decoded).toBe(3);
+    expect(stats.decoded).toBe(22);
   });
 
   it('a failed fetch leaves the sound silent rather than throwing', async () => {
@@ -355,5 +414,322 @@ describe('useSoundMuted', () => {
     fireEvent.click(button);
     expect(button.textContent).toBe('on');
     expect(sounds.isMuted()).toBe(false);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Issue #722 — the nineteen recorded effects, folded into THIS module.
+// ---------------------------------------------------------------------------
+
+/** Bring a module up with a mock context and every clip decoded. */
+async function readyModule(): Promise<{ sounds: SoundsModule; stats: MockStats }> {
+  window.localStorage.clear();
+  const { Ctor, stats } = makeMockAudioContext('running');
+  setAudioContext(Ctor);
+  stubAudioFetch();
+  const sounds = await loadModule();
+  sounds.primeAudio();
+  await flushLoads();
+  return { sounds, stats };
+}
+
+/** The gain a voice was started at, which identifies the recording: every id
+ *  has its own level in the module's gain table. */
+function startedGains(stats: MockStats): number[] {
+  return stats.gains.map((gain) => gain.gain.value);
+}
+
+describe('sounds — an un-primed session (issue #722)', () => {
+  // Every other test below starts from `readyModule()`, which primes. This one
+  // does not, because the un-primed module is the state a reviewer is actually
+  // in for the whole setup phase of a review: the panel's only other prime
+  // lives inside `submitReview`. It pins WHY the console must prime on its
+  // first gesture — the caller-side half of this is asserted in
+  // orbit-diner-render.test.tsx.
+  it('sounds nothing until primeAudio has run, and sounds the same event after it', async () => {
+    window.localStorage.clear();
+    const { Ctor, stats } = makeMockAudioContext('running');
+    setAudioContext(Ctor);
+    stubAudioFetch();
+    const sounds = await loadModule();
+
+    // The markup-intensity radio's `key`, in a session that has submitted
+    // nothing: no fetch has been made, no clip is decoded, and `play()` stops
+    // at its empty-buffer guard. Not muted, not budget-limited — just unloaded.
+    sounds.playMotionEvent('key');
+    await flushLoads();
+    expect(stats.decoded).toBe(0);
+    expect(stats.sourcesStarted).toBe(0);
+
+    // The identical event, on the identical module, once a gesture has primed
+    // it: the control has a voice. Priming is the whole difference.
+    sounds.primeAudio();
+    await flushLoads();
+    sounds.playMotionEvent('key');
+    expect(stats.sourcesStarted).toBe(1);
+    expect(startedGains(stats)).toEqual([0.32]); // register-key
+  });
+});
+
+describe('sounds — the console adapter (issue #722)', () => {
+  it('plays one recording per console event, on the one bus', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.playMotionEvent('reservation-confirmed'); // till-open, 0.34
+    expect(stats.sourcesStarted).toBe(1);
+    expect(startedGains(stats)).toEqual([0.34]);
+
+    stats.sources[0].end();
+    sounds.playMotionEvent('pad-focus'); // paper-slide, 0.18
+    expect(startedGains(stats)).toEqual([0.34, 0.18]);
+  });
+
+  it('stays silent for the four events the panel\'s own handlers already sound', async () => {
+    const { sounds, stats } = await readyModule();
+
+    // `submitReview` plays the lever, and the `phase` effect plays the
+    // completion and the clunk. The adapter must not double any of them.
+    for (const event of ['submit-accepted', 'done', 'error', 'manual'] as const) {
+      sounds.playMotionEvent(event);
+    }
+    expect(stats.sourcesStarted).toBe(0);
+  });
+
+  it('fires a stage cue once per genuinely new backend stage token', async () => {
+    const { sounds, stats } = await readyModule();
+
+    // Three polls reporting the SAME stage are one cue, not three.
+    sounds.playMotionEvent('stage', 'primary_pass');
+    sounds.playMotionEvent('stage', 'primary_pass');
+    sounds.playMotionEvent('stage', 'primary_pass');
+    expect(stats.sourcesStarted).toBe(1);
+    expect(startedGains(stats)).toEqual([0.2]); // stage-primary
+
+    stats.sources[0].end();
+    sounds.playMotionEvent('stage', 'critic_pass');
+    expect(startedGains(stats)).toEqual([0.2, 0.18]); // + stage-critic
+
+    // A stage token this build does not know gets no cue rather than a wrong one.
+    stats.sources[1].end();
+    sounds.playMotionEvent('stage', 'some_future_pass');
+    expect(stats.sourcesStarted).toBe(2);
+  });
+
+  it('re-arms the stage cues for the next submission', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.playMotionEvent('stage', 'primary_pass');
+    stats.sources[0].end();
+    sounds.playMotionEvent('submit-accepted'); // silent itself, but a new run
+    sounds.playMotionEvent('stage', 'primary_pass');
+    expect(stats.sourcesStarted).toBe(2);
+  });
+
+  it('creates no timer of its own — the ~446 ms tick stays the only one', async () => {
+    const { sounds } = await readyModule();
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    for (const event of [
+      'key',
+      'file-loaded',
+      'file-removed',
+      'cancelled',
+      'receipt-open',
+      'receipt-copy',
+      'settled',
+      'odometer',
+      'refusal',
+    ] as const) {
+      sounds.playMotionEvent(event);
+    }
+    sounds.playPop();
+    sounds.playClunk();
+
+    expect(intervalSpy).not.toHaveBeenCalled();
+    expect(timeoutSpy).not.toHaveBeenCalled();
+    intervalSpy.mockRestore();
+    timeoutSpy.mockRestore();
+  });
+});
+
+describe('sounds — completion identity and the failure signal (issue #722)', () => {
+  it('plays exactly one completion recording, the pop by default', async () => {
+    const { sounds, stats } = await readyModule();
+    expect(sounds.COMPLETION_SOUND).toBe('pop');
+
+    sounds.playPop();
+    // One voice, at the pop\'s own level — never the pop AND the ka-ching
+    // (0.3), which is the alternative a deployment may select instead.
+    expect(stats.sourcesStarted).toBe(1);
+    expect(startedGains(stats)).toEqual([0.9]);
+  });
+
+  it('keeps the failure clunk and puts the recorded hiss under it', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.playClunk();
+    // The lever recording at its own level, plus burnt-hiss at 0.17 — one
+    // owner, one moment, no second bus hissing on a route we cannot see.
+    expect(startedGains(stats)).toEqual([0.9, 0.17]);
+  });
+});
+
+describe('sounds — the shared voice budget (issue #722)', () => {
+  it('never holds more than three voices open, the tick included', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.startTicking(); // one tick voice
+    sounds.playMotionEvent('reservation-confirmed');
+    sounds.playMotionEvent('settled');
+    sounds.playMotionEvent('odometer');
+    sounds.stopTicking();
+
+    expect(stats.sourcesStarted).toBe(4);
+    expect(liveVoices(stats)).toBe(3);
+  });
+
+  it('drops a texture sound rather than interrupting terminal signals', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.playPop();
+    sounds.playPop();
+    sounds.playPop();
+    expect(liveVoices(stats)).toBe(3);
+
+    // register-key is texture; three completions are already sounding, so the
+    // new sound is dropped rather than stealing one of them.
+    sounds.playMotionEvent('key');
+    expect(stats.sourcesStarted).toBe(3);
+    expect(liveVoices(stats)).toBe(3);
+  });
+
+  it('lets a terminal signal take a texture voice when the budget is full', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.playMotionEvent('key'); // register-key, texture
+    sounds.playMotionEvent('pad-focus'); // paper-slide, texture
+    sounds.playMotionEvent('guidance-readback'); // pen-scratch, texture
+    expect(liveVoices(stats)).toBe(3);
+
+    sounds.playPop();
+    expect(stats.sourcesStarted).toBe(4);
+    // The oldest texture voice yielded; the completion is heard.
+    expect(stats.sources[0].stopped).toBe(true);
+    expect(liveVoices(stats)).toBe(3);
+  });
+});
+
+describe('sounds — ducking the tick (issue #722)', () => {
+  it('ducks a live tick to 12% over 20 ms and restores it over 120 ms', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.startTicking();
+    sounds.stopTicking(); // the interval is not needed; the first tick is playing
+    const tickGain = stats.gains[0];
+    expect(tickGain.gain.value).toBeCloseTo(0.22, 5);
+
+    sounds.playMotionEvent('settled'); // a one-shot over the tick
+    expect(tickGain.ramps).toHaveLength(1);
+    expect(tickGain.ramps[0].value).toBeCloseTo(0.22 * 0.12, 5);
+    expect(tickGain.ramps[0].time).toBeCloseTo(0.02, 5); // 20 ms
+
+    // The one-shot finishes: the tick comes back up over 120 ms.
+    stats.sources[1].end();
+    expect(tickGain.ramps).toHaveLength(2);
+    expect(tickGain.ramps[1].value).toBeCloseTo(0.22, 5);
+    expect(tickGain.ramps[1].time).toBeCloseTo(0.12, 5);
+  });
+
+  it('starts a tick already ducked when a one-shot is sounding', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.playMotionEvent('settled');
+    sounds.startTicking();
+    sounds.stopTicking();
+
+    // gains[0] is the one-shot; gains[1] is the tick, born at 12%.
+    expect(stats.gains[1].gain.value).toBeCloseTo(0.22 * 0.12, 5);
+  });
+});
+
+describe('sounds — a muted session and a hidden tab are silent (issue #722)', () => {
+  it('plays nothing at all while muted, console events included', async () => {
+    const { sounds, stats } = await readyModule();
+    sounds.setMuted(true);
+
+    for (const event of [
+      'key',
+      'stage',
+      'settled',
+      'reservation-confirmed',
+      'receipt-copy',
+      'odometer',
+      'refusal',
+    ] as const) {
+      sounds.playMotionEvent(event, 'primary_pass');
+    }
+    sounds.playPop();
+    sounds.playClunk();
+    sounds.playLever();
+    sounds.playDetent();
+    sounds.startTicking();
+
+    expect(stats.sourcesStarted).toBe(0);
+  });
+
+  it('stops voices that are already sounding when the reviewer mutes', async () => {
+    const { sounds, stats } = await readyModule();
+
+    sounds.startTicking();
+    sounds.playMotionEvent('reservation-confirmed');
+    expect(liveVoices(stats)).toBe(2);
+
+    sounds.setMuted(true);
+    expect(liveVoices(stats)).toBe(0);
+  });
+
+  it('stops voices and starts none while the tab is hidden', async () => {
+    const { sounds, stats } = await readyModule();
+    sounds.playMotionEvent('reservation-confirmed');
+    expect(liveVoices(stats)).toBe(1);
+
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(liveVoices(stats)).toBe(0);
+
+    sounds.playMotionEvent('settled');
+    sounds.playPop();
+    expect(stats.sourcesStarted).toBe(1); // still just the first one
+
+    hidden.mockRestore();
+  });
+});
+
+describe('sounds — one bus, not two (issue #722)', () => {
+  it('is the only caller of the kit\'s createSoundBus — nothing runs it', () => {
+    // The kit ships its own bus (`src/orbit-diner/sounds.ts`). Running it
+    // alongside this module would mean two AudioContexts, two voice budgets and
+    // two readings of the mute flag. It stays defined and exported as part of
+    // the vendored surface; it must stay uncalled.
+    const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const callers: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (/\.(ts|tsx)$/.test(entry.name)) {
+          const relative = path.relative(srcDir, full).split(path.sep).join('/');
+          if (relative === 'orbit-diner/sounds.ts') continue; // where it is defined
+          if (/\bcreateSoundBus\s*\(/.test(fs.readFileSync(full, 'utf-8'))) {
+            callers.push(relative);
+          }
+        }
+      }
+    };
+    walk(srcDir);
+    expect(callers, 'createSoundBus must not be called anywhere; toaster/sounds.ts is the one owner').toEqual([]);
   });
 });

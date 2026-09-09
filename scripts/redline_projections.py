@@ -23,14 +23,31 @@ package, all three of which must hold before a document is delivered:
    clause's heading is its own extracted field, never part of `text`, so it
    has to be compared explicitly or a renumbered or re-titled section would
    pass. This is what proves the redline is SURGICAL: nothing outside a
-   tracked change moved.
+   tracked change moved. Since issue #646 a `delete_block` that empties a
+   clause also INSERTS `[Intentionally omitted.]` into it, and this proof is
+   what says that insertion is fully rejectable -- the placeholder is new
+   content the compiler injects, so "reject-all is byte-faithful to the
+   original" is the assertion that matters most about it.
+   What this proof does NOT say is WHICH `<w:p>` a revision landed on:
+   rejecting our revisions restores whatever paragraph we wrote them on, and
+   proof 2 compares a grouping-independent text STREAM, so an edit written
+   into a neighbouring element reproduces both projections. Every writer
+   here therefore carries its own carried-identity + text-equality guard
+   (`redline_block_apply._resolve_physical_paragraphs` for a body paragraph,
+   `_plan_omitted_clause_placeholders` for the heading a placeholder is
+   decided by), and nothing in this module backstops one if it is weakened.
 
 2. **Accept-all == final.** Take the output, accept every tracked change
    (`extraction_normalization_stage.materialize_accept_all`, reused rather
    than reimplemented), extract it, and require the resulting text to equal
-   the model-approved final text: each edited block's `final_text`, every
-   `delete_block`'s block absent, every `insert_block_after`'s `new_text`
-   present in its anchored position.
+   the model-approved final text: each edited block's ops as delivered
+   (`block_transcript.delivered_final_text` -- its `final_text` less the
+   duplicative boundary spaces issue #644 drops, which is the ONLY licensed
+   divergence and is whitespace-only), every `delete_block`'s block absent
+   (or, where the compiler left a placeholder under an emptied heading,
+   reading exactly `block_transcript.OMITTED_CLAUSE_PLACEHOLDER` -- issue
+   #646), every `insert_block_after`'s `new_text` present in its anchored
+   position.
 
 3. **Part allowlist.** Only the parts a redline legitimately touches may
    differ between input and output package; every other part must come back
@@ -39,7 +56,11 @@ package, all three of which must hold before a document is delivered:
    `<w:rsid>` and nothing else -- because that one part also carries
    `<w:documentProtection>` and `<w:trackChanges>`, so exempting it wholesale
    would let a redline go out edit-locked, or with revision tracking
-   switched off, and still pass the proof.
+   switched off, and still pass the proof. `word/styles.xml` has a narrower
+   rule of its own (issue #647): a redline may APPEND the two footnote
+   styles a footnote number needs to render as superscript, and may create
+   the part outright for a package that has none, but may not rewrite or
+   drop a single style the document already defines.
 
 ## What "our" tracked changes means, and why proof 1 is scoped to them
 
@@ -110,12 +131,12 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import block_transcript  # noqa: E402
 import extraction_normalization_stage  # noqa: E402
+import docx_parts  # noqa: E402
 import ooxml_util  # noqa: E402
-import redline_inplace  # noqa: E402
 
-WORD_NS = redline_inplace.WORD_NS
-DOCUMENT_PART = redline_inplace.DOCUMENT_PART
-_w = redline_inplace._w
+WORD_NS = ooxml_util.WORD_NS
+DOCUMENT_PART = ooxml_util.DOCUMENT_PART
+_w = ooxml_util.w
 
 # The transcript vocabulary, bound to its single definition
 # (`scripts/block_transcript.py`) rather than re-spelled here.
@@ -160,8 +181,24 @@ PROOFS = (PROOF_REJECT_ALL, PROOF_ACCEPT_ALL, PROOF_PART_ALLOWLIST)
 # to say no part changed that a redline may not touch would pass both.
 # `_verify_settings_rsids_only` permits the measured delta and nothing else.
 #
-# Everything else in the package -- styles, numbering, theme, media, custom
-# XML, docProps -- must come back unchanged.
+# `word/styles.xml` is likewise NOT in this list, and for the same reason
+# (issue #647). A footnote number is superscript because its run carries
+# `<w:rStyle w:val="FootnoteReference"/>` and the package DEFINES that style;
+# a document that has never carried a footnote defines neither it nor
+# `FootnoteText`, so `redline_block_apply._footnote_styles_part` appends the
+# missing definitions -- and creates the part outright for a package that has
+# none. That is the ONLY delta permitted here. Allowlisting the whole part to
+# excuse it would also excuse a rewritten `Normal`, a deleted `Heading1`, or a
+# `<w:docDefaults>` swapped for another font -- a wholesale reformat of the
+# counterparty's paper, waved through by the proof whose stated job is to say
+# no part changed that a redline may not touch.
+# `_verify_styles_footnote_additions_only` permits the two named additions and
+# nothing else, comparing them against the SAME
+# `docx_parts.FOOTNOTE_STYLE_XML` the writer emits from, so the proof
+# and the writer cannot drift into agreeing about a definition neither states.
+#
+# Everything else in the package -- numbering, theme, media, custom XML,
+# docProps -- must come back unchanged.
 # ---------------------------------------------------------------------------
 DECLARED_REDLINE_PARTS = (
     "word/document.xml",
@@ -182,6 +219,14 @@ SETTINGS_PART = "word/settings.xml"
 _RSIDS_TAG = _w("rsids")
 _RSID_TAG = _w("rsid")
 _VAL_ATTR = _w("val")
+
+#: The other narrow-rule part (issue #647). Also kept OUT of
+#: `ALLOWED_CHANGED_PARTS`: a redline may CREATE this part for a package that
+#: has none, but may never drop one, and a part present on both sides gets
+#: `_verify_styles_footnote_additions_only` rather than a blanket pass.
+STYLES_PART = docx_parts.STYLES_PART
+_STYLE_TAG = _w("style")
+_STYLE_ID_ATTR = _w("styleId")
 
 #: How many per-block mismatches a `reject_all` failure spells out before it
 #: truncates. A whole-document divergence would otherwise paste the entire
@@ -543,7 +588,61 @@ def _apply_edit_tuples(source_text: str, tuples: list[tuple[int, int, str]]) -> 
     return "".join(pieces)
 
 
+def _placeholder_block_ids_from_transcript(
+    source_docx_bytes: bytes, source_norm: dict[str, Any], proven: dict[str, Any]
+) -> set:
+    """Which of `proven`'s `delete_block`s leave `[Intentionally omitted.]`
+    behind, for the `applied_edits is None` mode (issue #646).
+
+    With a compiler record in hand this question is already answered -- the
+    placeholder is that edit's `insert_text`. Without one, "every edit in the
+    transcript applied" has to be projected forward, and whether a delete
+    leaves a placeholder is a property of the SOURCE DOCUMENT's heading
+    structure and of the whole batch, not of the op alone. So this asks
+    `redline_block_apply`'s own planner rather than re-deriving the rule:
+    a second implementation of a structural gate is a second thing to drift.
+
+    That makes this half of proof 2 agree with the compiler by construction
+    for the placeholder DECISION -- exactly as it already does for the issue
+    #644 boundary trim, and for the same reason. What proof 2 still proves is
+    that the compiler WROTE what it decided, in the right block, and nothing
+    else; that a placeholder is rejectable is proof 1's job.
+    """
+    # Local import: `redline_block_apply` imports this module, so the
+    # dependency can only run this way round at call time.
+    import redline_block_apply  # noqa: PLC0415
+
+    deleted: set = set()
+    anchored: set = set()
+    block_ids_in_order = [
+        record.get("block_id")
+        for record in source_norm.get("paragraphs") or []
+        if record.get("block_id")
+    ]
+    for block_op in proven.get("block_ops") or []:
+        if block_op["op"] == OP_DELETE_BLOCK:
+            deleted.add(block_op["block_id"])
+        elif block_op["anchor_block_id"] == ANCHOR_START:
+            # `"start"` names no block: the new paragraph lands before the
+            # FIRST block's first `<w:p>`, i.e. under that block's heading.
+            if block_ids_in_order:
+                anchored.add(block_ids_in_order[0])
+        else:
+            anchored.add(block_op["anchor_block_id"])
+    if not deleted:
+        return set()
+
+    # Read-only: this parse is never serialized back, so it needs none of
+    # `materialize_reject_all`'s namespace-preservation dance.
+    with zipfile.ZipFile(io.BytesIO(source_docx_bytes)) as zf:
+        root = ET.fromstring(zf.read(DOCUMENT_PART))
+    return redline_block_apply._plan_omitted_clause_placeholders(
+        root, source_norm.get("paragraphs") or [], deleted, anchored
+    )
+
+
 def _expected_accept_all_texts(
+    source_docx_bytes: bytes,
     source_norm: dict[str, Any],
     proven: dict[str, Any],
     applied_edits: Optional[list[dict[str, Any]]],
@@ -551,22 +650,52 @@ def _expected_accept_all_texts(
     """The block texts the accept-all projection must read, in document order.
 
     With `applied_edits is None` this is the transcript's own promise -- each
-    edited block's `final_text`, every `block_op` in force. With a list, it
-    is the promise RESTRICTED to what actually landed: `apply_block_transcript`
-    fails closed per edit and never lets one edit's failure block its
-    siblings, so a batch where one span edit was refused still delivers the
-    rest, and the proof has to be against the delivered set or it would
-    fail-closed on a document that is exactly right.
+    edited block's ops as DELIVERED, every `block_op` in force. Delivered,
+    not `final_text`: the compiler drops duplicative boundary spaces from
+    insert texts (issue #644), so `block_transcript.delivered_final_text` is
+    what the document is entitled to say and `final_text` -- the promise as
+    the model authored it -- is a space too long at any such boundary. Both
+    sides of this proof call the SAME function, so the trim can never be the
+    thing that fails it.
+
+    With a list, it is the promise RESTRICTED to what actually landed:
+    `apply_block_transcript` fails closed per edit and never lets one edit's
+    failure block its siblings, so a batch where one span edit was refused
+    still delivers the rest, and the proof has to be against the delivered
+    set or it would fail-closed on a document that is exactly right. Those
+    `insert_text`s are already trimmed, having come from
+    `_pair_ops_into_edits`.
+
+    `source_docx_bytes` is the document the transcript was proven against.
+    It is read in the `applied_edits is None` mode only, to project forward
+    which `delete_block`s leave an `[Intentionally omitted.]` placeholder
+    (issue #646) -- a question about the source's heading structure that the
+    normalized paragraph list alone cannot answer, because the rule guards
+    on the LIVE heading paragraph's text.
     """
     block_map = extraction_normalization_stage.build_block_map(source_norm["paragraphs"])
 
     final_text_by_block: dict[str, str] = {}
     deleted_block_ids: set[str] = set()
+    # `block_id -> the text a struck block still shows` (issue #646): the
+    # `[Intentionally omitted.]` placeholder where the compiler left one, and
+    # nothing at all otherwise.
+    struck_block_text: dict[str, str] = {}
     inserts_by_anchor: dict[str, list[str]] = {}
 
     if applied_edits is None:
+        for block_id in _placeholder_block_ids_from_transcript(
+            source_docx_bytes, source_norm, proven
+        ):
+            struck_block_text[block_id] = block_transcript.OMITTED_CLAUSE_PLACEHOLDER
         for block in proven.get("blocks") or []:
-            final_text_by_block[block["block_id"]] = block["final_text"]
+            # NOT `block["final_text"]`: that is the model's promise verbatim,
+            # and the compiler is entitled to drop a duplicative boundary
+            # space from an insert (issue #644). Rebuilding from the ops
+            # through the same rule keeps this proof about the writers.
+            final_text_by_block[block["block_id"]] = block_transcript.delivered_final_text(
+                block["ops"]
+            )
         for block_op in proven.get("block_ops") or []:
             if block_op["op"] == OP_DELETE_BLOCK:
                 deleted_block_ids.add(block_op["block_id"])
@@ -581,6 +710,9 @@ def _expected_accept_all_texts(
             block_id = spec.get("block_id")
             if kind == OP_DELETE_BLOCK:
                 deleted_block_ids.add(block_id)
+                # A delete that left a placeholder recorded it as its own
+                # `insert_text` (issue #646); an ordinary one recorded "".
+                struck_block_text[block_id] = spec.get("insert_text", "") or ""
             elif kind == OP_INSERT_BLOCK_AFTER:
                 inserts_by_anchor.setdefault(block_id, []).append(spec.get("insert_text", ""))
             else:
@@ -599,7 +731,9 @@ def _expected_accept_all_texts(
     expected.extend(inserts_by_anchor.get(ANCHOR_START, []))
     for block_id, live in block_map.items():
         if block_id in deleted_block_ids:
-            expected.append("")  # struck wholesale: contributes no text
+            # Struck wholesale: contributes nothing, unless the compiler left
+            # `[Intentionally omitted.]` standing under an emptied heading.
+            expected.append(struck_block_text.get(block_id, ""))
         else:
             expected.append(final_text_by_block.get(block_id, live.get("text", "") or ""))
         expected.extend(inserts_by_anchor.get(block_id, []))
@@ -607,6 +741,7 @@ def _expected_accept_all_texts(
 
 
 def _verify_accept_all(
+    source_docx_bytes: bytes,
     source_norm: dict[str, Any],
     output_docx_bytes: bytes,
     proven: dict[str, Any],
@@ -636,7 +771,9 @@ def _verify_accept_all(
         ]
 
     try:
-        expected_texts = _expected_accept_all_texts(source_norm, proven, applied_edits)
+        expected_texts = _expected_accept_all_texts(
+            source_docx_bytes, source_norm, proven, applied_edits
+        )
     except Exception as exc:  # noqa: BLE001 - any failure here is fail-closed
         return [
             _failure(
@@ -760,6 +897,131 @@ def _verify_settings_rsids_only(
     return failures
 
 
+def _styles_split(data: Optional[bytes]) -> tuple[str, dict[str, str]]:
+    """`word/styles.xml` split into (everything that is not a `<w:style>`,
+    `styleId` -> that style's canonical form).
+
+    `None` is a package with no styles part at all, which reads as an empty
+    `<w:styles>` root and no styles -- so a CREATED part is held to exactly
+    the same rule as an appended-to one rather than escaping the check.
+
+    A style with no `w:styleId`, and a second style repeating one already
+    seen, are keyed by POSITION rather than by id -- two entries that collided
+    on one key would silently collapse into one and hide a difference from
+    every comparison below.
+    """
+    root = ET.fromstring(data.decode("utf-8")) if data is not None else ET.Element(_w("styles"))
+    styles: dict[str, str] = {}
+    for index, style in enumerate(list(root.findall(_STYLE_TAG))):
+        style_id = style.get(_STYLE_ID_ATTR)
+        key = style_id if style_id is not None else f"<unnamed #{index}>"
+        while key in styles:
+            key = f"{key} #{index}"
+        styles[key] = ET.canonicalize(
+            xml_data=ET.tostring(style, encoding="unicode"), strip_text=True
+        )
+        root.remove(style)
+    remainder = ET.canonicalize(
+        xml_data=ET.tostring(root, encoding="unicode"), strip_text=True
+    )
+    return remainder, styles
+
+
+def _canonical_footnote_styles() -> dict[str, str]:
+    """`styleId` -> canonical form, for the two definitions
+    `docx_parts.FOOTNOTE_STYLE_XML` holds. Parsed from that same
+    mapping the writer emits from, so this proof cannot bless a definition
+    the writer does not actually produce."""
+    return {
+        style_id: ET.canonicalize(xml_data=xml, strip_text=True)
+        for style_id, xml in docx_parts.FOOTNOTE_STYLE_XML.items()
+    }
+
+
+def _verify_styles_footnote_additions_only(
+    source: Optional[bytes], output: bytes
+) -> list[dict[str, Any]]:
+    """Proof 3's narrower rule for `word/styles.xml` (see the allowlist
+    comment): the ONLY difference permitted is the APPEARANCE of the two
+    footnote styles issue #647 requires, each canonically identical to the
+    definition `docx_parts.FOOTNOTE_STYLE_XML` states.
+
+    Everything else in the part -- `<w:docDefaults>`, `<w:latentStyles>`, and
+    every style the document already defined, INCLUDING a `FootnoteReference`
+    or `FootnoteText` of its own -- must come back canonically identical. A
+    document that styles footnotes its own way keeps that styling; the writer
+    only ever fills a gap, and this is what says so about the delivered bytes
+    rather than about the writer's intent.
+    """
+    try:
+        source_rest, source_styles = _styles_split(source)
+        output_rest, output_styles = _styles_split(output)
+    except Exception as exc:  # noqa: BLE001 - an uncomparable part is fail-closed
+        return [
+            _failure(
+                PROOF_PART_ALLOWLIST,
+                f"package part {STYLES_PART!r} could not be compared: "
+                f"{type(exc).__name__}: {exc}",
+                part=STYLES_PART,
+            )
+        ]
+
+    failures: list[dict[str, Any]] = []
+    if source_rest != output_rest:
+        failures.append(
+            _failure(
+                PROOF_PART_ALLOWLIST,
+                f"package part {STYLES_PART!r} changed outside its <w:style> "
+                "definitions, and appending the two footnote styles is the only "
+                "change a redline may make to it -- this part also carries "
+                "<w:docDefaults> and <w:latentStyles>",
+                part=STYLES_PART,
+            )
+        )
+
+    for style_id in sorted(set(source_styles) - set(output_styles)):
+        failures.append(
+            _failure(
+                PROOF_PART_ALLOWLIST,
+                f"package part {STYLES_PART!r} dropped style {style_id!r}; a redline "
+                "may only ADD a style definition, never remove one",
+                part=STYLES_PART,
+            )
+        )
+    for style_id in sorted(set(source_styles) & set(output_styles)):
+        if source_styles[style_id] != output_styles[style_id]:
+            failures.append(
+                _failure(
+                    PROOF_PART_ALLOWLIST,
+                    f"package part {STYLES_PART!r} rewrote style {style_id!r}; the "
+                    "document's own style definitions are left exactly as they were",
+                    part=STYLES_PART,
+                )
+            )
+
+    permitted = _canonical_footnote_styles()
+    for style_id in sorted(set(output_styles) - set(source_styles)):
+        if style_id not in permitted:
+            failures.append(
+                _failure(
+                    PROOF_PART_ALLOWLIST,
+                    f"package part {STYLES_PART!r} gained style {style_id!r}; the only "
+                    f"styles a redline may add are {sorted(permitted)!r}",
+                    part=STYLES_PART,
+                )
+            )
+        elif output_styles[style_id] != permitted[style_id]:
+            failures.append(
+                _failure(
+                    PROOF_PART_ALLOWLIST,
+                    f"package part {STYLES_PART!r} gained a style {style_id!r} that is "
+                    "not the definition docx_parts.FOOTNOTE_STYLE_XML states",
+                    part=STYLES_PART,
+                )
+            )
+    return failures
+
+
 def _verify_part_allowlist(
     input_docx_bytes: bytes, output_docx_bytes: bytes
 ) -> list[dict[str, Any]]:
@@ -778,6 +1040,13 @@ def _verify_part_allowlist(
 
     failures: list[dict[str, Any]] = []
     for name in sorted(set(output_parts) - set(source_parts)):
+        if name == STYLES_PART:
+            # Created for a package that carried none: held to the same
+            # content rule as an appended-to one, against an empty source.
+            failures.extend(
+                _verify_styles_footnote_additions_only(None, output_parts[name])
+            )
+            continue
         if name not in ALLOWED_CHANGED_PARTS:
             failures.append(
                 _failure(
@@ -801,6 +1070,13 @@ def _verify_part_allowlist(
         if name == SETTINGS_PART:
             failures.extend(
                 _verify_settings_rsids_only(source_parts[name], output_parts[name])
+            )
+            continue
+        if name == STYLES_PART:
+            failures.extend(
+                _verify_styles_footnote_additions_only(
+                    source_parts[name], output_parts[name]
+                )
             )
             continue
         if name in ALLOWED_CHANGED_PARTS:
@@ -849,7 +1125,9 @@ def verify_projections(
     `applied_edits` is the compiler's own per-edit record of what actually
     landed (each entry carrying `kind`, `block_id` and, for a span edit,
     `start`/`end`/`insert_text`); `None` means "every edit in the transcript
-    applied".
+    applied", and rebuilds proof 2's expected text from the transcript's ops
+    through the same issue #644 boundary rule the compiler writes with, so
+    the two modes agree on a boundary-trimmed transcript.
 
     Returns `{"status": "verified"|"failed", "failures": [...]}`. Each failure
     names its `proof`. Never raises: a projection that cannot even be built is
@@ -871,7 +1149,9 @@ def verify_projections(
 
     failures.extend(_verify_reject_all(source_norm, output_docx_bytes, revision_ids))
     failures.extend(
-        _verify_accept_all(source_norm, output_docx_bytes, proven, applied_edits)
+        _verify_accept_all(
+            input_docx_bytes, source_norm, output_docx_bytes, proven, applied_edits
+        )
     )
 
     return {

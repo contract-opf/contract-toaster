@@ -66,6 +66,29 @@ review MANUAL_REVIEW_REQUIRED / `floor_invariant_unjudged` rather than letting
 an unevaluated invariant pass silently, and a `violation` verdict becomes a
 monotonic `detector_fires` entry that `reconcile()` cannot downgrade.
 
+TOLD WHO IT ACTS FOR (issue #679). A Floor invariant is frequently
+DIRECTIONAL -- phrased in terms of what may or may not run in "the
+counterparty's" favour -- and until #679 this function was given no party
+identity at all, so it resolved that pronoun by guess. Measured live against
+the real playbook (#679's own runs), it guessed BACKWARDS every time, firing
+a signed monotonic Floor rule against our own principal.
+`judge_floor_invariants(perspective_note=...)` now carries the resolved
+identity into each per-invariant prompt, and a party-relative invariant with
+NO resolvable identity fails closed into `unjudged` rather than being
+guessed at.
+
+GIVEN ROOM TO ANSWER (issue #682). The default `max_output_tokens` was
+`1024`, sized from nothing and big enough only for the synthetic fixtures:
+OpenRouter's `max_tokens` is a COMBINED reasoning+content ceiling, so on a
+reasoning-class model that budget was spent thinking and every real document
+died here with `finish_reason='length'`. `DEFAULT_MAX_OUTPUT_TOKENS` below is
+derived instead -- the largest verdict `_validate_judge_response` accepts,
+plus the reasoning allowance #677 measured -- so the judge survives even a
+model whose policy entry declares no reasoning allowance at all. The same
+issue closed the hole that failure exposed: a truncated judge now fails
+CLOSED into `unjudged` (and is named in `FloorJudgment.truncated`) instead of
+raising out of this module and killing the review.
+
 Still out of scope (the remainder of issue #285's list): prompt-manifest
 integration and any lexical detector change.
 """
@@ -115,9 +138,94 @@ _MAX_RETRIES_PER_INVARIANT = 1
 
 _EVIDENCE_QUOTE_MAX_CHARS = 200
 
+# ---------------------------------------------------------------------------
+# Output budget (issue #682)
+# ---------------------------------------------------------------------------
+# This function's default budget used to be a bare `1024` -- a number sized
+# from nothing. It fit the synthetic fixtures, and the first REAL document
+# broke it. OpenRouter's `max_tokens` is a COMBINED ceiling over a
+# reasoning-class model's THINKING and its CONTENT (model-policy/
+# openrouter.json's own "REASONING BUDGET" note; `model_client
+# .OpenRouterModelClient.invoke` sends `max_tokens = max_output_tokens +
+# reasoning_allowance`), so at 1024 the thinking ate the verdict: measured on
+# the private corpus for issue #677 (landed as 41e0b4c), one real
+# counterparty-paper agreement truncated 5 runs out of 5 here with
+# `finish_reason='length'`, and completed 2 of 2 once ~4000 tokens of
+# thinking room existed.
+#
+# #677's policy pin does not make this budget safe -- it only widens the
+# ceiling for the models it pinned. `model-policy/openrouter.json` still
+# ships `selectable` entries declaring `reasoning_max_tokens: 0`, and an
+# operator who selects one of those gets `max_tokens == max_output_tokens`
+# and the broken shape back. So the default is built here from the two
+# quantities that are actually knowable:
+#
+#   CONTENT -- the judge emits exactly ONE small JSON verdict, and
+#   `_validate_judge_response` below bounds it: an echoed `invariant_id`, a
+#   bool, and an `evidence_quote` of at most `_EVIDENCE_QUOTE_MAX_CHARS`.
+#   `_LARGEST_ACCEPTABLE_VERDICT` is the biggest response that validator will
+#   accept; the content half is its measured size with 4x headroom.
+#
+#   REASONING -- `_MEASURED_REASONING_TOKENS`, the allowance #677 measured as
+#   sufficient on a real document. It is folded into `max_output_tokens`
+#   deliberately, so the judge survives a model that declares NO allowance.
+#   A policy pin, where one exists, is ADDED on top by the client -- extra
+#   headroom, never a substitute for this.
+#
+# Raising a CEILING is not spend. A provider bills the tokens it actually
+# generates, and the verdict asked for here is the same few hundred
+# characters it always was.
 
-def _build_user_prompt(*, invariant_id: str, statement: str, review_context: str) -> str:
+#: Generous upper bound on an OPF Floor invariant id (a rule-id-shaped
+#: slug, e.g. "floor-no-uncapped-liability"), used only to size the largest
+#: verdict the validator can accept. Not a limit imposed on callers.
+_MAX_INVARIANT_ID_CHARS = 120
+
+_LARGEST_ACCEPTABLE_VERDICT = json.dumps(
+    {
+        "invariant_id": "i" * _MAX_INVARIANT_ID_CHARS,
+        "violated": True,
+        "evidence_quote": "q" * _EVIDENCE_QUOTE_MAX_CHARS,
+    }
+)
+
+#: The content half: the largest acceptable verdict, times four.
+_VERDICT_CONTENT_TOKENS = 4 * _primary_review_pass.estimate_tokens(_LARGEST_ACCEPTABLE_VERDICT)
+
+#: The reasoning half: the allowance issue #677 measured as sufficient for a
+#: real document (0 of 5 completions without it, 2 of 2 with it).
+_MEASURED_REASONING_TOKENS = 4000
+
+#: Default `max_output_tokens` for `judge_floor_invariants`. Callers may
+#: override it; nothing in the pipeline does today.
+DEFAULT_MAX_OUTPUT_TOKENS = _VERDICT_CONTENT_TOKENS + _MEASURED_REASONING_TOKENS
+
+# Issue #679: an invariant phrased relative to one side of the deal -- in
+# terms of "the counterparty" -- cannot be judged by a judge that has not
+# been told which party is which. Deliberately ONE term, matched as a
+# case-insensitive substring of `statement`: "an invariant phrased in terms
+# of 'the counterparty' is unjudgeable" is the ticket's own scoping, and
+# widening it (e.g. to "our"/"we") would push party-neutral-in-practice
+# invariants into the fail-closed path and change behavior for callers this
+# issue is not about.
+_PARTY_RELATIVE_TERM = "counterparty"
+
+
+def _is_party_relative(statement: str) -> bool:
+    """True when `statement` is phrased relative to a party, so it is
+    unjudgeable without a resolved binding (issue #679)."""
+    return _PARTY_RELATIVE_TERM in statement.lower()
+
+
+def _build_user_prompt(
+    *, invariant_id: str, statement: str, review_context: str, perspective_note: str = ""
+) -> str:
+    # Issue #679: the note goes FIRST, ahead of the invariant -- its closing
+    # line disambiguates "the counterparty" for "the rule below", so it only
+    # reads correctly when the rule follows it.
+    prefix = f"{perspective_note}\n\n" if perspective_note else ""
     return (
+        f"{prefix}"
         f"invariant_id: {invariant_id}\n"
         f"statement: {statement}\n"
         "\n"
@@ -169,10 +277,22 @@ class FloorJudgment:
     evidence_quote}`.
     `unjudged`: invariant ids that had no valid verdict after the one
     bounded retry -- the deterministic coverage gate.
+    `truncated` (issue #682): the SUBSET of `unjudged` that ran out of
+    output room (`model_client.ModelOutputTruncatedError`) rather than
+    answering unreadably. Both fail closed identically -- this field changes
+    no decision, it only tells the two diagnoses apart, because they lead an
+    operator to different fixes: a budget/`reasoning_max_tokens` problem
+    versus a model that answered and got the shape wrong. Not decoration:
+    `review_spine.run_review` reads it to choose between its
+    `REASON_FLOOR_INVARIANT_TRUNCATED` and `REASON_FLOOR_INVARIANT_UNJUDGED`
+    terminals, which is what puts the right cause/fix copy in front of the
+    reader -- "a retry will not help" for a deterministic budget failure
+    instead of "it is worth submitting again".
     """
 
     verdicts: list[dict[str, Any]] = field(default_factory=list)
     unjudged: list[str] = field(default_factory=list)
+    truncated: list[str] = field(default_factory=list)
 
     @property
     def fail_closed(self) -> bool:
@@ -189,9 +309,10 @@ def judge_floor_invariants(
     review_context: str,
     model_client: Any,
     model_id: str,
-    max_output_tokens: int = 1024,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     review_id: str = "",
     ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,
+    perspective_note: str = "",
 ) -> FloorJudgment:
     """Judge every Floor invariant against `review_context`, one
     `model_client.invoke()` call per invariant (plus one bounded retry for
@@ -212,23 +333,72 @@ def judge_floor_invariants(
     default `""` keeps every existing direct caller (offline/unit tests
     that pass no `ledger_write`) unaffected.
 
+    `perspective_note` (issue #679, default `""`): who this review acts
+    for, resolved by the caller from the OPF document's `perspective` block
+    (`scripts/review_spine.py::_floor_perspective_note` is the one producer
+    in the pipeline). Prepended VERBATIM to every per-invariant user prompt,
+    ahead of the invariant. A directional Floor invariant is phrased
+    relative to a principal this function was never given -- it asks about
+    "the counterparty" -- and measured live those invariants resolved
+    that pronoun BACKWARDS -- firing a signed, monotonic, un-downgradable
+    Floor rule against our own client. The judge resolves the pronoun itself
+    once it is told who the parties are; there is no rule table here.
+
+    FAIL CLOSED when it cannot be resolved: with NO `perspective_note`, an
+    invariant whose `statement` is party-relative (`_is_party_relative`) is
+    genuinely unjudgeable and goes straight to `unjudged` -- no model call,
+    no guess. A wrong Floor is worse than an unjudged one, and the caller
+    already knows how to stop (`fail_closed` ->
+    `review_spine.REASON_FLOOR_INVARIANT_UNJUDGED`). A party-NEUTRAL
+    invariant is judged exactly as before, so the default is a no-op for
+    every caller whose invariants do not depend on a binding.
+
+    `max_output_tokens` (issue #682, default `DEFAULT_MAX_OUTPUT_TOKENS`):
+    see that constant's derivation above -- it is sized from the verdict
+    contract this module enforces plus the reasoning need #677 measured on a
+    real document, NOT from the round `1024` that shipped first and
+    truncated every real review here. Still caller-overridable; nothing in
+    the pipeline overrides it today.
+
     Returns a `FloorJudgment`. Never raises on a judge failure -- an
     invalid-after-retry invariant lands in `unjudged` (fail-closed),
     exactly like `primary_review_pass`'s bounded-retry-then-terminal
-    pattern, just scoped per-invariant instead of per-pass.
+    pattern, just scoped per-invariant instead of per-pass. Issue #682 made
+    that true of a TRUNCATED judge too (`model_client
+    .ModelOutputTruncatedError`, which used to propagate out of here); it
+    lands in `unjudged` and is additionally named in `truncated` so the
+    "ran out of room" diagnosis is not lost. Every other
+    `ModelInvocationError` still propagates -- a broken model seam is not a
+    per-invariant judgment.
     """
     ledger_write = ledger_write or (lambda record: None)
     verdicts: list[dict[str, Any]] = []
     unjudged: list[str] = []
+    truncated: list[str] = []
 
     for invariant in invariants:
         invariant_id = invariant["id"]
         statement = invariant["statement"]
+        # Issue #679 fail-closed gate, BEFORE any spend: no resolved
+        # binding + a party-relative statement == unjudgeable. Not judged
+        # satisfied, not judged violated, and not one model call spent
+        # guessing which side is which.
+        if not perspective_note and _is_party_relative(statement):
+            unjudged.append(invariant_id)
+            continue
         user_prompt = _build_user_prompt(
-            invariant_id=invariant_id, statement=statement, review_context=review_context
+            invariant_id=invariant_id,
+            statement=statement,
+            review_context=review_context,
+            perspective_note=perspective_note,
         )
 
         verdict: dict[str, Any] | None = None
+        # Issue #682: whether ANY attempt for THIS invariant ran out of
+        # output room. Reset per invariant, and only consulted once the
+        # attempt budget is spent -- an invariant that truncates and then
+        # answers on its retry is judged, not labelled.
+        ran_out_of_room = False
         attempts_allowed = 1 + _MAX_RETRIES_PER_INVARIANT
         for attempt in range(1, attempts_allowed + 1):
             raw_response = None
@@ -258,6 +428,32 @@ def judge_floor_invariants(
                     verdict = parsed
                 else:
                     outcome = "retry" if attempt < attempts_allowed else "failure"
+            except _model_client.ModelOutputTruncatedError:
+                # Issue #682: the provider stopped at `finish_reason='length'`
+                # -- the judge was CUT OFF before it could write its verdict.
+                # This used to propagate straight out of this function, past
+                # `fail_closed` and past the caller's
+                # `REASON_FLOOR_INVARIANT_UNJUDGED` terminal, killing the
+                # review as an unhandled exception -- contradicting both this
+                # module's and this function's documented "never raises on a
+                # judge failure / an unjudgeable invariant lands in
+                # `unjudged`" contract. It is now what it always claimed to
+                # be: a judge failure, which fails CLOSED.
+                #
+                # Deliberately NARROW -- only this subclass. Every other
+                # `ModelInvocationError` (throttling, an empty body, a
+                # transport fault) still propagates, because those are not
+                # "this invariant could not be judged", they are "the model
+                # seam is broken" and the caller must see them as such.
+                #
+                # It spends its place in the SAME bounded retry budget as an
+                # unreadable response -- no extra allowance, no widening.
+                # Model output length is not deterministic, so the re-invoke
+                # is a real chance rather than a replay, and the fix for a
+                # judge that reliably outruns its ceiling is the sized
+                # `DEFAULT_MAX_OUTPUT_TOKENS` above, not an unbounded loop.
+                ran_out_of_room = True
+                outcome = "retry" if attempt < attempts_allowed else "failure"
             finally:
                 actual_usage = (
                     getattr(model_client, "last_usage", None) if raw_response is not None else None
@@ -290,6 +486,10 @@ def judge_floor_invariants(
                         cache_creation_input_tokens=(actual_usage or {}).get(
                             "cache_creation_input_tokens"
                         ),
+                        # Issue #661: same seam as the primary/critic passes
+                        # -- the reasoning tokens the provider reported for
+                        # THIS attempt, None (not 0) when it reported none.
+                        reasoning_tokens=(actual_usage or {}).get("reasoning_tokens"),
                     )
                 )
             if verdict is not None:
@@ -297,10 +497,15 @@ def judge_floor_invariants(
 
         if verdict is None:
             unjudged.append(invariant_id)
+            # Issue #682: `truncated` is a strict subset of `unjudged` --
+            # recorded only for an invariant that ended up unjudged AND ran
+            # out of room on the way, never for one that recovered.
+            if ran_out_of_room:
+                truncated.append(invariant_id)
         else:
             verdicts.append(verdict)
 
-    return FloorJudgment(verdicts=verdicts, unjudged=unjudged)
+    return FloorJudgment(verdicts=verdicts, unjudged=unjudged, truncated=truncated)
 
 
 def floor_fires(judgment: FloorJudgment) -> list[dict[str, Any]]:

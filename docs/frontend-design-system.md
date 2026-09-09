@@ -99,10 +99,15 @@ Consequences:
 are ignored) and the suite uses @testing-library/react, whose queries
 (`getByTestId`, `getByText`, `getByRole`) **do not pierce shadow roots**.
 This drives the light-DOM doctrine in §5. Additionally,
-`toaster-states.test.tsx:163-172` asserts a live inline `<style>` element
-matching `/prefers-reduced-motion:\s*reduce/` — which is why the
-toaster's animation CSS must stay in the inline `ToasterStyles` block
-(`frontend/src/toaster/Toaster.tsx`), not a bundled `.css` file.
+`toaster-states.test.tsx:200-209` asserts a live inline `<style>` element
+matching `/prefers-reduced-motion:\s*reduce/` — which is why the Review
+console's animation CSS must stay in the inline stylesheet
+`motionStyles` (`frontend/src/orbit-diner/motion.ts`), rendered into a
+`<style>` element at `OrbitDiner.tsx:922`, not a bundled `.css` file.
+(This was `ToasterStyles` in `frontend/src/toaster/Toaster.tsx` until
+issue #727 deleted that component; the constraint followed the
+stylesheet. `scripts/focus-audit.mjs` reads `motion.ts` by name and
+cites this section as its authority.)
 
 ### 3.3 npm lockfile: never run bare `npm install` in `frontend/`
 Local npm is 11.x; the Docker build (`deploy/dts/frontend.Dockerfile`,
@@ -371,7 +376,7 @@ contract — extend, don't rename):
 | `ct-tab-bar` | light | ARIA tablist with roving tabindex + arrow/Home/End nav, extracted from `App.tsx:203-289` **behavior-identical** (same roles, `data-tab-id`, `aria-controls` to light-DOM panels). Emits `ct-select {id}`. Panels stay in React and stay mounted (§3.4). Animated active indicator (token motion). Public `label` prop sets the element's `aria-label` (default `"Sections"`, still the only instance App.tsx renders). Issue #477 briefly split the tab set into two independent tablist instances (primary + an admin-only `label="Admin"` second instance wrapped in `.ct-tab-group`); issue #599 reversed that DECISION per owner directive (2026-08-20) back to the single flat instance — `App.tsx` now hands it one ordered array with admin-only entries filtered out for a non-admin caller, relying on this element's existing `flex-wrap: wrap` (unchanged, `ct-tab-bar.css`) to keep up to seven tabs usable at narrow widths. The roving-tabindex fallback (an instance whose `active` id isn't among its own `tabs` still puts `tabindex="0"` on index 0) still matters with one instance: a non-admin caller's hash can resolve to an admin-only id that `tabs` has already filtered out. |
 | `ct-app-shell` | light | Header (brand nameplate in display face, identity, role badge, sign-out slot), max-width content column on `--ct-bg`, footer (version in mono). Slots: `header-actions`, default, `footer`. |
 | `ct-field` | light | Label + control-slot + hint + error with wired `for`/`aria-describedby`; error text in `role="alert"` context per existing copy rules. `narrow` (issue #601): opts the slotted control out of the field's default full-width stretch, so a short control (e.g. a number input) keeps its own intrinsic width instead of being stretched to fill whatever container (`ct-stack`, `ct-columns`) it sits in — only the control is affected, never the label/hint/error text. |
-| `ct-table` | light | Styled table wrapper: sunken header row, hairline rows, hover tint, `.ct-table-scroll` behavior built in (horizontal scroll wrapper). |
+| `ct-table` | light | Styled table wrapper: sunken header row, hairline rows, hover tint, `.ct-table-scroll` behavior built in (horizontal scroll wrapper). Opt-in classes on the slotted `<table>`: `.ct-table--wrap-headings` (issue #668) lets column headings break onto a second line instead of inheriting the default `thead th { white-space: nowrap }` — that default makes a heading's min-content width the width of the whole heading string, so on a wide table the HEADING, not the data, sets the column's minimum and pushes the table past the viewport (measured on History: `DOCUMENTS` cut off mid-word at the browser's default window size, min-content 1040px → 875px with this and the rest of #668). Use it on any table with more than about five columns; leave it off where every heading is one short word, which reads better on one line. Guarded by `layout-audit.mjs` check 8, both halves — the rule exists and sets a wrapping `white-space`, and some component actually applies the class. |
 | `ct-toolbar` | light | Row layout for filters/actions above tables; replaces `.ct-toolbar/.ct-row/.ct-actions` usage in admin panels. |
 | `ct-file-drop` | light | Drag-and-drop + click-to-browse upload. Accept list, max size, selected-file pill (name/size/clear), keyboard + SR accessible (`<input type=file>` under the hood), emits `ct-files {files}`. Visually rhymes with the toaster slot: sunken well, accent glow on dragover. |
 | `ct-progress` | light | Indeterminate warm shimmer bar + optional phase caption; used during upload/poll alongside the hero. |
@@ -404,12 +409,22 @@ inline SVG (keep art inline per current pattern).
 - **Empty/loading:** every async surface gets a quiet skeleton or
   `ct-progress`; no layout jumps between states.
 
-## 8. Toaster hero v2
+## 8. Toaster hero v2 — SUPERSEDED
 
-The hero stays the brand centerpiece and keeps its entire behavioral
+> **Superseded by the Orbit Diner console (epic #729, issue #727).** This
+> section is kept for the record only; nothing below it is a live rule.
+> Issue #727 deleted `ToasterHero`, `ContractTypeDial`, `ToasterStyles`
+> and the rest of `frontend/src/toaster/Toaster.tsx`, along with this
+> tab's `ct-file-drop` well. (`ToasterPhase` outlives the deletion only
+> because `toaster/tabChrome.ts` re-declares it for the tab-title
+> theater.) The Review tab is now `frontend/src/orbit-diner/`; the
+> inline-stylesheet constraint that used to live here moved to
+> `motionStyles` with the rest of §3.2.
+
+The hero was the brand centerpiece and kept its entire behavioral
 contract: `ToasterHero` props and `ToasterPhase` API, the ARIA dial
 radiogroup, all `data-testid`s, sounds wiring, and the **inline
-`ToasterStyles` constraint (§3.2)**. The upgrade is visual:
+`ToasterStyles` constraint (§3.2)**. The upgrade was visual:
 
 - Chrome body re-rendered with richer multi-stop gradients, a soft
   environment reflection, tighter bezel highlights, and a warm contact
@@ -476,6 +491,14 @@ visual QA surface and the living documentation for future workers.
   the contrast/focus/layout audits) and
   `.venv/bin/python tests/test_frontend_xss_posture.py` (source-posture
   greps). Both offline.
+- The first of those runs automatically as **CI GATE E** in
+  `.github/workflows/ci-pipeline.yml` on every PR and every push to `main`
+  (issue #634). Before that job existed nothing ran the frontend suite at
+  all — `scripts/check.sh` is Python-only — so #599's tab rename left the
+  suite red on `main` and no gate could see it. A red GATE E on `main`
+  files the `ci-main-red` issue and blocks the image build.
+  `tests/test_frontend_gate_wired_634.py` (inside GATE A) holds that
+  wiring in place.
 - The three audits are **static source guards, not renderers** — they
   cannot tell you the app looks right, only that a spelling which has
   already broken it once cannot come back. Each carries a self-test of

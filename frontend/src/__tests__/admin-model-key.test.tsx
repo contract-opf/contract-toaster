@@ -31,7 +31,7 @@ function settings(overrides: Partial<ModelKeySettings> = {}): ModelKeySettings {
     model_provider: 'openrouter',
     key_set: false,
     key_source: null,
-    key_hint: '',
+    key_fingerprint: '',
     updated_at: '',
     updated_by: '',
     ...overrides,
@@ -80,11 +80,27 @@ function stubModelKeyFetch(handlers: {
   get?: () => { status: number; body: unknown };
   post?: (body: unknown) => { status: number; body: unknown };
   delete?: () => { status: number; body: unknown };
+  /**
+   * The panel's OTHER mount-time loader. Defaults to a 200 that keeps it out
+   * of the way of the key tests, but it is overridable because the two routes
+   * are gated IDENTICALLY server-side — `/api/admin/model-key` and
+   * `/api/admin/model-selection` both depend on `get_active_user_row` and both
+   * call `_require_admin` (backend/src/main.py, backend/src/model_settings.py).
+   * A caller refused by one is refused by both, so a refusal test that leaves
+   * this at 200 is asserting over a state production cannot produce
+   * (issue #635).
+   */
+  selection?: () => { status: number; body: unknown };
 }): ReturnType<typeof vi.fn> {
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/api/admin/model-selection')) {
-      return { ok: true, status: 200, json: async () => INERT_SELECTION } as Response;
+      const selection = handlers.selection?.() ?? { status: 200, body: INERT_SELECTION };
+      return {
+        ok: selection.status >= 200 && selection.status < 300,
+        status: selection.status,
+        json: async () => selection.body,
+      } as Response;
     }
     const method = (init?.method ?? 'GET').toUpperCase();
     const handler =
@@ -112,7 +128,10 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
   });
 
   it('hides itself entirely on a 403 rather than rendering an empty form', async () => {
-    stubModelKeyFetch({ get: () => ({ status: 403, body: { detail: 'Admin privilege required.' } }) });
+    // Both admin routes refuse, because that is the only way a real caller is
+    // ever refused — see the `selection` handler's docstring (issue #635).
+    const refusal = () => ({ status: 403, body: { detail: 'Admin privilege required.' } });
+    stubModelKeyFetch({ get: refusal, selection: refusal });
     const { container } = render(<AdminModel />);
     await waitFor(() => {
       expect(container).toBeEmptyDOMElement();
@@ -126,21 +145,21 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     expect(screen.getByTestId('admin-model-save')).toBeDisabled();
   });
 
-  it('shows only the last-four hint for an admin-set key, never the key', async () => {
+  it('shows a one-way fingerprint for an admin-set key — never the key, and never part of it', async () => {
     stubModelKeyFetch({
       get: () => ({
         status: 200,
-        body: settings({ key_set: true, key_source: 'admin', key_hint: '…beef', updated_by: 'admin-1' }),
+        body: settings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4', updated_by: 'admin-1' }),
       }),
     });
     render(<AdminModel />);
-    expect(await screen.findByTestId('admin-model-key-hint')).toHaveTextContent('…beef');
+    expect(await screen.findByTestId('admin-model-key-fingerprint')).toHaveTextContent('a1b2c3d4');
     expect(document.body.textContent).not.toContain(KEY);
   });
 
   it('reports when the key is coming from the deployment environment instead', async () => {
     stubModelKeyFetch({
-      get: () => ({ status: 200, body: settings({ key_set: true, key_source: 'env', key_hint: '…beef' }) }),
+      get: () => ({ status: 200, body: settings({ key_set: true, key_source: 'env', key_fingerprint: 'a1b2c3d4' }) }),
     });
     render(<AdminModel />);
     expect(await screen.findByTestId('admin-model-status')).toHaveTextContent(
@@ -155,7 +174,7 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
       get: () => ({ status: 200, body: settings() }),
       post: () => ({
         status: 200,
-        body: settings({ key_set: true, key_source: 'admin', key_hint: '…beef' }),
+        body: settings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4' }),
       }),
     });
     render(<AdminModel />);
@@ -174,7 +193,7 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
       get: () => ({ status: 200, body: settings() }),
       post: () => ({
         status: 200,
-        body: settings({ key_set: true, key_source: 'admin', key_hint: '…beef' }),
+        body: settings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4' }),
       }),
     });
     render(<AdminModel />);
@@ -192,7 +211,7 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
 
     // The secret must not survive in component state after a successful save.
     expect((screen.getByTestId('admin-model-key-input') as HTMLInputElement).value).toBe('');
-    expect(await screen.findByTestId('admin-model-key-hint')).toHaveTextContent('…beef');
+    expect(await screen.findByTestId('admin-model-key-fingerprint')).toHaveTextContent('a1b2c3d4');
   });
 
   it("surfaces the server's rejection message when a key is refused", async () => {
@@ -213,11 +232,11 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
   });
 
   it('clears a saved key back to the environment key, but only on the second click', async () => {
-    let current = settings({ key_set: true, key_source: 'admin', key_hint: '…beef' });
+    let current = settings({ key_set: true, key_source: 'admin', key_fingerprint: 'a1b2c3d4' });
     const fetchMock = stubModelKeyFetch({
       get: () => ({ status: 200, body: current }),
       delete: () => {
-        current = settings({ key_set: true, key_source: 'env', key_hint: '…9a7c' });
+        current = settings({ key_set: true, key_source: 'env', key_fingerprint: '9f8e7d6c' });
         return { status: 200, body: current };
       },
     });

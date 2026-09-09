@@ -1,5 +1,18 @@
 # standard-forms/
 
+> **Retired 2026-09-02 (issue #631).** The anchor-map builder, the standard-form
+> diff, and the two anchor CI gates described in this file were deleted. The
+> 2026-07-22 LLM-native decision (D3) had already retired them from issue
+> generation, and an edit is now addressed by block transcript rather than by a
+> section anchor (ARCHITECTURE.md → "How an edit is addressed: block
+> transcripts"). **The committed artifacts in this directory stay**: the
+> `.docx` files and `*.anchor-map.json` maps are governed history, release-bundle
+> validation still requires `anchor_map_hash` / `standard_form_hash`, and the
+> playbook registry still resolves an `anchor_map_path` per playbook. What is
+> gone is the code that BUILT and CONSUMED them — there is no supported way to
+> regenerate a map, so a standard-form revision is not a supported operation
+> today. Everything below is kept as the record of the retired design.
+
 This directory is the repo home for a tenant's canonical standard-form `.docx` files
 and the derived anchor-map artifacts that are part of the legal-behavior release bundle.
 The engine ships no baked-in tenant standard form — only a brand-neutral synthetic
@@ -31,8 +44,8 @@ In brief:
   explicitly configured as data in the playbook's `<id>-v<version>.sections.json`
   file's `sub_clause_splits` block (the single shared document heading each group lives
   under, plus the ordered lettered-paragraph markers that partition its body text)
-  and executed by the real-`.docx` loader in `scripts/diff_standard_form.py` and
-  the real-`.docx` anchor resolver in `scripts/build_anchor_map.py` (issue #200).
+  and executed by the real-`.docx` loader and anchor resolver that issue #631
+  deleted (issue #200).
 
 ## Anchor map artifact
 
@@ -74,11 +87,11 @@ the builder's own contract, independent of the two governance gates above:
   check is skipped, not failed, when `python-docx` is not installed.
 - The builder's written artifact is **byte-identical** across two runs on
   identical input — not merely a matching `anchor_map_hash` — per the
-  no-timestamp-in-persisted-content convention (see `scripts/diff_standard_form.py`).
+  no-timestamp-in-persisted-content convention.
 
-## Form-coverage gate
+## Form-coverage gate (retired 2026-09-02, issue #631)
 
-CI also runs `tests/anchor/test_form_coverage.py`.  It verifies:
+CI used to run `tests/anchor/test_form_coverage.py`.  It verified:
 - Every anchor present in the anchor map has **exactly one** corresponding topic in
   `playbooks/contract-toaster-v*.json` (matching `section_anchors`).
 - Any anchor with no topic is in this anchor map's `coverage_exempt_anchors` array with
@@ -89,28 +102,18 @@ CI also runs `tests/anchor/test_form_coverage.py`.  It verifies:
   the anchor map).
 - Every exempt anchor carries a rationale in `coverage_exempt_rationales`.
 
-## Building / updating the anchor map
+## Building / updating the anchor map (retired 2026-09-02, issue #631)
 
-Run the builder after any change to the standard-form `.docx`:
+The builder (`scripts/build_anchor_map.py`), the synthetic-form generator
+(`scripts/generate_synthetic_standard_form.py`) and the diff
+(`scripts/diff_standard_form.py`) were deleted with the rest of the
+subsystem. The maps already committed here remain valid and are still read
+(the playbook registry resolves each playbook's `anchor_map_path`, and
+release-bundle validation still requires `anchor_map_hash`), but there is no
+supported command to regenerate one.
 
-```bash
-# Synthetic mode (no real .docx required — uses the section config in the script):
-python3 scripts/build_anchor_map.py
-
-# Real .docx mode (requires python-docx), for a tenant's own standard form
-# registered under <playbook-id> in playbooks/registry.json:
-pip install python-docx
-python3 scripts/build_anchor_map.py --playbook-id <playbook-id> --docx path/to/your-standard-form.docx
-
-# Real-docx mode is exercised offline today against the SYNTHETIC placeholder
-# (regenerate it after editing the "eiaa" playbook_id's section-config,
-# tests/fixtures/playbooks/synthetic-generic-v1.0.0.sections.json):
-python3 scripts/generate_synthetic_standard_form.py --playbook-id eiaa
-python3 scripts/build_anchor_map.py --playbook-id eiaa --docx standard-forms/synthetic-generic-v1.0.0.docx --output /tmp/synthetic.anchor-map.json
-python3 scripts/diff_standard_form.py --docx standard-forms/synthetic-generic-v1.0.0.docx --playbook-id eiaa
-```
-
-Record the printed `anchor_map_hash` in the release bundle before activating.
+The `anchor_map_hash` recorded in an existing release bundle stays as it is —
+do not recompute it.
 
 See also [RUNBOOK.md → Revising the standard form](../RUNBOOK.md#revising-the-standard-form)
 for the full procedure including anchor migration records.

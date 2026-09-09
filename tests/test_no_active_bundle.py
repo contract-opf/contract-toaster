@@ -37,6 +37,20 @@ described behavior is implemented; see the GATE_KIND marker below and
 tests/test_docs_gate_labeling.py, which enforces that this marker exists.
 Gate 1a below is the one exception: it has been converted to a real
 behavioral check (or an explicit, documented skip) per issue #196.
+
+CI IS STRICT (issue #638): the documented skip is a courtesy to a
+contributor whose interpreter has no backend dependencies. It is NOT
+acceptable on the gate of record. From 2026-09-01, when the `CI`
+environment variable is set, a Gate 1a skip is a FAILURE, not a pass.
+
+Why: .github/workflows/docs-lint.yml's `no-active-bundle` job ran this
+file on an interpreter with nothing installed, so Gate 1a skipped on
+EVERY run and the job reported success — permanently green, asserting
+nothing about the refusal path (run 33456932705 is the evidence in issue
+#638). The same commit that added this rule added the job's
+`pip install -r backend/requirements.txt` step, so the skip branch is now
+unreachable in CI for the reason it used to fire; if it fires anyway,
+that is a real regression and must be loud.
 """
 
 import os
@@ -85,8 +99,44 @@ NO_ACTIVE_PLAYBOOK_MESSAGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Values of $CI that mean "not CI". GitHub Actions sets CI=true; some local
+# shells export CI=0 or CI=false, and an empty value is not a signal either.
+_CI_FALSEY = frozenset({"", "0", "false", "no", "off"})
 
-def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str]]:
+
+def ci_is_strict() -> bool:
+    """True when this run is the gate of record and a Gate 1a skip is fatal.
+
+    Issue #638: a documented skip is a reasonable courtesy on a contributor
+    laptop with no backend dependencies installed. On CI it is not — CI is
+    the one environment whose green tick is read as evidence the refusal
+    path is enforced, and it was also the one environment that could never
+    satisfy the check.
+    """
+    return os.environ.get("CI", "").strip().lower() not in _CI_FALSEY
+
+
+def _ci_skip_is_fatal_failure() -> str:
+    """The failure text a Gate 1a skip becomes when $CI is set (issue #638).
+
+    The skip's own reason is NOT repeated here: every caller that receives
+    this failure also receives the matching "Gate 1a: SKIP (documented
+    reason)" entry in the skips list, and main() prints the skips first.
+    """
+    return (
+        "  Gate 1a: SKIP IS FATAL IN CI (issue #638) — $CI is set, so this run\n"
+        "  is the gate of record and a documented skip is not acceptable: the\n"
+        "  job would otherwise report success having asserted NOTHING about\n"
+        "  the no-active-bundle refusal. The reason is the 'Gate 1a: SKIP\n"
+        "  (documented reason)' line above.\n"
+        "  Fix: install the gate's backend dependencies in the job that runs\n"
+        "  this file (`pip install -r backend/requirements.txt`, as\n"
+        "  .github/workflows/docs-lint.yml's no-active-bundle job does), or\n"
+        "  wire the route. Do not relax this back to a pass."
+    )
+
+
+def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]:
     """Behavioral check (issue #196), replacing the prior prose-only check.
 
     Previously Gate 1a asserted only that ARCHITECTURE.md *described*
@@ -109,10 +159,23 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str]]:
     backend/src/main.py), it explicitly SKIPS with a documented reason
     instead of silently passing or asserting on doc prose.
 
-    Returns (failures, skips).
+    Returns (failures, skips, notes).
+
+    `notes` (issue #638) carries the BEHAVIORAL-PASS trace. It used to be
+    appended to `skips`, which made a successful real-route assertion print
+    the summary line "PASS (with documented skip above)" — indistinguishable
+    in a CI log from the permanent skip this gate actually had. Keeping the
+    two lists apart is what lets a skip be fatal under $CI while a genuine
+    behavioral pass stays green.
     """
     skips: list[str] = []
+    notes: list[str] = []
     failures: list[str] = []
+
+    def _skip(reason: str) -> None:
+        skips.append(reason)
+        if ci_is_strict():
+            failures.append(_ci_skip_is_fatal_failure())
 
     try:
         import sys as _sys
@@ -121,14 +184,14 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str]]:
             _sys.path.insert(0, str(BACKEND_ROOT))
         import src.main as backend_main  # backend/src/main.py, as "src.main"
     except Exception as e:  # pragma: no cover - environment-dependent
-        skips.append(
+        _skip(
             "  Gate 1a: SKIP (documented reason) — could not import\n"
             f"  backend/src/main.py ({e!r}). Cannot determine whether\n"
             "  POST /api/reviews is wired as a live route, so this check\n"
             "  explicitly skips rather than falling back to asserting on\n"
             "  ARCHITECTURE.md prose. (issue #196)"
         )
-        return failures, skips
+        return failures, skips, notes
 
     route_registered = any(
         getattr(route, "path", None) == "/api/reviews"
@@ -137,7 +200,7 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str]]:
     )
 
     if not route_registered:
-        skips.append(
+        _skip(
             "  Gate 1a: SKIP (documented reason) — POST /api/reviews is not\n"
             "  registered as a route in backend/src/main.py.\n"
             "  backend/src/reviews.py:submit_review exists as business logic\n"
@@ -149,7 +212,7 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str]]:
             "  exist. Once the route is wired, replace this skip with the\n"
             "  TestClient assertion in the branch below."
         )
-        return failures, skips
+        return failures, skips, notes
 
     # The route IS wired — exercise it for real instead of reading docs.
     # Get a real, authenticated caller past auth and the upload gauntlet so
@@ -243,14 +306,18 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str]]:
         # gate actually asserted a real outcome, per issue #196: "must
         # either assert a real outcome or explicitly skip ... never
         # silently no-op."
-        skips.append(
-            "  Gate 1a: PASS (documented behavioral check, issue #196) —\n"
+        #
+        # This goes in `notes`, NOT `skips` (issue #638): it is the record of
+        # the assertion EXECUTING, and a CI log has to be able to tell it
+        # apart from the skip line.
+        notes.append(
+            "  Gate 1a: EXECUTED (behavioral check, issue #196) —\n"
             "  POST /api/reviews is wired on src.main.app; an authenticated\n"
             "  caller's valid upload against an unseeded playbook_id got the\n"
             "  real HTTP 503 'no active playbook' refusal from the live\n"
             "  route (not asserted from ARCHITECTURE.md prose)."
         )
-    return failures, skips
+    return failures, skips, notes
 
 
 # ---------------------------------------------------------------------------
@@ -332,13 +399,16 @@ GOVERNANCE_DEACTIVATE_PATTERN = re.compile(
 # Gate runner helpers
 # ---------------------------------------------------------------------------
 
-def gate_1_no_active_bundle_refusal(arch_text: str) -> tuple[list[str], list[str]]:
+def gate_1_no_active_bundle_refusal(
+    arch_text: str,
+) -> tuple[list[str], list[str], list[str]]:
     failures: list[str] = []
 
     # Gate 1a (issue #196): behavioral check (real route exercise, or a
     # documented skip) — no longer a doc-prose regex scan. See
-    # gate_1a_route_refusal_behavioral for rationale.
-    gate_1a_failures, skips = gate_1a_route_refusal_behavioral()
+    # gate_1a_route_refusal_behavioral for rationale. Under $CI a skip
+    # arrives here as a FAILURE too (issue #638).
+    gate_1a_failures, skips, notes = gate_1a_route_refusal_behavioral()
     failures.extend(gate_1a_failures)
 
     # Check that the user-visible message "no active playbook" is defined
@@ -351,7 +421,7 @@ def gate_1_no_active_bundle_refusal(arch_text: str) -> tuple[list[str], list[str
             f"  Missing pattern: {NO_ACTIVE_PLAYBOOK_MESSAGE_PATTERN.pattern!r}"
         )
 
-    return failures, skips
+    return failures, skips, notes
 
 
 def gate_2_deactivate_action(arch_text: str) -> list[str]:
@@ -431,7 +501,11 @@ def main() -> int:
         "Gate 1: No-active-bundle refusal — Gate 1a is behavioral (issue #196), "
         "Gate 1b is doc prose"
     )
-    g1, g1_skips = gate_1_no_active_bundle_refusal(arch_text)
+    if ci_is_strict():
+        print("  (CI detected — a Gate 1a skip is FATAL here, issue #638)")
+    g1, g1_skips, g1_notes = gate_1_no_active_bundle_refusal(arch_text)
+    for n in g1_notes:
+        print(n)
     for s in g1_skips:
         print(s)
     if g1:

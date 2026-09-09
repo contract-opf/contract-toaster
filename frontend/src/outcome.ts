@@ -93,12 +93,28 @@ export const OUTCOME_CHIPS: Record<ReviewOutcome, OutcomeChip> = {
   // judgment for.
   ACCEPT: { label: 'Accepted', variant: 'ok' },
   REQUEST_CHANGE: { label: 'Changes requested', variant: 'warn' },
-  // The documented manual-review outcomes (issue #458's "handed-to-a-human"
-  // class): this succeeded into a legal admin's queue, or failed but a
-  // legal admin is already on it either way, not a tool fault the reviewer
-  // needs to act on.
+  // The handed-to-a-human outcome (issue #458's class): the pipeline reached
+  // a terminal answer of its own and put the document in a legal admin's
+  // queue. `warn`, not `danger` — #458's finding is that a review which
+  // succeeded into a human's hands must not be painted as a tool fault the
+  // reviewer should resubmit.
   MANUAL_REVIEW_REQUIRED: { label: 'Needs manual review', variant: 'warn' },
-  ERROR_MANUAL_REVIEW_REQUIRED: { label: 'Needs manual review', variant: 'warn' },
+  // NOT the same event, though until issue #666 this line was a verbatim
+  // copy of the one above — which is how a review that died in the critic
+  // pass and produced nothing came to read, on History, in the same words
+  // and the same colour as a completed one awaiting a human.
+  //
+  // This status is a pipeline FAILURE that fell back closed: no verdict was
+  // ever reached and no redline exists. `scripts/review_spine.py`'s
+  // `_terminal` writes `decision: None` for it (a SYSTEM status must never
+  // carry a decision), and `backend/src/reviews.py`'s `STATUS_USER_MESSAGES`
+  // opens its copy with "A pipeline error prevented automatic review of your
+  // document" where the status above says only that the document "could not
+  // be automatically reviewed". So it leads with ERROR's own word and sits
+  // in ERROR's `danger` — the reviewer must read "this did not finish"
+  // first — while keeping the handoff as a second clause, because a legal
+  // admin really is on it and that half was never the misleading part.
+  ERROR_MANUAL_REVIEW_REQUIRED: { label: 'Failed — needs manual review', variant: 'danger' },
   // Genuine faults.
   ERROR: { label: 'Failed', variant: 'danger' },
   QUARANTINED: { label: 'Quarantined', variant: 'danger' },

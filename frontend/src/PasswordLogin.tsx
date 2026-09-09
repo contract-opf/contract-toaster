@@ -14,9 +14,31 @@
  * is stored, and `friendlyErrorMessage`/`readErrorDetail` guarantee that only
  * a server-supplied `detail` or a safe fallback reaches the DOM. The
  * technical detail (endpoint, HTTP status) is logged to the console only.
+ *
+ * ## The deploy fingerprint under the card (issue #652)
+ *
+ * "Did my change actually ship?" has to be answerable BEFORE signing in --
+ * the session is the scarce resource on this deployment, and spending one to
+ * prove a deploy landed is the wrong order. The backend's own stamp is
+ * authenticated on purpose (`GET /version`; build details stay off the public
+ * liveness path), so what goes here is the ONE fact this page can state
+ * without adding any disclosure at all: the running bundle's own file name.
+ *
+ * It adds nothing a caller could not already read -- `index.html` ships that
+ * exact name in its `<script src>` on every unauthenticated request, and it
+ * is the value the manual pre/post-deploy ritual has always diffed
+ * (`index-CzHcT69l.js` -> `index-BN3-dr-7.js` verified the 2026-09-01
+ * deploy). What it adds is legibility: a human, or Claude driving Chrome, can
+ * read it off the login screen instead of opening devtools.
+ *
+ * Deliberately NOT the commit SHA or the build time: those are not already on
+ * this page, and #652 justified surfacing the asset names precisely because
+ * they are. The full picture -- server stamp, bundle stamp, and whether they
+ * agree -- is on the authenticated Settings tab (AdminSettings.tsx).
  */
 import { useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { frontendStamp } from './deployIdentity';
 import { CtButton, CtBanner, CtCard, CtField } from './ui/react';
 
 // Mirrors App.tsx's PRODUCT_NAME (issue #274) without importing App.tsx —
@@ -48,6 +70,7 @@ export default function PasswordLogin({
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const bundleFingerprint = frontendStamp().assetFingerprint;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -121,6 +144,19 @@ export default function PasswordLogin({
             </CtBanner>
           )}
         </CtCard>
+        {/* Read once at render from the bundle itself -- no state, no fetch,
+            no clock: the same deployment always renders the same string, so
+            it survives a restart unchanged and only a genuinely new bundle
+            moves it. */}
+        <p className="ct-muted" data-testid="login-build-fingerprint">
+          {bundleFingerprint ? (
+            <>
+              App bundle <code className="ct-mono">{bundleFingerprint}</code>
+            </>
+          ) : (
+            'App bundle fingerprint unavailable on this build'
+          )}
+        </p>
       </div>
     </main>
   );

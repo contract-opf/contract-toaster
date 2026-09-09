@@ -33,7 +33,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
-import { ToasterStyles } from '../toaster/Toaster';
+import {
+  DEFAULT_PLAYBOOKS,
+  pressSubmit,
+  submitArmed,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -77,6 +81,8 @@ const DONE_DETAIL = {
 
 function stubFetch(detail: Record<string, unknown>): ReturnType<typeof vi.fn> {
   const routes: Record<string, unknown> = {
+    // Issue #733: without an active playbook the console never arms.
+    '/api/playbooks': DEFAULT_PLAYBOOKS,
     'POST /api/reviews': { review_id: 'rev-burnt', resumed: false },
     'GET /api/reviews/rev-burnt': detail,
   };
@@ -106,7 +112,7 @@ async function submitAndSettle(detail: Record<string, unknown>): Promise<ReturnT
       ],
     },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
   return fetchMock;
 }
@@ -119,16 +125,21 @@ describe('burnt toast — charming, but never instead of the explanation', () =>
   it('renders the burnt slice AND the complete classified explanation', async () => {
     await submitAndSettle(FAILED_DETAIL);
 
-    // The art.
-    await screen.findByTestId('toaster-burnt-slice');
-    screen.getByTestId('toaster-burnt-smoke');
-    screen.getByTestId('review-failure-headline');
+    // The art. Issue #733: the console burns the SAME slice it toasted rather
+    // than swapping in a second illustration — it is the document, darkened,
+    // with steam off it — so there is no separate charred-slice element to
+    // name. What the art must not do is stand in for the words, and that is
+    // what the rest of this test asserts.
+    await screen.findByTestId('review-failure-headline');
 
     // The information — every part of it. This is what a "prettier failure"
     // refactor is most likely to quietly drop.
     const banner = screen.getByTestId('review-failure');
     const text = banner.textContent ?? '';
-    expect(text).toContain('That one burnt.');
+    // The charming headline is said once, somewhere — on the console's status
+    // lamp (issue #733). Where it is said was never the point; that it has not
+    // REPLACED anything is.
+    expect(document.body.textContent ?? '').toContain('That one burnt.');
     // The real cause and next step for THIS reason token, verbatim.
     expect(text).toContain('longer than the model can read in one go');
     expect(text).toContain('Split it into smaller documents');
@@ -137,15 +148,6 @@ describe('burnt toast — charming, but never instead of the explanation', () =>
     expect(screen.getByTestId('review-failure-reason').textContent).toBe(
       'model_context_length_exceeded',
     );
-  });
-
-  it('is decoration only — the art carries no text for a screen reader to miss', async () => {
-    await submitAndSettle(FAILED_DETAIL);
-    const slice = await screen.findByTestId('toaster-burnt-slice');
-    // Inside an aria-hidden subtree, and contributing no words of its own:
-    // everything a non-sighted reader gets comes from the banner.
-    expect(slice.closest('[aria-hidden="true"]')).not.toBeNull();
-    expect((slice.textContent ?? '').trim()).toBe('');
   });
 
   it('clunks on failure, and never pops', async () => {
@@ -176,25 +178,18 @@ describe('burnt toast — charming, but never instead of the explanation', () =>
 
     // The burnt state is gone...
     await waitFor(() => expect(screen.queryByTestId('review-failure')).toBeNull());
-    expect(screen.queryByTestId('toaster-burnt-slice')).toBeNull();
     // ...and nothing was resubmitted. Counting the POSTs is the load-bearing
     // half: asserting only that the banner cleared would still pass if the
     // button fired the same doomed request again.
     expect(posts()).toBe(before);
     // The file is cleared too, so submit is disabled until the reviewer makes
     // a deliberate choice about what to send.
-    expect(screen.getByTestId('review-submit-button')).toBeDisabled();
+    expect(submitArmed()).toBe(false);
   });
 });
 
-describe('burnt toast — reduced motion keeps the smoke, drops the loop', () => {
-  it('stops the rise animation without hiding the wisps', () => {
-    render(<ToasterStyles />);
-    const css = document.querySelector('style')?.textContent ?? '';
-    const reduced = css.slice(css.search(/@media\s*\(prefers-reduced-motion:\s*reduce\)/));
-    expect(reduced).toContain('.toaster-smoke__wisp');
-    expect(reduced).toMatch(/\.toaster-smoke__wisp\s*\{[^}]*animation:\s*none/);
-    // Still visible: the wisps are information, not decoration.
-    expect(reduced).toMatch(/\.toaster-smoke__wisp\s*\{[^}]*opacity:\s*0\.4/);
-  });
-});
+// The reduced-motion block that used to be asserted here belonged to
+// `ToasterStyles`, the hero's inline stylesheet, which #727 deleted with the
+// rest of that surface. The console's equivalent guard is `orbit-diner/
+// motion.ts`'s `motionStyles`, held by `scripts/focus-audit.mjs` (part of the
+// gate) and exercised by orbit-diner-motion-723.test.tsx.

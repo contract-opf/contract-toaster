@@ -33,8 +33,8 @@ model, because it has no API surface for any of that.
 Every named transform in `TRANSFORMS` below instead operates directly on
 the built document's `word/document.xml`, via the SAME zipfile+ElementTree,
 root-namespace-preservation technique this repo's own redline modules use
-(`redline_inplace._root_open_tag` / `register_declared_namespaces` /
-`_merge_hoisted_namespaces`, reused here rather than reimplemented -- see
+(`ooxml_util.root_open_tag` / `register_declared_namespaces` /
+`merge_hoisted_namespaces`, reused here rather than reimplemented -- see
 `_rewrite_document_xml` below) -- every other zip part (styles.xml,
 docProps/*, ...) survives byte-for-byte; only `word/document.xml` is
 rewritten.
@@ -114,7 +114,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import redline_inplace as ri  # noqa: E402 -- root-namespace-preservation helpers, reused not reimplemented
+import ooxml_util as ou  # noqa: E402 -- root-namespace-preservation helpers, reused not reimplemented
 
 try:
     from docx import Document  # python-docx -- requirements-dev.txt
@@ -124,7 +124,7 @@ except ImportError as _exc:  # pragma: no cover -- exercised only in a broken ve
 else:
     _DOCX_IMPORT_ERROR = None
 
-WORD_NS = ri.WORD_NS
+WORD_NS = ou.WORD_NS
 _XML_NS = "http://www.w3.org/XML/1998/namespace"
 
 
@@ -285,24 +285,24 @@ def _rewrite_document_xml(docx_bytes: bytes, mutate: Callable[[ET.Element], None
     `ET.fromstring` -> mutate -> `ET.tostring` round trip silently drops any
     root `xmlns` declaration ElementTree does not see used, which is exactly
     what a python-docx base document's document.xml is full of (a dozen
-    declared-but-unused drawing/VML namespaces). Reused via
-    `redline_inplace`'s aliases onto `ooxml_util`, not reimplemented.
+    declared-but-unused drawing/VML namespaces). Reused from `ooxml_util`,
+    not reimplemented.
     """
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
         infos = zf.infolist()
         originals = {info.filename: zf.read(info.filename) for info in infos}
 
-    doc_xml_text = originals[ri.DOCUMENT_PART].decode("utf-8")
-    original_root_open_tag = ri._root_open_tag(doc_xml_text)
-    ri.register_declared_namespaces(ri._declared_namespaces_anywhere(doc_xml_text))
+    doc_xml_text = originals[ou.DOCUMENT_PART].decode("utf-8")
+    original_root_open_tag = ou.root_open_tag(doc_xml_text)
+    ou.register_declared_namespaces(ou.declared_namespaces_anywhere(doc_xml_text))
 
-    root = ET.fromstring(originals[ri.DOCUMENT_PART])
+    root = ET.fromstring(originals[ou.DOCUMENT_PART])
     mutate(root)
 
     serialized = ET.tostring(root, encoding="unicode")
-    auto_root_open_tag = ri._root_open_tag(serialized)
+    auto_root_open_tag = ou.root_open_tag(serialized)
     body_and_close = serialized[len(auto_root_open_tag) :]
-    root_open_tag = ri._merge_hoisted_namespaces(original_root_open_tag, auto_root_open_tag)
+    root_open_tag = ou.merge_hoisted_namespaces(original_root_open_tag, auto_root_open_tag)
     new_document_xml = (
         b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         + root_open_tag.encode("utf-8")
@@ -312,7 +312,7 @@ def _rewrite_document_xml(docx_bytes: bytes, mutate: Callable[[ET.Element], None
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf_out:
         for info in infos:
-            data = new_document_xml if info.filename == ri.DOCUMENT_PART else originals[info.filename]
+            data = new_document_xml if info.filename == ou.DOCUMENT_PART else originals[info.filename]
             zf_out.writestr(info, data)
     return out.getvalue()
 
@@ -497,7 +497,7 @@ def reserved_ns_prefix(docx_bytes: bytes, *, seed: int = 0) -> bytes:
     A pure string splice on the root open tag, deliberately NOT routed
     through `_rewrite_document_xml`'s ElementTree round trip: ElementTree's
     own `register_namespace` raises `ValueError` on exactly this pattern
-    (see `redline_inplace.register_declared_namespaces`'s docstring), so
+    (see `ooxml_util.register_declared_namespaces`'s docstring), so
     writing the declaration as literal text is the only way to produce this
     shape at all.
     """
@@ -505,11 +505,11 @@ def reserved_ns_prefix(docx_bytes: bytes, *, seed: int = 0) -> bytes:
         infos = zf.infolist()
         originals = {info.filename: zf.read(info.filename) for info in infos}
 
-    doc_xml_text = originals[ri.DOCUMENT_PART].decode("utf-8")
-    open_tag = ri._root_open_tag(doc_xml_text)
+    doc_xml_text = originals[ou.DOCUMENT_PART].decode("utf-8")
+    open_tag = ou.root_open_tag(doc_xml_text)
     new_open_tag = open_tag[:-1] + ' xmlns:ns0="http://schemas.example.com/churn">'
     new_doc_xml_text = doc_xml_text.replace(open_tag, new_open_tag, 1)
-    originals[ri.DOCUMENT_PART] = new_doc_xml_text.encode("utf-8")
+    originals[ou.DOCUMENT_PART] = new_doc_xml_text.encode("utf-8")
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf_out:

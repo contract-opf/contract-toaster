@@ -25,6 +25,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  openReviewRecord,
+  pressSubmit,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -36,6 +42,9 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // Issue #733: the catalog is a fixture every scenario needs, not a scenario
+  // of its own — the console will not arm its lever without an active playbook.
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -65,7 +74,7 @@ async function submitAndReachStatus(): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 
@@ -102,7 +111,7 @@ describe('AC1 — the finished panel', () => {
     });
 
     await submitAndReachStatus();
-    await screen.findByTestId('review-result');
+    await findReviewResult();
 
     // Outcome headline — the shared outcome map's label, promoted to the
     // biggest text in the panel. Never the raw DONE status token.
@@ -110,9 +119,11 @@ describe('AC1 — the finished panel', () => {
 
     // Truthful save line — only once the automatic save has actually
     // resolved (issue #466's discipline, extended to visible copy).
+    // What #492 pins is that the line appears ONLY once the save actually
+    // resolved.
     await screen.findByTestId('review-saved-line');
     expect(screen.getByTestId('review-saved-line').textContent).toBe(
-      'Redline saved to your downloads.',
+      'Download started automatically. Save redline repeats it.'
     );
 
     // Quiet meta line — filename · finished-at time (no contract type was
@@ -123,7 +134,7 @@ describe('AC1 — the finished panel', () => {
     expect(meta).toMatch(/\d{4}-\d{2}-\d{2}/);
 
     // Download button, renamed per the ticket.
-    expect(screen.getByTestId('review-download-button').textContent).toBe('Download redline');
+    expect(screen.getByTestId('review-download-button').textContent).toBe('Save redline');
 
     // Nothing anywhere in the finished panel ever names the raw review id,
     // the bare DONE token, or the attorney-approval disclaimer -- checked at
@@ -154,7 +165,8 @@ describe('AC1 — the finished panel', () => {
     // rather than computed visibility) — not as visible copy.
     const announcement = screen.getByTestId('review-ready-announcement');
     expect(announcement.textContent).toContain('focus');
-    expect(announcement.className).toContain('ct-sr-only');
+    // Visually hidden — the console's own clip helper (issue #733).
+    expect(announcement.className).toContain('od-sr');
   });
 });
 
@@ -180,6 +192,7 @@ describe('AC2 — Copy review ID, in both RUNNING and finished states', () => {
     expect(statusText).not.toContain(REVIEW_ID);
     expect(statusText).not.toMatch(/\bRUNNING\b/);
 
+    await openReviewRecord();
     fireEvent.click(screen.getByTestId('review-copy-id-button'));
     expect(writeText).toHaveBeenCalledWith(REVIEW_ID);
     expect(await screen.findByText('Copied')).toBeInTheDocument();
@@ -201,7 +214,7 @@ describe('AC2 — Copy review ID, in both RUNNING and finished states', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
 
     await submitAndReachStatus();
-    await screen.findByTestId('review-result');
+    await findReviewResult();
 
     // The provenance receipt (issue #498) is not exempt from the ticket's
     // "no UUID in visible DOM" AC either -- checked at the review-status
@@ -209,8 +222,9 @@ describe('AC2 — Copy review ID, in both RUNNING and finished states', () => {
     // together.
     expect(screen.getByTestId('review-status').textContent ?? '').not.toContain(REVIEW_ID);
     expect(screen.getByTestId('review-result').textContent ?? '').not.toContain(REVIEW_ID);
-    expect(screen.getByTestId('review-id-row').textContent).not.toContain(REVIEW_ID);
+    expect((await openReviewRecord()).textContent).not.toContain(REVIEW_ID);
 
+    await openReviewRecord();
     fireEvent.click(screen.getByTestId('review-copy-id-button'));
     expect(writeText).toHaveBeenCalledWith(REVIEW_ID);
   });
@@ -230,6 +244,7 @@ describe('AC2 — Copy review ID, in both RUNNING and finished states', () => {
 
     await submitAndReachStatus();
 
+    await openReviewRecord();
     expect(() => fireEvent.click(screen.getByTestId('review-copy-id-button'))).not.toThrow();
   });
 });
@@ -250,7 +265,7 @@ describe('AC3 — no attorney-approval framing anywhere this component renders',
       });
 
       await submitAndReachStatus();
-      await screen.findByTestId('review-result');
+      await findReviewResult();
 
       // Checked via the removed disclaimer's own lead-in text — see the
       // module docstring's AC3 note for why this isn't the swept phrase
@@ -279,20 +294,21 @@ describe('AC4 — the critic-flagged variant keeps the same voice and the same g
     });
 
     await submitAndReachStatus();
-    await screen.findByTestId('review-result');
+    await findReviewResult();
 
     expect(screen.getByTestId('review-outcome').textContent).toBe('Changes requested');
-    const indicator = await screen.findByTestId('review-critic-delta');
-    const button = screen.getByTestId('review-download-button');
-    const relation = indicator.compareDocumentPosition(button);
-    expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The indicator lives in the review record, so document order says
+    // nothing; what enforces the gate is that nothing is saved until a human
+    // presses the key, asserted just below (issue #733, same migration as
+    // review-download-gate).
+    await screen.findByTestId('review-critic-delta');
 
     // The gate is still in force: no automatic save, no truthful save line,
     // until a human passes the indicator and clicks.
     expect(screen.queryByTestId('review-saved-line')).toBeNull();
     expect(anchorClickSpy).not.toHaveBeenCalled();
 
-    fireEvent.click(button);
+    fireEvent.click(screen.getByTestId('review-download-button'));
     await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(1));
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/output'))).toBe(true);
   });

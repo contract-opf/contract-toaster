@@ -12,8 +12,13 @@ Gate for issue #572: `NOTES_MODE_ENABLED` -- the kill switch that makes epic
   3. Flag set to `1`/`true`/`yes`: all four modes resolve exactly as they do
      today.
   4. A garbage value for the flag (`NOTES_MODE_ENABLED=maybe`) is treated as
-     OFF, not ON -- the same matching set `requote_enabled` /
-     `structured_output_enabled` use.
+     OFF, not ON -- this is a default-OFF flag, so only the matching set
+     `{"1","true","yes"}` turns it on and everything else (including a
+     typo) leaves it off. NOT the shape `structured_output_enabled` uses:
+     issue #673 made that one default ON, so its matching set is the
+     inverse (an explicit `0`/`false`/`no`/`off` turns it off, a typo
+     leaves it on). Both spellings fail SAFE for their own flag; do not
+     "unify" them.
   5. The refusal names the flag (`NOTES_MODE_ENABLED`) in the message, so a
      400 response is diagnosable rather than a bare "invalid value".
 
@@ -48,7 +53,9 @@ import src.reviews as reviews  # noqa: E402
 
 class TestNotesModeEnabledFlag(unittest.TestCase):
     """Direct coverage of `config.notes_mode_enabled()`, mirroring
-    `requote_enabled()` / `structured_output_enabled()`'s own test shape."""
+    `structured_output_enabled()`'s own test shape (a case per value class,
+    each pinning the env explicitly) -- but NOT its polarity: see item 4 of
+    the module docstring."""
 
     def test_unset_is_off(self) -> None:
         with patch.dict(os.environ, {}, clear=False):

@@ -34,7 +34,7 @@ mechanism plus a tightening, nothing more. **#522 (epic #519 item D) then
 added the first and only internal-bound field**,
 `internal_rationale_for_footnote`, together with the renderer that keeps its
 content out of a counterparty-bound document
-(`redline_docx_writer.footnote_texts_for_notes_mode`). The assertion below
+(`footnote_audience.footnote_texts_for_notes_mode`). The assertion below
 moved with it: exactly one internal entry, named, and still no way for a
 notes mode -- or any other runtime input -- to change a field's channel.
 Tests reach the internal ruleset by naming the channel directly, or by
@@ -101,7 +101,14 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import diff_standard_form as dsf_module  # noqa: E402
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
+import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import leakage_scan as ls  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -318,7 +325,7 @@ class StaticChannelMapTestCase(unittest.TestCase):
         #519 item D) landed exactly one internal-bound field --
         `internal_rationale_for_footnote` -- together with the renderer that
         keeps its content out of a counterparty-bound document
-        (`redline_docx_writer.footnote_texts_for_notes_mode`, which emits it
+        (`footnote_audience.footnote_texts_for_notes_mode`, which emits it
         only in the `internal`/`both` notes modes and only behind
         `INTERNAL_FOOTNOTE_PREFIX`). It is still the ONLY one: any second
         internal entry is a new audience decision, not an incremental
@@ -554,7 +561,7 @@ def _run_review_with_model_output(
     playbook_extra_hard_rejection: str | None = None,
 ) -> dict[str, Any]:
     bundle = _bundle_with(playbook_extra_hard_rejection)
-    docx_bytes = _build_draft_docx(dsf_module, {"sec-8": _SEC8_DRAFT_TEXT})
+    docx_bytes = _build_draft_docx(sfp_module, {"sec-8": _SEC8_DRAFT_TEXT})
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client.FakeBedrockClient(

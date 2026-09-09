@@ -3,8 +3,9 @@
  * which models reviews actually run on.
  *
  * Admin-only screen backing backend/src/model_settings.py:
- *   - GET    /api/admin/model-key — is a key loaded, from which source, and a
- *     last-four hint at which key it is.
+ *   - GET    /api/admin/model-key — is a key loaded, from which source, when
+ *     it was last set and by whom, and a non-reversible fingerprint saying
+ *     WHICH key it is (issue #651).
  *   - POST   /api/admin/model-key — set/rotate the key.
  *   - DELETE /api/admin/model-key — clear it, reverting to OPENROUTER_API_KEY.
  *   - GET    /api/admin/model-selection — the selectable catalogue, the policy
@@ -32,9 +33,13 @@
  * The key is INSTANCE-WIDE: one key, every user's reviews, one bill. That is
  * the point of putting it here rather than in a per-user setting.
  *
- * WRITE-ONLY BY DESIGN. The server never returns the stored key, so this
- * component never has it to render — the most it can show is `key_hint`
- * ("…4f2a"). Consequences worth preserving if you edit this file:
+ * WRITE-ONLY BY DESIGN. The server never returns the stored key — not whole,
+ * not masked, not partially — so this component never has it to render. The
+ * most it can show is `key_fingerprint` ("3f9a2c71"), a salted digest that
+ * contains no character of the key (issue #651; it replaced a last-four hint,
+ * which was four characters of a live credential arriving in the browser on
+ * every panel load, and from there into any screenshot or page read).
+ * Consequences worth preserving if you edit this file:
  *   - The <input> is type="password" with autoComplete="off": the key is
  *     never echoed to the screen, never offered to a password manager as a
  *     site credential, and never persisted to component state after a
@@ -51,6 +56,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
 import {
@@ -63,6 +69,7 @@ import {
   CtProgress,
   CtToolbar,
 } from './ui/react';
+import SpendCard from './SpendCard';
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend/src/model_settings.py::get_model_key_settings.
@@ -77,8 +84,13 @@ export interface ModelKeySettings {
   key_set: boolean;
   /** "admin" (set here), "env" (OPENROUTER_API_KEY), or null (no key at all). */
   key_source: 'admin' | 'env' | null;
-  /** Last four characters only, e.g. "…4f2a". Never the key. */
-  key_hint: string;
+  /**
+   * A non-reversible fingerprint of whichever key is in force — the first
+   * eight hex characters of a salted SHA-256 (issue #651), e.g. "3f9a2c71".
+   * NOT a mask: no character of the key survives into it. "" when no key is
+   * configured at all.
+   */
+  key_fingerprint: string;
   updated_at: string;
   updated_by: string;
 }
@@ -285,6 +297,67 @@ function ModelRoleField({
           ? `Running on ${effectiveId}, set by the deployment environment. Choosing here overrides it.`
           : `Running on ${effectiveId}.`}
       </p>
+      {chosen && (
+        <div
+          data-testid={`admin-model-${role}-comparison-card`}
+          style={{
+            padding: '0.75rem',
+            borderRadius: '6px',
+            background: 'var(--ct-bg-subtle, rgba(255, 255, 255, 0.03))',
+            border: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+            marginTop: '0.25rem',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '0.5rem',
+            }}
+          >
+            <span style={{ fontWeight: 600, fontSize: 'var(--ct-text-sm)' }}>{chosen.display_name}</span>
+            <CtChip
+              variant={
+                chosen.tier === 'Highest'
+                  ? 'ok'
+                  : chosen.tier === 'High'
+                    ? 'info'
+                    : chosen.tier === 'Good'
+                      ? 'muted'
+                      : 'warn'
+              }
+            >
+              {chosen.tier} Tier
+            </CtChip>
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: '0.4rem',
+              fontSize: 'var(--ct-text-sm)',
+            }}
+          >
+            <div>
+              <span className="ct-muted">Cost / review: </span>
+              <strong>{formatUsd(perReviewCostUsd(chosen, basis))}</strong>
+            </div>
+            <div>
+              <span className="ct-muted">Context window: </span>
+              <strong>{Math.round(chosen.context_length / 1000)}k tokens</strong>
+            </div>
+            <div>
+              <span className="ct-muted">Input rate: </span>
+              <span>${chosen.cost_per_million_input_usd}/M</span>
+            </div>
+            <div>
+              <span className="ct-muted">Output rate: </span>
+              <span>${chosen.cost_per_million_output_usd}/M</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -296,7 +369,9 @@ function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-export default function AdminModel(): React.ReactElement | null {
+export default function AdminModel({
+  credentialsRefreshKey = 0,
+}: AdminPanelRefreshProps = {}): React.ReactElement | null {
   // Issue #511: an explicit three-state load, not a `T | null` sentinel plus a
   // separate error string. Those two were both true at once on a failed fetch,
   // so the screen rendered a danger banner AND a permanent "Loading model key
@@ -345,6 +420,9 @@ export default function AdminModel(): React.ReactElement | null {
           ),
         );
       }
+      // Issue #635: the latch tracks the server's CURRENT answer, not its
+      // first one — see adminRefresh.ts.
+      setIsForbidden(false);
       setSettings((await response.json()) as ModelKeySettings);
     } catch (err) {
       setSettingsLoad(
@@ -393,6 +471,7 @@ export default function AdminModel(): React.ReactElement | null {
           ),
         );
       }
+      setIsForbidden(false); // Issue #635 — see adminRefresh.ts.
       applySelection(data);
     } catch (err) {
       setSelectionLoad(failedLoad(err, "We couldn't load the model choices. Please try again."));
@@ -404,10 +483,13 @@ export default function AdminModel(): React.ReactElement | null {
     void loadSelection();
   }, [loadSelection]);
 
+  // `credentialsRefreshKey` (issue #635) is what makes this effect run a
+  // SECOND time: the panel is mounted once and only `hidden` toggles, so
+  // without it a rotation that ends a 403 is never observed.
   useEffect(() => {
     void loadSettings();
     void loadSelection();
-  }, [loadSettings, loadSelection]);
+  }, [loadSettings, loadSelection, credentialsRefreshKey]);
 
   const handleSaveModels = useCallback(
     async (event: React.FormEvent) => {
@@ -547,156 +629,7 @@ export default function AdminModel(): React.ReactElement | null {
 
   return (
     <section data-testid="admin-model-panel" className="ct-section ct-stack">
-      <CtToolbar title="Models" />
-
-      {/* A failed load is TERMINAL: the banner carries the message and a
-          working retry, and the loader below is unreachable while it shows
-          (issue #511). */}
-      {settingsLoad.status === 'failed' && (
-        <div className="ct-stack">
-          <CtBanner variant="danger" data-testid="admin-model-error">
-            {settingsLoad.message}
-          </CtBanner>
-          <div className="ct-actions" role="group">
-            <CtButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              data-testid="admin-model-retry"
-              onClick={retryLoadSettings}
-            >
-              Try again
-            </CtButton>
-          </div>
-        </div>
-      )}
-      {actionError && (
-        <CtBanner variant="danger" data-testid="admin-model-action-error">
-          {actionError}
-        </CtBanner>
-      )}
-      {notice && (
-        <CtBanner variant="ok" data-testid="admin-model-notice">
-          {notice}
-        </CtBanner>
-      )}
-
-      {settingsLoad.status === 'loading' ? (
-        <CtProgress data-testid="admin-model-loading" label="Loading model key settings…" />
-      ) : settings === null ? null : !settings.key_store_available ? (
-        <CtCard data-testid="admin-model-unavailable">
-          <div className="ct-stack">
-            <p>
-              This deployment doesn&apos;t manage a model API key here. It reviews documents
-              through its own configured model provider, set by whoever operates the
-              deployment.
-            </p>
-          </div>
-        </CtCard>
-      ) : (
-        <CtCard data-testid="admin-model-panel-body">
-          <div className="ct-stack">
-            <p>
-              One key serves everyone on this instance — every review runs against it, and
-              it bills to whichever account issued it.
-            </p>
-
-            {settings.model_provider !== 'openrouter' && (
-              <CtBanner variant="warn" data-testid="admin-model-provider-warning">
-                Heads up: this deployment is currently set to use{' '}
-                <strong>{settings.model_provider}</strong>, so a key saved here won&apos;t be
-                used until it&apos;s switched to OpenRouter.
-              </CtBanner>
-            )}
-
-            <div className="ct-row">
-              {settings.key_source === 'admin' ? (
-                <CtChip variant="ok" dot>
-                  Key saved
-                </CtChip>
-              ) : settings.key_source === 'env' ? (
-                <CtChip variant="warn" dot>
-                  Using environment key
-                </CtChip>
-              ) : (
-                <CtChip variant="danger" dot>
-                  No key configured
-                </CtChip>
-              )}
-            </div>
-
-            <p data-testid="admin-model-status">
-              {settings.key_source === 'admin' ? (
-                <>
-                  A key is saved here, ending in{' '}
-                  <strong data-testid="admin-model-key-hint">
-                    <code>{settings.key_hint}</code>
-                  </strong>
-                  {settings.updated_by && <> — last changed by {settings.updated_by}</>}.
-                </>
-              ) : settings.key_source === 'env' ? (
-                <>
-                  No key is saved here. Reviews are using the key from the deployment
-                  environment, ending in{' '}
-                  <strong data-testid="admin-model-key-hint">
-                    <code>{settings.key_hint}</code>
-                  </strong>
-                  . Saving a key below will override it.
-                </>
-              ) : (
-                <strong data-testid="admin-model-key-missing">
-                  No key is configured, so every review will fail until you add one.
-                </strong>
-              )}
-            </p>
-
-            <form onSubmit={handleSave} className="ct-stack">
-              <CtField label={settings.key_source === 'admin' ? 'Replace the key' : 'OpenRouter API key'}>
-                <input
-                  id="admin-model-key-input"
-                  data-testid="admin-model-key-input"
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="sk-or-v1-…"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                />
-              </CtField>
-
-              <CtBanner variant="muted">
-                Get a key at <a href="https://openrouter.ai/keys">openrouter.ai/keys</a>. Once
-                saved it can be replaced but never read back — we only ever show its last four
-                characters. If you lose it, generate a new one at OpenRouter.
-              </CtBanner>
-
-              <div className="ct-row">
-                <CtButton
-                  type="submit"
-                  variant="primary"
-                  data-testid="admin-model-save"
-                  disabled={saving || apiKey.trim() === ''}
-                  loading={saving}
-                >
-                  {saving ? 'Saving…' : 'Save key'}
-                </CtButton>
-                {settings.key_source === 'admin' && (
-                  <CtButton
-                    type="button"
-                    variant="danger"
-                    data-testid="admin-model-clear"
-                    confirm="Click again to clear"
-                    disabled={saving}
-                    onClick={() => void handleClear()}
-                  >
-                    Clear saved key
-                  </CtButton>
-                )}
-              </div>
-            </form>
-          </div>
-        </CtCard>
-      )}
+      <CtToolbar />
 
       {selectionLoad.status === 'failed' && (
         <div className="ct-stack">
@@ -806,6 +739,162 @@ export default function AdminModel(): React.ReactElement | null {
           </form>
         </CtCard>
       )}
+
+      {/* A failed load is TERMINAL: the banner carries the message and a
+          working retry, and the loader below is unreachable while it shows
+          (issue #511). */}
+      {settingsLoad.status === 'failed' && (
+        <div className="ct-stack">
+          <CtBanner variant="danger" data-testid="admin-model-error">
+            {settingsLoad.message}
+          </CtBanner>
+          <div className="ct-actions" role="group">
+            <CtButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="admin-model-retry"
+              onClick={retryLoadSettings}
+            >
+              Try again
+            </CtButton>
+          </div>
+        </div>
+      )}
+      {actionError && (
+        <CtBanner variant="danger" data-testid="admin-model-action-error">
+          {actionError}
+        </CtBanner>
+      )}
+      {notice && (
+        <CtBanner variant="ok" data-testid="admin-model-notice">
+          {notice}
+        </CtBanner>
+      )}
+
+      {settingsLoad.status === 'loading' ? (
+        <CtProgress data-testid="admin-model-loading" label="Loading model key settings…" />
+      ) : settings === null ? null : !settings.key_store_available ? (
+        <CtCard data-testid="admin-model-unavailable">
+          <div className="ct-stack">
+            <p>
+              This deployment doesn&apos;t manage a model API key here. It reviews documents
+              through its own configured model provider, set by whoever operates the
+              deployment.
+            </p>
+          </div>
+        </CtCard>
+      ) : (
+        <CtCard data-testid="admin-model-panel-body">
+          <div className="ct-stack">
+            <p>
+              One key serves everyone on this instance — every review runs against it, and
+              it bills to whichever account issued it.
+            </p>
+
+            {settings.model_provider !== 'openrouter' && (
+              <CtBanner variant="warn" data-testid="admin-model-provider-warning">
+                Heads up: this deployment is currently set to use{' '}
+                <strong>{settings.model_provider}</strong>, so a key saved here won&apos;t be
+                used until it&apos;s switched to OpenRouter.
+              </CtBanner>
+            )}
+
+            <div className="ct-row">
+              {settings.key_source === 'admin' ? (
+                <CtChip variant="ok" dot>
+                  Key saved
+                </CtChip>
+              ) : settings.key_source === 'env' ? (
+                <CtChip variant="warn" dot>
+                  Using environment key
+                </CtChip>
+              ) : (
+                <CtChip variant="danger" dot>
+                  No key configured
+                </CtChip>
+              )}
+            </div>
+
+            <p data-testid="admin-model-status">
+              {settings.key_source === 'admin' ? (
+                <>
+                  A key is saved here. Its fingerprint is{' '}
+                  <strong data-testid="admin-model-key-fingerprint">
+                    <code>{settings.key_fingerprint}</code>
+                  </strong>
+                  {settings.updated_by && <> — last changed by {settings.updated_by}</>}.
+                </>
+              ) : settings.key_source === 'env' ? (
+                <>
+                  No key is saved here. Reviews are using the key from the deployment
+                  environment, fingerprint{' '}
+                  <strong data-testid="admin-model-key-fingerprint">
+                    <code>{settings.key_fingerprint}</code>
+                  </strong>
+                  . Saving a key below will override it.
+                </>
+              ) : (
+                <strong data-testid="admin-model-key-missing">
+                  No key is configured, so every review will fail until you add one.
+                </strong>
+              )}
+            </p>
+
+            <form onSubmit={handleSave} className="ct-stack">
+              <CtField label={settings.key_source === 'admin' ? 'Replace the key' : 'OpenRouter API key'}>
+                <input
+                  id="admin-model-key-input"
+                  data-testid="admin-model-key-input"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="sk-or-v1-…"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+              </CtField>
+
+              <CtBanner variant="muted">
+                Get an API key at <a href="https://openrouter.ai/keys">openrouter.ai/keys</a>. Once
+                saved, keys are write-only — only a verification fingerprint is displayed.
+              </CtBanner>
+
+              <div className="ct-row">
+                <CtButton
+                  type="submit"
+                  variant="primary"
+                  data-testid="admin-model-save"
+                  disabled={saving || apiKey.trim() === ''}
+                  loading={saving}
+                >
+                  {saving ? 'Saving…' : 'Save key'}
+                </CtButton>
+                {settings.key_source === 'admin' && (
+                  <CtButton
+                    type="button"
+                    variant="danger"
+                    data-testid="admin-model-clear"
+                    confirm="Click again to clear"
+                    disabled={saving}
+                    onClick={() => void handleClear()}
+                  >
+                    Clear saved key
+                  </CtButton>
+                )}
+              </div>
+            </form>
+          </div>
+        </CtCard>
+      )}
+
+      <SpendCard
+        credentialsRefreshKey={credentialsRefreshKey}
+        testIdPrefix="admin-model-spend"
+        title="Daily spend cap"
+        onForbidden={() => setIsForbidden(true)}
+      />
     </section>
   );
 }
+

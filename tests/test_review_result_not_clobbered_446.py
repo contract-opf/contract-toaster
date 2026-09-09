@@ -78,6 +78,13 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import os  # noqa: E402
 
 REVIEWS_TABLE = "contract-toaster-reviews-446"
@@ -99,7 +106,7 @@ import boto3  # noqa: E402
 import time  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
-import diff_standard_form as dsf_module  # noqa: E402
+import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
@@ -238,7 +245,7 @@ def _build_docx_bytes(body_paragraphs_xml: str) -> bytes:
 
 
 def _build_draft_docx(overrides: dict[str, str]) -> bytes:
-    standard = dsf_module.load_standard_form_paragraphs(docx_path=None, playbook_id=PLAYBOOK_ID)
+    standard = sfp_module.load(playbook_id=PLAYBOOK_ID)
     parts = []
     for std_para in standard:
         if std_para.get("absent_from_form", False):

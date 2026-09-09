@@ -33,10 +33,13 @@ file FAILS on import until it does.
      save does) passes, while a `<w:documentProtection>` smuggled into the
      same part -- a redline delivered edit-locked -- fails, as does dropping
      an element that was there.
-  5. Whole-block ops project correctly: `delete_block`'s clause is absent
-     from the accept-all projection and present in the reject-all one,
-     `insert_block_after`'s new clause the mirror -- and altering the
-     inserted clause's text breaks the accept-all proof.
+  5. Whole-block ops project correctly: `delete_block`'s clause reads
+     `[Intentionally omitted.]` in the accept-all projection (issue #646) and
+     is back verbatim in the reject-all one, `insert_block_after`'s new
+     clause the mirror -- and altering the inserted clause's text breaks the
+     accept-all proof. That case runs in the `applied_edits=None` mode, so
+     the half of proof 2 that projects the transcript forward without a
+     compiler record is what is being exercised.
   6. The gate is WIRED and fail-closed: with a fault injected into the
      compiler's own last writer pass, `apply_block_transcript` returns NO
      bytes and one batch-level `projection_verification_failed` failure that
@@ -654,6 +657,24 @@ def test_block_ops_project_both_ways(failures: list) -> None:
     report = _verify(docx_bytes, result, proven)
     if report["status"] != "verified":
         failures.append(f"[{case}] block ops did not verify: {report['failures']!r}")
+
+    # The struck clause is not simply absent from the accepted document any
+    # more: issue #646 leaves `[Intentionally omitted.]` under its heading,
+    # and this proof is what says so.
+    accepted = extraction_normalization_stage.extract_and_normalize(
+        extraction_normalization_stage.materialize_accept_all(result["docx_bytes"])
+    )
+    renewal = [
+        paragraph
+        for paragraph in accepted["paragraphs"]
+        if paragraph.get("heading") == "Section 3. Renewal"
+    ]
+    placeholder = block_transcript.OMITTED_CLAUSE_PLACEHOLDER
+    if [paragraph["text"] for paragraph in renewal] != [placeholder]:
+        failures.append(
+            f"[{case}] the accepted projection reads {renewal!r} under the struck "
+            f"clause's heading, expected exactly {placeholder!r}"
+        )
 
     # The accept-all proof genuinely reads the inserted clause: change one
     # character of it and the proof must fail.

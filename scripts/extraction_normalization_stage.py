@@ -31,10 +31,17 @@ This module therefore has two halves:
      text (`w:txbxContent`) and content-control placeholder bodies
      (`w:sdt`/`w:sdtContent`) are excluded by construction too: the walker
      below only recurses into a fixed, explicit set of tags (`w:p`, `w:tbl`/
-     `w:tr`/`w:tc`, `w:r`, `w:ins`, `w:del`, `w:fldSimple`) -- it is not a
-     generic "recurse into every child" walk, so an unrecognized wrapper tag
-     (`w:drawing`, `w:sdt`, `mc:AlternateContent`, ...) is simply never
-     descended into. Image alt text (`wp:docPr/@descr`, `@title`) is an XML
+     `w:tr`/`w:tc`, `w:r`, `w:ins`, `w:del`, `w:fldSimple`, `w:hyperlink`)
+     -- it is not a generic "recurse into every child" walk, so an
+     unrecognized wrapper tag (`w:drawing`, `w:sdt`,
+     `mc:AlternateContent`, ...) is simply never descended into.
+     `w:hyperlink` joined that set in issue #663: it is a transparent
+     wrapper around ordinary runs whose text a reader sees inline (a
+     cross-reference, a defined-term link, a URL), so excluding it was not
+     a security boundary but silent content loss -- the model reviewed a
+     clause with words missing from the middle of it.
+
+     Image alt text (`wp:docPr/@descr`, `@title`) is an XML
      ATTRIBUTE, not run text, and this module never reads attributes other
      than the few named ones it explicitly looks up (`w:author`, `w:val`,
      `w:instr`), so alt text cannot reach the output either.
@@ -55,7 +62,7 @@ This module therefore has two halves:
      paragraph, and returns a STRUCTURED paragraph list -- `[{"heading":
      ..., "text": ...}, ...]` -- not `normalize_input.normalize()`'s single
      lossy joined `clean_body` string. This is the SAME shape
-     `scripts/diff_standard_form.py`'s `diff_draft_against_standard()`
+     the retired standard-form diff
      draft parameter and `backend/src/corpus.py`'s `extract_clauses()`
      already consume (see corpus.py's module docstring: "issue #80's output
      shape"), so each paragraph stays independently anchorable by the
@@ -103,8 +110,8 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import clause_boundaries  # noqa: E402
 import normalize_input  # noqa: E402
+import ooxml_util  # noqa: E402
 import redline_generate  # noqa: E402
-import redline_inplace  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -287,20 +294,76 @@ def _walk_content(
 ) -> None:
     """Walks a fixed, explicit set of OOXML content tags. Any tag not
     explicitly handled (`w:drawing`, `w:sdt`, `mc:AlternateContent`,
-    `w:pict`, bookmarks, proofing marks, ...) is skipped WITHOUT recursion --
-    this is what keeps textbox bodies, content-control placeholder bodies,
-    and any other non-allowlisted nested content out of the output by
-    construction rather than by an after-the-fact filter."""
+    `w:pict`, `w:smartTag`, bookmarks, proofing marks, ...) is skipped
+    WITHOUT recursion -- this is what keeps textbox bodies, content-control
+    placeholder bodies, and any other non-allowlisted nested content out of
+    the output by construction rather than by an after-the-fact filter.
+
+    `w:hyperlink` IS on that allowlist (issue #663). It is a transparent
+    wrapper around ordinary `w:r`/`w:ins`/`w:del` children that a reader
+    sees as part of the sentence -- Word emits it for cross-references,
+    defined-term links, and plain URLs -- so skipping it dropped visible
+    words out of the middle of a clause, silently. Descending is also what
+    keeps this walk in agreement with the writer side:
+    `redline_block_apply._accepted_text_runs` recurses into every container
+    except `w:del`/`w:moveFrom`, so hyperlink text was already addressable
+    by the block-apply path while being invisible to extraction. Recursion
+    carries `mode`/`author` through unchanged, so a `w:hyperlink` nested in
+    a pending `w:ins`/`w:del` -- and an `ins`/`del` nested in a hyperlink --
+    both land in the right stream via the existing revision handlers.
+
+    Neither of the hyperlink's own attributes is read: `r:id` (external,
+    into `word/_rels/document.xml.rels`) and `w:anchor` (internal
+    cross-reference) are both ignored, and the rels part is never opened,
+    so a hyperlink's TARGET can no more reach the model than image alt text
+    can. Only the text a reader sees does.
+
+    `w:moveTo` is on the allowlist for the SAME reason (issue #686), and as
+    the same kind of transparent wrapper: it is a tracked MOVE's new
+    location, which Word renders as ordinary visible text and
+    `redline_block_apply._accepted_text_runs` reads as ordinary visible
+    text. Skipping it left the block map built from the uploaded bytes --
+    the one `review_spine` hands the model and proves every transcript
+    against -- missing a sentence the delivered document contains. Its
+    counterpart `w:moveFrom` (the move's OLD location) stays excluded from
+    BOTH streams, matching the writer's walk, which skips exactly `w:del`
+    and `w:moveFrom`. The four range markers (`w:moveFromRangeStart` and
+    friends) are empty and fall through to the generic skip.
+
+    `w:moveFrom` is deliberately NOT routed into `del` mode, which is the
+    obvious reading of "moveFrom is removed text" and is a trap (issue
+    #686): `del` mode puts text in the pre-edit stream only, which
+    manufactures a pending tracked-change record whose `resulting_text` is
+    empty for any paragraph moved away WHOLE -- the shape Word writes when a
+    clause is dragged elsewhere -- and `normalize_input._normalize_paragraph`
+    refuses that record as malformed, failing the entire upload closed. A
+    move is not a proposal about what a clause should SAY: the text is
+    present in the document either way, at its new location, so both move
+    halves are resolved here rather than surfaced as a pending revision.
+    The disposition is not silent -- `accepted_revision_disclosure` names
+    the `moveFrom`/`moveTo` counts the materializer accepted (issue #685).
+    An ordinary `w:del` covering a whole paragraph is a different shape and
+    keeps failing closed (tests/test_extraction_normalization_stage_80.py,
+    [G3d]): deleted text leaves the document, moved text does not.
+    """
     for el in elements:
         tag = el.tag
         if tag == _w("r"):
             _process_run(el, builder, mode, author, inside_field_code)
+        elif tag in (_w("hyperlink"), _w("moveTo")):
+            _walk_content(list(el), builder, mode=mode, author=author, inside_field_code=inside_field_code)
         elif tag == _w("ins"):
             ins_author = el.get(_w("author")) or author
             _walk_content(list(el), builder, mode="ins", author=ins_author, inside_field_code=inside_field_code)
         elif tag == _w("del"):
             del_author = el.get(_w("author")) or author
             _walk_content(list(el), builder, mode="del", author=del_author, inside_field_code=inside_field_code)
+        elif tag == _w("moveFrom"):
+            # EXPLICIT (issue #686), not left to the generic skip below: the
+            # move's old location is excluded from BOTH streams, exactly as
+            # `redline_block_apply._accepted_text_runs` excludes it. See this
+            # function's docstring for why `del` mode would be wrong here.
+            continue
         elif tag == _w("fldSimple"):
             _process_fld_simple(el, builder)
         else:
@@ -311,7 +374,7 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
     """Extracts one raw `<w:p>` into `{"text", "revisions"}` (no `heading`
     key -- heading-vs-body grouping happens one level up, in
     `extract_document_paragraphs`, the same convention
-    `scripts/diff_standard_form.py`'s real-docx loader uses for the
+    the retired standard-form docx loader used for the
     canonical standard form)."""
     builder = _ParaBuilder()
     _walk_content(list(p_el), builder, mode="plain", author=None, inside_field_code=False)
@@ -346,7 +409,11 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
     for field in builder.fields:
         revisions.append({"type": "field", "status": "n/a", **field})
 
-    return {"text": original_text, "revisions": revisions}
+    return {
+        "text": original_text,
+        "resulting_text": resulting_text,
+        "revisions": revisions,
+    }
 
 
 def _iter_table_paragraphs(tbl_el: ET.Element):
@@ -385,7 +452,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     Returns raw (pre-normalization) logical paragraphs, grouped by
     `scripts/clause_boundaries.py`'s shared clause-boundary detector
     (issue #277): a Heading-style `w:p` starts a new logical paragraph, the
-    same rule `scripts/diff_standard_form.py`'s real-docx loader uses for
+    same rule the retired standard-form docx loader used for
     the canonical standard form; when no Heading style is present (real
     counterparty drafts routinely lose named heading styles), a
     document-signals fallback (numbered/lettered lead-ins, outline level,
@@ -396,8 +463,23 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     Subsequent non-boundary `w:p`s are siblings of the most recent boundary
     until the next one.
 
-      [{"heading": "...", "physical_paragraphs": [{"text": "...",
-        "revisions": [...]}, ...]}, ...]
+      [{"heading": "...", "heading_p_index": 3, "heading_source_text": "...",
+        "physical_paragraphs": [{"text": "...", "revisions": [...]}, ...]},
+       ...]
+
+    `heading_p_index` / `heading_source_text` (issue #645) are the boundary
+    `<w:p>`'s own IDENTITY -- its position in the part's preorder `w:p`
+    numbering, the same numbering `p_index` uses -- and the text that
+    paragraph carries before `clean_heading_text` strips its lead-in. They
+    exist so a writer can identify the heading ELEMENT: `delete_block`
+    (`scripts/redline_block_apply.py`) strikes a clause's body and, when no
+    body is left under it, leaves `[Intentionally omitted.]` in its place,
+    because the ACCEPTED document must not show a numbered heading with no
+    clause under it (issue #645, action set by issue #646). Both are
+    None/`""` for the implicit leading group -- text before the document's
+    first boundary paragraph -- which has no heading `<w:p>` at all; a writer
+    must read that as "there is no heading here to be left empty" rather than
+    fall back to guessing an index.
 
     Each sibling under a heading is kept as its own PHYSICAL paragraph
     record here -- NOT flattened into one combined text/revisions list --
@@ -452,25 +534,43 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
             logical.append(
                 {
                     "heading": current["heading"],
+                    # IDENTITY of the boundary `<w:p>` the heading was lifted
+                    # from, and that paragraph's own text (issue #645). Both
+                    # None/"" for the implicit leading group, which has no
+                    # heading paragraph at all. See this function's docstring.
+                    "heading_p_index": current["heading_p_index"],
+                    "heading_source_text": current["heading_source_text"],
                     "physical_paragraphs": current["physical_paragraphs"],
                 }
             )
 
     for p_el in _iter_body_paragraphs(body):
         record = _build_paragraph_record(p_el)
-        if not record["text"] and not record["revisions"]:
+        operative_text = record.get("resulting_text") or record["text"]
+        if not operative_text and not record["revisions"]:
             continue  # empty paragraph (spacer) -- nothing to extract
 
-        if clause_boundaries.is_boundary_paragraph_ooxml(p_el, record["text"]):
+        if clause_boundaries.is_boundary_paragraph_ooxml(p_el, operative_text):
             _flush()
-            heading_text = clause_boundaries.clean_heading_text(record["text"])
+            heading_text = clause_boundaries.clean_heading_text(operative_text)
             current = {
                 "heading": heading_text or "<untitled>",
+                "heading_p_index": p_index_by_element[id(p_el)],
+                "heading_source_text": record["text"],
                 "physical_paragraphs": [],
             }
         else:
             if current is None:
-                current = {"heading": "<untitled>", "physical_paragraphs": []}
+                current = {
+                    "heading": "<untitled>",
+                    # No boundary paragraph was ever seen: this group is the
+                    # document's preamble, and there is no heading `<w:p>` at
+                    # all. A writer must treat that as "no heading here can be
+                    # left empty", never as an index it may guess at.
+                    "heading_p_index": None,
+                    "heading_source_text": "",
+                    "physical_paragraphs": [],
+                }
             # Kept as its own physical-paragraph record -- see this
             # function's docstring for why siblings must not be merged
             # before normalization.
@@ -487,7 +587,8 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Accept-all materialization (issue #563)
+# Accept-all materialization (issue #563; formatting revisions and tracked
+# moves added by issue #685)
 #
 # `normalize_paragraphs` (below) accepts a paragraph's pending tracked
 # changes in TEXT SPACE ONLY -- the `resulting_text` the model reads and a
@@ -499,10 +600,123 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 # canonical, already-accepted document through block-mapping, patch-apply, and
 # the delivered redline, rather than text-space and byte-space ever
 # disagreeing about what "the document" says.
+#
+# Issue #685 widened the disposition from `<w:ins>`/`<w:del>` to the
+# counterparty's pending FORMATTING revisions and tracked MOVES, which used
+# to ride through untouched and surface in the delivered redline as their
+# own "Formatted: ..." revisions. Because a document can carry those with
+# no pending TEXT revision at all -- and therefore no per-paragraph accept
+# note -- the caller now runs this unconditionally and reads the report it
+# returns, instead of inferring from text space whether byte space has
+# anything to do.
 # ---------------------------------------------------------------------------
 
 
-def _splice_accept_all(el: ET.Element) -> None:
+#: Revision-markup elements that record a FORMATTING / PROPERTY change
+#: (issue #685). Each one holds the PREVIOUS properties; the element it
+#: sits inside (`w:rPr`, `w:pPr`, `w:tblPr`, `w:sectPr`, `w:tblGrid`, ...)
+#: already holds the CURRENT ones. So ACCEPTING such a revision means
+#: deleting the change record and keeping what is there -- never touching
+#: the surrounding properties. Left in place (the pre-#685 behavior) they
+#: survive into the delivered redline, where Word renders them as
+#: "Formatted: ..." revisions attributed to the counterparty's author,
+#: indistinguishable to a reader from the edits we are actually asking for.
+PROPERTY_CHANGE_TAGS = frozenset(
+    {
+        "rPrChange",
+        "pPrChange",
+        "sectPrChange",
+        "tblPrChange",
+        "tblPrExChange",
+        "trPrChange",
+        "tcPrChange",
+        "tblGridChange",
+        "numberingChange",
+    }
+)
+
+#: Tracked-MOVE markup removed with its content (issue #685): `w:moveFrom`
+#: is the text at the move's OLD location, which an accepted move deletes
+#: (exactly like `w:del`, and its runs even carry `w:delText`), plus the
+#: four empty range markers that bracket a move at either end and mean
+#: nothing once the move is applied.
+MOVE_REMOVE_TAGS = frozenset(
+    {
+        "moveFrom",
+        "moveFromRangeStart",
+        "moveFromRangeEnd",
+        "moveToRangeStart",
+        "moveToRangeEnd",
+    }
+)
+
+#: Tracked-MOVE markup UNWRAPPED (issue #685): `w:moveTo` is the text at the
+#: move's NEW location, which an accepted move keeps -- exactly like
+#: `w:ins`, and exactly how the writer side already reads it
+#: (`redline_block_apply._accepted_text_runs` skips `w:del`/`w:moveFrom` and
+#: descends into everything else), so unwrapping it changes no offset any
+#: reader or writer computes; it only drops the revision wrapper.
+MOVE_UNWRAP_TAGS = frozenset({"moveTo"})
+
+#: Every child tag `_splice_accept_all` removes OUTRIGHT, content included.
+_ACCEPT_BY_REMOVAL = frozenset(
+    {_w("del")} | {_w(name) for name in MOVE_REMOVE_TAGS | PROPERTY_CHANGE_TAGS}
+)
+
+#: Every child tag `_splice_accept_all` UNWRAPS (children spliced up into
+#: the parent, wrapper discarded).
+_ACCEPT_BY_UNWRAP = frozenset({_w("ins")} | {_w(name) for name in MOVE_UNWRAP_TAGS})
+
+#: Revision-tracking tags that are neither `*Change` nor `move*` and so are
+#: not caught by the shape rule in `_revision_markup_local_name` below.
+#: `w:cellIns`/`w:cellDel`/`w:cellMerge` record a tracked table-cell
+#: insertion/deletion/merge; accepting one is a STRUCTURAL edit to the table
+#: (dropping or merging cells), not a marker removal, so this module does
+#: not apply them -- it REPORTS them instead (issue #685: a revision kind
+#: the splice does not recognise must be disclosed, never silently passed
+#: through).
+_OTHER_REVISION_TAGS = frozenset({"ins", "del", "cellIns", "cellDel", "cellMerge"})
+
+_WORD_TAG_PREFIX = f"{{{WORD_NS}}}"
+
+
+def _revision_markup_local_name(tag: str) -> str | None:
+    """The WordprocessingML local name of `tag` when it is revision-tracking
+    markup, else None.
+
+    Deliberately a SHAPE rule (`*Change`, `move*`) rather than a closed
+    list: a revision kind this module has never heard of -- a newer
+    `*PrChange`, a move variant -- still classifies as revision markup and
+    is therefore reported by `_unapplied_revision_markup` rather than
+    passing through unnoticed. Nothing outside the WordprocessingML
+    namespace can match.
+    """
+    if not tag.startswith(_WORD_TAG_PREFIX):
+        return None
+    local = tag[len(_WORD_TAG_PREFIX) :]
+    if local.endswith("Change") or local.startswith("move") or local in _OTHER_REVISION_TAGS:
+        return local
+    return None
+
+
+def _unapplied_revision_markup(root: ET.Element) -> dict[str, int]:
+    """Counts, by local tag name, every revision-tracking element STILL
+    present under `root`. Run AFTER `_splice_accept_all`, so everything it
+    finds is by definition a kind the splice does not apply -- the
+    fail-closed disclosure half of issue #685 (`materialize_accept_all`'s
+    report carries it; `scripts/review_spine.py` folds it into
+    `normalization_notes`, where the attorney sees it, rather than letting
+    an unhandled revision kind ride into the delivered redline unmentioned).
+    """
+    counts: dict[str, int] = {}
+    for el in root.iter():
+        local = _revision_markup_local_name(el.tag)
+        if local is not None:
+            counts[local] = counts.get(local, 0) + 1
+    return counts
+
+
+def _splice_accept_all(el: ET.Element, tally: dict[str, int] | None = None) -> None:
     """Mutates `el`'s children in place, accepting every pending tracked
     change anywhere under them: each `<w:del>` child is removed ENTIRELY
     (including its own subtree -- a rejected/superseded span never existed
@@ -515,6 +729,29 @@ def _splice_accept_all(el: ET.Element) -> None:
     but otherwise left completely untouched: no other tag, no attribute, is
     ever read or modified (same "touches nothing else" discipline
     `_walk_content` documents for extraction).
+
+    Since issue #685 the same two dispositions cover TWO more revision
+    families, which is what stops the counterparty's own pending FORMATTING
+    revisions from riding into the delivered redline:
+
+      * REMOVED outright, like `<w:del>`: every `PROPERTY_CHANGE_TAGS`
+        element (`w:rPrChange`, `w:pPrChange`, `w:sectPrChange`, ...), whose
+        subtree holds the PREVIOUS properties and whose removal therefore
+        KEEPS the current ones; and every `MOVE_REMOVE_TAGS` element
+        (`w:moveFrom` -- the move's old location -- and the four empty
+        move range markers).
+      * UNWRAPPED, like `<w:ins>`: `w:moveTo`, the move's new location,
+        whose text an accepted move keeps.
+
+    Neither disposition moves a single visible character: `w:moveTo`'s runs
+    are already in the accepted view on both sides (`_walk_content` here,
+    `redline_block_apply._accepted_text_runs` on the writer side), and a
+    `*PrChange` subtree carries no `w:t` at all. Accepting them changes the
+    MARKUP only, which is exactly what "accept a formatting revision" means.
+
+    `tally` (optional) counts, by local tag name, every revision element
+    accepted -- the input to the `normalization_notes` disclosure
+    `materialize_accept_all_with_report` returns.
 
     Nested markup (`<w:ins>` wrapping `<w:del>` -- text inserted, then
     deleted, before ever being accepted) is handled correctly BY
@@ -539,8 +776,8 @@ def _splice_accept_all(el: ET.Element) -> None:
     `<w:p>` elements (with a vestigial empty `<w:pPr><w:rPr/></w:pPr>` where
     the marker lived) even though `normalize_paragraphs`'s TEXT-space
     reading already folds the two into one logical paragraph -- see
-    `materialize_accept_all`'s own docstring for how this can surface as a
-    spurious paragraph split in the delivered redline, and
+    `materialize_accept_all_with_report`'s own docstring for how this can
+    surface as a spurious paragraph split in the delivered redline, and
     `tests/test_accept_all_materializer.py` for the fixture pinning this as
     current behavior.
     """
@@ -548,23 +785,112 @@ def _splice_accept_all(el: ET.Element) -> None:
     for child in original_children:
         el.remove(child)
     for child in original_children:
-        if child.tag == _w("del"):
-            continue  # accepted-away entirely, including all descendants
-        if child.tag == _w("ins"):
-            _splice_accept_all(child)  # accept nested content FIRST
+        if child.tag in _ACCEPT_BY_REMOVAL:
+            # Accepted-away entirely, including all descendants: a deleted
+            # or moved-from span never existed once accepted, and a
+            # `*PrChange`'s subtree is the PREVIOUS properties, which
+            # accepting discards.
+            _count_accepted(tally, child.tag)
+            continue
+        if child.tag in _ACCEPT_BY_UNWRAP:
+            _count_accepted(tally, child.tag)
+            _splice_accept_all(child, tally)  # accept nested content FIRST
             for grandchild in list(child):
                 el.append(grandchild)
             continue
-        _splice_accept_all(child)
+        _splice_accept_all(child, tally)
         el.append(child)
 
 
+def _count_accepted(tally: dict[str, int] | None, tag: str) -> None:
+    """Records one accepted revision element in `tally`, keyed by local tag
+    name (`"rPrChange"`, `"ins"`, ...). A None tally counts nothing -- the
+    disposition itself is identical either way."""
+    if tally is None:
+        return
+    local = tag[len(_WORD_TAG_PREFIX) :] if tag.startswith(_WORD_TAG_PREFIX) else tag
+    tally[local] = tally.get(local, 0) + 1
+
+
 def materialize_accept_all(docx_bytes: bytes) -> bytes:
+    """The bytes half of `materialize_accept_all_with_report` -- see that
+    function for the full contract. Kept as the plain-bytes entry point
+    every caller that does not need the disclosure report already uses."""
+    return materialize_accept_all_with_report(docx_bytes)[0]
+
+
+def accepted_revision_disclosure(report: dict[str, Any]) -> str | None:
+    """The `normalization_notes` sentence(s) for a
+    `materialize_accept_all_with_report` report, or None when there is
+    nothing to disclose (issue #685).
+
+    Two independent sentences, either of which may be absent:
+
+      * what was accepted in MARKUP space beyond the `w:ins`/`w:del` text
+        revisions `normalize_input`'s own per-paragraph notes already
+        disclose -- formatting/property changes and tracked moves, named by
+        kind and count; and
+      * what was LEFT IN PLACE because this module has no accept rule for
+        it, named the same way. Reported, never silent.
+
+    Neither sentence ends with the literal `"accepted-all into the operative
+    draft."` tail: `frontend/src/toaster/receipt.ts::acceptedChangesSummary`
+    COUNTS that exact tail and drops its whole summary line when it parses
+    fewer sentences than it counted, so borrowing the tail here would
+    silently suppress the per-edit summary the attorney already gets. These
+    sentences are additive disclosure alongside it, not part of its count.
     """
-    Physically accept every pending tracked change in `word/document.xml`:
-    every `<w:del>` element is removed INCLUDING its content, and every
+    accepted = {
+        name: count
+        for name, count in (report.get("accepted") or {}).items()
+        if name not in ("ins", "del")
+    }
+    unapplied = report.get("unapplied") or {}
+    sentences: list[str] = []
+    if accepted:
+        sentences.append(
+            "Pending formatting and move revisions ("
+            + ", ".join(f"{count} {name}" for name, count in sorted(accepted.items()))
+            + ") were accepted into the operative draft before review."
+        )
+    if unapplied:
+        sentences.append(
+            "Revision markup with no accept rule was left in place ("
+            + ", ".join(f"{count} {name}" for name, count in sorted(unapplied.items()))
+            + ")."
+        )
+    return " ".join(sentences) if sentences else None
+
+
+def materialize_accept_all_with_report(docx_bytes: bytes) -> tuple[bytes, dict[str, Any]]:
+    """
+    Physically accept every pending tracked change in `word/document.xml`,
+    returning `(materialized_bytes, report)` where `report` is
+    `{"accepted": {<local tag name>: count}, "unapplied": {...}}` --
+    what was accepted, and what revision markup this module has no rule for
+    and therefore left in place (issue #685; `accepted_revision_disclosure`
+    turns it into the `normalization_notes` sentence).
+
+    Every `<w:del>` element is removed INCLUDING its content, and every
     `<w:ins>` element is unwrapped (its children spliced into its parent,
     the wrapper dropped) -- everywhere in the part, at any nesting depth.
+    Since issue #685 the same two dispositions also accept the
+    counterparty's pending FORMATTING revisions (`PROPERTY_CHANGE_TAGS`,
+    removed -- the element records the PREVIOUS properties, so dropping it
+    keeps the current ones) and tracked MOVES (`w:moveFrom` and the move
+    range markers removed, `w:moveTo` unwrapped). Before that, those rode
+    through untouched into the delivered redline, where Word showed them as
+    the counterparty's own "Formatted: ..." revisions sitting beside our
+    edits.
+
+    When there is NOTHING to accept the input `docx_bytes` are returned
+    unchanged, byte for byte -- no re-zip, no re-serialization, and no
+    round-trip verification of a document this stage never altered. That is
+    what lets a caller run this unconditionally instead of guessing from
+    text-space signals whether byte-space has anything to do (a document
+    whose only pending revisions are formatting ones produces no
+    per-paragraph accept note at all, so the pre-#685 "only materialize when
+    `normalization_notes` is present" gate never fired for it).
     Touches nothing else: every other zip entry is copied through
     byte-for-byte, and no other tag or attribute in `word/document.xml` is
     ever modified (`_splice_accept_all`'s own contract).
@@ -600,17 +926,21 @@ def materialize_accept_all(docx_bytes: bytes) -> bytes:
 
     Round-trips through `redline_generate.verify_docx_round_trip` before
     returning -- raises `ValueError` (that function's own exception) rather
-    than ever handing a caller bytes that do not open.
+    than ever handing a caller bytes that do not open. That check covers
+    every document this function REWRITES; the nothing-to-accept case above
+    returns the caller's own bytes untouched and is deliberately not put
+    through it, so running this unconditionally can never turn a document
+    the stage did not alter into a refusal.
 
     Uses the SAME guarded `ET.register_namespace` discipline
-    `scripts/redline_inplace.py` established (issue #560/#561): a real
+    `scripts/ooxml_util.py` owns (issue #560/#561): a real
     uploaded document can declare a namespace prefix ElementTree's own
     serializer would refuse to register (`ns<digits>`, reserved for its own
     auto-generated bindings) or declare a prefix on a non-root element that
     ElementTree hoists to the root on serialization --
-    `redline_inplace.register_declared_namespaces` /
-    `_merge_hoisted_namespaces` handle both; reused here rather than
-    reimplemented so the two directions (in-place redline patch vs.
+    `ooxml_util.register_declared_namespaces` /
+    `merge_hoisted_namespaces` handle both; reused here rather than
+    reimplemented so the two directions (block-transcript redline write vs.
     accept-all materialization) can never drift apart on this.
     """
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
@@ -623,25 +953,39 @@ def materialize_accept_all(docx_bytes: bytes) -> bytes:
         )
 
     original_document_xml = originals[ALLOWED_DOCUMENT_PART].decode("utf-8")
-    original_root_open_tag = redline_inplace._root_open_tag(original_document_xml)
-    # See redline_inplace.apply_tracked_changes_inplace's identical call:
-    # every prefix the document declares ANYWHERE (not just on the root) is
+    original_root_open_tag = ooxml_util.root_open_tag(original_document_xml)
+    # The same call `redline_generate.inject_export_marker_and_footnotes`
+    # makes: every prefix the document declares ANYWHERE (not just on the root) is
     # registered so ElementTree picks matching prefixes for anything it
     # re-serializes, guarded against the reserved `ns<digits>` pattern.
-    redline_inplace.register_declared_namespaces(
-        redline_inplace._declared_namespaces_anywhere(original_document_xml)
+    ooxml_util.register_declared_namespaces(
+        ooxml_util.declared_namespaces_anywhere(original_document_xml)
     )
 
     root = ET.fromstring(originals[ALLOWED_DOCUMENT_PART])
-    _splice_accept_all(root)
+    accepted: dict[str, int] = {}
+    _splice_accept_all(root, accepted)
+    # Whatever revision markup survives the splice is, by definition, a kind
+    # it has no rule for -- reported, never silently passed through.
+    report: dict[str, Any] = {
+        "accepted": accepted,
+        "unapplied": _unapplied_revision_markup(root),
+    }
+    if not accepted:
+        # Nothing was accepted, so the materialized document IS the input.
+        # Returning it verbatim keeps this a true no-op (byte-identical, and
+        # a document this stage never altered is never put through a
+        # round-trip that could fail it) while the report still discloses
+        # any unapplied markup found.
+        return docx_bytes, report
 
     # Serialize the (mutated) tree, then splice the ORIGINAL root start tag
     # back in verbatim, merged with any namespace the serializer hoisted --
-    # same "Preserve" technique redline_inplace.py documents at length.
+    # same "Preserve" technique ooxml_util.py documents at length.
     serialized = ET.tostring(root, encoding="unicode")
-    auto_root_open_tag = redline_inplace._root_open_tag(serialized)
+    auto_root_open_tag = ooxml_util.root_open_tag(serialized)
     body_and_close = serialized[len(auto_root_open_tag) :]
-    root_open_tag = redline_inplace._merge_hoisted_namespaces(
+    root_open_tag = ooxml_util.merge_hoisted_namespaces(
         original_root_open_tag, auto_root_open_tag
     )
     new_document_xml = (
@@ -662,7 +1006,7 @@ def materialize_accept_all(docx_bytes: bytes) -> bytes:
 
     materialized_bytes = out_buf.getvalue()
     redline_generate.verify_docx_round_trip(materialized_bytes)
-    return materialized_bytes
+    return materialized_bytes, report
 
 
 # ---------------------------------------------------------------------------
@@ -742,11 +1086,12 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     Unlike `normalize_input.normalize()`, this does NOT flatten the result
     into one joined `clean_body` string -- it returns a structured
     paragraph list, `[{"heading": ..., "text": ..., "physical_spans": [...],
-    "block_id": ...}, ...]`, matching the `scripts/diff_standard_form.py` /
+    "block_id": ...}, ...]`, matching the retired standard-form diff's /
     `backend/src/corpus.py` draft-input contract (see module docstring), so
     each paragraph stays independently anchorable downstream.
-    `physical_spans` is ADDITIVE (issue #564) and so is `block_id` (issue
-    #619): existing readers of `heading`/`text` alone are unaffected.
+    `physical_spans` is ADDITIVE (issue #564) and so are `block_id` (issue
+    #619) and `heading_p_index`/`heading_source_text` (issue #645): existing
+    readers of `heading`/`text` alone are unaffected.
 
     `block_id` is an IMMUTABLE, CODE-ASSIGNED address for the logical
     paragraph -- `BLOCK_ID_FORMAT % position`, 1-based over the logical
@@ -804,6 +1149,17 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     the same text and writes the edit into the wrong clause. An entry is
     None when `raw_paragraphs` was hand-built without `p_index`.
 
+    `heading_p_index` / `heading_source_text` are the same kind of carried
+    identity for the block's HEADING element (issue #645), passed through
+    from `extract_document_paragraphs` unchanged: the boundary `<w:p>`'s own
+    position in that preorder numbering, and the text it carries. They are
+    what lets `delete_block` tell that striking a clause would leave its
+    heading with nothing under it, and leave `[Intentionally omitted.]` there
+    instead (issue #646). A record whose `heading_p_index` is None has no
+    heading paragraph at all -- the implicit leading group, or a hand-built
+    caller -- and a writer must read that as "no heading can be left empty
+    here", never as an index to guess at.
+
     Returns:
       {"status": "normalized", "paragraphs": [...],
        "normalization_notes": "..."}   (notes key present only when one or
@@ -819,6 +1175,8 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
 
     for paragraph in raw_paragraphs:
         heading = paragraph.get("heading", "<untitled>")
+        heading_p_index = paragraph.get("heading_p_index")
+        heading_source_text = paragraph.get("heading_source_text", "")
         physical_paragraphs = paragraph.get("physical_paragraphs", [])
 
         clean_texts: list[str] = []
@@ -855,6 +1213,17 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
         clean_paragraphs.append(
             {
                 "heading": heading,
+                # Identity of the boundary `<w:p>` the heading came from, and
+                # that paragraph's own pre-clean text, carried through from
+                # `extract_document_paragraphs` (issue #645). Additive, like
+                # `physical_spans` and `block_id` before it: no existing
+                # reader of `heading`/`text` is affected. Both are
+                # None/`""` for the implicit leading group and for any caller
+                # that hand-built raw paragraphs without them, which a writer
+                # must treat as "this block has no heading element" rather
+                # than as an index to guess at.
+                "heading_p_index": heading_p_index,
+                "heading_source_text": heading_source_text,
                 "text": text,
                 "physical_spans": physical_spans,
                 # Identity, parallel to `physical_spans` (issue #621 fix

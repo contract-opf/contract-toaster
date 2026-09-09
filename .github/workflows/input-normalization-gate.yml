@@ -1,0 +1,77 @@
+# Input-normalization fail-closed gate (deterministic; no model invocation,
+# no AWS credentials).
+#
+# Issue #65 (BLOCKING GATE): "Redline anchoring + fail-closed patching + input
+# normalization" -- the normalization half, which is all that remains of that
+# issue's scope. Issue #380 retired the anchor/hash patch path from issue
+# generation (the 2026-07-22 LLM-native decision, D3); issue #628 deleted the
+# quote patcher that briefly replaced it; issue #631 deleted the patcher
+# module itself along with the rest of the anchor-map / standard-form-diff
+# subsystem. The patching guarantee's successor on the block-transcript path
+# (compile against a PROVEN transcript, round-trip verify, report per-edit
+# failures rather than approximating) is covered by the full suite's
+# tests/redline/test_redline_generation_83.py and
+# tests/redline/test_roundtrip_failure_fails_closed.py.
+#
+# This gate proves:
+#   - scripts/normalize_input.py applies the documented accept/reject rule to
+#     pre-existing tracked changes / comments / hidden text / fields, and
+#     fails closed (reason=unnormalizable_input) when a paragraph's operative
+#     text is ambiguous (unresolved tracked change).
+#   - The fail-closed path builds the analysis_report artifact shape
+#     (docs/output-contract.md -> "Fail-closed internal analysis report") and
+#     never carries a legal `decision` field -- the fail-closed outcome is a
+#     SYSTEM status (MANUAL_REVIEW_REQUIRED), never a legal decision.
+#
+# This is also picked up by the full Python test suite in ci-pipeline.yml
+# (tests/*/test_*.py glob); this dedicated workflow exists so a BLOCKING GATE
+# issue gets its own clearly-labeled, independently-runnable check.
+#
+# See:
+#   ARCHITECTURE.md § "Input normalization (before review)"
+#   docs/output-contract.md § "Fail-closed internal analysis report"
+#   docs/phase-0-issues.md item 17
+
+name: Input-normalization gate
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "scripts/normalize_input.py"
+      - "tests/redline/**"
+      - ".github/workflows/input-normalization-gate.yml"
+  pull_request:
+    paths:
+      - "scripts/normalize_input.py"
+      - "tests/redline/**"
+      - ".github/workflows/input-normalization-gate.yml"
+
+jobs:
+  input-normalization-gate:
+    name: Input normalization fail-closed gate
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install needed -- the module uses only the stdlib.
+
+      - name: Input-normalization fail-closed gate
+        # Fails if:
+        #   - scripts/normalize_input.py is missing or fails to import
+        #   - a clean document, or a document with only accepted tracked
+        #     changes / resolved fields / hidden text, fails to normalize
+        #   - a document with an unresolved tracked change or corrupt
+        #     revision structure normalizes anyway instead of failing closed
+        #     with reason=unnormalizable_input
+        #   - the analysis_report builder omits a required field, or attaches
+        #     a legal `decision` field to a fail-closed report
+        run: python3 tests/redline/test_fail_closed_normalization.py

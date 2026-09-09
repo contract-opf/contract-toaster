@@ -12,9 +12,16 @@
  * 2. Reduced motion — the global `prefers-reduced-motion: reduce` kill
  *    switch lives in base.css; no `ui/components/*.css` file hardcodes an
  *    animation/transition duration (must route through `--ct-dur*`); the
- *    toaster hero's inline stylesheet keeps its own guard (§3.2 — it can't
+ *    Review console's inline stylesheet keeps its own guard (§3.2 — it can't
  *    use base.css's `*` selector because it's not in the document tree
  *    base.css's cascade reaches the same way bundled CSS is).
+ *
+ *    That stylesheet used to be `toaster/Toaster.tsx`'s. Issue #727 deleted
+ *    that component with the rest of the surface the Orbit Diner console
+ *    replaced, and this check followed the stylesheet rather than being
+ *    dropped: `orbit-diner/motion.ts`'s `motionStyles` is the string the
+ *    console renders into a `<style>` element, and it is subject to exactly
+ *    the same §3.2 argument.
  * 3. Forced colors — `forced-colors: active` (Windows High Contrast)
  *    discards `box-shadow`, so a ring built only from `--ct-focus-ring`
  *    vanishes. No `:focus` / `:focus-visible` / `:focus-within` rule
@@ -41,7 +48,13 @@ const FRONTEND_SRC = path.resolve(__dirname, '../src');
 const COMPONENTS_DIR = path.join(FRONTEND_SRC, 'ui/components');
 const BASE_CSS_PATH = path.join(FRONTEND_SRC, 'styles/base.css');
 const TOKENS_CSS_PATH = path.join(FRONTEND_SRC, 'styles/tokens.css');
-const TOASTER_TSX_PATH = path.join(FRONTEND_SRC, 'toaster/Toaster.tsx');
+/** The Review console's INLINE stylesheet — `motionStyles`, rendered into a
+ *  `<style>` element by `orbit-diner/OrbitDiner.tsx`. It is a template string
+ *  in a .ts file, so `cssFilesUnder()` below cannot see it and it is read by
+ *  name (issue #727; it was `toaster/Toaster.tsx` until that file was
+ *  deleted). `orbit-diner/orbit.css` is a real stylesheet and is already
+ *  covered by the recursive walk. */
+const CONSOLE_MOTION_PATH = path.join(FRONTEND_SRC, 'orbit-diner/motion.ts');
 
 // Components that render an interactive part of their own (issue #396
 // scope). ct-card/ct-chip are shadow leaves with no interactive control;
@@ -130,9 +143,11 @@ for (const name of FOCUS_REQUIRED_COMPONENTS) {
 }
 
 {
-  const toaster = readFileSync(TOASTER_TSX_PATH, 'utf8');
-  if (!/prefers-reduced-motion:\s*reduce/.test(toaster)) {
-    failures.push('motion: Toaster.tsx inline stylesheet has no prefers-reduced-motion guard (§3.2)');
+  const consoleMotion = readFileSync(CONSOLE_MOTION_PATH, 'utf8');
+  if (!/prefers-reduced-motion:\s*reduce/.test(consoleMotion)) {
+    failures.push(
+      'motion: orbit-diner/motion.ts inline stylesheet has no prefers-reduced-motion guard (§3.2)',
+    );
   }
 }
 
@@ -165,7 +180,7 @@ for (const entry of readdirSync(COMPONENTS_DIR)) {
 // leaves keyboard users in Windows High Contrast Mode with NO focus
 // indicator at all (WCAG 2.4.7). This check makes that a standing
 // invariant rather than a one-time fix: it walks every stylesheet under
-// frontend/src (plus the toaster's inline stylesheet) and rejects any
+// frontend/src (plus the console's inline stylesheet) and rejects any
 // :focus-visible rule that suppresses the outline.
 
 /** Every *.css under `dir`, recursively, in a stable order. */
@@ -269,7 +284,9 @@ function forcedColorsOutlineFailures(source, label) {
 for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
   failures.push(...forcedColorsOutlineFailures(readFileSync(cssPath, 'utf8'), path.relative(FRONTEND_SRC, cssPath)));
 }
-failures.push(...forcedColorsOutlineFailures(readFileSync(TOASTER_TSX_PATH, 'utf8'), 'toaster/Toaster.tsx'));
+failures.push(
+  ...forcedColorsOutlineFailures(readFileSync(CONSOLE_MOTION_PATH, 'utf8'), 'orbit-diner/motion.ts'),
+);
 
 // ------------------------------------------- 3b. Self-test (mutation cover)
 //

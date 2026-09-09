@@ -123,12 +123,29 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+import block_transcript  # noqa: E402
 import detector_common  # noqa: E402
 import model_client as model_client_module  # noqa: E402
+import primary_review_pass  # noqa: E402
+import review_spine  # noqa: E402
 
 VALID_DECISIONS = ("accept", "flag", "reject")
 
 DEFAULT_MAX_OUTPUT_TOKENS = 512
+
+#: The issue_key a transcript is proved under DURING this pass. The real key
+#: ("I1", "I2", ...) is minted by
+#: `third_party_output_integration._keyed_findings` over the COMPLETE findings
+#: list, which does not exist yet while a single clause is being judged.
+#:
+#: Proving under a placeholder is sound because the two things
+#: `validate_block_patches` establishes are of different kinds: SOURCE FIDELITY
+#: (the keep/delete segments reproduce the block's own bytes) is a property of
+#: the text and is entirely independent of the label on the segment, while the
+#: key is a pure attribution label bound later -- by the same single walk that
+#: already guarantees issue and edit agree (see `_keyed_findings`' docstring on
+#: why deriving it twice is how that invariant rots).
+PROVISIONAL_ISSUE_KEY = "I1"
 
 # System prompt for the "softer judgement" model call -- issued only for a
 # matched clause no deterministic hard_rejection rule fired on. Instructs
@@ -147,6 +164,25 @@ _SYSTEM_PROMPT = (
     'shape {"decision": "accept|flag|reject", "rationale": "<one or two '
     "sentences, second-person 'your' voicing, never a tenant brand "
     'name>"}. No prose outside the JSON object.'
+)
+
+
+#: Appended to `_SYSTEM_PROMPT` only when this clause resolves to a block id,
+#: i.e. only when an edit could actually be proved and compiled. Offering
+#: transcript authoring for a clause we cannot anchor would invite the model to
+#: draft an edit with nowhere to land (issue #630).
+_TRANSCRIPT_PROMPT_SUFFIX = (
+    " If (and only if) your decision is 'reject', you MAY additionally author "
+    "a surgical edit to the clause, as a \"block_patches\" array with ONE "
+    "entry: {\"block_id\": \"<the id shown in brackets>\", \"segments\": "
+    "[...]}. The segments transcribe the WHOLE clause in order as "
+    '{"op":"keep"|"delete"|"insert","text":"..."} -- concatenating every '
+    "'keep' and 'delete' text must reproduce the clause EXACTLY, character "
+    "for character, and 'insert' adds your new wording. Edit the smallest "
+    "span that fixes the problem; do not restate the clause. NEVER copy the "
+    "\"[pNNNN] \" marker into any text -- it is display scaffolding that "
+    "exists in no document. Omit \"block_patches\" entirely if no narrow "
+    "edit is right; omitting it is always safe and never penalised."
 )
 
 
@@ -271,7 +307,9 @@ def _missing_position_finding(topic: dict[str, Any], required: bool) -> dict[str
     }
 
 
-def _build_user_prompt(topic: dict[str, Any], clause_text: str) -> str:
+def _build_user_prompt(
+    topic: dict[str, Any], clause_text: str, block_id: str | None = None
+) -> str:
     payload = {
         "topic_section": topic.get("section_ref"),
         "your_position": topic.get("our_standard"),
@@ -282,6 +320,13 @@ def _build_user_prompt(topic: dict[str, Any], clause_text: str) -> str:
         "unacceptable_deviations": topic.get("reject_if_proposed", []),
         "counterparty_clause_text": clause_text,
     }
+    if block_id is not None:
+        # The SAME marker rendering the first-party path uses, from the same
+        # helper, so the two cannot drift on the format the never-copy rule
+        # and the strip backstop are written against.
+        payload["counterparty_clause_text_with_block_id"] = (
+            review_spine.render_block_marker(block_id) + clause_text
+        )
     return json.dumps(payload, indent=2)
 
 
@@ -309,7 +354,83 @@ def _parse_model_judgement(raw_response: str, topic_id: str, clause_id: str) -> 
             f"a non-empty 'rationale' string: {raw_response!r}"
         )
 
-    return {"decision": decision, "rationale": rationale}
+    parsed: dict[str, Any] = {"decision": decision, "rationale": rationale}
+
+    # Optional and always droppable. A malformed transcript must NOT fail the
+    # judgement the model got right: the decision and rationale still stand,
+    # and the caller falls back to governed fixed text or flag-only. That is
+    # why this reads the field defensively instead of raising the way a bad
+    # `decision` does -- a bad decision means we do not know what the model
+    # concluded, a bad transcript only means we cannot use its drafting.
+    patches = data.get("block_patches")
+    if isinstance(patches, list) and patches:
+        parsed["block_patches"] = patches
+    return parsed
+
+
+def _strip_block_markers_from_segments(patches: list[Any]) -> None:
+    """Remove a leading rendered `"[pNNNN] "` marker from every segment text.
+
+    The prompt forbids copying the marker, and this is the deterministic
+    backstop for a model that does it anyway -- the same belt-and-braces the
+    first-party path keeps (`primary_review_pass._strip_rendered_block_markers`),
+    for the same reason: a marker inside a `keep`/`delete` text cannot prove
+    against the block and costs the WHOLE transcript, not one segment.
+    """
+    for patch in patches:
+        if not isinstance(patch, dict):
+            continue
+        for segment in patch.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            text = segment.get("text")
+            if isinstance(text, str):
+                segment["text"] = primary_review_pass.RENDERED_BLOCK_MARKER_PATTERN.sub(
+                    "", text, count=1
+                )
+
+
+def _validated_model_transcript(
+    patches: Any,
+    block_id: str,
+    block_map: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    """`patches` proved against `block_map`, or `None` if it does not prove.
+
+    Returns the patch list with the PROVISIONAL key stamped on every edit
+    segment; `third_party_output_integration` restamps the real `issue_key`
+    when it knows it. Never raises: an unusable transcript is a fallback
+    signal, not an error (see `_parse_model_judgement`).
+    """
+    if not isinstance(patches, list) or not patches:
+        return None
+    prepared: list[dict[str, Any]] = []
+    for patch in patches:
+        if not isinstance(patch, dict):
+            return None
+        segments = patch.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return None
+        keyed_segments: list[dict[str, Any]] = []
+        for segment in segments:
+            if not isinstance(segment, dict) or not isinstance(segment.get("op"), str):
+                return None
+            copied = dict(segment)
+            # Only EDIT segments carry a key; a bare `keep` must not.
+            if copied["op"] != "keep":
+                copied["issue_key"] = PROVISIONAL_ISSUE_KEY
+            keyed_segments.append(copied)
+        # The model names the block; anything else is a mis-anchored edit and
+        # is refused rather than retargeted, for the same reason #629 refuses
+        # an unresolved anchor: striking the wrong paragraph is not recoverable.
+        if patch.get("block_id") != block_id:
+            return None
+        prepared.append({"block_id": block_id, "segments": keyed_segments})
+
+    result = block_transcript.validate_block_patches(prepared, [], block_map)
+    if result.get("status") != "proven":
+        return None
+    return prepared
 
 
 def _model_judged_finding(
@@ -319,21 +440,70 @@ def _model_judged_finding(
     model_client: Any,
     model_id: str,
     max_output_tokens: int,
+    block_id: str | None = None,
+    block_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """One (topic, clause) judgement, optionally carrying a proved edit.
+
+    Transcript authoring is offered only when BOTH a `block_id` and a
+    `block_map` are supplied -- i.e. only when an edit could actually be
+    proved against the uploaded document and compiled onto it. Callers that
+    pass neither get byte-identical behaviour to before issue #630.
+    """
+    offers_transcript = block_id is not None and block_map is not None
+    system_prompt = _SYSTEM_PROMPT + (_TRANSCRIPT_PROMPT_SUFFIX if offers_transcript else "")
+    user_prompt = _build_user_prompt(topic, clause_text, block_id if offers_transcript else None)
+
     raw_response = model_client.invoke(
         model_id=model_id,
-        system_prompt=_SYSTEM_PROMPT,
-        user_prompt=_build_user_prompt(topic, clause_text),
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         max_output_tokens=max_output_tokens,
     )
     judgement = _parse_model_judgement(raw_response, topic["id"], clause_id)
-    return {
+
+    finding: dict[str, Any] = {
         "playbook_topic_id": topic["id"],
         "clause_id": clause_id,
         "decision": judgement["decision"],
         "rationale": judgement["rationale"],
         "source": "model_judgement",
     }
+
+    if not offers_transcript or judgement["decision"] != "reject":
+        return finding
+
+    patches = judgement.get("block_patches")
+    if patches:
+        _strip_block_markers_from_segments(patches)
+    proved = _validated_model_transcript(patches, block_id, block_map)
+
+    if proved is None and patches:
+        # ONE informed retry, the same bounded shape the first-party pass uses
+        # (`MAX_RETRIES_PER_PASS == 1`): tell the model exactly what failed and
+        # let it try again. A second failure falls back rather than looping --
+        # an unusable draft must never cost the decision the model got right.
+        retry_raw = model_client.invoke(
+            model_id=model_id,
+            system_prompt=system_prompt,
+            user_prompt=(
+                user_prompt
+                + "\n\nYour previous block_patches did not prove against the "
+                "clause's own text. The 'keep' and 'delete' texts, concatenated "
+                "in order, must reproduce the clause EXACTLY. Re-author them, or "
+                "omit block_patches entirely."
+            ),
+            max_output_tokens=max_output_tokens,
+        )
+        retry_judgement = _parse_model_judgement(retry_raw, topic["id"], clause_id)
+        retry_patches = retry_judgement.get("block_patches")
+        if retry_patches:
+            _strip_block_markers_from_segments(retry_patches)
+            proved = _validated_model_transcript(retry_patches, block_id, block_map)
+
+    if proved is not None:
+        finding["model_block_patches"] = proved
+    return finding
 
 
 def evaluate_position_findings(
@@ -344,6 +514,8 @@ def evaluate_position_findings(
     *,
     model_id: str | None = None,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    block_id_by_clause_id: dict[str, str] | None = None,
+    block_map: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Evaluate one position-level finding per playbook topic, over that
     topic's matched clauses (#249's `match_result["topic_matches"]`).
@@ -361,6 +533,15 @@ def evaluate_position_findings(
     clause -- every playbook topic id appears in at least one finding.
     Deterministic and offline: no randomness, no network call of any kind;
     the only "judgement" step goes through the injected `model_client`.
+
+    `block_id_by_clause_id` and `block_map` (issue #630) are optional and
+    only useful together: supplied, a `reject` judgement may additionally
+    author a SURGICAL intra-clause edit, proved against the uploaded
+    document before it is attached as `finding["model_block_patches"]`.
+    Omitted -- as every pre-#630 caller omits them -- the behaviour is
+    byte-identical to before: judgement only, and the governed fixed-text
+    path in `third_party_output_integration` remains the only source of
+    edits.
     """
     resolved_model_id = model_id if model_id is not None else model_client_module.primary_model_id()
 
@@ -395,6 +576,9 @@ def evaluate_position_findings(
                 findings.append(_hard_rejection_finding(topic, clause_id, fired_rule))
                 continue
 
+            # Both or neither: a block id with no map cannot be proved
+            # against, and a map with no id has nothing to name.
+            clause_block_id = (block_id_by_clause_id or {}).get(clause_id)
             findings.append(
                 _model_judged_finding(
                     topic,
@@ -403,6 +587,8 @@ def evaluate_position_findings(
                     model_client,
                     resolved_model_id,
                     max_output_tokens,
+                    block_id=clause_block_id if block_map is not None else None,
+                    block_map=block_map if clause_block_id is not None else None,
                 )
             )
 

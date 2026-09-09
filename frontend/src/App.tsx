@@ -9,7 +9,8 @@
  *   - Header: "Signed in as you@example.com" (the authenticated user's email)
  *   - Footer: version from the authenticated /version endpoint, plus the
  *     build time parsed out of the version string (issue #603 —
- *     `buildTimestampFromVersion` below)
+ *     `buildTimestampFromVersion`, now in ./deployIdentity and re-exported
+ *     from here)
  *   - Foot of page: account notices (the default-password warning), moved
  *     down from under the nameplate by issue #603 per owner direction
  *
@@ -36,11 +37,13 @@ import AdminRetention from './AdminRetention';
 import AdminModel from './AdminModel';
 import AdminPlaybooks from './AdminPlaybooks';
 import AdminDiagnostics from './AdminDiagnostics';
+import AdminSettings from './AdminSettings';
 import ReviewSubmission from './ReviewSubmission';
 import ReviewHistory from './ReviewHistory';
 import PasswordLogin, { DemoIdentity } from './PasswordLogin';
 import ChangePassword from './ChangePassword';
 import { isPasswordMode } from './auth';
+import { buildTimestampFromVersion } from './deployIdentity';
 import { authorizedFetch, onSessionExpired } from './api';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CtAppShell, CtBanner, CtButton, CtChip, CtTabBar } from './ui/react';
@@ -75,71 +78,21 @@ interface VersionInfo {
 const VERSION_POLL_INTERVAL_MS = 60_000;
 
 // ---------------------------------------------------------------------------
-// Build timestamp (issue #603).
+// Build timestamp (issue #603) — and, since issue #652, deploy identity.
 //
-// The publish workflow tags each image `<short-sha>-$(date -u +%Y%m%d%H%M%S)`
-// (.github/workflows/dts-image-publish.yml) and bakes that string in as
-// VERSION, so the build time is ALREADY in the string the footer shows — it
-// just isn't legible. Parsing it here rather than adding a `built_at` field
-// to /version is deliberate: the backend payload would then have to be
-// plumbed through every deployment target's compose/env, and issue #469's
-// landmine is precisely that VERSION/COMMIT_SHA/IMAGE_DIGEST must stay EMPTY
-// in deploy/dts/docker-compose.coolify.yml so the image's baked-in ENV wins.
-// A parser adds no deploy coupling at all. (A real `built_at`, independent of
-// the tag, remains a sensible follow-up if one is ever needed.)
-//
-// The stamp is UTC at the source, and is rendered as UTC — not converted to
-// the viewer's local zone. The footer is a deploy-verification signal read
-// against `docker image ls` output and workflow logs, which are all UTC;
-// making the one human-readable copy of that instant disagree with them by
-// an offset would be a worse footer, not a friendlier one. It also keeps the
-// rendering deterministic rather than dependent on the runner's TZ.
-const BUILD_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// The parser itself now lives in ./deployIdentity, alongside the frontend's
+// own build stamp and the backend/frontend agreement check that reads the
+// same version strings. One parser, so the footer here and the Settings tab's
+// "what is deployed" table can never disagree about when an image was built.
+// It stays exported from this module because the footer is where it first
+// shipped and where its own test suite reaches for it.
+// ---------------------------------------------------------------------------
+export { buildTimestampFromVersion };
 
 // The id the identity cluster's ChangePassword control carries, and the
 // fragment the foot-of-page default-password warning links to (issue #603).
 // One constant so the link and its target cannot drift apart.
 const CHANGE_PASSWORD_ANCHOR = 'change-password';
-
-/**
- * "20 Aug 2026, 19:16 UTC" for `cb79b4a-20260820191617`, or null when the
- * version string carries no timestamp suffix (VERSION defaults to `dev`) or
- * carries a nonsense one. Null means "render no date", never "Invalid Date".
- * Exported for direct unit coverage of the degradation cases.
- */
-export function buildTimestampFromVersion(version: string | null | undefined): string | null {
-  const match = /-(\d{14})$/.exec(version ?? '');
-  if (!match) {
-    return null;
-  }
-  const digits = match[1];
-  const [year, month, day, hour, minute, second] = [
-    digits.slice(0, 4),
-    digits.slice(4, 6),
-    digits.slice(6, 8),
-    digits.slice(8, 10),
-    digits.slice(10, 12),
-    digits.slice(12, 14),
-  ].map(Number);
-
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-  // Date.UTC does not reject out-of-range parts, it ROLLS THEM OVER: month 13
-  // silently becomes January of the next year, day 32 becomes the 1st. A
-  // round-trip comparison is what turns "parsed something" into "parsed this".
-  const roundTrips =
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day &&
-    date.getUTCHours() === hour &&
-    date.getUTCMinutes() === minute &&
-    date.getUTCSeconds() === second;
-  if (!roundTrips) {
-    return null;
-  }
-
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${day} ${BUILD_MONTHS[month - 1]} ${year}, ${pad(hour)}:${pad(minute)} UTC`;
-}
 
 // ---------------------------------------------------------------------------
 // Admin-visibility gate (issue #234).
@@ -175,6 +128,11 @@ type TabId =
   // falls back to Review via `tabFromHash`'s documented "unrecognised hash"
   // path, same as any other retired tab.
   | 'playbooks'
+  // Issue #650 (epic #649): the read-only home for the operator-facing facts
+  // that have nowhere else to live — what this deployment has enabled and
+  // why. Not a settings EDITOR: see AdminSettings.tsx's own docstring for the
+  // owner decision that dropped the feature-switch registry.
+  | 'settings'
   | 'diagnostics';
 
 interface TabDef {
@@ -204,7 +162,14 @@ interface TabDef {
 // non-admin caller, exactly the caller `tabFromHash` most needs to
 // recognise so it can refuse the hash).
 const PRIMARY_TAB_IDS = new Set<TabId>(['review', 'history']);
-const ADMIN_TAB_IDS = new Set<TabId>(['users', 'retention', 'model', 'playbooks', 'diagnostics']);
+const ADMIN_TAB_IDS = new Set<TabId>([
+  'users',
+  'retention',
+  'model',
+  'playbooks',
+  'settings',
+  'diagnostics',
+]);
 
 function hashForTab(id: TabId): string {
   return ADMIN_TAB_IDS.has(id) ? `#/admin/${id}` : `#/${id}`;
@@ -347,6 +312,14 @@ function AppContent({
   const adminCapability = useAdminCapability();
   // Bumped after a successful password change (issue #469) so the warning
   // banner below clears immediately instead of waiting for a reload.
+  //
+  // Issue #635 gave it a second, larger job: it is also the signal the four
+  // admin panels re-load on. Until rotation, every one of their data routes
+  // answers 403 (backend/src/main.py's `get_active_user_row` →
+  // `enforce_default_credentials_rotation`) while `/api/me` — the route that
+  // decides whether they mount at all — is exempt, so they mount, latch the
+  // refusal, and render nothing. Nothing else in this SPA knows the exact
+  // moment that refusal ends; this does. See adminRefresh.ts.
   const [credentialsRefreshKey, setCredentialsRefreshKey] = useState(0);
   const defaultCredentialsWarning = useDefaultCredentialsWarning(credentialsRefreshKey);
   const buildTimestamp = buildTimestampFromVersion(versionInfo?.version);
@@ -448,9 +421,10 @@ function AppContent({
   // wouldn't read as an accident when it wrapped; #599's answer to that same
   // worry is `ct-tab-bar.css`'s existing `flex-wrap: wrap` (unchanged — see
   // `frontend/scripts/layout-audit.mjs` check 3), which lets a single flat
-  // row of up to seven tabs wrap onto a second line at narrow widths
-  // instead of clipping or scrolling — never a horizontally-clipped row
-  // that hides Diagnostics. `useAdminCapability` still decides whether the
+  // row of up to eight tabs (seven at #599, plus #650's Settings) wrap onto
+  // a second line at narrow widths instead of clipping or scrolling — never
+  // a horizontally-clipped row that hides Diagnostics.
+  // `useAdminCapability` still decides whether the
   // admin-only entries render at all (and the header admin badge); it never
   // branches which panel renders or the rest of the Review flow.
   // <ReviewSubmission /> takes no admin gate of its own (issue #433 removed
@@ -485,6 +459,13 @@ function AppContent({
     // bundled-sample special case, this is the ONLY playbook-lifecycle
     // surface in the app.
     { id: 'playbooks', label: 'Playbooks', adminOnly: true },
+    // Settings (issue #650, epic #649) — what this deployment has turned on
+    // and why the product behaves the way it does; later also secret
+    // rotation (#651), deployed-version identity (#652) and spend (#653).
+    // Placed here rather than after Diagnostics on purpose: it belongs to
+    // the routine configuration flow above, and Diagnostics keeps its
+    // documented last position ("where you go when something is wrong").
+    { id: 'settings', label: 'Settings', adminOnly: true },
     // Diagnostics (issue #443) — why recent reviews failed, read from the
     // #442 reason vocabulary. Last on purpose: it is where you go when
     // something is wrong, not part of the routine configuration flow above.
@@ -653,7 +634,9 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'users'}
           >
-            <ErrorBoundary name="users"><AdminUsers /></ErrorBoundary>
+            <ErrorBoundary name="users">
+              <AdminUsers credentialsRefreshKey={credentialsRefreshKey} />
+            </ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -662,7 +645,9 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'retention'}
           >
-            <ErrorBoundary name="retention"><AdminRetention /></ErrorBoundary>
+            <ErrorBoundary name="retention">
+              <AdminRetention credentialsRefreshKey={credentialsRefreshKey} />
+            </ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -671,7 +656,9 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'model'}
           >
-            <ErrorBoundary name="model"><AdminModel /></ErrorBoundary>
+            <ErrorBoundary name="model">
+              <AdminModel credentialsRefreshKey={credentialsRefreshKey} />
+            </ErrorBoundary>
           </section>
           <section
             role="tabpanel"
@@ -680,7 +667,23 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'playbooks'}
           >
-            <ErrorBoundary name="playbooks"><AdminPlaybooks onCatalogChange={bumpCatalogVersion} /></ErrorBoundary>
+            <ErrorBoundary name="playbooks">
+              <AdminPlaybooks
+                onCatalogChange={bumpCatalogVersion}
+                credentialsRefreshKey={credentialsRefreshKey}
+              />
+            </ErrorBoundary>
+          </section>
+          <section
+            role="tabpanel"
+            id="panel-settings"
+            aria-labelledby="tab-settings"
+            className="ct-tabpanel"
+            hidden={activeTab !== 'settings'}
+          >
+            <ErrorBoundary name="settings">
+              <AdminSettings credentialsRefreshKey={credentialsRefreshKey} />
+            </ErrorBoundary>
           </section>
           <section
             role="tabpanel"
