@@ -233,11 +233,17 @@ Full setup details live in [RUNBOOK.md](RUNBOOK.md).
 
 ## Contributing
 
-- All work is tracked in GitHub issues, grouped by phase milestone.
-- Every change goes through a pull request. `main` is protected.
-- Anything that modifies `playbooks/` or `prompts/` requires legal review (enforced by .github/CODEOWNERS (CODEOWNERS, maintained privately)).
+**Start with [CONTRIBUTING.md](CONTRIBUTING.md)** — setup that has been run from
+a clean clone, the four things that will bite you, and where to start in the
+backlog.
+
+- All work is tracked in GitHub issues in this repository.
+- Every change goes through a pull request, and CI runs on both branches and
+  PRs. Note that `main` is **not** currently protected — the organisation's plan
+  does not offer it, so nothing mechanically stops a direct push. Issue #64
+  tracks the interim guard.
+- Anything that modifies `playbooks/` or `prompts/` requires legal review.
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
-- Branch naming: `phase-N/short-description` (e.g., `phase-0/cognito-google-idp`).
 
 ## License
 
