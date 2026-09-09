@@ -1,8 +1,11 @@
 # Review workflow control inventory — 2026-09-05, revised at #728
 
-> *Published from the project's planning history on 2026-09-09. Issue numbers
-> below predate the tracker migration of 2026-09-08 and refer to the old
-> private numbering; read them as history, not as links.*
+> *Published from the project's planning history on 2026-09-09. This is a
+> record of what was decided at the time, not current instructions. Issue
+> numbers predate the tracker migration of 2026-09-08 and refer to the old
+> private numbering, and any repository path or command shown may name the
+> private origin this work was done in. Read both as history, not as links
+> to follow.*
 
 Originally the input to the counter/register/waitress-pad design, read from the
 code at `e510718`. **Revised at issue #728** (epic #729) to describe the tab
