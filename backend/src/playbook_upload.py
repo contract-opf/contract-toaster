@@ -32,6 +32,20 @@ already tested but unused: `scripts/opf_load.py::load_opf_document` (OPF 0.2/
 a document with no `identity.content_hash` is refused, exactly like any
 other OPF validation failure -- this module never loosens that.
 
+## Spec-normative minimums (issue #676)
+
+`_load_opf_from_bytes` additionally refuses an OPF document that omits a
+field the OPF spec's own prose calls mandatory but the JSON Schema's
+`required` list does not enforce -- today exactly one, `perspective`. The
+list lives in ONE named place, `OPF_UPLOAD_MINIMUMS` below, with the
+requirement's source and the field's purpose stated on each entry (both
+surfaced to the operator on rejection). Because the check sits in
+`_load_opf_from_bytes` rather than in `validate_playbook_upload`, it fires
+at upload AND at review time -- `pipeline_runner._load_opf_bundle_if_active`
+re-validates the stored artifact through the same function on every review
+-- so an artifact activated before the gate existed is caught too, with no
+migration.
+
 ## Agreement-type match + stub-basis watermark (steps 4-5)
 
 OPF uploads additionally must have their `agreement_type` (id or any alias)
@@ -70,6 +84,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -137,12 +152,152 @@ def _opf_artifact_kind(opf_version: Any) -> str:
     return f"opf-{opf_version}"
 
 
+# ---------------------------------------------------------------------------
+# Spec-normative minimums (issue #676)
+# ---------------------------------------------------------------------------
+#
+# THE ONE named place for "an OPF document this deployment refuses even
+# though the JSON Schema would accept it". Issue #676 is explicit about the
+# failure mode to avoid: this list quietly growing into a second,
+# undocumented schema. So the rules are:
+#
+#   - every entry states WHERE its requirement comes from (spec prose vs a
+#     product decision) and WHAT the field is for, and both strings are
+#     surfaced to the operator on rejection -- a gate nobody can act on is a
+#     support ticket;
+#   - nothing goes in here that the schema's own `required` list already
+#     enforces (that would be duplication), and nothing goes in here without
+#     a stated reason on the entry itself.
+#
+# Today the list is exactly one field. Every top-level property of
+# `playbooks/opf/playbook.schema-0.3.json` AND `...-0.2.json` was scanned
+# for normative language (must/required/shall) in its description that the
+# schema's `required` list does NOT back, and `perspective` was the only
+# match in either (issue #676). That scan is not a claim to trust: it is
+# re-run against the schema files themselves by
+# tests/test_playbook_minimums_676.py::TestSchemaPremise, so a schema bump
+# that promotes `perspective` into `required` -- or that adds a second
+# normative-but-optional field -- turns that test red rather than leaving a
+# silent duplicate, or a silent gap, here.
+
+
+@dataclass(frozen=True)
+class OpfMinimum:
+    """One spec-normative minimum enforced beyond the JSON Schema.
+
+    `defect` returns a short, VALUE-FREE phrase describing what is wrong
+    with the document (or None when the minimum is satisfied) -- it must
+    never echo a value pulled out of the uploaded document, per the module
+    docstring's "No document content in errors".
+    """
+
+    field: str
+    requirement_source: str
+    purpose: str
+    defect: Callable[[dict[str, Any]], str | None]
+
+
+def _perspective_defect(doc: dict[str, Any]) -> str | None:
+    """Value-free description of what is missing from `/perspective`, or
+    None when it names a principal.
+
+    Both the absent-block and the blank-string cases are defects: the
+    schema requires `party` and `counterparty_type` to be present strings
+    WHEN the block exists, but `""` is a string, so a document can satisfy
+    the schema and still name nobody. Since the entire point of the field
+    is to say who "us" is, a blank value fails the requirement exactly as
+    an absent block does.
+    """
+    perspective = doc.get("perspective")
+    if perspective is None:
+        return "the document carries no top-level 'perspective' block."
+    if not isinstance(perspective, dict):
+        return "the document's top-level 'perspective' is not an object."
+    blank = [
+        name
+        for name in ("party", "counterparty_type")
+        if not str(perspective.get(name) or "").strip()
+    ]
+    if blank:
+        return (
+            "the document's 'perspective' block leaves "
+            + " and ".join(f"'{name}'" for name in blank)
+            + " empty."
+        )
+    return None
+
+
+OPF_UPLOAD_MINIMUMS: tuple[OpfMinimum, ...] = (
+    OpfMinimum(
+        field="perspective",
+        # SOURCE: spec prose. `playbooks/opf/playbook.schema-0.3.json` (and
+        # -0.2.json, identically) describes /perspective as "Whose
+        # perspective this playbook is reviewed 'as' -- an open-standard OPF
+        # instance must say who 'us' is", but omits it from the schema's own
+        # `required` list, so nothing enforced it.
+        requirement_source=(
+            "the OPF schema's own /perspective description ('an open-standard "
+            "OPF instance must say who \"us\" is') -- normative prose the "
+            "schema's `required` list does not enforce"
+        ),
+        # WHY IT IS ENFORCED: without a principal the review has no side to
+        # be on. Issue #675 measured the consequence on a live model run
+        # against the perspective-less production playbook: a fluent
+        # surgical redline drafted FOR the counterparty.
+        purpose=(
+            "'perspective.party' names our legal entity for this agreement type "
+            "and 'perspective.counterparty_type' names what the other side "
+            "typically is; without them a review has no principal and can draft "
+            "a redline against the operator's own side"
+        ),
+        defect=_perspective_defect,
+    ),
+)
+
+
+def _check_opf_minimums(doc: dict[str, Any]) -> None:
+    """Enforce `OPF_UPLOAD_MINIMUMS` against a schema-valid OPF document.
+
+    Raises `PlaybookUploadRejected` with an operator-facing message naming
+    the field, what is wrong, what the field is for, and where the
+    requirement comes from -- deliberately NOT a generic schema error
+    (issue #676). Carries no document content, like every other message
+    this module raises.
+    """
+    for minimum in OPF_UPLOAD_MINIMUMS:
+        defect = minimum.defect(doc)
+        if defect is None:
+            continue
+        raise PlaybookUploadRejected(
+            f"OPF minimums check failed at /{minimum.field}: {defect} "
+            f"Required because {minimum.requirement_source}. "
+            f"What it is for: {minimum.purpose}. "
+            f"Recompile the playbook with a '{minimum.field}' block and upload "
+            "it again."
+        )
+
+
 def _load_opf_from_bytes(contents: bytes, *, suffix: str) -> dict[str, Any]:
-    """Write *contents* to a throwaway temp file and run it through
-    `opf_load.load_opf_document`. Reuses the tested, Path-based loader
-    (schema dispatch, `identity.content_hash` verification, the injection
-    scan, sibling-id uniqueness) rather than re-implementing any of that
-    against an in-memory API this module was never meant to duplicate.
+    """Write *contents* to a throwaway temp file, run it through
+    `opf_load.load_opf_document`, and enforce `OPF_UPLOAD_MINIMUMS` on the
+    result. Reuses the tested, Path-based loader (schema dispatch,
+    `identity.content_hash` verification, the injection scan, sibling-id
+    uniqueness) rather than re-implementing any of that against an
+    in-memory API this module was never meant to duplicate.
+
+    Issue #676: the minimums check lives HERE, not in
+    `validate_playbook_upload`, because this function is the one seam BOTH
+    surfaces already share -- the two admin upload routes in
+    `backend/src/main.py`, and `pipeline_runner._load_opf_bundle_if_active`,
+    which re-validates the stored artifact through it on every review
+    rather than trusting the activated row. One check therefore also covers
+    an artifact activated BEFORE the gate existed, with no migration and no
+    separate review-path gate.
+
+    Raises `opf_load.OpfValidationError` for a schema/identity/injection
+    failure (callers catch it and re-wrap) and `PlaybookUploadRejected` for
+    a minimums failure -- the latter is already safe to surface verbatim,
+    so callers pass it straight through as a 4xx.
     """
     tmp_path: Path | None = None
     try:
@@ -151,10 +306,12 @@ def _load_opf_from_bytes(contents: bytes, *, suffix: str) -> dict[str, Any]:
         ) as tmp:
             tmp.write(contents)
             tmp_path = Path(tmp.name)
-        return opf_load.load_opf_document(tmp_path, require_identity=True)
+        doc = opf_load.load_opf_document(tmp_path, require_identity=True)
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
+    _check_opf_minimums(doc)
+    return doc
 
 
 def _check_agreement_type_match(doc: dict[str, Any], playbook_id: str) -> None:

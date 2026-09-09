@@ -80,7 +80,12 @@ ops" below.
 
 **Pass 4 -- footnotes.** `inject_issue_footnotes` appends each issue's
 `<w:footnoteReference>` run inside the first `<w:ins>` IN DOCUMENT ORDER
-whose `w:id` this call recorded for that issue.
+whose `w:id` this call recorded for that issue. Both runs carrying the
+footnote's NUMBER name the `FootnoteReference` character style and the body
+paragraph names `FootnoteText`, and `_footnote_styles_part` appends whichever
+of those two definitions `word/styles.xml` is missing -- without them the
+number renders as ordinary inline text (issue #647), which is what the owner
+read in the first production redline.
 
 ## Footnote bodies are themselves tracked (issue #615)
 
@@ -144,8 +149,8 @@ instead of degrading those issues to flag-only:
   wrapped in a `<w:del>`, its `<w:t>` retagged `<w:delText>` (and
   `<w:instrText>` retagged `<w:delInstrText>`) -- `<w:t>` inside a `<w:del>`
   is the common, incorrect shortcut that renders wrong in Word's Reviewing
-  pane, per the OOXML rule `scripts/redline_inplace.py` documents (its
-  "Rewrite" section). The paragraph MARK is marked deleted too
+  pane (`_DELETED_TEXT_TAGS` below carries the rule and its rationale). The
+  paragraph MARK is marked deleted too
   (`<w:pPr><w:rPr><w:del/></w:rPr></w:pPr>`), which is what makes the
   deletion a WHOLE-paragraph one rather than "a paragraph emptied of text":
   without it, accepting the change leaves the pilcrow and therefore a blank
@@ -153,6 +158,34 @@ instead of degrading those issues to flag-only:
   accept-all materializer documents the mirror-image limitation in its
   `_splice_accept_all` KNOWN LIMITATION note: it strips such a marker
   without applying its merge semantics.)
+  A clause's HEADING is a separate `<w:p>` from its body, so a delete that
+  covers only the block's own paragraphs leaves a numbered heading with no
+  clause under it in the ACCEPTED document (issue #645, seen in the first
+  live-model redline). The OWNER's ruling on that artifact (issue #646) is
+  that the heading STAYS and the emptied clause reads
+  `block_transcript.OMITTED_CLAUSE_PLACEHOLDER` -- `[Intentionally
+  omitted.]` -- so the clean copy shows a deliberate striking rather than
+  what looks like a drafting mistake:
+
+      3. Indemnification
+      [Intentionally omitted.]
+
+  `_plan_omitted_clause_placeholders` owns the rule and its guards: the
+  placeholder goes in only when the batch leaves NOTHING under that heading
+  (issue #646 kept issue #645's condition verbatim and swapped its action),
+  and it is written into the block's LAST struck `<w:p>` -- whose paragraph
+  MARK is therefore left undeleted, or accept-all would merge that paragraph
+  away and the placeholder would have nowhere to live. A block the rule
+  declines simply loses its body, which is the pre-#645 behaviour and never
+  a wrong edit.
+  Two readers reconstruct a delete's outcome and both follow: the DERIVED
+  `proposed_replacement_text`
+  (`redline_generate.derived_replacement_text_by_issue`) is the placeholder
+  for a whole-block strike that proposes no language of its own, and proof 2
+  of the projection gate (`scripts/redline_projections.py`) expects the
+  placeholder as that block's accepted text instead of the empty string.
+  Proof 1 is unaffected: rejecting our revisions drops the `<w:ins>` and
+  unwraps the `<w:del>`s, so the original clause comes back byte for byte.
 - **`insert_block_after`.** A new `<w:p>` holding a single `<w:ins>`-wrapped
   run, placed after the anchor block's LAST physical `<w:p>`
   (`anchor_block_id == "start"` places it BEFORE the document's first
@@ -175,6 +208,19 @@ the op and the block: deleting a cell's only paragraph, or adding one, is a
 table-structure edit (row/column semantics, `<w:cellDel>`/`<w:cellIns>`)
 this module does not attempt. Within-cell SPAN edits are unaffected and
 remain supported.
+
+## Boundary whitespace (issue #644)
+
+The one place this module touches model-authored text, and it is limited to
+the ASCII space: when a kept span and an inserted span BOTH supply the space
+at the boundary between them, accept-all reads a doubled space in the text a
+lawyer sends out. `block_transcript.collapse_boundary_spaces` drops the
+duplicate from the INSERT side only (the kept side is the document's own
+bytes), leaving whitespace anywhere else -- interior doubles included --
+exactly as authored. See that function for the full rule, what it
+deliberately does not cover, and why it lives in `block_transcript` rather
+than here: two other readers reconstruct the delivered text from the same
+ops and have to apply the same rule to stay in agreement with it.
 
 ## The projection gate (issue #623)
 
@@ -233,21 +279,21 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import block_transcript  # noqa: E402
 import docx_editor  # noqa: E402
+import docx_parts  # noqa: E402
 import extraction_normalization_stage  # noqa: E402
 import ooxml_util  # noqa: E402
-import redline_docx_writer  # noqa: E402
 import redline_generate  # noqa: E402
-import redline_inplace  # noqa: E402
 import redline_projections  # noqa: E402
 
-WORD_NS = redline_inplace.WORD_NS
-XML_NS = redline_inplace.XML_NS
-DOCUMENT_PART = redline_inplace.DOCUMENT_PART
+WORD_NS = ooxml_util.WORD_NS
+XML_NS = ooxml_util.XML_NS
+DOCUMENT_PART = ooxml_util.DOCUMENT_PART
 FOOTNOTES_PART = "word/footnotes.xml"
+STYLES_PART = docx_parts.STYLES_PART
 RELS_PART = "word/_rels/document.xml.rels"
 CONTENT_TYPES_PART = "[Content_Types].xml"
 
-_w = redline_inplace._w
+_w = ooxml_util.w
 _pkg = redline_generate._pkg
 _ct = redline_generate._ct
 
@@ -384,7 +430,19 @@ def _pair_ops_into_edits(ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     (and, unlike the quote path, gets no spurious `<w:del>` to go with it).
 
     `keep` ops are not edits and carry no author, so they are skipped.
+
+    Insert texts arrive here through
+    `block_transcript.collapse_boundary_spaces` (issue #644), so the writers
+    and the `applied` report see the trimmed text. The other two readers that
+    reconstruct what the document says apply the SAME function rather than
+    reading the transcript raw -- the issue #623 accept-all proof
+    (`redline_projections._expected_accept_all_texts`, in BOTH its
+    `applied_edits` modes) and `redline_generate.
+    derived_replacement_text_by_issue` -- so the document cannot disagree
+    with the proof, and the field the pen rules judge is the language that
+    shipped.
     """
+    ops = block_transcript.collapse_boundary_spaces(ops)
     edits: list[dict[str, Any]] = []
     consumed: set[int] = set()
 
@@ -519,6 +577,117 @@ def _resolve_physical_paragraphs(
                 "lead": len(live_text) - len(live_text.lstrip()),
             }
     return resolved
+
+
+def _plan_omitted_clause_placeholders(
+    root: ET.Element,
+    normalized_paragraphs: list[dict[str, Any]],
+    deleted_block_ids: set,
+    anchored_block_ids: set,
+) -> set:
+    """The `block_id`s whose `delete_block` must leave
+    `block_transcript.OMITTED_CLAUSE_PLACEHOLDER` behind, because this batch
+    empties the clause under a heading completely (issues #645, #646).
+
+    ## The rule, and why it is structural rather than a judgment call
+
+    A clause's heading is a SEPARATE `<w:p>` from its body
+    (`extraction_normalization_stage.extract_document_paragraphs` lifts the
+    boundary paragraph into `heading` and appends only the rest to
+    `physical_paragraphs`), so a `delete_block` -- which strikes the block's
+    own physical paragraphs -- leaves the heading standing. In the REDLINE
+    view that reads fine; in the ACCEPTED document it leaves a numbered
+    heading with no clause under it, which is not a document an attorney
+    would send.
+
+    Issue #645 answered that by deleting the heading too. The OWNER reversed
+    it (issue #646) after reading the first production redline: the heading
+    stays, and the emptied clause reads `[Intentionally omitted.]`, so the
+    clean copy says the striking was deliberate. The CONDITION is unchanged
+    -- it was already exactly right -- and only the action moved, which is
+    why this function still asks the #645 question.
+
+    A placeholder goes in only when the batch leaves NOTHING under that
+    heading: every block it heads is being deleted (`deleted_block_ids`) and
+    none of them is the anchor of an `insert_block_after`
+    (`anchored_block_ids`), whose new `<w:p>` lands under that same heading.
+    That is a fact about the document's structure, not a reading of what the
+    model meant: a heading with a surviving body needs no placeholder,
+    always.
+
+    The anchored half is not hypothetical -- it is how a clause is REPLACED
+    in place. `scripts/third_party_output_integration.py` emits
+    `delete_block` + `insert_block_after` on the same block for one
+    `issue_key`, and the governed replacement text belongs under the struck
+    clause's own heading; a placeholder there would announce an omission
+    directly above the replacement clause.
+
+    Today `extract_document_paragraphs` starts exactly one logical block at
+    each boundary paragraph, so the set of blocks under one heading has a
+    single member -- but the gate is written over the set the paragraph list
+    actually describes, so a grouping change can never silently turn this
+    into "placeholder whenever any block under a heading goes". For the same
+    reason a heading is claimed by AT MOST ONE block: two `delete_block`s
+    under one heading yield ONE placeholder, not two.
+
+    Nothing is guessed and nothing is searched for. The heading is read by
+    the SAME carried identity a body paragraph is (`heading_p_index`, the
+    boundary `<w:p>`'s own position in the part's preorder `w:p` numbering),
+    and the same text-equality GUARD applies: the live paragraph's
+    accepted-view text must still be the text that heading was extracted
+    from. A block with no heading paragraph at all (`heading_p_index is
+    None` -- the document's preamble, or a hand-built caller), an index that
+    no longer exists, or a paragraph whose text has moved is simply left OUT
+    of the returned set: the body deletion still lands whole, with no
+    placeholder, which is the pre-#645 behaviour and never a wrong edit.
+    """
+    paragraphs = _body_paragraph_elements(root)
+
+    blocks_by_heading: dict[int, list[str]] = {}
+    heading_of_block: dict[str, tuple[int, str]] = {}
+    for record in normalized_paragraphs:
+        block_id = record.get("block_id")
+        heading_p_index = record.get("heading_p_index")
+        if not block_id:
+            continue
+        if not isinstance(heading_p_index, int) or isinstance(heading_p_index, bool):
+            continue
+        blocks_by_heading.setdefault(heading_p_index, []).append(block_id)
+        heading_of_block[block_id] = (
+            heading_p_index,
+            record.get("heading_source_text", "") or "",
+        )
+
+    placeholders: set = set()
+    claimed: set = set()
+    for record in normalized_paragraphs:
+        block_id = record.get("block_id")
+        if block_id not in deleted_block_ids or block_id not in heading_of_block:
+            continue
+        heading_p_index, source_text = heading_of_block[block_id]
+        if heading_p_index in claimed:
+            continue
+        siblings = blocks_by_heading.get(heading_p_index, [])
+        if any(
+            sibling not in deleted_block_ids or sibling in anchored_block_ids
+            for sibling in siblings
+        ):
+            # A body under this heading survives the batch -- either it was
+            # never struck, or a replacement clause is being inserted under
+            # it. The heading is still doing its job, so nothing is omitted.
+            continue
+        if not 0 <= heading_p_index < len(paragraphs):  # pragma: no cover - defensive
+            continue
+        if _accepted_text(paragraphs[heading_p_index]).strip() != source_text.strip():
+            # The live paragraph is not the heading this record was extracted
+            # from any more, so this record is not evidence about what the
+            # accepted document will show under it. Leave the clause to be
+            # struck the plain way rather than announce an omission on a
+            # guess.
+            continue
+        claimed.add(heading_p_index)
+        placeholders.add(block_id)
+    return placeholders
 
 
 # ---------------------------------------------------------------------------
@@ -661,8 +830,8 @@ def _apply_pure_insertion(
 
 def _stamp_revision(el: ET.Element, revision_id: int, author: str, timestamp_iso: str) -> None:
     """`w:id`/`w:author`/`w:date` on one `<w:ins>`/`<w:del>`, per the OOXML
-    tracked-changes schema -- the same three attributes
-    `redline_docx_writer._append_run` stamps on every revision it creates."""
+    tracked-changes schema -- the three attributes every revision this
+    module creates carries."""
     el.set(_w("id"), str(revision_id))
     el.set(_w("author"), author)
     el.set(_w("date"), timestamp_iso)
@@ -705,8 +874,9 @@ _UNDELETED_CONTAINERS = (_w("del"), _w("moveFrom"), _w("pPr"))
 
 # `<w:t>` inside a `<w:del>` is the common, incorrect shortcut that renders
 # wrong in Word's Reviewing pane; deleted text is `<w:delText>` and a deleted
-# field instruction is `<w:delInstrText>`. Same correctness requirement
-# `scripts/redline_inplace.py` documents in its "Rewrite" section.
+# field instruction is `<w:delInstrText>`. Word silently renders a `<w:t>`
+# inside a `<w:del>` as ordinary body text, so the reviewer sees the deleted
+# words as if they were still part of the clause.
 _DELETED_TEXT_TAGS = {_w("t"): _w("delText"), _w("instrText"): _w("delInstrText")}
 
 
@@ -842,14 +1012,50 @@ def _delete_runs_in(
 
 
 def _delete_paragraph(
-    p: ET.Element, allocate, author: str, timestamp_iso: str
+    p: ET.Element,
+    allocate,
+    author: str,
+    timestamp_iso: str,
+    placeholder: Optional[str] = None,
 ) -> list[int]:
     """One physical `<w:p>` of a `delete_block`: every run tracked-deleted,
-    then the paragraph mark itself."""
+    then the paragraph mark itself.
+
+    `placeholder` (issue #646) makes this the paragraph that CARRIES
+    `block_transcript.OMITTED_CLAUSE_PLACEHOLDER` -- the last struck `<w:p>`
+    of a clause whose heading would otherwise be left with nothing under it.
+    Two things change, and they stand or fall together:
+
+    - The paragraph MARK is left alone. Deleting it is what makes an ordinary
+      whole-paragraph deletion whole (see `_mark_paragraph_mark`), but
+      accept-all would then merge this paragraph into its successor and the
+      placeholder would have nowhere to live -- it would land inside the NEXT
+      clause. A paragraph that survives on purpose keeps its pilcrow.
+    - An `<w:ins>` run carrying `placeholder` is appended AFTER the
+      `<w:del>`s, so the redline reads "struck text, then the replacement"
+      exactly as an in-place substitution does, and rejecting the change
+      drops the `<w:ins>` and unwraps the `<w:del>`s back to the original
+      paragraph.
+
+    The run inherits the `<w:rPr>` of the paragraph's first run as it was
+    BEFORE the deletion, so the placeholder is formatted like the clause it
+    replaces rather than like the document's defaults.
+    """
+    rpr = None
+    if placeholder is not None:
+        accepted_runs = _accepted_text_runs(p)
+        rpr = _copy_rpr(accepted_runs[0]["run"]) if accepted_runs else None
+
     revision_ids = _delete_runs_in(p, allocate, author, timestamp_iso)
-    mark_id = allocate()
-    _mark_paragraph_mark(p, "del", mark_id, author, timestamp_iso)
-    revision_ids.append(mark_id)
+    if placeholder is None:
+        mark_id = allocate()
+        _mark_paragraph_mark(p, "del", mark_id, author, timestamp_iso)
+        revision_ids.append(mark_id)
+        return revision_ids
+
+    insert_id = allocate()
+    p.append(_build_ins(insert_id, author, timestamp_iso, rpr, placeholder))
+    revision_ids.append(insert_id)
     return revision_ids
 
 
@@ -923,7 +1129,13 @@ def _serialize_document(root: ET.Element, original_root_open_tag: str) -> bytes:
     """Serialize a mutated `word/document.xml` tree, splicing the ORIGINAL
     root start tag back in verbatim and merging any namespace the serializer
     hoisted -- the shared `scripts/ooxml_util.py` dance (issue #621), not a
-    fourth copy of it."""
+    fourth copy of it.
+
+    Nothing here is specific to `word/document.xml`; issue #647's
+    `_footnote_styles_part` reuses it for an existing `word/styles.xml`,
+    whose root start tag carries just as many namespace declarations that
+    ElementTree would otherwise drop.
+    """
     serialized = ET.tostring(root, encoding="unicode")
     auto_root_open_tag = ooxml_util.root_open_tag(serialized)
     body_and_close = serialized[len(auto_root_open_tag) :]
@@ -938,6 +1150,68 @@ def _serialize_document(root: ET.Element, original_root_open_tag: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Pass 3: footnotes keyed by issue
 # ---------------------------------------------------------------------------
+
+
+def _footnote_style_rpr() -> ET.Element:
+    """`<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>` -- the run
+    properties Word puts on BOTH runs that carry a footnote's number (the
+    in-body `<w:footnoteReference>` and the `<w:footnoteRef/>` that opens the
+    note itself). Without it the number renders as ordinary inline text
+    (issue #647)."""
+    rpr = ET.Element(_w("rPr"))
+    rstyle = ET.SubElement(rpr, _w("rStyle"))
+    rstyle.set(_w("val"), docx_parts.FOOTNOTE_REFERENCE_STYLE_ID)
+    return rpr
+
+
+def _footnote_styles_part(styles_xml: Optional[bytes]) -> tuple[Optional[bytes], bool]:
+    """`(new "word/styles.xml" bytes, part_was_created)` for a package whose
+    footnotes must be able to RESOLVE `FootnoteReference` / `FootnoteText`,
+    or `(None, False)` when the package's own part already defines both.
+
+    A style the document ALREADY defines is left completely alone (issue
+    #647 scope item 3): a counterparty may style footnotes their own way,
+    and rewriting their definition would be an unrequested formatting edit
+    to a part a redline otherwise never touches. Only a MISSING definition
+    is appended, and only the two ids `docx_parts.FOOTNOTE_STYLE_XML`
+    names -- which is also exactly what `redline_projections`' proof 3
+    permits this part to gain, checked against that same mapping rather than
+    against a second copy of it here.
+
+    `styles_xml is None` means the uploaded package carries no styles part at
+    all. That is reachable: a `.docx` from a non-Word producer can omit it,
+    and pass 1's `docx-editor` save neither adds one nor fails on its
+    absence. The part is then created carrying only these two styles, and the
+    caller adds the relationship and content-type override for it.
+    """
+    created = styles_xml is None
+    original_open_tag: Optional[str] = None
+    if created:
+        root = ET.Element(_w("styles"))
+    else:
+        styles_text = styles_xml.decode("utf-8")
+        original_open_tag = ooxml_util.root_open_tag(styles_text)
+        ooxml_util.register_declared_namespaces(
+            ooxml_util.declared_namespaces_anywhere(styles_text)
+        )
+        root = ET.fromstring(styles_xml)
+
+    already_defined = {style.get(_w("styleId")) for style in root.findall(_w("style"))}
+    missing = [
+        style
+        for style in docx_parts.footnote_style_elements()
+        if style.get(_w("styleId")) not in already_defined
+    ]
+    if not missing:
+        return None, False
+    root.extend(missing)
+
+    if original_open_tag is not None:
+        return _serialize_document(root, original_open_tag), created
+    return (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        + ET.tostring(root, encoding="unicode").encode("utf-8")
+    ), created
 
 
 def inject_issue_footnotes(
@@ -966,6 +1240,17 @@ def inject_issue_footnotes(
     reference is tracked, so the body must be too, or reject-all leaves an
     orphaned note and accept-all promotes machine-authored commentary to
     permanent document text with nothing marking it as tool-generated.
+
+    Both runs that carry the footnote's NUMBER (the in-body
+    `<w:footnoteReference>` and the `<w:footnoteRef/>` opening the note) get
+    `<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>`, and the footnote
+    body paragraph gets `<w:pStyle w:val="FootnoteText"/>` -- Word's own
+    markup, superscript carried by the STYLE rather than by direct run
+    formatting. `_footnote_styles_part` then makes sure `word/styles.xml`
+    actually DEFINES those two ids, because a document that has never
+    carried a footnote does not, and an unresolvable `<w:rStyle>` renders as
+    plain inline text (issue #647). A definition the document already
+    carries is left exactly as it is.
 
     `[Content_Types].xml` and `word/_rels/document.xml.rels` are only ever
     APPENDED to, never replaced, and new footnote ids are offset past
@@ -1025,7 +1310,7 @@ def inject_issue_footnotes(
         ins_by_id[numeric_id] = el
         ins_position[numeric_id] = position
 
-    next_revision_id = redline_inplace._max_existing_id(doc_root) + 1
+    next_revision_id = ooxml_util.max_existing_id(doc_root) + 1
 
     entries: list[dict[str, Any]] = []
     for spec in specs:
@@ -1050,6 +1335,9 @@ def inject_issue_footnotes(
         footnote_id = next_footnote_id
         next_footnote_id += 1
         ref_run = ET.SubElement(target, _w("r"))
+        # `<w:rPr>` FIRST: OOXML fixes the order of a run's children, and
+        # run properties are the only thing allowed before the content.
+        ref_run.append(_footnote_style_rpr())
         ref = ET.SubElement(ref_run, _w("footnoteReference"))
         ref.set(_w("id"), str(footnote_id))
         entries.append(
@@ -1083,7 +1371,13 @@ def inject_issue_footnotes(
         fn = ET.SubElement(footnotes_root, _w("footnote"))
         fn.set(_w("id"), str(entry["id"]))
         p = ET.SubElement(fn, _w("p"))
+        # `<w:pPr>` FIRST (OOXML child order), carrying the paragraph style
+        # Word gives a footnote body (issue #647).
+        ppr = ET.SubElement(p, _w("pPr"))
+        pstyle = ET.SubElement(ppr, _w("pStyle"))
+        pstyle.set(_w("val"), docx_parts.FOOTNOTE_TEXT_STYLE_ID)
         ref_run = ET.SubElement(p, _w("r"))
+        ref_run.append(_footnote_style_rpr())
         ET.SubElement(ref_run, _w("footnoteRef"))
         # Issue #615: the BODY is tracked too, matching the tracked
         # reference that points at it.
@@ -1098,25 +1392,61 @@ def inject_issue_footnotes(
         + ET.tostring(footnotes_root, encoding="unicode").encode("utf-8")
     )
 
+    # Issue #647: the two runs above now carry `<w:rStyle
+    # w:val="FootnoteReference"/>` and the body paragraph `<w:pStyle
+    # w:val="FootnoteText"/>`. A style reference resolves to nothing unless
+    # the package DEFINES the style, and a document that has never carried a
+    # footnote does not -- which is why the number rendered as plain inline
+    # text. Definitions the document already has are never touched.
+    styles_bytes, styles_created = _footnote_styles_part(originals.get(STYLES_PART))
+    if styles_bytes is not None:
+        new_parts[STYLES_PART] = styles_bytes
+
+    # Parts this call ADDED to the package, each needing a relationship and a
+    # content-type override: `(part name, target, rel type, content type)`.
+    added_parts: list[tuple[str, str, str, str]] = []
     if not have_footnotes:
+        added_parts.append(
+            (
+                FOOTNOTES_PART,
+                "footnotes.xml",
+                docx_parts.FOOTNOTES_REL_TYPE,
+                docx_parts.FOOTNOTES_CONTENT_TYPE,
+            )
+        )
+    if styles_created:
+        added_parts.append(
+            (
+                STYLES_PART,
+                "styles.xml",
+                docx_parts.STYLES_REL_TYPE,
+                docx_parts.STYLES_CONTENT_TYPE,
+            )
+        )
+
+    if added_parts:
         rels_root = (
             ET.fromstring(originals[RELS_PART])
             if RELS_PART in names
             else ET.Element(_pkg("Relationships"))
         )
-        rel = ET.SubElement(rels_root, _pkg("Relationship"))
-        rel.set("Id", f"rId{redline_generate._max_rel_id(rels_root) + 1}")
-        rel.set("Type", redline_docx_writer.FOOTNOTES_REL_TYPE)
-        rel.set("Target", "footnotes.xml")
+        ct_root = ET.fromstring(originals[CONTENT_TYPES_PART])
+        next_rel_id = redline_generate._max_rel_id(rels_root) + 1
+        for part_name, target, rel_type, content_type in added_parts:
+            rel = ET.SubElement(rels_root, _pkg("Relationship"))
+            rel.set("Id", f"rId{next_rel_id}")
+            next_rel_id += 1
+            rel.set("Type", rel_type)
+            rel.set("Target", target)
+
+            override = ET.SubElement(ct_root, _ct("Override"))
+            override.set("PartName", "/" + part_name)
+            override.set("ContentType", content_type)
+
         new_parts[RELS_PART] = (
             b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             + ET.tostring(rels_root, encoding="unicode").encode("utf-8")
         )
-
-        ct_root = ET.fromstring(originals[CONTENT_TYPES_PART])
-        override = ET.SubElement(ct_root, _ct("Override"))
-        override.set("PartName", "/" + FOOTNOTES_PART)
-        override.set("ContentType", redline_docx_writer.FOOTNOTES_CONTENT_TYPE)
         new_parts[CONTENT_TYPES_PART] = (
             b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             + ET.tostring(ct_root, encoding="unicode").encode("utf-8")
@@ -1458,6 +1788,45 @@ def apply_block_transcript(
             }
         )
 
+    # ---- Leave `[Intentionally omitted.]` under a heading this batch empties
+    # (issue #646, reversing issue #645's heading removal). Decided over the
+    # WHOLE batch, after every op is planned, because "is any body under this
+    # heading surviving?" is a question about the batch and not about one op
+    # -- a `delete_block` paired with an `insert_block_after` on the same
+    # block is a clause REPLACED in place, and the replacement, not a
+    # placeholder, is what goes under its heading. See
+    # `_plan_omitted_clause_placeholders` for the rule and its guards.
+    anchored_block_ids: set = set()
+    for op in planned_block_ops:
+        if op["op"] != OP_INSERT_BLOCK_AFTER:
+            continue
+        if op["insert_before"]:
+            # `"start"` names no block: the new paragraph goes before the
+            # FIRST block's first `<w:p>`, i.e. under that block's heading.
+            if norm["paragraphs"]:
+                anchored_block_ids.add(norm["paragraphs"][0]["block_id"])
+        else:
+            anchored_block_ids.add(op["anchor_key"])
+    placeholder_block_ids = _plan_omitted_clause_placeholders(
+        doc_root,
+        norm["paragraphs"],
+        {op["anchor_key"] for op in planned_block_ops if op["op"] == OP_DELETE_BLOCK},
+        anchored_block_ids,
+    )
+    for op in planned_block_ops:
+        if op["op"] != OP_DELETE_BLOCK:
+            continue
+        if op["anchor_key"] not in placeholder_block_ids:
+            continue
+        op["placeholder"] = block_transcript.OMITTED_CLAUSE_PLACEHOLDER
+        # The placeholder IS this edit's insertion, so the `applied` record
+        # -- which is what proof 2 rebuilds the expected accepted text from
+        # (`redline_projections._expected_accept_all_texts`) and what the
+        # caller reports -- has to say so. `_block_op_edit` leaves
+        # `insert_text` empty for a delete because most deletes insert
+        # nothing; this one does.
+        op["edit"]["insert_text"] = block_transcript.OMITTED_CLAUSE_PLACEHOLDER
+
     applied: list[dict[str, Any]] = []
     # The EDIT dicts behind `applied`, kept whole (offsets included) for the
     # issue #623 projection gate below: proving "accept-all == the final
@@ -1567,9 +1936,9 @@ def apply_block_transcript(
         root = ET.fromstring(originals[DOCUMENT_PART])
 
         # Document-wide `w:id` uniqueness, the same sweep
-        # `redline_inplace._max_existing_id` documents: never collide with an
+        # `ooxml_util.max_existing_id` documents: never collide with an
         # id a human-edited upload (or pass 1) already carries.
-        next_revision_id = redline_inplace._max_existing_id(root) + 1
+        next_revision_id = ooxml_util.max_existing_id(root) + 1
         paragraphs = _body_paragraph_elements(root)
 
         for paragraph_index in sorted(insertion_work):
@@ -1647,10 +2016,21 @@ def apply_block_transcript(
             if op["op"] != OP_DELETE_BLOCK:
                 continue
             revision_ids: list[int] = []
-            for paragraph_index in op["paragraph_indexes"]:
+            target_indexes = op["paragraph_indexes"]
+            # `[Intentionally omitted.]` (issue #646) goes in the LAST struck
+            # `<w:p>` of the block, which therefore keeps its paragraph mark
+            # -- see `_delete_paragraph`. Every earlier paragraph of a
+            # multi-paragraph clause is deleted whole, mark included, so
+            # accept-all collapses them into the one that survives.
+            for position, paragraph_index in enumerate(target_indexes):
+                is_last = position == len(target_indexes) - 1
                 revision_ids.extend(
                     _delete_paragraph(
-                        paragraphs[paragraph_index - 1], allocate, author, timestamp_iso
+                        paragraphs[paragraph_index - 1],
+                        allocate,
+                        author,
+                        timestamp_iso,
+                        placeholder=op.get("placeholder") if is_last else None,
                     )
                 )
             record(op["edit"], revision_ids)

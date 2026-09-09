@@ -67,7 +67,10 @@ return type: this function returns `list[str]`.
 `perspective`, and `de_minimis` (plus, off the separate policy document,
 `rules[].{id,strength,text}`, and off the caller's own `instructions_text`
 param -- issue #479/#482/#483's operator standing instructions, never read
-from the OPF document itself). Note `evidence` is NOT among them any more:
+from the OPF document itself, and its `entity_roster` param -- issue #678's
+deployment-scoped roster of our own legal entities, likewise not an OPF
+field and deliberately never becoming one). Note `evidence` is NOT among
+them any more:
 the digest is the projection of it that reaches the model, and the full
 evidence section is read only on demand, off disk, by the lookup tool.
 Every other top-level section --
@@ -99,7 +102,7 @@ playbook as having governed the review.
 
 So each guard now RECORDS what it dropped, and `compose_opf_system_blocks`
 prints one aggregated `WARNING:` line per kind of omission to stderr -- the
-convention `scripts/diff_standard_form.py` already uses for "discarding this,
+convention the retired standard-form diff used for "discarding this,
 but visibly, so a drift signal is not silent data loss". Aggregated, not
 per-entry: a real playbook has thousands of entries, and a warning per entry is
 a warning nobody reads.
@@ -134,7 +137,7 @@ import json
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, Sequence
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -159,6 +162,9 @@ BINDING_INTRO = (
     "FLAG IT FOR ATTORNEY REVIEW and say why. Do not silently override it, and do not silently "
     "comply with it against the facts — the determination is an attorney's to make, in either "
     "direction.\n"
+    "A Floor invariant phrased in terms of \"the counterparty\" is DIRECTIONAL: the "
+    "counterparty is the other party to this agreement, never us, and a term that "
+    "runs in our favour does not violate such a rule.\n"
     "Every entry here is re-read against your finished redline by the closing self-check."
 )
 
@@ -381,10 +387,27 @@ def _fmt_summary_entry(entry: dict, where: str) -> str:
     )
 
 
+def _fmt_refused_entry(entry: dict, where: str) -> str:
+    """A REFUSED counterparty ask (issue #677).
+
+    Same shape as `_fmt_summary_entry` MINUS the risk annotation. `{risk:
+    neutral/none}` on an ask we turned down reads as "this wording is harmless",
+    which is the opposite of the section's meaning: the risk delta describes the
+    ask's effect, not our appetite for it. Live runs showed the model drawing
+    REPLACEMENT LANGUAGE from this section near-verbatim and proposing it as our
+    position, so nothing here may look like an approval signal.
+    """
+    return (
+        f"  - {entry.get('text_summary', '')}"
+        + _fmt_n(entry, where)
+        + _fmt_cite(entry.get("example_ref"), where)
+    )
+
+
 _LIST_FORMATTERS = {
     "preferred_variations": _fmt_preferred,
     "concessions": _fmt_summary_entry,
-    "unacceptable": _fmt_summary_entry,
+    "unacceptable": _fmt_refused_entry,
     "exemplar_forms": _fmt_summary_entry,
 }
 
@@ -647,13 +670,108 @@ def _standing_instructions_block(instructions_text: str) -> str | None:
     return primary_review_pass.render_standing_instructions_block(instructions_text)
 
 
-def _context_block(opf_doc: dict) -> str | None:
+#: The key the Context block renders our recognition set under, REPLACING
+#: `perspective.party` (issue #678). See `resolve_party_recognition_set`.
+OUR_ENTITIES_KEY = "our_entities"
+
+
+def _recognition_key(name: str) -> str:
+    """The identity a recognition-set entry is deduplicated on: case- and
+    whitespace-insensitive. "Acme  Holdings, LLC" and "acme holdings, llc"
+    are one entity typed twice, not two entities to show the model."""
+    return " ".join(name.split()).casefold()
+
+
+def resolve_party_recognition_set(
+    opf_doc: dict, entity_roster: Optional[Sequence[str]] = None
+) -> list[str]:
+    """Every legal-entity name that IS us, as ONE flat, deduplicated,
+    source-free list (issue #678).
+
+    The union of the playbook's `perspective.party` and the deployment's
+    admin-managed entity roster (`backend/src/entity_roster.py`). The
+    roster is organisation-scoped and the playbook is not: we are ~25 legal
+    entities, any of which can be the contracting party, and on third-party
+    paper the counterparty drafts with whichever name it was given -- a
+    subsidiary, a former name, a d/b/a.
+
+    THE SHAPE IS THE POINT. The playbook-engine owner's objection to
+    splitting the recognition set across two sources is that it makes the
+    "one primary + alternates" reading MORE tempting, not less -- the
+    playbook supplies a single named party, deployment config supplies the
+    rest, and that asymmetry is structural. So this returns one list in
+    which nothing marks where an entry came from:
+
+      - `perspective.party` is an ordinary member, not a head element.
+      - The order is a case-insensitive sort, so position carries no rank
+        and no source (and composition stays deterministic).
+      - Entries are deduplicated case- and whitespace-insensitively, which
+        is what makes the roster containing `perspective.party` -- the
+        intended configuration -- a no-op rather than a duplicate.
+
+    `perspective.party` is NOT canonical here and no caller may treat it as
+    such (issue #678): under the flat-set model that field is populated
+    because the schema requires it, and which of our entities happens to be
+    in it is arbitrary.
+
+    Fail-soft like every other renderer in this module: a malformed
+    `perspective`, a non-string entry, or a blank name is skipped, never
+    raised on. Returns `[]` when nothing usable is on either side, which is
+    what makes the Context block fall back to rendering `perspective`
+    unchanged rather than inventing an empty list.
+    """
+    candidates: list[str] = []
+    perspective = opf_doc.get("perspective")
+    if isinstance(perspective, dict):
+        party = perspective.get("party")
+        if isinstance(party, str):
+            candidates.append(party)
+    for entry in entity_roster or ():
+        if isinstance(entry, str):
+            candidates.append(entry)
+
+    # Sorted BEFORE the dedup, on `(identity, spelling)`, so that when the
+    # same entity is typed two ways ("Acme Holdings, LLC" in the playbook,
+    # "ACME HOLDINGS, LLC" in the roster) the surviving spelling is a
+    # function of the spellings themselves and NOT of which source happened
+    # to be read first. Deduplicating in encounter order would have made the
+    # playbook's spelling win every tie -- a small, quiet way for the source
+    # to remain visible in the output.
+    by_identity: dict[str, str] = {}
+    for name in sorted(
+        (n.strip() for n in candidates if n.strip()), key=lambda n: (_recognition_key(n), n)
+    ):
+        by_identity.setdefault(_recognition_key(name), name)
+    return sorted(by_identity.values(), key=lambda n: (_recognition_key(n), n))
+
+
+def _context_block(opf_doc: dict, entity_roster: Optional[Sequence[str]] = None) -> str | None:
     """`perspective` and `de_minimis`, only if at least one is present in
     the source doc. Returns None (no block emitted) when neither is
-    present."""
+    present.
+
+    `perspective.party` is REPLACED by `perspective.our_entities` (issue
+    #678): the flat recognition set `resolve_party_recognition_set` builds
+    from that field and the deployment's entity roster together. The single
+    named party never survives into the rendered block alongside the list,
+    because `{"party": X, "aliases": [...]}` is precisely the shape that
+    invites the model to read one entity as the real principal and the rest
+    as also-rans. With no roster configured the list is that one name --
+    same content as before, same shape as with twenty-five.
+    """
     context: dict[str, Any] = {}
     if "perspective" in opf_doc:
-        context["perspective"] = opf_doc["perspective"]
+        perspective = opf_doc["perspective"]
+        our_entities = resolve_party_recognition_set(opf_doc, entity_roster)
+        if isinstance(perspective, dict) and our_entities:
+            rendered = {k: v for k, v in perspective.items() if k != "party"}
+            rendered[OUR_ENTITIES_KEY] = our_entities
+            context["perspective"] = rendered
+        else:
+            # Nothing usable to flatten (a malformed `perspective`, or a
+            # blank party and no roster): render what the document says
+            # rather than substituting an empty list for it.
+            context["perspective"] = perspective
     if "de_minimis" in opf_doc:
         context["de_minimis"] = opf_doc["de_minimis"]
     if not context:
@@ -668,6 +786,7 @@ def compose_opf_system_blocks(
     policy: Optional[dict] = None,
     mode: str = MODE_PLAYBOOK_DIGEST,
     instructions_text: str = "",
+    entity_roster: Optional[Sequence[str]] = None,
     omissions_out: Optional[dict[str, list]] = None,
 ) -> list[str]:
     """Compose an OPF document's knowledge into review system-prompt blocks.
@@ -717,6 +836,17 @@ def compose_opf_system_blocks(
     reported to stderr as an aggregated `WARNING:` (see the module docstring);
     the returned blocks are unaffected by it.
 
+    `entity_roster` (issue #678, optional): the deployment's admin-managed
+    roster of OUR legal entity names, resolved once per review by
+    `backend/src/pipeline_runner.py` from `backend/src/entity_roster.py`
+    and threaded here read-only. Unioned with the playbook's
+    `perspective.party` into the ONE flat list the Context block renders --
+    see `resolve_party_recognition_set` for why the union is flattened
+    rather than rendered as a party plus its aliases. `None`/empty (every
+    caller before this parameter existed, and every deployment with no
+    roster configured) renders exactly the same single-name list the
+    playbook alone supplies.
+
     `omissions_out` (optional, default `None`): when given, this function
     populates it (in place, via `dict.update`) with the SAME `{kind: [count,
     where]}` mapping the stderr warning is built from, so a caller that
@@ -735,7 +865,7 @@ def compose_opf_system_blocks(
             None if mode == MODE_POLICY_ONLY else _digest_block(opf_doc),
             _guidance_block(policy),
             _standing_instructions_block(instructions_text),
-            _context_block(opf_doc),
+            _context_block(opf_doc, entity_roster),
         ):
             if block is not None:
                 blocks.append(block)

@@ -9,8 +9,8 @@ data files, the 7 consumer modules, and every test referencing the field).
 Before this ticket, `exos_standard` was a schema field key baked into the
 real synthetic-generic playbook JSON / `playbooks/schema.json` and read by seven
 modules (scripts/{third_party_clause_matching, playbook_validation,
-leakage_scan, diff_standard_form, third_party_position_findings,
-build_anchor_map}.py and backend/src/reviews.py). Issue #349's GRIND SPEC
+leakage_scan, third_party_position_findings}.py and
+backend/src/reviews.py). Issue #349's GRIND SPEC
 renames the field to `our_standard` (matching the engine's OPF v0.2 field
 of the same name) across the data model and every consumer.
 

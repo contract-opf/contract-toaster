@@ -68,9 +68,22 @@ see `main()`'s dump-dir handling below. Issue #573 fix round 1 (Slice A):
 `--dump-dir` also carries a per-attempt `"attempts"` list (pass, attempt
 number, ledgered outcome, tokenized `error_token`) for every attempt of the
 run -- including one a bounded retry then corrected, which the terminal
-`result` alone never shows -- built the same "token, never the raw message"
-way as `classify_validation_outcome` below. This list stays OUT of the
-default report, same as every other substance the dump captures.
+`result` alone never shows.
+
+Issue #643 completes that list: each NON-SUCCESSFUL attempt's entry also
+carries `error_message` (the attempt's FULL error, not just its token) and,
+on a `schema_invalid` attempt, a `schema_error` object naming the rejected
+path, the validator keyword, and the offending value. Before it, a real-model
+contract violation cost a paid run to observe and still could not be
+diagnosed from the artifact that run produced: only the FINAL error survived,
+in `detail.last_error`, so an EARLIER attempt's failure was recorded as its
+class and nothing more (measured on the 2026-09-01 live check, #642). Both
+new fields come from `run_review`'s `attempt_diagnostic_write` seam, are
+model SUBSTANCE, and therefore live under `--dump-dir` and NOWHERE else --
+`classify_validation_outcome` below still derives the default report's
+`validation_outcome` the "token, never the raw message" way, and the whole
+per-attempt list stays OUT of the default report, same as every other
+substance the dump captures.
 
 ## How the pieces are wired
 
@@ -193,16 +206,20 @@ def build_review_bundle(playbook_id: str) -> dict[str, Any]:
 
 
 def set_structured_output_env(mode: str) -> None:
-    """Set (mode="on") or clear (mode="off") `OPENROUTER_STRUCTURED_OUTPUT`
-    for the NEXT call -- `config.structured_output_enabled()` reads this
-    live, per call, so this is the exact seam issue #418 wired for
-    production to flip. Always an explicit set-or-clear (never "leave
-    whatever the shell already had"), so every run in this matrix is
-    labeled by what it actually asked for, not by ambient inheritance."""
-    if mode == "on":
-        os.environ[_MODE_ENV_VAR] = "1"
-    else:
-        os.environ.pop(_MODE_ENV_VAR, None)
+    """Set `OPENROUTER_STRUCTURED_OUTPUT` to `"1"` (mode="on") or `"0"`
+    (mode="off") for the NEXT call -- `config.structured_output_enabled()`
+    reads this live, per call, so this is the exact seam issue #418 wired
+    for production to flip. Always an explicit value for BOTH modes (never
+    "leave whatever the shell already had", and never "clear it and let the
+    default decide"), so every run in this matrix is labeled by what it
+    actually asked for, not by ambient inheritance or by whichever way the
+    default happens to point.
+
+    Issue #673 is why "off" writes `"0"` rather than unsetting the var:
+    that flip made UNSET mean ON, so the old clear-it spelling would have
+    quietly run both arms of the A/B in structured-output mode and reported
+    one of them as `"off"`."""
+    os.environ[_MODE_ENV_VAR] = "1" if mode == "on" else "0"
 
 
 # ---------------------------------------------------------------------------
@@ -324,14 +341,18 @@ def run_one(
     mode: str,
     review_id: str,
     build_client: Callable[[], Any],
-) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], list[Any], list[dict[str, Any]]]:
     """Drive one (doc, run, mode) through the real composed pipeline.
 
-    Returns `(row, result, records)`: `row` is the substance-free dict that
-    goes into the default report; `result` is `run_review`'s full return
-    value; `records` is every `model_client.ModelInvocationRecord` this run
-    ledgered (one per model-invocation attempt, across both passes). `result`
-    and `records` are handed back ONLY so `main()` can optionally write them
+    Returns `(row, result, records, diagnostics)`: `row` is the
+    substance-free dict that goes into the default report; `result` is
+    `run_review`'s full return value; `records` is every
+    `model_client.ModelInvocationRecord` this run ledgered (one per
+    model-invocation attempt, across both passes); `diagnostics` is the
+    debug-only per-attempt detail issue #643 added (`run_review`'s
+    `attempt_diagnostic_write` seam -- full error message, and for a schema
+    failure the rejected path and value). `result`, `records` and
+    `diagnostics` are handed back ONLY so `main()` can optionally write them
     to `--dump-dir` -- never merged into `row`.
 
     Issue #573 fix round 1 (Slice A): before this, `records` was reduced to
@@ -348,6 +369,10 @@ def run_one(
     """
     set_structured_output_env(mode)
     records: list[Any] = []
+    # Issue #643: every non-successful attempt's FULL error, collected
+    # through the pass-level sink `run_review` threads for exactly this
+    # `--dump-dir` consumer. Never read into `row`.
+    diagnostics: list[dict[str, Any]] = []
     client: Any = None
 
     started = time.monotonic()
@@ -356,7 +381,12 @@ def run_one(
             client = build_client()
             docx_bytes = doc_path.read_bytes()
             result = review_spine.run_review(
-                docx_bytes, bundle, client, review_id=review_id, ledger_write=records.append
+                docx_bytes,
+                bundle,
+                client,
+                review_id=review_id,
+                ledger_write=records.append,
+                attempt_diagnostic_write=diagnostics.append,
             )
         except Exception as exc:  # noqa: BLE001 - a single bad run must not kill the matrix
             # Issue #420 review round 3, finding 1: this must also catch a
@@ -422,7 +452,7 @@ def run_one(
         "cost_usd_cents": cost_usd_cents,
         "latency_ms": latency_ms,
     }
-    return row, result, records
+    return row, result, records, diagnostics
 
 
 # ---------------------------------------------------------------------------
@@ -658,7 +688,7 @@ def main(
                 for mode in modes:
                     run_number += 1
                     review_id = f"smoke-{doc.stem}-{mode}-{run_index}"
-                    row, result, records = run_one(
+                    row, result, records, diagnostics = run_one(
                         doc,
                         bundle,
                         run_index=run_index,
@@ -702,16 +732,60 @@ def main(
                         # (see `model_client.ModelInvocationRecord.error_
                         # token`'s own docstring for why only the token, not
                         # the full message, belongs on a ledgered record).
-                        dump_payload["attempts"] = [
-                            {
+                        #
+                        # Issue #643: the ledgered TOKEN alone is not
+                        # diagnosable. The 2026-09-01 live check (#642) burned
+                        # a paid run whose attempt 1 recorded
+                        # `error_token: "schema_invalid"` and nothing else --
+                        # only the FINAL error survived in
+                        # `detail.last_error`, so what attempt 1 actually sent
+                        # could be recovered only by paying for another run
+                        # and hoping a nondeterministic failure recurred. The
+                        # per-attempt FULL message (and, on a schema failure,
+                        # the rejected path and value) now arrives through
+                        # `run_review`'s `attempt_diagnostic_write` seam and
+                        # is merged onto the matching entry here. That detail
+                        # is model SUBSTANCE, which is why it lives here and
+                        # only here -- the same rule every other field of this
+                        # dump already follows.
+                        #
+                        # Keyed by (pass_name, attempt_number). Both passes
+                        # that emit diagnostics ledger exactly one record per
+                        # attempt with a 1-based, monotonically increasing
+                        # `attempt_number` (`run_primary_pass` /
+                        # `run_critic_pass`'s own attempt loops), so within
+                        # one run that pair identifies exactly one record of
+                        # theirs and the merge cannot attach one attempt's
+                        # error to another. `floor_judge`'s
+                        # `pass_name="floor"` records emit no diagnostics at
+                        # all, so they simply never match.
+                        diagnostic_by_attempt = {
+                            (d.get("pass_name"), d.get("attempt_number")): d
+                            for d in diagnostics
+                        }
+                        attempt_entries: list[dict[str, Any]] = []
+                        for record in records:
+                            entry: dict[str, Any] = {
                                 "pass_name": record.pass_name,
                                 "attempt_number": record.attempt_number,
                                 "outcome": record.outcome,
                                 "error_token": record.error_token,
                                 "replacement_text_failures": record.replacement_text_failures,
                             }
-                            for record in records
-                        ]
+                            diagnostic = diagnostic_by_attempt.get(
+                                (record.pass_name, record.attempt_number)
+                            )
+                            if diagnostic is not None:
+                                # A successful attempt has no diagnostic at
+                                # all (nothing failed on it), so these keys
+                                # are ABSENT there rather than empty -- the
+                                # same "absent, never a null placeholder"
+                                # discipline the rest of this pipeline uses.
+                                entry["error_message"] = diagnostic.get("error_message", "")
+                                if "schema_error" in diagnostic:
+                                    entry["schema_error"] = diagnostic["schema_error"]
+                            attempt_entries.append(entry)
+                        dump_payload["attempts"] = attempt_entries
                         (dump_dir / f"{review_id}.json").write_text(
                             json.dumps(dump_payload, default=str, indent=2)
                         )

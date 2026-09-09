@@ -598,7 +598,9 @@ def _part_2_structured_output_both(lse, tmp_path: Path, failures: list[str]) -> 
             if call["tool_spec"] is not None:
                 failures.append(
                     f"[2b] Expected tool_spec=None on the 'off' run (structured "
-                    f"output disabled -- OPENROUTER_STRUCTURED_OUTPUT unset), "
+                    f"output disabled -- OPENROUTER_STRUCTURED_OUTPUT=0; issue "
+                    f"#673 made UNSET mean ON, so the 'off' arm must write an "
+                    f"explicit 0, not clear the var), "
                     f"got a call with tool_spec set: {call}"
                 )
         for call in on_calls:
@@ -1162,6 +1164,280 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
             )
 
 
+# ---------------------------------------------------------------------------
+# Part 10: --dump-dir carries the FULL per-attempt error message and, on a
+# schema failure, the rejected JSON path + offending value (issue #643).
+#
+# Part 9 above proved the per-attempt list exists and carries a TOKEN. That
+# is where the 2026-09-01 live check (#642) ran aground: its primary pass
+# failed twice for two DIFFERENT reasons, and only the second was
+# diagnosable, because the FINAL error survives in `detail.last_error` while
+# attempt 1 left behind `error_token: "schema_invalid"` and nothing else. A
+# real-model contract violation therefore cost a paid run to observe and
+# still could not be explained from the artifact that run produced -- the
+# only way to learn what attempt 1 sent was to pay again and hope a
+# nondeterministic failure recurred.
+#
+# This part scripts that exact shape -- attempt 1 schema-invalid, attempt 2
+# valid -- and asserts the dump now names WHICH field of WHICH object
+# carried WHAT value, while the default report stays exactly as shareable as
+# Parts 1/7/9 already prove.
+# ---------------------------------------------------------------------------
+
+
+# The value planted below, the exact validator message it produces, and the
+# exact instance path it produces -- all three asserted by resolved VALUE
+# further down, so changing any of them (not merely deleting a line) turns
+# this part red.
+_NESTED_INVALID_DECISION = "MAYBE-SENTINEL-7a1c"
+_NESTED_INVALID_PATH = "issues/0/decision"
+_NESTED_INVALID_MESSAGE = f"'{_NESTED_INVALID_DECISION}' is not one of ['REQUEST_CHANGE']"
+
+# An `issue_key` far longer than `_debug_safe_value`'s bound, so the SAME
+# seam is exercised with an instance that must be truncated. Production
+# reaches this the same way it reaches every other shape in this file: it is
+# model output, and a model asked to transcribe a paragraph into a field can
+# and does overrun it.
+_OVERSIZED_ISSUE_KEY = "I" + ("x" * 5000)
+
+
+def _nested_schema_invalid_primary_response(verdict_summary: str) -> str:
+    """A response that is valid JSON and correctly shaped EVERYWHERE except
+    one NESTED field: `issues[0].decision` carries a value outside the
+    `Issue.decision` enum (`playbooks/output-schema-v3.json`).
+
+    Deliberately nested rather than reusing `_schema_invalid_primary_
+    response` above, whose missing `confidence_state` fails at the document
+    ROOT -- `jsonschema.ValidationError.absolute_path` is empty there, so
+    that response cannot prove a PATH is reported at all. A wrong enum value
+    on an issue is also the more representative real failure: a model that
+    omits a top-level required key is obvious from the token alone, and a
+    model that fills one field with a plausible-but-wrong value is exactly
+    the case a bare `schema_invalid` cannot distinguish from any other.
+
+    Production reaches this shape through `model_client`'s `invoke()` return
+    value: it is raw model output, and `validate_model_response` is the
+    check that exists because a real model does emit it.
+    """
+    payload = json.loads(_request_change_response(verdict_summary))
+    payload["issues"][0]["decision"] = _NESTED_INVALID_DECISION
+    return json.dumps(payload)
+
+
+def _oversized_value_primary_response(verdict_summary: str) -> str:
+    """Same nesting as above, but the rejected instance is a 5001-character
+    string -- `issues[0].issue_key` violating the schema's `pattern`."""
+    payload = json.loads(_request_change_response(verdict_summary))
+    payload["issues"][0]["issue_key"] = _OVERSIZED_ISSUE_KEY
+    return json.dumps(payload)
+
+
+def _run_retry_then_succeed(
+    lse, tmp_path: Path, *, name: str, bad_primary: str
+) -> tuple[dict, str]:
+    """One (1 doc x 1 run) matrix whose primary attempt 1 is `bad_primary`
+    and whose attempt 2 succeeds (MAX_RETRIES_PER_PASS == 1, so exactly two
+    attempts are allowed). Returns `(dump_json, report_text)`."""
+    docs_dir = tmp_path / f"docs_{name}"
+    docs_dir.mkdir()
+    (docs_dir / "docB.docx").write_bytes(_make_docx([_DOC_B_HEADER_TEXT, _DOC_B_FINDING_TEXT]))
+
+    bundle = lse.build_review_bundle("synthetic-nda-sample")
+    request_change_summary = "One issue identified requiring attention before acceptance."
+    scripts = [
+        (
+            [bad_primary, _request_change_response(request_change_summary)],
+            _critic_no_delta_response(),
+        )
+    ]
+    build_client = _scripted_build_client_factory(bundle, scripts)
+
+    out_path = tmp_path / f"report_{name}.json"
+    dump_dir = tmp_path / f"dump_{name}"
+    rc = lse.main(
+        [str(docs_dir), "--out", str(out_path), "--dump-dir", str(dump_dir), "--yes"],
+        build_client=build_client,
+        resolve_api_key=lambda: "sk-or-v1-fake-test-key",
+    )
+    if rc != 0:
+        raise AssertionError(f"Expected main() to return 0 for {name}, got {rc!r}")
+    dump_files = sorted(dump_dir.glob("*.json")) if dump_dir.is_dir() else []
+    if len(dump_files) != 1:
+        raise AssertionError(f"Expected exactly 1 dump JSON for {name}, got {dump_files}")
+    return json.loads(dump_files[0].read_text()), out_path.read_text()
+
+
+def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str]) -> None:
+    request_change_summary = "One issue identified requiring attention before acceptance."
+
+    try:
+        dump_json, report_text = _run_retry_then_succeed(
+            lse,
+            tmp_path,
+            name="nested_schema",
+            bad_primary=_nested_schema_invalid_primary_response(request_change_summary),
+        )
+    except AssertionError as exc:
+        failures.append(f"[10a] {exc}")
+        return
+
+    attempts = dump_json.get("attempts")
+    if not isinstance(attempts, list):
+        failures.append(f"[10b] Expected an 'attempts' list in the dump, got keys {list(dump_json)}")
+        return
+    primary_attempts = sorted(
+        (a for a in attempts if a.get("pass_name") == "primary"),
+        key=lambda a: a.get("attempt_number", 0),
+    )
+    if len(primary_attempts) != 2:
+        failures.append(
+            f"[10c] Expected 2 ledgered primary attempts (1 failure + 1 "
+            f"retry-success), got {primary_attempts}"
+        )
+        return
+    first, second = primary_attempts
+
+    # The gap this issue exists to close: the token alone was all attempt 1
+    # ever left behind.
+    if first.get("error_token") != "schema_invalid":
+        failures.append(f"[10d] Expected attempt 1 error_token 'schema_invalid', got {first!r}")
+    expected_message = f"schema_invalid: {_NESTED_INVALID_MESSAGE} (at {_NESTED_INVALID_PATH})"
+    if first.get("error_message") != expected_message:
+        failures.append(
+            f"[10e] Expected attempt 1 to carry its FULL error message "
+            f"{expected_message!r} -- a bare token names the class of "
+            f"failure and nothing else, which is why issue #642's first "
+            f"failure was undiagnosable. Got {first.get('error_message')!r}"
+        )
+    schema_error = first.get("schema_error")
+    if not isinstance(schema_error, dict):
+        failures.append(
+            f"[10f] Expected attempt 1 to carry a 'schema_error' object "
+            f"(the validator's path + offending value), got {first!r}"
+        )
+    else:
+        if schema_error.get("path") != _NESTED_INVALID_PATH:
+            failures.append(
+                f"[10g] Expected schema_error path {_NESTED_INVALID_PATH!r} "
+                f"(WHICH field of WHICH object was rejected), got "
+                f"{schema_error.get('path')!r}"
+            )
+        if schema_error.get("message") != _NESTED_INVALID_MESSAGE:
+            failures.append(
+                f"[10h] Expected schema_error message {_NESTED_INVALID_MESSAGE!r}, "
+                f"got {schema_error.get('message')!r}"
+            )
+        if schema_error.get("validator") != "enum":
+            failures.append(
+                f"[10i] Expected schema_error validator 'enum' (the keyword "
+                f"that rejected it), got {schema_error.get('validator')!r}"
+            )
+        if schema_error.get("offending_value") != _NESTED_INVALID_DECISION:
+            failures.append(
+                f"[10j] Expected schema_error offending_value "
+                f"{_NESTED_INVALID_DECISION!r} -- the actual value the model "
+                f"sent, got {schema_error.get('offending_value')!r}"
+            )
+
+    # The attempt that SUCCEEDED must carry neither key: nothing failed on
+    # it, and an empty-string placeholder would read as "it failed with no
+    # message". Same "absent, never a null placeholder" discipline the rest
+    # of the pipeline uses.
+    if "error_message" in second or "schema_error" in second:
+        failures.append(
+            f"[10k] Expected the successful attempt 2 to carry no "
+            f"error_message/schema_error at all, got {second!r}"
+        )
+    critic_attempts = [a for a in attempts if a.get("pass_name") == "critic"]
+    if len(critic_attempts) != 1 or "error_message" in critic_attempts[0]:
+        failures.append(
+            f"[10l] Expected 1 clean critic attempt with no error_message, "
+            f"got {critic_attempts!r}"
+        )
+
+    # The default report must stay substance-free. Every one of these is a
+    # RESOLVED value this feature could leak, not a key name that might
+    # merely be renamed.
+    for leaked in (
+        _NESTED_INVALID_DECISION,
+        _NESTED_INVALID_MESSAGE,
+        _NESTED_INVALID_PATH,
+        SENTINEL_FINDING,
+        "error_message",
+        "schema_error",
+        "offending_value",
+    ):
+        if leaked in report_text:
+            failures.append(
+                f"[10m] Expected {leaked!r} to be absent from the default "
+                f"report -- per-attempt error detail is model substance and "
+                f"belongs only in --dump-dir."
+            )
+
+    # Second scenario: the offending instance is far larger than the dump
+    # should ever carry. The bound must hold and must SAY it truncated,
+    # while the full message still reaches `error_message` -- the two are
+    # governed separately on purpose.
+    try:
+        big_dump, big_report = _run_retry_then_succeed(
+            lse,
+            tmp_path,
+            name="oversized_value",
+            bad_primary=_oversized_value_primary_response(request_change_summary),
+        )
+    except AssertionError as exc:
+        failures.append(f"[10n] {exc}")
+        return
+
+    big_first = next(
+        (
+            a
+            for a in big_dump.get("attempts", [])
+            if a.get("pass_name") == "primary" and a.get("attempt_number") == 1
+        ),
+        None,
+    )
+    if not isinstance(big_first, dict) or not isinstance(big_first.get("schema_error"), dict):
+        failures.append(f"[10o] Expected a primary attempt 1 with a schema_error, got {big_first!r}")
+        return
+    offending = big_first["schema_error"]["offending_value"]
+    # The bound's owner, imported here rather than at module scope so this
+    # file's `sys.path` bootstrap above has already run.
+    import primary_review_pass as _pp
+
+    expected_suffix = f"... (truncated, {len(_OVERSIZED_ISSUE_KEY)} chars total)"
+    if not offending.endswith(expected_suffix):
+        failures.append(
+            f"[10p] Expected an oversized offending_value to be truncated "
+            f"and to declare the true length ({expected_suffix!r}), got "
+            f"...{offending[-80:]!r}"
+        )
+    if offending[: _pp._DEBUG_VALUE_MAX_CHARS] != _OVERSIZED_ISSUE_KEY[: _pp._DEBUG_VALUE_MAX_CHARS]:
+        failures.append(
+            "[10q] Expected the retained prefix of an oversized "
+            "offending_value to be the model's own characters verbatim."
+        )
+    if len(offending) != _pp._DEBUG_VALUE_MAX_CHARS + len(expected_suffix):
+        failures.append(
+            f"[10r] Expected an oversized offending_value bounded to "
+            f"{_pp._DEBUG_VALUE_MAX_CHARS} chars plus the truncation note, "
+            f"got {len(offending)} chars."
+        )
+    if _OVERSIZED_ISSUE_KEY not in big_first.get("error_message", ""):
+        failures.append(
+            "[10s] Expected the FULL validator message (which quotes the "
+            "whole rejected value) to still reach error_message -- the "
+            "bound applies to the structured offending_value, not to the "
+            "message the pass itself already carried."
+        )
+    if _OVERSIZED_ISSUE_KEY[:200] in big_report:
+        failures.append(
+            "[10t] Expected the oversized rejected value to be absent from "
+            "the default report."
+        )
+
+
+
 def main() -> int:
     failures: list[str] = []
 
@@ -1212,6 +1488,7 @@ def main() -> int:
             _part_7_failure_modes_exercised(lse, tmp_path, failures)
             _part_8_review_round_3_findings(lse, tmp_path, failures)
             _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path, failures)
+            _part_10_dump_dir_carries_full_error(lse, tmp_path, failures)
 
     if failures:
         print("FAIL: live smoke-eval gate (issue #420).\n")

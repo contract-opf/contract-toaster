@@ -153,6 +153,16 @@ export const DOWNLOAD_ERROR_COPY =
   "an admin needs to check the deployment's storage settings.";
 
 /**
+ * The retention case (HTTP 410), which is NOT the configuration failure above:
+ * the document is gone on purpose, a retry will never produce it, and no link
+ * is handed to the browser. One string for every surface that can ask for a
+ * stored document — History's per-row buttons and the Review panel's own
+ * "Save original" (issue #719) — so the two cannot drift on wording.
+ */
+export const DOCUMENT_PURGED_COPY =
+  'This document is no longer available — it was removed once its retention window passed.';
+
+/**
  * Log `technicalDetail` (the server's raw `detail`, or a status-line
  * fallback) to the console for an operator, and return the fixed
  * `DOWNLOAD_ERROR_COPY` for rendering — never the detail itself. Every

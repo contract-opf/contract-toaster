@@ -39,6 +39,10 @@ for _dir in (BACKEND_SRC, SCRIPTS_DIR):
 
 import model_client as mc  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
+from openrouter_sse_double import (  # noqa: E402
+    sse_stream_adapter,
+    stream_context_for_response,
+)
 
 # anthropic/claude-opus-5 -- model-policy/openrouter.json's `models.primary`
 # pin. It is here ONLY so `OpenRouterModelClient.invoke`'s runtime policy
@@ -74,6 +78,10 @@ class ScriptedHttpClient:
         self.calls: list[dict] = []
         self.closed = False
 
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
+
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         self.calls.append({"url": url, "json": json, "headers": headers})
         if not self._outcomes:
@@ -101,7 +109,12 @@ class TestConnectionReuse(unittest.TestCase):
     def test_httpx_client_constructed_once_and_reused_across_invocations(self) -> None:
         with patch("httpx.Client") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
-            mock_instance.post.return_value = _ok_response("first")
+            # Issue #657: the client opens a streamed request, so the owned
+            # httpx.Client is driven through `.stream()`, not `.post()`. A
+            # fresh context per call -- a streamed body is consumable once.
+            mock_instance.stream.side_effect = lambda *_a, **_kw: (
+                stream_context_for_response(_ok_response("first"))
+            )
             client = mc.OpenRouterModelClient(
                 api_key="sk-test", max_retries=0, sleep_fn=_no_sleep
             )
@@ -124,7 +137,13 @@ class TestConnectionReuse(unittest.TestCase):
             "httpx.Client must be constructed exactly ONCE per OpenRouterModelClient "
             "instance and reused, not once per invoke() call.",
         )
-        self.assertEqual(mock_instance.post.call_count, 2)
+        self.assertEqual(mock_instance.stream.call_count, 2)
+        self.assertEqual(
+            mock_instance.post.call_count,
+            0,
+            "The generation path must go through .stream(), never a "
+            "non-streamed .post() (issue #657).",
+        )
         mock_instance.close.assert_not_called()
         client.close()
         mock_instance.close.assert_called_once()
@@ -146,7 +165,9 @@ class TestConnectionReuse(unittest.TestCase):
     def test_context_manager_closes_owned_client(self) -> None:
         with patch("httpx.Client") as mock_client_cls:
             mock_instance = mock_client_cls.return_value
-            mock_instance.post.return_value = _ok_response("ok")
+            mock_instance.stream.side_effect = lambda *_a, **_kw: (
+                stream_context_for_response(_ok_response("ok"))
+            )
             with patch.dict("os.environ", {}, clear=True):
                 with mc.OpenRouterModelClient(
                     api_key="sk-test", max_retries=0, sleep_fn=_no_sleep

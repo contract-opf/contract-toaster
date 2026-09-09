@@ -1,0 +1,135 @@
+[
+  {
+    "file": "register-key.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 3134
+  },
+  {
+    "file": "till-open.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 7941
+  },
+  {
+    "file": "till-close.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 7105
+  },
+  {
+    "file": "receipt-print.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 8150
+  },
+  {
+    "file": "receipt-tear.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 6896
+  },
+  {
+    "file": "ka-ching.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 7941
+  },
+  {
+    "file": "paper-slide.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 5851
+  },
+  {
+    "file": "pen-scratch.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 4388
+  },
+  {
+    "file": "slice-insert.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 3970
+  },
+  {
+    "file": "slice-eject.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 4388
+  },
+  {
+    "file": "stop-release.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 5851
+  },
+  {
+    "file": "burnt-hiss.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 6896
+  },
+  {
+    "file": "handoff-bell.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 8150
+  },
+  {
+    "file": "refusal.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 2507
+  },
+  {
+    "file": "stage-primary.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 1671
+  },
+  {
+    "file": "stage-critic.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 3134
+  },
+  {
+    "file": "stage-reconciliation.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 4179
+  },
+  {
+    "file": "stage-redline.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 3134
+  },
+  {
+    "file": "odometer-roll.mp3",
+    "codec": "mp3",
+    "sample_rate": "44100",
+    "channels": 1,
+    "bytes": 3134
+  }
+]

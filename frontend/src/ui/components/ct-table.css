@@ -34,6 +34,26 @@ ct-table thead th {
   border-bottom: 1px solid var(--ct-border);
 }
 
+/* Opt-in for a WIDE table: let column headings break onto a second line
+   (issue #668).
+
+   The `white-space: nowrap` above makes a heading's min-content width the
+   width of the whole heading string, so the heading — not the data — becomes
+   the widest thing in the column and the table is pushed past the viewport.
+   Measured on prod: History's `DOCUMENTS` column was cut off mid-word at the
+   browser's default window size. Opting out per table rather than changing
+   the base rule, because the admin tables' headings are short enough to fit
+   on one line and read better that way.
+
+   `vertical-align: bottom` keeps a one-line heading sitting on the same
+   baseline as a two-line one beside it, instead of floating in the middle of
+   the taller row. Guarded by scripts/layout-audit.mjs check 8 — the component
+   suite runs with `css: false` and cannot see this rule at all. */
+ct-table table.ct-table--wrap-headings thead th {
+  white-space: normal;
+  vertical-align: bottom;
+}
+
 ct-table tbody td {
   padding: var(--ct-space-2) var(--ct-space-3);
   border-bottom: 1px solid var(--ct-border);

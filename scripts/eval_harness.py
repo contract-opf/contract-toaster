@@ -30,13 +30,20 @@ proves the MECHANICAL contract holds (decision fidelity to what the canned
 model said, quotes locate, leakage blocks), not that a real model's
 judgment is good.
 
-The two retired modules named above remain fully alive for their OTHER
-production consumers (`tests/lint-gold-fixtures.py`,
-`tests/lint-acceptable-variations.py`, `scripts/form_match_router.py`,
-`scripts/build_anchor_map.py`, `scripts/replacement_text_enforcement.py`,
-`scripts/third_party_position_findings.py`) -- this module no longer
-imports either one; see `scripts/review_spine.py`'s docstring for their
-exact module paths.
+Of the two retired modules named above, only the detector engine still
+exists: it remains fully alive for its OTHER production consumers
+(`tests/lint-gold-fixtures.py`, `tests/lint-acceptable-variations.py`,
+`scripts/replacement_text_enforcement.py`,
+`scripts/third_party_position_findings.py`). The standard-form line-diff
+was deleted outright by issue #631, together with the anchor-map builder
+and the form-match router that were its last consumers. Either way this
+module imports neither.
+
+Neither retired module is spelled by its module name anywhere in this
+file, deliberately: `tests/test_eval_harness.py`'s check 2 greps this
+whole source file -- prose included, not just its imports -- for those two
+names, so naming one here fails the gate. See `scripts/review_spine.py`'s
+docstring for the detector engine's exact module path.
 
 ## Fixture shape (schema "llm-native-v1")
 
@@ -69,7 +76,7 @@ Each gold fixture is a JSON file with:
 
 `document.clauses` is rendered into a minimal, dependency-free OOXML
 `.docx` (the same zipfile+ElementTree convention as
-`scripts/redline_docx_writer.py` / `tests/test_review_spine.py`) -- one
+`tests/test_review_spine.py`) -- one
 heading paragraph (if given) and one body paragraph per clause. `model_
 responses.primary` / `.critic` are JSON-serialized in order into a
 `model_client.FakeBedrockClient` queue keyed by the scored playbook's own
@@ -208,7 +215,7 @@ SCHEMA_MARKER = "llm-native-v1"
 
 # ---------------------------------------------------------------------------
 # Minimal, dependency-free OOXML .docx builder -- same convention as
-# tests/test_review_spine.py / scripts/redline_docx_writer.py. No
+# tests/test_review_spine.py. No
 # python-docx needed to write a minimal valid body.
 # ---------------------------------------------------------------------------
 

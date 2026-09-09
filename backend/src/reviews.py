@@ -52,7 +52,12 @@ Environment variables consumed:
                              rather than raising, same discipline as
                              PLAYBOOK_VERSIONS_TABLE above
   STATE_MACHINE_ARN          ARN of the contract-toaster-{env} state machine
-  DAILY_SPEND_CAP_USD_CENTS  daily spend ceiling in cents (default 2000 = $20)
+  DAILY_SPEND_CAP_USD_CENTS  the DEPLOYMENT's daily spend ceiling in cents
+                             (default 2000 = $20). Since issue #653 this is
+                             the FALLBACK beneath an admin-set cap, not the
+                             only answer: every enforcement site in this
+                             module reads
+                             `model_settings.resolve_daily_spend_cap_cents`
 
 Issue #194 (active-bundle resolver): the release bundle hash is resolved
 from the `playbooks` table's `active_release_bundle_hash` attribute by
@@ -141,8 +146,52 @@ BUCKET_WIDTH_MINUTES = 10
 # constant automatically (the formula below), and rise with it.
 # ---------------------------------------------------------------------------
 MAX_INPUT_TOKENS = 100_000
-MAX_OUTPUT_TOKENS = 8_000
 MAX_RETRIES_PER_PASS = 1
+# Issue #658: truncation has its own retry allowance in both review passes
+# (scripts/primary_review_pass.py::MAX_TRUNCATION_RETRIES_PER_PASS), spendable
+# only by a response that did not fit. It is a real extra model call, so the
+# reservation counts it -- the pre-#658 reservation already under-reserved by
+# pricing one budget while the truncation retry could spend a second.
+MAX_TRUNCATION_RETRIES_PER_PASS = 1
+
+# Issue #658: the worst-case OUTPUT budget one attempt can ask for. NOT a
+# literal any more -- it is `model_client.output_budget_for_document`, the
+# same sizing function both review passes call, evaluated at the largest
+# document this deployment will ever admit (`MAX_INPUT_TOKENS`) against the
+# FAIL-CLOSED per-model ceiling.
+#
+# WHY THE FAIL-CLOSED CEILING AND NOT THE SELECTED MODEL'S DECLARED CAP. The
+# reservation is taken at SUBMISSION time, before the document has been
+# extracted -- there is no document to size against, so this is a
+# worst-case figure exactly like MAX_INPUT_TOKENS above. Pricing every review
+# at an Anthropic model's declared 128,000-token cap would reserve ~$17.76
+# (at the OpenRouter rates this file prices with; ~$19.54 at the Bedrock
+# rates ARCHITECTURE.md tabulates) against the $20/day default ceiling and
+# refuse the second concurrent review of the day, for a budget almost no
+# review asks for. That is the trade issue #658's own note names: "the real
+# argument for scaling rather than pinning every review to the maximum."
+#
+# KNOWN RESIDUAL -- DELIBERATE, AND BIGGER THAN IT WAS. This reservation is
+# NOT an upper bound on settle. Before #658 the gap was ~1.5x on output
+# tokens (reserve 2 attempts x 8,000 = 16,000; worst-case spend 8,000 then a
+# doubled 16,000 = 24,000). After #658 it is 4x: reserve 3 attempts x 32,000
+# = 96,000, while any document over ~44,800 estimated tokens -- the ~80-page
+# agreement this issue exists to enable -- rides the shipped policy's
+# declared 128,000 on all three attempts = 384,000. In dollars that is
+# ~$6.24 reserved against ~$17.76 actual at the OpenRouter pins (~$6.86 vs
+# ~$19.54 at the Bedrock rates), i.e. 2.85x, ALWAYS in the direction of
+# reserving less. Two concurrent submissions therefore reserve ~$13.72, are
+# both admitted under a $20/day ceiling, and can settle at ~$39.08.
+# `settle_spend` reconciles each reservation against real ledgered usage the
+# moment its review ends -- so the counter converges on actual spend and the
+# excess cannot compound beyond the reviews in flight -- but the ceiling
+# gates STARTS, not the day's total. ARCHITECTURE.md -> "What that
+# reservation is not" states the same thing; do not restore the "upper
+# bound" / "true ceiling" / "cannot overshoot" wording that issue #658's
+# fix round 1 removed from it.
+MAX_OUTPUT_TOKENS = model_client.output_budget_for_document(
+    MAX_INPUT_TOKENS, model_client.DEFAULT_MAX_OUTPUT_TOKENS
+)
 PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 
 # Per-model worst-case rates (issue #189 fix). The reservation must price
@@ -151,7 +200,9 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # (the pre-fix WORST_CASE_PRICE_PER_TOKEN_USD = Opus output rate, applied to
 # ALL passes) overshot the true worst case by 4.6x: $9.68 reserved per
 # review vs the then-documented $2.11 (ARCHITECTURE.md -> Cost shape;
-# $2.46 since issue #625 raised MAX_INPUT_TOKENS to 100_000), which
+# $2.46 after issue #625 raised MAX_INPUT_TOKENS to 100_000, and $6.86
+# since issue #658 raised the output budget and added a truncation
+# attempt -- $6.86 is the current figure), which
 # 429'd the third review of any day against the $20/day default cap.
 #
 # These figures mirror model-policy/bedrock-us-east-1.json's
@@ -160,8 +211,9 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # regional-endpoint surcharge documented in docs/design-notes.md -> Model
 # selection & governance applied ($5.50/$27.50 Opus, $3.30/$16.50 Sonnet) --
 # the SAME regional rates ARCHITECTURE.md's Cost shape unit-economics table
-# cites for its $2.46 worst-case/review arithmetic ($2.11 before issue #625
-# raised MAX_INPUT_TOKENS to 100_000). They cannot be loaded
+# cites for its $6.86 worst-case/review arithmetic -- 3 attempts x 100K in +
+# 3 attempts x 32K out, per pass (issue #658). That table lists $2.46
+# (pre-#658) and $2.11 (pre-#625) as history only. They cannot be loaded
 # directly from model-policy/*.json at runtime: this module ships inside the
 # backend container (backend/Dockerfile COPYs only src/, built from the
 # backend/ directory as its Docker context) and infra/lambda/persist/
@@ -178,7 +230,13 @@ PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 27.50  # Opus 4.8 output, regional rate
 CRITIC_INPUT_RATE_USD_PER_MILLION = 3.30  # Sonnet 4.6 input, regional rate
 CRITIC_OUTPUT_RATE_USD_PER_MILLION = 16.50  # Sonnet 4.6 output, regional rate
 
-DAILY_SPEND_CAP_USD_CENTS_DEFAULT = 2000  # $20.00/day default ceiling
+# $20.00/day default ceiling. ONE definition, aliased here: since issue #653
+# the cap is an admin-settable value living in the settings store, so the
+# constant moved next to its resolver (`model_settings`) and this name stays as
+# the alias every existing caller and test already reads. Two literals would
+# drift; one of them would then be the number a reservation is checked against
+# and the other the number the dashboard prints.
+DAILY_SPEND_CAP_USD_CENTS_DEFAULT = model_settings.DAILY_SPEND_CAP_USD_CENTS_DEFAULT
 
 
 REVIEW_STATUSES_NON_TERMINAL = {"PENDING", "RUNNING"}
@@ -507,8 +565,11 @@ def _active_provider_rates(
     see that file's own `_comment`). Any other value (including unset, the
     AWS/Bedrock target's default) returns the existing hardcoded Bedrock
     regional-rate constants, UNCHANGED -- this branch must never perturb
-    the Bedrock path's documented $2.46 worst case (issue #189; $2.11
-    before issue #625 raised MAX_INPUT_TOKENS to 100_000).
+    the Bedrock path's documented $6.86 worst case (issue #189; the
+    figure is $6.86 since issue #658 raised the output budget from a flat
+    8_000 and gave truncation its own attempt -- it was $2.46 before that,
+    and $2.11 before issue #625 raised MAX_INPUT_TOKENS to 100_000).
+    ARCHITECTURE.md -> Cost shape is the authority for all three.
 
     ADMIN SELECTION (issue #445). On the OpenRouter path the rates are those
     of the models that will actually be invoked -- the admin's stored
@@ -552,9 +613,16 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     Retry-inclusive, per-model formula (issue #189 fix; retry-inclusive
     shape per reconciliation note #14):
 
-        reservation = (1 + max_retries_per_pass) * sum over {primary, critic} of
+        reservation = (1 + max_retries_per_pass + max_truncation_retries_per_pass)
+            * sum over {primary, critic} of
             (max_input_tokens * that_model's_input_rate_per_token
              + max_output_tokens * that_model's_output_rate_per_token)
+
+    Issue #658: `max_output_tokens` is no longer a flat 8,000 literal -- it
+    is `model_client.output_budget_for_document` at the worst-case document
+    size (see the constant above), the same sizing function the review passes
+    use -- and the attempt count includes truncation's own retry allowance,
+    which the pre-#658 formula silently under-reserved.
 
     Each pass (primary/Opus, critic/Sonnet) is priced at ITS OWN model's
     rate rather than a single blended "most expensive tier" rate applied to
@@ -568,10 +636,14 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     — without it the reservation falls back to the policy pins, which is the
     right answer only when no admin selection can be in force.
 
-    Folding the retry budget into the reservation at reserve-time means any
-    sequence of attempts within that budget cannot overshoot the reservation
-    — only the settled actual spend (ledgered after every model attempt,
-    including failures) can come in under it.
+    Folding the retry budget into the reservation at reserve-time means no
+    extra ATTEMPT can push a review past its reservation. A larger OUTPUT
+    BUDGET still can: this prices `MAX_OUTPUT_TOKENS` (the fail-closed
+    32,000-token ceiling) while a big document on a model declaring 128,000
+    asks for that — see the KNOWN RESIDUAL on the constant above for the
+    measured 2.85x. Settlement (ledgered after every model attempt,
+    including failures) is therefore a reconciliation in BOTH directions,
+    not a correction that can only come in under.
 
     Issue #628: the bounded address-repair pass issue #569 added a
     conditional third model call for is gone (its module, its flag, and the
@@ -582,7 +654,7 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     infra/lambda/orphan_reconciler/handler.py) dropped the same term in the
     same commit, so reserve and settle cannot disagree.
     """
-    attempts_per_pass = 1 + MAX_RETRIES_PER_PASS
+    attempts_per_pass = 1 + MAX_RETRIES_PER_PASS + MAX_TRUNCATION_RETRIES_PER_PASS
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
         _active_provider_rates(dynamodb_resource)
     )
@@ -645,6 +717,103 @@ def compute_actual_usd_cents_from_usage(
     return int(round(total_usd * 100))
 
 
+def estimate_review_usd_cents(dynamodb_resource: Any = None) -> int | None:
+    """What one review is EXPECTED to cost, in USD cents — or None when this
+    deployment's provider carries no per-review token basis to estimate from.
+
+    Issue #653. This is not the worst case: `compute_worst_case_reservation_
+    usd_cents` prices every retry at the full input and output ceilings,
+    because a reservation has to be an amount no review can exceed. That
+    figure is the right one to hold against the cap and the wrong one to put
+    in front of someone deciding whether to press the button — the two
+    differed by 4x on the 2026-09-01 measurement this issue was filed on
+    ($0.2742 actual against a $1.10 worst case).
+
+    The expected figure is the SAME arithmetic the model picker already shows
+    per model (`frontend/src/AdminModel.tsx::perReviewCostUsd`): the role's
+    `approx_tokens_per_review_{input,output}` basis out of
+    model-policy/openrouter.json, at the rates of the models that will
+    actually be invoked (`_active_provider_rates`, so an admin selection and a
+    break-glass env override are both reflected). Computed server-side and
+    computed from the artifact, never hardcoded here — the rates and the basis
+    both move over time, and a stale literal in front of a spend decision is
+    the failure this issue exists to remove.
+
+    Returns None on the Bedrock path: that provider's rates are the module
+    constants above and there is no measured per-review basis beside them, so
+    there is no honest expected figure to report. A caller renders the worst
+    case alone rather than an invented number.
+    """
+    if config.model_provider() != "openrouter":
+        return None
+    policy = model_client.load_openrouter_policy()
+    primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
+        _active_provider_rates(dynamodb_resource)
+    )
+    usd = 0.0
+    for role, input_rate, output_rate in (
+        ("primary", primary_input_rate, primary_output_rate),
+        ("critic", critic_input_rate, critic_output_rate),
+    ):
+        block = policy["models"][role]
+        usd += int(block["approx_tokens_per_review_input"]) * (input_rate / 1_000_000)
+        usd += int(block["approx_tokens_per_review_output"]) * (output_rate / 1_000_000)
+    return int(round(usd * 100))
+
+
+# The ONLY fields a non-admin reviewer's estimate carries. An explicit tuple,
+# asserted against in tests, so a figure added to the admin ledger tomorrow
+# cannot reach this route by being appended to a shared dict.
+REVIEW_COST_ESTIMATE_FIELDS = (
+    "estimated_usd_cents",
+    "worst_case_reservation_usd_cents",
+)
+
+
+def review_cost_estimate(dynamodb_resource: Any = None) -> dict[str, Any]:
+    """GET /api/review-cost-estimate — what the NEXT review costs, for the
+    person about to submit one (issue #653 Scope item 2).
+
+    Scope item 2 asks for the estimate "shown where a reviewer can see it
+    before submitting", and a reviewer is not necessarily an admin: the
+    Settings tab carrying the rest of #653 is admin-gated and
+    `AdminSettings.tsx` renders nothing at all on the 403 a non-admin gets from
+    `GET /api/admin/spend`, so without this route the estimate would exist only
+    for people who already have the whole ledger.
+
+    BOTH figures, because they answer different questions and neither
+    substitutes for the other:
+
+      `estimated_usd_cents`               what a document of ordinary size is
+                                          expected to cost (None where the
+                                          provider carries no basis)
+      `worst_case_reservation_usd_cents`  what the submission RESERVES against
+                                          the daily cap, and therefore what it
+                                          can be refused for
+
+    The gap between them is the whole reason this issue was filed: $0.2742
+    actual against a $1.10 worst case, measured 2026-09-01. Showing only the
+    reservation tells a reviewer a review costs four times what it does;
+    showing only the expected figure hides the number that can refuse them.
+    Neither is a maximum — ARCHITECTURE.md -> Cost shape documents that
+    settlement reconciles the reservation in BOTH directions.
+
+    What it deliberately does NOT return is the reason it is a route of its own
+    rather than a relaxation of the ledger's gate: the daily cap, what today
+    has already spent, and what is left are this deployment's OPERATING BUDGET,
+    and epic #649 is about putting operator facts in the ADMIN UI. Nor does it
+    name the selected models — the numbers answer the reviewer's question and
+    the ids are instance configuration. So the projection is an ALLOWLIST
+    (`REVIEW_COST_ESTIMATE_FIELDS`), not a dict with the budget removed.
+    """
+    return {
+        "estimated_usd_cents": estimate_review_usd_cents(dynamodb_resource),
+        "worst_case_reservation_usd_cents": compute_worst_case_reservation_usd_cents(
+            dynamodb_resource
+        ),
+    }
+
+
 def reserve_spend(
     review_id: str,
     dynamodb_resource: Any,
@@ -671,10 +840,33 @@ def reserve_spend(
     # the policy pins -- the same resource the reservation is written on
     # carries the admin selection.
     reservation_amount_cents = compute_worst_case_reservation_usd_cents(dynamodb_resource)
-    daily_cap_cents = int(
-        os.environ.get("DAILY_SPEND_CAP_USD_CENTS", str(DAILY_SPEND_CAP_USD_CENTS_DEFAULT))
-    )
+    # Issue #653: the admin-set cap wins over the deployment's own, resolved
+    # per submission so a change on the Settings tab takes effect on the next
+    # reservation with no redeploy.
+    daily_cap_cents = model_settings.resolve_daily_spend_cap_cents(dynamodb_resource)
     reservation_id = str(uuid.uuid4())
+
+    # THE FIRST REVIEW OF THE DAY IS NOT EXEMPT (issue #653). The
+    # ConditionExpression below passes unconditionally while
+    # `reserved_usd_cents` does not exist yet, so on a fresh day a single
+    # reservation LARGER than the whole cap used to be admitted -- the
+    # arithmetic budget (`cap - amount`) goes negative and nothing compares
+    # against it. Unreachable while the cap was a deploy-time constant chosen
+    # to be many reviews wide; reachable the moment an admin can set the cap
+    # below one review's worst case from a form, which is precisely what this
+    # issue adds. Refused here rather than silently allowed.
+    #
+    # The wording differs from the exhausted-day refusal below on purpose:
+    # waiting for UTC midnight does not fix a cap that is smaller than one
+    # review, and telling a reviewer to wait for it would be a lie.
+    if reservation_amount_cents > daily_cap_cents:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "The daily spend cap is set below the cost of a single review. "
+                "Raise the cap on the Settings tab, or choose cheaper models."
+            ),
+        )
 
     try:
         # Single atomic conditional update — the reserve and the cap-check
@@ -685,7 +877,14 @@ def reserve_spend(
             Key={"spend_date": spend_date},
             UpdateExpression=(
                 "SET reserved_usd_cents = if_not_exists(reserved_usd_cents, :zero) + :amount, "
-                "daily_cap_usd_cents = if_not_exists(daily_cap_usd_cents, :cap)"
+                # OVERWRITTEN, not seeded once (issue #653). The stored value is
+                # metadata for the dashboard, and with an admin-settable cap an
+                # if_not_exists seed would pin the day's row to whatever the cap
+                # was at the day's FIRST reservation -- so the Settings tab would
+                # print an old ceiling while the condition below enforced the new
+                # one. Recording the cap this reservation was actually checked
+                # against keeps the two the same number.
+                "daily_cap_usd_cents = :cap"
             ),
             # DynamoDB ConditionExpressions do not permit arithmetic (only
             # UpdateExpressions do), so the cap check compares the stored
@@ -956,20 +1155,22 @@ def cover_note_daily_cap_reached(
     than a post-landing review finding warrants.
 
     Deliberately mirrors `reserve_spend`'s own budget arithmetic: the cap
-    compared against is the value FRESHLY read from
-    `DAILY_SPEND_CAP_USD_CENTS` (env) each call, not the `daily_cap_usd_cents`
-    value stored on the row -- that stored value is metadata `reserve_spend`
-    seeds for visibility/its own documented mid-day-change caveat, never
-    what its own ConditionExpression budget is computed against.
+    compared against is FRESHLY RESOLVED each call through
+    `model_settings.resolve_daily_spend_cap_cents` (the admin-set cap, then
+    `DAILY_SPEND_CAP_USD_CENTS`, then the default -- issue #653), not the
+    `daily_cap_usd_cents` value stored on the row; that stored value is
+    metadata `reserve_spend` writes for visibility, never what its own
+    ConditionExpression budget is computed against. Resolving it here rather
+    than reading the env var directly is what keeps a cap LOWERED on the
+    Settings tab from being enforced on submissions while cover-note
+    regeneration carried on against the old ceiling.
     """
     table = dynamodb_resource.Table(os.environ["DAILY_SPEND_TABLE"])
     now_epoch = time.time() if now_epoch is None else now_epoch
     spend_date = time.strftime("%Y-%m-%d", time.gmtime(now_epoch))
     resp = table.get_item(Key={"spend_date": spend_date})
     row = resp.get("Item") or {}
-    daily_cap_cents = int(
-        os.environ.get("DAILY_SPEND_CAP_USD_CENTS", str(DAILY_SPEND_CAP_USD_CENTS_DEFAULT))
-    )
+    daily_cap_cents = model_settings.resolve_daily_spend_cap_cents(dynamodb_resource)
     committed_cents = row.get("reserved_usd_cents", 0) + row.get("settled_usd_cents", 0)
     return committed_cents >= daily_cap_cents
 
@@ -3333,6 +3534,21 @@ _RECENT_FAILURE_FIELDS = (
     "leakage_category",
     "leakage_rule_id",
     "leakage_field_name",
+    # Issue #665: the retry budget the critic pass spent, present only on a
+    # critic-pass failure row. A DELIBERATE disclosure decision like the
+    # three above, and a much easier one: it is an integer count computed by
+    # `critic_review_pass.run_critic_pass` itself, with no path by which
+    # prompt, document, or model-output substance could reach it.
+    #
+    # What it tells an operator, precisely: the pass returns
+    # `attempts_allowed` -- the WHOLE budget, not the attempt it stopped on
+    # -- so it never reads "failed once". It is
+    # `1 + MAX_RETRIES_PER_PASS` unless the pass was granted a widened retry
+    # after an output truncation, which adds one per grant. Above baseline
+    # therefore means the critic ALSO hit its output budget on the way, an
+    # output-sizing lead (issue #658) that the reason token alone does not
+    # carry.
+    "critic_attempts",
 )
 
 
@@ -3374,7 +3590,9 @@ def list_recent_failures(
     the stage that failed, the terminal status, when, and -- for a leakage
     block only -- which detector fired (issue #616's `leakage_category` /
     `leakage_rule_id` / `leakage_field_name`, non-substantive by the
-    scanner's own construction). Nothing else.
+    scanner's own construction) and -- for a critic-pass failure only --
+    the size of the retry budget that pass spent (issue #665's
+    `critic_attempts`, an integer count). Nothing else.
 
     NOT A LOG VIEWER (issue #443, explicitly out of scope): no stack trace,
     no exception message, no prompt or document substance, no key material,

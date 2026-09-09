@@ -99,6 +99,23 @@ if [ -n "$orfiles" ]; then
 else
   note "no OpenRouter-shaped tokens found"
 fi
+# 4d. HARD: no counterparty identity in the tree (issue #341). The scanner is
+# public and data-free; the token list is private and lives in overlay/, which
+# this script has just scrubbed from $STAGE -- so it is read from the REPO, not
+# the staging tree. With no list reachable the scanner SKIPS and exits 0, which
+# is why the publish path must not be the only place it runs.
+if "$PYTHON" tests/lint-counterparty-names.py > "$OUTDIR/counterparty.log" 2>&1; then
+  if grep -q "SKIPPED" "$OUTDIR/counterparty.log"; then
+    note "⚠️  counterparty scan SKIPPED — no token list. Run this from a checkout"
+    note "    that has overlay/counterparty-tokens.txt before publishing."
+  else
+    note "counterparty scan: clean"
+  fi
+else
+  note "❌ HARD: counterparty identity found — see $OUTDIR/counterparty.log"
+  fail=1
+fi
+
 # 4c. SOFT: .docx without a SYNTHETIC marker — needs a human to confirm it is not real corpus.
 "$PYTHON" - "$STAGE" <<'PY' || true
 import sys, zipfile, glob, os

@@ -12,7 +12,7 @@ Before this slice, `scripts/extraction_normalization_stage.py` (#80),
 #239's own Goal text: "Today these exist only as disconnected scripts."
 This test drives the real `scripts/review_spine.py::run_review` end to end
 over a hand-built OOXML fixture `.docx` (same dependency-free
-zipfile+ElementTree convention as `scripts/redline_docx_writer.py` /
+zipfile+ElementTree convention as `scripts/docx_parts.py` /
 `tests/fixtures/gold_docx_204/_generate.py`) through the FULL composed
 chain (extract -> normalize -> primary -> critic -> reconcile -> leakage
 scan -> redline), driven by `FakeBedrockClient`
@@ -20,7 +20,7 @@ scan -> redline), driven by `FakeBedrockClient`
 `scripts/review_spine.py` (no composed spine) and PASSES once one exists
 and correctly wires every stage together.
 
-`diff_standard_form` (imported below) is used ONLY as this test's OWN
+`synthetic_form_paragraphs` (imported below) is used ONLY as this test's OWN
 fixture-building utility (`_build_draft_docx` loads the real standard-form
 paragraphs to construct a realistic draft `.docx`) -- it has nothing to do
 with `run_review()`'s internal pipeline, which no longer diffs the draft
@@ -79,6 +79,13 @@ BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
+
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 
 def _import_review_spine():
@@ -164,14 +171,14 @@ def _build_docx_bytes(body_paragraphs_xml: str) -> bytes:
     return buf.getvalue()
 
 
-def _build_draft_docx(dsf_module, overrides: dict[str, str]) -> bytes:
+def _build_draft_docx(sfp_module, overrides: dict[str, str]) -> bytes:
     """Every non-`absent_from_form` standard-form anchor carried over
     VERBATIM (heading + text) except the anchors in `overrides`, which get
     the override text instead -- same recipe as
     tests/fixtures/gold_docx_204/_generate.py's build_draft_body_xml, so
     every anchor NOT in `overrides` diffs as "unchanged" and only the
     planted anchors produce real hunks."""
-    standard = dsf_module.load_standard_form_paragraphs(docx_path=None, playbook_id="synthetic-generic")
+    standard = sfp_module.load(playbook_id="synthetic-generic")
     parts = []
     for std_para in standard:
         if std_para.get("absent_from_form", False):
@@ -493,9 +500,9 @@ def _load_bundle() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _part_1_request_change(rs, model_client_module, dsf_module, failures: list[str]) -> None:
+def _part_1_request_change(rs, model_client_module, sfp_module, failures: list[str]) -> None:
     bundle = _load_bundle()
-    docx_bytes = _build_draft_docx(dsf_module, {"sec-8": _SEC8_DRAFT_TEXT})
+    docx_bytes = _build_draft_docx(sfp_module, {"sec-8": _SEC8_DRAFT_TEXT})
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client_module.FakeBedrockClient(
@@ -552,9 +559,9 @@ def _part_1_request_change(rs, model_client_module, dsf_module, failures: list[s
 # ---------------------------------------------------------------------------
 
 
-def _part_2_accept(rs, model_client_module, dsf_module, failures: list[str]) -> None:
+def _part_2_accept(rs, model_client_module, sfp_module, failures: list[str]) -> None:
     bundle = _load_bundle()
-    docx_bytes = _build_draft_docx(dsf_module, {})  # no overrides: identical to the standard form
+    docx_bytes = _build_draft_docx(sfp_module, {})  # no overrides: identical to the standard form
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client_module.FakeBedrockClient(
@@ -649,10 +656,10 @@ def _part_3_normalization_notes_survive_fail_closed(
 
 
 def _part_4_schema_enforcement_requested_keys(
-    rs, model_client_module, dsf_module, failures: list[str]
+    rs, model_client_module, sfp_module, failures: list[str]
 ) -> None:
     bundle = _load_bundle()
-    docx_bytes = _build_draft_docx(dsf_module, {"sec-8": _SEC8_DRAFT_TEXT})
+    docx_bytes = _build_draft_docx(sfp_module, {"sec-8": _SEC8_DRAFT_TEXT})
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
 
@@ -788,6 +795,62 @@ def _part_5_unnormalizable_input_carries_normalization_notes(
         )
 
 
+# ---------------------------------------------------------------------------
+# Part 6: issue #685 -- a document whose ONLY pending revisions are
+# FORMATTING ones produces no per-paragraph accept note, so the pre-#685
+# `if normalization_notes:` gate never materialized it and the
+# counterparty's own `*PrChange` markup rode into the delivered redline
+# unaccepted and undisclosed. Asserted HERE, not in
+# tests/test_formatting_revision_acceptance_685.py, because this file owns
+# the run_review harness (_load_bundle / FakeBedrockClient) and a test file
+# must not import another test file's fixtures.
+# ---------------------------------------------------------------------------
+
+
+def _formatting_revision_only_p(text: str) -> str:
+    """A run whose formatting was changed with track changes on (bold ->
+    not bold): the live `<w:rPr>` holds the CURRENT properties, the
+    `<w:rPrChange>` record holds the previous ones. No `<w:ins>`/`<w:del>`
+    anywhere, so nothing in TEXT space is pending at all -- which is exactly
+    why this case used to slip past stage 1 untouched. Word writes this
+    shape whenever a reviewer re-formats text with tracking enabled."""
+    return (
+        "<w:p><w:r><w:rPr>"
+        '<w:rPrChange w:id="7" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
+        "<w:rPr><w:b/></w:rPr></w:rPrChange>"
+        f"</w:rPr><w:t>{text}</w:t></w:r></w:p>"
+    )
+
+
+def _part_6_formatting_revision_disclosure_reaches_the_result(
+    rs, model_client_module, failures: list[str]
+) -> None:
+    bundle = _load_bundle()
+    body = _heading_p("Sovereign Immunity") + _formatting_revision_only_p(
+        "Nothing in this Agreement waives any immunity of either party."
+    )
+    docx_bytes = _build_docx_bytes(body)
+    primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
+    # Same stubbing as Part 3: two schema-invalid responses exhaust the
+    # primary pass's bounded retry budget, so the review fails closed after
+    # stage 1 -- the disclosure must still reach the caller.
+    fake_client = model_client_module.FakeBedrockClient(
+        {primary_id: ["not valid json at all", "still not valid json"]}
+    )
+
+    result = rs.run_review(docx_bytes, bundle, fake_client, review_id="spine-test-6")
+
+    notes = result.get("normalization_notes") or ""
+    if "rPrChange" not in notes:
+        failures.append(
+            f"[6a] A document whose only pending revisions are formatting "
+            f"ones must still disclose that stage 1 accepted them (issue "
+            f"#685) -- otherwise the counterparty's own 'Formatted: ...' "
+            f"revisions are folded in silently, or not at all. Got "
+            f"normalization_notes={notes!r}"
+        )
+
+
 def main() -> int:
     failures: list[str] = []
 
@@ -797,14 +860,15 @@ def main() -> int:
         print(f"[G0] {missing}")
         return 1
 
-    import diff_standard_form as dsf_module  # noqa: E402
+    import synthetic_form_paragraphs as sfp_module  # noqa: E402
     import model_client as model_client_module  # noqa: E402
 
-    _part_1_request_change(rs, model_client_module, dsf_module, failures)
-    _part_2_accept(rs, model_client_module, dsf_module, failures)
+    _part_1_request_change(rs, model_client_module, sfp_module, failures)
+    _part_2_accept(rs, model_client_module, sfp_module, failures)
     _part_3_normalization_notes_survive_fail_closed(rs, model_client_module, failures)
-    _part_4_schema_enforcement_requested_keys(rs, model_client_module, dsf_module, failures)
+    _part_4_schema_enforcement_requested_keys(rs, model_client_module, sfp_module, failures)
     _part_5_unnormalizable_input_carries_normalization_notes(rs, model_client_module, failures)
+    _part_6_formatting_revision_disclosure_reaches_the_result(rs, model_client_module, failures)
 
     if failures:
         print("FAIL: review spine gate (issue #239).\n")

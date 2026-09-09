@@ -88,6 +88,7 @@ import model_client as mc  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
 import floor_judge as fj  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 BEDROCK_PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"  # policy: prompt_caching true
 BEDROCK_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"  # policy: declares neither field
@@ -339,6 +340,10 @@ class FakeHttpClient:
     def __init__(self, response: FakeHttpResponse) -> None:
         self.response = response
         self.calls: list[dict[str, Any]] = []
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url: str, json: Any = None, headers: Any = None) -> FakeHttpResponse:  # noqa: A002
         self.calls.append({"url": url, "json": json, "headers": headers})

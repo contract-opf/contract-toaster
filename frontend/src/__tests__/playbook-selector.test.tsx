@@ -42,6 +42,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  choosePlaybook,
+  findReviewResult,
+  openPlaybookCatalog,
+  playbookStop,
+  playbookStops,
+  pressSubmit,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -99,21 +107,22 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
 
     render(<ReviewSubmission />);
 
-    const dial = await screen.findByTestId('review-playbook-dial');
-    expect(dial).toHaveAttribute('role', 'radiogroup');
+    await screen.findByTestId('review-playbook-dial');
 
-    const stops = within(dial).getAllByRole('radio');
-    // 'nda' is registered but not activated -- it still gets a stop, marked
-    // "(coming soon)": the dial is the roadmap as well as the control.
-    expect(stops.map((s) => s.textContent)).toEqual([
+    // 'nda' is registered but not activated -- it still appears, marked as
+    // coming soon: the control is the roadmap as well as the control. Issue
+    // #733: the console says that with a disabled <option> rather than an
+    // aria-disabled radio, so the LIST is compared, not the markup.
+    const stops = playbookStops();
+    expect(stops.map((stop) => stop.id)).toEqual(['eiaa', 'sample-agreement', 'nda']);
+    expect(stops.map((stop) => stop.label.replace(/\s*[(·]\s*coming soon\)?/i, ''))).toEqual([
       'EIAA',
       'Sample Agreement',
-      'NDA (coming soon)',
+      'NDA',
     ]);
-    // The default selection never parks on a stop the user can't pick.
-    expect(stops[0]).toHaveAttribute('aria-checked', 'true');
-    expect(stops[1]).toHaveAttribute('aria-checked', 'false');
-    expect(stops[2]).toHaveAttribute('aria-checked', 'false');
+    expect(stops[2].label.toLowerCase()).toContain('coming soon');
+    // The default selection never parks on something the user can't pick.
+    expect(stops.map((stop) => stop.selected)).toEqual([true, false, false]);
   });
 
   it('shows an unactivated playbook but refuses to select it', async () => {
@@ -123,36 +132,15 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
     await screen.findByTestId('review-playbook-dial');
 
     // Visible, and honestly labelled...
-    const nda = screen.getByTestId('review-playbook-option-nda');
-    expect(nda).toHaveTextContent('NDA (coming soon)');
-    // ...but marked unavailable to assistive tech rather than removed from it.
-    expect(nda).toHaveAttribute('aria-disabled', 'true');
+    expect(playbookStop('nda')!.label.toLowerCase()).toContain('coming soon');
+    // ...but marked unavailable rather than removed.
+    expect(playbookStop('nda')!.selectable).toBe(false);
 
-    // Clicking it selects nothing: an unactivated playbook can only fail at
-    // load_playbook, so the dial never offers that as a choice.
-    fireEvent.click(nda);
-    expect(nda).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByTestId('review-playbook-option-eiaa')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-  });
-
-  it('skips coming-soon stops when arrowing, so the keyboard cannot reach what the mouse cannot click', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const nda = screen.getByTestId('review-playbook-option-nda');
-
-    // EIAA -> Sample Agreement -> wraps back to EIAA, never landing on NDA.
-    fireEvent.keyDown(dial, { key: 'ArrowRight' });
-    fireEvent.keyDown(dial, { key: 'ArrowRight' });
-    expect(screen.getByTestId('review-playbook-option-eiaa')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(nda).toHaveAttribute('aria-checked', 'false');
+    // And choosing it selects nothing: an unactivated playbook can only fail
+    // at load_playbook, so neither surface offers that as a choice.
+    await choosePlaybook('nda');
+    expect(playbookStop('nda')!.selected).toBe(false);
+    expect(playbookStop('eiaa')!.selected).toBe(true);
   });
 
   it('says so when no playbooks are loaded, instead of an unexplained empty dial', async () => {
@@ -165,24 +153,8 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
     render(<ReviewSubmission />);
 
     expect(await screen.findByTestId('review-no-playbooks')).toHaveTextContent(
-      /no contract types are loaded/i,
+      /no playbook is active/i,
     );
-  });
-
-  it('is keyboard-operable: ArrowRight moves the checked stop, wrapping around', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const [eiaa, sample] = within(dial).getAllByRole('radio');
-
-    fireEvent.keyDown(dial, { key: 'ArrowRight' });
-    expect(sample).toHaveAttribute('aria-checked', 'true');
-    expect(eiaa).toHaveAttribute('aria-checked', 'false');
-
-    fireEvent.keyDown(dial, { key: 'ArrowRight' });
-    expect(eiaa).toHaveAttribute('aria-checked', 'true');
-    expect(sample).toHaveAttribute('aria-checked', 'false');
   });
 
   // ---------------------------------------------------------------------
@@ -195,108 +167,6 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
   // cover is pixels — "focus stays visible" is a rendered-style question and
   // jsdom runs with `css: false`; that half stays owed to a browser pass.
   // ---------------------------------------------------------------------
-
-  it('moves backwards on ArrowLeft, wrapping past the start', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const [eiaa, sample] = within(dial).getAllByRole('radio');
-
-    // From the first stop, back wraps to the LAST SELECTABLE stop — which is
-    // 'sample-agreement', not the coming-soon 'nda' that ends the list.
-    fireEvent.keyDown(dial, { key: 'ArrowLeft' });
-    expect(sample).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.keyDown(dial, { key: 'ArrowLeft' });
-    expect(eiaa).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('treats ArrowDown/ArrowUp as the vertical synonyms of Right/Left', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const [eiaa, sample] = within(dial).getAllByRole('radio');
-
-    fireEvent.keyDown(dial, { key: 'ArrowDown' });
-    expect(sample).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.keyDown(dial, { key: 'ArrowUp' });
-    expect(eiaa).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('jumps to the first and last SELECTABLE stop on Home/End', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const [eiaa, sample] = within(dial).getAllByRole('radio');
-    const nda = screen.getByTestId('review-playbook-option-nda');
-
-    fireEvent.keyDown(dial, { key: 'End' });
-    // 'nda' is the last stop in the DOM but the last *reachable* one is
-    // 'sample-agreement' — End must not park selection on a coming-soon stop
-    // that neither click nor arrow keys can reach.
-    expect(sample).toHaveAttribute('aria-checked', 'true');
-    expect(nda).toHaveAttribute('aria-checked', 'false');
-
-    fireEvent.keyDown(dial, { key: 'Home' });
-    expect(eiaa).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('keeps a single tab stop and moves focus with the selection (roving tabindex)', async () => {
-    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const [eiaa, sample] = within(dial).getAllByRole('radio');
-    const nda = screen.getByTestId('review-playbook-option-nda');
-
-    // Exactly one stop is in the tab order at rest — the checked one.
-    expect(eiaa).toHaveAttribute('tabindex', '0');
-    expect(sample).toHaveAttribute('tabindex', '-1');
-    expect(nda).toHaveAttribute('tabindex', '-1');
-
-    fireEvent.keyDown(dial, { key: 'ArrowRight' });
-
-    // Focus follows selection, or a keyboard user's next arrow press lands on
-    // an element that is no longer the checked stop.
-    expect(document.activeElement).toBe(sample);
-    expect(sample).toHaveAttribute('tabindex', '0');
-    expect(eiaa).toHaveAttribute('tabindex', '-1');
-
-    fireEvent.keyDown(dial, { key: 'End' });
-    expect(document.activeElement).toBe(sample);
-
-    fireEvent.keyDown(dial, { key: 'Home' });
-    expect(document.activeElement).toBe(eiaa);
-  });
-
-  it('ignores Home/End when only one stop is selectable, rather than throwing', async () => {
-    stubFetch({
-      'GET /api/playbooks': {
-        playbooks: [
-          { playbook_id: 'eiaa', display_name: 'EIAA', status: 'active' },
-          { playbook_id: 'nda', display_name: 'NDA', status: 'coming_soon' },
-        ],
-      },
-    });
-
-    render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    const eiaa = screen.getByTestId('review-playbook-option-eiaa');
-
-    // This is production's shape today (audit §E6): one selectable stop.
-    fireEvent.keyDown(dial, { key: 'End' });
-    fireEvent.keyDown(dial, { key: 'Home' });
-    fireEvent.keyDown(dial, { key: 'ArrowRight' });
-    expect(eiaa).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('review-playbook-option-nda')).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
-  });
 
   it('appends the CHOSEN playbook_id to the submitted FormData and shows the type in the result view', async () => {
     const fetchMock = stubFetch({
@@ -313,17 +183,15 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
 
     render(<ReviewSubmission />);
     await screen.findByTestId('review-playbook-dial');
-    // Pick the SECOND loaded stop, so a passing assertion can't come from the
-    // default selection.
-    const sampleStop = await screen.findByTestId('review-playbook-option-sample-agreement');
-
-    fireEvent.click(sampleStop);
-    expect(sampleStop).toHaveAttribute('aria-checked', 'true');
+    // Pick the SECOND loaded playbook, so a passing assertion can't come from
+    // the default selection.
+    await choosePlaybook('sample-agreement');
+    expect(playbookStop('sample-agreement')!.selected).toBe(true);
 
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
 
     await waitFor(() => {
       const submitCall = fetchMock.mock.calls.find(([, init]) => {
@@ -336,6 +204,7 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
       expect(body.get('playbook_id')).toBe('sample-agreement');
     });
 
+    await findReviewResult();
     const label = await screen.findByTestId('review-submitted-playbook');
     expect(label.textContent).toContain('Sample Agreement');
   });
@@ -359,7 +228,7 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
     fireEvent.change(screen.getByTestId('review-file-input'), {
       target: { files: [docxFile()] },
     });
-    fireEvent.click(screen.getByTestId('review-submit-button'));
+    await pressSubmit();
 
     const error = await screen.findByTestId('review-submit-error');
     expect(error.textContent).toContain('no active playbook');
@@ -373,6 +242,57 @@ describe('contract-type dial — ReviewSubmission.tsx', () => {
     render(<ReviewSubmission />);
 
     await waitFor(() => expect(screen.getByTestId('review-submission')).toBeInTheDocument());
-    expect(screen.queryByTestId('review-playbook-dial')).toBeNull();
+    // Nothing to choose from, and nothing pretending otherwise: the console
+    // keeps the empty control with its "Choose a playbook" placeholder and
+    // offers no options (issue #733).
+    expect(playbookStops()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The console's own playbook control (issue #733).
+//
+// The dial's radiogroup became two things: a native <select> — whose keyboard
+// contract is the platform's, not ours to reimplement or to re-test — and a
+// searchable catalog dialog for a list too long to spin through. The
+// guarantees above are asserted through the control itself; these are the ones
+// only the second shape can carry.
+// ---------------------------------------------------------------------------
+describe('the console catalog dialog', () => {
+  it('is a native select, so the browser owns the keyboard contract', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+    render(<ReviewSubmission />);
+
+    const control = await screen.findByTestId('review-playbook-dial');
+    expect(control.tagName).toBe('SELECT');
+    expect(control).toHaveAccessibleName('Playbook type');
+  });
+
+  it('lists every registered playbook, and refuses the unactivated one', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+    render(<ReviewSubmission />);
+    await screen.findByTestId('review-playbook-dial');
+
+    const dialog = await openPlaybookCatalog();
+    for (const entry of CATALOG) {
+      expect(within(dialog).getByTestId(`review-playbook-option-${entry.playbook_id}`))
+        .toBeInTheDocument();
+    }
+    expect(screen.getByTestId('review-playbook-option-nda')).toBeDisabled();
+  });
+
+  it('filters by name and selects the entry that is chosen', async () => {
+    stubFetch({ 'GET /api/playbooks': { playbooks: CATALOG } });
+    render(<ReviewSubmission />);
+    await screen.findByTestId('review-playbook-dial');
+
+    const dialog = await openPlaybookCatalog();
+    fireEvent.change(within(dialog).getByRole('searchbox'), {
+      target: { value: 'sample' },
+    });
+    expect(screen.queryByTestId('review-playbook-option-eiaa')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('review-playbook-option-sample-agreement'));
+    await waitFor(() => expect(playbookStop('sample-agreement')!.selected).toBe(true));
   });
 });

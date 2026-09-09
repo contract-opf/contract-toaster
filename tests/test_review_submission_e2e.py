@@ -243,11 +243,17 @@ class TestIdempotencyKeyDerivation(unittest.TestCase):
 
 class TestSpendReservation(unittest.TestCase):
     def test_reservation_is_retry_inclusive_and_per_model(self):
-        """reservation = (1 + max_retries) * sum over {primary, critic} of
-        (max_in * that model's input rate + max_out * that model's output
-        rate) -- issue #189: each pass priced at its OWN model's rate, not a
-        single blended rate applied to both passes."""
-        attempts_per_pass = 1 + _reviews_module.MAX_RETRIES_PER_PASS
+        """reservation = (1 + max_retries + max_truncation_retries) * sum over
+        {primary, critic} of (max_in * that model's input rate + max_out *
+        that model's output rate) -- issue #189: each pass priced at its OWN
+        model's rate, not a single blended rate applied to both passes; issue
+        #658: truncation's own retry allowance is a real extra model call and
+        the reservation counts it."""
+        attempts_per_pass = (
+            1
+            + _reviews_module.MAX_RETRIES_PER_PASS
+            + _reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
+        )
         primary_usd = _reviews_module.MAX_INPUT_TOKENS * (
             _reviews_module.PRIMARY_INPUT_RATE_USD_PER_MILLION / 1_000_000
         ) + _reviews_module.MAX_OUTPUT_TOKENS * (
@@ -265,13 +271,13 @@ class TestSpendReservation(unittest.TestCase):
         )
 
     def test_reservation_matches_architecture_md_worst_case(self):
-        """The reservation must match ARCHITECTURE.md's documented $2.46
+        """The reservation must match ARCHITECTURE.md's documented $6.86
         worst-case/review (issue #625 raised MAX_INPUT_TOKENS to 100_000;
-        it was $2.11 at 80_000), not the pre-fix blended-rate figure (issue
-        #189: applying a single blended 'Opus output' rate to ALL tokens
-        overshot by 4.6x and 429'd the third review of any day against the
-        $20/day cap)."""
-        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 246)
+        issue #658 replaced the flat 8_000 output budget with the sizing
+        function's worst case of 32_000 and added truncation's own retry
+        attempt), not the pre-fix blended-rate figure (issue #189: applying a
+        single blended 'Opus output' rate to ALL tokens overshot by 4.6x)."""
+        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 686)
 
     def test_reservation_fails_closed_over_daily_cap(self):
         ddb = FakeDynamoDBResource()

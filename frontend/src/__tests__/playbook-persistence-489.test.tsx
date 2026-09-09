@@ -12,8 +12,9 @@
  * Fully offline: aws-amplify/auth is mocked; fetch is stubbed per test.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { choosePlaybook, playbookStop } from './support/consoleSurface';
 import { LAST_PLAYBOOK_STORAGE_KEY } from '../lastPlaybook';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -56,11 +57,9 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
     stubFetch({ 'GET /api/playbooks': { playbooks: TWO_ACTIVE }, 'GET /api/reviews': { reviews: [] } });
 
     render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    expect(within(dial).getByTestId('review-playbook-option-eiaa')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
+    await screen.findByTestId('review-playbook-dial');
+    // Issue #733: which playbook is CHOSEN, whichever control expresses it.
+    expect(playbookStop('eiaa')!.selected).toBe(true);
   });
 
   it('selecting a different playbook persists it, and a fresh mount ("reload") restores it', async () => {
@@ -68,7 +67,7 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
 
     render(<ReviewSubmission />);
     await screen.findByTestId('review-playbook-dial');
-    fireEvent.click(screen.getByTestId('review-playbook-option-sample-agreement'));
+    await choosePlaybook('sample-agreement');
 
     await waitFor(() =>
       expect(window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY)).toBe('sample-agreement'),
@@ -78,15 +77,9 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
     // one against the same stubbed catalog.
     cleanup();
     render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
-    expect(within(dial).getByTestId('review-playbook-option-sample-agreement')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(within(dial).getByTestId('review-playbook-option-eiaa')).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
+    await screen.findByTestId('review-playbook-dial');
+    expect(playbookStop('sample-agreement')!.selected).toBe(true);
+    expect(playbookStop('eiaa')!.selected).toBe(false);
   });
 
   it('a stored id for a playbook an admin has since removed falls back to the default, no error', async () => {
@@ -101,12 +94,9 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
     });
 
     render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
+    await screen.findByTestId('review-playbook-dial');
 
-    expect(within(dial).getByTestId('review-playbook-option-eiaa')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
+    expect(playbookStop('eiaa')!.selected).toBe(true);
     expect(screen.queryByTestId('review-submit-error')).toBeNull();
     expect(screen.queryByTestId('review-catalog-error')).toBeNull();
 
@@ -130,15 +120,9 @@ describe('last-selected playbook persistence (issue #489, item 4)', () => {
     });
 
     render(<ReviewSubmission />);
-    const dial = await screen.findByTestId('review-playbook-dial');
+    await screen.findByTestId('review-playbook-dial');
 
-    expect(within(dial).getByTestId('review-playbook-option-eiaa')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(within(dial).getByTestId('review-playbook-option-sample-agreement')).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
+    expect(playbookStop('eiaa')!.selected).toBe(true);
+    expect(playbookStop('sample-agreement')!.selected).toBe(false);
   });
 });

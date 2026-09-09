@@ -52,7 +52,7 @@ export class CtToolbar extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    if (this._titleEl) {
+    if (this._titleEl || !this._title) {
       return;
     }
     const heading = document.createElement('h2');
@@ -72,8 +72,17 @@ export class CtToolbar extends LitElement {
 
   set title(value: string) {
     this._title = value;
-    if (this._titleEl) {
+    if (value) {
+      if (!this._titleEl) {
+        const heading = document.createElement('h2');
+        heading.className = 'ct-toolbar__title';
+        this.insertBefore(heading, this.firstChild);
+        this._titleEl = heading;
+      }
       this._titleEl.textContent = value;
+    } else if (this._titleEl) {
+      this._titleEl.remove();
+      this._titleEl = null;
     }
   }
 

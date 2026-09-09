@@ -27,7 +27,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
-import type { ToasterPhase } from '../toaster/Toaster';
+import type { ToasterPhase } from '../toaster/tabChrome';
 
 type TabChromeModule = typeof import('../toaster/tabChrome');
 

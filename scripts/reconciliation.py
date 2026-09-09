@@ -344,11 +344,15 @@ def run_two_pass_review(
         -- the primary pass failed (propagated verbatim; the critic is
         never invoked in this slice's contract, mirroring
         run_primary_pass's own oversized-doc short-circuit).
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "stage": "critic", ...}
+      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "stage": "critic",
+       "attempts": N | None, "last_error": ..., "reason": <token> | None}
         -- the primary pass succeeded but the critic pass did not (after
         its own bounded retry). The primary's schema-valid output is
         DELIBERATELY NOT reconciled/returned as a result here -- surfacing
         it would be exactly the silent single-pass DONE this rule forbids.
+        `stage` names WHERE it failed and is NOT a reason token: issue #665
+        -- `review_spine.critic_failure_reason` turns this dict into the
+        token the review row and the reader-facing copy are keyed by.
       {"status": "OK", "result": {...}}
         -- both passes succeeded; `result` is `reconcile()`'s merged
         output-schema-v1-shaped dict.
@@ -363,6 +367,16 @@ def run_two_pass_review(
             "stage": "critic",
             "attempts": (critic_pass_result or {}).get("attempts"),
             "last_error": (critic_pass_result or {}).get("last_error"),
+            # Issue #665: the critic pass's OWN reason token, when it made
+            # one. Only its oversized-prompt gate does
+            # (`reason="document_too_large"`, refused before any model call),
+            # and this composition used to drop it -- so the one critic
+            # failure that already carried a diagnosis arrived at the caller
+            # indistinguishable from the ones that did not.
+            # `review_spine.critic_failure_reason` is the reader of this key.
+            # None (not absent) when the pass named no reason, matching every
+            # other key of this dict.
+            "reason": (critic_pass_result or {}).get("reason"),
         }
 
     reconciled = reconcile(

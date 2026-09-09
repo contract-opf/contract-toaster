@@ -54,6 +54,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import {
   authorizedFetch,
+  DOCUMENT_PURGED_COPY,
   friendlyDownloadError,
   friendlyErrorMessage,
   readErrorDetail,
@@ -66,10 +67,6 @@ import {
 // not — the same "one table, not two" rule AdminDiagnostics.tsx applies to
 // `REASON_EXPLANATIONS`.
 import { formatFailureTime as formatEpochSeconds } from './AdminDiagnostics';
-// Same hash-shortening convention AdminPlaybooks.tsx's version trail table
-// already uses (full value never dropped -- carried on the cell's `title`
-// so it stays readable/copyable from the tooltip, never truncated away).
-import { shortenHash } from './AdminPlaybooks';
 // The outcome chip's label AND variant — imported, never re-derived. Before
 // issue #470 this screen read the label off `row.decision || row.status`
 // and the variant off a separate `historyStatusVariant(row.status)`: two
@@ -95,7 +92,16 @@ import {
 // Design section's "and in History's expanded row"). See coverNote.ts's
 // module docstring for why a 502 degrades quietly instead of throwing.
 import { butterIt, formatCostUsdCents, COVER_NOTE_FAILURE_COPY } from './coverNote';
-import { CtBanner, CtButton, CtCard, CtChip, CtProgress, CtTable, CtToolbar } from './ui/react';
+import {
+  CtBanner,
+  CtButton,
+  CtCard,
+  CtChip,
+  CtIconButton,
+  CtProgress,
+  CtTable,
+  CtToolbar,
+} from './ui/react';
 import { ToastReceipt } from './toaster/ToastReceipt';
 import type { ReceiptSource } from './toaster/receipt';
 
@@ -217,8 +223,9 @@ export function servedModelMismatch(row: HistoryRow): boolean {
   return pairs.some(([asked, served]) => Boolean(asked) && Boolean(served) && asked !== served);
 }
 
-const PURGED_MESSAGE =
-  'This document is no longer available — it was removed once its retention window passed.';
+/** The retention copy, now shared with the Review panel's own "Save original"
+ *  (issue #719) — see api.ts's DOCUMENT_PURGED_COPY. */
+const PURGED_MESSAGE = DOCUMENT_PURGED_COPY;
 
 function jsonFetch(path: string, init?: RequestInit): Promise<Response> {
   return authorizedFetch(path, {
@@ -252,11 +259,133 @@ export function describePlaybookVersion(row: HistoryRow): string {
   return parts.length > 0 ? parts.join(' · ') : `Version ${NOT_RECORDED.toLowerCase()}`;
 }
 
+export function formatRelativeTime(epoch: string | number | null | undefined): string {
+  if (!epoch) return '';
+  const seconds = typeof epoch === 'string' ? Number(epoch) : epoch;
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const diffSeconds = Math.max(0, nowSeconds - seconds);
+
+  if (diffSeconds < 60) return 'just now';
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 30) return `${diffDays}d ago`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths}mo ago`;
+  return `${Math.floor(diffDays / 365)}y ago`;
+}
+
+// ---------------------------------------------------------------------------
+// Width discipline (issue #668)
+//
+// The table scrolled horizontally at an ordinary desktop width, which meant a
+// reviewer could not see a row's outcome and its downloads at the same time —
+// the one thing the table is for. Three things made each row far wider than
+// the information in it: sentences where a mark would do, the content hash
+// printed inline, and the provider prefix on every model id. All three are
+// dealt with the same way: SHORTEN WHAT IS PAINTED, KEEP WHAT IS RECORDED.
+//
+// Nothing here deletes data. Each shortened value stays reachable two ways
+// that are not hover — the shortened element carries the full value as its
+// `title` for a mouse, and a real focusable `<button>` discloses it inline
+// for everyone else. Hover alone would have traded a scrollbar for
+// provenance a keyboard or screen-reader user simply cannot get, which is
+// exactly what this issue forbids (same bar as #656: accessible names, not
+// visual output).
+// ---------------------------------------------------------------------------
+
+/**
+ * A model id with its provider segment dropped, for DISPLAY only.
+ *
+ * `anthropic/claude-opus-5` paints as `claude-opus-5`. The provider is the
+ * same on every row of a page — it is the widest constant in the column and
+ * distinguishes nothing, so it costs width and buys no information.
+ *
+ * Only a leading `provider/` segment is dropped, and only when something
+ * follows it. Bedrock's ids (`anthropic.claude-opus-4-8`,
+ * model-policy/bedrock-us-east-1.json) carry no `/` at all and are returned
+ * untouched rather than guessed at by splitting on the dot — that would eat
+ * the model family, not a provider.
+ */
+export function modelDisplayName(id: string): string {
+  const cut = id.lastIndexOf('/');
+  return cut >= 0 && cut < id.length - 1 ? id.slice(cut + 1) : id;
+}
+
+/**
+ * Every model id recorded on a row, labelled, for the cell's disclosure.
+ * Requested and served are named as such: "asked X, served Y" has to stay
+ * answerable from the row itself (issues #508/#514) even though only the
+ * short names are painted.
+ */
+export function fullModelIdLines(row: HistoryRow): string[] {
+  const pairs: Array<[string, string | null | undefined]> = [
+    ['Primary requested', row.primary_model_id],
+    ['Primary served', row.served_primary_model_id],
+    ['Critic requested', row.critic_model_id],
+    ['Critic served', row.served_critic_model_id],
+  ];
+  return pairs.filter(([, id]) => Boolean(id)).map(([label, id]) => `${label}: ${id}`);
+}
+
+/**
+ * One model id as the cell paints it: the short name, with the full id as
+ * hover text. An unrecorded id renders `NOT_RECORDED` and carries no
+ * `title` — there is no fuller value to hover, and inventing one is the
+ * fabricated-audit-record failure this screen exists to refuse.
+ */
+function ModelName({
+  id,
+  testId,
+}: {
+  id: string | null | undefined;
+  testId: string;
+}): React.ReactElement {
+  if (!id) {
+    return (
+      <span className="ct-table__mono" data-testid={testId}>
+        {NOT_RECORDED}
+      </span>
+    );
+  }
+  return (
+    <span className="ct-table__mono" data-testid={testId} title={id}>
+      {modelDisplayName(id)}
+    </span>
+  );
+}
+
+/**
+ * A non-interactive status mark standing in for a sentence that used to be
+ * painted in the cell ("No redline was produced.").
+ *
+ * `role="img"` + `aria-label` is what keeps the sentence in the accessibility
+ * tree — a bare glyph would be announced as "em dash" or skipped entirely,
+ * and a bare `title` is a mouse-only affordance. Nothing is disclosed here
+ * because there is nothing to disclose: the meaning IS the absence.
+ */
+function AbsentMark({ label, testId }: { label: string; testId: string }): React.ReactElement {
+  return (
+    <span className="ct-muted" role="img" aria-label={label} title={label} data-testid={testId}>
+      —
+    </span>
+  );
+}
+
 export default function ReviewHistory(): React.ReactElement {
   const [load, setLoad] = useState<LoadState<HistoryRow[]>>({ status: 'loading' });
   // Per-row UI state, keyed by review_id. Kept out of the row objects so a
   // refresh replaces the data without discarding what the user has open.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Issue #668's inline disclosures (the content hash, and the full model
+  // ids), keyed `${review_id}:${what}` so one row's open hash does not open
+  // every row's. Same "kept out of the row objects" rule as `expanded`
+  // directly above: a Refresh must not slam shut what the user opened.
+  const [disclosed, setDisclosed] = useState<Record<string, boolean>>({});
   // Paging (issue #488). `nextToken` is what the server handed back; null
   // means this is the whole listing and there is no "Show more" to offer.
   const [nextToken, setNextToken] = useState<string | null>(null);
@@ -381,6 +510,29 @@ export default function ReviewHistory(): React.ReactElement {
     void loadHistory(nextToken);
   }, [nextToken, loadingMore, loadHistory]);
 
+  const [outcomeFilter, setOutcomeFilter] = useState<'all' | 'redline' | 'clean' | 'failed'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredRows = (load.status === 'ready' ? load.data : []).filter((row) => {
+    if (outcomeFilter === 'redline' && row.decision !== 'REQUEST_CHANGE') return false;
+    if (outcomeFilter === 'clean' && row.decision !== 'ACCEPT') return false;
+    if (
+      outcomeFilter === 'failed' &&
+      row.status !== 'FAILED' &&
+      row.status !== 'CANCELLED' &&
+      row.status !== 'ERROR'
+    ) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchId = row.review_id.toLowerCase().includes(q);
+      const matchPlaybook = Boolean(row.playbook_id?.toLowerCase().includes(q));
+      if (!matchId && !matchPlaybook) return false;
+    }
+    return true;
+  });
+
   /** Fetch the review's own detail record for its instructions, once. */
   const loadGuidance = useCallback(async (reviewId: string) => {
     setGuidance((current) => ({ ...current, [reviewId]: { status: 'loading' } }));
@@ -437,6 +589,12 @@ export default function ReviewHistory(): React.ReactElement {
     },
     [guidance, loadGuidance],
   );
+
+  /** Open/close one inline disclosure (issue #668). Purely local: the values
+   * it reveals are already on the row, so nothing is fetched. */
+  const toggleDisclosure = useCallback((key: string) => {
+    setDisclosed((current) => ({ ...current, [key]: !current[key] }));
+  }, []);
 
   /**
    * Mint a presigned URL for one of the review's two documents and hand it to
@@ -594,7 +752,7 @@ export default function ReviewHistory(): React.ReactElement {
 
   return (
     <section data-testid="review-history-panel" className="ct-section ct-stack">
-      <CtToolbar title="History">
+      <CtToolbar>
         <div slot="actions">
           <CtButton
             type="button"
@@ -638,8 +796,89 @@ export default function ReviewHistory(): React.ReactElement {
         <CtProgress data-testid="review-history-loading" label="Loading your history…" />
       ) : (
         <CtCard data-testid="review-history-table-panel">
+          <div
+            className="ct-row ct-row--between ct-row--wrap"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '0.75rem 1rem',
+              gap: '0.75rem',
+              borderBottom: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
+                Filter:
+              </span>
+              {(['all', 'redline', 'clean', 'failed'] as const).map((filterKey) => {
+                const labels: Record<string, string> = {
+                  all: 'All',
+                  redline: 'Redlines (Changes)',
+                  clean: 'Clean (Accepted)',
+                  failed: 'Failed / Stopped',
+                };
+                const active = outcomeFilter === filterKey;
+                return (
+                  <button
+                    key={filterKey}
+                    type="button"
+                    data-testid={`history-filter-${filterKey}`}
+                    style={{
+                      background: active ? 'var(--ct-accent, #646cff)' : 'var(--ct-bg-subtle, rgba(255,255,255,0.06))',
+                      color: active ? '#fff' : 'var(--ct-text, #fff)',
+                      border: active ? '1px solid var(--ct-accent, #646cff)' : '1px solid var(--ct-border-subtle, rgba(255,255,255,0.1))',
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '16px',
+                      fontSize: 'var(--ct-text-sm)',
+                      cursor: 'pointer',
+                      fontWeight: active ? 600 : 400,
+                    }}
+                    onClick={() => setOutcomeFilter(filterKey)}
+                  >
+                    {labels[filterKey]}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <input
+                type="search"
+                placeholder="Search history…"
+                data-testid="history-search-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  padding: '0.25rem 0.6rem',
+                  fontSize: 'var(--ct-text-sm)',
+                  borderRadius: '6px',
+                  background: 'var(--ct-bg, #1e1e1e)',
+                  border: '1px solid var(--ct-border, rgba(255,255,255,0.15))',
+                  color: 'inherit',
+                  width: '14rem',
+                }}
+              />
+              <span className="ct-muted" style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}>
+                Showing {filteredRows.length} of {load.data.length}
+              </span>
+            </div>
+          </div>
           <CtTable>
-            <table data-testid="history-table">
+            {/*
+              `ct-table--wrap-headings` (issue #668): ct-table.css pins every
+              `thead th` to `white-space: nowrap`, which makes each heading's
+              min-content width the width of the WHOLE heading string — so
+              "Playbook & version" and "Instructions" were the widest things
+              in their columns and forced the table past the viewport. This
+              opt-in lets them break onto a second line instead. The opt-in is
+              per-table rather than a change to the base rule because the
+              admin tables' headings are short enough to fit on one line and
+              read better that way. The stylesheet half of this pairing is
+              guarded by layout-audit.mjs check 8 — the component suite runs
+              with `css: false` and cannot see a stylesheet at all.
+            */}
+            <table className="ct-table--wrap-headings" data-testid="history-table">
               <thead>
                 <tr>
                   <th>Toasted</th>
@@ -658,13 +897,43 @@ export default function ReviewHistory(): React.ReactElement {
                       Nothing toasted yet. Reviews you run will appear here.
                     </td>
                   </tr>
+                ) : filteredRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="ct-table__empty" data-testid="review-history-empty-filter">
+                      No reviews match the selected filter.
+                      <br />
+                      <button
+                        type="button"
+                        style={{
+                          marginTop: '0.5rem',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--ct-accent)',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                        }}
+                        onClick={() => {
+                          setOutcomeFilter('all');
+                          setSearchQuery('');
+                        }}
+                      >
+                        Clear filters
+                      </button>
+                    </td>
+                  </tr>
                 ) : (
-                  load.data.map((row) => {
+                  filteredRows.map((row) => {
                     const isExpanded = Boolean(expanded[row.review_id]);
                     const guidanceState = guidance[row.review_id];
                     const message = actionMessage[row.review_id];
                     const isBusy = Boolean(busy[row.review_id]);
                     const outcomeChip = describeOutcome(row.status, row.decision);
+                    // Issue #668's two inline disclosures for this row.
+                    const hashKey = `${row.review_id}:hash`;
+                    const modelIdsKey = `${row.review_id}:model-ids`;
+                    const hashOpen = Boolean(disclosed[hashKey]);
+                    const modelIdsOpen = Boolean(disclosed[modelIdsKey]);
+                    const modelIdLines = fullModelIdLines(row);
                     return (
                       <Fragment key={row.review_id}>
                         <tr data-testid={`history-row-${row.review_id}`}>
@@ -672,29 +941,52 @@ export default function ReviewHistory(): React.ReactElement {
                             className="ct-table__mono"
                             data-testid={`history-toasted-${row.review_id}`}
                           >
-                            {formatEpochSeconds(row.created_at)}
+                            <time title={formatEpochSeconds(row.created_at)} style={{ cursor: 'help' }}>
+                              {formatRelativeTime(row.created_at)
+                                ? `${formatRelativeTime(row.created_at)} · `
+                                : ''}
+                              {formatEpochSeconds(row.created_at)}
+                            </time>
                           </td>
+                          {/*
+                            Issue #668: the content hash used to be painted
+                            inline as `(sha256:f046bd48c615…)`. It is a
+                            provenance fact worth KEEPING and almost never
+                            worth READING, and it was the widest thing in this
+                            column. It is now disclosed on demand — by a real
+                            focusable button, not by hover alone — and shown in
+                            FULL when disclosed, rather than shortened away.
+                          */}
                           <td data-testid={`history-playbook-${row.review_id}`}>
                             <span className="ct-table__mono">{row.playbook_id || '—'}</span>
                             <br />
-                            <small
-                              className="ct-muted"
-                              title={
-                                row.playbook_content_hash
-                                  ? `Content hash: ${row.playbook_content_hash}`
-                                  : undefined
-                              }
-                            >
-                              {describePlaybookVersion(row)}
-                              {row.playbook_content_hash ? (
-                                <>
-                                  {' '}
-                                  <span className="ct-table__mono">
-                                    ({shortenHash(row.playbook_content_hash)})
-                                  </span>
-                                </>
-                              ) : null}
-                            </small>
+                            <small className="ct-muted">{describePlaybookVersion(row)}</small>
+                            {row.playbook_content_hash ? (
+                              <>
+                                {' '}
+                                <CtIconButton
+                                  label={
+                                    hashOpen
+                                      ? 'Hide the playbook content hash'
+                                      : 'Show the playbook content hash'
+                                  }
+                                  title={`Content hash: ${row.playbook_content_hash}`}
+                                  aria-pressed={hashOpen}
+                                  data-testid={`history-hash-toggle-${row.review_id}`}
+                                  onClick={() => toggleDisclosure(hashKey)}
+                                >
+                                  {hashOpen ? '▾' : '▸'}
+                                </CtIconButton>
+                                {hashOpen && (
+                                  <div
+                                    className="ct-table__mono"
+                                    data-testid={`history-hash-${row.review_id}`}
+                                  >
+                                    {row.playbook_content_hash}
+                                  </div>
+                                )}
+                              </>
+                            ) : null}
                           </td>
                           <td data-testid={`history-outcome-${row.review_id}`}>
                             <CtChip variant={outcomeChip.variant}>{outcomeChip.label}</CtChip>
@@ -707,9 +999,16 @@ export default function ReviewHistory(): React.ReactElement {
                           <td data-testid={`history-models-${row.review_id}`}>
                             <small>
                               Primary:{' '}
-                              <span className="ct-table__mono">
-                                {row.primary_model_id || NOT_RECORDED}
-                              </span>
+                              {/* Issue #668: the NAME is painted, the provider
+                                  prefix is not — it is identical on every row
+                                  of the page, so it cost two columns' worth of
+                                  width to distinguish nothing. The full id
+                                  stays on this span's `title`, and on the
+                                  cell's disclosure below. */}
+                              <ModelName
+                                id={row.primary_model_id}
+                                testId={`history-model-primary-${row.review_id}`}
+                              />
                               {/* The served id is shown ONLY when it differs.
                                   Printing "asked X, served X" on every row
                                   doubles the cell's height to say nothing, and
@@ -720,24 +1019,27 @@ export default function ReviewHistory(): React.ReactElement {
                                 row.served_primary_model_id !== row.primary_model_id && (
                                   <>
                                     {' → served '}
-                                    <span className="ct-table__mono">
-                                      {row.served_primary_model_id}
-                                    </span>
+                                    <ModelName
+                                      id={row.served_primary_model_id}
+                                      testId={`history-model-served-primary-${row.review_id}`}
+                                    />
                                   </>
                                 )}
                               <br />
                               Critic:{' '}
-                              <span className="ct-table__mono">
-                                {row.critic_model_id || NOT_RECORDED}
-                              </span>
+                              <ModelName
+                                id={row.critic_model_id}
+                                testId={`history-model-critic-${row.review_id}`}
+                              />
                               {row.served_critic_model_id &&
                                 row.critic_model_id &&
                                 row.served_critic_model_id !== row.critic_model_id && (
                                   <>
                                     {' → served '}
-                                    <span className="ct-table__mono">
-                                      {row.served_critic_model_id}
-                                    </span>
+                                    <ModelName
+                                      id={row.served_critic_model_id}
+                                      testId={`history-model-served-critic-${row.review_id}`}
+                                    />
                                   </>
                                 )}
                               {servedModelMismatch(row) && (
@@ -752,59 +1054,133 @@ export default function ReviewHistory(): React.ReactElement {
                                 </>
                               )}
                             </small>
+                            {/*
+                              "Which model ran each step" is the audit trail,
+                              so dropping the provider prefix has to be a
+                              disclosure, not a deletion — and a `title` alone
+                              is a mouse-only affordance. This button is the
+                              keyboard/assistive-tech route to the same values.
+                              A row that recorded no id at all has nothing to
+                              disclose and gets no control (an empty one would
+                              read as "there is an id, go find it").
+                            */}
+                            {modelIdLines.length > 0 && (
+                              <>
+                                {' '}
+                                <CtIconButton
+                                  label={
+                                    modelIdsOpen
+                                      ? 'Hide the full model ids'
+                                      : 'Show the full model ids'
+                                  }
+                                  title={modelIdLines.join('\n')}
+                                  aria-pressed={modelIdsOpen}
+                                  data-testid={`history-model-ids-toggle-${row.review_id}`}
+                                  onClick={() => toggleDisclosure(modelIdsKey)}
+                                >
+                                  {modelIdsOpen ? '▾' : '▸'}
+                                </CtIconButton>
+                                {modelIdsOpen && (
+                                  <div
+                                    className="ct-table__mono"
+                                    data-testid={`history-model-ids-${row.review_id}`}
+                                  >
+                                    {modelIdLines.map((line) => (
+                                      <div key={line}>{line}</div>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            )}
                           </td>
+                          {/*
+                            Issue #668: "Show instructions"/"Hide instructions"
+                            was a sentence in a cell. The control keeps both
+                            meanings — as its ACCESSIBLE NAME and its hover
+                            text — and adds `aria-pressed`, so the open/closed
+                            state is announced rather than inferred from a
+                            label that is no longer painted.
+                          */}
                           <td>
-                            <CtButton
-                              type="button"
-                              variant="ghost"
-                              size="sm"
+                            <CtIconButton
+                              label={
+                                isExpanded
+                                  ? 'Hide the instructions applied to this review'
+                                  : 'Show the instructions applied to this review'
+                              }
+                              title={
+                                isExpanded
+                                  ? 'Hide the instructions applied to this review'
+                                  : 'Show the instructions applied to this review'
+                              }
+                              aria-pressed={isExpanded}
                               data-testid={`history-guidance-toggle-${row.review_id}`}
                               onClick={() => toggleGuidance(row.review_id)}
                             >
-                              {isExpanded ? 'Hide instructions' : 'Show instructions'}
-                            </CtButton>
+                              {isExpanded ? '▾' : '▸'}
+                            </CtIconButton>
                           </td>
+                          {/*
+                            Issue #668: the two downloads are marks, not
+                            sentences, and the two "there is nothing here"
+                            sentences are marks too. Both downloads keep a
+                            DISTINCT accessible name — side-by-side glyphs are
+                            only tellable apart by name, which is the whole
+                            risk of trading words for icons — and the absent
+                            cases keep their explanation as an accessible name
+                            rather than leaving an unexplained blank. They sit
+                            on one row (`ct-actions`) instead of stacking,
+                            which is what lets the column be narrow rather than
+                            merely shorter.
+                          */}
                           <td data-testid={`history-actions-${row.review_id}`}>
-                            <div className="ct-stack">
+                            <div className="ct-row">
                               {row.has_output ? (
-                                <CtButton
-                                  type="button"
-                                  variant="secondary"
-                                  size="sm"
+                                <CtIconButton
+                                  label="Download the redline"
+                                  title="Download the redline"
                                   disabled={isBusy}
                                   data-testid={`history-download-output-${row.review_id}`}
                                   onClick={() => void downloadDocument(row.review_id, 'output')}
                                 >
-                                  Redline
-                                </CtButton>
+                                  ✎
+                                </CtIconButton>
                               ) : (
-                                <small className="ct-muted">No redline was produced.</small>
+                                <AbsentMark
+                                  label="No redline was produced."
+                                  testId={`history-no-output-${row.review_id}`}
+                                />
                               )}
                               {row.has_input ? (
-                                <CtButton
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
+                                <CtIconButton
+                                  label="Download the input document"
+                                  title="Download the input document"
                                   disabled={isBusy}
                                   data-testid={`history-download-input-${row.review_id}`}
                                   onClick={() => void downloadDocument(row.review_id, 'input')}
                                 >
-                                  Input document
-                                </CtButton>
+                                  ▤
+                                </CtIconButton>
                               ) : (
-                                <small className="ct-muted">
-                                  Input document {NOT_RECORDED.toLowerCase()}.
-                                </small>
-                              )}
-                              {message && (
-                                <small
-                                  className="ct-muted"
-                                  data-testid={`history-action-message-${row.review_id}`}
-                                >
-                                  {message}
-                                </small>
+                                <AbsentMark
+                                  label={`Input document ${NOT_RECORDED.toLowerCase()}.`}
+                                  testId={`history-no-input-${row.review_id}`}
+                                />
                               )}
                             </div>
+                            {/* The 410-Gone retention message stays PROSE and
+                                stays in the cell: it is a state the user has
+                                to be told about in words, not a standing
+                                property of the row that an icon could stand
+                                for, and it appears only after a click. */}
+                            {message && (
+                              <small
+                                className="ct-muted"
+                                data-testid={`history-action-message-${row.review_id}`}
+                              >
+                                {message}
+                              </small>
+                            )}
                           </td>
                           {/*
                             Disposition (issue #486) — optional, settable

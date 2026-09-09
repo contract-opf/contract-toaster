@@ -224,8 +224,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { authorizedFetch, friendlyErrorMessage, readErrorDetail, triggerBrowserDownload } from './api';
 import { linkifyText } from './linkify';
 import { deriveVersionIdentifier, readOpfIdentity } from './opfIdentity';
 import AdminInstructions from './AdminInstructions';
@@ -348,7 +349,7 @@ function versionChipVariant(status: PlaybookVersionStatus): CtChipVariant {
   }
 }
 
-export interface AdminPlaybooksProps {
+export interface AdminPlaybooksProps extends AdminPanelRefreshProps {
   /**
    * Issue #464: called after any mutation that can change what
    * GET /api/playbooks returns (rename, remove, activate, rollback, notes —
@@ -363,6 +364,7 @@ export interface AdminPlaybooksProps {
 
 export default function AdminPlaybooks({
   onCatalogChange,
+  credentialsRefreshKey = 0,
 }: AdminPlaybooksProps = {}): React.ReactElement | null {
   // Issue #511: two explicit three-state loads. Both previously shared ONE
   // `error` string alongside a `T | null` sentinel, so a failed catalog fetch
@@ -426,6 +428,21 @@ export default function AdminPlaybooks({
   // filename showing under an empty form.
   const [fileDropNonce, setFileDropNonce] = useState(0);
 
+  const [playbookSearchQuery, setPlaybookSearchQuery] = useState('');
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffVersionA, setDiffVersionA] = useState('');
+  const [diffVersionB, setDiffVersionB] = useState('');
+
+  const filteredPlaybooks = (playbooks ?? []).filter((entry) => {
+    if (!playbookSearchQuery.trim()) return true;
+    const q = playbookSearchQuery.toLowerCase().trim();
+    return (
+      entry.display_name.toLowerCase().includes(q) ||
+      entry.playbook_id.toLowerCase().includes(q) ||
+      Boolean(entry.notes?.toLowerCase().includes(q))
+    );
+  });
+
   // Create-playbook form (issue #485) — deliberately separate from the
   // upload form above, and with NO playbook_id field: identity comes from
   // the uploaded OPF document itself (POST /api/admin/playbooks derives it
@@ -458,6 +475,9 @@ export default function AdminPlaybooks({
           ),
         );
       }
+      // Issue #635: the latch tracks the server's CURRENT answer, not its
+      // first one — see adminRefresh.ts.
+      setIsForbidden(false);
       const data = (await response.json()) as { playbooks: PlaybookCatalogEntry[] };
       setPlaybooksLoad({ status: 'ready', data: data.playbooks });
     } catch (err) {
@@ -497,9 +517,12 @@ export default function AdminPlaybooks({
     }
   }, []);
 
+  // `credentialsRefreshKey` (issue #635) is what makes this effect run a
+  // SECOND time: the panel is mounted once and only `hidden` toggles, so
+  // without it a rotation that ends a 403 is never observed.
   useEffect(() => {
     void loadPlaybooks();
-  }, [loadPlaybooks]);
+  }, [loadPlaybooks, credentialsRefreshKey]);
 
   /**
    * Issue #611, restoring #484's "one playbook installed: preselected and
@@ -678,6 +701,51 @@ export default function AdminPlaybooks({
         onSuccess: () => refreshAfterVersionChange(playbookId),
       }),
     [refreshAfterVersionChange, runAction],
+  );
+
+  const downloadVersion = useCallback(
+    async (playbookId: string, version: string) => {
+      const path = `/api/admin/playbooks/${encodeURIComponent(playbookId)}/versions/${encodeURIComponent(version)}/download`;
+      setActionError(null);
+      setPendingAction(`download:${version}`);
+      try {
+        const response = await authorizedFetch(path);
+        if (response.status === 403) {
+          setIsForbidden(true);
+          return;
+        }
+        if (response.status === 410) {
+          throw new Error('This playbook version is no longer available in storage.');
+        }
+        if (!response.ok) {
+          const detail = await readErrorDetail(response);
+          throw new Error(
+            detail ??
+              friendlyErrorMessage(
+                `GET playbook version download ${playbookId}/${version}`,
+                "We couldn't download that playbook version. Please try again.",
+              ),
+          );
+        }
+        const data = (await response.json()) as { url?: string };
+        if (!data.url) {
+          throw new Error('Download URL missing from response.');
+        }
+        triggerBrowserDownload(data.url);
+      } catch (err) {
+        setActionError(
+          err instanceof Error
+            ? err.message
+            : friendlyErrorMessage(
+                err,
+                "We couldn't download that playbook version. Please try again.",
+              ),
+        );
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [],
   );
 
   // Issue #595 retired the standalone `approveVersion`. Approval on its own
@@ -1125,7 +1193,7 @@ export default function AdminPlaybooks({
 
   return (
     <section data-testid="admin-playbooks-panel" className="ct-section ct-stack">
-      <CtToolbar title="Playbooks">
+      <CtToolbar>
         <div slot="actions">
           <CtButton
             type="button"
@@ -1138,25 +1206,6 @@ export default function AdminPlaybooks({
             }}
           >
             Upload new playbook
-          </CtButton>
-          <CtButton
-            type="button"
-            variant="primary"
-            data-testid="admin-playbooks-upload-toggle"
-            onClick={() => {
-              setUploadResult(null);
-              setUploadError(null);
-              setUploadOpen((open) => {
-                const next = !open;
-                const firstPlaybookId = playbooks?.[0]?.playbook_id;
-                if (next && uploadPlaybookId === '' && firstPlaybookId !== undefined) {
-                  setUploadPlaybookId(selectedPlaybookId ?? firstPlaybookId);
-                }
-                return next;
-              });
-            }}
-          >
-            Upload version
           </CtButton>
         </div>
       </CtToolbar>
@@ -1193,6 +1242,42 @@ export default function AdminPlaybooks({
         <CtProgress data-testid="admin-playbooks-loading" label="Loading playbooks…" />
       ) : playbooks === null ? null : (
         <CtCard data-testid="admin-playbooks-table-panel">
+          <div
+            className="ct-row ct-row--between"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '0.75rem 1rem',
+              gap: '0.75rem',
+              borderBottom: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+            }}
+          >
+            <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
+              Catalog
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <input
+                type="search"
+                placeholder="Filter playbooks…"
+                data-testid="playbooks-search-input"
+                value={playbookSearchQuery}
+                onChange={(e) => setPlaybookSearchQuery(e.target.value)}
+                style={{
+                  padding: '0.25rem 0.6rem',
+                  fontSize: 'var(--ct-text-sm)',
+                  borderRadius: '6px',
+                  background: 'var(--ct-bg, #1e1e1e)',
+                  border: '1px solid var(--ct-border, rgba(255,255,255,0.15))',
+                  color: 'inherit',
+                  width: '14rem',
+                }}
+              />
+              <span className="ct-muted" style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}>
+                Showing {filteredPlaybooks.length} of {playbooks.length}
+              </span>
+            </div>
+          </div>
           <CtTable>
             <table data-testid="playbooks-table">
               <thead>
@@ -1211,8 +1296,29 @@ export default function AdminPlaybooks({
                       No playbooks yet.
                     </td>
                   </tr>
+                ) : filteredPlaybooks.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="ct-table__empty" data-testid="admin-playbooks-empty-filter">
+                      No playbooks match &ldquo;{playbookSearchQuery}&rdquo;.
+                      <br />
+                      <button
+                        type="button"
+                        style={{
+                          marginTop: '0.5rem',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--ct-accent)',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                        }}
+                        onClick={() => setPlaybookSearchQuery('')}
+                      >
+                        Clear filter
+                      </button>
+                    </td>
+                  </tr>
                 ) : (
-                  playbooks.map((entry) => (
+                  filteredPlaybooks.map((entry) => (
                     <tr key={entry.playbook_id} data-testid={`playbook-row-${entry.playbook_id}`}>
                       <td>
                         {renamingId === entry.playbook_id ? (
@@ -1257,7 +1363,7 @@ export default function AdminPlaybooks({
                       </td>
                       <td className="ct-table__mono">{entry.playbook_id}</td>
                       <td data-testid={`playbook-status-${entry.playbook_id}`}>
-                        <CtChip variant={catalogChipVariant(entry.status)}>
+                        <CtChip variant={catalogChipVariant(entry.status)} dot={entry.status === 'active'}>
                           {catalogStatusLabel(entry.status)}
                         </CtChip>
                       </td>
@@ -1276,7 +1382,7 @@ export default function AdminPlaybooks({
                             ordering: "third in a stack" is exactly what this
                             replaces. */}
                         <div
-                          className="ct-row-actions"
+                          className="ct-row-actions ct-actions-grid-2x2"
                           role="group"
                           data-testid={`playbook-row-actions-${entry.playbook_id}`}
                           aria-label={`Actions for ${entry.display_name}`}
@@ -1402,6 +1508,22 @@ export default function AdminPlaybooks({
             <div slot="actions">
               <CtButton
                 type="button"
+                variant="primary"
+                size="sm"
+                data-testid="admin-playbooks-upload-toggle"
+                onClick={() => {
+                  setUploadResult(null);
+                  setUploadError(null);
+                  if (historyPlaybookId) {
+                    setUploadPlaybookId(historyPlaybookId);
+                  }
+                  setUploadOpen((open) => !open);
+                }}
+              >
+                Upload version
+              </CtButton>
+              <CtButton
+                type="button"
                 variant="secondary"
                 size="sm"
                 data-testid="admin-playbooks-versions-close"
@@ -1447,7 +1569,194 @@ export default function AdminPlaybooks({
               label="Loading version history…"
             />
           ) : (
-            <CtTable>
+            <>
+              {versions.length >= 2 && (
+                <div
+                  style={{
+                    marginBottom: '1rem',
+                    padding: '0.75rem',
+                    borderRadius: '6px',
+                    background: 'var(--ct-bg-subtle, rgba(255, 255, 255, 0.03))',
+                    border: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600 }}>
+                      Version Comparison
+                    </span>
+                    <CtButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      data-testid="playbook-diff-toggle"
+                      onClick={() => {
+                        if (!diffOpen) {
+                          const activeVer =
+                            versions.find((v) => v.status === 'active')?.version ??
+                            versions[0].version;
+                          const otherVer =
+                            versions.find((v) => v.version !== activeVer)?.version ??
+                            versions[1]?.version ??
+                            '';
+                          setDiffVersionA(activeVer);
+                          setDiffVersionB(otherVer);
+                        }
+                        setDiffOpen((o) => !o);
+                      }}
+                    >
+                      {diffOpen ? 'Hide comparison' : 'Compare versions'}
+                    </CtButton>
+                  </div>
+
+                  {diffOpen && (
+                    <div
+                      className="ct-stack"
+                      style={{ marginTop: '0.75rem', gap: '0.75rem' }}
+                      data-testid="playbook-diff-panel"
+                    >
+                      <div
+                        className="ct-row"
+                        style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}
+                      >
+                        <label
+                          style={{
+                            fontSize: 'var(--ct-text-sm)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                          }}
+                        >
+                          <span>Version A:</span>
+                          <select
+                            value={diffVersionA}
+                            onChange={(e) => setDiffVersionA(e.target.value)}
+                            data-testid="playbook-diff-select-a"
+                            style={{
+                              fontSize: 'var(--ct-text-sm)',
+                              padding: '0.2rem 0.4rem',
+                              borderRadius: '4px',
+                              background: 'var(--ct-bg)',
+                            }}
+                          >
+                            {versions.map((v) => (
+                              <option key={v.version} value={v.version}>
+                                v{v.version} ({v.status})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label
+                          style={{
+                            fontSize: 'var(--ct-text-sm)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                          }}
+                        >
+                          <span>Version B:</span>
+                          <select
+                            value={diffVersionB}
+                            onChange={(e) => setDiffVersionB(e.target.value)}
+                            data-testid="playbook-diff-select-b"
+                            style={{
+                              fontSize: 'var(--ct-text-sm)',
+                              padding: '0.2rem 0.4rem',
+                              borderRadius: '4px',
+                              background: 'var(--ct-bg)',
+                            }}
+                          >
+                            {versions.map((v) => (
+                              <option key={v.version} value={v.version}>
+                                v{v.version} ({v.status})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      {(() => {
+                        const verA = versions.find((v) => v.version === diffVersionA);
+                        const verB = versions.find((v) => v.version === diffVersionB);
+                        if (!verA || !verB) return null;
+                        const sameHash =
+                          verA.content_hash &&
+                          verB.content_hash &&
+                          verA.content_hash === verB.content_hash;
+                        return (
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(2, 1fr)',
+                              gap: '0.75rem',
+                              padding: '0.75rem',
+                              borderRadius: '4px',
+                              background: 'var(--ct-bg-card, rgba(0,0,0,0.2))',
+                              border:
+                                '1px solid var(--ct-border-subtle, rgba(255,255,255,0.06))',
+                              fontSize: 'var(--ct-text-sm)',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
+                                Version {verA.version} ({verA.status})
+                              </div>
+                              <div className="ct-muted">
+                                Hash:{' '}
+                                <span className="ct-table__mono">
+                                  {verA.content_hash ? shortenHash(verA.content_hash) : '—'}
+                                </span>
+                              </div>
+                              <div className="ct-muted">
+                                Uploaded by: {verA.uploaded_by || '—'}
+                              </div>
+                              <div style={{ marginTop: '0.4rem' }}>
+                                <strong>Note:</strong> {verA.notes || '—'}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>
+                                Version {verB.version} ({verB.status})
+                              </div>
+                              <div className="ct-muted">
+                                Hash:{' '}
+                                <span className="ct-table__mono">
+                                  {verB.content_hash ? shortenHash(verB.content_hash) : '—'}
+                                </span>
+                              </div>
+                              <div className="ct-muted">
+                                Uploaded by: {verB.uploaded_by || '—'}
+                              </div>
+                              <div style={{ marginTop: '0.4rem' }}>
+                                <strong>Note:</strong> {verB.notes || '—'}
+                              </div>
+                            </div>
+                            <div
+                              style={{
+                                gridColumn: '1 / -1',
+                                paddingTop: '0.4rem',
+                                borderTop:
+                                  '1px solid var(--ct-border-subtle, rgba(255,255,255,0.06))',
+                              }}
+                            >
+                              <CtChip variant={sameHash ? 'ok' : 'warn'}>
+                                {sameHash ? 'Identical content bytes' : 'Content bytes differ'}
+                              </CtChip>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+              <CtTable>
               <table data-testid="playbook-versions-table">
                 <thead>
                   <tr>
@@ -1558,6 +1867,16 @@ export default function AdminPlaybooks({
                         </td>
                         <td>
                           <div className="ct-actions" role="group">
+                            <CtButton
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              data-testid={`playbook-version-download-${row.version}`}
+                              disabled={pendingAction === `download:${row.version}`}
+                              onClick={() => void downloadVersion(row.playbook_id, row.version)}
+                            >
+                              Download
+                            </CtButton>
                             {/* The APPROVAL STATE of this row, as a note —
                                 never a control. Since issue #595 the only
                                 approval control is the merged action below.
@@ -1685,6 +2004,7 @@ export default function AdminPlaybooks({
                 </tbody>
               </table>
             </CtTable>
+            </>
           )}
         </CtCard>
         </div>

@@ -156,6 +156,17 @@ For infrastructure: identify the previous stable revision of `infra/`, check it 
 
 ### Revising the standard form
 
+> **Retired 2026-09-02 (issue #631).** This procedure is no longer executable.
+> The anchor-map builder (`scripts/build_anchor_map.py`), the standard-form diff
+> and the two anchor CI gates it depends on were deleted with the rest of the
+> anchor-map / standard-form-diff subsystem — issue spotting has been LLM-native
+> since the 2026-07-22 decision (D3), and an edit is addressed by block
+> transcript, not by a section anchor. The committed `standard-forms/` artifacts
+> and the `anchor_map_hash` / `standard_form_hash` release-bundle fields remain
+> valid governed history; do not recompute them. Revising a tenant's canonical
+> standard form is **not a supported operation today** — it needs a rebuilt
+> toolchain first. The procedure below is kept as the record of what it was.
+
 The canonical standard form (in `standard-forms/`) is versioned in lockstep with
 the playbook.  A revision to the form must go through this procedure — an informal
 edit breaks the content-address guarantee and will fail the heading-hash drift and
@@ -397,13 +408,13 @@ If a retention change and a hold ever appear to conflict, the hold wins. Never w
 
 Admin UI → Settings → **Daily spend ceiling** (default `$20/day`). The dashboard shows today's spend against the ceiling. Once the cap is reached, new reviews are refused with a clear message until the next day; in-flight reviews finish.
 
-The cap is enforced by an **atomic reservation**, not a pre-check: before a pipeline starts, the API conditionally increments a daily DynamoDB spend counter by a **worst-case upper-bound** estimate (max input + output tokens × both passes × uncached pricing — the real token cost is not known until extraction, which happens later in the pipeline); if that would exceed the ceiling the increment fails and the review is refused. Actual cost is **settled** against the counter after the run (every model attempt is ledgered, including failures and retries), correcting the estimate downward. Reserving the *worst case* is what makes concurrent submissions safe — several uploads at once cannot collectively overshoot the cap before any settles. Note this also means the cap admits ~8 worst-case reviews per day at the default `$20` (comfortably above the expected 2–7/day peak); the documented max-reviews/day figure lives with the per-review caps. The same reservation/ledger also governs **CI evaluation** Bedrock spend so the harness cannot bypass the ceiling.
+The cap is enforced by an **atomic reservation**, not a pre-check: before a pipeline starts, the API conditionally increments a daily DynamoDB spend counter by a **worst-case estimate priced from the per-review caps** (max input tokens + the fail-closed output ceiling × both passes × every allowed attempt, at uncached pricing — the real token cost is not known until extraction, which happens later in the pipeline); if that would exceed the ceiling the increment fails and the review is refused. Actual cost is **settled** against the counter after the run (every model attempt is ledgered, including failures and retries). Reserving from the caps is what makes concurrent submissions safe — several uploads at once cannot each slip under the cap before any settles. Note this means the cap admits ~2 reservations held at once at the default `$20` (~$6.86 reserved per review), and ~25 typical reviews run one after another as each settles. Since issue #658 the reservation is **not** an upper bound on settle: a large document on a model declaring a 128,000-token output cap can settle at ~$19.54, so settlement sometimes corrects *upward*. The documented max-reviews/day figure and that residual live with the per-review caps. The same reservation/ledger also governs **CI evaluation** Bedrock spend so the harness cannot bypass the ceiling.
 
 **Users hitting the daily cap mid-day.** When a user receives a "daily limit reached" error on a legitimate review (not just a retry), the ceiling is full. Diagnose and resolve in this order:
 
 1. **Check for phantom reservations first.** Admin UI → Cost ledger → today's reservations. Compare the reserved total to the sum of settled, ledgered attempts for the day. A persistent gap with no active execution behind it is an abandoned (phantom) reservation inflating the counter. Resolve it via the admin reconcile action, which settles that review's reservation to its actual cost. Do not edit the counter by hand — a blind edit races live reservations.
-2. **If no phantoms, the cap is legitimately full.** At the default `$20/day` ceiling, ~8 worst-case reviews exhaust the budget (see [ARCHITECTURE.md](ARCHITECTURE.md) → Cost shape for the arithmetic). If the daily volume is regularly hitting this, raise the ceiling:
-   - Admin UI → Settings → **Daily spend ceiling** → increase (e.g. to `$50/day`, which allows ~20 worst-case or ~55 typical reviews per day while still bounding blast radius).
+2. **If no phantoms, the cap is legitimately full.** At the default `$20/day` ceiling, ~25 typical reviews (or ~2 reservations held at once) exhaust the budget (see [ARCHITECTURE.md](ARCHITECTURE.md) → Cost shape for the arithmetic; a concurrent pair of ~80-page reviews can settle at ~$39 and fill it on its own). If the daily volume is regularly hitting this, raise the ceiling:
+   - Admin UI → Settings → **Daily spend ceiling** → increase (e.g. to `$50/day`, which allows ~7 concurrent reservations, or ~63 typical reviews per day, while still bounding blast radius).
    - The new ceiling applies immediately; in-flight reviews unaffected.
 3. **After a ceiling raise, reconcile.** If phantom reservations also contributed, reconcile them after the raise so tomorrow starts clean.
 4. Log the ceiling change to the audit record (the change writes an audit entry automatically).
@@ -465,16 +476,16 @@ notes mode actually put internal-audience content in scope (`internal`/`both`; t
 production while issue #572's `NOTES_MODE_ENABLED` kill switch is off, so every review currently
 produces a document with no marker in any part). The marker carries no approval semantics: nothing
 in this product requires or enforces attorney approval, and the marker does not gate, sign, or
-record anything. Placement differs by generation path — the live first-party redline places it in
-the running every-page header/footer only; the standalone writer used for fixture generation
-additionally places it as a first-page cover note. Counterparty (third-party) paper used that
-writer until issue #629 moved it onto the shared block compiler, so it now takes the header/footer
-placement too — no delivered redline you will ever hold carries a cover page.
+record anything. Placement is the same on every generation path — the running every-page
+header/footer, for first-party and counterparty (third-party) paper alike (issue #629 moved
+third-party onto the shared block compiler). No delivered redline you will ever hold carries a
+cover page: that placement belonged to the standalone writer used for fixture generation, which
+issue #631 deleted (retired 2026-09-02).
 
 **There is no de-marking procedure, and none is coming.** The marker is not decoration on top of an
 otherwise-safe document — it is a signal that the document's footnotes and rationale text actually
 carry internal-audience content, placed there because the notes mode asked for it. Deleting the
-marker text from the header/footer (or the cover note) would not delete that content; it would just
+marker text from the header/footer would not delete that content; it would just
 make an internal-notes document LOOK external-safe while still carrying internal-audience commentary
 a counterparty was never meant to see. Do not edit a marked `.docx` to remove the marker and send it
 on.

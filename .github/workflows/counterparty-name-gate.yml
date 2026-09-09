@@ -1,0 +1,44 @@
+name: counterparty-name-gate
+
+# Issue #341: no counterparty identity on the public surface.
+#
+# The failure this exists to prevent already happened once. On 2026-09-04 two
+# docs landed under docs/ -- not a manifest-excluded path -- quoting a real
+# counterparty agreement filename, and passed every gate the repo had. The
+# public repo escaped only because the previous cut predated them.
+#
+# The scanner (tests/lint-counterparty-names.py) is PUBLIC and carries no data.
+# The token list is PRIVATE and lives in overlay/, which public-cut-exclude.txt
+# excludes wholesale. So this gate does real work in the private origin, where
+# the overlay is present, and SKIPS in the public repo, where it is not --
+# deliberately, so an outside contributor can still run the checks and push.
+#
+# A finding prints the file, the line, and the token's INDEX in the private
+# list. Never the token, never the line: a CI log is public too.
+#
+# scripts/check.sh also runs this file (its loop picks up tests/lint-*.py), and
+# scripts/public-cut.sh runs it as a hard check on the publish path. This
+# workflow blocks pushes and pull requests independently of both.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  counterparty-names:
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Counterparty-name lint
+        run: python3 tests/lint-counterparty-names.py
+
+      - name: Scanner regression tests
+        run: python3 tests/test_counterparty_scanner_341.py

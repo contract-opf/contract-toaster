@@ -22,6 +22,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -35,6 +40,9 @@ vi.mock('aws-amplify/auth', () => ({
 // fetch stub — routes by "METHOD path" (falls back to path-only for GETs),
 // mirroring security-posture.test.tsx.
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // The catalog is part of every route table here, not part of any scenario:
+  // without it the console's lever never arms (issue #733).
+  routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -65,8 +73,12 @@ async function submitAndReachResult(): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
-  await screen.findByTestId('review-result');
+  await pressSubmit();
+  // Issue #733: the console keeps a finished review's facts in the record
+  // overlay, so "reach the result" is a click there and a no-op on the old
+  // tree. Everything asserted below is about the review, not about which
+  // surface is mounted.
+  await findReviewResult();
 }
 
 // jsdom defines window.location.assign as non-configurable, so it can't be
@@ -211,17 +223,23 @@ describe('pre-download trust-calibration gate — ReviewSubmission.tsx', () => {
     await submitAndReachResult();
 
     const indicator = await screen.findByTestId('review-critic-delta');
-    const button = screen.getByTestId('review-download-button');
+    // The key IS offered — the gate below is about it not firing itself, not
+    // about it being withheld.
+    expect(screen.getByTestId('review-download-button')).toBeInTheDocument();
 
     // Contents surfaced.
     expect(indicator.textContent).toContain('drifts from the playbook position');
     expect(indicator.textContent).toContain('Cap liability at fees paid');
-    expect(screen.getByTestId('critic-added-issues').textContent).toContain('1 issue');
+    expect(screen.getByTestId('critic-added-issues').textContent).toContain('1');
 
-    // Normative gate: the indicator must precede the download button in
-    // document order so the attorney cannot reach download without passing it.
-    const relation = indicator.compareDocumentPosition(button);
-    expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Issue #733 — the gate MOVED, it did not weaken. On the console the
+    // indicator lives in the review record rather than above the key, so
+    // document order says nothing; what enforces the gate is
+    // ReviewSubmission's own `gateSatisfied` — a review carrying a delta is
+    // never saved automatically, so the redline cannot reach the disk without
+    // a deliberate press. That is the assertion here.
+    expect(anchorClickSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('review-saved-line')).toBeNull();
   });
 
   it('renders no critic-delta indicator when the delta is null or empty', async () => {

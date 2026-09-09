@@ -1,0 +1,54 @@
+name: published-tree-scan
+
+# Issue #341 — the backstop that makes fail-open safe.
+#
+# tests/lint-counterparty-names.py SKIPS when it cannot reach the private token
+# list. That is deliberate: an outside contributor without the overlay must
+# still be able to run the checks and push. The cost is that the gate protecting
+# the public repo does not run in the public repo.
+#
+# This job closes that hole from the only place that can: the private origin,
+# which has the token list. It clones the ALREADY-PUBLISHED tree and scans what
+# is actually live, on a schedule, regardless of who pushed it or how.
+#
+# It reports the file, the line, and the token's INDEX. Never the token, never
+# the line -- this log is readable by anyone with access to this repo, and the
+# whole point of the exercise is not to copy the secret around.
+#
+# If this ever fails, the leak is ALREADY PUBLIC. Treat it as an incident:
+# remove the content, and remember that git history in the public repo keeps it
+# reachable until that history is rewritten.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-published:
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Check out the private origin (for the scanner and the token list)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Clone the published tree
+        run: git clone --depth 1 https://github.com/contract-opf/contract-toaster.git published
+
+      - name: Confirm the token list is present
+        run: |
+          test -f overlay/counterparty-tokens.txt || {
+            echo "::error::overlay/counterparty-tokens.txt missing — this job cannot do its work"
+            exit 1
+          }
+
+      - name: Scan the published tree
+        run: python3 tests/lint-counterparty-names.py --tree published

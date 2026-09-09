@@ -59,6 +59,13 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import review_spine  # noqa: E402
 
 # Cross-file reuse of the already-proven docx builder / playbook loader /
@@ -216,14 +223,14 @@ def test_no_headings_matches_pre_fix_join(failures: list[str]) -> None:
 
 
 def test_run_review_sends_heading_to_model(failures: list[str]) -> None:
-    import diff_standard_form as dsf_module
+    import synthetic_form_paragraphs as sfp_module
     import model_client as model_client_module
 
     bundle = _load_bundle()
     # Unmodified draft (identical to the standard form) -- ACCEPT path,
     # the minimal-setup scenario. This test cares only about what reaches
     # the model's user_prompt, not the decision.
-    docx_bytes = _build_draft_docx(dsf_module, {})
+    docx_bytes = _build_draft_docx(sfp_module, {})
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     fake_client = model_client_module.FakeBedrockClient(

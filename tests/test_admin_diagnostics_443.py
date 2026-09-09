@@ -27,10 +27,12 @@ network, no AWS.
      appears anywhere in the response body. The route is a controlled
      projection, not a log viewer -- so the assertion is made against the RAW
      response text, not against a parsed subset, and the row shape is
-     asserted to be EXACTLY the nine documented fields (six, plus issue
+     asserted to be EXACTLY the ten documented fields (six, plus issue
      #616's three leakage-detector fields -- a category constant, a
      detector rule name and a model-output field NAME, never anything the
-     detector matched).
+     detector matched -- plus issue #665's `critic_attempts`, an integer
+     count of the retry budget the critic pass spent, computed by that pass
+     itself).
   4. BOUNDED. `?limit=` is clamped into [1, RECENT_FAILURES_MAX_LIMIT]; the
      default is RECENT_FAILURES_DEFAULT_LIMIT; a hostile `limit=100000`
      cannot turn the route into a full-table dump.
@@ -493,7 +495,7 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
             )
         ]
 
-    def test_row_shape_is_exactly_the_nine_documented_fields(self) -> None:
+    def test_row_shape_is_exactly_the_ten_documented_fields(self) -> None:
         row = self._get().json()["failures"][0]
         self.assertEqual(
             sorted(row.keys()),
@@ -510,6 +512,9 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
                     "leakage_category",
                     "leakage_rule_id",
                     "leakage_field_name",
+                    # Issue #665 -- null here too: this row did not fail on
+                    # the critic pass, so no attempt count was recorded.
+                    "critic_attempts",
                 ]
             ),
         )

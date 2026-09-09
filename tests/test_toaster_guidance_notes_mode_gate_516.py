@@ -98,8 +98,15 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631). Explicit rather than relying on the script's own
+# directory landing on sys.path.
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 import critic_review_pass as cp  # noqa: E402
-import diff_standard_form as dsf_module  # noqa: E402
+import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import review_spine  # noqa: E402
@@ -404,7 +411,7 @@ def test_end_to_end_redline_carries_no_narration_in_default_mode(failures: list[
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
 
-    docx_bytes = _build_draft_docx(dsf_module, {"sec-8": _SEC8_DRAFT_TEXT})
+    docx_bytes = _build_draft_docx(sfp_module, {"sec-8": _SEC8_DRAFT_TEXT})
     fake_client = model_client.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],

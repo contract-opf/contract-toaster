@@ -92,6 +92,8 @@ function stubRoutes(): void {
 async function openUploadVersion(): Promise<HTMLElement> {
   render(<AdminPlaybooks />);
   await screen.findByTestId('playbook-row-synthetic-nda-sample');
+  fireEvent.click(screen.getByTestId('playbook-versions-synthetic-nda-sample'));
+  await screen.findByTestId('admin-playbooks-versions-panel');
   fireEvent.click(screen.getByTestId('admin-playbooks-upload-toggle'));
   return screen.findByTestId('admin-playbooks-upload-panel');
 }

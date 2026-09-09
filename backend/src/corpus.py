@@ -25,7 +25,7 @@ live AWS and without issue #80 (OOXML paragraph extraction) being done yet:
 
   - `paragraphs`: the caller supplies already-extracted, already-normalized
     paragraphs (`[{"heading": ..., "text": ...}, ...]`) — the same input
-    shape scripts/diff_standard_form.py's `diff_draft_against_standard`
+    shape the retired standard-form diff's `diff_draft_against_standard`
     consumes. Real `.docx` paragraph extraction is issue #80's job; wiring
     that extractor in is a follow-up, not a redefinition of this contract.
   - `embed_fn`: a callable `(str) -> list[float]` for the pinned embedding
@@ -39,7 +39,7 @@ live AWS and without issue #80 (OOXML paragraph extraction) being done yet:
   1. `run_upload_gauntlet` (issue #63) — hostile-file checks on the raw bytes.
   2. `extract_clauses` — map each paragraph to a `playbook_topic_id` via the
      playbook's `section_anchors` (heading match against the anchor map,
-     same convention as diff_standard_form.py), producing clause text +
+     same convention as that diff used), producing clause text +
      metadata. A paragraph that matches no topic is skipped (not every
      paragraph of an executed agreement is a reviewable clause — e.g.
      signature blocks, recitals).
@@ -56,7 +56,7 @@ live AWS and without issue #80 (OOXML paragraph extraction) being done yet:
      clauses never share a top-K positive-precedent context.
   6. `build_manifest` — a content-addressed, deterministically-ordered
      manifest of the clause_ids ingested (`serialize_manifest` / hash),
-     mirroring `scripts/diff_standard_form.py`'s `serialize_diff`/`diff_hash`
+     mirroring the retired standard-form diff's `serialize_diff`/`diff_hash`
      determinism convention.
   7. `run_ingestion` — orchestrates 1-6 into a draft snapshot record. A
      failure at any stage marks the draft snapshot `failed` (never
@@ -499,7 +499,7 @@ def build_manifest(clause_ids: list[str], snapshot_version: str) -> dict[str, An
     """A content-addressed manifest of the clause_ids a snapshot contains.
 
     Sorted-key, deterministic JSON serialization (same convention as
-    scripts/diff_standard_form.py's serialize_diff/diff_hash) so the same
+    the retired standard-form diff's serialize_diff/diff_hash) so the same
     ingested clause set always produces the same manifest hash — required
     for "candidate pool reproducible" (ARCHITECTURE.md -> "Frozen
     content-addressed manifest").

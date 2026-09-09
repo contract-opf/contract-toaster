@@ -20,7 +20,7 @@
  * choice, shown only for the two modes that warrant it. No dialog, no
  * confirmation, no repetition. It follows #495's transparency rule in spirit:
  * `INTERNAL_MARKER_TEXT` below is the marker the document will ACTUALLY
- * carry, quoted verbatim from `scripts/redline_docx_writer.py::MARKER_TEXT`
+ * carry, quoted verbatim from `scripts/redline_generate.py::MARKER_TEXT`
  * rather than paraphrased, and `tests/test_user_preferences_523.py` pins the
  * two strings identical so the promise on screen cannot drift from the ink on
  * the page.
@@ -37,7 +37,7 @@ export type NotesMode = 'none' | 'external' | 'internal' | 'both';
 
 /**
  * The exact marker every page of an internal-notes document carries.
- * MUST stay character-identical to `scripts/redline_docx_writer.py`'s
+ * MUST stay character-identical to `scripts/redline_generate.py`'s
  * `MARKER_TEXT` — see the module docstring.
  */
 export const INTERNAL_MARKER_TEXT = 'contains internal notes — not for external transmission';
@@ -109,9 +109,10 @@ export function isNotesMode(value: unknown): value is NotesMode {
  * resolve_notes_mode` raises → HTTP 400), and the browser cannot see
  * deployment config, so `GET /api/me/preferences` reports it as
  * `notes_mode_available`. Offering a stop that is guaranteed to fail would be
- * a dead affordance dressed as a live one — the same reason `ContractTypeDial`
- * renders an unloaded playbook as a visible-but-unselectable "coming soon"
- * stop rather than hiding it or letting it 503.
+ * a dead affordance dressed as a live one — the same reason the console's
+ * playbook control (`orbit-diner/OrbitDiner.tsx`) renders an unloaded playbook
+ * as a visible-but-`disabled` "coming soon" option rather than hiding it or
+ * letting it 503.
  */
 export function isNotesModeAvailable(mode: NotesMode, internalAvailable: boolean): boolean {
   return internalAvailable || !notesModeSetting(mode).carriesInternalNotes;

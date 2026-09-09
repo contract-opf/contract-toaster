@@ -1058,7 +1058,17 @@ def test_run_primary_pass_rejects_inference_profile_before_any_call(failures: li
 
 
 def test_cost_model_constants_match_reviews_module(failures: list[str]) -> None:
-    for const_name in ("MAX_INPUT_TOKENS", "MAX_OUTPUT_TOKENS", "MAX_RETRIES_PER_PASS"):
+    # Issue #658 dropped MAX_OUTPUT_TOKENS from primary_review_pass.py: the
+    # per-request budget is no longer a flat constant to mirror, it is
+    # `model_client.output_budget_for_document(document_tokens, ceiling)`,
+    # which BOTH modules import rather than copy -- so there is nothing left
+    # to drift. reviews.py keeps the name for the reservation's worst case
+    # (test_output_budget_sizing_658.py ties that back to the same function).
+    for const_name in (
+        "MAX_INPUT_TOKENS",
+        "MAX_RETRIES_PER_PASS",
+        "MAX_TRUNCATION_RETRIES_PER_PASS",
+    ):
         pp_value = getattr(pp, const_name)
         reviews_value = getattr(_reviews_module, const_name)
         if pp_value != reviews_value:

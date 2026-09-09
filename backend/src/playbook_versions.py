@@ -406,6 +406,37 @@ def get_active_version_record(
     return _find_active_item(playbook_id, dynamodb_resource)
 
 
+def get_playbook_version_record(
+    playbook_id: str,
+    version: str,
+    dynamodb_resource: Any,
+) -> dict[str, Any] | None:
+    """Public read of a specific `playbook_versions` row, or None."""
+    return _get_version_item(playbook_id, version, dynamodb_resource)
+
+
+def record_playbook_version_download(
+    playbook_id: str,
+    version: str,
+    actor_identity: str,
+    storage_key: str,
+    dynamodb_resource: Any,
+) -> None:
+    """Append an immutable audit row for a playbook version download."""
+    _write_audit_entry(
+        dynamodb_resource=dynamodb_resource,
+        actor=actor_identity,
+        action="playbook_version_downloaded",
+        target=f"{playbook_id}#{version}",
+        detail={
+            "playbook_id": playbook_id,
+            "version": version,
+            "storage_key": storage_key,
+        },
+    )
+
+
+
 def activate_playbook_version(
     playbook_id: str,
     version: str,

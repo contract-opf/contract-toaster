@@ -26,6 +26,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import {
+  DEFAULT_PLAYBOOKS,
+  findReviewResult,
+  pressSubmit,
+  stateBadge,
+} from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -63,13 +69,14 @@ async function submit(): Promise<void> {
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
   });
-  fireEvent.click(screen.getByTestId('review-submit-button'));
+  await pressSubmit();
   await screen.findByTestId('review-status');
 }
 
 describe('toaster illustration — ReviewStatus visual states', () => {
   it('PENDING/RUNNING render the doneness-progress treatment, not the toast-up or sober one', async () => {
     stubFetch({
+      '/api/playbooks': DEFAULT_PLAYBOOKS,
       'POST /api/reviews': { review_id: 'rev-running', resumed: false },
       'GET /api/reviews/rev-running': {
         review_id: 'rev-running',
@@ -82,13 +89,16 @@ describe('toaster illustration — ReviewStatus visual states', () => {
 
     await submit();
 
-    expect(await screen.findByTestId('toaster-state-progress')).toBeInTheDocument();
-    expect(screen.queryByTestId('toaster-state-done')).toBeNull();
-    expect(screen.queryByTestId('toaster-state-sober')).toBeNull();
+    // Issue #733: `-progress` is the working progressbar on both surfaces;
+    // `-sober` resolves to the console's status-named terminal badge.
+    expect(await screen.findByTestId(stateBadge('progress'))).toBeInTheDocument();
+    expect(screen.queryByTestId(stateBadge('done'))).toBeNull();
+    expect(screen.queryByTestId(stateBadge('sober'))).toBeNull();
   });
 
   it('DONE renders the toast-up treatment alongside the unchanged download gate', async () => {
     stubFetch({
+      '/api/playbooks': DEFAULT_PLAYBOOKS,
       'POST /api/reviews': { review_id: 'rev-done', resumed: false },
       'GET /api/reviews/rev-done': {
         review_id: 'rev-done',
@@ -101,11 +111,11 @@ describe('toaster illustration — ReviewStatus visual states', () => {
     });
 
     await submit();
-    await screen.findByTestId('review-result');
+    await findReviewResult();
 
-    expect(screen.getByTestId('toaster-state-done')).toBeInTheDocument();
-    expect(screen.queryByTestId('toaster-state-progress')).toBeNull();
-    expect(screen.queryByTestId('toaster-state-sober')).toBeNull();
+    expect(screen.getByTestId(stateBadge('done'))).toBeInTheDocument();
+    expect(screen.queryByTestId(stateBadge('progress'))).toBeNull();
+    expect(screen.queryByTestId(stateBadge('sober'))).toBeNull();
 
     // The #255/#271 download gate is untouched: confidence band and download
     // button still render. Issue #492 removed the attorney-approval
@@ -124,14 +134,23 @@ describe('toaster illustration — ReviewStatus visual states', () => {
     expect(screen.getByTestId('review-outcome').textContent).toBe('Changes requested');
   });
 
+  // The ILLUSTRATION is deliberately shared by all three (see this file's
+  // header) — the sober treatment, never the popped toast. The HEADLINE is
+  // not: issue #666 split ERROR_MANUAL_REVIEW_REQUIRED's label off
+  // MANUAL_REVIEW_REQUIRED's, because a run that failed and produced nothing
+  // was reading in exactly the words of one that finished and is waiting on
+  // a human. The three expected labels below are therefore three DIFFERENT
+  // strings, and failed-review-outcome-666.test.tsx is what pins them apart
+  // across every surface rather than only this one.
   it.each([
     ['ERROR', 'Failed'],
     ['MANUAL_REVIEW_REQUIRED', 'Needs manual review'],
-    ['ERROR_MANUAL_REVIEW_REQUIRED', 'Needs manual review'],
+    ['ERROR_MANUAL_REVIEW_REQUIRED', 'Failed — needs manual review'],
   ])(
     '%s renders the sober treatment (outcome headline %s), never the toast-up one, and no attorney-approval disclaimer',
     async (status, outcomeLabel) => {
       stubFetch({
+        '/api/playbooks': DEFAULT_PLAYBOOKS,
         'POST /api/reviews': { review_id: `rev-${status}`, resumed: false },
         [`GET /api/reviews/rev-${status}`]: {
           review_id: `rev-${status}`,
@@ -143,11 +162,11 @@ describe('toaster illustration — ReviewStatus visual states', () => {
       });
 
       await submit();
-      await screen.findByTestId('review-result');
+      await findReviewResult();
 
-      expect(screen.getByTestId('toaster-state-sober')).toBeInTheDocument();
-      expect(screen.queryByTestId('toaster-state-done')).toBeNull();
-      expect(screen.queryByTestId('toaster-state-progress')).toBeNull();
+      expect(screen.getByTestId(stateBadge('sober', status))).toBeInTheDocument();
+      expect(screen.queryByTestId(stateBadge('done'))).toBeNull();
+      expect(screen.queryByTestId(stateBadge('progress'))).toBeNull();
       // Issue #492: the outcome headline, never the removed disclaimer.
       expect(screen.getByTestId('review-outcome').textContent).toBe(outcomeLabel);
       // "Tool recommendation only" is the removed disclaimer's own lead-in —
@@ -163,6 +182,7 @@ describe('toaster illustration — ReviewStatus visual states', () => {
 
   it('never renders an tenant-brand string across illustrated states', async () => {
     stubFetch({
+      '/api/playbooks': DEFAULT_PLAYBOOKS,
       'POST /api/reviews': { review_id: 'rev-brand', resumed: false },
       'GET /api/reviews/rev-brand': {
         review_id: 'rev-brand',
@@ -174,7 +194,7 @@ describe('toaster illustration — ReviewStatus visual states', () => {
     });
 
     await submit();
-    await screen.findByTestId('review-result');
+    await findReviewResult();
     expect(document.body.textContent ?? '').not.toMatch(/exos/i);
   });
 

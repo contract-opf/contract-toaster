@@ -1,0 +1,49 @@
+{
+  "name": "orbit-diner-04p2-artwork",
+  "baseline": "Accepted 04p1 kit",
+  "scope": "Artwork and exact visual positioning contribution, not the full functional 04p2 patch.",
+  "payloads": [
+    {
+      "path": "artwork/toaster.webp",
+      "bytes": 221298,
+      "sha256": "fec553f8b24c9b3846b2a01e6771d75951e6b9590c3f52efcc145a18f9c1c919",
+      "baseline_sha256": "62039fec24dcd5af35d10a735ee9d84b9baa46977df51a6992f1a8b0c6b986be"
+    },
+    {
+      "path": "artwork/masters/toaster.png",
+      "bytes": 2035719,
+      "sha256": "d6701489e333950014b18e2d35eb55d82f03715f1de5ec93ed61d2d8b7bcbc48",
+      "baseline_sha256": "da4bb9827f747b704c596a9325be5588b0d9da98653d36deb15b720399380671"
+    },
+    {
+      "path": "artwork/toaster-phone.webp",
+      "bytes": 233432,
+      "sha256": "cf5f77aa34805327078a030e713b63fc3ca7d1c0fbc41b21d5f0653a11e6d786",
+      "baseline_sha256": null
+    },
+    {
+      "path": "artwork/masters/toaster-phone.png",
+      "bytes": 2091802,
+      "sha256": "84072fca9eda8232d7dbf95244a445081affad58f17d80d4128ffed6524d92c8",
+      "baseline_sha256": null
+    },
+    {
+      "path": "artwork/assets.json",
+      "bytes": 1733,
+      "sha256": "85b41da4c6a7bca6b14882b0341df4ecd252ed89870c59fbdff6a115a30cd95f",
+      "baseline_sha256": "14fe4b44860581dfef7fe14e4218c6d4ac6aeebde489dae7580279113071e663"
+    },
+    {
+      "path": "src/MaterialArt.tsx",
+      "bytes": 5679,
+      "sha256": "9df342916976d270d4c0bb42ee0e44609136314acaaf8a55fd7795caf1b07c41",
+      "baseline_sha256": "a43d4cda6e0e7abd9cc3573edc44138f5d989aec721f2514b4508593ba1f11ef"
+    },
+    {
+      "path": "src/orbit-artwork-04p2.css",
+      "bytes": 3249,
+      "sha256": "f50cba56cba4676551f8ec297eda94bfa2f966018dbc1c420fb790e864ec3963",
+      "baseline_sha256": null
+    }
+  ]
+}

@@ -10,7 +10,7 @@ a playbook document trusted it blindly:
     `playbooks.active_release_bundle_hash` and handed the hash straight
     back to the caller -- it never checked that the ON-DISK playbook body
     for that hash's `playbook_id` was even schema-valid.
-  - `scripts/diff_standard_form.py`'s `_topic_text_by_anchor` silently
+  - the synthetic body builder's `topic_text_by_anchor` silently
     substituted an empty string (or, for a genuinely uncovered anchor, the
     heading text) for a topic's standard-form paragraph whenever
     `our_standard` was missing/blank -- corrupting the deterministic diff
@@ -25,7 +25,7 @@ This test proves:
      never a partial/invalid load.
   2. A covering topic missing `our_standard` is a hard, structural error
      -- both at the bundle-resolution seam (same 503 fail-closed refusal)
-     AND at `diff_standard_form._topic_text_by_anchor` (raises
+     AND at `synthetic_form_paragraphs.topic_text_by_anchor` (raises
      `playbook_validation.PlaybookValidationError` naming the offending
      topic -- never a silent substitution).
   3. A genuinely valid bundle (the real eiaa playbook) still
@@ -71,6 +71,12 @@ if str(BACKEND_ROOT) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+# `tests/synthetic_form_paragraphs.py` -- the synthetic-document fixture
+# builder (issue #631).
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-review-submissions-test-266")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test-266")
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test-266")
@@ -83,7 +89,7 @@ os.environ.setdefault(
 from fastapi import HTTPException  # noqa: E402
 
 import canonicalize  # noqa: E402
-import diff_standard_form  # noqa: E402
+import synthetic_form_paragraphs  # noqa: E402
 import playbook_registry  # noqa: E402
 import playbook_validation  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
@@ -264,16 +270,16 @@ class TestMissingOurStandardFailsClosed(SyntheticRegistryTestBase):
         self.assertEqual(ctx.exception.status_code, 503)
         self.assertEqual(ctx.exception.detail, "no active playbook")
 
-    def test_diff_standard_form_raises_a_clear_structural_error(self):
-        """The other consumer named in the issue: scripts/diff_standard_form.py's
-        _topic_text_by_anchor must raise -- never silently substitute the
-        heading text or an empty paragraph (diff_standard_form.py:315)."""
+    def test_topic_text_by_anchor_raises_a_clear_structural_error(self):
+        """The other consumer named in the issue: the synthetic body
+        builder's `topic_text_by_anchor` must raise -- never silently
+        substitute the heading text or an empty paragraph."""
         entry = playbook_registry.resolve_playbook(self.MISSING_STANDARD_ID)
         with open(entry.playbook_path, encoding="utf-8") as f:
             doc = json.load(f)
 
         with self.assertRaises(playbook_validation.PlaybookValidationError) as ctx:
-            diff_standard_form._topic_text_by_anchor(doc)
+            synthetic_form_paragraphs.topic_text_by_anchor(doc)
 
         self.assertIn(self.missing_standard_topic_id, str(ctx.exception))
 
@@ -303,25 +309,25 @@ class TestValidBundleUnaffected(unittest.TestCase):
     # though its actual assertions (non-empty text_by_anchor, "sec-2.1"
     # present) were content-agnostic and would keep passing. Coverage of
     # "_topic_text_by_anchor() produces non-empty per-anchor text" is not
-    # lost: tests/anchor/test_standard_form_anchor_map_211.py's G2b check and
-    # tests/diff/test_standard_form_loader_200.py's G1 check both exercise
-    # the same production code path against the (renamed) synthetic fixture.
+    # lost: this class's own
+    # test_topic_text_by_anchor_raises_a_clear_structural_error exercises
+    # the same code path, and every suite that builds a synthetic document
+    # through `tests/synthetic_form_paragraphs.py` exercises the non-empty
+    # per-anchor text it produces.
 
 
-# -- (4) diff_standard_form.py must import without jsonschema installed -----
+# -- (4) playbook_validation must import without jsonschema installed -------
 
-class TestDiffStandardFormStaysStdlibImportable(unittest.TestCase):
-    """scripts/diff_standard_form.py is imported by the "Deterministic
-    standard-form diff gate" CI job (.github/workflows/standard-form-diff-
-    gate.yml), which deliberately runs `python3 tests/diff/test_deterministic_
-    diff.py` with NO `pip install` step ("synthetic mode uses only the
-    stdlib"). scripts/playbook_validation.py (this issue) must therefore
-    stay importable without jsonschema installed -- jsonschema is only
-    needed by the actual schema-validation call
-    (`playbook_validation.validate_playbook_document` /
-    `load_and_validate_playbook`), never merely to import the module or to
-    call `topic_missing_standard_text` / raise `PlaybookValidationError`
-    (diff_standard_form.py's own use)."""
+class TestPlaybookValidationStaysStdlibImportable(unittest.TestCase):
+    """`scripts/playbook_validation.py` is reached from stdlib-only callers
+    (`tests/synthetic_form_paragraphs.py` builds a synthetic document body
+    out of a playbook using nothing but the standard library) and from CI
+    jobs with no `pip install` step. It must therefore stay importable
+    without jsonschema installed -- jsonschema is only needed by the actual
+    schema-validation call (`playbook_validation.validate_playbook_document`
+    / `load_and_validate_playbook`), never merely to import the module or to
+    call `topic_missing_standard_text` / raise
+    `PlaybookValidationError`."""
 
     def test_playbook_validation_module_has_no_top_level_jsonschema_import(self):
         source = (SCRIPTS_DIR / "playbook_validation.py").read_text(encoding="utf-8")
@@ -334,14 +340,12 @@ class TestDiffStandardFormStaysStdlibImportable(unittest.TestCase):
                     "jsonschema",
                     [alias.name for alias in node.names],
                     "jsonschema must not be imported at module top level -- "
-                    "it would break scripts/diff_standard_form.py's import "
-                    "in the no-pip-install CI gate",
+                    "it would break every stdlib-only caller's import",
                 )
             if isinstance(node, ast.ImportFrom) and node.module == "jsonschema":
                 self.fail(
                     "jsonschema must not be imported at module top level -- "
-                    "it would break scripts/diff_standard_form.py's import "
-                    "in the no-pip-install CI gate"
+                    "it would break every stdlib-only caller's import"
                 )
 
 
@@ -352,7 +356,7 @@ def main() -> int:
         TestInvalidSchemaBundleFailsClosed,
         TestMissingOurStandardFailsClosed,
         TestValidBundleUnaffected,
-        TestDiffStandardFormStaysStdlibImportable,
+        TestPlaybookValidationStaysStdlibImportable,
     ):
         suite.addTests(loader.loadTestsFromTestCase(test_case))
 

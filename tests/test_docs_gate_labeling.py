@@ -170,9 +170,15 @@ def check_no_active_bundle_gate_1a_behavioral() -> list[str]:
         )
 
     # Dynamic: import the module and run the actual behavioral gate function,
-    # confirming it returns a (failures, skips) pair where at least one of
-    # them is populated (i.e. it did something observable) rather than
-    # silently returning ([], []).
+    # confirming it returns a (failures, skips, notes) triple where at least
+    # one of them is populated (i.e. it did something observable) rather than
+    # silently returning ([], [], []).
+    #
+    # `notes` was split out of `skips` by issue #638: a behavioral PASS used
+    # to be reported through `skips`, so a real assertion and a permanent
+    # no-op printed the same summary line. All three lists still count as
+    # "did something observable" here — the distinction that matters to THIS
+    # check is observable-vs-silent, not which bucket it landed in.
     try:
         module = _load_module(path)
         fn = getattr(module, "gate_1a_route_refusal_behavioral", None)
@@ -184,14 +190,14 @@ def check_no_active_bundle_gate_1a_behavioral() -> list[str]:
                 "  unit. (issue #196)"
             )
         else:
-            gate_failures, gate_skips = fn()
-            if not gate_failures and not gate_skips:
+            gate_failures, gate_skips, gate_notes = fn()
+            if not gate_failures and not gate_skips and not gate_notes:
                 failures.append(
                     "  tests/test_no_active_bundle.py's\n"
-                    "  gate_1a_route_refusal_behavioral() returned no failures\n"
-                    "  and no skips — it must either assert a real outcome or\n"
-                    "  explicitly skip with a documented reason, never silently\n"
-                    "  no-op. (issue #196)"
+                    "  gate_1a_route_refusal_behavioral() returned no failures,\n"
+                    "  no skips and no notes — it must either assert a real\n"
+                    "  outcome or explicitly skip with a documented reason,\n"
+                    "  never silently no-op. (issue #196)"
                 )
     except Exception as e:  # pragma: no cover - environment-dependent
         failures.append(

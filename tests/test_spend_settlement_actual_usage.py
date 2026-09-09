@@ -94,6 +94,7 @@ import reviews  # noqa: E402
 # fixture builder, canned responses, and DynamoDB/S3 fakes rather than
 # duplicating them.
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
+from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
 MODEL_RESPONSES_DIR = REPO_ROOT / "tests" / "fixtures" / "model_responses"
 
@@ -136,6 +137,10 @@ class _FakeHttpClient:
 
     def __init__(self, responses: list[dict]):
         self._queue = list(responses)
+
+    # Issue #657: the client streams; route .stream() through the
+    # canned .post() below (tests/openrouter_sse_double.py).
+    stream = sse_stream_adapter
 
     def post(self, url, json=None, headers=None):  # noqa: A002 - mirror httpx sig
         payload = self._queue.pop(0)

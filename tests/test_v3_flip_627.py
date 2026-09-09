@@ -46,6 +46,12 @@ test, against the real prompt and the real artifact -- see
      somebody else's issue while the review still reports OK.
   8. Stage 5.5 (the re-quote repair call sites) is gone from the spine.
 
+Issue #637 added the second half of (2): the criterion above was asserted
+over the assembled SYSTEM prompt only, and the critic's tasking travels in
+the USER prompt, where a v2 field instruction survived the cutover unseen.
+`test_no_v2_field_instruction_survives_in_the_critic_user_prompt` and
+`test_the_critic_tasking_wording_is_gated_on_the_active_contract` close it.
+
 ## Fixture fidelity
 
 Every block id and every `keep`/`delete` segment text in this file is
@@ -282,6 +288,255 @@ def test_no_v2_field_instruction_survives_anywhere_in_the_assembled_prompt(
                 "`issue_key`, which v3 requires on every Issue."
             )
 
+
+def _proven_v3_primary_output(failures: list[str]) -> dict[str, Any] | None:
+    """A v3 primary output built the way production builds one: a real
+    transcript over a real `build_block_map`, run through the ACTIVE
+    validator (`pp.validate_model_response`) and PROVEN against the block
+    map by `block_transcript.validate_block_patches`.
+
+    Not a hand-typed dict. This is the object `review_spine.run_review`
+    hands the critic, so a hand-written stand-in would put a shape
+    production cannot reach inside the very prompt this test measures --
+    and the measurement is a substring count over that prompt, so a wrong
+    shape would silently change the answer.
+    """
+    docx_bytes = _make_docx(SECTIONS)
+    block_map = ens.build_block_map(_paragraphs(docx_bytes))
+    block_id = next(iter(block_map))
+    head, _, tail = block_map[block_id]["text"].partition(" ")
+
+    response = {
+        "decision": "REQUEST_CHANGE",
+        "confidence_state": "OK",
+        "issues": [
+            {
+                "issue_key": "I1",
+                "section_ref": "1",
+                "section_title": "Term and Fee",
+                "counterparty_change_summary": "The term was extended.",
+                "decision": "REQUEST_CHANGE",
+                "external_rationale_for_footnote": "The standard term is shorter.",
+                "playbook_topic_id": "term-length",
+                "internal_precedent_citation": None,
+            }
+        ],
+        "block_patches": [
+            {
+                "block_id": block_id,
+                "segments": [
+                    {"op": "keep", "text": head},
+                    {"op": "delete", "text": " ", "issue_key": "I1"},
+                    {"op": "insert", "text": " (as amended) ", "issue_key": "I1"},
+                    {"op": "keep", "text": tail},
+                ],
+            }
+        ],
+        "block_ops": [],
+    }
+
+    ok, parsed = pp.validate_model_response(json.dumps(response))
+    if not ok:
+        failures.append(
+            f"[11a] the v3 primary output this test feeds the critic prompt does not even "
+            f"validate against the active contract: {parsed}"
+        )
+        return None
+    proven = block_transcript.validate_block_patches(
+        parsed["block_patches"], parsed["block_ops"], block_map
+    )
+    if proven["status"] != "proven":
+        failures.append(
+            f"[11b] the v3 primary output this test feeds the critic prompt does not prove "
+            f"against the document it was derived from: {proven['failures']}"
+        )
+        return None
+    return parsed
+
+
+def test_no_v2_field_instruction_survives_in_the_critic_user_prompt(
+    failures: list[str],
+) -> None:
+    """AC-2's OTHER half, and the half nothing could see (issue #637).
+
+    `test_no_v2_field_instruction_survives_anywhere_in_the_assembled_prompt`
+    above asserts over `render_system_prompt(assemble_system_blocks(...))`.
+    The critic's tasking does not travel there: it is composed FIRST in the
+    USER prompt by `assemble_user_prompt_critic`, which that test never
+    calls. So the v3 cutover shipped a critic still told to contest a
+    `"proposed_replacement_text"` -- a key the same prompt's overlay
+    forbids and the v3 primary output shown to it does not carry -- and
+    every offline test stayed green.
+
+    Both branches are asserted, because the tasking has two variants
+    (`CRITIC_TASKING_BLOCK` / `CRITIC_TASKING_BLOCK_NO_DOCUMENT`) and a fix
+    applied to one and not the other is exactly this defect again.
+    """
+    primary_output = _proven_v3_primary_output(failures)
+    if primary_output is None:
+        return
+
+    # The document block is real text, not a placeholder: it is concatenated
+    # into the same prompt the substring count below measures.
+    doc_text = "\n\n".join(
+        str(paragraph.get("text", "")) for paragraph in _paragraphs(_make_docx(SECTIONS))
+    )
+
+    # Guard: the primary's JSON is embedded verbatim in this prompt, so a
+    # primary output that itself carried a v1/v2 field would make the
+    # assertion below fire for a reason that has nothing to do with the
+    # tasking. Say so directly rather than reporting it as prompt drift.
+    payload = json.dumps(primary_output, sort_keys=True)
+    for field in ("source_quote", "proposed_replacement_text"):
+        if field in payload:
+            failures.append(
+                f"[11c] the v3 primary output itself carries {field!r}; this test measures "
+                f"the TASKING, so its input must not supply the needle."
+            )
+            return
+
+    branches = {
+        "document-bearing (CRITIC_TASKING_BLOCK)": pp.assemble_user_prompt_critic(
+            primary_output=primary_output, doc_text=doc_text
+        ),
+        "no-document (CRITIC_TASKING_BLOCK_NO_DOCUMENT)": pp.assemble_user_prompt_critic(
+            primary_output=primary_output
+        ),
+    }
+
+    for label, prompt in branches.items():
+        for field in ("source_quote", "proposed_replacement_text"):
+            if field in prompt:
+                failures.append(
+                    f"[11d] DRIFT: the {label} critic USER prompt still instructs {field!r}, "
+                    f"a field the active v3 contract's Issue does not carry and the same "
+                    f"review's system prompt explicitly forbids. The critic is pointed at a "
+                    f"key that is absent from the JSON it is shown, so that duty is aimed at "
+                    f"nothing."
+                )
+
+        # THE SAME DEFECT, SPELLED IN PROSE (issue #641). The loop above is a
+        # substring search for two literal field names, so it is blind to a
+        # paragraph that describes those same two v2 artifacts in words. That
+        # is not hypothetical: #637 fixed duty 4, which named the fields, and
+        # left the evidence paragraph immediately below it telling the critic
+        # its evidence was "the clause text the first reviewer quoted, the
+        # rationales and replacement text it wrote" -- a `source_quote` and a
+        # `proposed_replacement_text`, in the no-document branch of the very
+        # prompt this test measures, green the whole time.
+        #
+        # These needles are a REGRESSION PIN on that specific wording, not a
+        # general prose detector -- no substring check can be one. The general
+        # property is enforced structurally instead: every paragraph that
+        # describes the SHAPE of the first reviewer's output is now gated on
+        # the active contract through one seam, and
+        # `test_the_critic_tasking_wording_is_gated_on_the_active_contract`
+        # exercises that gate in both directions.
+        for phrase in (
+            "the clause text the first reviewer quoted",
+            "replacement text it wrote",
+        ):
+            if phrase in prompt:
+                failures.append(
+                    f"[11g] DRIFT: the {label} critic USER prompt still describes the first "
+                    f"reviewer's output in v1/v2 terms ({phrase!r}). No field name appears, "
+                    f"so [11d] cannot see it -- but a v3 primary output carries neither a "
+                    f"quoted clause nor written replacement text, so the critic is again "
+                    f"pointed at material it will not be shown."
+                )
+
+        # The v3 restatement has to land somewhere, or [11d] passes simply by
+        # deleting the duty: the critic contests the EDIT, which is joined to
+        # its issue by `issue_key`, and reports it in the SAME channel.
+        #
+        # Measured over the TASKING REGION only -- the prompt text ahead of the
+        # first delimited data block. The primary's JSON is embedded further
+        # down and carries `issue_key`/`block_patches`/`block_ops` of its own,
+        # so a whole-prompt search would report these as instructed even if the
+        # tasking never mentioned them (it does not, before this change).
+        offsets = [
+            offset
+            for offset in (prompt.find(pp.UNTRUSTED_BLOCK_WARNING), prompt.find("\n<"))
+            if offset >= 0
+        ]
+        if not offsets:
+            failures.append(
+                f"[11f] the {label} critic prompt composes no delimited data block at all, "
+                f"so the tasking region cannot be isolated."
+            )
+            continue
+        tasking = prompt[: min(offsets)]
+
+        for needle, why in (
+            ('"issue_key"', "the join between an authored edit and the issue that authored it"),
+            ('"block_patches"', "the segment carrier an authored edit lives in"),
+            ('"block_ops"', "the whole-block carrier an authored edit lives in"),
+            (
+                "contested_replacements",
+                "the output channel a contested edit is reported in, kept from v2",
+            ),
+            (
+                "Never silently rewrite",
+                "the rule that keeps the critic from overwriting the primary's edit",
+            ),
+        ):
+            if needle not in tasking:
+                failures.append(
+                    f"[11e] the {label} critic tasking never names {needle} -- {why}."
+                )
+
+
+def test_the_critic_tasking_wording_is_gated_on_the_active_contract(
+    failures: list[str],
+) -> None:
+    """The gate itself, exercised in BOTH directions (issue #637 scope 2).
+
+    `render_critic_tasking_block` chooses its duty-4 wording from
+    `authors_block_transcripts(load_output_schema())` -- the same seam
+    `render_replacement_text_modes_block` and
+    `critic_review_pass.run_critic_pass` read. A one-variant test would
+    leave the v2 arm green forever, so the v2 artifact is selected here
+    through that seam and the superseded wording is required to come back.
+    """
+    for with_document in (True, False):
+        rendered = pp.render_critic_tasking_block(with_document=with_document)
+        expected = pp.CRITIC_TASKING_BLOCK if with_document else pp.CRITIC_TASKING_BLOCK_NO_DOCUMENT
+        if rendered != expected:
+            failures.append(
+                f"[12a] render_critic_tasking_block(with_document={with_document}) does not "
+                f"reproduce the shipped constant -- the constant and the renderer are two "
+                f"sources for one prompt, which is the drift this file exists to stop."
+            )
+
+    original = pp.load_output_schema
+    try:
+        pp.load_output_schema = lambda *_a, **_kw: original(pp.OUTPUT_SCHEMA_V2_PATH)
+        if pp.authors_block_transcripts(pp.load_output_schema()):
+            failures.append(
+                "[12b] output-schema-v2.json reports as a block-transcript contract; this "
+                "test cannot reach the v2 arm of the gate."
+            )
+            return
+        v2_tasking = pp.render_critic_tasking_block(with_document=True)
+    finally:
+        pp.load_output_schema = original
+
+    if "proposed_replacement_text" not in v2_tasking:
+        failures.append(
+            "[12c] with the v2 artifact selected, the tasking must still teach the v2 field "
+            "the model authors under that contract -- the cutover changes the wording, it "
+            "does not delete the superseded path."
+        )
+    if "block_patches" in v2_tasking:
+        failures.append(
+            "[12d] the v2 tasking must not teach the v3 transcript carriers; a v2 model "
+            "emitting `block_patches` fails `additionalProperties: false`."
+        )
+    if pp.render_critic_tasking_block(with_document=True) == v2_tasking:
+        failures.append(
+            "[12e] the active (v3) tasking is byte-identical to the v2 tasking, so the gate "
+            "is not actually gating anything."
+        )
 
 def test_the_primary_prompt_teaches_block_transcript_authoring(failures: list[str]) -> None:
     overlay = pp.BINARY_DECISION_OVERLAY_BLOCK
@@ -1205,6 +1460,190 @@ def test_stage_five_and_a_half_is_gone_from_the_spine(failures: list[str]) -> No
         )
 
 
+def test_the_no_document_evidence_paragraph_is_gated_on_the_active_contract(
+    failures: list[str],
+) -> None:
+    """Issue #641, the second half of the #637 fix.
+
+    The critic tasking has TWO paragraphs that describe the shape of the first
+    reviewer's output rather than its judgment: duty 4 (which contests the
+    proposal) and the no-document evidence paragraph (which enumerates the
+    material the critic may reason from, and that material IS the first
+    reviewer's output). #637 gated duty 4 and left the evidence paragraph on
+    the v2 side, where it named a quoted clause and written replacement text.
+
+    Both directions, for the same reason [12] does it: a one-variant test
+    leaves the v2 arm green forever.
+    """
+    v3_no_doc = pp.render_critic_tasking_block(with_document=False)
+    v3_with_doc = pp.render_critic_tasking_block(with_document=True)
+
+    # Measured on the PARAGRAPH, not the whole tasking. Duty 4 already names
+    # "insert"/"block_ops"/"block_patches", so a whole-tasking search would
+    # report this paragraph as fixed even if it were deleted outright.
+    v3_paragraph = pp._critic_tasking_evidence_without_document()
+    if v3_paragraph not in v3_no_doc:
+        failures.append(
+            "[13a] the paragraph `_critic_tasking_evidence_without_document` builds is not "
+            "the one `render_critic_tasking_block(with_document=False)` emits, so every "
+            "assertion below measures text the model never sees."
+        )
+
+    # The v3 paragraph must name the carriers a v3 primary output actually
+    # has, or [11g] passes by deleting the enumeration rather than fixing it.
+    for needle in ('"keep"', '"delete"', '"block_patches"', '"insert"', '"block_ops"'):
+        if needle not in v3_paragraph:
+            failures.append(
+                f"[13a] the no-document evidence paragraph never names {needle} -- under v3 "
+                f"that is where the evidence the critic may reason from actually lives."
+            )
+
+    # The document-bearing branch must NOT acquire the enumeration: its
+    # evidence is the document itself, and telling it to reason from the first
+    # reviewer's transcript instead would narrow the adversarial pass on
+    # exactly the reviews that have the most evidence available.
+    if "the material that IS shown to you" in v3_with_doc:
+        failures.append(
+            "[13b] the document-bearing critic tasking acquired the no-document evidence "
+            "paragraph; that branch grounds objections in the document, not in the first "
+            "reviewer's output."
+        )
+
+    original = pp.load_output_schema
+    try:
+        pp.load_output_schema = lambda *_a, **_kw: original(pp.OUTPUT_SCHEMA_V2_PATH)
+        if pp.authors_block_transcripts(pp.load_output_schema()):
+            failures.append(
+                "[13c] output-schema-v2.json reports as a block-transcript contract; this "
+                "test cannot reach the v2 arm of the gate."
+            )
+            return
+        v2_paragraph = pp._critic_tasking_evidence_without_document()
+    finally:
+        pp.load_output_schema = original
+
+    if "replacement text it wrote" not in v2_paragraph:
+        failures.append(
+            "[13d] with the v2 artifact selected, the no-document tasking must still point "
+            "the critic at the replacement text a v2 primary output actually carries -- the "
+            "cutover changes the wording, it does not delete the superseded path."
+        )
+    if "block_patches" in v2_paragraph:
+        failures.append(
+            "[13e] the v2 no-document tasking must not point the critic at v3 transcript "
+            "carriers, which a v2 primary output does not have."
+        )
+    # Compared PARAGRAPH to PARAGRAPH: the two whole taskings differ in duty 4
+    # whatever this paragraph does, so comparing those would report a gate here
+    # that does not exist.
+    if v2_paragraph == v3_paragraph:
+        failures.append(
+            "[13f] the v2 and v3 no-document evidence paragraphs are byte-identical, so the "
+            "gate is not actually gating anything."
+        )
+
+
+def test_the_retry_correction_is_the_third_path_and_it_is_clean(
+    failures: list[str],
+) -> None:
+    """Issue #641 scope 3: the THIRD path into the model.
+
+    The two anti-drift tests above cover the system prompt and the critic's
+    tasking. Neither sees `render_retry_correction_block`, whose output is
+    APPENDED to the user prompt on attempt 2 -- text the model reads exactly
+    like any other instruction, composed at run time from an error token
+    rather than assembled by `assemble_system_blocks`.
+
+    It carries one branch naming `proposed_replacement_text`. That branch is
+    UNREACHABLE under a block-transcript contract, and that is not an
+    incidental fact to leave unasserted: it is unreachable only because the
+    producer of its token is gated off. Both passes compute
+    `pass_time_replacement_text_enforcement_off =
+    authors_block_transcripts(load_output_schema())` and hand
+    `check_issues_replacement_text` an empty list when it is true, so no v3
+    attempt can ever set `last_error = "replacement_text_violation: ..."`.
+    Re-enable that enforcement under v3 and this correction reaches the model
+    naming a key the same request's overlay forbids -- so the reachability is
+    pinned here, next to the check that depends on it.
+    """
+    enforcement_off = pp.authors_block_transcripts(pp.load_output_schema())
+    if not enforcement_off:
+        failures.append(
+            "[15a] pass-time replacement-text enforcement is ON under the active contract, so "
+            "`replacement_text_violation` IS producible and its correction block -- which "
+            "names \"proposed_replacement_text\" -- reaches the model. Re-word that branch or "
+            "re-gate the enforcement; do not leave both."
+        )
+
+    # Every token production can actually put in `correction` under v3, plus
+    # the empty case a first attempt uses.
+    reachable_errors = (
+        None,
+        "",
+        "invalid_json: Expecting value: line 1 column 1 (char 0)",
+        "invalid_response_contract: response is not a JSON object",
+        "schema_invalid: 'issue_key' is a required property",
+        f"{pp.BLOCK_TRANSCRIPT_ERROR_TOKEN}: source_mismatch on block p0001",
+    )
+    for error in reachable_errors:
+        correction = pp.render_retry_correction_block(error)
+        for field in ("source_quote", "proposed_replacement_text"):
+            if field in correction:
+                failures.append(
+                    f"[15b] DRIFT: the retry correction for {error!r} instructs {field!r}. "
+                    f"This text is appended to the USER prompt on attempt 2, so it is a "
+                    f"model-facing instruction that neither the system-prompt nor the "
+                    f"critic-tasking anti-drift check can see."
+                )
+        if error and not correction:
+            failures.append(
+                f"[15c] a non-empty error {error!r} produced no correction at all, so the "
+                f"retry is uninformed and the loop above is asserting over nothing."
+            )
+    if pp.render_retry_correction_block(None) != "":
+        failures.append(
+            "[15d] a first attempt (no error) must append no correction; a non-empty return "
+            "here changes attempt 1's prompt."
+        )
+
+
+def test_the_stdlib_schema_gate_resolves_the_same_artifact_the_interpreter_does(
+    failures: list[str],
+) -> None:
+    """Issue #641. `tests/test_output_schema.py` answers "which output contract
+    is ACTIVE?" by parsing `scripts/primary_review_pass.py` with `ast` instead
+    of importing it -- it has to, because
+    `.github/workflows/output-schema.yml` runs it on a bare interpreter with no
+    `jsonschema` (issue #639, `97b0fa2`).
+
+    That makes it a partial re-implementation of Python's own name binding, and
+    NOTHING compared its answer to the interpreter's. A resolver that quietly
+    returns a stale artifact makes that file's SUBSET CHECK validate the
+    shipped playbook against a contract that is not live, and print PASS while
+    doing it.
+
+    This file already imports `primary_review_pass`, so it can hold the one
+    assertion the stdlib-only file cannot make about itself. The resolver's
+    own refusal cases are checked there, in `check_resolver_self_check`, where
+    they run in the CI job that actually gates them.
+    """
+    import test_output_schema as tos  # noqa: PLC0415 -- stdlib-only module, imported here on purpose
+
+    resolved = tos._active_output_schema_path()
+    if resolved != pp.OUTPUT_SCHEMA_PATH:
+        failures.append(
+            f"[14a] tests/test_output_schema.py resolves the active output contract as "
+            f"{resolved}, but the interpreter resolves "
+            f"primary_review_pass.OUTPUT_SCHEMA_PATH as {pp.OUTPUT_SCHEMA_PATH}. Every check "
+            f"that file builds on the resolved path is measuring the wrong artifact."
+        )
+    if tos.ACTIVE_OUTPUT_SCHEMA_PATH != pp.OUTPUT_SCHEMA_PATH:
+        failures.append(
+            f"[14b] the module-level ACTIVE_OUTPUT_SCHEMA_PATH that check_subset actually "
+            f"reads is {tos.ACTIVE_OUTPUT_SCHEMA_PATH}, not {pp.OUTPUT_SCHEMA_PATH}."
+        )
+
+
 TESTS = [
     test_the_instructed_envelope_and_the_active_validator_are_one_contract,
     test_the_primary_prompt_teaches_block_transcript_authoring,
@@ -1220,6 +1659,11 @@ TESTS = [
     test_a_colliding_critic_key_does_not_misattribute_the_delivered_redline,
     test_stage_five_and_a_half_is_gone_from_the_spine,
     test_no_v2_field_instruction_survives_anywhere_in_the_assembled_prompt,
+    test_no_v2_field_instruction_survives_in_the_critic_user_prompt,
+    test_the_critic_tasking_wording_is_gated_on_the_active_contract,
+    test_the_no_document_evidence_paragraph_is_gated_on_the_active_contract,
+    test_the_retry_correction_is_the_third_path_and_it_is_clean,
+    test_the_stdlib_schema_gate_resolves_the_same_artifact_the_interpreter_does,
 ]
 
 

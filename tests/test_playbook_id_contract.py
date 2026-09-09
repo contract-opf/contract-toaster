@@ -32,11 +32,10 @@ H-J (issue #209): playbook_id is a first-class RUNTIME parameter of the engine
 itself, not just the docs. A new contract type must be addable by authoring
 data (a playbook.json + anchor-map.json + section-config.json + fixtures dir +
 a registry entry) with NO code edit to scripts/canonicalize.py,
-scripts/diff_standard_form.py, scripts/build_anchor_map.py, or
-scripts/eval_harness.py.
+scripts/playbook_registry.py, or scripts/eval_harness.py.
 
-H. scripts/canonicalize.py, scripts/diff_standard_form.py,
-   scripts/build_anchor_map.py, and scripts/eval_harness.py resolve their
+H. scripts/canonicalize.py, scripts/eval_harness.py, and every reader of a
+   playbook's own artifacts resolve their
    playbook/anchor-map/standard-form/fixtures paths from a playbook REGISTRY
    keyed on playbook_id (scripts/playbook_registry.py), not a hard-coded
    literal path. Registering a SECOND, synthetic playbook_id in
@@ -44,13 +43,13 @@ H. scripts/canonicalize.py, scripts/diff_standard_form.py,
    edit -- verified against a temporary registry (monkeypatching
    scripts/playbook_registry.py's REGISTRY_PATH), not the real one.
 
-I. build_anchor_map.py's SECTION_CONFIG / COVERAGE_EXEMPT_RATIONALES are read
-   from a per-playbook section-config DATA FILE (via
-   build_anchor_map.load_section_config(playbook_id)), not Python literals
-   shared across every playbook. A second playbook_id's section config must
-   resolve to genuinely different content than the first.
+I. A playbook's section config (SECTION_CONFIG / COVERAGE_EXEMPT_RATIONALES)
+   is a per-playbook DATA FILE resolved through the registry
+   (`resolve_playbook(playbook_id).section_config_path`), not a Python
+   literal shared across every playbook. A second playbook_id's section
+   config must resolve to genuinely different content than the first.
 
-J. diff_standard_form._load_active_anchor_map() selects the anchor map by
+J. Anchor-map resolution selects the map by
    playbook_id via the registry, not by picking the lexically-last
    *.anchor-map.json file in the shared standard-forms/ directory. Two
    anchor-map files coexisting in the same directory, where the WRONG one
@@ -74,6 +73,12 @@ PHASE0 = REPO_ROOT / "docs" / "phase-0-issues.md"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+
+# `tests/synthetic_form_paragraphs.py` -- the playbook/anchor-map reader
+# these checks probe the registry through (issue #631).
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 
 def read(path: Path) -> str:
@@ -271,6 +276,20 @@ def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _load_section_config(playbook_id: str) -> dict:
+    """The playbook's section config, resolved through the REGISTRY -- the
+    resolution these checks are about. Read here with `json.load` rather
+    than through a module-level loader: issue #631 deleted the anchor-map
+    builder that used to own one, and the invariant is that the config is
+    per-playbook DATA reached by playbook_id, not that some particular
+    module reads it."""
+    import playbook_registry
+
+    entry = playbook_registry.resolve_playbook(playbook_id)
+    with open(entry.section_config_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _build_synthetic_registry(root: Path) -> Path:
     """
     Build a synthetic registry.json plus every artifact it points at, rooted
@@ -343,8 +362,8 @@ def _build_synthetic_registry(root: Path) -> Path:
 # ── Check H — registry-driven path resolution, not the literal eiaa path ─────
 
 def check_h() -> list[str]:
-    """canonicalize.py / diff_standard_form.py / build_anchor_map.py /
-    eval_harness.py resolve paths via a playbook registry keyed on
+    """canonicalize.py / eval_harness.py / every reader of a playbook's own
+    artifacts resolve paths via a playbook registry keyed on
     playbook_id, not a literal hard-coded playbook path -- verified
     against a SYNTHETIC registry (not the real one) so this proves the
     resolution mechanism itself, not just that the real eiaa entry exists."""
@@ -352,10 +371,9 @@ def check_h() -> list[str]:
 
     try:
         import playbook_registry
-        import build_anchor_map
         import canonicalize
-        import diff_standard_form
         import eval_harness
+        import synthetic_form_paragraphs
     except ImportError as exc:
         return [f"  Could not import scripts/playbook_registry.py or its consumers: {exc}"]
 
@@ -393,22 +411,22 @@ def check_h() -> list[str]:
                     "(e.g. resolve_playbook_path()) -- PLAYBOOK_PATH is still a fixed literal."
                 )
 
-            # diff_standard_form.py must resolve the SYNTHETIC playbook/anchor-map
-            # for "synthetic-widget", not the eiaa ones.
-            synthetic_playbook = diff_standard_form._load_playbook("synthetic-widget")
+            # A playbook reader must resolve the SYNTHETIC playbook for
+            # "synthetic-widget", not the eiaa one.
+            synthetic_playbook = synthetic_form_paragraphs.load_playbook("synthetic-widget")
             if synthetic_playbook.get("playbook", {}).get("id") != "synthetic-widget":
                 failures.append(
-                    "  [H] diff_standard_form._load_playbook('synthetic-widget') did not "
+                    "  [H] load_playbook('synthetic-widget') did not "
                     f"resolve the synthetic playbook (got: {synthetic_playbook})."
                 )
 
-            # build_anchor_map.py must resolve the SYNTHETIC section-config file
-            # for "synthetic-widget", not build_anchor_map.SECTION_CONFIG (eiaa).
-            synthetic_cfg = build_anchor_map.load_section_config("synthetic-widget")
+            # The registry must resolve the SYNTHETIC section-config FILE for
+            # "synthetic-widget", never a config shared with eiaa.
+            synthetic_cfg = _load_section_config("synthetic-widget")
             synthetic_anchors = {row[0] for row in synthetic_cfg["sections"]}
             if synthetic_anchors != {"sec-w1", "sec-w2"}:
                 failures.append(
-                    "  [H] build_anchor_map.load_section_config('synthetic-widget') did not "
+                    "  [H] resolve_playbook('synthetic-widget').section_config_path did not "
                     f"resolve the synthetic section config (got anchors: {synthetic_anchors})."
                 )
 
@@ -429,24 +447,22 @@ def check_h() -> list[str]:
 # ── Check I — SECTION_CONFIG / COVERAGE_EXEMPT_RATIONALES are DATA ───────────
 
 def check_i() -> list[str]:
-    """build_anchor_map's section config must be read from a per-playbook data
-    file (via load_section_config(playbook_id)), not a Python literal shared
-    identically across every playbook_id."""
+    """A playbook's section config must be a per-playbook DATA FILE resolved
+    through the registry, not a Python literal shared identically across
+    every playbook_id."""
     failures: list[str] = []
 
     try:
-        import build_anchor_map
+        import playbook_registry
     except ImportError as exc:
-        return [f"  Could not import scripts/build_anchor_map.py: {exc}"]
+        return [f"  Could not import scripts/playbook_registry.py: {exc}"]
 
-    if not hasattr(build_anchor_map, "load_section_config"):
+    if "section_config_path" not in playbook_registry.PlaybookEntry.__dataclass_fields__:
         return [
-            "  [I] scripts/build_anchor_map.py has no load_section_config(playbook_id) -- "
-            "SECTION_CONFIG / COVERAGE_EXEMPT_RATIONALES are still Python literals, not "
-            "per-playbook data."
+            "  [I] playbook_registry entries carry no section_config_path -- "
+            "SECTION_CONFIG / COVERAGE_EXEMPT_RATIONALES cannot be per-playbook data."
         ]
 
-    import playbook_registry
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -457,15 +473,15 @@ def check_i() -> list[str]:
         try:
             playbook_registry.REGISTRY_PATH = root / "playbooks" / "registry.json"
 
-            eiaa_cfg = build_anchor_map.load_section_config("eiaa")
-            synthetic_cfg = build_anchor_map.load_section_config("synthetic-widget")
+            eiaa_cfg = _load_section_config("eiaa")
+            synthetic_cfg = _load_section_config("synthetic-widget")
 
             eiaa_anchors = {row[0] for row in eiaa_cfg["sections"]}
             synthetic_anchors = {row[0] for row in synthetic_cfg["sections"]}
 
             if eiaa_anchors == synthetic_anchors:
                 failures.append(
-                    "  [I] load_section_config() returned the SAME anchor set for 'eiaa' and "
+                    "  [I] the section config resolved to the SAME anchor set for 'eiaa' and "
                     "'synthetic-widget' -- section config is not actually per-playbook data."
                 )
             if synthetic_anchors != {"sec-w1", "sec-w2"}:
@@ -482,17 +498,17 @@ def check_i() -> list[str]:
 # ── Check J — anchor-map selection by playbook_id, not lexically-last file ───
 
 def check_j() -> list[str]:
-    """diff_standard_form._load_active_anchor_map() must select the anchor
-    map by playbook_id via the registry, never by picking the lexically-last
-    *.anchor-map.json file in standard-forms/ -- a decoy file that sorts
-    after the correct one must NOT be selected."""
+    """Anchor-map resolution must select the map by playbook_id via the
+    registry, never by picking the lexically-last *.anchor-map.json file in
+    standard-forms/ -- a decoy file that sorts after the correct one must NOT
+    be selected."""
     failures: list[str] = []
 
     try:
-        import diff_standard_form
         import playbook_registry
+        import synthetic_form_paragraphs
     except ImportError as exc:
-        return [f"  Could not import scripts/diff_standard_form.py: {exc}"]
+        return [f"  Could not import scripts/playbook_registry.py or its readers: {exc}"]
 
     import tempfile
 
@@ -504,26 +520,26 @@ def check_j() -> list[str]:
         try:
             playbook_registry.REGISTRY_PATH = root / "playbooks" / "registry.json"
 
-            resolved = diff_standard_form._load_active_anchor_map("eiaa")
+            resolved = synthetic_form_paragraphs.load_active_anchor_map("eiaa")
             anchors = set(resolved.get("anchors", {}).keys())
 
             if "WRONG-ANCHOR-FROM-DECOY" in anchors:
                 failures.append(
-                    "  [J] _load_active_anchor_map('eiaa') selected the decoy anchor-map file "
+                    "  [J] anchor-map resolution for 'eiaa' selected the decoy file "
                     "(lexically-last by filename) instead of the one registered for 'eiaa' -- "
                     "still resolving by sorted(*.anchor-map.json)[-1], not by playbook_id."
                 )
             if anchors != {"sec-1"}:
                 failures.append(
-                    f"  [J] _load_active_anchor_map('eiaa') did not resolve the anchor map "
+                    f"  [J] anchor-map resolution for 'eiaa' did not resolve the map "
                     f"registered for 'eiaa' (got anchors: {anchors})."
                 )
 
-            resolved_synth = diff_standard_form._load_active_anchor_map("synthetic-widget")
+            resolved_synth = synthetic_form_paragraphs.load_active_anchor_map("synthetic-widget")
             synth_anchors = set(resolved_synth.get("anchors", {}).keys())
             if synth_anchors != {"sec-w1", "sec-w2"}:
                 failures.append(
-                    "  [J] _load_active_anchor_map('synthetic-widget') did not resolve the "
+                    "  [J] anchor-map resolution for 'synthetic-widget' did not resolve the "
                     f"anchor map registered for 'synthetic-widget' (got anchors: {synth_anchors})."
                 )
         finally:

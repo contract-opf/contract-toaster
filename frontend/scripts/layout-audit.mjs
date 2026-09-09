@@ -104,6 +104,24 @@
  *    cannot do better here either — `css: false` means no stylesheet is even
  *    loaded in the component suite.
  *
+ * 8. THE WRAPPABLE-HEADINGS OPT-IN (issue #668). `ct-table.css` pins every
+ *    `thead th` to `white-space: nowrap`, which makes a heading's min-content
+ *    width the width of the WHOLE heading string — so a two-word heading, not
+ *    the data under it, becomes the widest thing in the column and pushes the
+ *    table past the viewport. That is measured, not hypothetical: at the
+ *    browser's default window size on prod, History's `DOCUMENTS` column was
+ *    cut off mid-word. `.ct-table--wrap-headings` is the per-table opt-out,
+ *    and it has two halves that fail independently:
+ *      (a) the rule must exist and must set a WRAPPING `white-space` (a rule
+ *          that is deleted, or edited back to `nowrap`, silently restores the
+ *          overflow), and
+ *      (b) at least one component under src/ must actually apply the class —
+ *          a stylesheet rule with no consumer is inert, and neither vitest
+ *          (`css: false`) nor any other check here would notice.
+ *    Same honesty caveat as every check above: this reads source text. The
+ *    DOM half — that the History table is the component carrying the class —
+ *    is asserted in src/__tests__/history-table-width-668.test.tsx.
+ *
  * Exits non-zero listing every failing check.
  */
 
@@ -177,6 +195,16 @@ function* eachRule(text) {
 }
 
 const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** `stripComments` plus whole-line `//` comments — for scanning TS/TSX
+ * sources, where a class name mentioned in a docstring must not be mistaken
+ * for the class being applied. Only leading-`//` lines are removed, so a
+ * `https://` inside a string survives. */
+const stripJsComments = (source) =>
+  stripComments(source)
+    .split('\n')
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join('\n');
 
 /** Split a comma-separated selector list on top-level commas only — a naive
  * `.split(',')` also splits inside a `:is(input, select, textarea)`-style
@@ -676,7 +704,8 @@ const TYPE_SCALE = parseTypeScale(readFileSync(TOKENS_CSS, 'utf8'));
 {
   failures.push(...typeScaleFailures(TYPE_SCALE));
   // Stylesheets AND component modules: ct-chip.ts holds its rules in a Lit
-  // `css` tagged template and Toaster.tsx in an inline <style> string, so a
+  // `css` tagged template and orbit-diner/motion.ts in an inline <style>
+  // string (it was Toaster.tsx until issue #727 deleted that file), so a
   // CSS-files-only sweep misses both — and the 12.48px chip was one of the
   // three sizes measured on the live screen.
   const sources = filesUnder(FRONTEND_SRC, (name) => /\.(css|ts|tsx)$/.test(name));
@@ -685,7 +714,94 @@ const TYPE_SCALE = parseTypeScale(readFileSync(TOKENS_CSS, 'utf8'));
   }
 }
 
-// ------------------------------------------- 8. Self-test (mutation cover)
+// ------------------- 8. The wrappable-headings opt-in is live (issue #668)
+
+const WRAP_HEADINGS_CLASS = 'ct-table--wrap-headings';
+const WRAP_HEADINGS_SELECTOR = `ct-table table.${WRAP_HEADINGS_CLASS} thead th`;
+// Anything that lets a line break happen. `nowrap` and `pre` are the two
+// values that do not, and they are exactly the regression this guards.
+const WRAPPING_WHITE_SPACE_RE = /white-space\s*:\s*(normal|pre-wrap|pre-line|break-spaces)\b/i;
+
+/**
+ * Failures for the STYLESHEET half, given a flat list of `{ selector, body }`
+ * rules gathered across every stylesheet. Global rather than per-file for the
+ * same reason as the narrow-field check above: the mutation being guarded
+ * against is deleting the rule outright, which leaves zero matches in every
+ * file, and a per-file "not declared here" skip would wave that straight
+ * through. Declarations may be split across several rules with the same
+ * selector (the tab-strip check's convention), so the bodies are joined.
+ */
+function wrapHeadingsFailures(rules, selector = WRAP_HEADINGS_SELECTOR) {
+  const found = [];
+  const matches = rules.filter((rule) => splitSelectorList(rule.selector).includes(selector));
+  if (matches.length === 0) {
+    found.push(
+      `wrappable headings: no stylesheet declares "${selector}" — every column heading is back to ` +
+        "ct-table.css's `white-space: nowrap`, so the heading string's full width becomes the column's " +
+        'minimum and a wide table scrolls horizontally again (issue #668).',
+    );
+    return found;
+  }
+  const bodies = matches.map((rule) => rule.body).join('\n');
+  if (!WRAPPING_WHITE_SPACE_RE.test(bodies)) {
+    found.push(
+      `wrappable headings: "${selector}" is declared but sets no wrapping \`white-space\` (expected ` +
+        '`normal` or equivalent), so the opt-in class is inert and the base `nowrap` still pins every ' +
+        'heading to one line (issue #668).',
+    );
+  }
+  return found;
+}
+
+/**
+ * Failures for the CONSUMER half, given `{ label, source }` pairs for every
+ * component module under src/. A rule nothing applies is dead CSS: the class
+ * would satisfy the stylesheet check above forever while no table on the
+ * screen ever wraps a heading.
+ *
+ * A bare substring search is NOT enough, and this was caught by running the
+ * mutation rather than by reasoning about it: deleting `className=` from the
+ * History table left this check green, because the JSX comment ABOVE that
+ * table names the class in prose. So comments are stripped first, and the
+ * class then has to appear as the value of a `className`/`class` attribute
+ * — an actual application, not a mention.
+ */
+function wrapHeadingsConsumerFailures(sources, className = WRAP_HEADINGS_CLASS) {
+  const applied = new RegExp(
+    `class(?:Name)?\\s*=\\s*['"\`{]+[^'"\`]*\\b${className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+  );
+  const used = sources.some(({ source }) => applied.test(stripJsComments(source)));
+  return used
+    ? []
+    : [
+        `wrappable headings: no component under src/ applies the "${className}" class as a className, so the ` +
+          'rule that lets headings wrap is never on any table and cannot affect the rendered app — a mention ' +
+          'in a comment does not count (issue #668).',
+      ];
+}
+
+{
+  const allRules = [];
+  for (const cssPath of cssFilesUnder(FRONTEND_SRC)) {
+    const text = stripComments(readFileSync(cssPath, 'utf8'));
+    for (const rule of eachRule(text)) allRules.push(rule);
+  }
+  failures.push(...wrapHeadingsFailures(allRules));
+
+  // Component modules only. A mention inside a stylesheet is the rule
+  // itself, not a consumer of it — and a mention inside `__tests__/` is an
+  // ASSERTION about a consumer, which would let this check pass on the
+  // strength of the very test it is here to back up.
+  const modules = filesUnder(FRONTEND_SRC, (name) => /\.(ts|tsx)$/.test(name))
+    .filter((file) => !file.split(path.sep).includes('__tests__'))
+    .map((file) => ({
+      label: path.relative(FRONTEND_SRC, file),
+      source: readFileSync(file, 'utf8'),
+    }));
+  failures.push(...wrapHeadingsConsumerFailures(modules));
+}
+
+// ------------------------------------------- 9. Self-test (mutation cover)
 //
 // The fixtures run the REAL checkers on every invocation: if a later edit
 // narrows either check, the audit fails rather than quietly passing.
@@ -1013,6 +1129,113 @@ for (const testCase of TYPE_SCALE_CASES) {
   }
 }
 
+const WRAP_HEADINGS_SELF_SELECTOR = 'ct-table table.ct-table--wrap-headings thead th';
+const WRAP_HEADINGS_CASES = [
+  {
+    name: 'the opt-in rule deleted outright',
+    flagged: true,
+    rules: [{ selector: 'ct-table thead th', body: 'white-space: nowrap;' }],
+  },
+  {
+    name: 'opt-in present but edited back to nowrap',
+    flagged: true,
+    rules: [{ selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'white-space: nowrap;' }],
+  },
+  {
+    name: 'opt-in present but declares no white-space at all',
+    flagged: true,
+    rules: [{ selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'vertical-align: bottom;' }],
+  },
+  // --- must NOT be flagged -------------------------------------------
+  {
+    name: 'the shipped rule',
+    flagged: false,
+    rules: [{ selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'white-space: normal; vertical-align: bottom;' }],
+  },
+  {
+    name: 'declared inside a multi-selector rule',
+    flagged: false,
+    rules: [
+      { selector: `.something-else, ${WRAP_HEADINGS_SELF_SELECTOR}`, body: 'white-space: normal;' },
+    ],
+  },
+  {
+    name: 'declarations split across two rules with the same selector',
+    flagged: false,
+    rules: [
+      { selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'vertical-align: bottom;' },
+      { selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'white-space: normal;' },
+    ],
+  },
+  {
+    name: 'pre-wrap is an accepted wrapping value',
+    flagged: false,
+    rules: [{ selector: WRAP_HEADINGS_SELF_SELECTOR, body: 'white-space: pre-wrap;' }],
+  },
+];
+for (const testCase of WRAP_HEADINGS_CASES) {
+  const hits = wrapHeadingsFailures(testCase.rules);
+  if (testCase.flagged && hits.length === 0) {
+    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the wrappable-headings check (issue #668)`);
+  } else if (!testCase.flagged && hits.length > 0) {
+    failures.push(`self-test: "${testCase.name}" must be exempt from the wrappable-headings check but was flagged: ${hits[0]}`);
+  }
+}
+
+const WRAP_HEADINGS_CONSUMER_CASES = [
+  {
+    name: 'the class applied by no component at all',
+    flagged: true,
+    sources: [{ label: 'ReviewHistory.tsx', source: '<table data-testid="history-table">' }],
+  },
+  {
+    name: 'a near-miss class name',
+    flagged: true,
+    sources: [{ label: 'ReviewHistory.tsx', source: '<table className="ct-table--wrap" />' }],
+  },
+  {
+    // The mutation that exposed the bare-substring version of this check: the
+    // className is gone, but the JSX comment explaining it is still there.
+    name: 'named only in a JSX block comment above the table',
+    flagged: true,
+    sources: [
+      {
+        label: 'ReviewHistory.tsx',
+        source: '{/* ct-table--wrap-headings lets headings wrap */}\n<table data-testid="history-table">',
+      },
+    ],
+  },
+  {
+    name: 'named only in a line comment',
+    flagged: true,
+    sources: [{ label: 'ReviewHistory.tsx', source: '// ct-table--wrap-headings is the opt-in\n<table />' }],
+  },
+  // --- must NOT be flagged -------------------------------------------
+  {
+    name: 'a component applies the class',
+    flagged: false,
+    sources: [{ label: 'ReviewHistory.tsx', source: '<table className="ct-table--wrap-headings" />' }],
+  },
+  {
+    name: 'applied alongside another class',
+    flagged: false,
+    sources: [{ label: 'X.tsx', source: '<table className="ct-table--wrap-headings ct-other" />' }],
+  },
+  {
+    name: 'applied through a template literal',
+    flagged: false,
+    sources: [{ label: 'X.tsx', source: '<table className={`ct-table--wrap-headings ${extra}`} />' }],
+  },
+];
+for (const testCase of WRAP_HEADINGS_CONSUMER_CASES) {
+  const hits = wrapHeadingsConsumerFailures(testCase.sources);
+  if (testCase.flagged && hits.length === 0) {
+    failures.push(`self-test: mutation "${testCase.name}" was NOT detected by the wrappable-headings consumer check (issue #668)`);
+  } else if (!testCase.flagged && hits.length > 0) {
+    failures.push(`self-test: "${testCase.name}" must be exempt from the wrappable-headings consumer check but was flagged: ${hits[0]}`);
+  }
+}
+
 // ------------------------------------------------------------------ Report
 
 if (failures.length > 0) {
@@ -1021,7 +1244,7 @@ if (failures.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    `layout-audit: grid tracks OK; ${Object.keys(HIDDEN_HELPER_OWNERS).length} visually-hidden helper(s) contained by a positioned owner; ${TAB_STRIP_SELECTORS.length} tab-strip selector(s) keep flex-wrap: wrap (issue #477); ct-columns keeps its two-track/one-track breakpoint and ct-field[narrow]'s control opts out of stretch (issue #601); every ct-*.css is imported by its sibling ct-*.ts (issue #601 follow-up); every font size under src/ resolves to >= ${MIN_FONT_SIZE_PX}px against a ${Object.keys(TYPE_SCALE).length}-step --ct-text-* scale (issue #600)`,
+    `layout-audit: grid tracks OK; ${Object.keys(HIDDEN_HELPER_OWNERS).length} visually-hidden helper(s) contained by a positioned owner; ${TAB_STRIP_SELECTORS.length} tab-strip selector(s) keep flex-wrap: wrap (issue #477); ct-columns keeps its two-track/one-track breakpoint and ct-field[narrow]'s control opts out of stretch (issue #601); every ct-*.css is imported by its sibling ct-*.ts (issue #601 follow-up); every font size under src/ resolves to >= ${MIN_FONT_SIZE_PX}px against a ${Object.keys(TYPE_SCALE).length}-step --ct-text-* scale (issue #600); the .ct-table--wrap-headings opt-in is declared and applied (issue #668)`,
   );
   console.log('LAYOUT AUDIT: ALL GREEN');
 }

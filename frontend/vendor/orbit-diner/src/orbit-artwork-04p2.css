@@ -1,0 +1,113 @@
+/* Visual contribution to 04p2. Load after 04p1 orbit.css for the supplied
+   reference renders; fold these final declarations into the consolidated
+   production stylesheet. No new controls, state, handlers or remote assets. */
+.od-console:not(.od-plain) .od-toast-name {
+  left: 20%;
+  right: 20%;
+  top: 40%;
+  font-size: 20px;
+  line-height: 1.1;
+  max-height: 24%;
+  text-wrap: balance;
+}
+.od-console:not(.od-plain) .od-ready {
+  top: 68.5%;
+  left: 49.8%;
+  right: auto;
+  width: 28%;
+  height: 7.5%;
+  min-height: 0;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.15;
+  white-space: nowrap;
+  color: #243542;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.od-console:not(.od-plain) .od-ready::before { display: none; }
+.od-console:not(.od-plain) .od-ready-lamp {
+  display: inline-block;
+  position: static;
+  inset: auto;
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #647078;
+  box-shadow: inset 0 1px 2px #0006;
+}
+.od-console[data-status="loaded"]:not(.od-plain) .od-ready-lamp { background: #ba561f; }
+.od-console[data-status="done"]:not(.od-plain) .od-ready-lamp { background: #287c60; }
+.od-console[data-status="error"]:not(.od-plain) .od-ready-lamp { background: #a33530; }
+.od-console[data-status*="manual"]:not(.od-plain) .od-ready-lamp { background: #26668a; }
+.od-console[data-status="running"]:not(.od-plain) .od-ready-lamp,
+.od-console[data-status="pending"]:not(.od-plain) .od-ready-lamp { background: #ba561f; }
+.od-console:not(.od-plain) .od-lever {
+  left: 80.2%;
+  width: 14%;
+  min-width: 44px;
+  transform: translateX(-50%);
+}
+.od-console:not(.od-plain) .od-lever-label {
+  top: calc(78.6% + 4px);
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  width: max-content;
+  transform: translateX(-50%);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.15;
+}
+/* The physical unlit glass remains in register.webp. With no message the
+   text layer has no painted panel, glow, indicator, or accessible wording. */
+.od-console:not(.od-plain) .od-register-status:empty {
+  background: none;
+  box-shadow: none;
+  text-shadow: none;
+  visibility: hidden;
+}
+@container (max-width: 1220px) {
+  .od-console:not(.od-plain) .od-toast-name { font-size: 18px; }
+}
+@container (max-width: 560px) {
+  .od-console:not(.od-plain) .od-ready {
+    top: 70.5%;
+    width: 41%;
+    height: 10%;
+    min-height: 0;
+  }
+  .od-console:not(.od-plain) .od-toast-name { font-size: 14px; }
+  .od-console:not(.od-plain) .od-playbook-value > span {
+    display: block;
+    font-size: 15px;
+    line-height: 1.15;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+}
+/* The existing kit establishes an inline-size container; this media fallback
+   also supports a standalone host which has not yet established one. */
+@media (max-width: 560px) {
+  .od-console:not(.od-plain) .od-ready {
+    top: 70.5%;
+    width: 41%;
+    height: 10%;
+    min-height: 0;
+  }
+  .od-console:not(.od-plain) .od-toast-name { font-size: 14px; }
+}
+@media (forced-colors: active) {
+  .od-console .od-ready-lamp { display: none !important; }
+}

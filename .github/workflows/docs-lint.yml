@@ -24,7 +24,10 @@
 #   H – OOXML hygiene both directions (input part allowlist + output rescan + admin-XSS
 #       sinks enumerated: doc properties and filenames alongside section titles)
 #   I – No-active-bundle state + deactivate action (issue #41):
-#       · POST /api/reviews refuses with HTTP 503 + "no active playbook" message
+#       · POST /api/reviews refuses with HTTP 503 + "no active playbook"
+#         message — a BEHAVIORAL check against the live route (issue #196);
+#         its job installs backend/requirements.txt and treats a Gate 1a
+#         skip as a failure because $CI is set (issue #638)
 #       · Deactivate action defined, audited, GC-gated, distinct from rollback
 #       · RUNBOOK suspend-intake procedure documented
 #       · docs/playbook-governance.md lifecycle updated
@@ -59,6 +62,9 @@ on:
       - 'tests/test_ooxml_hygiene_both_directions.py'
       - 'tests/test_no_active_bundle.py'
       - 'tests/test_clean_copy_export_runbook.py'
+      - 'tests/test_no_active_bundle_gate_executes_638.py'
+      - 'backend/requirements.txt'
+      - '.github/workflows/docs-lint.yml'
   push:
     branches:
       - main
@@ -73,6 +79,9 @@ on:
       - 'tests/test_ooxml_hygiene_both_directions.py'
       - 'tests/test_no_active_bundle.py'
       - 'tests/test_clean_copy_export_runbook.py'
+      - 'tests/test_no_active_bundle_gate_executes_638.py'
+      - 'backend/requirements.txt'
+      - '.github/workflows/docs-lint.yml'
 
 jobs:
   docs-lint:
@@ -147,11 +156,31 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install the no-active-bundle gate's backend dependencies
+        # Gate 1a is BEHAVIORAL: it imports backend/src/main.py and drives
+        # POST /api/reviews with a real fastapi TestClient. This job used to
+        # install nothing, so that import failed with ModuleNotFoundError on
+        # EVERY run, Gate 1a took its documented-skip branch, and the step
+        # exited 0 having asserted nothing about the refusal path (issue
+        # #638; run 33456932705 is the log). The step below now FAILS on that
+        # skip because Actions sets $CI — this install is what keeps it green
+        # honestly.
+        #
+        # Pinned by backend/requirements.txt, the same file the App Runner
+        # image installs, so the gate cannot drift from the app it boots.
+        # Only this job needs it; every other job in this workflow is
+        # stdlib-only. (Precedent: "Install the v3 gate's validator
+        # dependency" in .github/workflows/output-schema.yml.)
+        run: python3 -m pip install --disable-pip-version-check --quiet -r backend/requirements.txt
+
       - name: Check no-active-bundle state and deactivate action
         run: python3 tests/test_no_active_bundle.py
         # Four gates (see issue #41):
         #   Gate 1 – POST /api/reviews refuses with HTTP 503 + "no active playbook"
         #            when no release bundle is active; user-visible message specified.
+        #            Gate 1a exercises the live route (issue #196) and, because
+        #            GitHub Actions sets $CI, a documented skip here is a FAILURE
+        #            rather than a pass (issue #638).
         #   Gate 2 – Deactivate action defined in ARCHITECTURE.md: distinct from
         #            rollback, audited, GC-gated consistently with activation controls.
         #   Gate 3 – RUNBOOK.md suspend-intake procedure documented, references

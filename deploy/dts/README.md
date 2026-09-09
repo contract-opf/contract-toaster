@@ -40,9 +40,12 @@ Supply it from **either** source — the admin-set key wins when both exist:
 
 The key is instance-wide: one key, every user's reviews, one OpenRouter bill.
 The admin-set key is stored in `MODEL_SETTINGS_TABLE` and is **write-only** —
-the UI shows only a last-four hint (`…4f2a`), never the key. A lost key is
-regenerated at [openrouter.ai/keys](https://openrouter.ai/keys), not recovered
-here. Clearing it in the UI reverts the instance to `OPENROUTER_API_KEY`.
+no endpoint returns it, masked or otherwise. The UI shows only a
+non-reversible fingerprint (`3f9a2c71`, the first eight hex of a salted
+SHA-256), enough to tell two keys apart and to confirm a rotation took
+effect. A lost key is regenerated at
+[openrouter.ai/keys](https://openrouter.ai/keys), not recovered here.
+Clearing it in the UI reverts the instance to `OPENROUTER_API_KEY`.
 
 ## Run it
 
@@ -116,6 +119,47 @@ double-sweep the same rows.
 Before this landed, nothing on this target ever invoked the sweep, so an
 operator who set a retention window saw the *preview* work and reasonably
 concluded data was being purged. It was not.
+
+## The backend refuses to start with an incomplete environment
+
+At startup the backend asserts that every environment variable the code
+dereferences with `os.environ[...]` — i.e. required, no default — is set. If
+any is missing it logs **every** missing name in one line and exits non-zero,
+so the container restart-loops instead of serving:
+
+```
+STARTUP: refusing to start — required environment variable(s) not set: USER_PREFERENCES_TABLE. …
+```
+
+Only **names** are ever logged, never values. The required set is derived
+from the source by an AST pass at boot (`backend/src/startup_checks.py`), not
+from a list, so it cannot drift away from the code.
+
+Fix it by setting the named variables in the deployment's environment. The
+compose files in this directory already carry all of them; a Coolify-managed
+compose is edited in Coolify's UI, and a variable dropped there is exactly
+the failure this check exists to make loud (issue #654: `USER_PREFERENCES_TABLE`
+was missing from the live compose, the container started anyway, and
+`GET /api/me/preferences` 500'd on every request while the Review tab just
+showed `Internal (unavailable)` — indistinguishable from an unbuilt feature).
+
+## Our own legal entities (`ENTITY_ROSTER_TABLE`, issue #678)
+
+The Settings tab holds the deployment's roster of OUR legal entity names —
+the ~25 entities any of which can be the contracting party on a document we
+review. At review time the roster is unioned with the governing playbook's
+own `perspective.party` into one flat set, so a document naming a
+subsidiary, a former name or a d/b/a is still recognised as us.
+
+It is **optional configuration and degrades quietly**: with
+`ENTITY_ROSTER_TABLE` unset the Settings panel says the deployment has no
+roster store, writes are refused with a 400, and every review recognises the
+playbook's own party alone — the behaviour that existed before #678. That is
+deliberately not a startup refusal (the variable is read with `.get`, so the
+AST pass above does not classify it as required), but a Coolify-managed
+compose that omits it silently loses the feature: add
+`ENTITY_ROSTER_TABLE: contract-toaster-entity-roster-dts` in Coolify's UI to
+match the compose files here, then re-run `bootstrap` to create the table.
 
 ## Not yet included (follow-ups)
 

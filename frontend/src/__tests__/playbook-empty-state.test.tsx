@@ -30,6 +30,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { NO_PLAYBOOKS_COPY } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -68,8 +69,6 @@ const COMING_SOON = {
 
 const ACTIVE = { ...COMING_SOON, status: 'active' };
 
-const POINTS_AT_THE_ADMIN_TAB = /an admin needs to install and activate a playbook first/i;
-
 describe('empty-shell state — ReviewSubmission.tsx', () => {
   it('says nothing is loaded and points at the Playbooks tab', async () => {
     stubFetch({ 'GET /api/playbooks': { playbooks: [COMING_SOON] } });
@@ -77,8 +76,9 @@ describe('empty-shell state — ReviewSubmission.tsx', () => {
     render(<ReviewSubmission />);
 
     const banner = await screen.findByTestId('review-no-playbooks');
-    expect(banner).toHaveTextContent(/no contract types are loaded/i);
-    expect(banner).toHaveTextContent(POINTS_AT_THE_ADMIN_TAB);
+    expect(banner).toHaveTextContent(NO_PLAYBOOKS_COPY);
+    // It names who can fix it.
+    expect(banner).toHaveTextContent(/an admin/i);
   });
 
   it('offers no activate-sample control, and POSTs nothing, while empty', async () => {

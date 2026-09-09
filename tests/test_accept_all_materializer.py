@@ -689,7 +689,7 @@ def test_field_code_pending_change_materializes_without_corrupting_the_field(fai
 def test_reserved_root_namespace_prefix_survives_materialization(failures: list) -> None:
     """Issue #563 follow-up finding 4: `materialize_accept_all`'s docstring
     claims it survives a reserved `ns<digits>` prefix via the guarded
-    `redline_inplace.register_declared_namespaces` reuse (issue #560/#561),
+    `ooxml_util.register_declared_namespaces` reuse (issue #560/#561),
     but nothing in this gate exercised that claim. Mirrors
     `tests/test_reserved_namespace_prefix_560.py::test_a_reserved_prefix_still_produces_a_redline`
     for THIS writer: a document declaring `xmlns:ns0` on the root, carrying
@@ -735,7 +735,7 @@ def test_non_root_namespace_prefix_survives_materialization(failures: list) -> N
     document can declare a prefix on a NON-root element (`materialize_
     accept_all`'s own docstring, "declare a prefix on a non-root element
     that ElementTree hoists to the root") rather than on the document root
-    itself. `redline_inplace._merge_hoisted_namespaces` is the half of the
+    itself. `ooxml_util.merge_hoisted_namespaces` is the half of the
     shared machinery that carries a HOISTED declaration back into the
     preserved original root tag -- exercised here for this writer for the
     first time."""
@@ -744,7 +744,7 @@ def test_non_root_namespace_prefix_survives_materialization(failures: list) -> N
         # A namespace declaration alone is not enough to make ElementTree
         # preserve/hoist it -- it only tracks a binding actually USED to
         # qualify some element or attribute name (same reason
-        # `redline_inplace._merge_hoisted_namespaces`'s own docstring cites
+        # `ooxml_util.merge_hoisted_namespaces`'s own docstring cites
         # a real `<w:drawing>` subtree, not a bare unused declaration). This
         # throwaway `<cust:meta>` element is what makes the prefix "used":
         # `_walk_content` skips it without recursion (not `w:r`/`w:ins`/

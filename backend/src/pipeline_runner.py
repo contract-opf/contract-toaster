@@ -79,7 +79,9 @@ import boto3
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import (
+        attempt_diagnostics,
         config,
+        entity_roster,
         invocation_ledger,
         model_client,
         model_settings,
@@ -88,7 +90,9 @@ try:  # production runs `src.main`; tests put backend/src on sys.path
         reviews,
     )
 except ImportError:  # pragma: no cover
+    import attempt_diagnostics  # type: ignore[no-redef]
     import config  # type: ignore[no-redef]
+    import entity_roster  # type: ignore[no-redef]
     import invocation_ledger  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
     import model_settings  # type: ignore[no-redef]
@@ -97,7 +101,7 @@ except ImportError:  # pragma: no cover
     import reviews  # type: ignore[no-redef]
 
 # scripts/review_spine.py (issue #239) composes the pipeline-stage modules
-# it imports (extraction_normalization_stage, diff_standard_form, ...) via
+# it imports (extraction_normalization_stage, redline_generate, ...) via
 # its own SCRIPTS_DIR/BACKEND_SRC_DIR sys.path insertion; inserting SCRIPTS_DIR
 # here too (idempotent) lets THIS module import review_spine + playbook_registry
 # by bare name regardless of which of the two import styles above resolved.
@@ -627,6 +631,16 @@ def _load_opf_bundle_if_active(
     here exactly as it would be on re-upload, not trusted blindly at
     review-run time.
 
+    Issue #676 rides on that same reuse: `_load_opf_from_bytes` also
+    enforces the spec-normative minimums
+    (`playbook_upload.OPF_UPLOAD_MINIMUMS` -- today `perspective`), so an
+    artifact ACTIVATED before that gate existed is refused on its next
+    review rather than grandfathered in. The refusal
+    (`PlaybookUploadRejected`) propagates uncaught, fail-closed, exactly
+    like the corrupted-bytes case above: a playbook that cannot say whose
+    side it is on must stop the review, not silently fall back to the
+    registry's on-disk bundle.
+
     Purely additive and never raises for a deployment target that has not
     configured the `playbook_versions` upload flow at all -- mirrors
     `backend/src/reviews.py::_resolve_playbook_version_lineage`'s own
@@ -947,6 +961,13 @@ _ANALYSIS_FIELDS = (
     "leakage_category",
     "leakage_rule_id",
     "leakage_field_name",
+    # Issue #665: the size of the retry budget the critic pass spent, on the
+    # one path that records it (a critic-pass bounded-retry terminal). An
+    # accounting count, never substance -- the same reason it is safe on the
+    # row and in the Diagnostics projection. Absent from the RESULT (and so
+    # `null` in this fixed-shape document) for every other review, exactly
+    # like the three leakage fields above.
+    "critic_attempts",
 )
 
 
@@ -1173,6 +1194,16 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     if result.get("normalization_notes") is not None:
         set_clauses.append("normalization_notes = :nn")
         values[":nn"] = result["normalization_notes"]
+    # Issue #665: the critic's attempt count, on a critic-branch failure.
+    # Written onto the ROW for the same reason the leakage fields below are:
+    # `reviews.list_recent_failures` reads the row and never opens
+    # `analysis.json`, so detail that lives only in the artifact is detail no
+    # operator can reach from inside the app. Same "absent, never a null
+    # placeholder" convention -- `run_review` sets this key only when the
+    # critic pass actually reported a count.
+    if result.get("critic_attempts") is not None:
+        set_clauses.append("critic_attempts = :ca")
+        values[":ca"] = result["critic_attempts"]
     # Issue #616: which leakage detector blocked this review. Written onto
     # the ROW (not just the analysis artifact) because the admin Diagnostics
     # route reads the row and nothing else -- `backend/src/reviews.py::
@@ -1422,6 +1453,21 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 toaster_guidance=toaster_guidance,
                 notes_mode=notes_mode,
                 instructions_text=instructions_text,
+                # Issue #678: the deployment's roster of OUR OWN legal
+                # entity names, resolved HERE (per review, from the store)
+                # rather than carried in the execution payload like
+                # `instructions_text` above. The two are different kinds of
+                # fact: instructions are per-playbook content whose exact
+                # text is hashed into this review's lineage at submission
+                # time, so re-reading them mid-flight would reopen the
+                # split brain #482 forbids; the roster is organisation-
+                # scoped configuration that must take effect on the next
+                # review after an admin adds the entity a document just
+                # turned out to name. `resolve_entity_roster` cannot raise
+                # and degrades to `()` -- the playbook's own
+                # `perspective.party` alone -- so a store blip narrows the
+                # recognition set (fail closed) and never widens it.
+                entity_roster=entity_roster.resolve_entity_roster(dynamodb_resource),
                 # Issue #447: publish the spine's real sub-stage
                 # (primary_pass -> critic_pass -> reconciliation -> redline)
                 # onto the reviews row as it happens, so the polling UI can
@@ -1440,6 +1486,33 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 # `_write_progress_stage` above, can never fail this review --
                 # every exception is caught and logged inside it.
                 ledger_write=invocation_ledger.make_ledger_write(review_id, dynamodb_resource),
+                # Issue #669: the EXACT same omission as #414's above, in
+                # this same call, one argument away. The passes have built a
+                # structured per-attempt diagnostic since #643 -- the
+                # attempt's full error message, and for a schema rejection
+                # the path/validator/offending value -- and both gate its
+                # construction on this sink being non-None, so production
+                # never even built one. A critic-pass retry exhaustion in
+                # prod was therefore undiagnosable from production at all:
+                # not from the Diagnostics tab, not from the reviews row,
+                # not from the ledger (whose METADATA-ONLY invariant is why
+                # #573 reduced each attempt's error to a token there).
+                # `attempt_diagnostics.make_attempt_diagnostic_write`
+                # persists them to `outputs/{review_id}/
+                # attempt-diagnostics.json` -- same prefix as the redline
+                # and the #416 analysis artifact, so the retention purge's
+                # prefix scan destroys it with the document -- and, like
+                # `_write_progress_stage` and `make_ledger_write` above,
+                # can never fail this review: every exception is caught and
+                # logged inside it, and what it keeps is bounded in both
+                # record count and per-field length. Deliberately NOT
+                # surfaced through any route (#443's disclosure line): see
+                # that module's docstring for why the raw text stays behind
+                # object-store access while the operator-facing token stays
+                # #665's classified `reason`.
+                attempt_diagnostic_write=attempt_diagnostics.make_attempt_diagnostic_write(
+                    review_id, s3_client
+                ),
                 # The sub-stage boundary is also the natural cancel checkpoint:
                 # the spine already stops here to report progress, so asking
                 # "still wanted?" in the same place costs one consistent read

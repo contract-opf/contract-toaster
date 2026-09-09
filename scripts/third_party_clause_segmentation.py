@@ -8,7 +8,7 @@ clause records (issue #248, Third-party-paper support Slice 2 of 5).
 Once the router (#247) sends an upload down the `THIRD_PARTY_POSITIONS`
 route, the document is the counterparty's OWN template -- it has no
 relationship to your form's headings or anchor map, so none of the
-first-party machinery (`scripts/diff_standard_form.py` heading-anchor
+first-party machinery (the retired standard-form heading-anchor
 matching, the section-anchor map, `sec-_new`) can segment it. This module
 produces an ordered list of **clause records** -- each with a stable,
 content-addressed `clause_id`, the clause heading (if any), the clause

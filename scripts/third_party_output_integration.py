@@ -411,6 +411,14 @@ def _proposed_replacement_text(finding: dict[str, Any], topic: dict[str, Any]) -
         return ""
     if finding.get("decision") != "reject":
         return ""
+    if finding.get("model_block_patches"):
+        # A surgical transcript IS the proposal, and the delivered text is
+        # derived from it at compile time (issue #630) exactly as the
+        # first-party v3 path derives its own. Advertising the topic's fixed
+        # text here as well would state a whole-clause replacement the
+        # document does not make -- the issue and the redline would disagree
+        # about what was proposed.
+        return ""
     replacement_cfg = topic.get("replacement_text") or {}
     if replacement_cfg.get("mode") == "fixed":
         return replacement_cfg.get("fixed_text") or ""
@@ -604,10 +612,48 @@ def build_third_party_block_transcript(
     `_edit_plan`) and an unresolved anchor (see
     `unresolved_anchor_issue_keys`).
     """
+    block_patches: list[dict[str, Any]] = []
     block_ops: list[dict[str, Any]] = []
+
+    # PRECEDENCE (issue #630): a model-authored transcript that already PROVED
+    # against the uploaded document wins; the governed fixed-text pair is the
+    # fallback; flag-only is last. Ordered this way because a surgical edit
+    # preserves the counterparty's own drafting everywhere it is not wrong,
+    # while the fixed-text pair replaces the entire clause -- correct, but the
+    # blunter instrument. A model transcript is only ever present when it
+    # proved (`_validated_model_transcript` returns None otherwise), so this
+    # branch never prefers an unproven edit over a governed one.
+    surgical_issue_keys: set[str] = set()
+    for issue_key, finding in _keyed_findings(findings):
+        patches = finding.get("model_block_patches")
+        if not patches:
+            continue
+        if finding.get("clause_id") is None or finding.get("decision") != "reject":
+            continue
+        # Restamp the provisional key the findings pass proved under with the
+        # real one this walk mints. Source fidelity was established there and
+        # does not depend on the label; attribution is established here, by the
+        # SAME walk `map_findings_to_issues` uses, so an edit can never name a
+        # key no issue carries.
+        for patch in patches:
+            restamped = {
+                "block_id": patch["block_id"],
+                "segments": [
+                    ({**segment, "issue_key": issue_key} if segment.get("op") != "keep" else dict(segment))
+                    for segment in patch["segments"]
+                ],
+            }
+            block_patches.append(restamped)
+        surgical_issue_keys.add(issue_key)
+
     for entry in _edit_plan(findings, clause_records, playbook, block_id_by_clause_id):
         block_id = entry["block_id"]
         if block_id is None:
+            continue
+        if entry["issue_key"] in surgical_issue_keys:
+            # Already carried by a proved surgical patch above; emitting the
+            # whole-block pair too would delete the very block the patch edits
+            # (`conflicting_block_op`) and fail the WHOLE transcript.
             continue
         block_ops.append(
             {
@@ -624,7 +670,7 @@ def build_third_party_block_transcript(
                 "issue_key": entry["issue_key"],
             }
         )
-    return [], block_ops
+    return block_patches, block_ops
 
 
 def build_third_party_response(

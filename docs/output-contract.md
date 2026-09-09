@@ -64,7 +64,7 @@ The pipeline validates every model response against this schema before any redli
 | `issues[].external_rationale_for_footnote` | string, 1–800 chars |
 | `issues[].internal_rationale_for_footnote` | string, 1–800 chars, **OPTIONAL** — **new in v2**, carried into v3 unchanged; the one internal-audience field. Asked for, and rendered, only in the `internal`/`both` notes modes; see [Which rationale becomes a footnote](#which-rationale-becomes-a-footnote-the-reviews-notes-mode-issue-522-epic-519-item-d) |
 | `issues[].proposed_replacement_text` | string, max 8000 chars |
-| `issues[].playbook_topic_id` | kebab-case pattern |
+| `issues[].playbook_topic_id` | `^[a-z0-9_]+(?:[-.][a-z0-9_]+)*$` — the id copied verbatim out of the ACTIVE playbook's own vocabulary. Admits kebab-case (a v1 playbook's `topics[].id`), snake_case and the dotted digest form (`clause.ferpa_student_records`): `playbooks/opf/playbook.schema-0.{2,3}.json` constrains an OPF playbook's `taxonomy.entries[].id` to `^[a-z0-9_]+$`, so underscore is a **word character here, not a separator** — rejecting it (issue #672) made 39 of the 61 topics in the real `educational-affiliation` playbook uncitable and discarded every review that cited one (issue #671). Still not free text: uppercase, whitespace, path punctuation, and a leading/trailing/doubled `-`/`.` separator are rejected |
 | `issues[].internal_precedent_citation` | string (max 500 chars) or null |
 | `issues[].provenance` | `"model"` \| `"critic-added"` \| `"detector:<rule_id>"` — **system metadata only**; see [Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band) |
 | `issues[].source_quote` | string, 1–8000 chars, **OPTIONAL** — **v2 only**; see [Schema versions (v1 → v2)](#schema-versions-v1--v2) |
@@ -139,6 +139,26 @@ segment list that `scripts/block_transcript.py::validate_block_patches` proves b
 own bytes. `block_patches[]` carries exactly one entry per `block_id`; `block_ops[]` carries whole-block
 `delete_block` / `insert_block_after` operations (whose `anchor_block_id` may be the literal `"start"`).
 
+A `delete_block` names the block, and the compiler (`scripts/redline_block_apply.py`) also leaves
+**`[Intentionally omitted.]`** standing where that clause was, whenever the batch leaves no body under
+its heading (issue #646, reversing the heading removal issue #645 first shipped). A heading is its own
+`<w:p>` and carries no block id, so a body-only deletion left the accepted document with a numbered
+heading and nothing under it — which reads as a drafting mistake rather than a deliberate striking.
+Accepting the redline therefore yields:
+
+```
+3. Indemnification
+[Intentionally omitted.]
+```
+
+and rejecting it restores the clause exactly. This is a compiler rule with a structural gate, not
+something the model asks for or can ask for: the response shape is unchanged, and the placeholder is
+never written under a heading that still has a body — including the `delete_block` + `insert_block_after`
+pair that replaces a clause in place. The derived `proposed_replacement_text` for a whole-block strike
+that proposes no language of its own is that same placeholder string
+(`redline_generate.derived_replacement_text_by_issue`); a pure deletion of text *inside* a block still
+derives the empty string.
+
 Unlike v2, v3's `schema_version` const **is** bumped: v3 removes a field and adds a required one, so a
 v2-shaped response does not validate against it and the envelope literal must say so. The pipeline stamps
 that literal from whichever artifact is selected (`primary_review_pass.output_schema_version_const`), so
@@ -193,6 +213,138 @@ governance step and not a code change. Read the artifact's *schema* as authorita
 dormancy claim* as superseded by this section until that step runs. This paragraph exists so the
 contradiction is recorded rather than discovered.
 
+## Length budgets (issue #674)
+
+Every `maxLength` in `playbooks/output-schema-v3.json` is one of exactly **two** kinds of cap, and
+conflating them is what made two of them reject legitimate content:
+
+| Class | What sets the number | Fields |
+|---|---|---|
+| **Layout / identity** | Where the value lands has a shape of its own, so the cap is a product decision | `external_rationale_for_footnote` and `internal_rationale_for_footnote` (800 — typeset into a footnote of the delivered `.docx`), `section_ref` (200) and `section_title` (300) and `replacement_scope_note` (300 — result-view headings and cells), `internal_precedent_citation` (500 — an audit reference), `block_id` / `anchor_block_id` (64 — a code-assigned id) |
+| **Free prose** | Nothing about the destination bounds it; the cap exists only so one response cannot be unbounded | `primary_replacement_text`, `critic_suggested_replacement`, `Segment.text`, `BlockOp.new_text`, and — since #674 — `verdict_summary`, `critic_objection`, `rationale_objections[].objection`. The artifact's number for this class is **8000** |
+
+**What #674 changed, and what it deliberately did not.** `critic_objection` and
+`rationale_objections[].objection` held **800** — the delivered-footnote budget — despite being internal
+audit content no counterparty ever reads; `verdict_summary` held **2000** despite never being rendered
+verbatim into the delivered document at all (`redline_generate` carries it into the result payload and
+`cover_note_pass` reads it as one input line). Both caps were layout-class numbers on free-prose fields,
+and both were measured failing in live runs against the real `educational-affiliation` playbook: layers 4
+and 5 of #671. All three fields moved to the free-prose class bound the artifact already uses. **No new
+number was introduced** — what changed is which class each field is in.
+
+### What was measured
+
+The evidence is ten live `scripts/live_smoke_eval.py --dump-dir` runs on **2026-09-02** — the #671 ladder,
+against the real `educational-affiliation` playbook, reviewing a **synthetic** multi-clause affiliation
+agreement (the runs that recorded served ids served `anthropic/claude-opus-5` primary and
+`anthropic/claude-sonnet-4.6` critic). Over-long values reach the dump as
+`attempts[].schema_error.offending_value`; `primary_review_pass._debug_safe_value` clips the echo at 2000
+characters but appends `... (truncated, N chars total)`, and **N is the untruncated length** — those are
+the numbers below, not the clipped ones. No fixture length appears in this table.
+
+| Field | Observed lengths (live) | Largest observed | Old cap | New cap | Headroom over largest observed |
+|---|---|---|---|---|---|
+| `verdict_summary` | 2068, 2202, 2635 (n=3) | **2635** | 2000 — rejected all 3 | **8000** | 5365 chars (3.0×) |
+| `critic_objection` | 910, 1275 (n=2) | **1275** | 800 — rejected both | **8000** | 6725 chars (6.3×) |
+| `rationale_objections[].objection` | *none — never populated in any of the ten runs* | — | 800 | **8000** | not measured; see below |
+
+So the failures were not marginal: the smallest over-long `verdict_summary` was already 3.4% past its cap
+and the largest 32% past it, and the smallest over-long `critic_objection` was 14% past 800 with the
+largest 59% past. A cap the biggest real answer overshoots by a third was in the wrong class, not a few
+characters short.
+
+The retries are the other half of the measurement. In two runs the *informed* retry came back at **exactly
+the length** of the answer it was correcting — `verdict_summary` 2202 then 2202 again, and
+`critic_objection` 910 then 910 again. Those two retry lengths are recovered by decoding the terminal
+attempt's `error_message`, which carries jsonschema's `repr` of the value instead of a truncation record;
+decoded, the `critic_objection` retry is byte-identical to the attempt it replaced and the
+`verdict_summary` retry is identical across all 2000 characters the dump retained. Neither retry is
+counted as an independent observation in the table above — the `n` there is distinct first-attempt
+over-long values. Both attempt budgets spent, both reviews failed closed. A model told only *that* it was too long
+does not converge on a number nobody gave it, which is the direct evidence for stating the budgets and
+for putting `N` and `M` in the correction block.
+
+**8000 is not measured — it is inherited, and the measurement is what says that is safe.** The number is
+this schema's existing free-prose bound (`primary_replacement_text`, `critic_suggested_replacement`,
+`Segment.text`, `BlockOp.new_text`), chosen so no new number enters the artifact. What the measurement adds
+is the margin: 3.0× the largest `verdict_summary` and 6.3× the largest `critic_objection` ever observed
+live. Three and two samples are a small distribution and are not claimed as more than that — they are
+reported so the margin is a number a reader can check rather than a feeling.
+
+`rationale_objections[].objection` is the honest exception: **it was never populated in any of the ten
+runs**, so there is no observed length for it. It is raised to 8000 on its sibling's argument — same
+author, same pass, same internal-audit audience, same evidence-before-conclusion instruction as
+`critic_objection` — and not on evidence of its own. Leaving the critic's other objection channel at the
+delivered-footnote cap would have moved the failure rather than fixed it, which is why it moves; that it
+moves *unmeasured* is recorded here rather than dressed up.
+
+**The untouched caps were re-checked against the same live output, not against fixtures.** Largest observed
+value vs. its cap, over the same runs: `section_ref` 35/200, `section_title` 27/300,
+`replacement_scope_note` 173/300, `internal_precedent_citation` 212/500,
+`external_rationale_for_footnote` 256/800, `counterparty_change_summary` 243/2000. None was ever the field
+a run died on, and the closest any came to its cap is `replacement_scope_note` at 173 of 300 — no live
+value gave a reason to move any of them. `internal_rationale_for_footnote` is unobserved
+(these runs carried no internal-notes mode), and the transcript/id caps do not appear in a dump at all —
+both stay put for want of evidence to move them, which is the same rule applied in the other direction.
+`external_rationale_for_footnote` stays at 800 **on purpose** besides: its text is typeset into a footnote
+the counterparty reads, so the cap is the product decision it looks like. Raising a cap without evidence is
+how nobody ends up knowing which caps were reasoned about.
+
+**A review does reach a decision once these caps are lifted — that part is measured, not assumed.** Every
+length above was read off a pass that *failed*, so the fair question is whether lifting the caps actually
+buys a completed review. It does. The owner's 2026-09-03 comment on #671 records the first successful
+review ever run against `educational-affiliation`: `status: OK`, `decision: REQUEST_CHANGE`, 6 findings,
+**primary and critic each succeeding on their first attempt with no retry burned**, $0.55, 64s, and a
+7262-byte redline carrying genuine OOXML tracked changes and four substantive footnotes. That run applied
+all five #671 layer fixes by hand, this issue's two caps among them, at **experiment values of 3000
+(`critic_objection`) and 6000 (`verdict_summary`)** — which the same comment is explicit are "experiment
+values, not recommendations", to be sized from measurement per this ticket. Sizing them is what the table
+above does. Both shipped caps are **8000**, strictly above both experiment values, so nothing that
+validated in that run can fail against this artifact; and the largest values ever observed (1275 and 2635)
+sit well inside the experiment values that ran clean.
+
+**What is still owed, and who owes it.** That run does not prove any of it *in production*, and it does not
+prove how a model behaves once it is **told** the budgets — it was a hand-edited local export, and the
+prompt-side budget blocks described below did not exist yet. That confirmation is deliberately not
+discharged here, and not because it was skipped: the same #671 comment fixes the order, holding that the
+fixes land first and a *production* review against this playbook then produces a redline whose run id is
+recorded on #671, which stays open until one does. It is also not a code change to make —
+`scripts/live_smoke_eval.py` states in its own module docstring that driving it against live OpenRouter
+traffic is a **human step** (the "AFK build, human execute" split, as #418) and that it never runs in CI,
+being live network and a real spend. So the ledger is: sufficient-to-reach-a-decision is evidenced by a
+real run, the numbers are sized by measurement here, and the one production confirmation still owed is
+tracked on #671 where whoever authorizes the spend records the run id.
+
+**The budgets are stated to the model.** A cap the model is never told is a coin flip, not a constraint,
+and structured output does not close the gap: `model_output_schema._UNSUPPORTED_STRING_CONSTRAINT_KEYWORDS`
+**strips** `maxLength` out of the provider-facing projection (a provider's structured-output validator
+rejects a request carrying one), so a provider enforces the *shape* of a response and never its *length*.
+Since #674:
+
+- `primary_review_pass.render_length_budget_block` emits a `LENGTH BUDGETS` section in the OUTPUT CONTRACT
+  block, and `render_critic_length_budget_block` emits the critic's own fields into the critic tasking
+  block. Both **read the numbers off the active artifact** — never restated as literals, the same
+  one-value-one-source rule `OUTPUT_SCHEMA_VERSION` follows.
+- `validate_model_response` appends a `[length budget] "<field>" is N characters long; its maximum is M
+  characters.` clause to a `maxLength` rejection, so `last_error` — and therefore the retry correction, the
+  terminal `detail`, and `--dump-dir` — carries the two numbers. jsonschema's own message (`'…' is too
+  long`) carries neither, which is why both live retries came back the same size (measured above).
+- `render_retry_correction_block` recognizes that marker and tells the model to **condense the prose, never
+  drop an issue or soften a finding** to fit. A model told only "too long" can comply by saying less.
+
+**Coverage is enforced, not remembered.** Every cap in the artifact is accounted for exactly once across
+`_PRIMARY_LENGTH_BUDGETS`, `_INTERNAL_NOTES_LENGTH_BUDGETS`, `_CRITIC_LENGTH_BUDGETS` and
+`LENGTH_BUDGETS_DELIBERATELY_UNSTATED` in `scripts/primary_review_pass.py`;
+`tests/test_length_budgets_674.py` walks the schema and fails on any cap in none of them, so a new field
+cannot arrive silently unbudgeted the way these two did. The deliberately-unstated ones carry their reason
+in code — the load-bearing one is the transcript fields (`Segment.text`, `BlockOp.new_text`, the block
+ids), where stating a ceiling would invite a model to **truncate** a `keep`/`delete` segment to fit, and a
+truncated transcript is a `source_mismatch` rejection rather than a shorter answer.
+
+**Governance.** Editing `playbooks/output-schema-v3.json` changes its content hash, so this is a
+release-bundle event: it needs a new `release.output_contract_hash` and the legal-approval gate in the
+coupling rules above. That step is the owner's, not the code change's.
+
 ## ACCEPT summary shape
 
 The ACCEPT result view promises **"a summary of what changed and why each change was acceptable."** The source field for this summary is **`verdict_summary`** — a top-level string in the model response schema (carried unchanged from `output-schema-v1.json` through `output-schema-v2.json` into the ACTIVE `output-schema-v3.json`).
@@ -202,7 +354,7 @@ The ACCEPT result view promises **"a summary of what changed and why each change
 | Attribute | Value |
 |---|---|
 | Field | `verdict_summary` (top-level, optional) |
-| Type | string (1–2000 chars) or null |
+| Type | string (1–8000 chars; raised from 2000 by issue #674 — see [Length budgets](#length-budgets-issue-674)) or null |
 | ACCEPT path | Model-generated narrative: what the counterparty changed and why each change fell within acceptable variation under the playbook. Rendered in the reviewer UI on the ACCEPT result page as the primary body of the "no requested changes identified by tool" result. |
 | REQUEST_CHANGE path | Optional high-level narrative alongside the per-issue list. Not required; may be null. |
 | Leakage scan | Required — `verdict_summary` passes the pre-render leakage scan before being surfaced in the UI or stored in a context accessible to non-admin users (see [Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose)). |
@@ -400,17 +552,24 @@ attorney can apply the edit by hand.
 |---|---|---|
 | **Un-normalizable input** | The normalization pass cannot produce a clean, unambiguous document body (e.g. irreconcilable unresolved tracked changes, corrupt OOXML structure). | None — there is no clean document body to patch against, so no redline `.docx` exists. The analysis report is delivered alone. |
 | **Anchor/hash mismatch at patch time** | At redline-patching time, the target text at one or more section anchors no longer matches its pre-computed hash (document shifted, normalization changed it, anchor stale). | **Partial**, when any other patch in the batch matched exactly (see below). |
-| **In-place locate failure at patch time** (issue #291) | The anchor/hash join above passed, but `scripts/redline_inplace.py::apply_tracked_changes_inplace` could not safely locate the target paragraph inside the uploaded package (`not_found`/`ambiguous`) to write the `<w:ins>`/`<w:del>` in place. | **Partial**, when any other patch in the batch was located and applied (see below). |
+| **Edit compile failure at write time** | The block transcript proved, but the compiler could not write the `<w:ins>`/`<w:del>` for one edit (e.g. the span crosses a physical-paragraph join). | **Partial**, when any other edit in the batch compiled and applied (see below). |
+
+> **Retired 2026-09-02 (issue #631).** The "anchor/hash mismatch at patch time" row above
+> describes the anchor/hash-joined patch path, retired from issue generation by issue #380 and
+> deleted outright by issue #631 (`scripts/redline_patch.py`, `scripts/redline_inplace.py`).
+> Its successor guarantee on the block-transcript path is the row below it: an edit compiles
+> only against a PROVEN transcript and the written package is round-trip verified, so an edit
+> that cannot be written safely is reported, never approximated.
 
 Neither path guesses at the right location or applies an approximate match — that guarantee is
-per-patch and unconditional (`scripts/redline_patch.py::apply_patch` and
-`scripts/redline_inplace.py::apply_tracked_changes_inplace`). But at the batch level, one patch's
-hash mismatch or in-place-locate failure does not withhold every other patch's clean, exact-match
-edit (issue #203): the redline `.docx` is delivered for the applied patches **alongside**, never
-*instead of*, the analysis report for the patches that failed. `scripts/redline_patch.py
-::apply_patches()` returns both `applied_patches` and an `analysis_report` (built from
-`failed_patches` only) in the same result; `scripts/redline_generate.py::generate_redline()` joins
-any in-place-locate failures into that same `changes_not_applied` list (never a silent omission of
+per-edit and unconditional (`scripts/redline_block_apply.py::apply_block_transcript`). But at the
+batch level, one edit's
+compile failure does not withhold every other edit's clean
+result (issue #203): the redline `.docx` is delivered for the applied edits **alongside**, never
+*instead of*, the analysis report for the ones that failed. `scripts/redline_generate.py::generate_redline_from_blocks()`
+returns both the delivered bytes and an `analysis_report` (built from
+the failed edits only) in the same result, joining
+every compile failure into that same `changes_not_applied` list (never a silent omission of
 a `REQUEST_CHANGE` edit), so a caller with a mixed-outcome batch delivers the partial redline and
 the report together, with `status = MANUAL_REVIEW_REQUIRED` so a human still sees exactly which
 section(s) were not auto-patched. A batch where every patch matches exactly and locates cleanly,
@@ -547,11 +706,11 @@ it says exactly what it means: **"contains internal notes — not for external t
 carries no approval semantics — it is a signpost that a document holds internal-audience content,
 not a nag to seek sign-off.
 
-Placement differs by generation path (see [ARCHITECTURE.md → Redlining](../ARCHITECTURE.md#redlining--owned-docx-library)
-for the code-level detail): the live first-party redline path places the marker in the running
-every-page header/footer only; the standalone writer (used for fixture generation) additionally
-places it as a first-page cover note. Third-party paper used the standalone writer until issue #629
-moved it onto the block compiler, so it now takes the header/footer placement too.
+Placement is the same on every generation path (see [ARCHITECTURE.md → Redlining](../ARCHITECTURE.md#redlining--owned-docx-library)
+for the code-level detail): the marker goes in the running every-page header/footer, for first-party
+and third-party paper alike (issue #629 moved third-party onto the same block compiler). No
+delivered redline carries a first-page cover note — that placement belonged to the standalone
+writer, which issue #631 deleted (retired 2026-09-02).
 
 There is deliberately **no manual de-marking procedure**. Stripping the marker text would not
 remove the internal-audience content the notes mode actually put in the document (the footnotes and
@@ -595,9 +754,10 @@ playbook alternative where one exists (see `output_format.footnote_phrasing_rule
 An issue carries up to two rationales — `external_rationale_for_footnote` (counterparty-facing) and
 the optional `internal_rationale_for_footnote` (written for your own team). Which of them the
 delivered `.docx` renders is the review's notes mode, resolved in one place,
-`scripts/redline_docx_writer.py` → `footnote_texts_for_notes_mode`, shared by every writer path (the
-live first-party path through `redline_generate`, the block compiler that path and third-party paper
-both use since issue #629, and the standalone writer used for the mock fixture):
+`scripts/footnote_audience.py` → `footnote_texts_for_notes_mode`, shared by every writer path (the
+live first-party path through `redline_generate`, and the block compiler that path and third-party
+paper both use since issue #629) and by `scripts/leakage_scan.py`, which declares the internal
+field's channel:
 
 | Notes mode | Footnotes emitted per applied patch |
 |---|---|
@@ -627,6 +787,18 @@ stands between an internal note and the counterparty in an accept-all-then-send 
 therefore part of the rendered text itself, and `tests/redline/test_footnote_audience_modes_522.py`
 asserts it is still there after the real accept-all transform.
 
+**The footnote NUMBER is superscript, by style (issue #647).** Both runs that carry it — the in-body
+`<w:footnoteReference>` and the `<w:footnoteRef/>` opening the note — carry
+`<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>`, and the footnote body paragraph carries
+`<w:pStyle w:val="FootnoteText"/>`: Word's own markup, with the superscript in the style rather than
+as direct run formatting. A `<w:rStyle>` only renders if the package *defines* the style, and a
+document that has never carried a footnote defines neither — so the writer appends the two missing
+definitions to `word/styles.xml` (creating the part for a package that has none). A definition the
+uploaded document already carries is **left exactly as it is**: a counterparty may style footnotes
+their own way, and rewriting it would be an unrequested formatting edit. That is the only change a
+redline may make to `word/styles.xml`, and `scripts/redline_projections.py`'s part-allowlist proof
+holds it to it — a rewritten, dropped, or unrelated added style fails the document closed.
+
 Third-party paper renders no internal footnote today: #250's finding shape carries only a single
 `rationale`, so `internal`/`both` on that path suppress the counterparty-facing note without
 substituting anything. The mode still governs that path — `none` and `internal` both leave its
@@ -638,8 +810,8 @@ An issue whose `proposed_replacement_text` is `""` signals a **flag-only** issue
 topic's `replacement_text.mode == "none"` (the model has nothing to propose in its place; the
 clause needs attorney attention, not a redline). A flag-only issue **produces no docx patch**:
 it gets no `<w:del>`, no `<w:ins>`, and no footnote in the generated `.docx`
-(`scripts/redline_generate.py::_issues_to_patches` excludes it from the patch set before
-`redline_patch.join_patches_from_diff` ever runs). The clause it refers to is left byte-for-byte
+(`scripts/redline_generate.py::_issues_to_patches` excludes it from the patch set before any
+edit is compiled). The clause it refers to is left byte-for-byte
 intact in the generated redline.
 
 This is deliberate, not an omission: striking a clause through with no replacement text
@@ -743,6 +915,28 @@ that never actually disclosed anything confidential. Implementation:
 excessive-precedent-quotation check (`precedent_verbatim_spans`), which
 already requires a minimum 40-character verbatim span and is not
 short-fragment-prone in the same way.
+
+**Public clause vocabulary is not confidential reasoning (issue #616).** On the
+OPF 0.3 path `ConfidentialCorpus.from_opf_document` derives `playbook_ngrams`
+and `standard_clause_ngrams` from playbook prose authored in a separate tool,
+and `$defs.digestObservationSummary.text_summary` in
+`playbooks/opf/playbook.schema-0.3.json` carries no `minLength`. A
+`text_summary` that summarises nothing — the bare clause name repeated — is
+therefore schema-valid and became a blocked gram identical to the same
+document's **public** `taxonomy.entries[].label`. Against the real
+`educational-affiliation` playbook that blocked every review at
+`playbook_leakage · playbook-ngram · verdict_summary`, on the single word
+`indemnification`: you cannot review a contract without naming its clauses.
+Two whole-gram exclusions now run at corpus-build time
+(`leakage_scan._without_public_vocabulary`) — a gram that is exactly a
+`taxonomy.entries[].id`/`label` or a clause `title`/`taxonomy_id` from the same
+document, and a gram of fewer than two words. Both are **whole-gram** tests, so
+a confidential statement that merely contains a clause name still blocks; and
+both are scoped to the OPF builder, because a v1 `hard_rejections` rule id is a
+deliberately short confidential identifier rather than published vocabulary.
+The unfiltered lists still feed the check-1 exemption, so a text dropped from
+check 2 is never promoted into check 1. A short-but-not-single-word gram is a
+separate, still-open hazard — issue #617.
 
 **Field-class scoping matrix for `is_replacement_text` fields.** Not every
 corpus category is checked the same way against fields whose whole purpose is

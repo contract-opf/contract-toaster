@@ -100,7 +100,7 @@ def check_harness_api_present() -> list[str]:
 def check_no_detector_or_diff_imports() -> list[str]:
     failures = []
     source = (SCRIPTS_DIR / "eval_harness.py").read_text(encoding="utf-8")
-    for banned in ("detector_common", "diff_standard_form"):
+    for banned in ("detector_common", "standard_form_diff"):
         if banned in source:
             failures.append(
                 f"  scripts/eval_harness.py still references {banned!r} -- the "

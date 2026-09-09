@@ -270,7 +270,7 @@ def introduced_texts(reconciled_result: dict[str, Any]) -> list[tuple[str, str]]
     """`(section_ref, text)` for every non-empty `proposed_replacement_text`.
 
     This IS the `<w:ins>` content: `redline_generate.generate_redline` ->
-    `redline_patch` inserts each issue's `proposed_replacement_text` verbatim
+    the redline writer inserts each issue's `proposed_replacement_text` verbatim
     as the inserted run. Running BEFORE the redline is generated (rather than
     re-parsing OOXML after) checks the same bytes one stage earlier, and is
     what lets a fail-closed self-check stop the document from being built at

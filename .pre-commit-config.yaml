@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: docs-sync-guard
+        name: docs-sync (warn when code changes touch documented areas)
+        entry: python3 tools/docs_guard.py
+        language: system
+        pass_filenames: false
+        verbose: true
+      # Issue #341. Runs at PUSH time, not commit time: it scans the whole
+      # public surface, which is too slow per-commit and only matters when
+      # something is about to leave the machine. Fail-open without the private
+      # token list, so a contributor without the overlay is not blocked.
+      # Enable with: pre-commit install --hook-type pre-push
+      - id: counterparty-names
+        name: counterparty-name lint (no counterparty identity on the public surface)
+        entry: python3 tests/lint-counterparty-names.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        verbose: true
