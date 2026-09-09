@@ -121,6 +121,6 @@ for the full procedure including anchor migration records.
 ## CODEOWNERS
 
 Changes to `standard-forms/` require GC and engineering review (see
-[../.github/CODEOWNERS](../.github/CODEOWNERS)).  The standard form and its anchor
+../.github/CODEOWNERS (CODEOWNERS, maintained privately)).  The standard form and its anchor
 map are legal-behavior artifacts: a change to either changes what diff the review
 pipeline sees and therefore what the model reasons about.

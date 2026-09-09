@@ -27,7 +27,7 @@ context from the conversation that produced it.
 
 The cutover is less of a leap than it sounds, because most of the machinery
 already exists and the target architecture is already written down in
-[overlay/README.md](../../overlay/README.md).
+`overlay/README.md` (in the private overlay).
 
 - `contract-opf/contract-toaster` is **already public and live**, with its own
   fresh history: eight `Public cut of private main @ <sha>` commits landed by
