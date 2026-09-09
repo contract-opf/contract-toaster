@@ -235,7 +235,7 @@ Full setup details live in [RUNBOOK.md](RUNBOOK.md).
 
 - All work is tracked in GitHub issues, grouped by phase milestone.
 - Every change goes through a pull request. `main` is protected.
-- Anything that modifies `playbooks/` or `prompts/` requires legal review (enforced by [.github/CODEOWNERS](.github/CODEOWNERS)).
+- Anything that modifies `playbooks/` or `prompts/` requires legal review (enforced by .github/CODEOWNERS (CODEOWNERS, maintained privately)).
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 - Branch naming: `phase-N/short-description` (e.g., `phase-0/cognito-google-idp`).
 
