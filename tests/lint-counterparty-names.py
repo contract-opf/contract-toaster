@@ -12,9 +12,11 @@ It had already failed once. On 2026-09-04 two docs landed under `docs/` --
 which is not in `public-cut-exclude.txt` -- quoting a real counterparty
 agreement filename. They passed `tests/lint-brand-free.py` (which polices the
 private ORG, not counterparties), passed `tests/lint-public-cut-exclude.py`
-(which checks manifest paths, not content), and passed `scripts/public-cut.sh`
-(which scans for keys, `.env` files and unmarked `.docx`, not prose). The live
-public repo escaped only because the previous cut predated them.
+(which checks manifest paths, not content), and passed the cut script's own
+scans (keys, `.env` files, unmarked `.docx` -- not prose). The live public repo
+escaped only because the previous cut predated them. That cut workflow retired
+on 2026-09-09 when development moved here; this gate did not, because a public
+trunk needs it more, not less.
 
 ## The design constraint: the denylist is itself the secret
 
