@@ -1,8 +1,11 @@
 # Contract-toaster — long-range plan (2026-07-22)
 
-> *Published from the project's planning history on 2026-09-09. Issue numbers
-> below predate the tracker migration of 2026-09-08 and refer to the old
-> private numbering; read them as history, not as links.*
+> *Published from the project's planning history on 2026-09-09. This is a
+> record of what was decided at the time, not current instructions. Issue
+> numbers predate the tracker migration of 2026-09-08 and refer to the old
+> private numbering, and any repository path or command shown may name the
+> private origin this work was done in. Read both as history, not as links
+> to follow.*
 
 Canonical roadmap. Supersedes the build order in #101 (kept as the historical index).
 Framed by four decisions taken 2026-07-22 (see also memory `llm-native-review-decision`).
