@@ -1,8 +1,11 @@
 # Orbit Diner — round 3 for the designer
 
-> *Published from the project's planning history on 2026-09-09. Issue numbers
-> below predate the tracker migration of 2026-09-08 and refer to the old
-> private numbering; read them as history, not as links.*
+> *Published from the project's planning history on 2026-09-09. This is a
+> record of what was decided at the time, not current instructions. Issue
+> numbers predate the tracker migration of 2026-09-08 and refer to the old
+> private numbering, and any repository path or command shown may name the
+> private origin this work was done in. Read both as history, not as links
+> to follow.*
 
 7 September 2026. Answers to H1–H9 are accepted and recorded; the plan is final and
 the build queue is filed. Two of those answers asked us to send you material (H8, H9)

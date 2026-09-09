@@ -1,8 +1,11 @@
 # Orbit Diner kit 04 — review-tab replacement plan
 
-> *Published from the project's planning history on 2026-09-09. Issue numbers
-> below predate the tracker migration of 2026-09-08 and refer to the old
-> private numbering; read them as history, not as links.*
+> *Published from the project's planning history on 2026-09-09. This is a
+> record of what was decided at the time, not current instructions. Issue
+> numbers predate the tracker migration of 2026-09-08 and refer to the old
+> private numbering, and any repository path or command shown may name the
+> private origin this work was done in. Read both as history, not as links
+> to follow.*
 
 2026-09-06. Companion to the control inventory the kit was built against
 (`2026-09-05-review-workflow-control-inventory.md`) and to the designer questions
