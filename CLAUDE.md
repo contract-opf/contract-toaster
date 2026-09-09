@@ -2,7 +2,7 @@
 
 ## Read this first
 
-**[docs/planning/2026-09-08-orbit-diner-completion-handoff.md](docs/planning/2026-09-08-orbit-diner-completion-handoff.md)** —
+**[docs/plans/2026-09-08-orbit-diner-completion-handoff.md](docs/plans/2026-09-08-orbit-diner-completion-handoff.md)** —
 current state, what is verified, what is still open, and the two hand steps the
 new auto-deploy needs. It is written to be read cold, with no other context.
 

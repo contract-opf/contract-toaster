@@ -92,7 +92,6 @@ GUARD_FILES = {
     "tests/lint-brand-free.py": "this gate itself -- defines the patterns",
     "tests/lint-public-cut-debrand.py": "public-cut de-brand scanner",
     "tests/lint-issue-349-debrand.py": "issue-349 de-brand scanner",
-    "tests/lint-public-cut-exclude.py": "exclusion-manifest gate; names the private org",
     "tests/lint-acceptable-variations.py": "references the org in its provenance docstring",
     "tests/test_no_hardcoded_tenant_literals_274.py": "asserts tenant literals are ABSENT",
     "tests/test_policy_document.py": "asserts a policy carries no tenant literal",
@@ -101,8 +100,11 @@ GUARD_FILES = {
     "tests/test_phase0_ac_coverage.py": "quotes historical phase-0 acceptance criteria",
     "tests/test_schema_hardening.py": "quotes historical schema URLs",
     "scripts/docs-lint.py": "docs linter; the stale address is its search pattern",
-    "scripts/public-cut.sh": "the cut tool; names the private origin by design",
     "public-cut-exclude.txt": "the exclusion manifest; naming what it excludes is its job",
+    # (Removed 2026-09-09: entries for scripts/public-cut.sh and
+    # tests/lint-public-cut-exclude.py. Both belonged to the retired cut
+    # workflow and neither file exists in this repository, so the entries
+    # were inert config describing a tool nobody can run here.)
     "tests/test_infra_appname_prefix_233.py": "asserts CodeBuild no longer hard-codes the org",
 }
 # NOTE (issue #591): eleven entries were removed from this dict here -- tests

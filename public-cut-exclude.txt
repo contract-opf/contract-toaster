@@ -1,23 +1,32 @@
-# Public-cut exclusion manifest.
+# Path exclusion manifest — what must never be published.
 #
-# This repo can never be flipped public: its history holds a real client
-# corpus (real signed agreements, real counterparty identities) and real
-# negotiation positions. The public launch is instead a FRESH-HISTORY cut --
-# `git archive HEAD` of a clean tree, scrub, `git init` -- published to the
-# separate `contract-opf/contract-toaster` repo.
+# ORIGINAL PURPOSE (2026-07-15 to 2026-09-09). This repository used to be a
+# periodic, hand-scrubbed cut of a private one, and this file was the scrub
+# list: `scripts/public-cut.sh` read it, removed every path named here, and
+# `tests/lint-public-cut-exclude.py` asserted each pattern still matched
+# something. Both of those lived in the private repo. The cut workflow retired
+# on 2026-09-09 when development moved here, so the script was removed rather
+# than left in place calling a gate that this repository, by design, does not
+# ship.
 #
-# That cut was first taken 2026-07-15 against a scrub allow-list held in a
-# human's head and applied by hand. This file is that list, written down.
-# Fresh history means a mistake here is not recoverable by reverting: the
-# file simply ships. `tests/lint-public-cut-exclude.py` is the gate.
+# CURRENT PURPOSE. This file is still load-bearing, for a different job: it
+# defines the "public surface" that two gates scan.
+#
+#   tests/lint-brand-free.py         — no private-org reference in a pull path
+#   tests/lint-counterparty-names.py — no counterparty identity, ever
+#
+# Both compute their scope as `git ls-files` MINUS the paths below. In this
+# repository those paths are already absent, so the surface is the whole tree —
+# which is the correct answer here, and keeps one definition of "public
+# surface" shared by both gates rather than two that can drift apart.
+#
+# The entries below are kept because they document what must never appear here,
+# and because a path that ever reappears must be excluded again deliberately.
 #
 # Format: one path per line, matched against `git ls-files` output.
 #   - a line ending in `/` excludes that directory and everything under it
 #   - any other line excludes exactly that path
 #   - `#` starts a comment; blank lines are ignored
-#
-# To exclude something new: add it here. Do not rely on remembering it at
-# publish time -- that is the failure mode this file exists to remove.
 
 # The real contract library: 200+ real signed agreements from ~44 real
 # counterparties. The FOLDER NAMES ALONE leak the counterparties, so no

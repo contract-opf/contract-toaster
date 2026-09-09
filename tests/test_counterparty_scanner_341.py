@@ -13,8 +13,8 @@ agreement filename, in a hyphen-joined shape:
 `docs/` is not in `public-cut-exclude.txt`, so the next public cut would have
 published it. It passed `tests/lint-brand-free.py` (which polices the private
 ORG, not counterparties), `tests/lint-public-cut-exclude.py` (manifest paths,
-not content) and `scripts/public-cut.sh` (keys, `.env`, unmarked `.docx`, not
-prose). The live public repo escaped only because the previous cut predated it.
+not content) and the cut script's own scans (keys, `.env`, unmarked `.docx`,
+not prose; that script retired with the cut workflow on 2026-09-09). The live public repo escaped only because the previous cut predated it.
 
 This file asserts the new scanner would have caught it -- reproducing the
 STRUCTURE of that filename with a fabricated counterparty, because the real one
@@ -32,7 +32,7 @@ cannot appear in a public test.
    property that lets the gate run in a public CI log.
 6. Tokens below the length floor are dropped by the loader, so a short generic
    string cannot be smuggled into the list and fire on everything.
-7. The scanner is wired into `scripts/public-cut.sh` as a hard check.
+7. The scanner is wired into CI, so it runs on every push and pull request.
 8. With no token list reachable it SKIPS and exits 0 -- an outside contributor
    without the private overlay must still be able to run the checks.
 
@@ -50,7 +50,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCANNER = REPO_ROOT / "tests" / "lint-counterparty-names.py"
-PUBLIC_CUT = REPO_ROOT / "scripts" / "public-cut.sh"
+CI_GATE = REPO_ROOT / ".github" / "workflows" / "counterparty-name-gate.yml"
 
 # A fabricated counterparty. Never a real one -- this file is public.
 FAKE = "Placeholder State University"
@@ -137,12 +137,13 @@ def main() -> int:
     finally:
         tmp.unlink(missing_ok=True)
 
-    # 7. wired into the publish path
-    cut = PUBLIC_CUT.read_text(encoding="utf-8") if PUBLIC_CUT.exists() else ""
+    # 7. wired into CI. The cut script used to be the publish-path gate; with
+    #    the cut workflow retired, CI is the thing that must not lose the wiring.
+    ci = CI_GATE.read_text(encoding="utf-8") if CI_GATE.exists() else ""
     failures.append(
         not check(
-            "scripts/public-cut.sh runs the scanner as a hard check",
-            "lint-counterparty-names.py" in cut,
+            "CI runs the scanner on every push and pull request",
+            "lint-counterparty-names.py" in ci and "pull_request" in ci,
         )
     )
 
