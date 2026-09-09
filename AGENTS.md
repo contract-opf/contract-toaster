@@ -80,25 +80,26 @@ Plans and reports are permanent. Never write them to `/tmp` or
 `/private/tmp` — macOS purges those after a few days idle — and never delete
 one because it is finished. Superseded is a note at the top, not a `rm`.
 
-`docs/planning/` is the **legacy** plan directory and still holds live
-documents, including the current handoff. Leave what is there where it is;
-write *new* plans to `docs/plans/`.
-
 ## Two repo-specific traps
 
-**`docs/planning/` never ships.** `public-cut-exclude.txt` excludes that whole
-directory from the public cut, because the real client corpus sits under
-`docs/planning/Internship-Agreement-Library/` and the folder names alone
-identify real counterparties. Consequences you must respect:
+**A push here is a publication.** This repository is the development trunk and
+it is public. There is no scrub step between your commit and the world — that
+model retired on 2026-09-09, along with the cut script that implemented it.
+Two consequences:
 
-- The corpus subtree is excluded from `docs/INDEX.md` on purpose. Do not index
-  it, and never quote a counterparty name into the index, a scope line, a
-  commit message, or a doc that does ship.
-- `docs/INDEX.md` **does** ship, and it carries lines pointing into
-  `docs/planning/`. **The public cut must re-run
-  `python3 tools/docs_sync.py project --write` after the scrub and before
-  publishing**, so the shipped index does not name scrubbed paths. Same for
-  `overlay/README.md` and `aws-access-request.md`, which are also cut.
+- **Never write a counterparty name** into code, a document, a commit message,
+  or an issue. `tests/lint-counterparty-names.py` guards this, but it is
+  **fail-open**: the denylist is itself sensitive and lives in a private
+  overlay, so with no token list reachable the gate SKIPS and passes. On your
+  machine it will almost certainly skip. It is a backstop, not a substitute for
+  not writing the name. A scheduled job with the list scans this tree daily.
+- `tests/lint-brand-free.py` hard-fails on a pull path, repo URL, or team
+  reference pointing at the private origin. Naming that org in prose is fine.
+
+Both gates scan `git ls-files` minus `public-cut-exclude.txt`, so **a file you
+have not staged is invisible to them.** Stage first, then run the gate — an
+untracked file passing locally and failing in CI is the most common way to be
+surprised here.
 
 **`frontend/vendor/orbit-diner/` is read-only and deliberately unindexed.** It
 is the designer's source of record and the baseline the next supplier patch
