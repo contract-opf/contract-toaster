@@ -9,7 +9,7 @@ Background
 `WafStack` (infra/lib/nested/waf-stack.ts) rule 4 (RateLimitUploadEndpoint,
 priority 40, limit 10/5min) scopes down only on URI path prefix
 (`/api/reviews`, STARTS_WITH). It evaluates *before* rule 5
-(RateLimitPollingEndpoint, priority 50, limit 60/5min), and it has no HTTP
+(RateLimitPollingEndpoint, priority 50, limit 300/5min since issue #50), and it has no HTTP
 method constraint — so GET /api/reviews/{id} (status polling) also matches
 rule 4. A UI that polls every few seconds for a 1-3 minute review burns
 through the 10-request budget in well under a minute, and the caller's IP
