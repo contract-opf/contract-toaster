@@ -23,6 +23,18 @@
 > `model_timeout`. Pinned by `tests/test_config_botocore_51.py` and
 > `tests/test_bedrock_client_transport_51.py`; rationale in
 > `ARCHITECTURE.md` → Cost shape → "Transport retry budget (Bedrock)".
+>
+> F2 / A2 landed as public issue `contract-opf/contract-toaster#52` (private
+> #692): the reviews table gained the `status-index` GSI (`status` /
+> `created_at`) on both deploy targets (`infra/lib/nested/data-stack.ts`,
+> `deploy/dts/bootstrap.py`), and every live path in the F2 table below now
+> reads it through `reviews._query_by_status` with a full `LastEvaluatedKey`
+> loop — the admin listing as a globally newest-first merge of per-status
+> queries, the health counts one partition at a time, retention preview /
+> sweep / holds and the legal triage queue per terminal status. Pinned by
+> `tests/test_reviews_no_scan.py` (call-logging spy over a real moto table,
+> with its own watched-red negative control) and Check L of
+> `tests/test_infra_dynamodb_tables.py` (the synthesized index).
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the
@@ -49,7 +61,7 @@ actions, `R` risks, `Q` questions parked for the owner.
 | Code | Pillar | Severity | One line |
 |---|---|---|---|
 | F1 | Stability | **P1** | *Landed — see the status note above.* WAF polling rule (60 req / 5 min per IP) is below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min gets the reviewer's IP blocked mid-review. |
-| F2 | Performance | **P1** | The `reviews` table is `.scan()`ed on six live request paths (admin list, admin health, retention preview/sweep/holds, legal triage) despite the documented "never scan `reviews`/`audit`" invariant. |
+| F2 | Performance | **P1** | *Landed — see the status note above.* The `reviews` table is `.scan()`ed on six live request paths (admin list, admin health, retention preview/sweep/holds, legal triage) despite the documented "never scan `reviews`/`audit`" invariant. |
 | F3 | Stability | P2 | *Landed — see the status note above.* Bedrock and DynamoDB boto clients are built with no `botocore.Config`: default 60 s read timeout and legacy retry mode. A long primary-pass generation trips the socket timeout and is silently retried by botocore, paying up to 4x. |
 | F4 | Stability | P2 | The upload `put_object` sends no integrity checksum; S3 accepts a truncated/corrupted body and the review runs on it. The submit fetch has no abort/timeout, so a stalled upload spins forever in "Submitting". |
 | F5 | Accuracy | P2 | Markup intensity ("browning") is not a wire field. The frontend composes a prose sentence into `toaster_guidance`; the backend has no `browning` concept, no enum, no schema slot, no audit field. Output contract is non-deterministic for the dial. |

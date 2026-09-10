@@ -50,6 +50,11 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import reviews as reviews_module
+except ImportError:  # pragma: no cover
+    import reviews as reviews_module  # type: ignore[no-redef]
+
 logger = logging.getLogger(__name__)
 
 GLOBAL_SETTING_ID = "global"
@@ -124,6 +129,29 @@ TERMINAL_REVIEW_STATUSES = {
     "QUARANTINED",
     "SUPERSEDED",
 }
+
+# Every status a reviews row can carry (issue #52): the purge worker's
+# terminal set above plus the app's own vocabulary. The sweep and the hold
+# list read the table one `status-index` partition at a time, so "every row"
+# is spelled as "every partition in this set" -- a hold can sit on a review
+# in any status, and the sweep's `skipped_active` bucket has to see the
+# in-flight rows it reports.
+_ALL_KNOWN_REVIEW_STATUSES = frozenset(
+    TERMINAL_REVIEW_STATUSES
+    | reviews_module.REVIEW_STATUSES_NON_TERMINAL
+    | reviews_module.REVIEW_STATUSES_TERMINAL
+)
+
+
+def _reviews_by_status(reviews_table: Any, statuses: Any) -> Any:
+    """Every row in each of `statuses`, one full `status-index` query per
+    status (issue #52). Replaces the table scan these callers used to make
+    -- which read ONE page: past the first megabyte, a purge
+    sweep silently never evaluated a row, and the preview under-counted what
+    that sweep would delete. `reviews._query_by_status` owns the
+    `LastEvaluatedKey` loop, so a row is seen exactly once per sweep."""
+    for status_ in sorted(statuses):
+        yield from reviews_module._query_by_status(reviews_table, status_)
 
 
 def now_epoch() -> float:
@@ -408,10 +436,11 @@ def preview_purge_sweep(
     _require_admin(caller_user_row, "Admin privilege required to preview a purge sweep.")
 
     reviews_table = _reviews_table(dynamodb_resource)
-    resp = reviews_table.scan()
 
     review_ids: list[str] = []
-    for review in resp.get("Items", []):
+    # Only the terminal partitions: a non-terminal review can never be
+    # purge-eligible (invariant 1), so there is nothing to read there.
+    for review in _reviews_by_status(reviews_table, TERMINAL_REVIEW_STATUSES):
         status_ = review.get("status")
         if status_ not in TERMINAL_REVIEW_STATUSES:
             continue
@@ -604,7 +633,6 @@ def run_purge_sweep_now(
                         substance fields are left intact for the next sweep
     """
     reviews_table = _reviews_table(dynamodb_resource)
-    resp = reviews_table.scan()
 
     uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
     outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
@@ -625,7 +653,10 @@ def run_purge_sweep_now(
     skipped_hold: list[str] = []
     skipped_not_yet_eligible: list[str] = []
 
-    for review in resp.get("Items", []):
+    # Every known partition, terminal ones first (issue #52): the in-flight
+    # partitions are read too, so `skipped_active` still names the reviews
+    # invariant 1 protected, exactly as the scan-backed sweep reported them.
+    for review in _reviews_by_status(reviews_table, _ALL_KNOWN_REVIEW_STATUSES):
         review_id = review["review_id"]
         status_ = review.get("status")
 
@@ -934,9 +965,10 @@ def list_legal_holds(
     _require_admin(caller_user_row, "Admin privilege required to view legal holds.")
 
     reviews_table = _reviews_table(dynamodb_resource)
-    resp = reviews_table.scan()
+    # Every known partition (issue #52): `set_legal_hold` does not require a
+    # terminal review, so a hold on an in-flight one must still be listed.
     return [
         {field: r[field] for field in _HOLD_LIST_FIELDS if field in r}
-        for r in resp.get("Items", [])
+        for r in _reviews_by_status(reviews_table, _ALL_KNOWN_REVIEW_STATUSES)
         if r.get("legal_hold")
     ]

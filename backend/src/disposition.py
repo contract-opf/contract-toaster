@@ -52,6 +52,11 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import reviews as reviews_module
+except ImportError:  # pragma: no cover
+    import reviews as reviews_module  # type: ignore[no-redef]
+
 # ---------------------------------------------------------------------------
 # Disposition outcomes
 # ---------------------------------------------------------------------------
@@ -208,10 +213,26 @@ def count_reviews_awaiting_disposition(
 
 
 def _scan_by_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
-    """Fallback owner-scoped fetch for callers whose table stand-in does not
-    implement query_by_owner (e.g. a full boto3 Table would use `query`
-    against the owner_sub-index GSI; production callers should pass a
-    resource whose Table() exposes that query directly)."""
+    """Owner-scoped fetch for callers whose table stand-in does not implement
+    `query_by_owner`. A real boto3 Table reads the `owner_sub-index` GSI
+    (infra/lib/nested/data-stack.ts) with a full `LastEvaluatedKey` loop --
+    never a scan (issue #52); the scan+filter branch is the documented
+    fallback for a lightweight stand-in without `.query()` (same convention
+    as reviews.py::_page_for_owner). The name is kept for its callers."""
+    if hasattr(table, "query"):
+        from boto3.dynamodb.conditions import Key
+
+        items: list[dict[str, Any]] = []
+        query_kwargs: dict[str, Any] = {
+            "IndexName": "owner_sub-index",
+            "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
+        }
+        resp = table.query(**query_kwargs)
+        items.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(**query_kwargs, ExclusiveStartKey=resp["LastEvaluatedKey"])
+            items.extend(resp.get("Items", []))
+        return items
     if hasattr(table, "scan"):
         resp = table.scan()
         return [i for i in resp.get("Items", []) if i.get("owner_sub") == owner_sub]
@@ -229,11 +250,14 @@ def list_legal_triage_queue(dynamodb_resource: Any) -> list[dict[str, Any]]:
     function only surfaces the queue.
     """
     table = _reviews_table(dynamodb_resource)
-    if hasattr(table, "scan"):
-        resp = table.scan()
-        items = resp.get("Items", [])
-    else:
-        items = []
+    # Issue #52: one `status-index` query per terminal status, filtered on
+    # the triage flag, instead of a scan. A disposition -- and so a triage
+    # entry -- can only be recorded on a completed review
+    # (`DISPOSITIONABLE_REVIEW_STATUSES`, a subset of the terminal set), so
+    # the terminal partitions are the whole population.
+    items: list[dict[str, Any]] = []
+    for status_ in sorted(reviews_module.REVIEW_STATUSES_TERMINAL):
+        items.extend(reviews_module._query_by_status(table, status_))
     return [i for i in items if i.get("legal_triage_status") == TRIAGE_STATUS_PENDING]
 
 

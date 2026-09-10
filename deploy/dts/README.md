@@ -84,7 +84,8 @@ the local Phase 1 quickstart this README covers.
 ## What the bootstrap does
 
 `bootstrap.py` (a one-shot compose service the backend waits on) creates the
-DynamoDB tables (+ the `reviews.owner_sub-index` GSI) and the uploads/outputs
+DynamoDB tables (+ the `reviews.owner_sub-index`, `reviews.status-index` and
+`reviews.playbook_hash-index` GSIs) and the uploads/outputs
 buckets, seeds any registry-declared mock-pipeline redline fixture into MinIO,
 seeds the demo users, and installs + activates the playbook the image ships
 with — **Synthetic NDA Sample**, the only contract type a fresh deployment

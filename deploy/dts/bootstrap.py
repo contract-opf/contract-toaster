@@ -9,7 +9,8 @@ Idempotent: creating a table/bucket that already exists is a no-op, so
 Does four things against DynamoDB-Local + MinIO (endpoints from env, via
 config.boto3_client_kwargs):
   1. Create the DynamoDB tables the backend reads, with the GSIs it queries
-     (reviews.owner_sub-index, review_submissions.review_id-index) -- and, for
+     (reviews.owner_sub-index, reviews.status-index,
+     review_submissions.review_id-index) -- and, for
      a table that ALREADY exists, converge it onto that declared index set
      (issue #446). Creating is not enough: a table provisioned before an index
      was declared here would otherwise be skipped forever, which is how a live
@@ -93,6 +94,12 @@ _TABLES = [
         [
             ("owner_sub-index", "owner_sub", "created_at"),
             ("playbook_hash-index", "playbook_hash", "created_at"),
+            # status-index mirrors infra/lib/nested/data-stack.ts (issue #52):
+            # the admin listing, pipeline health, retention preview/sweep/holds
+            # and the legal triage queue query it per status instead of
+            # scanning the table. Without it every one of those admin reads
+            # raises ValidationException on DTS.
+            ("status-index", "status", "created_at"),
         ],
     ),
     # review_id-index mirrors infra/lib/nested/data-stack.ts: pipeline_runner's

@@ -51,6 +51,13 @@ Verifies that all acceptance criteria for issue #52 are satisfied:
   K. Guard: DynamoDB table references (CfnOutputs or public properties)
      exist so downstream stacks can consume them.
 
+  L. The SYNTHESIZED reviews table carries the `status-index` GSI
+     (HASH `status`, RANGE `created_at`, ProjectionType ALL) that the
+     admin-wide reads query instead of scanning the table (issue #52,
+     public tracker). Read from the template Check J produced, not from a
+     regex over the source, so a GSI that is declared but does not
+     synthesize cannot pass.
+
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
@@ -624,6 +631,85 @@ def check_j_cdk_synth() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check L — status-index GSI on the SYNTHESIZED reviews table (issue #52)
+# ---------------------------------------------------------------------------
+
+# The exact index the backend queries (backend/src/reviews.py::_query_by_status)
+# and the DTS bootstrap mirrors (deploy/dts/bootstrap.py `_TABLES`).
+STATUS_INDEX_NAME = "status-index"
+STATUS_INDEX_KEY_SCHEMA = [
+    {"AttributeName": "status", "KeyType": "HASH"},
+    {"AttributeName": "created_at", "KeyType": "RANGE"},
+]
+
+
+def _synthesized_reviews_table() -> dict | None:
+    """The reviews table resource from the nested Data stack template Check J
+    synthesized into infra/cdk.out, or None when it cannot be found."""
+    cdk_out = INFRA / "cdk.out"
+    for template_path in sorted(cdk_out.glob("*.nested.template.json")):
+        try:
+            template = json.loads(template_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for resource in template.get("Resources", {}).values():
+            if resource.get("Type") != "AWS::DynamoDB::Table":
+                continue
+            table_name = json.dumps(resource.get("Properties", {}).get("TableName", ""))
+            if "-reviews-" in table_name:
+                return resource
+    return None
+
+
+def check_l_status_index_synthesized() -> list[str]:
+    print("\nCheck L: status-index GSI present on the synthesized reviews table …")
+    failures: list[str] = []
+
+    table = _synthesized_reviews_table()
+    failures += _assert(
+        table is not None,
+        "synthesized reviews table found in infra/cdk.out (requires Check J's synth)",
+        "No AWS::DynamoDB::Table with a '-reviews-' TableName in any nested template.",
+    )
+    if table is None:
+        return failures
+
+    properties = table.get("Properties", {})
+    indexes = {
+        gsi.get("IndexName"): gsi for gsi in properties.get("GlobalSecondaryIndexes", [])
+    }
+    status_index = indexes.get(STATUS_INDEX_NAME)
+    failures += _assert(
+        status_index is not None,
+        f"reviews table declares GSI {STATUS_INDEX_NAME!r}",
+        f"GSIs present: {sorted(indexes)}",
+    )
+    if status_index is None:
+        return failures
+
+    failures += _assert(
+        status_index.get("KeySchema") == STATUS_INDEX_KEY_SCHEMA,
+        f"{STATUS_INDEX_NAME} keys are HASH status / RANGE created_at",
+        f"KeySchema: {status_index.get('KeySchema')}",
+    )
+    failures += _assert(
+        status_index.get("Projection", {}).get("ProjectionType") == "ALL",
+        f"{STATUS_INDEX_NAME} projects ALL attributes (the admin reads need the row)",
+        f"Projection: {status_index.get('Projection')}",
+    )
+    attribute_types = {
+        d.get("AttributeName"): d.get("AttributeType")
+        for d in properties.get("AttributeDefinitions", [])
+    }
+    failures += _assert(
+        attribute_types.get("status") == "S" and attribute_types.get("created_at") == "S",
+        "status and created_at are declared as String key attributes",
+        f"AttributeDefinitions: {attribute_types}",
+    )
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Check K — Guard: DynamoDB table references exported for downstream stacks
 # ---------------------------------------------------------------------------
 
@@ -676,6 +762,8 @@ def main() -> int:
     all_failures += check_i_removal_policy()
     all_failures += check_j_cdk_synth()
     all_failures += check_k_table_exports()
+    # After J on purpose: L reads the template J synthesized.
+    all_failures += check_l_status_index_synthesized()
 
     print("\n" + "=" * 60)
     if all_failures:
