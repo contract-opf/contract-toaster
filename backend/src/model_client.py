@@ -2077,6 +2077,18 @@ class OpenRouterModelClient:
 # ---------------------------------------------------------------------------
 
 
+def _is_botocore_read_timeout(exc: BaseException) -> bool:
+    """True when `exc` is botocore's `ReadTimeoutError` (issue #51). Imported
+    lazily so this module stays importable without boto3/botocore -- and
+    fails closed (False) when botocore is absent, in which case no boto3
+    client could have raised it anyway."""
+    try:
+        from botocore.exceptions import ReadTimeoutError
+    except ImportError:  # pragma: no cover - botocore ships with boto3
+        return False
+    return isinstance(exc, ReadTimeoutError)
+
+
 class LiveBedrockModelClient:
     """Real Bedrock client: implements `BedrockModelClient.invoke` via
     `bedrock-runtime` `InvokeModel` against Anthropic Claude, per the
@@ -2126,7 +2138,26 @@ class LiveBedrockModelClient:
         if self._client is None:
             import boto3  # lazy: keep the module importable without boto3
 
-            kwargs = {"region_name": self._region_name} if self._region_name else {}
+            # Issue #51 (audit finding F3): explicit botocore transport
+            # settings -- 300 s read / 10 s connect timeouts and a transport
+            # retry budget of `max_attempts=2` (`standard` mode: at most two
+            # re-sends after the first, three sends total). botocore's
+            # defaults (60 s read, legacy mode, 5 attempts) let a single
+            # long Opus generation trip the socket timeout and be silently
+            # re-sent up to four more times, each a billed invocation the
+            # cost ledger never saw as a retry. `config` is imported lazily
+            # under the same try/except the other backend modules use
+            # (production runs `src.main`; tests put backend/src on path).
+            try:
+                from src import config as _config
+            except ImportError:  # pragma: no cover
+                import config as _config  # type: ignore[no-redef]
+
+            kwargs: dict[str, Any] = {
+                "config": _config.botocore_config("bedrock-runtime"),
+            }
+            if self._region_name:
+                kwargs["region_name"] = self._region_name
             self._client = boto3.client("bedrock-runtime", **kwargs)
         return self._client
 
@@ -2197,6 +2228,19 @@ class LiveBedrockModelClient:
                 accept="application/json",
             )
         except Exception as exc:  # transport/service error -- never echo the request
+            # Issue #51 / #472: a socket read timeout gets its own token
+            # (`model_timeout`) rather than the generic transport bucket --
+            # the same mapping OpenRouterModelClient applies to
+            # `httpx.TimeoutException`. Detected by TYPE (botocore's own
+            # exception hierarchy), never by parsing the message. botocore
+            # itself has already spent its transport retry budget
+            # (`config.botocore_config("bedrock-runtime")`: standard mode,
+            # `max_attempts=2`) by the time this surfaces.
+            if _is_botocore_read_timeout(exc):
+                raise ModelTimeoutError(
+                    "Bedrock InvokeModel timed out waiting for the response "
+                    "(read timeout; botocore transport retries exhausted)."
+                ) from exc
             raise ModelInvocationError(
                 f"Bedrock InvokeModel failed at transport/service level: "
                 f"{type(exc).__name__}"

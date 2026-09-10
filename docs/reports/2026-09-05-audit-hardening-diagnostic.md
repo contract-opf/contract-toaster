@@ -13,6 +13,16 @@
 > review's `created_at`, pinned by `frontend/src/__tests__/poll-budget-waf.test.tsx`.
 > The finding text below is left as written; it describes the state before
 > that change. Later steps will add their own lines here.
+>
+> F3 / A3 landed as public issue `contract-opf/contract-toaster#51` (private
+> #691): `backend/src/config.py::botocore_config` pins the Bedrock client to
+> `read_timeout=300`, `connect_timeout=10`, `retries={"mode": "standard",
+> "max_attempts": 2}` and the DynamoDB client to `adaptive` mode with 15 s /
+> 5 s timeouts, routed through `boto3_client_kwargs` and
+> `LiveBedrockModelClient._get_client`; a `ReadTimeoutError` now surfaces as
+> `model_timeout`. Pinned by `tests/test_config_botocore_51.py` and
+> `tests/test_bedrock_client_transport_51.py`; rationale in
+> `ARCHITECTURE.md` → Cost shape → "Transport retry budget (Bedrock)".
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the
@@ -40,7 +50,7 @@ actions, `R` risks, `Q` questions parked for the owner.
 |---|---|---|---|
 | F1 | Stability | **P1** | *Landed — see the status note above.* WAF polling rule (60 req / 5 min per IP) is below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min gets the reviewer's IP blocked mid-review. |
 | F2 | Performance | **P1** | The `reviews` table is `.scan()`ed on six live request paths (admin list, admin health, retention preview/sweep/holds, legal triage) despite the documented "never scan `reviews`/`audit`" invariant. |
-| F3 | Stability | P2 | Bedrock and DynamoDB boto clients are built with no `botocore.Config`: default 60 s read timeout and legacy retry mode. A long primary-pass generation trips the socket timeout and is silently retried by botocore, paying up to 4x. |
+| F3 | Stability | P2 | *Landed — see the status note above.* Bedrock and DynamoDB boto clients are built with no `botocore.Config`: default 60 s read timeout and legacy retry mode. A long primary-pass generation trips the socket timeout and is silently retried by botocore, paying up to 4x. |
 | F4 | Stability | P2 | The upload `put_object` sends no integrity checksum; S3 accepts a truncated/corrupted body and the review runs on it. The submit fetch has no abort/timeout, so a stalled upload spins forever in "Submitting". |
 | F5 | Accuracy | P2 | Markup intensity ("browning") is not a wire field. The frontend composes a prose sentence into `toaster_guidance`; the backend has no `browning` concept, no enum, no schema slot, no audit field. Output contract is non-deterministic for the dial. |
 | F6 | Accuracy | P2 | Party recognition is exact-string, case/whitespace-insensitive only. No suffix folding (GmbH/SAS/B.V./S.r.l./Ltd/LLC), no punctuation folding ("Acme, Inc." vs "Acme Inc"), no d/b/a splitting. A roster entry "Acme GmbH" will not match "ACME G.m.b.H." in the document. |

@@ -17,11 +17,62 @@ suite selects behavior per-test with `patch.dict(os.environ, ...)`, so reading
 the environment at call time keeps both working.
 
 The ONLY behavior this module changes for the AWS target is: when no endpoint
-override is configured, `boto3_client_kwargs` returns exactly
-`{"region_name": ...}` -- the same kwargs the ad-hoc factories passed before.
+override is configured, `boto3_client_kwargs` returns `{"region_name": ...}`
+plus the explicit per-service `botocore.config.Config` from
+`botocore_config(service)` (audit finding F3, issue #51) -- the same
+endpoint/credential kwargs the ad-hoc factories passed before, with the
+transport timeouts and retry mode pinned instead of left to botocore's
+defaults.
 """
 
 import os
+from typing import Any
+
+try:  # botocore ships with boto3; both are imported lazily elsewhere in the
+    # backend so every module stays importable (and CI jobs that never touch
+    # AWS stay green -- tests/test_ci_env_parity_639.py) without them. This
+    # binding exists for the `-> Config` annotation only; `botocore_config`
+    # re-imports at call time, the same way `model_client` imports boto3.
+    from botocore.config import Config
+except ImportError:  # pragma: no cover - only when boto3/botocore is absent
+    Config = Any  # type: ignore[misc,assignment]
+
+# Explicit botocore transport settings per service (audit finding F3 / A3,
+# issue #51). botocore's defaults are `read_timeout=60`, `connect_timeout=60`
+# and `retries={"mode": "legacy", "max_attempts": 5}` -- for Bedrock that
+# means a single long generation past 60 s raises `ReadTimeoutError` and
+# legacy mode silently re-sends `InvokeModel` up to four more times, each a
+# billed invocation the cost ledger never sees as a retry.
+BEDROCK_READ_TIMEOUT_SECONDS = 300
+BEDROCK_CONNECT_TIMEOUT_SECONDS = 10
+DYNAMODB_READ_TIMEOUT_SECONDS = 15
+DYNAMODB_CONNECT_TIMEOUT_SECONDS = 5
+
+
+def botocore_config(service: str) -> Config:
+    """Explicit timeouts and retry mode per service. Bedrock: long reads and a
+    transport retry budget of `max_attempts=2` (botocore counts retries AFTER
+    the first send, so a single `InvokeModel` is sent at most three times --
+    down from legacy mode's five) so a timed-out generation is not silently
+    re-billed four times. DynamoDB: adaptive mode for throttling bursts at
+    cold start. Any other service: standard mode, botocore's default timeouts.
+    See ARCHITECTURE.md -> Cost shape -> "Transport retry budget (Bedrock)"."""
+    from botocore.config import Config as _Config  # lazy: see the module note above
+
+    if service == "bedrock-runtime":
+        return _Config(
+            read_timeout=BEDROCK_READ_TIMEOUT_SECONDS,
+            connect_timeout=BEDROCK_CONNECT_TIMEOUT_SECONDS,
+            retries={"mode": "standard", "max_attempts": 2},
+        )
+    if service == "dynamodb":
+        return _Config(
+            read_timeout=DYNAMODB_READ_TIMEOUT_SECONDS,
+            connect_timeout=DYNAMODB_CONNECT_TIMEOUT_SECONDS,
+            retries={"mode": "adaptive", "max_attempts": 5},
+        )
+    return _Config(retries={"mode": "standard", "max_attempts": 3})
+
 
 # Env var name carrying a per-service endpoint override, keyed by boto3
 # service name. A local emulator (MinIO for S3, DynamoDB-Local for DynamoDB)
@@ -196,7 +247,7 @@ def s3_public_endpoint_url() -> str | None:
     return os.environ.get("S3_PUBLIC_ENDPOINT_URL", "").strip() or None
 
 
-def presigning_s3_client_kwargs() -> dict[str, str]:
+def presigning_s3_client_kwargs() -> dict[str, Any]:
     """Like `boto3_client_kwargs("s3")`, but `endpoint_url` is overridden by
     `s3_public_endpoint_url()` when set. Used only to build the dedicated
     client `download.generate_presigned_download_url` presigns with; the
@@ -216,21 +267,27 @@ def presigning_s3_client_kwargs() -> dict[str, str]:
     return kwargs
 
 
-def boto3_client_kwargs(service: str) -> dict[str, str]:
+def boto3_client_kwargs(service: str) -> dict[str, Any]:
     """Build the kwargs for `boto3.client(service, ...)` /
     `boto3.resource(service, ...)`.
 
     - Always sets `region_name`.
+    - Always sets `config` to `botocore_config(service)` -- explicit
+      timeouts and retry mode instead of botocore's defaults (issue #51).
     - When an endpoint override is configured for the service (Docker Compose: MinIO /
       DynamoDB-Local), also sets `endpoint_url` and -- unless real credentials
       are already present in the environment -- dummy static credentials
       (local emulators require *some* credentials but do not validate them).
 
     With no override configured (the AWS target), returns exactly
-    `{"region_name": region()}` -- unchanged from the previous ad-hoc
+    `{"region_name": region(), "config": botocore_config(service)}` -- the
+    endpoint/credential shape is unchanged from the previous ad-hoc
     factories, so the AWS path and every AWS-asserting test are unaffected.
     """
-    kwargs: dict[str, str] = {"region_name": region()}
+    kwargs: dict[str, Any] = {
+        "region_name": region(),
+        "config": botocore_config(service),
+    }
     override = endpoint_url(service)
     if override:
         kwargs["endpoint_url"] = override
