@@ -189,9 +189,11 @@ jobs:
           # for a host that is not behind Access.
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-          # The restart endpoint is a GET. Override only for a webhook style
-          # that wants POST (repo Settings -> Secrets and variables -> Variables).
-          METHOD: ${{ vars.COOLIFY_DEPLOY_METHOD || 'GET' }}
+          # Coolify >= 4.3.18 answers GET on this endpoint with 405 "This
+          # endpoint has changed to a POST request", so POST is the default.
+          # Override via the COOLIFY_DEPLOY_METHOD repo variable (repo
+          # Settings -> Secrets and variables -> Variables) for an older host.
+          METHOD: ${{ vars.COOLIFY_DEPLOY_METHOD || 'POST' }}
           SHA: ${{ needs.publish.outputs.sha }}
         run: |
           set -uo pipefail
@@ -216,19 +218,25 @@ jobs:
                 -o /tmp/coolify-response.txt -w '%{http_code}' \
                 "${hdrs[@]}" -X "${METHOD}" "${WEBHOOK}")" || true
           body_head="$(head -c 400 /tmp/coolify-response.txt 2>/dev/null || true)"
+          # Never echo the raw body: a challenge page embeds the request URL,
+          # and an error body can quote a header. Show a redacted head only.
+          redacted="$(sed -E 's/[A-Za-z0-9_.-]{32,}/<redacted>/g; s/<[^>]*>//g' <<<"${body_head}" | tr -s ' \n' ' ' | head -c 240)"
           if grep -qiE '<!DOCTYPE html|Just a moment|cdn-cgi/' <<<"${body_head}" \
              || [ "${code:-}" = "302" ]; then
             echo "::error title=Blocked at the edge::Cloudflare answered instead of Coolify (HTTP ${code:-none})."
-            echo "The bearer token never reached Coolify. Set CF_ACCESS_CLIENT_ID and"
-            echo "CF_ACCESS_CLIENT_SECRET (a Cloudflare Access service token scoped to the"
-            echo "Coolify application), or exempt this endpoint from Access."
+            echo "Response head: ${redacted}"
+            echo "The bearer token never reached Coolify. A 302 is the Access login: set"
+            echo "CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (a Cloudflare Access"
+            echo "service token scoped to the Coolify application). A 403 challenge page"
+            echo "with those set is Bot Fight Mode, which no rule can skip on the free"
+            echo "plan: turn it off for the zone, or run this job on a runner that"
+            echo "reaches Coolify without crossing Cloudflare."
             exit 1
           fi
           case "${code:-}" in
             2??) ;;
             *)
-              echo "Coolify refused the deploy (HTTP ${code:-none}):"
-              cat /tmp/coolify-response.txt || true
+              echo "Coolify refused the deploy (HTTP ${code:-none}): ${redacted}"
               exit 1
               ;;
           esac

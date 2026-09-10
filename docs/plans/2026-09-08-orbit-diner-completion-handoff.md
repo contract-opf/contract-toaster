@@ -112,7 +112,7 @@ invariant covers which target. Do not loosen the AWS one without a decision.
    the runner with a challenge page before the bearer token is ever read; the
    step now recognises that and names the service-token fix instead of
    printing the HTML. The endpoint is a GET; a `COOLIFY_DEPLOY_METHOD` repo
-   variable overrides it.
+   variable overrides it; Coolify 4.3.18+ requires POST, which is now the default.
 
 ### Deploy state right now
 
