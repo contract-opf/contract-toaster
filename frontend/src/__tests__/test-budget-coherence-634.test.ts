@@ -94,7 +94,7 @@ const configuredTimeoutMs = readNumber(
 
 const pollIntervalMs = readNumber(
   readFileSync(REVIEW_SUBMISSION, 'utf8'),
-  /^const POLL_INTERVAL_MS = (\d[\d_]*);/m,
+  /^(?:export )?const POLL_INTERVAL_MS = (\d[\d_]*);/m,
   'POLL_INTERVAL_MS in ReviewSubmission.tsx',
 );
 

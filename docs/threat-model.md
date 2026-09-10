@@ -264,7 +264,7 @@ The authoritative purge policy (invariant 5) is in [docs/data-handling.md](data-
 - **WAF.** A WAF fronts the API with managed rule sets plus request-size and rate rules, dropping obviously-abusive traffic before it reaches App Runner.
 - **Request-size caps.** A hard cap on upload request size (paired with the decompressed-size cap from [Hostile file uploads](#hostile-file-uploads)).
 - **Per-user concurrency and daily limits.** A cap on concurrent in-flight reviews per user and a per-user daily review count, so one account cannot monopolize the pipeline or, together with the global **$20/day spend ceiling** (see [ARCHITECTURE.md → Security posture](../ARCHITECTURE.md#security-posture)), drain the budget. These complement the pipeline-level concurrency control that protects the Bedrock quota.
-- **Rate limits on upload and polling.** Both `POST /api/reviews` and the `GET /api/reviews/{id}` polling endpoint are rate-limited per user, so a runaway client backs off instead of amplifying.
+- **Rate limits on upload and polling.** Both `POST /api/reviews` (10 per 5 minutes) and the `GET /api/reviews/{id}` polling endpoint (300 per 5 minutes per IP, sized against the UI's adaptive 3 s → 10 s poll so a healthy 15-minute review never trips it) are rate-limited, so a runaway client backs off instead of amplifying.
 
 ## Source-control processor
 

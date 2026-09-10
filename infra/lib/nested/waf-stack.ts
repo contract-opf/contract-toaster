@@ -35,8 +35,11 @@ export interface WafStackProps extends cdk.NestedStackProps {
  *        Scope-down is (URI path prefix) AND (method == POST) so GET status
  *        polling never matches this rule (issue #227).
  *        Prevents a single caller from firing reviews in a tight loop.
- *      - RateBasedStatement on GET /api/reviews (polling) — 60 req/5 min.
- *        Prevents a tight polling loop from amplifying load.
+ *      - RateBasedStatement on GET /api/reviews (polling) — 300 req/5 min.
+ *        Stops a scripted flood only: the application-layer per-user
+ *        concurrency cap (a DynamoDB conditional write) is the abuse
+ *        control, and the UI's adaptive poll interval stays well inside
+ *        this budget for the whole 15-minute execution timeout (issue #50).
  *
  * Per-user review-concurrency and daily-limit enforcement is performed in
  * the application layer (DynamoDB conditional write on the users table) rather
@@ -219,9 +222,12 @@ export class WafStack extends cdk.NestedStack {
         // ----------------------------------------------------------------
         // Rule 5: Rate limit on polling endpoint.
         //
-        // GET /api/reviews/{id} — 60 requests per 5-minute window per IP.
-        // Prevents a tight polling loop from amplifying load on the API
-        // and the DynamoDB status table.
+        // GET /api/reviews/{id} — 300 requests per 5-minute window per IP.
+        // Sized against the UI's adaptive poll (3 s for two minutes, then
+        // 10 s: at most 58 polls in any 5-minute window, asserted by
+        // frontend/src/__tests__/poll-budget-waf.test.tsx) so a healthy
+        // 15-minute review, a download and a cancel from one office NAT
+        // never trip it. Only a scripted flood does (issue #50).
         // ----------------------------------------------------------------
         {
           name: 'RateLimitPollingEndpoint',
@@ -229,7 +235,7 @@ export class WafStack extends cdk.NestedStack {
           action: { block: {} },
           statement: {
             rateBasedStatement: {
-              limit: 60,
+              limit: 300,
               aggregateKeyType: 'IP',
               scopeDownStatement: {
                 byteMatchStatement: {

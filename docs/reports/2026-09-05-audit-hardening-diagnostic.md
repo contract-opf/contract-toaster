@@ -30,7 +30,7 @@ actions, `R` risks, `Q` questions parked for the owner.
 
 | Code | Pillar | Severity | One line |
 |---|---|---|---|
-| F1 | Stability | **P1** | WAF polling rule (60 req / 5 min per IP) is below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min gets the reviewer's IP blocked mid-review. |
+| F1 | Stability | **P1** | **Landed (#50).** WAF polling rule (was 60 req / 5 min per IP, now 300) was below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min got the reviewer's IP blocked mid-review. Poll is now adaptive (3 s → 10 s after 120 s), worst window 58 req, pinned by `poll-budget-waf.test.tsx`. |
 | F2 | Performance | **P1** | The `reviews` table is `.scan()`ed on six live request paths (admin list, admin health, retention preview/sweep/holds, legal triage) despite the documented "never scan `reviews`/`audit`" invariant. |
 | F3 | Stability | P2 | Bedrock and DynamoDB boto clients are built with no `botocore.Config`: default 60 s read timeout and legacy retry mode. A long primary-pass generation trips the socket timeout and is silently retried by botocore, paying up to 4x. |
 | F4 | Stability | P2 | The upload `put_object` sends no integrity checksum; S3 accepts a truncated/corrupted body and the review runs on it. The submit fetch has no abort/timeout, so a stalled upload spins forever in "Submitting". |
