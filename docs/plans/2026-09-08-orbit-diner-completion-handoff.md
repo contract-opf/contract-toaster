@@ -93,18 +93,26 @@ invariant covers which target. Do not loosen the AWS one without a decision.
 1. **GitHub Actions secrets** at `Settings -> Secrets and variables -> Actions`
    in the GitHub repo (not Coolify):
    - `COOLIFY_DEPLOY_WEBHOOK` =
-     `https://<your-coolify-host>/api/v1/deploy?uuid=<service-uuid>
+     `https://<your-coolify-host>/api/v1/services/<service-uuid>/restart?latest=true`
    - `COOLIFY_API_TOKEN` = a Coolify API token with deploy permission
      (Coolify -> Keys & Tokens -> API tokens)
+   - `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` = a Cloudflare Access
+     service token scoped to the Coolify application, only if the host sits
+     behind Access (both halves optional otherwise)
 
-   Until they exist the deploy job warns and exits 0 — images still publish, the
-   deployment simply does not move.
+   Until the webhook exists the deploy job warns and exits 0 — images still
+   publish, the deployment simply does not move.
 
-2. **The deploy leg has never run.** It was written and YAML-validated but never
-   executed, because `gh workflow run` was blocked in the authoring session.
-   Coolify's `/api/v1/deploy` is a **GET** endpoint, so the step uses GET; a
-   `COOLIFY_DEPLOY_METHOD` repo variable overrides it. Treat the first automatic
-   deploy as the real test of this code.
+2. **The deploy leg first ran on 2026-09-10** and taught two things, both now
+   fixed in the workflow. The generic `/api/v1/deploy` endpoint ignores `force`
+   for a service and recreates containers from the `:latest` already on the
+   box, so it deploys nothing new — the services `restart?latest=true`
+   endpoint is the API twin of the UI's "Restart (pull latest)" and is what the
+   webhook must point at. And a Coolify host behind Cloudflare Access answers
+   the runner with a challenge page before the bearer token is ever read; the
+   step now recognises that and names the service-token fix instead of
+   printing the HTML. The endpoint is a GET; a `COOLIFY_DEPLOY_METHOD` repo
+   variable overrides it.
 
 ### Deploy state right now
 
