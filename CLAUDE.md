@@ -42,9 +42,10 @@ python3 tests/lint-counterparty-names.py # no counterparty identity on the publi
 
 The counterparty gate (#341) is **fail-open**: with no private token list
 reachable it SKIPS. That is deliberate, so a contributor without the overlay is
-not blocked. `check.sh` picks it up automatically, and
-`.github/workflows/published-tree-scan.yml` scans the already-published tree
-daily from here, where the list exists.
+not blocked. `check.sh` picks it up automatically. The backstop that scans
+this already-published tree daily lives in the private origin's
+`published-tree-scan` workflow, the only place the token list exists — it
+cannot run here and is deliberately absent from this repo.
 
 The 14px type floor (#600) and the `minmax(0, …fr)` rule (#457) are enforced by
 `npm run audit:layout`, inside `check-frontend.sh`.

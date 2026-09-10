@@ -100,7 +100,7 @@ without the overlay must still be able to push.
 | Hard check on the publish path | `scripts/public-cut.sh` §4d |
 | CI gate | `.github/workflows/counterparty-name-gate.yml` |
 | Pre-push hook | `.pre-commit-config.yaml` (`--hook-type pre-push`) |
-| Scheduled scan of the published tree | `.github/workflows/published-tree-scan.yml` |
+| Scheduled scan of the published tree | `published-tree-scan.yml` in the private origin (needs the token list; not in this repo) |
 
 Verified end-to-end: planting a real token in a surface file fails the gate,
 the failure log prints `file:line — matches private token #N` and never the
