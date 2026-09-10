@@ -144,7 +144,25 @@ class AnalysisArtifactTestBase(unittest.TestCase):
         self.ddb.create_table(
             TableName=os.environ["REVIEWS_TABLE"],
             KeySchema=[{"AttributeName": "review_id", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "review_id", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "review_id", "AttributeType": "S"},
+                {"AttributeName": "status", "AttributeType": "S"},
+                {"AttributeName": "created_at", "AttributeType": "S"},
+            ],
+            # The `status-index` GSI infra/lib/nested/data-stack.ts declares
+            # (issue #52): the admin-wide reads under test query it, and a
+            # fixture without it would raise ValidationException exactly as
+            # the real table does -- which is the point of declaring it here.
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "status-index",
+                    "KeySchema": [
+                        {"AttributeName": "status", "KeyType": "HASH"},
+                        {"AttributeName": "created_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
             BillingMode="PAY_PER_REQUEST",
         ).wait_until_exists()
         self.s3.create_bucket(Bucket=os.environ["UPLOADS_BUCKET"])

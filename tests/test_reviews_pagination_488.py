@@ -85,9 +85,15 @@ class _PagingTable:
 
     def query(self, **kwargs: Any) -> dict[str, Any]:
         self.query_calls += 1
-        assert kwargs["IndexName"] == "owner_sub-index"
-        owner = kwargs["KeyConditionExpression"]._values[1]
-        rows = [r for r in self.rows if r.get("owner_sub") == owner]
+        # The two reviews GSIs the listing reads (infra/lib/nested/data-stack.ts):
+        # `owner_sub-index` for the owner path, `status-index` (issue #52) for
+        # the admin-wide merge. Any other index is what the real table would
+        # reject with a ValidationException.
+        partition_attr = {"owner_sub-index": "owner_sub", "status-index": "status"}[
+            kwargs["IndexName"]
+        ]
+        wanted = kwargs["KeyConditionExpression"]._values[1]
+        rows = [r for r in self.rows if r.get(partition_attr) == wanted]
         rows.sort(
             key=lambda r: r.get("created_at") or "",
             reverse=not kwargs.get("ScanIndexForward", True),
@@ -254,8 +260,13 @@ class TestScoping(unittest.TestCase):
         page = reviews_module.list_reviews(_caller("admin", is_admin=True), _Resource(table))
         self.assertEqual(len(page["items"]), reviews_module.REVIEWS_PAGE_DEFAULT_LIMIT)
         self.assertIsNotNone(page["next_token"])
-        # One bounded scan call, not a drain loop.
-        self.assertEqual(table.scan_calls, 1)
+        # Bounded `status-index` queries (issue #52), never a scan: at most one
+        # query per status for a page, and every seeded row here is DONE.
+        self.assertEqual(table.scan_calls, 0)
+        self.assertGreater(table.query_calls, 0)
+        self.assertLessEqual(
+            table.query_calls, len(reviews_module._ADMIN_LISTING_STATUSES)
+        )
 
     def test_an_owner_scoped_listing_uses_the_index_not_a_scan(self) -> None:
         """The whole cost argument depends on this. A scan+filter that

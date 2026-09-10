@@ -904,6 +904,8 @@ export class DataStack extends cdk.NestedStack {
     //   - submission_id, execution_arn, execution_status
     //
     // GSI: owner_sub-index — partition key owner_sub, for "my reviews" queries.
+    // GSI: status-index — partition key status, sort key created_at, for the
+    //   admin-wide reads that must never scan the table (issue #52).
     //
     // Queryable indexes for rollback/quarantine by release-bundle/component hash:
     //   - playbook_hash-index (GSI) — supports rollback/quarantine by playbook
@@ -923,6 +925,20 @@ export class DataStack extends cdk.NestedStack {
     this.reviewsTable.addGlobalSecondaryIndex({
       indexName: 'owner_sub-index',
       partitionKey: { name: 'owner_sub', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // GSI: status-index — supports the admin-wide reads (admin listing,
+    // pipeline health, retention preview/sweep/holds, legal triage) without a
+    // table scan (issue #52). `status` has a small closed vocabulary
+    // (reviews.REVIEW_STATUSES_NON_TERMINAL | REVIEW_STATUSES_TERMINAL), so
+    // the index has few partitions, each bounded by the review volume in that
+    // status — acceptable for admin-only reads, which page newest-first on
+    // the `created_at` sort key rather than materialising a partition.
+    this.reviewsTable.addGlobalSecondaryIndex({
+      indexName: 'status-index',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });

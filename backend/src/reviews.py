@@ -3252,6 +3252,13 @@ def _review_list_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scan_all_reviews(table: Any) -> list[dict[str, Any]]:
+    """TEST-DOUBLE FALLBACK ONLY (issue #52). No live request path scans the
+    reviews table any more: every admin-wide read goes through
+    `_query_by_status` and the `status-index` GSI, and this loop is reached
+    only from a lightweight stand-in that implements `scan` but not `query`
+    (the convention `pipeline_runner._find_submission_by_review_id`
+    documents). `tests/test_reviews_no_scan.py` is the gate that keeps it
+    that way against a real (moto) table."""
     items: list[dict[str, Any]] = []
     resp = table.scan()
     items.extend(resp.get("Items", []))
@@ -3259,6 +3266,127 @@ def _scan_all_reviews(table: Any) -> list[dict[str, Any]]:
         resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
         items.extend(resp.get("Items", []))
     return items
+
+
+# ---------------------------------------------------------------------------
+# status-index (issue #52) -- the one index every admin-wide read uses
+#
+# `docs/audit-queries.md` §"No full-table scans, by construction" names
+# `reviews` and `audit` as the two tables that grow without bound and are
+# never scanned. `audit` always honoured that; `reviews` did not -- the admin
+# listing, pipeline health, retention preview/sweep/holds and the legal triage
+# queue all scanned it, three of them on a single page with no
+# `LastEvaluatedKey` loop (so a purge sweep silently skipped every row past
+# the first megabyte). The `status-index` GSI (infra/lib/nested/data-stack.ts,
+# mirrored by deploy/dts/bootstrap.py) partitions the table on `status` with
+# `created_at` as the sort key, so each of those reads is a Query per status
+# -- a small closed vocabulary -- ordered by the index rather than in memory.
+# ---------------------------------------------------------------------------
+REVIEWS_STATUS_INDEX = "status-index"
+
+
+def _status_index_key(item: dict[str, Any]) -> dict[str, Any]:
+    """The `ExclusiveStartKey` that resumes a `status-index` query just past
+    `item`: an index query's start key is the index keys plus the table key,
+    all of which every projected item carries."""
+    return {
+        "review_id": item.get("review_id"),
+        "status": item.get("status"),
+        "created_at": item.get("created_at"),
+    }
+
+
+def _query_status_page(
+    table: Any,
+    status_value: str,
+    *,
+    limit: int | None = None,
+    start_key: dict[str, Any] | None = None,
+    newest_first: bool = True,
+    projection: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """ONE page of the `status-index` partition for `status_value`, as
+    `(items, last_key)` -- `last_key` is None when the partition is
+    exhausted. `_query_by_status` is the loop over this; the admin listing's
+    merge (`_page_all`) drives pages directly because it consumes a
+    partition only as far as the merge needs it.
+
+    The scan fallback is for a lightweight test stand-in without `.query()`
+    (same convention as `_page_for_owner`): it reads the whole stand-in,
+    filters on status and orders in memory, then applies `start_key` and
+    `limit` to that -- so a fake pages the same way the index does, and a
+    paging bug is visible against a fake too.
+    """
+    if hasattr(table, "query"):
+        from boto3.dynamodb.conditions import Key
+
+        kwargs: dict[str, Any] = {
+            "IndexName": REVIEWS_STATUS_INDEX,
+            "KeyConditionExpression": Key("status").eq(status_value),
+            "ScanIndexForward": not newest_first,
+        }
+        if limit is not None:
+            kwargs["Limit"] = limit
+        if start_key:
+            kwargs["ExclusiveStartKey"] = start_key
+        if projection:
+            kwargs["ProjectionExpression"] = projection
+        resp = table.query(**kwargs)
+        return resp.get("Items", []), resp.get("LastEvaluatedKey")
+
+    rows = [i for i in _scan_all_reviews(table) if i.get("status") == status_value]
+    rows.sort(
+        key=lambda i: (str(i.get("created_at") or ""), str(i.get("review_id") or "")),
+        reverse=newest_first,
+    )
+    if start_key:
+        ids = [r.get("review_id") for r in rows]
+        after = start_key.get("review_id")
+        rows = rows[ids.index(after) + 1 :] if after in ids else rows
+    if limit is not None and len(rows) > limit:
+        return rows[:limit], _status_index_key(rows[limit - 1])
+    return rows, None
+
+
+def _query_by_status(
+    table: Any,
+    status_value: str,
+    *,
+    limit: int | None = None,
+    start_key: dict[str, Any] | None = None,
+    newest_first: bool = True,
+    projection: str | None = None,
+) -> list[dict[str, Any]]:
+    """Every row in `status_value` (or the first `limit` of them), read from
+    `status-index` with a FULL `LastEvaluatedKey` loop.
+
+    `limit=None` drains the partition -- the read the retention sweep and
+    the health counts need, and the one that must never stop at page one.
+    With a `limit`, pages are fetched until that many rows are in hand and
+    no more: a `Limit` on the wire bounds one page, not the answer, and
+    DynamoDB can return a short page (1 MB) with more behind it.
+
+    `newest_first=False` reads oldest-first from the index (the stale-review
+    sample); `projection` is a `ProjectionExpression` for reads that only
+    count (`"review_id"`). Falls back to a scan ONLY when `table` lacks
+    `.query` -- see `_query_status_page`.
+    """
+    items: list[dict[str, Any]] = []
+    key = start_key
+    while True:
+        page_limit = None if limit is None else max(1, limit - len(items))
+        page, key = _query_status_page(
+            table,
+            status_value,
+            limit=page_limit,
+            start_key=key,
+            newest_first=newest_first,
+            projection=projection,
+        )
+        items.extend(page)
+        if key is None or (limit is not None and len(items) >= limit):
+            break
+    return items if limit is None else items[:limit]
 
 
 def _list_reviews_for_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
@@ -3384,25 +3512,97 @@ def _page_for_owner(
     return items[:limit], key
 
 
+# Every status the admin listing merges over. The closed vocabulary is what
+# makes `status-index` a listing index at all: a status this set does not name
+# has no partition the merge reads, so a new terminal status must be added to
+# the sets above (which is also what makes it show up in diagnostics and on
+# the health tile).
+_ADMIN_LISTING_STATUSES: tuple[str, ...] = tuple(
+    sorted(REVIEW_STATUSES_NON_TERMINAL | REVIEW_STATUSES_TERMINAL)
+)
+
+
+def _invalid_page_token() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="That page token is not valid. Reload the list to start again.",
+    )
+
+
 def _page_all(
     table: Any, limit: int, start_key: dict[str, Any] | None
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    """One page of the admin-wide listing.
+    """One page of the admin-wide listing, GLOBALLY newest-first (issue #52).
 
-    A table scan has no global order, so this is bounded but NOT globally
-    newest-first: rows are sorted within the page only. That limitation is
-    stated rather than papered over -- the honest fix is an index over the
-    whole table, which is a schema change in two deploy targets. The
-    user-facing History tab asks for `scope=mine` and takes the exact,
-    index-ordered path above, so nothing a person actually reads is affected.
+    A k-way merge of one `status-index` query per status: each partition is
+    already ordered newest-first by `created_at`, so the merge only ever
+    compares partition heads, and the page is exactly the `limit` newest rows
+    across the table -- not, as the scan-backed version had to admit, the
+    newest rows of whatever page the scan happened to return. Each partition
+    is read `limit` rows at a time and refilled only when the merge has
+    consumed it, so a page costs at most one bounded query per status.
+
+    The cursor is a JSON object `{status: last_key}` -- for every partition
+    the merge has emitted from, the `status-index` key of the last row it
+    emitted (the next page resumes each partition just past it), or `null`
+    for a partition the merge has drained. A partition the cursor does not
+    name has not been read yet and starts from the top. `encode_page_token`
+    makes it opaque; a token whose keys are not statuses (including one from
+    the scan-cursor format this replaced) is a 400, not a silent restart,
+    for the same reason `decode_page_token` rejects a malformed one.
     """
-    kwargs: dict[str, Any] = {"Limit": limit}
-    if start_key:
-        kwargs["ExclusiveStartKey"] = start_key
-    resp = table.scan(**kwargs)
-    items = resp.get("Items", [])
-    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
-    return items, resp.get("LastEvaluatedKey")
+    cursor: dict[str, Any] = dict(start_key or {})
+    for name, value in cursor.items():
+        if name not in _ADMIN_LISTING_STATUSES or not (value is None or isinstance(value, dict)):
+            raise _invalid_page_token()
+
+    buffers: dict[str, list[dict[str, Any]]] = {}
+    resume: dict[str, dict[str, Any] | None] = {}
+    drained: set[str] = set()
+
+    def _fill(name: str) -> None:
+        # Drain pages until the buffer has a row or the partition is empty:
+        # the index can hand back a short (even empty) page with more behind
+        # it, and a merge that trusted one page would stop early.
+        while not buffers[name] and name not in drained:
+            page, last_key = _query_status_page(
+                table, name, limit=limit, start_key=resume.get(name), newest_first=True
+            )
+            buffers[name].extend(page)
+            resume[name] = last_key
+            if last_key is None:
+                drained.add(name)
+
+    for name in _ADMIN_LISTING_STATUSES:
+        buffers[name] = []
+        if name in cursor and cursor[name] is None:
+            drained.add(name)  # the previous page already emptied it
+            continue
+        resume[name] = cursor.get(name)
+        _fill(name)
+
+    def _newest(name: str) -> tuple[str, str]:
+        head = buffers[name][0]
+        return (str(head.get("created_at") or ""), str(head.get("review_id") or ""))
+
+    items: list[dict[str, Any]] = []
+    next_cursor: dict[str, Any] = dict(cursor)
+    while len(items) < limit:
+        candidates = [name for name in _ADMIN_LISTING_STATUSES if buffers[name]]
+        if not candidates:
+            break
+        winner = max(candidates, key=_newest)
+        item = buffers[winner].pop(0)
+        items.append(item)
+        next_cursor[winner] = _status_index_key(item)
+        if len(items) < limit:
+            _fill(winner)  # a refill only pays when the page still has room
+
+    for name in _ADMIN_LISTING_STATUSES:
+        if not buffers[name] and name in drained:
+            next_cursor[name] = None
+    has_more = any(buffers[name] or name not in drained for name in _ADMIN_LISTING_STATUSES)
+    return items, (next_cursor if has_more else None)
 
 
 def list_reviews(
@@ -3430,6 +3630,11 @@ def list_reviews(
     next page, or None when there is nothing behind it. The listing used to
     be unbounded on both axes, so it grew linearly forever; `limit` is
     clamped into [1, REVIEWS_PAGE_MAX_LIMIT] and cannot be opted out of.
+
+    Issue #52: the admin-wide page is a merge of `status-index` queries
+    (`_page_all`), so it is globally newest-first and never scans the table.
+    Its cursor is a per-status object rather than one index key, and a token
+    of any other shape is rejected there with the same 400.
     """
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     page_size = _clamp_limit(limit)
@@ -3622,11 +3827,13 @@ def list_recent_failures(
     bounded = max(1, min(requested, RECENT_FAILURES_MAX_LIMIT))
 
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
-    failures = [
-        item
-        for item in _scan_all_reviews(table)
-        if str(item.get("status") or "") in DIAGNOSTIC_FAILURE_STATUSES
-    ]
+    # Issue #52: one bounded `status-index` query per failure status, newest
+    # first, instead of a scan of the whole table filtered in memory. The
+    # newest `bounded` rows overall are among the newest `bounded` of each
+    # partition, so reading that much per status is exact, not a sample.
+    failures: list[dict[str, Any]] = []
+    for failure_status in sorted(DIAGNOSTIC_FAILURE_STATUSES):
+        failures.extend(_query_by_status(table, failure_status, limit=bounded))
     # Same ordering key as `list_reviews`: `created_at` is written as a
     # fixed-width epoch-second STRING by `_create_review_row`, so a plain
     # reverse string sort is a true newest-first ordering.

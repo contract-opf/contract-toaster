@@ -93,7 +93,11 @@ picker from the backend rather than from a second copy of this file.
 `reviews` — both grow without bound, so a scan-backed explorer works in a demo and times
 out in the investigation it was built for. The action-filter entries walk the trailing 12
 month partitions (a Query each) and report `months_searched`, so an empty result reads as
-"nothing in the last year", never as "nothing, ever".
+"nothing in the last year", never as "nothing, ever". The same invariant now holds for every
+admin-wide read of `reviews` outside this endpoint — admin listing, pipeline health,
+retention preview/sweep/holds, legal triage — which query the `status-index` GSI (`status`
+partition key, `created_at` sort key) one status at a time with a full `LastEvaluatedKey`
+loop; `tests/test_reviews_no_scan.py` is the call-logging gate that keeps them scan-free.
 
 `playbook_request_changes` filters on `decision`, which no index covers, so it reads the
 newest `AUDIT_QUERY_MAX_LIMIT` reviews under the version — the same cap the catalogue index

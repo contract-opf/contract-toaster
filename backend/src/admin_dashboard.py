@@ -117,13 +117,12 @@ def _clamp(value: Any, default: int, lowest: int, highest: int) -> int:
     widen a read past its documented ceiling.
 
     It is NOT a claim that every read here is bounded. `get_pipeline_health`
-    and `list_manual_review_queue` deliberately scan the whole `reviews`
-    table (through `reviews._scan_all_reviews`, the same pattern
-    `reviews.list_recent_failures` and `reviews._list_reviews_for_owner`
-    already use in production), because their `status_counts` / `counts`
-    tiles have to be EXACT totals rather than a count of a sample. What this
-    does guarantee for those two is that the row LIST each returns is a
-    bounded slice of that scan, never the scan itself.
+    and `list_manual_review_queue` deliberately read whole `status-index`
+    partitions (through `reviews._query_by_status`, issue #52 -- never a
+    table scan), because their `status_counts` / `counts` tiles have to be
+    EXACT totals rather than a count of a sample. What this does guarantee
+    for those two is that the row LIST each returns is a bounded slice of
+    that read, never the read itself.
     """
     try:
         requested = int(value)
@@ -447,38 +446,48 @@ def get_pipeline_health(
     now = int(time.time() if now_epoch is None else now_epoch)
 
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
-    # Reuses `reviews._scan_all_reviews` rather than re-implementing the
-    # LastEvaluatedKey loop: a second copy is a second chance to forget
-    # pagination and silently under-report every count on this page.
-    items = reviews_module._scan_all_reviews(table)
-
+    # Issue #52: one `status-index` query per status instead of a scan of the
+    # whole table. `reviews._query_by_status` owns the LastEvaluatedKey loop,
+    # so a count here is the whole partition, never its first page. The
+    # counts read a `review_id`-only projection -- the tile wants a number,
+    # not the rows -- and the vocabulary is closed: a status outside it has
+    # no partition this read visits, which is why a new terminal status is
+    # added to `reviews.REVIEW_STATUSES_*` rather than written ad hoc.
     status_counts: dict[str, int] = {
         name: 0
         for name in sorted(
             reviews_module.REVIEW_STATUSES_NON_TERMINAL | reviews_module.REVIEW_STATUSES_TERMINAL
         )
     }
+    for name in status_counts:
+        status_counts[name] = len(
+            reviews_module._query_by_status(table, name, projection="review_id")
+        )
+
     stale_rows: list[dict[str, Any]] = []
     in_flight = 0
     running = 0
 
-    for item in items:
-        review_status = str(item.get("status") or "")
-        status_counts[review_status] = status_counts.get(review_status, 0) + 1
-        if review_status not in reviews_module.REVIEW_STATUSES_NON_TERMINAL:
-            continue
-        in_flight += 1
-        if review_status == "RUNNING":
-            running += 1
-        # Age from the last time anything moved this review, falling back to
-        # submission time: a row whose `updated_at` keeps advancing is making
-        # progress and is not stuck, whatever its total age.
-        moved_at = _as_int(item.get("updated_at")) or _as_int(item.get("created_at"))
-        if moved_at is None or (now - moved_at) < threshold:
-            continue
-        row = {field: item.get(field) for field in _STALE_REVIEW_FIELDS}
-        row["age_seconds"] = now - moved_at
-        stale_rows.append(row)
+    # The stale sample reads only the in-flight partitions (PENDING, RUNNING)
+    # -- bounded by construction: everything that has finished is in a
+    # terminal partition this loop never touches. Oldest-first from the
+    # index, so the rows most likely to be stuck arrive first; the counts
+    # stay exact because the whole (small) partition is read.
+    for name in sorted(reviews_module.REVIEW_STATUSES_NON_TERMINAL):
+        for item in reviews_module._query_by_status(table, name, newest_first=False):
+            in_flight += 1
+            if name == "RUNNING":
+                running += 1
+            # Age from the last time anything moved this review, falling
+            # back to submission time: a row whose `updated_at` keeps
+            # advancing is making progress and is not stuck, whatever its
+            # total age.
+            moved_at = _as_int(item.get("updated_at")) or _as_int(item.get("created_at"))
+            if moved_at is None or (now - moved_at) < threshold:
+                continue
+            row = {field: item.get(field) for field in _STALE_REVIEW_FIELDS}
+            row["age_seconds"] = now - moved_at
+            stale_rows.append(row)
 
     stale_rows.sort(key=lambda r: r["age_seconds"], reverse=True)
 
@@ -629,11 +638,11 @@ def list_manual_review_queue(
     now = int(time.time() if now_epoch is None else now_epoch)
 
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
-    queue = [
-        item
-        for item in reviews_module._scan_all_reviews(table)
-        if str(item.get("status") or "") in MANUAL_REVIEW_STATUSES
-    ]
+    # Issue #52: the two manual-review partitions of `status-index`, each
+    # read in full (the `counts` tile is exact), never a scan of the table.
+    queue: list[dict[str, Any]] = []
+    for name in MANUAL_REVIEW_STATUSES:
+        queue.extend(reviews_module._query_by_status(table, name))
     # `created_at` is a fixed-width epoch-second string, so a reverse string
     # sort is a true newest-first ordering (same key `list_recent_failures`
     # and `list_reviews` use).
