@@ -310,7 +310,20 @@ function orbitReceiptLines(
   return receiptText(receiptLines(source, playbookName)).split('\n');
 }
 
-const POLL_INTERVAL_MS = 3000;
+// Adaptive poll cadence (issue #50). A review that is going to finish fast
+// deserves a fast answer, so the first two minutes poll every 3 s; after
+// that the review is on a long run and 10 s is plenty. The worst 5-minute
+// window is therefore 40 + 18 = 58 GETs, against a WAF budget of 300 per IP
+// (`infra/lib/nested/waf-stack.ts`, RateLimitPollingEndpoint) — asserted by
+// `poll-budget-waf.test.tsx` so neither side can drift alone.
+export const POLL_INTERVAL_MS = 3000;
+export const POLL_INTERVAL_SLOW_MS = 10000;
+export const POLL_FAST_PHASE_MS = 120_000;
+
+/** The poll delay to use `elapsedMs` after the poll loop started. */
+export function pollIntervalFor(elapsedMs: number): number {
+  return elapsedMs < POLL_FAST_PHASE_MS ? POLL_INTERVAL_MS : POLL_INTERVAL_SLOW_MS;
+}
 
 // Capped exponential backoff for retrying a transient poll failure — a
 // rejected/errored GET no longer stops polling for good (issue #271 item
@@ -1679,6 +1692,7 @@ export default function ReviewSubmission({
 
     let cancelled = false;
     let attempt = 0;
+    const startedAt = Date.now();
 
     async function poll(): Promise<void> {
       try {
@@ -1696,7 +1710,7 @@ export default function ReviewSubmission({
         if (NON_TERMINAL_STATUSES.has(data.status)) {
           pollTimer.current = setTimeout(() => {
             void poll();
-          }, POLL_INTERVAL_MS);
+          }, pollIntervalFor(Date.now() - startedAt));
         }
       } catch (err) {
         if (cancelled) {
