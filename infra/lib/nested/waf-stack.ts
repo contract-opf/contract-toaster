@@ -36,16 +36,22 @@ export interface WafStackProps extends cdk.NestedStackProps {
  *        polling never matches this rule (issue #227).
  *        Prevents a single caller from firing reviews in a tight loop.
  *      - RateBasedStatement on GET /api/reviews (polling) — 300 req/5 min.
- *        Stops a scripted flood only: the application-layer per-user
- *        concurrency cap (a DynamoDB conditional write) is the abuse
- *        control, and the UI's adaptive poll interval stays well inside
- *        this budget for the whole 15-minute execution timeout (issue #50).
+ *        Sized so the UI's adaptive poll (3 s for a review's first two
+ *        minutes, then 10 s: at most 58 GETs in any 5-minute window) never
+ *        trips it for a healthy review over the whole 15-minute execution
+ *        timeout (issue #50). Because the key is the source IP, this is a
+ *        budget of roughly five concurrent reviews per egress address; there
+ *        is NO application-layer limit on this GET, so the rule is the only
+ *        thing that stops a scripted flood of status reads.
  *
- * Per-user review-concurrency and daily-limit enforcement is performed in
- * the application layer (DynamoDB conditional write on the users table) rather
- * than the WAF, since WAF rate rules are keyed on IP, not on authenticated
- * Cognito identity.  The WAF rules here are the first line of defence for
- * unauthenticated and obviously-abusive traffic before the JWT is validated.
+ * Per-user limits live in the application layer rather than the WAF, since
+ * WAF rate rules are keyed on IP, not on authenticated Cognito identity: a
+ * per-user daily download count (`backend/src/download.py`, a conditional
+ * write on the users table) and a global daily spend cap
+ * (`backend/src/reviews.py`, `reserve_spend`). Pipeline concurrency is a
+ * process-wide `PIPELINE_MAX_CONCURRENCY`, not per user. The WAF rules here
+ * are the first line of defence for unauthenticated and obviously-abusive
+ * traffic before the JWT is validated.
  *
  * KMS encryption-context enforcement (issue #71 AC1):
  *   The outputs CMK key policy (KmsKeysStack.outputsKey) requires the caller
@@ -223,11 +229,13 @@ export class WafStack extends cdk.NestedStack {
         // Rule 5: Rate limit on polling endpoint.
         //
         // GET /api/reviews/{id} — 300 requests per 5-minute window per IP.
-        // Sized against the UI's adaptive poll (3 s for two minutes, then
-        // 10 s: at most 58 polls in any 5-minute window, asserted by
-        // frontend/src/__tests__/poll-budget-waf.test.tsx) so a healthy
-        // 15-minute review, a download and a cancel from one office NAT
-        // never trip it. Only a scripted flood does (issue #50).
+        // Sized against the UI's adaptive poll (3 s for a review's first two
+        // minutes, then 10 s: at most 58 polls in any 5-minute window,
+        // asserted by frontend/src/__tests__/poll-budget-waf.test.tsx), so
+        // one healthy 15-minute review plus its output download stays far
+        // inside it, and about five concurrent reviews behind one egress IP
+        // fit (issue #50). Cancel and the other POSTs under the prefix are
+        // governed by rule 4's 10/5 min, not by this rule.
         // ----------------------------------------------------------------
         {
           name: 'RateLimitPollingEndpoint',
