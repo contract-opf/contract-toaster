@@ -311,25 +311,60 @@ function orbitReceiptLines(
 }
 
 // Adaptive poll cadence (issue #50). A review that is going to finish fast
-// deserves a fast answer, so the first two minutes poll every 3 s; after
-// that the review is on a long run and 10 s is plenty. The worst 5-minute
-// window is therefore 40 + 18 = 58 GETs, against a WAF budget of 300 per IP
-// (`infra/lib/nested/waf-stack.ts`, RateLimitPollingEndpoint) — asserted by
-// `poll-budget-waf.test.tsx` so neither side can drift alone.
+// deserves a fast answer, so a review's first two minutes poll every 3 s;
+// after that it is on a long run and 10 s is plenty. The phase is a property
+// of the REVIEW — its server `created_at`, falling back to when this client
+// first saw it — not of the React effect, so "Check now" (#726) and the
+// reload-reattach path (#489) cannot restart the fast phase on an old
+// review. The worst-case window is computed and pinned by
+// `poll-budget-waf.test.tsx` against the WAF budget in
+// `infra/lib/nested/waf-stack.ts` (RateLimitPollingEndpoint).
 export const POLL_INTERVAL_MS = 3000;
 export const POLL_INTERVAL_SLOW_MS = 10000;
 export const POLL_FAST_PHASE_MS = 120_000;
-
-/** The poll delay to use `elapsedMs` after the poll loop started. */
-export function pollIntervalFor(elapsedMs: number): number {
-  return elapsedMs < POLL_FAST_PHASE_MS ? POLL_INTERVAL_MS : POLL_INTERVAL_SLOW_MS;
-}
 
 // Capped exponential backoff for retrying a transient poll failure — a
 // rejected/errored GET no longer stops polling for good (issue #271 item
 // 1); it retries with growing delay, capped, until a response (success or
 // terminal status) arrives.
-const POLL_BACKOFF_MAX_MS = 30000;
+export const POLL_BACKOFF_MAX_MS = 30000;
+
+/** The poll delay to use for a review that is `ageMs` old. */
+export function pollIntervalFor(ageMs: number): number {
+  return ageMs < POLL_FAST_PHASE_MS ? POLL_INTERVAL_MS : POLL_INTERVAL_SLOW_MS;
+}
+
+/**
+ * How old the review is, for cadence purposes. The server's `created_at`
+ * is the anchor whenever it parses and is not in the future (a skewed
+ * client clock must not stretch the fast phase); otherwise the moment this
+ * client first started polling the review.
+ */
+export function reviewAgeMs(
+  createdAt: string | null | undefined,
+  firstSeenAt: number,
+  now: number,
+): number {
+  const created = createdAt ? Date.parse(createdAt) : Number.NaN;
+  if (Number.isFinite(created) && now >= created) {
+    return now - created;
+  }
+  return Math.max(0, now - firstSeenAt);
+}
+
+/**
+ * Delay before the next poll. `attempt` is the number of consecutive
+ * failures so far (0 after a successful poll). The backoff ladder only ever
+ * SLOWS the cadence: it never drops below the phase interval, so a flapping
+ * endpoint deep in a long review is polled at 10 s, not 3 s.
+ */
+export function nextPollDelayMs(ageMs: number, attempt: number): number {
+  const cadence = pollIntervalFor(ageMs);
+  if (attempt <= 0) {
+    return cadence;
+  }
+  return Math.min(Math.max(cadence, POLL_INTERVAL_MS * 2 ** (attempt - 1)), POLL_BACKOFF_MAX_MS);
+}
 
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
 
@@ -983,6 +1018,14 @@ export default function ReviewSubmission({
   const autoPlaybookAppliedFor = useRef<string | null>(null);
 
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cadence anchor for the review being polled (issue #50): survives the
+  // effect re-running on "Check now", and is replaced only when the review
+  // itself changes. `createdAt` is filled from the first successful poll.
+  const pollAnchor = useRef<{
+    reviewId: string;
+    firstSeenAt: number;
+    createdAt: string | null;
+  } | null>(null);
 
   // Completion handoff (issue #448). `readyAnnouncement` populates a live
   // region that is mounted from first render; `handedOffReviewRef` remembers
@@ -1692,7 +1735,11 @@ export default function ReviewSubmission({
 
     let cancelled = false;
     let attempt = 0;
-    const startedAt = Date.now();
+    if (pollAnchor.current?.reviewId !== reviewId) {
+      pollAnchor.current = { reviewId, firstSeenAt: Date.now(), createdAt: null };
+    }
+    const anchor = pollAnchor.current;
+    const ageNow = (): number => reviewAgeMs(anchor.createdAt, anchor.firstSeenAt, Date.now());
 
     async function poll(): Promise<void> {
       try {
@@ -1705,12 +1752,15 @@ export default function ReviewSubmission({
           return;
         }
         attempt = 0;
+        if (data.created_at) {
+          anchor.createdAt = data.created_at;
+        }
         setDetail(data);
         setPollError(null);
         if (NON_TERMINAL_STATUSES.has(data.status)) {
           pollTimer.current = setTimeout(() => {
             void poll();
-          }, pollIntervalFor(Date.now() - startedAt));
+          }, nextPollDelayMs(ageNow(), 0));
         }
       } catch (err) {
         if (cancelled) {
@@ -1721,10 +1771,9 @@ export default function ReviewSubmission({
         // exponential backoff instead of giving up on polling for good.
         attempt += 1;
         setPollError(friendlyErrorMessage(err, STILL_CHECKING_COPY));
-        const backoff = Math.min(POLL_INTERVAL_MS * 2 ** (attempt - 1), POLL_BACKOFF_MAX_MS);
         pollTimer.current = setTimeout(() => {
           void poll();
-        }, backoff);
+        }, nextPollDelayMs(ageNow(), attempt));
       }
     }
 

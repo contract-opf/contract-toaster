@@ -7,9 +7,17 @@
 > private origin this work was done in. Read both as history, not as links
 > to follow.*
 
+> **Status note, 2026-09-10.** F1 / A1 landed as public issue
+> `contract-opf/contract-toaster#50` (private #690 in the table below):
+> polling limit 300 / 5 min, adaptive 3 s → 10 s poll anchored on the
+> review's `created_at`, pinned by `frontend/src/__tests__/poll-budget-waf.test.tsx`.
+> The finding text below is left as written; it describes the state before
+> that change. Later steps will add their own lines here.
+
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the
-prioritised plan. Nothing here has been changed in code yet; each finding names
+prioritised plan. Nothing here had been changed in code when it was written
+(the status note above tracks what has landed since); each finding names
 the file and the intended remediation so a follow-up session can execute it
 without re-deriving the diagnosis. The walkthrough for executed work lands in
 `docs/walkthroughs/2026-09-05-audit-hardening-walkthrough.md`.
@@ -30,7 +38,7 @@ actions, `R` risks, `Q` questions parked for the owner.
 
 | Code | Pillar | Severity | One line |
 |---|---|---|---|
-| F1 | Stability | **P1** | **Landed (#50).** WAF polling rule (was 60 req / 5 min per IP, now 300) was below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min got the reviewer's IP blocked mid-review. Poll is now adaptive (3 s → 10 s after 120 s), worst window 58 req, pinned by `poll-budget-waf.test.tsx`. |
+| F1 | Stability | **P1** | *Landed — see the status note above.* WAF polling rule (60 req / 5 min per IP) is below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min gets the reviewer's IP blocked mid-review. |
 | F2 | Performance | **P1** | The `reviews` table is `.scan()`ed on six live request paths (admin list, admin health, retention preview/sweep/holds, legal triage) despite the documented "never scan `reviews`/`audit`" invariant. |
 | F3 | Stability | P2 | Bedrock and DynamoDB boto clients are built with no `botocore.Config`: default 60 s read timeout and legacy retry mode. A long primary-pass generation trips the socket timeout and is silently retried by botocore, paying up to 4x. |
 | F4 | Stability | P2 | The upload `put_object` sends no integrity checksum; S3 accepts a truncated/corrupted body and the review runs on it. The submit fetch has no abort/timeout, so a stalled upload spins forever in "Submitting". |
