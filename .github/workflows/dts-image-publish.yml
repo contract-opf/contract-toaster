@@ -156,61 +156,95 @@ jobs:
     needs: publish
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
-      - name: Trigger the Coolify pull
+      - name: Trigger the Coolify pull-and-restart
+        id: trigger
         env:
-          # The URL that tells Coolify to redeploy. This is a GITHUB ACTIONS
-          # SECRET (repo Settings -> Secrets and variables -> Actions), not a
-          # Coolify environment variable — the runner is the thing that needs to
-          # read it. Its VALUE comes from Coolify:
+          # The URL that tells Coolify to pull the new images and recreate the
+          # service. This is a GITHUB ACTIONS SECRET (repo Settings -> Secrets
+          # and variables -> Actions), not a Coolify environment variable — the
+          # runner is the thing that needs to read it. Its VALUE is:
           #
-          #   https://<your-coolify-host>/api/v1/deploy?uuid=<resource-uuid>&force=false
+          #   https://<your-coolify-host>/api/v1/services/<service-uuid>/restart?latest=true
           #
-          # where <resource-uuid> is the last path segment of the resource's own
-          # page in the Coolify UI.
+          # where <service-uuid> is the last path segment of the service's own
+          # page in the Coolify UI. It must be the SERVICES RESTART endpoint with
+          # `latest=true`: that is the API twin of the UI's "Restart (pull
+          # latest)". The generic /api/v1/deploy endpoint ignores `force` for a
+          # service and recreates containers from the :latest already on the
+          # box, so it deploys nothing new (Coolify DeployController ->
+          # StartService, pullLatestImages defaults to false).
           #
           # While it is unset this step says so and stops WITHOUT failing: the
           # images stay published and the deployment simply does not move, which
           # is the safe direction to fail.
           WEBHOOK: ${{ secrets.COOLIFY_DEPLOY_WEBHOOK }}
-          # Coolify's API deploy endpoint authenticates with a bearer token
-          # (Coolify -> Keys & Tokens -> API tokens). A plain per-resource
-          # webhook URL that already carries its own token does not need this.
+          # Coolify's API authenticates with a bearer token
+          # (Coolify -> Keys & Tokens -> API tokens).
           TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
-          # Coolify's /api/v1/deploy is a GET endpoint — POSTing to it returns
-          # 405 and fails this job. Override to POST only for a webhook style
-          # that wants it (repo Settings -> Secrets and variables -> Variables).
+          # If the Coolify host sits behind Cloudflare Access, the bearer token
+          # never reaches Coolify: the edge answers with a challenge page (HTTP
+          # 403 "Just a moment...") or a 302 to the Access login. A Cloudflare
+          # Access SERVICE TOKEN scoped to the Coolify application gets the
+          # runner through. Both halves are optional secrets; leave them unset
+          # for a host that is not behind Access.
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          # The restart endpoint is a GET. Override only for a webhook style
+          # that wants POST (repo Settings -> Secrets and variables -> Variables).
           METHOD: ${{ vars.COOLIFY_DEPLOY_METHOD || 'GET' }}
           SHA: ${{ needs.publish.outputs.sha }}
         run: |
           set -uo pipefail
+          echo "rolled=false" >> "$GITHUB_OUTPUT"
           if [ -z "${WEBHOOK}" ]; then
             echo "::warning title=DTS deploy not wired::COOLIFY_DEPLOY_WEBHOOK is unset."
             echo "Images for ${SHA} are published; the deployment was NOT rolled forward."
-            echo "Add the secret, or pull manually in Coolify (Contract Toaster -> Restart)."
+            echo "Add the secret, or pull manually in Coolify (Actions -> Restart (pull latest))."
             exit 0
           fi
-          auth=()
-          if [ -n "${TOKEN}" ]; then auth=(-H "Authorization: Bearer ${TOKEN}"); fi
+          hdrs=()
+          if [ -n "${TOKEN}" ]; then hdrs+=(-H "Authorization: Bearer ${TOKEN}"); fi
+          if [ -n "${CF_ACCESS_CLIENT_ID}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET}" ]; then
+            hdrs+=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}")
+            hdrs+=(-H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}")
+          fi
+          hdrs+=(-H "Accept: application/json")
           # --fail-with-body so a 4xx/5xx fails the job AND still prints
-          # Coolify's reason, instead of exiting 0 on an error page.
-          if ! code="$(curl -sS --fail-with-body --max-time 60 \
+          # Coolify's reason, instead of exiting 0 on an error page. No
+          # --location: a 302 here is the Access login, not a deploy.
+          code="$(curl -sS --fail-with-body --max-time 60 \
                 -o /tmp/coolify-response.txt -w '%{http_code}' \
-                "${auth[@]}" -X "${METHOD}" "${WEBHOOK}")"; then
-            echo "Coolify refused the deploy (HTTP ${code:-none}):"
-            cat /tmp/coolify-response.txt || true
+                "${hdrs[@]}" -X "${METHOD}" "${WEBHOOK}")" || true
+          body_head="$(head -c 400 /tmp/coolify-response.txt 2>/dev/null || true)"
+          if grep -qiE '<!DOCTYPE html|Just a moment|cdn-cgi/' <<<"${body_head}" \
+             || [ "${code:-}" = "302" ]; then
+            echo "::error title=Blocked at the edge::Cloudflare answered instead of Coolify (HTTP ${code:-none})."
+            echo "The bearer token never reached Coolify. Set CF_ACCESS_CLIENT_ID and"
+            echo "CF_ACCESS_CLIENT_SECRET (a Cloudflare Access service token scoped to the"
+            echo "Coolify application), or exempt this endpoint from Access."
             exit 1
           fi
-          echo "Coolify accepted the deploy for ${SHA} (HTTP ${code})."
+          case "${code:-}" in
+            2??) ;;
+            *)
+              echo "Coolify refused the deploy (HTTP ${code:-none}):"
+              cat /tmp/coolify-response.txt || true
+              exit 1
+              ;;
+          esac
+          echo "Coolify accepted the pull-and-restart for ${SHA} (HTTP ${code})."
           cat /tmp/coolify-response.txt || true
+          echo "rolled=true" >> "$GITHUB_OUTPUT"
 
       - name: Say what to verify
+        if: steps.trigger.outputs.rolled == 'true'
         run: |
           # NOT GET /version: issue #613 is open — the backend build cache can
           # ignore a changed --build-arg COMMIT_SHA, so that endpoint may serve
           # a stale stamp even after a good pull. The SPA bakes its own commit
           # in at build time (VITE_COMMIT_SHA), so the Settings tab showing the
           # two halves agree is the honest check.
-          echo "Rolled ${SHA} onto the DTS host."
+          echo "Coolify is pulling ${SHA} onto the DTS host."
           echo "Verify in the app's Settings tab, not GET /version (issue #613)."
         env:
           SHA: ${{ needs.publish.outputs.sha }}
