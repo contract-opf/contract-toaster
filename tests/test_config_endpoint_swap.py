@@ -5,8 +5,11 @@ seam (Docker Compose deployment, Phase 1).
 
 Invariants:
   1. AWS target (no endpoint override): boto3_client_kwargs returns exactly
-     {"region_name": ...} — byte-identical to the previous ad-hoc factories,
-     so nothing changes for AWS.
+     {"region_name": ..., "config": <botocore Config>} — the endpoint /
+     credential shape is byte-identical to the previous ad-hoc factories, so
+     nothing changes for AWS; the `config` key (issue #51) carries the
+     explicit per-service timeouts/retry mode and is asserted by
+     tests/test_config_botocore_51.py.
   2. Per-service endpoint override (S3_ENDPOINT_URL / DYNAMODB_ENDPOINT_URL /
      STEPFUNCTIONS_ENDPOINT_URL) adds endpoint_url + dummy creds.
   3. Shared AWS_ENDPOINT_URL applies to every service; a per-service var wins.
@@ -27,22 +30,35 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 import config  # noqa: E402
+from botocore.config import Config  # noqa: E402
+
+
+def _without_config(kwargs: dict) -> dict:
+    """Issue #51: every kwargs dict now carries a `config` key holding a
+    `botocore.config.Config`. Assert it is one, then drop it so the
+    endpoint/credential shape can still be compared exactly."""
+    kwargs = dict(kwargs)
+    assert isinstance(kwargs.pop("config"), Config), "config key must be a botocore Config"
+    return kwargs
 
 
 class TestBoto3ClientKwargs(unittest.TestCase):
     def test_aws_target_is_region_only(self) -> None:
-        """No override -> exactly region_name, unchanged from the old factories."""
+        """No override -> exactly region_name (+ the #51 Config), unchanged
+        from the old factories."""
         with patch.dict("os.environ", {"AWS_REGION": "us-east-1"}, clear=True):
             for service in ("s3", "dynamodb", "stepfunctions"):
                 self.assertEqual(
-                    config.boto3_client_kwargs(service),
+                    _without_config(config.boto3_client_kwargs(service)),
                     {"region_name": "us-east-1"},
                     f"AWS-target kwargs for {service} must be region-only",
                 )
 
     def test_region_defaults_when_unset(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(config.boto3_client_kwargs("s3"), {"region_name": "us-east-1"})
+            self.assertEqual(
+                _without_config(config.boto3_client_kwargs("s3")), {"region_name": "us-east-1"}
+            )
 
     def test_per_service_endpoint_override_adds_endpoint_and_dummy_creds(self) -> None:
         with patch.dict(
@@ -56,7 +72,8 @@ class TestBoto3ClientKwargs(unittest.TestCase):
             self.assertEqual(kwargs["aws_secret_access_key"], "local")
             # A different service without its own override stays region-only.
             self.assertEqual(
-                config.boto3_client_kwargs("dynamodb"), {"region_name": "us-east-1"}
+                _without_config(config.boto3_client_kwargs("dynamodb")),
+                {"region_name": "us-east-1"},
             )
 
     def test_shared_endpoint_applies_to_all_services(self) -> None:
@@ -106,7 +123,9 @@ class TestBoto3ClientKwargs(unittest.TestCase):
 
     def test_empty_string_endpoint_counts_as_unset(self) -> None:
         with patch.dict("os.environ", {"AWS_ENDPOINT_URL": "  "}, clear=True):
-            self.assertEqual(config.boto3_client_kwargs("s3"), {"region_name": "us-east-1"})
+            self.assertEqual(
+                _without_config(config.boto3_client_kwargs("s3")), {"region_name": "us-east-1"}
+            )
 
 
 class TestDeployTarget(unittest.TestCase):

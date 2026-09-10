@@ -112,11 +112,17 @@ class TestConfigPublicEndpointSeam(unittest.TestCase):
         exactly boto3_client_kwargs("s3") -- byte-identical to the pre-#273
         behavior (region-only)."""
         with patch.dict("os.environ", {"AWS_REGION": "us-east-1"}, clear=True):
+            kwargs = config.presigning_s3_client_kwargs()
+            # Issue #51: the `config` key carries the explicit botocore
+            # timeouts/retry mode; drop it to compare the endpoint shape.
+            self.assertIn("config", kwargs)
             self.assertEqual(
-                config.presigning_s3_client_kwargs(), {"region_name": "us-east-1"}
+                {k: v for k, v in kwargs.items() if k != "config"},
+                {"region_name": "us-east-1"},
             )
             self.assertEqual(
-                config.presigning_s3_client_kwargs(), config.boto3_client_kwargs("s3")
+                {k: v for k, v in kwargs.items() if k != "config"},
+                {k: v for k, v in config.boto3_client_kwargs("s3").items() if k != "config"},
             )
 
     def test_presigning_kwargs_override_endpoint_only(self) -> None:
