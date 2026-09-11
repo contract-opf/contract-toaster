@@ -370,6 +370,7 @@ const PREFLIGHT: PreflightResult = {
   oneLineSummary: 'A mutual NDA between two parties.',
   match: 'likely',
   injectionScan: { ruleIds: ['ignore_previous'], findingCount: 2 },
+  partyRecognised: true,
 };
 
 describe('preflight', () => {
@@ -437,6 +438,20 @@ describe('preflight', () => {
     // in on any field.
     expect(JSON.stringify(preflight)).not.toContain('0.82');
     expect(JSON.stringify(preflight)).not.toContain('counterparty');
+  });
+
+  // Issue #55: the party signal is tri-state on the wire and BINARY in the
+  // projection — only the one value the panel has something to say about
+  // survives, so the panel's render check cannot accidentally treat "nothing
+  // configured" as "we looked and failed".
+  it('projects partyUnrecognised only for the false case', () => {
+    const project = (partyRecognised: boolean | null) =>
+      toReviewModel(baseState({ file: docx(), preflight: { ...PREFLIGHT, partyRecognised } }))
+        .preflight;
+
+    expect(project(false)?.partyUnrecognised).toBe(true);
+    expect(project(true)?.partyUnrecognised).toBeUndefined();
+    expect(project(null)?.partyUnrecognised).toBeUndefined();
   });
 
   it('is omitted entirely with no result and nothing in flight', () => {

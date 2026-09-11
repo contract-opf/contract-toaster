@@ -39,6 +39,12 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    (#580), and the forced structured-output tool reaches the request only
    in the ON state. A future change that wires a real tool loop back in
    must update this guard deliberately, not trip over it by accident.
+8. (issue #55, audit finding F6) The flat recognition set deduplicates on
+   `entity_normalize.recognition_key`, so a legal-form suffix, punctuation
+   or a diacritic does not split one entity into two lines the model has to
+   reconcile -- and the fixed recognition sentence
+   (`opf_prompt.OUR_ENTITIES_NOTE`) is rendered exactly once, beside the
+   list, with no variants field.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -293,6 +299,102 @@ def check_6_context_block_only_when_present() -> list[str]:
     return failures
 
 
+def check_8_recognition_set_folds_legal_form_variants() -> list[str]:
+    """Issue #55 (2026-09-05 audit finding F6, action A6).
+
+    `_recognition_key` delegates to `entity_normalize.recognition_key`, so
+    the prompt side deduplicates the recognition set on the SAME identity
+    `backend/src/entity_roster.py::normalize_entities` stores on -- one
+    entity typed under two legal-form spellings is one line in the flat
+    list the model reads, not two.
+
+    And the fixed recognition sentence is rendered ONCE, in the same object
+    as `our_entities`. It is a fixed string, not a per-entity variants list:
+    a canonical name beside its alternates is the "one real principal plus
+    also-rans" shape #678 flattened the block to eliminate.
+    """
+    failures = []
+
+    # Invented names (de-brand rule, same as the rest of this file).
+    typed = "Synthetic Holdings GmbH"
+    variant = "SYNTHETIC HOLDINGS G.m.b.H."
+    other = "Meridian Fabrication Works Ltd"
+
+    doc = _load_fixture()
+    doc["perspective"] = {"party": typed, "counterparty_type": "Educational Institution"}
+
+    resolved = opf_prompt.resolve_party_recognition_set(doc, [variant, other])
+    if len(resolved) != 2:
+        failures.append(
+            f"  [8] a legal-form variant was not folded into one entity: {resolved!r}"
+        )
+    elif other not in resolved or len({typed, variant} & set(resolved)) != 1:
+        failures.append(f"  [8] the recognition set lost a typed spelling: {resolved!r}")
+    else:
+        # #678's own rule still holds across the new fold: WHICH spelling
+        # survives is a function of the spellings, never of which source
+        # supplied one. Swap the sources and the output must not move.
+        swapped_doc = copy.deepcopy(doc)
+        swapped_doc["perspective"]["party"] = variant
+        swapped = opf_prompt.resolve_party_recognition_set(swapped_doc, [typed, other])
+        if swapped != resolved:
+            failures.append(
+                f"  [8] the surviving spelling depends on its source: {resolved!r} vs {swapped!r}"
+            )
+
+    # Punctuation and diacritics, on the same call path.
+    accented = opf_prompt.resolve_party_recognition_set(
+        {"perspective": {"party": "Société Synthetic SAS"}}, ["Societe Synthetic S.A.S."]
+    )
+    if len(accented) != 1:
+        failures.append(f"  [8] a diacritic variant was not folded: {accented!r}")
+
+    punctuated = opf_prompt.resolve_party_recognition_set(
+        {"perspective": {"party": "Synthetic, Inc."}}, ["Synthetic Inc"]
+    )
+    if len(punctuated) != 1:
+        failures.append(f"  [8] a punctuation variant was not folded: {punctuated!r}")
+
+    # The fixed sentence: rendered exactly once, and inside the same
+    # perspective object the list is rendered in.
+    blocks = opf_prompt.compose_opf_system_blocks(doc, entity_roster=[variant, other])
+    joined = "\n".join(blocks)
+    occurrences = joined.count(opf_prompt.OUR_ENTITIES_NOTE)
+    if occurrences != 1:
+        failures.append(
+            f"  [8] the fixed recognition sentence is rendered {occurrences} time(s), expected exactly 1"
+        )
+
+    carrying = [b for b in blocks if '"perspective"' in b]
+    if len(carrying) != 1:
+        failures.append(f"  [8] expected exactly one Context block, got {len(carrying)}")
+    else:
+        rendered = json.loads(carrying[0])["perspective"]
+        if rendered.get(opf_prompt.OUR_ENTITIES_NOTE_KEY) != opf_prompt.OUR_ENTITIES_NOTE:
+            failures.append(
+                "  [8] the fixed recognition sentence is not rendered beside our_entities"
+            )
+        # Variants must NOT be rendered: the default per the issue.
+        if any("variant" in str(key) for key in rendered):
+            failures.append(f"  [8] a variants field leaked into the block: {rendered!r}")
+
+    # No note where there is no list: a perspective the composer could not
+    # flatten must render exactly what the document says.
+    bare = copy.deepcopy(doc)
+    bare["perspective"] = {"counterparty_type": "Educational Institution"}
+    bare_blocks = [
+        b
+        for b in opf_prompt.compose_opf_system_blocks(bare, entity_roster=())
+        if '"perspective"' in b
+    ]
+    if len(bare_blocks) == 1 and opf_prompt.OUR_ENTITIES_NOTE in bare_blocks[0]:
+        failures.append(
+            "  [8] the recognition sentence is rendered with no recognition set to explain"
+        )
+
+    return failures
+
+
 def check_7_no_unbacked_tool_reference() -> list[str]:
     """Issue #579: DIGEST_INTRO used to instruct the model to call
     `lookup_clause_evidence` to verify exact clause language before relying
@@ -374,6 +476,7 @@ def main() -> int:
         ("5", "wholesale evidence retired: bulk must not reach the prompt", check_5_wholesale_evidence_is_retired),
         ("6", "Context block appears only when perspective/de_minimis present", check_6_context_block_only_when_present),
         ("7", "no unbacked tool reference, under both structured-output states", check_7_no_unbacked_tool_reference),
+        ("8", "recognition set folds legal-form variants; fixed sentence rendered once", check_8_recognition_set_folds_legal_form_variants),
     ]
 
     overall_pass = True

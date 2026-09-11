@@ -76,6 +76,24 @@ repo ships a synthetic one.
 d/b/a names) the tool recognises as *our* contracting party rather than the
 counterparty.
 
+**Party recognition** — deciding that a name in a draft is one of our
+entities. Two words carry it, both defined by `scripts/entity_normalize.py`:
+
+**Recognition key** — the identity two spellings of one entity are the *same
+entity* under: the name with diacritics, punctuation, `&`, a leading "the",
+and one trailing legal-form suffix folded away. It is what the roster and the
+prompt's recognition set deduplicate on, so `Synthetic Holdings GmbH` and
+`SYNTHETIC HOLDINGS G.m.b.H.` are one entity typed twice. Lossy on purpose —
+the suffix is gone — so it is never stored, rendered, or shown; the spelling
+an admin typed is what gets kept.
+
+**Variant** — a spelling the same entity might plausibly appear under in a
+document: each half of a `d/b/a` compound, the suffix-less core, and that core
+under every alternative spelling of its suffix. Variants are for *searching* a
+document (the preflight card's party advisory), never for rendering into a
+prompt — listing a canonical name beside its alternates is exactly the "one
+real principal plus also-rans" shape the flat recognition set exists to avoid.
+
 **EIAA** — Educational Affiliation Agreement for student internships, the first
 agreement type the tool was built against.
 
