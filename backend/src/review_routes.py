@@ -104,6 +104,7 @@ from src import (
     config,
     disposition,
     download,
+    entity_roster,
     invocation_ledger,
     model_client,
     model_settings,
@@ -147,6 +148,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import cover_note_pass  # noqa: E402
 import document_injection_scan  # noqa: E402
+import entity_normalize  # noqa: E402
 import leakage_scan  # noqa: E402
 import preflight_pass  # noqa: E402
 
@@ -913,6 +915,115 @@ def _preflight_agreement_vocabulary(
     return preflight_pass.known_agreement_types(names)
 
 
+#: Issue #55's half of the #659 cache: `perspective.party` keyed on the same
+#: active-version identity `_AGREEMENT_TYPE_CACHE` uses, for the same reason
+#: (skip the S3 GET + re-validation, never the DynamoDB freshness read).
+_PLAYBOOK_PARTY_CACHE: dict[tuple[str, str], tuple[str, ...]] = {}
+
+
+def _party_names_from_bundle(bundle: dict[str, Any]) -> list[str]:
+    """`bundle`'s own `perspective.party`, as a 0-or-1 element list.
+
+    Mirrors `_agreement_type_from_bundle` exactly, including the two bundle
+    shapes `pipeline_runner._load_playbook_bundle` can hand back: an
+    activated OPF artifact (`{"opf_bundle_v2": {"opf": <doc>, ...}}`, whose
+    `perspective` is the OPF document's own top-level block) and a v1
+    registry bundle read off disk (whose `playbook` section carries a
+    `perspective` only if that artifact was authored with one -- the
+    shipped samples are not, so v1 legitimately yields nothing here).
+
+    Fail-soft to `[]` for every malformed shape. This feeds an ADVISORY
+    preflight signal; `perspective.party` is not canonical (#678) and a
+    missing one is an ordinary, expected state, not a fault.
+    """
+    opf_bundle_v2 = bundle.get("opf_bundle_v2")
+    if opf_bundle_v2 is not None:
+        perspective = (opf_bundle_v2.get("opf") or {}).get("perspective")
+    else:
+        perspective = (bundle.get("playbook") or {}).get("perspective")
+    if not isinstance(perspective, dict):
+        return []
+    party = perspective.get("party")
+    if not isinstance(party, str) or not party.strip():
+        return []
+    return [party.strip()]
+
+
+def _resolve_playbook_party(
+    playbook_id: str,
+    dynamodb_resource: Any = None,
+    s3_client: Any = None,
+) -> list[str]:
+    """`playbook_id`'s ACTIVE `perspective.party`, or `[]`.
+
+    Best-effort and fail-open on ANY problem, for exactly the reasons
+    `_resolve_playbook_agreement_type` is (see its docstring): a catalog
+    problem must degrade an advisory signal, never 500 an otherwise-healthy
+    preflight request.
+
+    Cached on the SAME active-version identity that function caches on
+    (`_active_version_cache_key`), so the party signal costs no extra S3
+    GET on an OPF deployment: without this, every preflight would re-read
+    and re-validate the activated artifact a second time purely to read one
+    string off it. `None` from that helper means the registry-on-disk path
+    -- no S3 GET, and a file a developer may edit under a running process
+    -- so that branch resolves uncached, exactly as the agreement type does.
+    """
+    cache_key = _active_version_cache_key(playbook_id, dynamodb_resource)
+    if cache_key is not None:
+        cached = _PLAYBOOK_PARTY_CACHE.get(cache_key)
+        if cached is not None:
+            return list(cached)
+    try:
+        bundle = pipeline_runner._load_playbook_bundle(
+            playbook_id, dynamodb_resource, s3_client
+        )
+        names = _party_names_from_bundle(bundle)
+    except Exception:  # noqa: BLE001 -- advisory lookup, never fail preflight over it
+        return []
+    if cache_key is not None:
+        _PLAYBOOK_PARTY_CACHE[cache_key] = tuple(names)
+    return names
+
+
+def compute_party_recognised(
+    document_text: str, our_entity_names: list[str]
+) -> bool | None:
+    """Issue #55: does ANY variant of ANY entity that is US appear in this
+    document?
+
+    `None` when there is nothing to look for -- no roster AND no
+    `perspective.party` -- because "we checked and found nothing" and "we
+    had nothing to check for" are different answers and only the first one
+    is worth telling a reviewer about. `True` on the first variant found,
+    `False` when every variant of every name was searched and none matched.
+
+    Both sides go through `entity_normalize.fold`, so `SYNTHETIC HOLDINGS
+    G.m.b.H.` in the document matches the roster line `Synthetic Holdings
+    GmbH` -- the exact miss audit finding F6 is about. Substring, not
+    token-boundary: a folded entity name is several words long and the
+    surrounding characters in a contract preamble are arbitrary
+    (parentheses, quotes, a following comma), all of which fold away.
+
+    Advisory ONLY. Nothing branches on this but one line of copy, and it
+    never gates a submission (issue #491's "no enforcement, ever" holds).
+    Returns a bool, never any document text: the caller puts this on the
+    wire and the document itself must not follow it there.
+    """
+    names = [n for n in our_entity_names if isinstance(n, str) and n.strip()]
+    if not names:
+        return None
+    haystack = entity_normalize.fold(document_text)
+    if not haystack:
+        return False
+    for name in names:
+        for variant in entity_normalize.recognition_variants(name):
+            folded = entity_normalize.fold(variant)
+            if folded and folded in haystack:
+                return True
+    return False
+
+
 def _vocabulary_has_installed_types(known_types: list[str]) -> bool:
     """True when the vocabulary offers at least one real contract type.
     `UNCLASSIFIED_AGREEMENT_TYPE` is the null answer, not a type, so a
@@ -953,6 +1064,11 @@ async def post_review_preflight(
          with the deterministic stats still returned.
       5. The match verdict, computed HERE (never left to the model), against
          `playbook_id`'s own `agreement_type`/`agreement_aliases`.
+      6. The party signal (issue #55): `party_recognised`, an offline
+         `entity_normalize` search of the extracted text for any variant of
+         any entity that is US. Advisory like everything else on this
+         response -- it never gates the go button -- and it carries a bool
+         or `null`, never a locator and never any document text.
     """
     contents = await file.read()
     try:
@@ -1076,6 +1192,27 @@ async def post_review_preflight(
             agreement_type_guess, playbook_agreement_type, playbook_aliases
         )
 
+    # Issue #55: the party signal. Offline and deterministic -- no model
+    # call, no spend -- so it is computed for EVERY preflight, including the
+    # stats-only degraded one above, and sits outside the
+    # `classification == "ok"` branch the match verdict lives in.
+    #
+    # The same union the review itself binds to
+    # (`opf_prompt.resolve_party_recognition_set`): the deployment roster
+    # plus the playbook's own `perspective.party`, with neither treated as
+    # canonical (#678). Fail-soft as a whole -- a signal we could not
+    # compute is `null`, the same "nothing to say" the empty-roster case
+    # produces, never a 500 on an advisory field.
+    try:
+        our_entity_names = list(entity_roster.resolve_entity_roster(dynamodb_resource))
+        our_entity_names.extend(
+            _resolve_playbook_party(playbook_id, dynamodb_resource, s3_client)
+        )
+        party_recognised = compute_party_recognised(stats["full_text"], our_entity_names)
+    except Exception:  # noqa: BLE001 -- advisory: never fail preflight over the party signal
+        logger.warning("PREFLIGHT: party signal failed; preflight continues unaffected")
+        party_recognised = None
+
     response: dict[str, Any] = {
         "word_count": stats["word_count"],
         "page_estimate": stats["page_estimate"],
@@ -1088,6 +1225,7 @@ async def post_review_preflight(
         "one_line_summary": one_line_summary,
         "match": match,
         "injection_scan": injection_scan,
+        "party_recognised": party_recognised,
     }
     if served_model_id:
         # Issue #491 AC: "a route test pins the preflight model to the

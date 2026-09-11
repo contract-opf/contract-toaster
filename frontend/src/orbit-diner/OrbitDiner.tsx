@@ -1805,6 +1805,22 @@ export function OrbitDiner({
                             {m.preflight.injectionRuleIds?.join(", ")}.
                           </p>
                         )}
+                      {/* Issue #55 (audit finding F6). Advisory, and the
+                          copy says so: the review still runs, the go
+                          button is untouched. No document text and no
+                          entity name — naming the roster back at the
+                          reviewer would put configuration on a card about
+                          their document. */}
+                      {m.preflight.partyUnrecognised && (
+                        <p
+                          className="od-warning"
+                          data-testid="review-preflight-party-advisory"
+                        >
+                          None of your configured legal entities appears in
+                          this document. The review will still run; check
+                          the Settings roster if this is unexpected.
+                        </p>
+                      )}
                       {/* No apology line (issue #491, held through #733): the
                           deterministic stats above are the point, and a banner
                           announcing that the CHEAP model was unreachable is

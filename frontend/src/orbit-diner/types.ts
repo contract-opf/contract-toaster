@@ -64,6 +64,13 @@ export interface Preflight {
   injectionCount?: number;
   injectionRuleIds?: string[];
   /**
+   * Issue #55. Present ONLY when the app has something to say: the backend
+   * looked for our configured legal entities and found none. Absent both
+   * when they were found and when there was nothing to look for, so the
+   * panel's render check is a plain presence test.
+   */
+  partyUnrecognised?: boolean;
+  /**
    * "This reads like a Master Services Agreement on your own paper." —
    * composed by the panel (issue #733), because the article, the
    * unclassified-type special case and the neutral paper-side phrasing are

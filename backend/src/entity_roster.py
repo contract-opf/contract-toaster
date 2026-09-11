@@ -82,11 +82,23 @@ escape is a silent hole.
 
 import logging
 import os
+import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Iterable
 
 from fastapi import HTTPException, status
+
+# `scripts/entity_normalize.py` is the ONE place party-name folding lives
+# (issue #55). Put `scripts/` on `sys.path` the same idempotent way
+# `src/pipeline_runner.py` does, so this module imports it by bare name
+# whichever of the two import styles loaded `src` itself.
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+import entity_normalize  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -189,17 +201,29 @@ def _write_audit_entry(
 
 def normalize_entities(raw: Any) -> list[str]:
     """The stored form of a submitted roster: stripped, blank entries
-    dropped, duplicates removed case- and whitespace-insensitively, and the
-    admin's own ordering preserved for display.
+    dropped, duplicates removed on `entity_normalize.recognition_key`, and
+    the admin's own ordering preserved for display.
 
     Raises HTTPException(400) for a non-list body, a non-string entry, a name
     that is too long, a name carrying a control character (see the module
     docstring), or a roster over `MAX_ENTITIES`.
 
+    Issue #55: the identity is the recognition key, not the old
+    case-and-whitespace fold — so `Synthetic Holdings GmbH` and `SYNTHETIC
+    HOLDINGS G.m.b.H.` are one entity typed twice, not two roster lines.
+    The SPELLING IS STORED AS TYPED: the key is lossy (it throws the
+    legal-form suffix away) and exists only to answer "same entity?". The
+    surviving spelling is the FIRST one typed, which keeps the admin's own
+    ordering meaningful and makes a Save idempotent.
+
+    The 400 rules are deliberately untouched by that change: a name is
+    rejected for what it contains, never for what it collides with.
+
     The dedup here is a courtesy for the admin reading the list back; it is
     NOT what the prompt relies on. `opf_prompt.resolve_party_recognition_set`
-    deduplicates again over the union with the playbook's own party, because
-    that is the only place both sources are in scope.
+    deduplicates again -- on the same key -- over the union with the
+    playbook's own party, because that is the only place both sources are in
+    scope.
     """
     if not isinstance(raw, list):
         raise HTTPException(
@@ -240,7 +264,7 @@ def normalize_entities(raw: Any) -> list[str]:
                     "review prompt, where a line break would forge prompt structure."
                 ),
             )
-        identity = " ".join(name.split()).casefold()
+        identity = entity_normalize.recognition_key(name)
         if identity in seen:
             continue
         seen.add(identity)

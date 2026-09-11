@@ -405,6 +405,12 @@ function projectPreflight(state: ReviewProjectionState): Preflight | undefined {
     projected.injectionCount = result.injectionScan.findingCount;
     projected.injectionRuleIds = result.injectionScan.ruleIds;
   }
+  // Issue #55: only the `false` case projects. `true` (we were recognised)
+  // and `null` (nothing configured to look for) are both silence — a panel
+  // that announced either would be reporting on itself, not the document.
+  if (result.partyRecognised === false) {
+    projected.partyUnrecognised = true;
+  }
   return projected;
 }
 

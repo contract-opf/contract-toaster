@@ -70,6 +70,14 @@ export interface PreflightResult {
   oneLineSummary: string | null;
   match: PreflightMatch | null;
   injectionScan: PreflightInjectionScan | null;
+  /**
+   * Issue #55: did any variant of any of OUR configured legal entities
+   * appear in the document? `null` means the question was not asked — no
+   * roster and no playbook party to look for — and is NOT the same as
+   * `false` ("looked, found none"), which is the only value that renders
+   * anything. Advisory: nothing here gates the go button.
+   */
+  partyRecognised: boolean | null;
 }
 
 function normalizePaperSide(value: unknown): PreflightPaperSide {
@@ -132,6 +140,11 @@ function parsePreflightResponse(body: Record<string, unknown>): PreflightResult 
     oneLineSummary: classification === 'ok' ? normalizeSummary(body.one_line_summary) : null,
     match: classification === 'ok' ? normalizeMatch(body.match) : null,
     injectionScan: normalizeInjectionScan(body.injection_scan),
+    // Strictly tri-state: only a real boolean survives. Anything else —
+    // an older backend that does not send the field, a malformed body —
+    // is `null`, which renders nothing. Never coerced with `!!`: that
+    // would turn "absent" into a claim that we looked and failed.
+    partyRecognised: typeof body.party_recognised === 'boolean' ? body.party_recognised : null,
   };
 }
 

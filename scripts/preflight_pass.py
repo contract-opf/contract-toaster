@@ -230,7 +230,15 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
 
     Returns:
       {"word_count": int, "page_estimate": int, "paragraph_count": int,
-       "title": str | None, "excerpt": str}
+       "title": str | None, "excerpt": str, "full_text": str}
+
+    `full_text` (issue #55) is the WHOLE accept-all reading, uncapped --
+    `excerpt` is capped at `EXCERPT_CHAR_BUDGET` because it is what gets
+    paid for as cheap-model input, and a party named only in a signature
+    block past that cap would be invisible to a search over the excerpt.
+    It is used for the offline party-recognition signal
+    (`backend/src/review_routes.py`) and NEVER serialized into a response,
+    a log line or a prompt: it is document text.
 
     Raises `DocumentStatsError` if extraction itself raises (see that
     class's docstring for why this is expected to be rare).
@@ -249,6 +257,7 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
     title: str | None = None
     excerpt_parts: list[str] = []
     excerpt_len = 0
+    full_text_parts: list[str] = []
 
     for group in logical_paragraphs:
         heading = group.get("heading") or "<untitled>"
@@ -263,9 +272,10 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
         if title is None and heading and heading != "<untitled>":
             title = heading
 
-        if excerpt_len < EXCERPT_CHAR_BUDGET:
-            piece = f"{heading}: {body}".strip() if heading != "<untitled>" else body
-            if piece:
+        piece = f"{heading}: {body}".strip() if heading != "<untitled>" else body
+        if piece:
+            full_text_parts.append(piece)
+            if excerpt_len < EXCERPT_CHAR_BUDGET:
                 excerpt_parts.append(piece)
                 excerpt_len += len(piece)
 
@@ -279,6 +289,7 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
         "paragraph_count": len(logical_paragraphs),
         "title": title[:TITLE_MAX_CHARS] if title else title,
         "excerpt": "\n".join(excerpt_parts)[:EXCERPT_CHAR_BUDGET],
+        "full_text": "\n".join(full_text_parts),
     }
 
 

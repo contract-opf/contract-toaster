@@ -70,6 +70,28 @@
 > shown and injected sentences) and
 > `frontend/src/__tests__/markup-intensity-54.test.tsx`. The A5 text below
 > still describes the one-release dual-send it proposed; Q3 chose otherwise.
+>
+> F6 / A6 landed as public issue `contract-opf/contract-toaster#55` (private
+> #695). `scripts/entity_normalize.py` is the one place party-name folding
+> lives: a legal-form suffix table (19 canonical tokens), `d/b/a` splitting,
+> NFKD diacritic stripping, punctuation and `&` folding, and a leading
+> article. `backend/src/entity_roster.py::normalize_entities` and
+> `scripts/opf_prompt.py::_recognition_key` both deduplicate on its
+> `recognition_key` now, with the typed spelling still what gets stored.
+> A6's "emit the canonical name plus its variants" was NOT taken: rendering
+> variants beside the canonical name rebuilds the "one real principal plus
+> also-rans" shape #678 flattened the block to remove, so the model instead
+> gets one fixed sentence (`opf_prompt.OUR_ENTITIES_NOTE`) rendered beside
+> `perspective.our_entities`. The new preflight signal is
+> `party_recognised: bool | null` on `POST /api/reviews/preflight`
+> (`true`/`false`/`null` for found / looked-and-found-none / nothing
+> configured to look for), computed offline over the whole extracted text,
+> and rendered as one amber advisory line on the preflight card that never
+> gates the go button. Pinned by `tests/test_entity_normalize_55.py`
+> (table-driven over every suffix spelling, every d/b/a separator and
+> `fold` idempotence), `tests/test_preflight_party_signal_55.py` (real
+> router; the roster seeded through the real admin writer against real
+> DynamoDB) and `frontend/src/__tests__/preflight-party-advisory-55.test.tsx`.
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the

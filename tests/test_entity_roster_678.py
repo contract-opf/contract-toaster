@@ -120,6 +120,11 @@ PARTY = "FixtureCorp"
 SIBLING = "Alpine Performance Holdings, LLC"
 FORMER_NAME = "Zenith Sports Sciences"
 
+# Issue #55 (audit finding F6): one entity, two legal-form spellings. The
+# pre-#55 dedup (case + whitespace only) stored these as two roster lines.
+SUFFIX_ENTITY = "Synthetic Holdings GmbH"
+SUFFIX_ENTITY_VARIANT = "SYNTHETIC HOLDINGS G.m.b.H."
+
 
 def _fixture() -> dict:
     return opf_load.load_opf(FIXTURE_PATH)
@@ -415,6 +420,28 @@ class TestStore(RosterStoreTestBase):
             [f"  {SIBLING}  ", "", SIBLING.upper(), FORMER_NAME], ADMIN, self.ddb
         )
         self.assertEqual(after["entities"], [SIBLING, FORMER_NAME])
+
+    def test_a_legal_form_variant_is_one_entity_typed_twice(self):
+        """Issue #55 (audit finding F6). Before `entity_normalize`, the
+        roster dedup folded only case and whitespace, so an admin who typed
+        the same company under two suffix spellings stored it twice and the
+        model was shown both. The SURVIVING spelling is the FIRST one
+        typed -- the key is lossy, so it can never be what gets stored."""
+        after = entity_roster.set_entity_roster(
+            [SUFFIX_ENTITY, SUFFIX_ENTITY_VARIANT, FORMER_NAME], ADMIN, self.ddb
+        )
+        self.assertEqual(after["entities"], [SUFFIX_ENTITY, FORMER_NAME])
+        self.assertEqual(
+            entity_roster.resolve_entity_roster(self.ddb), (SUFFIX_ENTITY, FORMER_NAME)
+        )
+
+    def test_the_variant_typed_first_is_the_one_that_survives(self):
+        """The other order, so the assertion above is about the ORDER TYPED
+        and not about which spelling happens to sort first."""
+        after = entity_roster.set_entity_roster(
+            [SUFFIX_ENTITY_VARIANT, SUFFIX_ENTITY], ADMIN, self.ddb
+        )
+        self.assertEqual(after["entities"], [SUFFIX_ENTITY_VARIANT])
 
     def test_the_save_is_audited_by_count_and_never_by_name(self):
         entity_roster.set_entity_roster([SIBLING, FORMER_NAME], ADMIN, self.ddb)

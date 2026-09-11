@@ -115,25 +115,36 @@ V1_PLAYBOOK: dict[str, Any] = {"playbook_id": "eiaa", "metadata": {}}
 PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 
-# Golden pins, all captured on the UNTOUCHED tree (commit 54597b6, before this
-# issue's change) with no markup level. If any moves, a medium review's system
-# prompt is no longer byte-identical to what it was.
+# Golden pins, originally captured on the UNTOUCHED tree (commit 54597b6,
+# before this issue's change) with no markup level. If any moves, a medium
+# review's system prompt is no longer byte-identical to what it was.
+#
+# RE-CAPTURED ONCE, for issue #55 (2026-09-05 audit finding F6): that ticket
+# adds `perspective.our_entities_note` -- one fixed sentence
+# (`opf_prompt.OUR_ENTITIES_NOTE`) telling the model that a legal-form
+# suffix, its punctuation, and either half of a d/b/a name are the same
+# entity -- to the Context block, which every OPF pin below covers. That is
+# a DELIBERATE prompt change owned by #55, not a #54 regression, and this
+# pin catching it is the pin doing its job. Re-captured on the #55 tree with
+# no markup level; the V1 pins further down did NOT move, because the
+# Context block exists only on the OPF path.
 #
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
 # for the acme-university 0.3 gold fixture, bare and with standing
-# instructions. This block is NOT composed there, so these must not move.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "eed4d903be656de28569f8a92e6aefbca39d657a65c1cef70a47d4470e348f02"
+# instructions. The markup-intensity block is NOT composed there, so no
+# markup level may ever move these.
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "1dddabc9381f7afc847000af10f2de47351d4e9cef072524c4353c22a47e2924"
 GOLDEN_KNOWLEDGE_WITH_INSTRUCTIONS_SHA256 = (
-    "10e22c98f4cf8c54675c5b93ef34ec7f75e987f5bb1b591e8e76f5de628fd1ca"
+    "19e1680b5b3eae42f5e9971d3cd807e2e737d62b55932536927a0a108761b577"
 )
 # The ASSEMBLED OPF prompt (`review_spine._assemble_opf_system_blocks` over
 # `resolve_knowledge` of the same fixture): sha256 of the blocks' texts joined
 # with "\n\n", bare, and with STANDING_INSTRUCTIONS + TOASTER_GUIDANCE.
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "92395dfbae8b041dc9a37828574648e1bba26e9cab4711062067d0c22c33d7fb"
+    "33699c1014932900fb45220caddcb80ff3864c8e1914dcee837bba747d15e8c7"
 )
 GOLDEN_OPF_ASSEMBLED_FULL_SHA256 = (
-    "56b05b526dee55bd653c56740befc82b2eb7a1f1f8b40e5fd34fe9d320283b30"
+    "ca61ddbbbaf379fa76cc68e848c4b1f8dc61cf97d6f19a241fe38294f1271214"
 )
 # The ASSEMBLED v1 prompt (`primary_review_pass.assemble_system_blocks` over
 # V1_PLAYBOOK), same two shapes.

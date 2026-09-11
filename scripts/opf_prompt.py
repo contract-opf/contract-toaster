@@ -143,6 +143,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import entity_normalize  # noqa: E402
 import opf_terminology  # noqa: E402
 import primary_review_pass  # noqa: E402
 
@@ -674,12 +675,40 @@ def _standing_instructions_block(instructions_text: str) -> str | None:
 #: `perspective.party` (issue #678). See `resolve_party_recognition_set`.
 OUR_ENTITIES_KEY = "our_entities"
 
+#: The key the fixed recognition sentence rides under, rendered in the SAME
+#: object as `our_entities` and only when that list is rendered (issue #55).
+OUR_ENTITIES_NOTE_KEY = "our_entities_note"
+
+#: Issue #55 (audit finding F6): the flat list is the canonical typed
+#: spellings and NOTHING else -- rendering a variants list alongside it
+#: would reintroduce exactly the "one real name plus its also-rans" shape
+#: #678 flattened the block to eliminate. So the model is told the rule in
+#: one fixed, factual sentence instead, and `entity_normalize` does the
+#: actual folding everywhere the SYSTEM (rather than the model) has to
+#: decide whether two spellings are one entity.
+#:
+#: Fixed and deterministic: it does not name an entity, does not vary with
+#: the roster, and is byte-identical on every review, so the composed block
+#: stays a pure function of the document plus the roster.
+OUR_ENTITIES_NOTE = (
+    "A legal-form suffix (GmbH, B.V., S.r.l., SAS, S.A., Ltd, Inc, LLC, "
+    "plc, AG, S.p.A., Pty Ltd, K.K., Oy, AB, Corp, Co, LP, LLP), its "
+    "punctuation, and either half of a d/b/a or trading-as name are the "
+    "same entity as the spelling listed here."
+)
+
 
 def _recognition_key(name: str) -> str:
-    """The identity a recognition-set entry is deduplicated on: case- and
-    whitespace-insensitive. "Acme  Holdings, LLC" and "acme holdings, llc"
-    are one entity typed twice, not two entities to show the model."""
-    return " ".join(name.split()).casefold()
+    """The identity a recognition-set entry is deduplicated on.
+
+    Issue #55: delegates to `entity_normalize.recognition_key`, so the
+    prompt-composition side folds legal-form suffixes, punctuation and
+    diacritics exactly the way `backend/src/entity_roster.py
+    ::normalize_entities` does. "Acme Holdings, LLC", "acme  holdings llc"
+    and "ACME HOLDINGS L.L.C." are one entity typed three ways, not three
+    entities to show the model.
+    """
+    return entity_normalize.recognition_key(name)
 
 
 def resolve_party_recognition_set(
@@ -758,6 +787,11 @@ def _context_block(opf_doc: dict, entity_roster: Optional[Sequence[str]] = None)
     invites the model to read one entity as the real principal and the rest
     as also-rans. With no roster configured the list is that one name --
     same content as before, same shape as with twenty-five.
+
+    Issue #55 adds ONE sibling key, `perspective.our_entities_note`: the
+    fixed `OUR_ENTITIES_NOTE` sentence, rendered only where the list itself
+    is rendered. A variants list was the alternative and was rejected -- it
+    would put a canonical name beside its alternates, the exact shape above.
     """
     context: dict[str, Any] = {}
     if "perspective" in opf_doc:
@@ -766,6 +800,7 @@ def _context_block(opf_doc: dict, entity_roster: Optional[Sequence[str]] = None)
         if isinstance(perspective, dict) and our_entities:
             rendered = {k: v for k, v in perspective.items() if k != "party"}
             rendered[OUR_ENTITIES_KEY] = our_entities
+            rendered[OUR_ENTITIES_NOTE_KEY] = OUR_ENTITIES_NOTE
             context["perspective"] = rendered
         else:
             # Nothing usable to flatten (a malformed `perspective`, or a
