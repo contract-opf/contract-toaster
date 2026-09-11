@@ -166,3 +166,13 @@ match the compose files here, then re-run `bootstrap` to create the table.
 
 - **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend
   model.
+- **`Strict-Transport-Security` is yours to set at the TLS hop.**
+  `nginx.conf` serves the SPA's security headers (CSP, `nosniff`,
+  `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` —
+  issues #387 and #57) but deliberately sets NO HSTS: its single server block
+  is a plaintext `listen 8080;` listener and TLS terminates upstream
+  (Coolify/Traefik). Browsers ignore HSTS on non-secure responses, so it has
+  to be added by whatever terminates TLS in front of the container —
+  `max-age=63072000; includeSubDomains; preload` is the value the managed
+  target uses. `tests/test_infra_hardening_headers_57.py` flips to REQUIRING
+  HSTS in `nginx.conf` if a `listen … ssl` block is ever added there.

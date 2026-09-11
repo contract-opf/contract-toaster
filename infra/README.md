@@ -156,7 +156,10 @@ end-to-end minimal deploy on those two fronts.
 - **Per-data-class KMS**: One CMK per env at skeleton; per-class keys in #70.
 - **Split API role + scoped download**: Separate deploy vs. task roles here; scoped
   pre-signed download URLs in #71.
-- **XSS/CSP**: Amplify CSP header in #72; no `innerHTML` with user content (#54).
+- **XSS/CSP**: Amplify CSP header in #72; no `innerHTML` with user content (#54). The
+  same custom-headers block also carries `Strict-Transport-Security`,
+  `Permissions-Policy` and `Cross-Origin-Opener-Policy` (#57) — see
+  `docs/threat-model.md` → Frontend security posture.
 - **Hostile-file AV**: Upload scanning in #63.
 - **Pointer-only payloads**: Step Functions inputs carry only S3/DDB pointers (#59).
 - **No doc substance in logs**: CloudWatch must never log document content, rationales,

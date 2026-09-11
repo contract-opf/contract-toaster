@@ -113,6 +113,33 @@
 > `frontend/src/__tests__/lazy-panels-56.test.tsx` (all six panels resolve
 > through their `Suspense` boundary and survive a tab switch as the same DOM
 > nodes).
+>
+> F10 / A10 landed as public issue `contract-opf/contract-toaster#57` (private
+> #697). The managed target carries all three missing hardening headers; the
+> self-hosted one carries the two it is responsible for (HSTS belongs to the
+> hop that terminates TLS in front of it — see below).
+> `infra/lib/nested/frontend-stack.ts`'s Amplify custom-headers block
+> adds, on the catch-all `**/*` pattern,
+> `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`,
+> `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`
+> (an empty allowlist, as the F10 text below proposed; `payment` and `usb`
+> added to the three capabilities the finding named) and
+> `Cross-Origin-Opener-Policy: same-origin` — safe for the Cognito hosted-UI
+> flow, which is a full-page redirect, not a popup. `deploy/dts/nginx.conf`
+> gets the same `Permissions-Policy` and `Cross-Origin-Opener-Policy` as
+> server-level `add_header … always` directives (never per-location, which in
+> nginx would REPLACE rather than merge the inherited security headers), and
+> deliberately NO HSTS: its single server block is a plaintext `listen 8080;`
+> listener with TLS terminated upstream by Coolify/Traefik, which is the hop
+> that owns HSTS. `style-src 'unsafe-inline'` is unchanged and still awaits
+> the nonce re-evaluation A10 defers; `autoDeploymentsEnabled` is untouched.
+> Pinned by `tests/test_infra_hardening_headers_57.py` (offline `cdk synth`,
+> asserted on the catch-all pattern's own segment of the CustomHeaders YAML,
+> plus the nginx file — with the HSTS check written as an if-and-only-if so
+> it flips to REQUIRING HSTS the moment a `listen … ssl` block appears there),
+> and by the extended `tests/test_infra_frontend_csp_226.py` (check 5) and
+> `tests/test_dts_nginx_csp.py` (check 4b). Posture recorded in
+> `docs/threat-model.md` → Frontend security posture.
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the

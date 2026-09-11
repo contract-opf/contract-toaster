@@ -26,6 +26,13 @@ Checks (all must pass; exit 1 on any failure):
   3. `style-src` DOES include `'unsafe-inline'` (required by the toaster's
      inline <style> block, docs/frontend-design-system.md §3.1).
   4. nosniff (X-Content-Type-Options) and Referrer-Policy headers are present.
+  4b. Issue #57: Permissions-Policy (camera/microphone/geolocation/payment/
+     usb all denied with an empty allowlist) and
+     Cross-Origin-Opener-Policy: same-origin are present at server level
+     with `always`; Strict-Transport-Security is absent for as long as the
+     only server block is the plaintext `listen 8080;` listener (TLS
+     terminates upstream at Coolify/Traefik, which owns HSTS) and becomes
+     REQUIRED the moment a `listen … ssl` block appears in this file.
   5. No location block re-declares `add_header` in a way that would drop the
      server-level headers -- in nginx, `add_header` in a location block
      REPLACES (does not merge with) inherited headers, so if any location
@@ -251,6 +258,99 @@ def check_4_nosniff_and_referrer_policy() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check 4b — Permissions-Policy + COOP at server level; HSTS only on TLS
+# ---------------------------------------------------------------------------
+
+def check_4b_hardening_headers() -> list[str]:
+    """
+    Issue #57 (audit finding F10 / action A10): Permissions-Policy and
+    Cross-Origin-Opener-Policy must be present at SERVER level, with
+    `always`, mirroring the Amplify custom-headers block.
+
+    Strict-Transport-Security must NOT be here: this file has one server
+    block and it is a plaintext `listen 8080;` listener (TLS is terminated
+    upstream by Coolify/Traefik). HSTS belongs on the hop that speaks HTTPS
+    to the browser. The assertion below encodes exactly that decision -- if
+    a TLS `listen … ssl` server block is ever added to this file, the check
+    flips and requires HSTS inside it instead.
+    """
+    print(
+        "\nCheck 4b: Permissions-Policy + Cross-Origin-Opener-Policy at server "
+        "level; HSTS only on a TLS listener (issue #57) …"
+    )
+    failures: list[str] = []
+
+    text = read(NGINX_CONF)
+    server_level, _location_blocks = extract_server_blocks_and_locations(text)
+
+    permissions = re.search(
+        r'add_header\s+Permissions-Policy\s+"([^"]+)"\s+always\s*;', server_level
+    )
+    failures += check(
+        permissions is not None,
+        "4b-i: server-level `add_header Permissions-Policy \"…\" always;` present",
+        "4b-i: no server-level Permissions-Policy add_header with `always` "
+        "found -- it must sit outside every location block (check 5) and "
+        "carry `always` so it is emitted on error responses too",
+    )
+    if permissions is not None:
+        value = permissions.group(1)
+        missing = [
+            feature
+            for feature in ("camera=()", "microphone=()", "geolocation=()",
+                            "payment=()", "usb=()")
+            if feature not in value
+        ]
+        failures += check(
+            not missing,
+            "4b-ii: Permissions-Policy denies camera, microphone, geolocation, "
+            "payment and usb with an empty allowlist",
+            f"4b-ii: Permissions-Policy is {value!r}, missing {missing!r} -- "
+            "the app uses none of these capabilities, and an empty allowlist "
+            "`()` is strictly stronger than `self`",
+        )
+
+    coop = bool(re.search(
+        r'add_header\s+Cross-Origin-Opener-Policy\s+"same-origin"\s+always\s*;',
+        server_level,
+    ))
+    failures += check(
+        coop,
+        '4b-iii: server-level `add_header Cross-Origin-Opener-Policy '
+        '"same-origin" always;` present',
+        '4b-iii: no server-level Cross-Origin-Opener-Policy "same-origin" '
+        "add_header with `always` found -- it severs window.opener to "
+        "cross-origin documents (tabnabbing, shared-process side channels)",
+    )
+
+    # HSTS: required inside a TLS server block, forbidden on a plaintext one.
+    has_tls_listener = bool(re.search(r"^\s*listen\s+[^;]*\bssl\b", text, re.MULTILINE))
+    has_hsts = bool(re.search(r"add_header\s+Strict-Transport-Security\b", text))
+
+    if has_tls_listener:
+        failures += check(
+            has_hsts,
+            "4b-iv: a TLS listener exists and Strict-Transport-Security is set",
+            "4b-iv: this file now has a `listen … ssl` server block but no "
+            "Strict-Transport-Security add_header -- HSTS belongs on the hop "
+            "that speaks HTTPS to the browser",
+        )
+    else:
+        failures += check(
+            not has_hsts,
+            "4b-iv: no Strict-Transport-Security (correct -- the only server "
+            "block is a plaintext listener; TLS terminates upstream at "
+            "Coolify/Traefik, which is where HSTS belongs)",
+            "4b-iv: Strict-Transport-Security is set on a plaintext-only "
+            "nginx.conf. Browsers ignore HSTS on non-secure responses, and "
+            "once proxied it pins a max-age this hop cannot honour. Set it "
+            "at the TLS-terminating reverse proxy instead.",
+        )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Check 5 — no location block silently drops server-level headers
 # ---------------------------------------------------------------------------
 
@@ -445,6 +545,7 @@ def main() -> int:
     all_failures += check_2_script_src_strict()
     all_failures += check_3_style_src_unsafe_inline()
     all_failures += check_4_nosniff_and_referrer_policy()
+    all_failures += check_4b_hardening_headers()
     all_failures += check_5_no_location_drops_headers()
 
     check_6_failures, map_output_var = check_6_cache_control_map()
