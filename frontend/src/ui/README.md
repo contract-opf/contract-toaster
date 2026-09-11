@@ -57,6 +57,14 @@ The dev gallery (`src/gallery/`) is the one deliberate exception: it has no
 React and exercises the elements directly via `document.createElement`,
 which doubles as a no-React smoke test of the library.
 
+`ui/CtPanelSkeleton.tsx` (issue #56) is a React component, not a `ct-*`
+element: it is the `<Suspense>` fallback App.tsx shows while a code-split
+tabpanel's chunk loads, and it is built OUT of `CtCard` through this same
+wrapper surface. Nothing about the checklist below applies to it — there is
+no Lit element, no gallery entry and no `ui-<name>.test.tsx`; it is covered
+by `src/__tests__/lazy-panels-56.test.tsx` along with the boundaries that
+render it.
+
 ## Tokens only
 
 Component CSS references `--ct-*` custom properties exclusively

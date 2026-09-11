@@ -83,12 +83,33 @@ function stubRoutes(authMode: string): void {
   );
 }
 
-/** Renders the screen in `authMode` and opens the (collapsed) add-user card. */
+/** The control that exists ONLY once the `/api/admin/auth-mode` probe has
+ *  been applied, per mode. `sso` has no entry on purpose: it is the pre-probe
+ *  default, so nothing in the card changes when that probe confirms it. */
+const PROBE_APPLIED_TESTID: Record<string, string | undefined> = {
+  password: 'admin-users-add-username',
+  both: 'admin-users-add-type',
+};
+
+/** Renders the screen in `authMode` and opens the (collapsed) add-user card.
+ *
+ * The card's SHAPE comes from the `/api/admin/auth-mode` probe, which is a
+ * second authenticated call behind the roster read — so `await`ing the roster
+ * row never proved the card had been re-rendered for `authMode`. It merely
+ * happened to win the race. Issue #56 routed `auth.ts::getToken` through a
+ * dynamic `import('aws-amplify/auth')`, putting every authenticated call one
+ * microtask further out, and the bare `getByTestId` in each case below
+ * started losing it under load. Waiting on the probe's own control is what
+ * makes the helper mean what it always claimed. */
 async function openAddCard(authMode: string): Promise<HTMLElement> {
   stubRoutes(authMode);
   render(<AdminUsers />);
   await screen.findByTestId('user-row-sub-reviewer');
   fireEvent.click(screen.getByTestId('admin-users-add-toggle'));
+  const marker = PROBE_APPLIED_TESTID[authMode];
+  if (marker) {
+    await screen.findByTestId(marker);
+  }
   return screen.getByTestId('admin-users-add-panel');
 }
 

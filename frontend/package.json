@@ -13,6 +13,7 @@
     "audit:contrast": "node scripts/contrast-audit.mjs",
     "audit:focus": "node scripts/focus-audit.mjs",
     "audit:layout": "node scripts/layout-audit.mjs",
+    "audit:bundle": "node scripts/bundle-budget.mjs",
     "test": "node scripts/run-vitest.mjs"
   },
   "dependencies": {

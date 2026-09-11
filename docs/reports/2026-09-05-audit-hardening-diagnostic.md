@@ -92,6 +92,27 @@
 > `fold` idempotence), `tests/test_preflight_party_signal_55.py` (real
 > router; the roster seeded through the real admin writer against real
 > DynamoDB) and `frontend/src/__tests__/preflight-party-advisory-55.test.tsx`.
+>
+> F7 / A7 landed as public issue `contract-opf/contract-toaster#56` (private
+> #696). Before: ONE 951 kB JS chunk (271 kB gzip) plus one 384 kB CSS chunk,
+> downloaded whole by every visitor. After: a 165 kB entry chunk (55 kB gzip)
+> and a 69 kB stylesheet, with React (142 kB), Lit (18 kB) and Amplify
+> (485 kB) in their own vendor chunks and the six admin panels + History
+> behind `React.lazy` boundaries (9-36 kB each); 934 kB of JS in total, i.e.
+> the same code, fetched only when a route needs it. The Amplify
+> `Authenticator` moved to `frontend/src/SsoShell.tsx` and is lazy-loaded
+> only when `isPasswordMode()` is false; `main.tsx`'s `Amplify.configure` and
+> the Amplify UI stylesheet, and `auth.ts::getToken`'s `fetchAuthSession`,
+> are dynamic imports behind the same branch. A password-mode build now
+> carries NO Amplify JS or CSS at all (163 kB entry, no `amplify-*` asset).
+> The mounted-panel invariant (`frontend/src/App.tsx` — every panel stays
+> mounted, visibility toggled with `hidden`) is unchanged: only the MODULE is
+> lazy. Pinned by `frontend/scripts/bundle-budget.mjs` (`npm run
+> audit:bundle`, wired into `scripts/check-frontend.sh` after `build:ci` —
+> entry chunk < 300 kB, all chunks < 1100 kB) and
+> `frontend/src/__tests__/lazy-panels-56.test.tsx` (all six panels resolve
+> through their `Suspense` boundary and survive a tab switch as the same DOM
+> nodes).
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the

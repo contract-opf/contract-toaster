@@ -421,8 +421,14 @@ describe('preflight card — ReviewSubmission.tsx', () => {
     // ...the reviewer replaces it with a second file before it does.
     selectFile(docxFile('second.docx'));
 
+    // `waitFor`, not a bare assertion on the first render of the card: the
+    // card appears as soon as a preflight is IN FLIGHT, and the second file's
+    // response is one authenticated round trip behind that. Issue #56 routed
+    // `auth.ts::getToken` through a dynamic `import('aws-amplify/auth')`,
+    // which puts that round trip one microtask further out and made the bare
+    // assertion lose the race under load.
     const card = await screen.findByTestId('review-preflight-card');
-    expect(card).toHaveTextContent('Second File Title');
+    await waitFor(() => expect(card).toHaveTextContent('Second File Title'));
 
     // Now let the FIRST (stale) response resolve -- it must not overwrite
     // the second file's card.
