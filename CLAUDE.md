@@ -2,9 +2,11 @@
 
 ## Read this first
 
-**[docs/plans/2026-09-08-orbit-diner-completion-handoff.md](docs/plans/2026-09-08-orbit-diner-completion-handoff.md)** —
-current state, what is verified, what is still open, and the two hand steps the
-new auto-deploy needs. It is written to be read cold, with no other context.
+**[docs/plans/2026-09-11-afk-grind-handoff.md](docs/plans/2026-09-11-afk-grind-handoff.md)** —
+current state of the autonomous backlog grind: what landed, where the loop
+stopped, how to relaunch it, and the prod roll-forward rule. Written to be read
+cold. The 2026-09-08 Orbit Diner completion handoff it supersedes is still the
+reference for the Review-tab rewrite itself.
 
 Architecture is `ARCHITECTURE.md`; operating procedures are `RUNBOOK.md` (note
 its published copy is scrubbed — placeholder account IDs and `company.com`).
