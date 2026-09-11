@@ -16,7 +16,9 @@
  *
  * The Authenticator component from @aws-amplify/ui-react handles the full
  * sign-in flow (redirects to Cognito hosted UI, handles the OAuth callback,
- * and manages the session).
+ * and manages the session). Since issue #56 it lives in `./SsoShell`, which
+ * this module loads with `React.lazy` only on an SSO build — see
+ * `renderAuthenticatedApp` at the foot of this file.
  *
  * ACCEPT/REQUEST_CHANGE framing: ACCEPT reads "no requested changes
  * identified by tool" — never "no action needed" or "approved"
@@ -30,16 +32,8 @@
  * (the generated `.docx` itself).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
-import AdminUsers from './AdminUsers';
-import AdminRetention from './AdminRetention';
-import AdminModel from './AdminModel';
-import AdminPlaybooks from './AdminPlaybooks';
-import AdminDiagnostics from './AdminDiagnostics';
-import AdminSettings from './AdminSettings';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import ReviewSubmission from './ReviewSubmission';
-import ReviewHistory from './ReviewHistory';
 import PasswordLogin, { DemoIdentity } from './PasswordLogin';
 import ChangePassword from './ChangePassword';
 import { isPasswordMode } from './auth';
@@ -47,6 +41,43 @@ import { buildTimestampFromVersion } from './deployIdentity';
 import { authorizedFetch, onSessionExpired } from './api';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CtAppShell, CtBanner, CtButton, CtChip, CtTabBar } from './ui/react';
+import { CtPanelSkeleton } from './ui/CtPanelSkeleton';
+
+// ---------------------------------------------------------------------------
+// Code splitting (issue #56). Each of these was a static import until the
+// entry chunk hit 951 kB: a non-admin, and every password-mode deployment,
+// downloaded six admin panels to render the Review tab.
+//
+// WHAT IS LAZY IS THE MODULE, NEVER THE MOUNTED ELEMENT. The tabpanel block
+// further down still renders every panel at once and toggles `hidden` — see
+// its comment, and src/__tests__/lazy-panels-56.test.tsx, which fails if a
+// panel is ever unmounted on a tab switch. Each one is wrapped in a
+// `<Suspense fallback={<CtPanelSkeleton />}>` INSIDE its existing
+// `<ErrorBoundary>`, so a chunk that fails to load surfaces as that panel's
+// own error rather than white-screening the app.
+// ---------------------------------------------------------------------------
+const AdminUsers = lazy(() => import('./AdminUsers'));
+const AdminRetention = lazy(() => import('./AdminRetention'));
+const AdminModel = lazy(() => import('./AdminModel'));
+const AdminPlaybooks = lazy(() => import('./AdminPlaybooks'));
+const AdminDiagnostics = lazy(() => import('./AdminDiagnostics'));
+const AdminSettings = lazy(() => import('./AdminSettings'));
+const ReviewHistory = lazy(() => import('./ReviewHistory'));
+
+// The Amplify `Authenticator` (now `./SsoShell`) is lazy for the same reason,
+// with one extra step: `null` on a password-mode build, so the
+// `import('./SsoShell')` specifier — and the `amplify` chunk it would pull in
+// behind it — is literally ABSENT from the emitted entry chunk there rather
+// than merely never evaluated. Vite substitutes `import.meta.env.VITE_AUTH_MODE`
+// textually, so this folds to a constant at build time. See
+// `renderAuthenticatedApp` at the foot of this file, and auth.ts's getToken
+// and main.tsx for the same build-time/runtime pairing.
+//
+// Evaluated ONCE, at module load: `isPasswordMode()` — not this — remains the
+// runtime authority, and a test that flips VITE_AUTH_MODE after importing
+// this module changes that function's answer, not this constant.
+const SsoShell =
+  import.meta.env.VITE_AUTH_MODE === 'password' ? null : lazy(() => import('./SsoShell'));
 
 // ---------------------------------------------------------------------------
 // Product name (issue #274) — build-time config, no internal name baked in.
@@ -300,7 +331,11 @@ function useDefaultCredentialsWarning(refreshKey: number): boolean {
 // AppContent takes the identity (email) and sign-out handler as props, so it
 // is independent of how the caller authenticated — Cognito (SsoApp) or
 // username/password (PasswordApp).
-function AppContent({
+//
+// Exported (issue #56) because `SsoApp`/`SsoShell` moved into their own
+// module so the Amplify Authenticator can be `React.lazy`'d out of the entry
+// chunk; `SsoShell.tsx` is the only other importer.
+export function AppContent({
   userEmail,
   signOut,
 }: {
@@ -622,7 +657,11 @@ function AppContent({
         className="ct-tabpanel"
         hidden={activeTab !== 'history'}
       >
-        <ErrorBoundary name="history"><ReviewHistory /></ErrorBoundary>
+        <ErrorBoundary name="history">
+          <Suspense fallback={<CtPanelSkeleton />}>
+            <ReviewHistory />
+          </Suspense>
+        </ErrorBoundary>
       </section>
 
       {isAdmin && (
@@ -635,7 +674,9 @@ function AppContent({
             hidden={activeTab !== 'users'}
           >
             <ErrorBoundary name="users">
-              <AdminUsers credentialsRefreshKey={credentialsRefreshKey} />
+              <Suspense fallback={<CtPanelSkeleton />}>
+                <AdminUsers credentialsRefreshKey={credentialsRefreshKey} />
+              </Suspense>
             </ErrorBoundary>
           </section>
           <section
@@ -646,7 +687,9 @@ function AppContent({
             hidden={activeTab !== 'retention'}
           >
             <ErrorBoundary name="retention">
-              <AdminRetention credentialsRefreshKey={credentialsRefreshKey} />
+              <Suspense fallback={<CtPanelSkeleton />}>
+                <AdminRetention credentialsRefreshKey={credentialsRefreshKey} />
+              </Suspense>
             </ErrorBoundary>
           </section>
           <section
@@ -657,7 +700,9 @@ function AppContent({
             hidden={activeTab !== 'model'}
           >
             <ErrorBoundary name="model">
-              <AdminModel credentialsRefreshKey={credentialsRefreshKey} />
+              <Suspense fallback={<CtPanelSkeleton />}>
+                <AdminModel credentialsRefreshKey={credentialsRefreshKey} />
+              </Suspense>
             </ErrorBoundary>
           </section>
           <section
@@ -668,10 +713,12 @@ function AppContent({
             hidden={activeTab !== 'playbooks'}
           >
             <ErrorBoundary name="playbooks">
-              <AdminPlaybooks
-                onCatalogChange={bumpCatalogVersion}
-                credentialsRefreshKey={credentialsRefreshKey}
-              />
+              <Suspense fallback={<CtPanelSkeleton />}>
+                <AdminPlaybooks
+                  onCatalogChange={bumpCatalogVersion}
+                  credentialsRefreshKey={credentialsRefreshKey}
+                />
+              </Suspense>
             </ErrorBoundary>
           </section>
           <section
@@ -682,7 +729,9 @@ function AppContent({
             hidden={activeTab !== 'settings'}
           >
             <ErrorBoundary name="settings">
-              <AdminSettings credentialsRefreshKey={credentialsRefreshKey} />
+              <Suspense fallback={<CtPanelSkeleton />}>
+                <AdminSettings credentialsRefreshKey={credentialsRefreshKey} />
+              </Suspense>
             </ErrorBoundary>
           </section>
           <section
@@ -692,7 +741,11 @@ function AppContent({
             className="ct-tabpanel"
             hidden={activeTab !== 'diagnostics'}
           >
-            <ErrorBoundary name="diagnostics"><AdminDiagnostics /></ErrorBoundary>
+            <ErrorBoundary name="diagnostics">
+              <Suspense fallback={<CtPanelSkeleton />}>
+                <AdminDiagnostics />
+              </Suspense>
+            </ErrorBoundary>
           </section>
         </>
       )}
@@ -750,99 +803,6 @@ function AppContent({
         )}
       </footer>
     </CtAppShell>
-  );
-}
-
-/**
- * App — wraps the content with the Amplify Authenticator.
- *
- * The Authenticator component handles the full Cognito hosted-UI sign-in flow.
- * When not signed in, it renders the Cognito hosted UI redirect.
- * When signed in, it renders the app content (AppContent).
- */
-// SSO (AWS) target: the Cognito Authenticator provides the identity; derive the
-// email and sign-out from the Amplify session, exactly as before.
-//
-// Issue #587. Before this, a 401 from an authenticated call in SSO mode fired
-// the central notifier (api.ts, issue #487) into an empty listener set —
-// `PasswordApp` was the only subscriber in the whole codebase — so the
-// authenticated shell and stale History rows stayed on screen with no
-// visible signal that the session had died. Calling Amplify's own `signOut`
-// here forces the Authenticator back to its signed-out (hosted UI) surface,
-// the same mechanism the user's own sign-out button already uses.
-// `onExpired`/`onReauthenticated` (from `SsoShell`, which survives the
-// sign-out unlike this component, since `signOut` unmounts it) are what
-// actually drive the "session expired" banner on the resulting hosted-UI
-// surface, and clear it again once the user is back — see `SsoShell`.
-function SsoApp({
-  onExpired,
-  onReauthenticated,
-}: {
-  onExpired: () => void;
-  onReauthenticated: () => void;
-}): React.ReactElement {
-  const { user, signOut } = useAuthenticator((ctx) => [ctx.user]);
-  const userEmail: string =
-    (user as { signInDetails?: { loginId?: string } }).signInDetails?.loginId ??
-    (user as { username?: string }).username ??
-    'unknown';
-
-  useEffect(
-    () =>
-      onSessionExpired(() => {
-        onExpired();
-        signOut?.();
-      }),
-    [signOut, onExpired],
-  );
-
-  // `SsoApp` only ever renders while the Authenticator considers the user
-  // signed in — including immediately after a re-sign-in following an
-  // expiry — so mounting it is exactly the "reauthenticated" event. Without
-  // this, the banner set by `onExpired` above would never clear: it renders
-  // outside the Authenticator (see `SsoShell`), so nothing else tells it the
-  // user signed back in. Mirrors `PasswordApp`, which clears its own
-  // `sessionExpired` flag from `PasswordLogin`'s `onAuthenticated`.
-  useEffect(() => {
-    onReauthenticated();
-    // Run once per mount only — `onReauthenticated` is a fresh closure each
-    // render, and re-running this on every render would still be correct
-    // (it's idempotent) but noisier than necessary.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return <AppContent userEmail={userEmail} signOut={signOut ?? (() => {})} />;
-}
-
-// Issue #587. `SsoApp` unmounts the instant `signOut()` runs (the
-// Authenticator swaps it for its own hosted-UI sign-in surface), so any
-// "why are you seeing this" state has to live above the Authenticator,
-// where it survives that unmount. `SsoShell` is that place: it owns the
-// `sessionExpired` flag, passes `onExpired`/`onReauthenticated` down so
-// `SsoApp` can flip it on a 401 and clear it again once signed back in, and
-// renders the same `session-expired` banner password mode already shows
-// (App.tsx's `PasswordApp`) around whatever the Authenticator is currently
-// rendering — the hosted sign-in form on expiry, `SsoApp` once signed in
-// again.
-function SsoShell(): React.ReactElement {
-  const [sessionExpired, setSessionExpired] = useState(false);
-
-  return (
-    <>
-      {sessionExpired && (
-        <CtBanner variant="warn" data-testid="session-expired">
-          Your session expired — sign in to continue.
-        </CtBanner>
-      )}
-      <Authenticator hideSignUp socialProviders={['google']}>
-        {() => (
-          <SsoApp
-            onExpired={() => setSessionExpired(true)}
-            onReauthenticated={() => setSessionExpired(false)}
-          />
-        )}
-      </Authenticator>
-    </>
   );
 }
 
@@ -983,25 +943,25 @@ export default function App(): React.ReactElement {
 }
 
 function renderAuthenticatedApp(): React.ReactElement {
-  if (isPasswordMode()) {
+  // `SsoShell` is null on a password-mode build (see its declaration at the
+  // top of this file). `isPasswordMode()` is still the runtime authority —
+  // the null check only exists so the SSO branch is statically unreachable,
+  // and so tsc knows the component is defined below.
+  const Shell = SsoShell;
+  if (isPasswordMode() || Shell === null) {
     return <PasswordApp />;
   }
-  // Two Authenticator props make the AWS-target sign-in screen match the
-  // product's actual access model (issue #426):
-  //
-  //   socialProviders={['google']} — renders a "Sign In with Google" button
-  //     ABOVE the standard form. It ADDS the federated path; it does not
-  //     replace the username/password form. Both are supported sign-in paths.
-  //   hideSignUp — removes the "Create Account" tab. This product has zero
-  //     self-registration: admission is Google SSO + Cognito JIT provisioning
-  //     behind an application allowlist (ARCHITECTURE.md → Authentication), so
-  //     a sign-up tab is an affordance that can only ever dead-end.
-  //
-  // Both are verified present on the installed @aws-amplify/ui-react@6.15.4
-  // (AuthenticatorProps → RouterProps/SignInBaseProps; both are destructured
-  // by AuthenticatorInternal). See sso-signin-surface.test.tsx, which renders
-  // the REAL Authenticator — no vi.mock — and asserts the resulting surface.
-  // The Authenticator itself now lives in `SsoShell`, which wraps it with the
-  // session-expired banner (issue #587) — see `SsoShell`.
-  return <SsoShell />;
+  // SSO (AWS) target. The Amplify `Authenticator`, everything it drags in
+  // from `aws-amplify`, and the session-expired banner that wraps it all
+  // live in `./SsoShell` and are `React.lazy`'d (issue #56) — a password-mode
+  // deployment never takes this branch, so it never fetches that chunk, and
+  // an SSO deployment fetches it exactly once on first paint. The props that
+  // shape the sign-in surface (hideSignUp, socialProviders) moved with the
+  // component; see SsoShell.tsx's module docstring for why its own
+  // Authenticator import stays static.
+  return (
+    <Suspense fallback={<CtPanelSkeleton />}>
+      <Shell />
+    </Suspense>
+  );
 }

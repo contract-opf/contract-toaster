@@ -11,7 +11,14 @@
  * authenticated shell and any already-fetched History rows stayed on
  * screen with no signal that the session had died.
  *
- * The fix (App.tsx's `SsoApp`/`SsoShell`) subscribes and calls Amplify's own
+ * Issue #56 moved `SsoApp`/`SsoShell` into `src/SsoShell.tsx` and made
+ * App.tsx load it with `React.lazy`, so the signed-in shell is now one
+ * `Suspense` boundary away from `render(<App/>)` — hence `findByTestId`
+ * where this file used to read `getByTestId` on the first paint. The
+ * module-level `vi.mock('@aws-amplify/ui-react', …)` below still applies:
+ * a lazily imported module resolves through the same mocked registry.
+ *
+ * The fix (SsoShell.tsx's `SsoApp`/`SsoShell`) subscribes and calls Amplify's own
  * `signOut()` on expiry — the same mechanism the user's own sign-out
  * button already uses to force the Authenticator back to its signed-out
  * surface — and shows the `session-expired` banner from `SsoShell`, which
@@ -166,7 +173,7 @@ describe('issue #587 — SSO mode: a 401 mid-session clears the signed-in UI', (
     const { expireNow } = stubFetchWithExpiry();
     render(<App />);
 
-    expect(screen.getByTestId('user-email').textContent).toBe('reviewer@example.com');
+    expect((await screen.findByTestId('user-email')).textContent).toBe('reviewer@example.com');
     await screen.findByTestId('history-row-row-under-test');
 
     expireNow();
@@ -188,7 +195,7 @@ describe('issue #587 — SSO mode: a 401 mid-session clears the signed-in UI', (
     const { fetchMock } = stubFetchWithExpiry();
     render(<App />);
 
-    expect(screen.getByTestId('user-email').textContent).toBe('reviewer@example.com');
+    expect((await screen.findByTestId('user-email')).textContent).toBe('reviewer@example.com');
     await screen.findByTestId('history-row-row-under-test');
 
     fireEvent.click(screen.getByTestId('history-download-output-row-under-test'));

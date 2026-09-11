@@ -472,6 +472,43 @@ sheet. Dev-only: included in `rollupOptions.input` only when
 `mode !== 'production'`, so the prod bundle is unaffected. It is the
 visual QA surface and the living documentation for future workers.
 
+**Code splitting (issue #56):** `vite build` used to emit one 951 kB JS
+chunk, so every visitor — including a non-admin, and every password-mode
+deployment where `Amplify.configure` never runs — downloaded the six admin
+panels and the whole Amplify runtime to render the Review tab. Two halves
+now keep that from happening:
+
+- **Route level.** `App.tsx` loads the six `Admin*` panels, `ReviewHistory`
+  and `SsoShell` with `React.lazy`, each inside its existing
+  `<ErrorBoundary>` and behind `<Suspense fallback={<CtPanelSkeleton />}>`
+  (`src/ui/CtPanelSkeleton.tsx` — a `CtCard` with one `--ct-text-sm` line).
+  **What is lazy is the MODULE, never the mounted element:** the tabpanel
+  invariant is unchanged — every panel stays mounted once its chunk has
+  arrived and visibility is still toggled with `hidden`, so a running
+  review keeps polling behind a hidden tab. `src/__tests__/lazy-panels-56.test.tsx`
+  fails if a panel is ever unmounted on a tab switch.
+- **Vendor level.** `vite.config.ts`'s `build.rollupOptions.output.manualChunks`
+  splits `react`, `lit` and `amplify` into their own chunks. It matches on
+  the package DIRECTORY rather than taking Rollup's `{ name: [packages] }`
+  object form, because that form left React's CJS internals inside the
+  Amplify chunk and put the whole 485 kB of it back into the entry graph.
+
+The Amplify seam is split the same way and for the same reason: the
+`Authenticator` lives in `src/SsoShell.tsx` (lazy, SSO builds only),
+`main.tsx` reaches `Amplify.configure` and the Amplify UI stylesheet through
+dynamic imports behind the auth-mode branch, and `auth.ts::getToken` imports
+`aws-amplify/auth` on demand. Each of those branches is guarded by
+`import.meta.env.VITE_AUTH_MODE` as well as the runtime `isPasswordMode()`,
+so a password-mode build drops them at build time rather than merely never
+running them — that target ships no Amplify JS or CSS at all.
+
+`npm run audit:bundle` (`scripts/bundle-budget.mjs`, run by
+`scripts/check-frontend.sh` straight after `build:ci`) is the guard: the
+entry chunk `dist/index.html` actually references must stay under 300 kB
+minified, and all of `dist/assets/*.js` together under 1100 kB. Nothing in
+the vitest suite builds, so without it the split would decay unnoticed the
+first time someone re-added a static import at the top of `App.tsx`.
+
 ## 10. Testing the design system
 
 - Component tests live in `frontend/src/__tests__/ui-<name>.test.tsx`,
@@ -487,8 +524,8 @@ visual QA surface and the living documentation for future workers.
   cases when extracted).
 - Migration issues run the **existing** suite untouched as their
   regression gate — that is the point of preserving testids/roles.
-- Gates: `bash scripts/check-frontend.sh` (tsc + vite build + vitest +
-  the contrast/focus/layout audits) and
+- Gates: `bash scripts/check-frontend.sh` (tsc + vite build, the shipped-JS
+  bundle budget of §9, vitest, and the contrast/focus/layout audits) and
   `.venv/bin/python tests/test_frontend_xss_posture.py` (source-posture
   greps). Both offline.
 - The first of those runs automatically as **CI GATE E** in

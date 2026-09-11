@@ -24,7 +24,11 @@
  * backend/src/demo_auth.py's session-cookie posture comment for the full
  * rationale, including the CSRF defense-in-depth story.
  */
-import { fetchAuthSession } from 'aws-amplify/auth';
+
+/** The resolved `fetchAuthSession` export, once the SSO path has imported it
+ *  (see `getToken`). Module-scoped, so it is per document — and, under
+ *  vitest's default `isolate`, per test file. */
+let cachedFetchAuthSession: typeof import('aws-amplify/auth').fetchAuthSession | null = null;
 
 export function authMode(): string {
   return ((import.meta.env.VITE_AUTH_MODE as string | undefined) ?? 'sso').toLowerCase();
@@ -44,6 +48,39 @@ export async function getToken(): Promise<string> {
   if (isPasswordMode()) {
     return '';
   }
-  const session = await fetchAuthSession();
+  // The BUILD-TIME twin of the runtime check above (issue #56). `import.meta
+  // .env.VITE_AUTH_MODE` is a textual substitution, so in a password-mode
+  // build this whole `if` reads `'password' === 'password'` and esbuild drops
+  // everything after it — including the dynamic import below, and with it the
+  // entire `amplify` chunk, which is what makes
+  // `grep -l amplify dist/assets/index-*.js` come back empty on that target.
+  // It is deliberately a SUPERSET of `isPasswordMode()`, never a replacement:
+  // that function lowercases and defaults, so it is the one that decides at
+  // runtime, and this line can only ever fire on a build that already took
+  // the branch above.
+  if (import.meta.env.VITE_AUTH_MODE === 'password') {
+    return '';
+  }
+  // Dynamic import, deliberately. This module is on the entry path — api.ts's
+  // authorizedFetch calls getToken on every request — so a static
+  // `import { fetchAuthSession } from 'aws-amplify/auth'` at the top of this
+  // file pulled the whole Amplify auth runtime into the entry chunk of EVERY
+  // build, password-mode included. Importing it here means the `amplify`
+  // chunk is fetched only on the first authenticated call of an actual SSO
+  // session, and by then it is already in flight from SsoShell's own lazy
+  // boundary, so this adds no round trip in practice.
+  //
+  // Memoised because `authorizedFetch` calls this on EVERY request: an
+  // `await import()` is a promise even once the module is cached, so
+  // re-importing per call would put every authenticated request an extra
+  // microtask behind where it used to be, forever. Holding the resolved
+  // export makes only the FIRST call of a session pay for the import. The
+  // reference is the module's own binding, exactly what a static import gave
+  // — including under `vi.mock`, which replaces the module in the same
+  // registry this import reads.
+  if (cachedFetchAuthSession === null) {
+    ({ fetchAuthSession: cachedFetchAuthSession } = await import('aws-amplify/auth'));
+  }
+  const session = await cachedFetchAuthSession();
   return session.tokens?.idToken?.toString() ?? '';
 }

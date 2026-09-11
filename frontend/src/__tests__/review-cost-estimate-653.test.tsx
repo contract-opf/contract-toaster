@@ -134,11 +134,16 @@ describe('the reviewer sees what the next review costs, before submitting (#653)
     render(<ReviewSubmission />);
 
     await screen.findByTestId('review-cost-estimate');
+    // `waitFor`, not a bare assertion: issue #56 made auth.ts::getToken load
+    // `aws-amplify/auth` through a dynamic import, so the first authenticated
+    // call of a render is one microtask later than the panel's own first
+    // paint — the estimate placeholder is on screen before its GET has been
+    // issued. Same shape the other cases in this file already use.
+    await waitFor(() => expect(fetchedPaths(fetchMock)).toContain(ESTIMATE_PATH));
+    await waitFor(() => expect(estimateText()).toContain('$0.79'));
     // Still on the empty form: no file chosen, no POST made. The whole point
     // of Scope item 2 is that this is readable while the decision is open.
     expect(submitCount(fetchMock)).toBe(0);
-    expect(fetchedPaths(fetchMock)).toContain(ESTIMATE_PATH);
-    expect(estimateText()).toContain('$0.79');
   });
 
   it('does not word it as a ceiling on the bill', async () => {

@@ -67,15 +67,25 @@ beforeEach(() => {
  */
 async function renderSignInSurface(): Promise<HTMLElement> {
   render(<App />);
-  return waitFor(() => {
-    expect(
-      document.querySelector('[data-amplify-authenticator]'),
-      'the real Amplify Authenticator must render here — a vi.mock would make these assertions vacuous',
-    ).not.toBeNull();
-    const form = document.querySelector<HTMLElement>('[data-amplify-authenticator-signin]');
-    expect(form, 'the Authenticator must settle on its sign-in route').not.toBeNull();
-    return form as HTMLElement;
-  });
+  return waitFor(
+    () => {
+      expect(
+        document.querySelector('[data-amplify-authenticator]'),
+        'the real Amplify Authenticator must render here — a vi.mock would make these assertions vacuous',
+      ).not.toBeNull();
+      const form = document.querySelector<HTMLElement>('[data-amplify-authenticator-signin]');
+      expect(form, 'the Authenticator must settle on its sign-in route').not.toBeNull();
+      return form as HTMLElement;
+    },
+    // Explicit window, well over waitFor's 1000 ms default. Since issue #56
+    // the Authenticator lives in `src/SsoShell.tsx` behind App.tsx's
+    // `React.lazy`, so the FIRST case in this file pays for Vitest
+    // transforming and importing the whole unmocked `@aws-amplify/ui-react`
+    // tree on demand — measured at several seconds — before the state
+    // machine even starts booting. Subsequent cases hit the module cache.
+    // Still inside vitest.config.ts's 15 s per-test budget.
+    { timeout: 10_000 },
+  );
 }
 
 describe('AWS-target sign-in surface (VITE_AUTH_MODE unset)', () => {

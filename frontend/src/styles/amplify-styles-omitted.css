@@ -1,0 +1,17 @@
+/*
+ * amplify-styles-omitted.css — the empty stand-in vite.config.ts aliases
+ * `@aws-amplify/ui-react/styles.css` to on a password-mode build (issue #56).
+ *
+ * Deliberately empty. A password-mode (Docker Compose) deployment never
+ * renders the Amplify Authenticator, so the 315 kB stylesheet that exists to
+ * scope it is dead weight there. main.tsx already keeps it out of the entry
+ * chunk by importing it dynamically behind the auth-mode branch, but Vite's
+ * CSS pipeline emits an asset for every CSS module that REACHED the module
+ * graph, not for every one that survived tree-shaking — so without this
+ * alias the 315 kB file was still written into dist/assets/, merely
+ * unreferenced. Aliasing the specifier is what actually omits it.
+ *
+ * Nothing outside the Authenticator depends on that stylesheet: base.css owns
+ * the app's own box-sizing reset (see main.tsx's load-order comment), which
+ * is the only unscoped rule of it the app was ever near.
+ */

@@ -1,6 +1,5 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { Amplify } from 'aws-amplify';
 // Global styles, load order matters:
 //   1. Fonts (@fontsource/*, latin subset, weights 400/500/700) — must load
 //      before any CSS that references --ct-font-* so the woff2s are
@@ -14,7 +13,12 @@ import { Amplify } from 'aws-amplify';
 //      screen, but this stylesheet also ships its own unscoped global reset
 //      (e.g. `* { box-sizing: border-box }`); loaded last so its scoped
 //      widget styling wins, but base.css owns the app's own box-sizing
-//      reset rather than relying on this import for it.
+//      reset rather than relying on this import for it. Issue #56 moved it
+//      (and `Amplify.configure`) behind the `isPasswordMode()` branch at the
+//      foot of this file: a password-mode deployment has no Authenticator to
+//      style, so shipping ~40 kB of gzipped Amplify CSS to it was pure
+//      weight. base.css already owning the box-sizing reset is what makes
+//      dropping the stylesheet on that path safe.
 // The strict Amplify-hosting CSP forbids remote CSS/fonts, so every one of
 // these is bundled same-origin by Vite as real woff2/css files — no CDN
 // links, no data: URIs. Each @fontsource import below pulls in only the
@@ -28,7 +32,6 @@ import '@fontsource/ibm-plex-mono/latin-400.css';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/app.css';
-import '@aws-amplify/ui-react/styles.css';
 import App from './App';
 import awsExports from './aws-exports';
 import { isPasswordMode } from './auth';
@@ -46,8 +49,67 @@ import { isPasswordMode } from './auth';
 //
 // Docker Compose target (VITE_AUTH_MODE=password): there is no Cognito, so Amplify is not
 // configured — the SPA uses username/password sign-in (PasswordLogin) instead.
-if (!isPasswordMode()) {
+//
+// Both the Amplify runtime and the Amplify UI stylesheet are pulled in by
+// DYNAMIC import here (issue #56) rather than at the top of this module, so
+// neither lands in the entry chunk. They are pulled in INDEPENDENTLY of each
+// other, and that is load-bearing rather than stylistic. `Promise.all([
+// import('aws-amplify'), import('…/styles.css')])` — the first shape of this
+// change — made `Amplify.configure` a hostage of a 315 kB stylesheet:
+//
+//   * Vite's `__vitePreload` awaits a CSS dependency's `load` event for the
+//     first caller that registers that href, and does not invoke the module
+//     import until that promise settles. So `Amplify.configure` could not run
+//     until the stylesheet had downloaded — while the lazy `SsoShell`
+//     boundary, registering the same href second, skips the wait and could
+//     mount `<Authenticator>` against an unconfigured Amplify ("Auth
+//     UserPool not configured", and an already-signed-in user parked on the
+//     sign-in route).
+//   * Worse and deterministic: a stylesheet that 404s rejects that combined
+//     promise, so Amplify would never be configured at all — and a `void`-ed
+//     promise with no `unhandledrejection` handler anywhere in the app meant
+//     nothing said so.
+//
+// So: the stylesheet is fired FIRST, as its own promise with its own failure
+// handler (firing it first also registers the href before the runtime import
+// resolves its dependency list, so that import never waits on it), and
+// `configure` is gated on the `aws-amplify` import alone. `configureAmplify`
+// itself is still not awaited before render — nothing rendered below needs a
+// configured Amplify synchronously: the Authenticator lives behind App.tsx's
+// own lazy `SsoShell` boundary and `auth.ts::getToken` imports
+// `aws-amplify/auth` on demand — but see the call site for why its rejection
+// is reported rather than discarded.
+async function configureAmplify(): Promise<void> {
+  // Non-fatal on its own: the app's own stylesheets are in the entry chunk,
+  // so losing this one costs the Authenticator's widget styling and nothing
+  // else — which is precisely why it must not be allowed to take
+  // `Amplify.configure` down with it.
+  void import('@aws-amplify/ui-react/styles.css').catch((error: unknown) => {
+    console.error('[amplify] UI stylesheet failed to load; sign-in will be unstyled', error);
+  });
+  const { Amplify } = await import('aws-amplify');
   Amplify.configure(awsExports);
+}
+
+// The `import.meta.env.VITE_AUTH_MODE` half is the BUILD-TIME guard and the
+// `isPasswordMode()` half is the runtime one; both have to agree before
+// Amplify is touched. Vite substitutes the env reference textually, so on a
+// password-mode build this reads `'password' !== 'password' && …` and esbuild
+// drops the call — and with it `configureAmplify`, the `aws-amplify` import
+// and the 315 kB Amplify UI stylesheet, none of which that target can use.
+// On every other build it folds to `true && !isPasswordMode()`, i.e. exactly
+// the check that was here before.
+if (import.meta.env.VITE_AUTH_MODE !== 'password' && !isPasswordMode()) {
+  // `.catch`, not a bare `void`. This is the one step of SSO start-up that is
+  // fatal if it silently does not happen: with Amplify unconfigured the
+  // Authenticator reports "Auth UserPool not configured" and nobody can sign
+  // in. Before #56 it ran synchronously and could only fail loudly; now it is
+  // a promise, and there is no `unhandledrejection` handler in this app to
+  // catch a discarded rejection. The console is the same channel
+  // ErrorBoundary.tsx and api.ts already use for technical detail.
+  configureAmplify().catch((error: unknown) => {
+    console.error('[amplify] configuration failed; SSO sign-in will not work', error);
+  });
 }
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
