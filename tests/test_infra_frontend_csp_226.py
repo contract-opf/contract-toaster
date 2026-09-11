@@ -36,6 +36,10 @@ that:
      (Vite content-hashes every built asset) — mirroring the policy added
      to the DTS nginx target for the same issue, so this deploy target
      isn't left exposed to the same stale-bundle-after-redeploy bug.
+  5. Issue #57 (audit F10/A10): `CustomHeaders` also carries
+     `Strict-Transport-Security`, `Permissions-Policy` and
+     `Cross-Origin-Opener-Policy` on the catch-all pattern, with the exact
+     values docs/threat-model.md §Frontend security posture records.
 
 It must FAIL on the pre-fix tree (`connect-src 'self'` hardcoded at
 frontend-stack.ts:181-ish; no SPA rewrite rule) and PASS after the fix.
@@ -137,6 +141,23 @@ def _flatten_strings(node: Any) -> list[str]:
         for v in node:
             out.extend(_flatten_strings(v))
     return out
+
+
+def _catch_all_segment(collapsed: str) -> str | None:
+    """
+    Return the whitespace-collapsed slice of the CustomHeaders YAML that
+    belongs to the catch-all `pattern: "**/*"` entry — i.e. from that
+    pattern up to the next `- pattern:` (the `/assets/**` override) or the
+    end of the string. Used so a header assertion cannot be satisfied by an
+    entry parked under a narrower pattern.
+    """
+    marker = '- pattern: "**/*"'
+    start = collapsed.find(marker)
+    if start == -1:
+        return None
+    rest = collapsed[start + len(marker):]
+    nxt = rest.find("- pattern:")
+    return rest if nxt == -1 else rest[:nxt]
 
 
 def check_synth_exits_zero() -> tuple[list[str], subprocess.CompletedProcess | None]:
@@ -320,6 +341,77 @@ def check_cache_control_headers() -> list[str]:
     return failures
 
 
+def check_hardening_headers() -> list[str]:
+    """
+    Issue #57 (audit finding F10 / action A10): the Amplify custom-headers
+    block must also carry Strict-Transport-Security, Permissions-Policy and
+    Cross-Origin-Opener-Policy on the catch-all pattern, alongside the CSP.
+
+    Asserted here in the same whitespace-collapsed `key: "…" value: "…"`
+    form the other header checks in this file use, and scoped to the
+    catch-all `**/*` pattern's segment so a header parked under the narrower
+    `/assets/**` pattern (which would leave index.html and every SPA route
+    uncovered) cannot satisfy it.
+    """
+    print(
+        "\nCheck 5: CustomHeaders carries HSTS + Permissions-Policy + COOP "
+        "on the catch-all pattern (issue #57) …"
+    )
+    failures: list[str] = []
+
+    template = _load_frontend_template()
+    if template is None:
+        return _assert(False, "Synthesized FrontendStack template available (prerequisite)")
+
+    found_app = _find_amplify_app(template)
+    if found_app is None:
+        return _assert(False, "AWS::Amplify::App resource found (prerequisite)")
+
+    _logical_id, amplify_app = found_app
+    custom_headers = amplify_app.get("Properties", {}).get("CustomHeaders")
+    if custom_headers is None:
+        return _assert(False, "AWS::Amplify::App has a CustomHeaders property (prerequisite)")
+
+    collapsed = " ".join("".join(_flatten_strings(custom_headers)).split())
+
+    catch_all = _catch_all_segment(collapsed)
+    failures += _assert(
+        catch_all is not None,
+        'CustomHeaders has a catch-all `pattern: "**/*"` entry (prerequisite)',
+    )
+    if catch_all is None:
+        return failures
+
+    for key, value, why in (
+        (
+            "Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload",
+            "Without HSTS the first request to the origin can be downgraded "
+            "to plaintext and stripped; the in-memory Cognito token is what "
+            "that buys an attacker.",
+        ),
+        (
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+            "The app uses none of these capabilities; an empty allowlist `()` "
+            "denies them to this document and every nested browsing context.",
+        ),
+        (
+            "Cross-Origin-Opener-Policy",
+            "same-origin",
+            "Severs window.opener to cross-origin documents. Safe for the "
+            "Cognito hosted-UI flow, which is a full-page redirect, not a popup.",
+        ),
+    ):
+        failures += _assert(
+            f'key: "{key}" value: "{value}"' in catch_all,
+            f"CustomHeaders sets {key}: {value} on the catch-all pattern",
+            f"{why}\n         Catch-all segment was: {catch_all}",
+        )
+
+    return failures
+
+
 def check_spa_rewrite_rule_present() -> list[str]:
     print("\nCheck 3: Amplify app has a SPA rewrite rule (404 → /index.html) …")
     failures: list[str] = []
@@ -397,6 +489,7 @@ def main() -> int:
     all_failures += check_connect_src_allows_cognito_and_api()
     all_failures += check_spa_rewrite_rule_present()
     all_failures += check_cache_control_headers()
+    all_failures += check_hardening_headers()
 
     print("\n" + "=" * 60)
     if all_failures:

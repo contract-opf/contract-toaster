@@ -201,6 +201,34 @@ export class FrontendStack extends cdk.NestedStack {
       // 'require-trusted-types-for \'script\'' once Amplify UI ships Trusted Types
       // support (see docs/threat-model.md §Frontend security posture — Trusted Types).
       //
+      // Transport and isolation headers (issue #57, audit finding F10 /
+      // action A10 in docs/reports/2026-09-05-audit-hardening-diagnostic.md;
+      // posture recorded in docs/threat-model.md §Frontend security posture):
+      //   - 'Strict-Transport-Security: max-age=63072000; includeSubDomains;
+      //     preload' — two years, every subdomain, preload-list eligible. The
+      //     Amplify origin is HTTPS-only, so after the first visit the browser
+      //     refuses to make a plaintext request to it at all; this closes the
+      //     one-time downgrade/SSL-strip window that a bare redirect leaves
+      //     open, and the Cognito token that lives in this app's memory is
+      //     exactly what such a downgrade would be after.
+      //   - 'Permissions-Policy: camera=(), microphone=(), geolocation=(),
+      //     payment=(), usb=()' — the app uses none of those browser
+      //     capabilities, so every one is denied to this document AND to any
+      //     nested browsing context (the empty allowlist `()` is strictly
+      //     stronger than `self`). An injected script cannot silently reach a
+      //     device API that the product never needed.
+      //   - 'Cross-Origin-Opener-Policy: same-origin' — severs the
+      //     `window.opener` link to any cross-origin document, so a
+      //     same-process cross-origin page cannot reach into this one
+      //     (tabnabbing, and the shared-process side of Spectre-class
+      //     attacks). Safe for the Cognito hosted-UI sign-in flow because
+      //     that flow is a FULL-PAGE redirect, not a popup: nothing here
+      //     holds a handle to a Cognito window or is opened by one, so
+      //     there is no opener relationship for this header to break.
+      //     (Cross-Origin-Embedder-Policy is deliberately NOT set — it is
+      //     not needed for opener isolation and would require CORP/CORS
+      //     headers on every cross-origin subresource.)
+      //
       // Token storage (docs/threat-model.md §Frontend security posture):
       //   Cognito tokens are held in memory by the Amplify Auth library, not in
       //   localStorage.  The CSP is a defense-in-depth layer; the primary control
@@ -239,6 +267,12 @@ export class FrontendStack extends cdk.NestedStack {
         '          value: "DENY"',
         '        - key: "Referrer-Policy"',
         '          value: "strict-origin-when-cross-origin"',
+        '        - key: "Strict-Transport-Security"',
+        '          value: "max-age=63072000; includeSubDomains; preload"',
+        '        - key: "Permissions-Policy"',
+        '          value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()"',
+        '        - key: "Cross-Origin-Opener-Policy"',
+        '          value: "same-origin"',
         '        - key: "Cache-Control"',
         '          value: "no-cache"',
         '    - pattern: "/assets/**"',
