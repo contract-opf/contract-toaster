@@ -8,7 +8,10 @@
  * upload/poll/download UI" -- this component is that UI:
  *
  *   1. Upload: a multipart POST /api/reviews with the chosen .docx file.
- *      A 202 response carries `{review_id, resumed}`.
+ *      A 202 response carries `{review_id, resumed}`. The POST runs under
+ *      a stall timeout (issue #53): `submitTimeoutMs(file.size)` — 60 s
+ *      plus 1 s per MiB — after which the request is aborted, the submit
+ *      control re-arms, and the reviewer reads UPLOAD_STALLED_COPY.
  *   2. Poll: GET /api/reviews/{review_id} every few seconds while `status`
  *      is a non-terminal pipeline status (`PENDING` / `RUNNING` --
  *      src/reviews.py's `REVIEW_STATUSES_NON_TERMINAL`); stop once it
@@ -309,6 +312,36 @@ function orbitReceiptLines(
 ): string[] {
   return receiptText(receiptLines(source, playbookName)).split('\n');
 }
+
+// Stalled-submit timeout (issue #53, audit finding F4). The multipart POST
+// used to run with no AbortController, so an upload that stalled — a
+// captive portal, a connection that dropped mid-body — left `submitting`
+// true for good and the only way out was a reload. The budget scales with
+// the file: a fixed floor for the round trip, the gauntlet and the spend
+// reservation, plus one second for every MiB on the wire, so a 50 MiB
+// document on a slow link is not cut off by the budget a 40 KB one gets.
+export const SUBMIT_TIMEOUT_BASE_MS = 60_000;
+export const SUBMIT_TIMEOUT_PER_MIB_MS = 1_000;
+const MIB = 1024 * 1024;
+
+/** How long a submit of `fileSizeBytes` may take before it is abandoned. */
+export function submitTimeoutMs(fileSizeBytes: number): number {
+  // A started MiB counts as a whole one: the budget rounds in the
+  // reviewer's favour, never against them.
+  const mib = Math.ceil(Math.max(0, fileSizeBytes) / MIB);
+  return SUBMIT_TIMEOUT_BASE_MS + SUBMIT_TIMEOUT_PER_MIB_MS * mib;
+}
+
+/**
+ * What the reviewer reads when the timeout fires. Says what happened and
+ * what to do, and nothing about statuses, paths or durations — the same
+ * posture as every other `friendlyErrorMessage` fallback (the technical
+ * detail goes to the console). "Nothing was submitted" is literally true:
+ * the backend writes no row until the whole body has arrived and been
+ * stored, so an abandoned upload has no review to resume.
+ */
+export const UPLOAD_STALLED_COPY =
+  'The upload stalled before it finished. Nothing was submitted — check your connection and try again.';
 
 // Adaptive poll cadence (issue #50). A review that is going to finish fast
 // deserves a fast answer, so a review's first two minutes poll every 3 s;
@@ -1851,6 +1884,23 @@ export default function ReviewSubmission({
       setCoverNoteErrorMessage(null);
       setCoverNoteCopied(false);
 
+      // Issue #53: the upload gets a size-scaled budget and is abandoned
+      // when it runs out, so a stalled body can no longer pin `submitting`
+      // true until a reload. The controller's signal goes to the fetch (a
+      // real fetch rejects on abort and drops the connection), and the
+      // await below ALSO races the signal directly, so the timeout ends the
+      // wait even where the fetch in front of it ignores its signal.
+      const controller = new AbortController();
+      const timeoutMs = submitTimeoutMs(file.size);
+      const stallTimer = setTimeout(() => controller.abort(), timeoutMs);
+      const aborted = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(Object.assign(new Error('submit aborted'), { name: 'AbortError' })),
+          { once: true },
+        );
+      });
+
       try {
         const formData = new FormData();
         formData.append('file', file);
@@ -1886,10 +1936,14 @@ export default function ReviewSubmission({
           formData.append('notes_mode', notesMode);
         }
 
-        const response = await authorizedFetch('/api/reviews', {
-          method: 'POST',
-          body: formData,
-        });
+        const response = await Promise.race([
+          authorizedFetch('/api/reviews', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal,
+          }),
+          aborted,
+        ]);
 
         if (!response.ok) {
           const detail = await readErrorDetail(response);
@@ -1913,12 +1967,25 @@ export default function ReviewSubmission({
         setSubmittedEstimateCents(reviewCostUsdCents);
         setReviewId(data.review_id);
       } catch (err) {
-        setSubmitError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't submit your file for review. Please try again."),
-        );
+        if (controller.signal.aborted) {
+          // The budget ran out, not the server. `err` here is either the
+          // fetch's own AbortError or the race's — one fixed sentence for
+          // both; the numbers go to the console, never the DOM.
+          setSubmitError(
+            friendlyErrorMessage(
+              `POST /api/reviews abandoned after ${timeoutMs} ms (file ${file.size} B)`,
+              UPLOAD_STALLED_COPY,
+            ),
+          );
+        } else {
+          setSubmitError(
+            err instanceof Error
+              ? err.message
+              : friendlyErrorMessage(err, "We couldn't submit your file for review. Please try again."),
+          );
+        }
       } finally {
+        clearTimeout(stallTimer);
         setSubmitting(false);
       }
     },

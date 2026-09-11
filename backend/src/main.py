@@ -437,7 +437,7 @@ from src.playbook_versions import (
     update_playbook_version_notes,
     version_already_recorded,
 )
-from src.review_routes import router as review_router
+from src.review_routes import checksum_sha256_b64, router as review_router
 from src.reviews import (
     RECENT_FAILURES_DEFAULT_LIMIT,
     list_recent_failures,
@@ -1588,13 +1588,21 @@ async def post_admin_playbook_create(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="UPLOADS_BUCKET not configured.",
         )
-    s3_client.put_object(Bucket=uploads_bucket, Key=storage_key, Body=storage_bytes)
+    # Issue #53: both puts carry `ChecksumSHA256` so the object store proves
+    # it holds the bytes these hashes (and the row's `content_hash`) name --
+    # same integrity contract as review_routes._put_upload_object.
     s3_client.put_object(
         Bucket=uploads_bucket,
-        Key=original_artifact_key(
-            playbook_id, hashlib.sha256(contents).hexdigest(), filename=filename
-        ),
+        Key=storage_key,
+        Body=storage_bytes,
+        ChecksumSHA256=checksum_sha256_b64(storage_hash_hex),
+    )
+    original_hash_hex = hashlib.sha256(contents).hexdigest()
+    s3_client.put_object(
+        Bucket=uploads_bucket,
+        Key=original_artifact_key(playbook_id, original_hash_hex, filename=filename),
         Body=contents,
+        ChecksumSHA256=checksum_sha256_b64(original_hash_hex),
     )
 
     try:
@@ -1893,18 +1901,28 @@ async def post_admin_playbook_version_upload(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="UPLOADS_BUCKET not configured.",
         )
-    s3_client.put_object(Bucket=uploads_bucket, Key=storage_key, Body=storage_bytes)
+    # Issue #53: both puts carry `ChecksumSHA256` so the object store proves
+    # it holds the bytes these hashes (and the row's `content_hash`) name --
+    # same integrity contract as review_routes._put_upload_object.
+    s3_client.put_object(
+        Bucket=uploads_bucket,
+        Key=storage_key,
+        Body=storage_bytes,
+        ChecksumSHA256=checksum_sha256_b64(storage_hash_hex),
+    )
     # "...plus the original artifact" (issue #478 step 3): the raw uploaded
     # bytes, kept alongside the canonical text above at a key that can never
     # collide with it -- for EVERY artifact kind (not only `.opf.html`), so
     # the row's `content_hash` (the hash of these exact raw bytes) always
     # addresses a retrievable object (fix round 1, AC1's round-trip check).
+    original_hash_hex = hashlib.sha256(contents).hexdigest()
     s3_client.put_object(
         Bucket=uploads_bucket,
         Key=original_artifact_key(
-            playbook_id, hashlib.sha256(contents).hexdigest(), filename=file.filename or ""
+            playbook_id, original_hash_hex, filename=file.filename or ""
         ),
         Body=contents,
+        ChecksumSHA256=checksum_sha256_b64(original_hash_hex),
     )
 
     try:

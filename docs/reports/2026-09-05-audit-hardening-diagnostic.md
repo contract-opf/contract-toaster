@@ -35,6 +35,23 @@
 > `tests/test_reviews_no_scan.py` (call-logging spy over a real moto table,
 > with its own watched-red negative control) and Check L of
 > `tests/test_infra_dynamodb_tables.py` (the synthesized index).
+>
+> F4 / A4 landed as public issue `contract-opf/contract-toaster#53` (private
+> #693): `backend/src/review_routes.py::_put_upload_object` sends
+> `ChecksumSHA256` (base64 of the row's own `file_sha256`) so the object
+> store recomputes the digest and refuses a body it did not receive intact;
+> the refusal (`ClientError` — `BadDigest`, `InvalidRequest`,
+> `XAmzContentSHA256Mismatch`) maps to a 502 with a fixed `detail` and no
+> reviews or submissions row, since the put precedes both. The playbook
+> version uploads in `backend/src/main.py` carry the same header from their
+> already-computed hashes; the pipeline's output writes are unchanged
+> (no hash exists there to send). MinIO honours `x-amz-checksum-sha256`,
+> so the Docker Compose target needed no gate. The SPA's submit runs under
+> `submitTimeoutMs(file.size)` — 60 s + 1 s/MiB — on an `AbortController`
+> and reports `UPLOAD_STALLED_COPY` with the lever re-armed. Pinned by
+> `tests/test_upload_checksum_53.py` (real router, recording fake S3 that
+> rejects a mismatched checksum) and
+> `frontend/src/__tests__/review-submit-stall.test.tsx`.
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the
@@ -63,7 +80,7 @@ actions, `R` risks, `Q` questions parked for the owner.
 | F1 | Stability | **P1** | *Landed — see the status note above.* WAF polling rule (60 req / 5 min per IP) is below the UI's own poll rate (3 s = 100 req / 5 min); any review longer than ~3 min gets the reviewer's IP blocked mid-review. |
 | F2 | Performance | **P1** | *Landed — see the status note above.* The `reviews` table is `.scan()`ed on six live request paths (admin list, admin health, retention preview/sweep/holds, legal triage) despite the documented "never scan `reviews`/`audit`" invariant. |
 | F3 | Stability | P2 | *Landed — see the status note above.* Bedrock and DynamoDB boto clients are built with no `botocore.Config`: default 60 s read timeout and legacy retry mode. A long primary-pass generation trips the socket timeout and is silently retried by botocore, paying up to 4x. |
-| F4 | Stability | P2 | The upload `put_object` sends no integrity checksum; S3 accepts a truncated/corrupted body and the review runs on it. The submit fetch has no abort/timeout, so a stalled upload spins forever in "Submitting". |
+| F4 | Stability | P2 | *Landed — see the status note above.* The upload `put_object` sends no integrity checksum; S3 accepts a truncated/corrupted body and the review runs on it. The submit fetch has no abort/timeout, so a stalled upload spins forever in "Submitting". |
 | F5 | Accuracy | P2 | Markup intensity ("browning") is not a wire field. The frontend composes a prose sentence into `toaster_guidance`; the backend has no `browning` concept, no enum, no schema slot, no audit field. Output contract is non-deterministic for the dial. |
 | F6 | Accuracy | P2 | Party recognition is exact-string, case/whitespace-insensitive only. No suffix folding (GmbH/SAS/B.V./S.r.l./Ltd/LLC), no punctuation folding ("Acme, Inc." vs "Acme Inc"), no d/b/a splitting. A roster entry "Acme GmbH" will not match "ACME G.m.b.H." in the document. |
 | F7 | Performance | P2 | Single 953 kB JS chunk. Six admin panels (~8.3 k lines) and `@aws-amplify/ui-react` ship to every non-admin and to every password-mode deployment where Amplify is never configured. |

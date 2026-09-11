@@ -674,7 +674,10 @@ API (App Runner), synchronous:
      "daily limit reached" message. (Settlement reconciles it against the ledger --
      usually downward; see Cost shape for the one case where it settles higher.)
  6.  Backend writes the upload to s3://uploads/{owner-sub}/{review-id}/in.docx and
-     records the upload hash/pointer on the submission.
+     records the upload hash/pointer on the submission. The put carries that same
+     hash as `ChecksumSHA256` (issue #53), so the object store refuses a body it
+     did not receive intact; a refused put is a 502 with a fixed message and, since
+     it precedes steps 7-8, leaves no review and no submission record behind.
  7.  Backend creates or updates the `reviews` row through the submission record
      (status=PENDING, owner_sub, access_scope, release-bundle hashes,
      snapshotted retention window).

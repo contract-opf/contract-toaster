@@ -72,6 +72,7 @@ src/upload_validation.py, and src/download.py already document):
                    already wired there.
 """
 
+import base64
 import hashlib
 import json
 import os
@@ -83,6 +84,7 @@ import uuid
 from typing import Any, Callable, Iterator
 
 import boto3
+from botocore.exceptions import ClientError
 from fastapi import (
     APIRouter,
     Body,
@@ -595,7 +597,7 @@ async def post_review(
     else:
         review_id = str(uuid.uuid4())
         upload_pointer = f"uploads/{owner_sub}/{review_id}/in.docx"
-        _put_upload_object(s3_client, upload_pointer, contents)
+        _put_upload_object(s3_client, upload_pointer, contents, file_sha256)
 
     result = reviews.submit_review(
         owner_sub=owner_sub,
@@ -624,14 +626,61 @@ async def post_review(
     )
 
 
-def _put_upload_object(s3_client: Any, key: str, contents: bytes) -> None:
+UPLOAD_NOT_STORED_INTACT_DETAIL = (
+    "The uploaded file could not be stored intact. Nothing was submitted; "
+    "please try again."
+)
+
+
+def checksum_sha256_b64(sha256_hex: str) -> str:
+    """The `ChecksumSHA256` wire form of an already-computed hex digest:
+    S3 wants the raw 32 digest bytes base64-encoded, not the hex string."""
+    return base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
+
+
+def _put_upload_object(s3_client: Any, key: str, contents: bytes, sha256_hex: str) -> None:
+    """Write the upload to S3 and make the object store PROVE it holds the
+    bytes we hashed (issue #53, audit finding F4).
+
+    `sha256_hex` is the `file_sha256` the caller has already computed over
+    `contents` and is about to record on the review row. Sending it as
+    `ChecksumSHA256` makes S3 (and MinIO on the Docker Compose target --
+    `x-amz-checksum-sha256` has been honoured there since 2022, so no
+    per-deployment gate is needed) recompute the digest server-side and
+    refuse the put when the body it received differs: a proxy that mangled
+    the stream, a partial write on a flaky link. Before this the put was
+    accepted blind, and the pipeline later read bytes whose sha256 disagreed
+    with the row's `file_sha256`.
+
+    The rejection surfaces as `ClientError` -- `BadDigest`, or
+    `InvalidRequest` / `XAmzContentSHA256Mismatch` depending on the store --
+    and is mapped to a 502 whose `detail` is a fixed sentence. The row is
+    written AFTER this call, so a refused put leaves no review and no
+    submission record: nothing was submitted, and the reviewer is told so.
+    The bucket, the key and the exception text stay out of `detail` (a
+    storage layout is not something a reviewer should read); only the
+    service's error code reaches the log.
+    """
     bucket = os.environ.get("UPLOADS_BUCKET", "")
     if not bucket:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="UPLOADS_BUCKET not configured.",
         )
-    s3_client.put_object(Bucket=bucket, Key=key, Body=contents)
+    try:
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=contents,
+            ChecksumSHA256=checksum_sha256_b64(sha256_hex),
+        )
+    except ClientError as exc:
+        error_code = (exc.response or {}).get("Error", {}).get("Code", "")
+        logger.warning("upload put_object refused by the object store: code=%s", error_code)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=UPLOAD_NOT_STORED_INTACT_DETAIL,
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
