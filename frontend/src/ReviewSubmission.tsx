@@ -142,6 +142,8 @@ import {
 import { copyReceipt as copyOrbitReceipt, saveReceipt as saveOrbitReceipt } from './orbit-diner/receipt';
 import {
   composeGuidance,
+  DEFAULT_BROWNING,
+  toMarkupIntensity,
   type BrowningLevel,
 } from './toaster/browning';
 import {
@@ -1918,12 +1920,25 @@ export default function ReviewSubmission({
         // deliberately NOT wrapped in the pipeline's untrusted-input
         // delimiting (see that module's docstring).
         //
-        // Issue #495 composes the browning sentence in FRONT of the typed
-        // text (see composeGuidance). At Medium it contributes nothing, so an
-        // untouched control still sends the byte-identical request.
+        // Issue #495 used to compose the browning sentence in FRONT of the
+        // typed text here. Issue #54 cut that over: `composeGuidance` now
+        // returns the reviewer's own words only, and the dial travels as
+        // the `markup_intensity` field below.
         const guidance = composeGuidance(browning, toasterGuidance);
         if (guidance) {
           formData.append('toaster_guidance', guidance);
+        }
+        // Issue #54: the markup-intensity dial as its own closed-vocabulary
+        // field (`light | medium | heavy`). Appended only when it differs
+        // from the backend's default (`medium`,
+        // backend/src/reviews.py::DEFAULT_MARKUP_INTENSITY) — the same
+        // convention as `notes_mode` below, so an untouched control sends a
+        // request byte-identical to the one this form sent before the field
+        // existed. The control's `dark` becomes the wire's `heavy` HERE and
+        // nowhere else (`toMarkupIntensity`); the stored `lastBrowning`
+        // value is not translated.
+        if (browning !== DEFAULT_BROWNING) {
+          formData.append('markup_intensity', toMarkupIntensity(browning));
         }
         // Issue #523: the footnote audience for THIS review. Appended only
         // when it differs from the backend's own default (`external`,

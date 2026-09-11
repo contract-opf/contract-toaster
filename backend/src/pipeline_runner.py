@@ -1398,6 +1398,13 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # `or DEFAULT` covers a payload written before the field existed --
         # a re-driven older execution must not crash on a missing key.
         notes_mode = payload.get("notes_mode") or reviews.DEFAULT_NOTES_MODE
+        # Issue #54: the markup-intensity dial, read exactly as `notes_mode`
+        # is -- `or DEFAULT` so a payload written before the field existed
+        # (or one that omitted it because it was the default) resolves to
+        # `medium`, which renders no prompt block.
+        markup_intensity = (
+            payload.get("markup_intensity") or reviews.DEFAULT_MARKUP_INTENSITY
+        )
         # Issue #483 (epic #481): the playbook's standing instructions, ALREADY
         # resolved once at submission time (backend/src/reviews.py's
         # _resolve_instructions_lineage, issue #482) and carried verbatim in
@@ -1452,6 +1459,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 review_id=review_id,
                 toaster_guidance=toaster_guidance,
                 notes_mode=notes_mode,
+                markup_intensity=markup_intensity,
                 instructions_text=instructions_text,
                 # Issue #678: the deployment's roster of OUR OWN legal
                 # entity names, resolved HERE (per review, from the store)

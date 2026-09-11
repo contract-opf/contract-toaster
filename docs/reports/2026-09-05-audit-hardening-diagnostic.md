@@ -52,6 +52,24 @@
 > `tests/test_upload_checksum_53.py` (real router, recording fake S3 that
 > rejects a mismatched checksum) and
 > `frontend/src/__tests__/review-submit-stall.test.tsx`.
+>
+> F5 / A5 landed as public issue `contract-opf/contract-toaster#54` (private
+> #694), as a HARD CUTOVER per owner decision Q3 (no dual-send):
+> `markup_intensity` is a closed-enum multipart field on `POST /api/reviews`
+> (`light | medium | heavy`, default `medium`, any other value a 400 with a
+> fixed `detail`), validated first in `review_routes.py`, recorded on the
+> review row and the submission's execution input only when not `medium`,
+> projected by `GET /api/reviews/{id}` and the list view (a History chip),
+> and rendered by `scripts/primary_review_pass.py::render_markup_intensity_block`
+> as its own fixed-wording system block immediately before the
+> toaster-guidance block on both review paths (OPF and registry-v1) —
+> none at all for `medium`, so the default prompt is byte-identical to
+> before. `composeGuidance` now returns the typed text only. Pinned by
+> `tests/test_review_routes_markup_intensity_54.py` (real router; golden
+> sha256 of the pre-change medium prompt; cross-language identity of the
+> shown and injected sentences) and
+> `frontend/src/__tests__/markup-intensity-54.test.tsx`. The A5 text below
+> still describes the one-release dual-send it proposed; Q3 chose otherwise.
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the

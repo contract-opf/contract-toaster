@@ -1751,6 +1751,80 @@ def render_standing_instructions_block(instructions_text: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Markup intensity (issue #54, audit A5): the reviewer's "browning" dial.
+#
+# It used to reach the model as a prose sentence the SPA prepended to the
+# free-text `toaster_guidance` (`frontend/src/toaster/browning.ts::
+# composeGuidance`, issue #495). That made two reviews at different
+# intensities indistinguishable in audit and let the model weigh the setting
+# as free text. It is now a closed-vocabulary wire field (`markup_intensity`:
+# `light | medium | heavy`, `backend/src/reviews.py::MARKUP_INTENSITIES`),
+# rendered HERE as its OWN system block with FIXED wording per level, in the
+# same slot on BOTH review paths: after the standing-instructions block
+# above, before the toaster-guidance block below (`assemble_system_blocks`
+# for a v1 review, `scripts/review_spine.py::_assemble_opf_system_blocks`
+# for an OPF review -- the two assemblers that emit the toaster-guidance
+# block, so the reviewer's own typed words still read LAST, nearest the
+# decision overlay, exactly where #495's prose sentence used to put them).
+# It lives in this module, not `scripts/opf_prompt.py`, because both
+# assemblers already draw their guidance blocks from here and `opf_prompt`
+# imports this module (the reverse import would be circular).
+#
+# `medium` renders NO block: it is the default, and a medium review's system
+# prompt must stay byte-identical to the prompt assembled before this block
+# existed (the SPA sent nothing for Medium then, and sends nothing now).
+# `heavy` carries the sentence the SPA used to send for "Dark"; `light`
+# carries the old "Light" sentence adapted to "flag and footnote, edit only
+# Floor breaches". The SPA shows the SAME sentence under its control
+# (`BROWNING_SETTINGS[].sentence`) -- what the reviewer reads is what the
+# model is told, which was the transparency rule #495 was built on and is
+# now pinned across the two languages by
+# `tests/test_review_routes_markup_intensity_54.py`.
+# ---------------------------------------------------------------------------
+
+MARKUP_INTENSITY_INTRO = "MARKUP INTENSITY (set per review by the reviewer)."
+
+MARKUP_INTENSITY_SENTENCES: dict[str, str] = {
+    "light": (
+        "Keep the markup light: flag and footnote issues rather than editing them, "
+        "and make edits only where the document breaches the Floor."
+    ),
+    "heavy": (
+        "Push hard: mark up every open point the playbook gives us room on, "
+        "and prefer our preferred positions throughout."
+    ),
+}
+
+
+def render_markup_intensity_block(level: str) -> str | None:
+    """The reviewer's markup-intensity setting as a fixed-wording system
+    block (issue #54, audit A5). See the module comment above.
+
+    `medium` (the default) returns None -- NO block, so the default review's
+    prompt is byte-identical to the one assembled before this block existed;
+    the same "absent, not empty" doctrine as render_standing_instructions_block
+    and render_toaster_guidance_block. `light` and `heavy` render
+    `MARKUP_INTENSITY_INTRO` plus that level's one fixed sentence, and
+    nothing else: deterministic by construction.
+
+    Any other value raises. The route (`backend/src/review_routes.py`) is the
+    validator and refuses a bad value with a 400 before anything is written,
+    and `backend/src/pipeline_runner.py` maps an absent payload key to
+    `medium` -- so the only way an unknown level reaches here is a hand-built
+    execution payload, and silently rendering nothing for it would be the
+    quiet wrong answer this field exists to make impossible.
+    """
+    if level == "medium":
+        return None
+    sentence = MARKUP_INTENSITY_SENTENCES.get(level)
+    if sentence is None:
+        raise ValueError(
+            "markup_intensity must be one of: light, medium, heavy; got " + repr(level)
+        )
+    return f"{MARKUP_INTENSITY_INTRO}\n{sentence}"
+
+
+# ---------------------------------------------------------------------------
 # Toaster guidance (issue #398): optional, per-review free-text instructions
 # supplied at submission time (POST /api/reviews' optional `toaster_guidance`
 # field, threaded through scripts/review_spine.py::run_review). TRUSTED,
@@ -2118,9 +2192,10 @@ def assemble_system_blocks(
     toaster_guidance: str = "",
     instructions_text: str = "",
     notes_mode: str = "external",
+    markup_intensity: str = "medium",
 ) -> list[dict[str, Any]]:
-    """(a) guidance -> [standing instructions, if any] -> [toaster guidance,
-    if any] -> (b) binary overlay -> [topic replacement-text modes, if the
+    """(a) guidance -> [standing instructions, if any] -> [markup intensity,
+    unless medium] -> [toaster guidance, if any] -> (b) binary overlay -> [topic replacement-text modes, if the
     playbook has topics] -> [judged-NL Floor, if the playbook has
     hard_rejections] -> (c) PROJECTED playbook JSON, in that order, with a
     prompt-cache breakpoint AFTER the LAST block (issue #30) -- always the
@@ -2180,12 +2255,28 @@ def assemble_system_blocks(
 
     `external` (the default) gets neither, same as `none` -- both render
     byte-identically to the pre-#516/#522 prompt.
+
+    `markup_intensity` (issue #54, default `"medium"`) is the reviewer's
+    closed-vocabulary markup dial (`light | medium | heavy`), read out of the
+    execution payload by `backend/src/pipeline_runner.py` and threaded
+    through `scripts/review_spine.py::run_review` -> `run_primary_pass` /
+    `critic_review_pass.run_critic_pass` -> here, exactly as `notes_mode`
+    is. Rendered by `render_markup_intensity_block` as its own fixed-wording
+    block AFTER the standing-instructions block and BEFORE the
+    toaster-guidance block, so the reviewer's own typed words still read
+    last. `medium` renders NO block, so the default is byte-identical to
+    before the parameter existed. The OPF path renders the same block in
+    the same slot (`scripts/review_spine.py::_assemble_opf_system_blocks`).
     """
     blocks: list[dict[str, Any]] = [{"type": "text", "text": REVIEW_GUIDANCE_BLOCK}]
 
     standing_text = render_standing_instructions_block(instructions_text)
     if standing_text is not None:
         blocks.append({"type": "text", "text": standing_text})
+
+    intensity_text = render_markup_intensity_block(markup_intensity)
+    if intensity_text is not None:
+        blocks.append({"type": "text", "text": intensity_text})
 
     guidance_text = render_toaster_guidance_block(toaster_guidance, notes_mode=notes_mode)
     if guidance_text is not None:
@@ -3321,6 +3412,7 @@ def run_primary_pass(
     toaster_guidance: str = "",
     instructions_text: str = "",
     notes_mode: str = "external",
+    markup_intensity: str = "medium",
     max_input_tokens: int = MAX_INPUT_TOKENS,
     max_retries: int = MAX_RETRIES_PER_PASS,
     max_truncation_retries: int = MAX_TRUNCATION_RETRIES_PER_PASS,
@@ -3463,6 +3555,9 @@ def run_primary_pass(
     (issue #483, default `""`) are threaded straight into
     `assemble_system_blocks` -- see that function's docstring for the
     precedence contract. Both empty reproduces today's behavior exactly.
+    `markup_intensity` (issue #54, default `"medium"`) is threaded the same
+    way, for the same reason: a v1 review whose row records `light` or
+    `heavy` must actually tell the model so. `medium` adds nothing.
 
     `system_blocks_override` (issue #479, default `None`): when given, these
     Anthropic-message-API-shaped blocks are sent VERBATIM instead of the
@@ -3576,7 +3671,11 @@ def run_primary_pass(
         system_blocks_override
         if system_blocks_override is not None
         else assemble_system_blocks(
-            playbook, toaster_guidance, instructions_text, notes_mode=notes_mode
+            playbook,
+            toaster_guidance,
+            instructions_text,
+            notes_mode=notes_mode,
+            markup_intensity=markup_intensity,
         )
     )
     system_prompt_text = render_system_prompt(system_blocks)

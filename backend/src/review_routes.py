@@ -499,6 +499,7 @@ async def post_review(
     idempotency_key: str | None = Form(None),
     toaster_guidance: str = Form(""),
     notes_mode: str = Form(""),
+    markup_intensity: str = Form(""),
     caller_row: dict[str, Any] = Depends(get_active_user_row),
     dynamodb_resource: Any = Depends(get_dynamodb_resource),
     s3_client: Any = Depends(get_s3_client),
@@ -545,6 +546,18 @@ async def post_review(
     # no-active-playbook 503 ahead of any reservation.
     try:
         resolved_notes_mode = reviews.resolve_notes_mode(notes_mode)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    # Issue #54: the markup-intensity dial (`light | medium | heavy`, absent
+    # = `medium`), validated on the same terms and at the same point as
+    # `notes_mode` above -- a bad value is a malformed request and costs
+    # nothing. The 400 `detail` is the fixed, documented sentence
+    # (`reviews.MARKUP_INTENSITY_INVALID_DETAIL`), never the echoed input.
+    try:
+        resolved_markup_intensity = reviews.resolve_markup_intensity(markup_intensity)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -618,6 +631,7 @@ async def post_review(
         # header is built rather than trusting a stored value to stay safe.
         original_filename=(file.filename or "")[:512],
         notes_mode=resolved_notes_mode,
+        markup_intensity=resolved_markup_intensity,
     )
 
     return JSONResponse(

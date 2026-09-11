@@ -3,12 +3,21 @@
  * (issue #495).
  *
  * The control's whole safety argument is that the sentence shown under it and
- * the sentence sent to the model are THE SAME STRING, read from one constant.
+ * the sentence the model is told are THE SAME STRING, read from one constant.
  * Two sources of truth would let a reviewer be shown one instruction while the
- * model received another — a lie the UI would have no way to reveal. So the
- * load-bearing assertion here is not "a sentence appears" but **the rendered
- * text and the submitted `toaster_guidance` are character-identical**, and both
- * equal `BROWNING_SETTINGS`'s literal.
+ * model received another — a lie the UI would have no way to reveal.
+ *
+ * Issue #54 (hard cutover, owner decision Q3) moved the dial off the
+ * free-text `toaster_guidance` and onto its own wire field,
+ * `markup_intensity` (`light | medium | heavy`); the sentence now reaches the
+ * model as the backend's fixed system block for that level, and the
+ * cross-language identity (this file's `BROWNING_SETTINGS[].sentence` ===
+ * `scripts/primary_review_pass.py::MARKUP_INTENSITY_SENTENCES[level]`) is pinned by
+ * `tests/test_review_routes_markup_intensity_54.py`. So the load-bearing
+ * assertion here is now: **the rendered sentence is the constant, the wire
+ * carries the LEVEL, and the instructions field carries the reviewer's own
+ * words only** — never the sentence. `markup-intensity-54.test.tsx` covers
+ * the wire field in full; this file keeps the control's own contract.
  *
  * The rest of the surface, in the order it matters:
  *
@@ -16,10 +25,10 @@
  *      sends a request byte-identical to the one this form sent before the
  *      control existed. (`review-guidance.test.tsx` already pins the no-field
  *      case; this pins that browning did not quietly break it.)
- *   2. Dark's sentence reaches the wire, and a reviewer's own typed text
- *      SURVIVES and follows it. Order is the promise the precedence copy
- *      makes: the reviewer's words come last.
- *   3. The result view's guidance readback shows the combined text, so
+ *   2. A reviewer's own typed text is sent as-is, with no sentence in front
+ *      of it.
+ *   3. The result view's guidance readback shows the typed text — and NOT
+ *      the sentence, which is no longer part of the instructions — so
  *      History is a faithful record of what actually governed the review.
  *   4. It is a real radiogroup: arrows, Home and End move selection, and the
  *      SVG slider is decoration that mirrors the value rather than a
@@ -129,20 +138,23 @@ beforeEach(() => {
   window.localStorage?.clear();
 });
 
-describe('browning control — what you see is what is injected', () => {
-  it('shows the EXACT sentence it will send, not a paraphrase of it', async () => {
+describe('browning control — what you see is what the model is told', () => {
+  it('shows the EXACT sentence for the level, and sends the LEVEL — never the sentence', async () => {
     const fetchMock = mountForm();
     fireEvent.click(screen.getByTestId('review-browning-option-dark'));
 
-    // What the reviewer reads...
+    // What the reviewer reads is the constant itself, not a paraphrase.
     const shown = screen.getByTestId('review-browning-sentence').textContent ?? '';
     expect(shown).toBe(DARK.sentence);
 
-    // ...is character-identical to what the model is told. Comparing the
-    // rendered text to the FormData value (not both to the constant) is what
-    // makes this bite if the copy and the payload ever diverge.
+    // Issue #54 hard cutover: the wire carries the closed-enum level (the
+    // control's `dark` is the API's `heavy`), and the sentence is NOWHERE in
+    // the request -- the backend renders it as its own block from the same
+    // literal, which the Python gate pins character-for-character.
     await submitWith(null);
-    expect(submittedFormData(fetchMock).get('toaster_guidance')).toBe(shown);
+    const sent = submittedFormData(fetchMock);
+    expect(sent.get('markup_intensity')).toBe('heavy');
+    expect(sent.get('toaster_guidance')).toBeNull();
   });
 
   it('defaults to Medium, which adds nothing at all to the request', async () => {
@@ -156,29 +168,32 @@ describe('browning control — what you see is what is injected', () => {
     screen.getByTestId('review-browning-note');
 
     // The untouched control leaves the request exactly as it was before this
-    // control existed: no field, not an empty field.
+    // control existed: no field, not an empty field -- and (issue #54) no
+    // `markup_intensity` field either.
     await submitWith(null);
-    expect(submittedFormData(fetchMock).get('toaster_guidance')).toBeNull();
+    const sent = submittedFormData(fetchMock);
+    expect(sent.get('toaster_guidance')).toBeNull();
+    expect(sent.get('markup_intensity')).toBeNull();
   });
 
-  it("keeps the reviewer's own text, and puts it AFTER the browning sentence", async () => {
+  it("sends the reviewer's own text, and ONLY that text, as the instructions", async () => {
     const fetchMock = mountForm();
     await submitWith('light', TYPED);
-    const sent = String(submittedFormData(fetchMock).get('toaster_guidance'));
+    const formData = submittedFormData(fetchMock);
+    const sent = String(formData.get('toaster_guidance'));
 
-    expect(sent).toContain(LIGHT.sentence);
-    expect(sent).toContain(TYPED);
-    // The precedence copy promises the reviewer's words govern; later text is
-    // the more specific instruction, so their words go last.
-    expect(sent.indexOf(TYPED)).toBeGreaterThan(sent.indexOf(LIGHT.sentence));
+    // Issue #54: no sentence in front of the reviewer's words any more.
+    expect(sent).toBe(TYPED);
+    expect(sent).not.toContain(LIGHT.sentence);
     expect(sent).toBe(composeGuidance('light', TYPED));
+    expect(formData.get('markup_intensity')).toBe('light');
   });
 
-  it('shows the combined text back, so History records what really governed', async () => {
+  it('shows the typed text back — and not the sentence — so History records what really governed', async () => {
     // A finished review, so the result panel (and its guidance banner) renders.
     // The detail deliberately carries NO toaster_guidance, exercising the
-    // submit-time fallback -- the path where the combined text has to come
-    // from what this form composed rather than from the server.
+    // submit-time fallback -- the path where the text has to come from what
+    // this form composed rather than from the server.
     mountForm({
       review_id: 'rev-b1',
       status: 'DONE',
@@ -189,8 +204,10 @@ describe('browning control — what you see is what is injected', () => {
     await submitWith('dark', TYPED);
     const readback = await screen.findByTestId('review-applied-guidance');
     const text = readback.textContent ?? '';
-    expect(text).toContain(DARK.sentence);
     expect(text).toContain(TYPED);
+    // The sentence is no longer part of the instructions, so a readback that
+    // showed it would be claiming guidance the server never received.
+    expect(text).not.toContain(DARK.sentence);
   });
 });
 

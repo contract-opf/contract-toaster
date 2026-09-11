@@ -739,6 +739,32 @@ UI daily and triages each entry. The `contract-toaster-manual-review-stale` alar
 in a manual-review state unacknowledged for more than 24 hours. The owner and check cadence are
 defined in [RUNBOOK.md → Manual-review filter: owner and SLA](../RUNBOOK.md#manual-review-filter-owner-and-sla).
 
+## Markup intensity: the review's `markup_intensity` (issue #54, audit A5)
+
+How hard the redline pushes is a per-review input, not a property of the output schema — but it
+is part of the contract because it changes what the model is told, and it is recorded so two
+reviews at different intensities can be told apart afterwards. It is the closed-vocabulary
+multipart field `markup_intensity` on `POST /api/reviews` (`backend/src/reviews.py` →
+`MARKUP_INTENSITIES`, `resolve_markup_intensity`), mirroring `notes_mode`'s plumbing exactly:
+
+| `markup_intensity` | What the model is told (system block, `scripts/primary_review_pass.py::render_markup_intensity_block`) | Recorded |
+|---|---|---|
+| `light` | Flag and footnote issues rather than editing them; edit only where the document breaches the Floor | on the review row, the submission's execution input, `GET /api/reviews/{id}`, the list view (History chip) |
+| `medium` (default; absent, blank) | **Nothing** — no block at all. A medium review's system prompt is byte-identical to the prompt composed before this field existed | nothing — absent from the row and the payload, never a placeholder; `GET` projects `null` |
+| `heavy` | Mark up every open point the playbook gives room on; prefer our positions throughout | as `light` |
+
+Any other value is a `400` with `detail` `"markup_intensity must be one of: light, medium, heavy."`,
+refused before the file is read — a typo is a loud refusal, never a silent downgrade. The block's
+wording is fixed and deterministic per level, sits immediately before the reviewer's own
+`toaster_guidance` block on both review paths (`primary_review_pass.assemble_system_blocks` for a
+registry-v1 review, after the standing-instructions block; `review_spine._assemble_opf_system_blocks`
+for an OPF review, ahead of the knowledge blocks) so the reviewer's typed words read last, and is
+the same string the toaster shows under its Light/Medium/Dark
+control (`frontend/src/toaster/browning.ts`, the control's `dark` is the wire's `heavy`): what the
+reviewer reads is what the model is told. **Hard cutover** (owner decision Q3 on the 2026-09-05
+audit): the SPA no longer prepends any intensity sentence to `toaster_guidance`; that field carries
+the reviewer's own words only.
+
 ## Per-issue output and footnote rules
 
 Each issue in a `REQUEST_CHANGE` carries `section_ref`, `section_title`, `counterparty_change_summary`,
