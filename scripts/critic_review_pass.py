@@ -131,6 +131,7 @@ def run_critic_pass(
     toaster_guidance: str = "",
     instructions_text: str = "",
     notes_mode: str = "external",
+    markup_intensity: str = "medium",
     max_retries: int = MAX_RETRIES_PER_PASS,
     max_truncation_retries: int = MAX_TRUNCATION_RETRIES_PER_PASS,
     system_blocks_override: list[dict[str, Any]] | None = None,
@@ -187,6 +188,9 @@ def run_critic_pass(
     same standing instructions, and the same judged-NL Floor obligations the
     primary pass saw -- the critic can therefore catch a Floor violation, or
     a guidance/instructions conflict, the primary pass missed.
+    `markup_intensity` (issue #54, default `"medium"`) rides the same seam
+    for the same reason: the critic judges the primary's markup against the
+    intensity the reviewer actually asked for. `medium` adds nothing.
 
     `doc_text` (issue #618, default `""`): the counterparty document text
     the PRIMARY pass reviewed, verbatim -- `scripts/review_spine.py::
@@ -288,7 +292,11 @@ def run_critic_pass(
         system_blocks_override
         if system_blocks_override is not None
         else pp.assemble_system_blocks(
-            playbook, toaster_guidance, instructions_text, notes_mode=notes_mode
+            playbook,
+            toaster_guidance,
+            instructions_text,
+            notes_mode=notes_mode,
+            markup_intensity=markup_intensity,
         )
     )
     system_prompt_text = pp.render_system_prompt(system_blocks)

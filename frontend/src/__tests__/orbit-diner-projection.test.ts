@@ -314,9 +314,12 @@ describe('browningReadback, notesDisclosure', () => {
       const readback = toReviewModel(baseState({ browning: level })).browningReadback;
       expect(readback).toContain(setting.note);
       if (setting.sentence) {
-        // Identity against composeGuidance: the readback quotes the very text
-        // the model will be told, which is what makes it a readback.
-        expect(setting.sentence).toBe(composeGuidance(level, ''));
+        // The readback quotes the very text the model will be told -- which,
+        // since issue #54, is the backend's fixed system block for the level
+        // (pinned against this constant by
+        // tests/test_review_routes_markup_intensity_54.py), NOT guidance:
+        // composeGuidance contributes nothing for any level now.
+        expect(composeGuidance(level, '')).toBe('');
         expect(readback).toContain(setting.sentence);
       } else {
         expect(readback).toBe(setting.note);

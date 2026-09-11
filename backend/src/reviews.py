@@ -1672,6 +1672,56 @@ def resolve_notes_mode(value: str | None) -> str:
     return normalized
 
 
+# ---------------------------------------------------------------------------
+# Markup intensity (issue #54, 2026-09-05 audit finding F5 / action A5).
+#
+# The "browning" dial (Light / Medium / Dark in the SPA, issue #495) used to
+# reach the backend only as a prose sentence the SPA prepended to the free-text
+# `toaster_guidance`. The API, the review row, the execution payload and the
+# prompt had no notion of it: two reviews at different intensities were
+# indistinguishable in audit, and the model weighed the setting as free text.
+# It is now a closed-vocabulary wire field, mirrored on `notes_mode`'s plumbing
+# exactly: validated first at the route, carried in the execution payload and
+# on the review row only when it is NOT the default, projected back by
+# `get_review_detail` and the list view, and rendered by
+# `scripts/primary_review_pass.py::render_markup_intensity_block` as its own fixed-wording
+# system block. HARD CUTOVER (owner decision Q3): the SPA no longer sends the
+# sentence as guidance at all.
+# ---------------------------------------------------------------------------
+
+MARKUP_INTENSITIES = ("light", "medium", "heavy")
+
+# Today's behaviour. The SPA sends NO field for Medium (same convention as
+# `notes_mode`), and `medium` renders NO prompt block, so a submission that
+# says nothing produces a payload, a row and a system prompt byte-identical to
+# before this field existed.
+DEFAULT_MARKUP_INTENSITY = "medium"
+
+MARKUP_INTENSITY_INVALID_DETAIL = "markup_intensity must be one of: light, medium, heavy."
+
+
+def resolve_markup_intensity(value: str | None) -> str:
+    """The effective markup intensity for a submission.
+
+    Absent, empty and whitespace-only resolve to `medium`. Anything else that
+    is not one of the three raises `ValueError` carrying the documented
+    client-facing detail, which the route turns into a 400.
+
+    Same reasoning as `resolve_notes_mode`: silently downgrading a typo'd
+    `heavy` to `medium` would hand the reviewer a lighter markup than they
+    asked for, undetectably from the row afterwards. A loud refusal is
+    cheaper than a quiet wrong answer.
+    """
+    if value is None:
+        return DEFAULT_MARKUP_INTENSITY
+    normalized = value.strip().lower()
+    if not normalized:
+        return DEFAULT_MARKUP_INTENSITY
+    if normalized not in MARKUP_INTENSITIES:
+        raise ValueError(MARKUP_INTENSITY_INVALID_DETAIL)
+    return normalized
+
+
 def submit_review(
     owner_sub: str,
     playbook_id: str,
@@ -1685,6 +1735,7 @@ def submit_review(
     toaster_guidance: str = "",
     original_filename: str = "",
     notes_mode: str = DEFAULT_NOTES_MODE,
+    markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
 ) -> dict[str, Any]:
     """POST /api/reviews (stub is fine per issue #59 AC).
 
@@ -1795,6 +1846,7 @@ def submit_review(
         opf_lineage=opf_lineage,
         toaster_guidance=toaster_guidance,
         notes_mode=notes_mode,
+        markup_intensity=markup_intensity,
         instructions_lineage=playbook_version_lineage,
     )
 
@@ -1832,6 +1884,7 @@ def submit_review(
         upload_s3_key=upload_pointer,
         original_filename=original_filename,
         notes_mode=notes_mode,
+        markup_intensity=markup_intensity,
     )
 
     ensure_execution_started(submission, execution_input_json, dynamodb_resource, sfn_client)
@@ -2048,6 +2101,7 @@ def _build_execution_input_json_from_parts(
     toaster_guidance: str = "",
     notes_mode: str = DEFAULT_NOTES_MODE,
     instructions_lineage: dict[str, str | int | None] | None = None,
+    markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
 ) -> str:
     """Pointer-only execution input (issue #19): S3 keys and hashes only,
     never document text.
@@ -2105,6 +2159,13 @@ def _build_execution_input_json_from_parts(
     # internal request can never be lost to omission.
     if notes_mode and notes_mode != DEFAULT_NOTES_MODE:
         payload["notes_mode"] = notes_mode
+    # Issue #54: the markup-intensity dial, on the same "absent, never a
+    # placeholder" terms as `notes_mode` directly above -- `medium` and absent
+    # both mean "no intensity block in the prompt", so conflating them costs
+    # nothing, while `light`/`heavy` are never the default and are therefore
+    # always carried to `backend/src/pipeline_runner.py`.
+    if markup_intensity and markup_intensity != DEFAULT_MARKUP_INTENSITY:
+        payload["markup_intensity"] = markup_intensity
     payload.update(_recorded_lineage_fields(opf_lineage))
     payload.update(_recorded_instructions_execution_fields(instructions_lineage))
 
@@ -2391,6 +2452,7 @@ def _create_review_row(
     upload_s3_key: str = "",
     original_filename: str = "",
     notes_mode: str = DEFAULT_NOTES_MODE,
+    markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
 ) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
@@ -2429,6 +2491,13 @@ def _create_review_row(
     # recorded. The mode that could do harm if lost cannot be lost.
     if notes_mode and notes_mode != DEFAULT_NOTES_MODE:
         item["notes_mode"] = notes_mode
+    # Issue #54: the markup-intensity dial this review ran under, on the same
+    # terms as `notes_mode` above -- absent for `medium` (byte-identical row
+    # to before the field existed), always recorded for `light`/`heavy`.
+    # This is the audit trail the 2026-09-05 diagnostic's F5 asked for: two
+    # reviews at different intensities are now told apart from the row.
+    if markup_intensity and markup_intensity != DEFAULT_MARKUP_INTENSITY:
+        item["markup_intensity"] = markup_intensity
 
     item.update(_recorded_lineage_fields(opf_lineage))
 
@@ -2884,6 +2953,9 @@ def get_review_detail(
         # honest answer, not a back-filled "external" that would claim the
         # review was submitted under a mode nobody chose.
         "notes_mode": item.get("notes_mode"),
+        # Issue #54: same convention -- None on a review predating the field
+        # or submitted at the default, never a back-filled "medium".
+        "markup_intensity": item.get("markup_intensity"),
         "owner_sub": owner_sub,
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
@@ -3226,6 +3298,11 @@ _REVIEW_LIST_ITEM_FIELDS = (
     # nothing recorded yet -- the UI renders that as "Not recorded", never a
     # guess, same convention as every other field in this tuple.
     "attorney_disposition",
+    # Issue #54 -- the markup-intensity dial (`light`/`heavy`) the review was
+    # submitted under, so History can show it as a chip without a per-row
+    # detail fetch. None for `medium` and for every row predating the field;
+    # the UI renders no chip for None, never a guessed "Medium".
+    "markup_intensity",
 )
 
 

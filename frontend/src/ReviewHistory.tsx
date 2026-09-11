@@ -165,6 +165,31 @@ export interface HistoryRow {
    * has_output/has_input above. Used only to label the button.
    */
   has_cover_note_draft?: boolean;
+  /**
+   * Issue #54: the markup-intensity dial (`light` | `heavy`) this review was
+   * submitted under. Null/absent for a review submitted at the default
+   * (`medium`) AND for every row predating the field — the two are
+   * indistinguishable on the row, so the UI renders NO chip for either
+   * rather than a guessed "Medium".
+   */
+  markup_intensity?: string | null;
+}
+
+/**
+ * The chip label for a non-default markup intensity (issue #54), or null when
+ * there is nothing to show: `medium`, absent, null, or a value this build does
+ * not know (the server validates the enum; an unknown value here is a newer
+ * server, not something to paint verbatim).
+ */
+export function describeMarkupIntensity(value: string | null | undefined): string | null {
+  switch (value) {
+    case 'light':
+      return 'Light markup';
+    case 'heavy':
+      return 'Heavy markup';
+    default:
+      return null;
+  }
 }
 
 /** Per-row cover-note UI state (issue #499) — the draft text and its
@@ -934,6 +959,7 @@ export default function ReviewHistory(): React.ReactElement {
                     const hashOpen = Boolean(disclosed[hashKey]);
                     const modelIdsOpen = Boolean(disclosed[modelIdsKey]);
                     const modelIdLines = fullModelIdLines(row);
+                    const markupIntensityLabel = describeMarkupIntensity(row.markup_intensity);
                     return (
                       <Fragment key={row.review_id}>
                         <tr data-testid={`history-row-${row.review_id}`}>
@@ -1119,6 +1145,24 @@ export default function ReviewHistory(): React.ReactElement {
                             >
                               {isExpanded ? '▾' : '▸'}
                             </CtIconButton>
+                            {/*
+                              Issue #54: the markup-intensity dial is part of
+                              the instructions that governed this review, so
+                              its chip lives in this cell. Medium (and every
+                              row predating the field) paints nothing — see
+                              `describeMarkupIntensity`.
+                            */}
+                            {markupIntensityLabel && (
+                              <>
+                                {' '}
+                                <CtChip
+                                  variant="info"
+                                  data-testid={`history-markup-intensity-${row.review_id}`}
+                                >
+                                  {markupIntensityLabel}
+                                </CtChip>
+                              </>
+                            )}
                           </td>
                           {/*
                             Issue #668: the two downloads are marks, not

@@ -110,6 +110,15 @@ as a separate outer control block -- so it is part of `knowledge
 `toaster_guidance` remains an outer control block for BOTH paths (v1 and
 OPF alike): it is the per-review, most-specific layer, and stays composed
 identically to the v1 path per `primary_review_pass.render_toaster_guidance_block`.
+`markup_intensity` (issue #54) is an outer control block for both paths the
+same way -- rendered by `primary_review_pass.render_markup_intensity_block`
+immediately BEFORE the toaster-guidance block in each assembler (none at all
+for `medium`), so the reviewer's own typed words still read last. It is NOT
+part of `knowledge.system_blocks()` / `content_hash()`: the ticket's "after
+standing instructions, before toaster guidance" slot cannot exist inside
+`compose_opf_system_blocks`, whose blocks this assembler appends AFTER the
+guidance block; the level is recorded on the review row and the execution
+input instead, which is where the audit distinction lives.
 
 ## Address repair: removed from this pipeline (issues #627/#628)
 
@@ -466,10 +475,12 @@ def _assemble_opf_system_blocks(
     knowledge: "review_knowledge.ReviewKnowledge",
     toaster_guidance: str,
     notes_mode: str = "external",
+    markup_intensity: str = "medium",
 ) -> list[dict[str, Any]]:
     """The OPF digest-mode system blocks: the same output-contract control
     blocks every v1 review sends (`primary_review_pass.REVIEW_GUIDANCE_BLOCK`,
-    the optional toaster-guidance block, `BINARY_DECISION_OVERLAY_BLOCK` --
+    the optional markup-intensity block (issue #54), the optional
+    toaster-guidance block, `BINARY_DECISION_OVERLAY_BLOCK` --
     none of these describe playbook CONTENT, only the response shape, so
     they apply unchanged regardless of knowledge mode) followed by
     `knowledge.system_blocks()` -- POSTURE, BINDING, DIGEST, GUIDANCE,
@@ -505,6 +516,17 @@ def _assemble_opf_system_blocks(
     which is the defect this pairing exists to close. `external` (the
     default, and every mode reachable while #572's `NOTES_MODE_ENABLED`
     kill switch is off) reproduces the pre-#522 blocks byte for byte.
+
+    `markup_intensity` (issue #54, default `"medium"`) is rendered by
+    `primary_review_pass.render_markup_intensity_block` as its own
+    fixed-wording block in the SAME slot the v1 assembler gives it:
+    immediately BEFORE the toaster-guidance block, so the reviewer's own
+    typed words read last. It is deliberately an outer control block here
+    -- not composed into `knowledge.system_blocks()` -- see the module
+    docstring's "OPF digest-mode governance" section for why. `medium` (the
+    default) renders no block, so a medium review's prompt is byte-identical
+    to before the parameter existed (pinned in
+    `tests/test_review_routes_markup_intensity_54.py`).
     """
     # Issues #675/#677: the objective block is RENDERED with this review's
     # perspective, so the prompt states who we act for in the same block that
@@ -519,6 +541,9 @@ def _assemble_opf_system_blocks(
             ),
         }
     ]
+    intensity_text = primary_review_pass.render_markup_intensity_block(markup_intensity)
+    if intensity_text is not None:
+        blocks.append({"type": "text", "text": intensity_text})
     guidance_text = primary_review_pass.render_toaster_guidance_block(
         toaster_guidance, notes_mode=notes_mode
     )
@@ -776,6 +801,7 @@ def run_review(
     instructions_text: str = "",
     entity_roster: Optional[Sequence[str]] = None,
     notes_mode: str = "external",
+    markup_intensity: str = "medium",
     on_progress: Optional[Callable[[str], None]] = None,
     policy: Optional[dict[str, Any]] = None,
     cancel_checkpoint: Optional[Callable[[], None]] = None,
@@ -924,6 +950,22 @@ def run_review(
     (`leakage_scan._FIELD_CHANNELS`), never a function of this value --
     owner decision 2026-08-11 on #521.
 
+    `markup_intensity` (issue #54, default `"medium"`): the reviewer's
+    closed-vocabulary markup dial (`light | medium | heavy`), read out of
+    the execution payload by `backend/src/pipeline_runner.py` exactly as
+    `notes_mode` is and threaded read-only to BOTH review paths -- into
+    `_assemble_opf_system_blocks` for an OPF-governed review, and into
+    `primary_review_pass.run_primary_pass` / `critic_review_pass.
+    run_critic_pass` (-> `primary_review_pass.assemble_system_blocks`) for a
+    registry-v1 review -- where `primary_review_pass.
+    render_markup_intensity_block` renders it as its own fixed-wording
+    system block immediately before the toaster-guidance block (none at all
+    for `medium`, so the default prompt is byte-identical to before the
+    parameter existed). It replaces the prose sentence the SPA used to
+    prepend to `toaster_guidance` for the dial (hard cutover, owner decision
+    Q3 on the 2026-09-05 audit); a review whose row records `light` or
+    `heavy` tells the model so on whichever path it runs.
+
     `on_progress` (issue #447, default `None`): a live progress seam. When
     given, it is called with one of `PROGRESS_STAGES`' tokens immediately
     BEFORE the corresponding sub-stage starts, so a caller can persist
@@ -1032,7 +1074,10 @@ def run_review(
         except opf_prompt.PromptCompositionError:
             return _terminal(status=STATUS_MANUAL_REVIEW_REQUIRED, reason=REASON_OPF_DIGEST_MISSING)
         opf_system_blocks = _assemble_opf_system_blocks(
-            knowledge, toaster_guidance, notes_mode=notes_mode
+            knowledge,
+            toaster_guidance,
+            notes_mode=notes_mode,
+            markup_intensity=markup_intensity,
         )
         opf_playbook_hash = knowledge.content_hash()
         floor_invariants = opf_prompt.resolve_floor_invariants(
@@ -1074,6 +1119,7 @@ def run_review(
                 toaster_guidance,
                 instructions_text,
                 notes_mode=notes_mode,
+                markup_intensity=markup_intensity,
             )
         )
         system_prompt_exempt_texts = [toaster_guidance, instructions_text]
@@ -1164,6 +1210,7 @@ def run_review(
     primary_result = primary_review_pass.run_primary_pass(
         cancel_checkpoint=cancel_checkpoint,
         notes_mode=notes_mode,
+        markup_intensity=markup_intensity,
         review_id=review_id,
         retrieved_precedent=[],
         block_map=block_map,
@@ -1210,6 +1257,7 @@ def run_review(
     critic_result = critic_review_pass.run_critic_pass(
         cancel_checkpoint=cancel_checkpoint,
         notes_mode=notes_mode,
+        markup_intensity=markup_intensity,
         review_id=review_id,
         doc_text=doc_text,
         primary_output=primary_result["response"],
