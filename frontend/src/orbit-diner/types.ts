@@ -169,6 +169,19 @@ export interface ReviewModel {
    * the one fact they could already infer.
    */
   readyAnnouncement?: string;
+  /**
+   * The measured time-remaining line for a review in flight (issue #71):
+   * "About 4 minutes", or "Taking longer than usual" once it has outrun the
+   * sample's p90. Absent means "say nothing" — no sample, or nothing running.
+   * Printed verbatim: the console holds no clock and no estimate of its own.
+   */
+  timeRemaining?: string;
+  /**
+   * The same fact as a sentence for the polite region (issue #71). The host
+   * changes it exactly twice per review, so it is announced twice rather
+   * than once per tick. The completion handoff outranks it.
+   */
+  timeAnnouncement?: string;
   preflight?: Preflight;
   cost: Cost;
   result?: Result;

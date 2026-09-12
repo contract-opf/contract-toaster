@@ -528,6 +528,17 @@
   font-size: 18px;
   color: #ffe9bc;
 }
+/* Issue #71 — the measured time-remaining line, under the stage caption
+   inside the same `.od-progress` grid. Quieter than `.od-stage-name`: the
+   stage is what IS happening and the estimate is a courtesy beside it. Held
+   at the 14px type floor (#600) explicitly rather than inheriting, because
+   the `.od-progress` rule drops to 14px at the narrow breakpoint and an
+   inherited relative size would have taken this line under it. */
+.od-time-remaining {
+  font-size: 15px;
+  color: #cdd9de;
+  letter-spacing: 0.01em;
+}
 .od-review-tag {
   display: flex;
   justify-content: center;
@@ -2878,6 +2889,11 @@
   .od-console .od-pad-content > p,
   .od-console .od-pad-content > label > span,
   .od-console .od-stage-name,
+  /* Issue #71 — listed beside `.od-stage-name` for the same reason: it sits
+     inside `.od-progress`, which this block repaints to Canvas, so its own
+     quiet grey has to hand back to the system pairing rather than stay light
+     ink on a light surface. */
+  .od-console .od-time-remaining,
   .od-console .od-counter-footer .od-link-key,
   .od-console .od-receipt-text {
     color: CanvasText;

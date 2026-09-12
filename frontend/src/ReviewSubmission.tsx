@@ -105,6 +105,14 @@ import { readLastNotesMode, writeLastNotesMode } from './lastNotesMode';
 // this component's own job is just rendering `PreflightResult` as inert
 // text, never as markup or a link (see the render site below).
 import { refreshMatchVerdict, runPreflight, type PreflightResult } from './preflight';
+// The measured time-remaining line on the progress bar (issue #71). Fetching
+// and the whole of the copy live in that module; this component owns only the
+// clock and the two announcements.
+import {
+  fetchDurationEstimate,
+  timeRemaining as computeTimeRemaining,
+  type DurationEstimate,
+} from './durationEstimate';
 // The shared disposition capture (issue #486) — the POST call and the
 // vocabulary it is typed against. The console renders the choices and their
 // labels itself (issue #726), so only the transport and the type are needed
@@ -1279,6 +1287,34 @@ export default function ReviewSubmission({
     };
   }, []);
 
+  // Issue #71 (2026-09-05 diagnostic G12): how long this is going to take.
+  //
+  // The progress bar has always reported stage and never time. The answer is
+  // measured, not modelled — `GET /api/review-duration-estimate` returns the
+  // p50/p90 of the last 50 FINISHED reviews of this playbook plus the median
+  // word count of that same sample, and `durationEstimate.ts` scales those
+  // to the document in the toaster. Silent on failure, exactly like the cost
+  // line above: no estimate simply renders no line.
+  //
+  // Keyed on the playbook and the preflight word count because both are
+  // inputs to what is shown — the sample is per playbook, and `words` is the
+  // caller's half of the contract. Re-fetching when the dial moves is the
+  // point: an MSA playbook and an NDA playbook do not take the same time.
+  const [durationEstimate, setDurationEstimate] = useState<DurationEstimate | null>(null);
+  const preflightWordCount = preflight?.wordCount ?? 0;
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const estimate = await fetchDurationEstimate(playbookId, preflightWordCount);
+      if (!cancelled) {
+        setDurationEstimate(estimate);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [playbookId, preflightWordCount]);
+
   // The browning change WITHOUT its sound. Split out for issue #722: the
   // console's markup-intensity radio reports the same click as a `key` motion
   // event, which the one audio owner already sounds, so the caller that goes
@@ -2218,6 +2254,56 @@ export default function ReviewSubmission({
           ? 'idle'
           : 'error';
 
+  // Issue #71: the clock behind the time-remaining line, and the ONE place
+  // it ticks. It runs only in the `working` phase and is torn down the moment
+  // the review leaves it, so a finished review carries no timer at all.
+  //
+  // Measured from when THIS session started watching the review rather than
+  // from the row's submission time: a review adopted on mount (the in-flight
+  // pickup below) has already been running for an unknown while, and the
+  // honest consequence is that its estimate reads slightly optimistic — not
+  // that the panel invents a start it never saw.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const watchingSince = useRef<number | null>(null);
+  useEffect(() => {
+    if (phase !== 'working') {
+      watchingSince.current = null;
+      setElapsedSeconds(0);
+      return;
+    }
+    const started = watchingSince.current ?? Date.now();
+    watchingSince.current = started;
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - started) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
+  // The line itself. Recomputed on every tick, but it only ever CHANGES on
+  // the p90 crossing — everything is rounded to the minute and the estimate
+  // does not count down, which is what makes the announcement below fire
+  // twice rather than once a second.
+  const timeRemaining =
+    phase === 'working'
+      ? computeTimeRemaining(durationEstimate, preflightWordCount, elapsedSeconds)
+      : null;
+
+  // Exactly two announcements per review, both into the ONE polite region
+  // the console already owns (`review-ready-announcement`): the estimate when
+  // it first appears, and the switch to "taking longer than usual". Keyed on
+  // the PHASE, never on the label or the tick, so a screen reader is told the
+  // two things worth interrupting for and nothing else. The completion
+  // handoff (#448/#492) still wins that region the moment it has something to
+  // say — see the console's own precedence chain.
+  const [timeAnnouncement, setTimeAnnouncement] = useState('');
+  const announcedPhase = useRef<string | null>(null);
+  useEffect(() => {
+    const nextPhase = timeRemaining?.phase ?? null;
+    if (nextPhase === announcedPhase.current) return;
+    announcedPhase.current = nextPhase;
+    setTimeAnnouncement(timeRemaining?.announcement ?? '');
+  }, [timeRemaining?.phase, timeRemaining?.announcement]);
+
   // Favicon browning + tab title (issue #497) — reads the same `phase` and
   // `progress_stage` the console renders from, one projection away
   // (stageTheater.ts) from the caption under the glass. Designer answer D6:
@@ -2731,6 +2817,10 @@ export default function ReviewSubmission({
     toasterGuidance,
     appliedGuidance,
     readyAnnouncement,
+    // Issue #71: already-derived display values, handed over rather than
+    // re-derived — the console fetches nothing and owns no clock.
+    timeRemaining: timeRemaining?.label ?? null,
+    timeAnnouncement,
     metaParts,
     preflightReadsLike,
     preflightMismatchNote,

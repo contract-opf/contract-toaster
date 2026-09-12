@@ -73,6 +73,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -830,6 +831,181 @@ def review_cost_estimate(dynamodb_resource: Any = None) -> dict[str, Any]:
         "worst_case_reservation_usd_cents": compute_worst_case_reservation_usd_cents(
             dynamodb_resource
         ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# How long the NEXT review will take (issue #71, 2026-09-05 diagnostic G12)
+#
+# The progress bar reports STAGE, not time -- honest, and useless to someone
+# deciding whether to wait or come back after lunch. The inputs for a real
+# answer already exist on the rows: `created_at` at submission and (since this
+# issue) `completed_at` on the terminal DONE write, plus the `word_count` the
+# submission stamps so a sample of past durations can be normalised against
+# document size.
+#
+# Measured, never modelled: no per-stage budget, no constant. A deployment
+# with fewer than `REVIEW_DURATION_MIN_SAMPLE` finished reviews for this
+# playbook gets nulls and the UI says nothing at all -- an estimate built on
+# two data points is a guess wearing a number's clothes.
+# ---------------------------------------------------------------------------
+
+#: The newest N DONE reviews for the playbook that the percentiles are taken
+#: over. Bounded so this read stays a handful of index pages no matter how
+#: large the table grows, and recent so a model or prompt change shows up in
+#: the estimate within a working day rather than being averaged away.
+REVIEW_DURATION_SAMPLE_SIZE = 50
+
+#: Below this many usable samples every figure is `None`. Five is the point
+#: at which a p90 is a rank rather than "the slowest one we have seen".
+REVIEW_DURATION_MIN_SAMPLE = 5
+
+#: A hard ceiling on index pages read while collecting the sample. With a
+#: `FilterExpression` a page can come back empty, so the paging loop needs a
+#: stop that does not depend on the data: a playbook with no finished reviews
+#: at all must not walk the whole DONE partition.
+REVIEW_DURATION_MAX_PAGES = 10
+
+# The ONLY fields this route carries. An explicit tuple, asserted against in
+# tests, for the same reason `REVIEW_COST_ESTIMATE_FIELDS` is one: this is an
+# any-active-user projection over rows that belong to OTHER reviewers, so a
+# field appended to the sampled row shape tomorrow must not be able to reach
+# it by accident. Everything here is an aggregate over >= 5 rows -- never a
+# review id, an owner, a filename or any document-derived text.
+REVIEW_DURATION_ESTIMATE_FIELDS = (
+    "p50_seconds",
+    "p90_seconds",
+    "median_words",
+    "sample_size",
+)
+
+
+def _nearest_rank(sorted_values: list[int], fraction: float) -> int:
+    """The nearest-rank percentile of an already-sorted, non-empty list.
+
+    Nearest-rank (ceil(fraction * n), 1-indexed) rather than an interpolating
+    definition: every value returned is a duration this deployment ACTUALLY
+    recorded, which is the property that makes "About 4 minutes" defensible.
+    An interpolated p90 is a number no review ever took.
+    """
+    rank = max(1, math.ceil(fraction * len(sorted_values)))
+    return sorted_values[min(rank, len(sorted_values)) - 1]
+
+
+def _row_int(value: Any) -> int | None:
+    """A row attribute as an int, or None when it is absent or not a number.
+
+    Used for both kinds of number this sample reads: the epoch-second stamps
+    and the word count. A row written before a given field existed carries
+    nothing at all, and DynamoDB hands a numeric attribute back as a
+    `Decimal`, so neither a bare `int()` nor an `isinstance(value, int)`
+    check would do on its own. A bool is refused explicitly -- it is an
+    `int` subclass in Python, and `True` is not a timestamp."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sample_finished_reviews(table: Any, playbook_id: str) -> list[dict[str, Any]]:
+    """The newest `REVIEW_DURATION_SAMPLE_SIZE` DONE rows for `playbook_id`.
+
+    Reads `status-index` (issue #52) newest-first with a server-side filter
+    on `playbook_id` -- never `table.scan()`, and never the KEYS_ONLY
+    `playbook_hash-index`, which projects neither `completed_at` nor
+    `word_count` and so cannot answer this question at all on the deployed
+    table (tests/ddb_fixtures.py declares it KEYS_ONLY for exactly this
+    reason). `playbook_hash` would also be the wrong key: it changes with
+    every re-bind of the same playbook, so a bundle change would silently
+    empty the sample.
+    """
+    from boto3.dynamodb.conditions import Attr
+
+    rows: list[dict[str, Any]] = []
+    start_key: dict[str, Any] | None = None
+    for _ in range(REVIEW_DURATION_MAX_PAGES):
+        page, start_key = _query_status_page(
+            table,
+            REVIEW_STATUS_SUCCESS_TERMINAL,
+            limit=REVIEW_DURATION_SAMPLE_SIZE,
+            start_key=start_key,
+            newest_first=True,
+            filter_expression=Attr("playbook_id").eq(playbook_id),
+        )
+        rows.extend(page)
+        if start_key is None or len(rows) >= REVIEW_DURATION_SAMPLE_SIZE:
+            break
+    return rows[:REVIEW_DURATION_SAMPLE_SIZE]
+
+
+def review_duration_estimate(
+    playbook_id: str,
+    dynamodb_resource: Any = None,
+) -> dict[str, Any]:
+    """GET /api/review-duration-estimate -- how long a review of this
+    playbook has actually been taking (issue #71).
+
+    Returns `REVIEW_DURATION_ESTIMATE_FIELDS`:
+
+      `p50_seconds`   the median finished duration, in seconds
+      `p90_seconds`   the nearest-rank 90th percentile of the same sample
+      `median_words`  the median `word_count` of the SAME sampled reviews,
+                      so a caller can scale the percentiles to the document
+                      in front of it (a 2x document takes roughly 2x)
+      `sample_size`   how many usable rows the figures came from -- reported
+                      truthfully even when it is too small to answer
+
+    Every figure but `sample_size` is `None` below `REVIEW_DURATION_MIN_SAMPLE`
+    usable rows, and `median_words` is additionally `None` when no sampled row
+    carries a word count (rows written before that stamp existed). A caller
+    that gets `None` renders no estimate at all rather than a fabricated one.
+
+    A row is USABLE when it carries both `created_at` and `completed_at` and
+    the difference is non-negative. A negative delta is not arithmetic to be
+    clamped -- it means the two stamps disagree about what happened -- so the
+    row is dropped from the sample rather than folded in as a zero.
+
+    Owner scope, deliberately: the sample spans EVERY owner's finished
+    reviews for this playbook, because "how long does this take here" is a
+    property of the deployment and a reviewer's own first submission would
+    otherwise have nothing to answer from. Nothing identifying survives the
+    aggregation -- see `REVIEW_DURATION_ESTIMATE_FIELDS` -- so this is the
+    same any-active-user shape as `review_cost_estimate`, not a widening of
+    who may read whose reviews.
+    """
+    empty = {
+        "p50_seconds": None,
+        "p90_seconds": None,
+        "median_words": None,
+        "sample_size": 0,
+    }
+    if not playbook_id:
+        return empty
+    table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
+    durations: list[int] = []
+    word_counts: list[int] = []
+    for row in _sample_finished_reviews(table, playbook_id):
+        created = _row_int(row.get("created_at"))
+        completed = _row_int(row.get("completed_at"))
+        if created is None or completed is None or completed < created:
+            continue
+        durations.append(completed - created)
+        words = _row_int(row.get("word_count"))
+        if words is not None and words > 0:
+            word_counts.append(words)
+
+    sample_size = len(durations)
+    if sample_size < REVIEW_DURATION_MIN_SAMPLE:
+        return {**empty, "sample_size": sample_size}
+    durations.sort()
+    word_counts.sort()
+    return {
+        "p50_seconds": _nearest_rank(durations, 0.5),
+        "p90_seconds": _nearest_rank(durations, 0.9),
+        "median_words": _nearest_rank(word_counts, 0.5) if word_counts else None,
+        "sample_size": sample_size,
     }
 
 
@@ -1755,6 +1931,7 @@ def submit_review(
     original_filename: str = "",
     notes_mode: str = DEFAULT_NOTES_MODE,
     markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
+    word_count: int | None = None,
 ) -> dict[str, Any]:
     """POST /api/reviews (stub is fine per issue #59 AC).
 
@@ -1794,6 +1971,12 @@ def submit_review(
     the resumed path leaves the original row's value untouched, which is
     correct: the already-started execution runs under the guidance the
     FIRST call supplied, so the row keeps naming what actually governed.
+
+    word_count (issue #71, optional): the uploaded document's word count,
+    recorded on the reviews row so `review_duration_estimate` can normalise
+    past durations against document size. Ignored on the resumed/duplicate
+    path for the same reason `toaster_guidance` is -- the original row
+    already records the document that actually ran.
     """
     idempotency_key = resolve_idempotency_key(
         client_supplied_idempotency_key, owner_sub, file_sha256, active_release_bundle_hash
@@ -1904,6 +2087,7 @@ def submit_review(
         original_filename=original_filename,
         notes_mode=notes_mode,
         markup_intensity=markup_intensity,
+        word_count=word_count,
     )
 
     ensure_execution_started(submission, execution_input_json, dynamodb_resource, sfn_client)
@@ -2472,6 +2656,7 @@ def _create_review_row(
     original_filename: str = "",
     notes_mode: str = DEFAULT_NOTES_MODE,
     markup_intensity: str = DEFAULT_MARKUP_INTENSITY,
+    word_count: int | None = None,
 ) -> None:
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
@@ -2508,6 +2693,19 @@ def _create_review_row(
     # counterparty-facing only, so conflating them costs nothing, while
     # `internal` and `both` are never defaults and are therefore always
     # recorded. The mode that could do harm if lost cannot be lost.
+    # Issue #71: how big the document was, as a plain integer. This is the
+    # denominator `review_duration_estimate` normalises past durations
+    # against -- without it the sample cannot tell a two-page NDA from a
+    # sixty-page MSA and every estimate is the same number.
+    #
+    # A COUNT, never content: `scripts/preflight_pass.compute_document_stats`
+    # produces the excerpt and full text too, and neither is passed here or
+    # persisted anywhere on this row. Absent (never a null placeholder) when
+    # the caller could not compute one -- issue #491's preflight is advisory
+    # and this stamp inherits that posture: a submission is never refused,
+    # delayed or altered because the count failed.
+    if isinstance(word_count, int) and not isinstance(word_count, bool) and word_count > 0:
+        item["word_count"] = word_count
     if notes_mode and notes_mode != DEFAULT_NOTES_MODE:
         item["notes_mode"] = notes_mode
     # Issue #54: the markup-intensity dial this review ran under, on the same
@@ -3415,12 +3613,19 @@ def _query_status_page(
     start_key: dict[str, Any] | None = None,
     newest_first: bool = True,
     projection: str | None = None,
+    filter_expression: Any = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """ONE page of the `status-index` partition for `status_value`, as
     `(items, last_key)` -- `last_key` is None when the partition is
     exhausted. `_query_by_status` is the loop over this; the admin listing's
     merge (`_page_all`) drives pages directly because it consumes a
     partition only as far as the merge needs it.
+
+    `filter_expression` (issue #71) is a boto3 `Attr(...)` condition applied
+    SERVER-SIDE to the page. A DynamoDB `Limit` bounds the rows READ, not the
+    rows returned, so a filtered page can come back short (or empty) with
+    more behind it -- every caller that passes one must keep paging on
+    `last_key` rather than treating a short page as the end.
 
     Issue #67: the scan fallback this used to carry for a stand-in without
     `.query()` is gone. A real boto3 Table always has `.query`, so that
@@ -3441,6 +3646,8 @@ def _query_status_page(
         kwargs["ExclusiveStartKey"] = start_key
     if projection:
         kwargs["ProjectionExpression"] = projection
+    if filter_expression is not None:
+        kwargs["FilterExpression"] = filter_expression
     resp = table.query(**kwargs)
     return resp.get("Items", []), resp.get("LastEvaluatedKey")
 

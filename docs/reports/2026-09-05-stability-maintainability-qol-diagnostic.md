@@ -49,6 +49,34 @@
 > public `#52`. Pinned by `tests/test_runner_recovery.py`. The finding text
 > below is left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G12 / B12 **landed** as public issue
+> `contract-opf/contract-toaster#71` (private #711 in the table below). The
+> progress bar now carries a measured time-remaining line:
+> `GET /api/review-duration-estimate` (`backend/src/reviews.py::
+> review_duration_estimate`) returns p50/p90 seconds and the median word
+> count of the newest 50 `DONE` rows for the selected playbook, read off the
+> `status-index` GSI, and `frontend/src/durationEstimate.ts` scales those by
+> the preflight word count into "About N minutes" — switching to "Taking
+> longer than usual" past the scaled p90, announced into the console's one
+> polite region exactly twice per review.
+>
+> **Two departures from B12 as written below.** First, B12 names
+> "`created_at` → `completed_at`" and says "the `pipeline_health` data
+> already exists". `completed_at` did not: the reviews row carried
+> `created_at`, `updated_at` and (issue #472) `failed_at` and nothing else
+> about time, so the stamp had to be added to both terminal writers
+> (`pipeline_runner.py::_write_real_terminal` and
+> `infra/lambda/persist/handler.py::_write_terminal_reviews_state`) as the
+> exact mirror of `failed_at`. `updated_at` could not stand in for it —
+> every later administrative touch moves it. Second, B12 proposes scaling by
+> "the preflight page estimate", but nothing persisted a document size on the
+> review row either, so there was no denominator to normalise a past
+> duration against; `POST /api/reviews` now stamps `word_count` (the count
+> alone — never the excerpt or the text) via
+> `review_routes._submitted_word_count`, which is the "nice-to-have" issue
+> #491 recorded as a deliberate scope cut. The finding text below is left as
+> written; it describes the state before that change.
+
 > **Status note, 2026-09-12.** G3 / B3 **landed** as public issue
 > `contract-opf/contract-toaster#63` (private #703 in the table below), on
 > **3.13**, not the 3.12 B3 proposes below: owner decision Q5 chose the
@@ -398,6 +426,8 @@ otherwise the user is asked to choose it. Uses the existing submit path.
 **B12.** Time-remaining estimate on the progress bar from the preflight page
 estimate and a per-deployment rolling median of recent DONE reviews'
 `created_at → completed_at` (the `pipeline_health` data already exists).
+**Landed (B12)** — see the G12 status note at the top of this file.
+
 **B13.** A tiny in-memory catalog store (`playbooksStore.ts`) shared by
 `ReviewSubmission`, `AdminPlaybooks`, and `ReviewHistory`, invalidated by
 the admin mutations and by the existing `adminRefresh.ts` seam.

@@ -40,6 +40,24 @@ advice.
 - **A review completes end-to-end on both.** PENDING → RUNNING → DONE with a
   downloadable `.docx`. The reviewer UI shows the result behind the required
   pre-download trust-calibration gate (confidence band + critic-delta indicator).
+- **While a review runs, the progress bar answers two different questions.**
+  The step ("Step 2 of 4, adversarial critic") is reported by the pipeline
+  itself and never guessed from elapsed time. Beside it, issue #71 adds a
+  measured time-remaining line: `GET /api/review-duration-estimate` returns the
+  p50/p90 of the last 50 **finished** reviews of the selected playbook plus
+  that sample's median word count, and the panel scales them by the preflight
+  word count into "About N minutes". Two things are worth knowing before you
+  judge it. It is **measurement, not a model** — under five finished reviews
+  for that playbook the route answers nulls and the line does not render at
+  all, so a fresh deployment shows nothing rather than a guess. And past the
+  scaled p90 it stops estimating and says "Taking longer than usual", which is
+  **not** a failure report: the burnt-toast panel owns failure, and a review
+  one second past p90 is running normally. One asymmetry between the targets
+  is deliberate: `pipeline_runner._write_terminal` — the Compose fallback that
+  returns a canned fixture when `MODEL_PROVIDER` is unset — stamps no
+  `completed_at`, so those rows are never samples and cannot drag a real
+  deployment's estimate toward zero. The AWS persist stage does stamp it, and
+  should: on that target a mock review IS what a review takes there.
 - **What ships vs. what's stubbed/planned** for the admin-UI and observability
   surfaces is tracked plainly in
   [docs/implementation-status.md](implementation-status.md) (a lint-enforced

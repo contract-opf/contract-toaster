@@ -634,12 +634,52 @@ async def post_review(
         original_filename=(file.filename or "")[:512],
         notes_mode=resolved_notes_mode,
         markup_intensity=resolved_markup_intensity,
+        # Issue #71. Skipped entirely on the duplicate/retry path:
+        # `submit_review` ignores this argument there (the original row
+        # already records the document that actually ran), so parsing
+        # the .docx again would be work with nowhere to land.
+        word_count=None if existing else _submitted_word_count(contents),
     )
 
     return JSONResponse(
         status_code=result["status_code"],
         content={"review_id": result["review_id"], "resumed": result["resumed"]},
     )
+
+
+def _submitted_word_count(contents: bytes) -> int | None:
+    """The uploaded document's word count, or None if it could not be
+    computed (issue #71).
+
+    The one thing #491's preflight route deliberately did NOT do -- its own
+    module header records "stamping the result onto the review row if the
+    user proceeds" as a documented scope cut -- and the one input
+    `reviews.review_duration_estimate` cannot work without: a sample of past
+    durations that cannot tell a two-page NDA from a sixty-page MSA produces
+    one estimate for every document.
+
+    Computed here rather than accepted from the client for the obvious
+    reason: a self-reported number would let a caller steer a figure shown
+    to every other reviewer of the playbook. `compute_document_stats` is
+    deterministic, offline and already run against these same bytes on the
+    preflight route -- it makes no model call and costs no spend.
+
+    Only the integer is kept. The same call also produces the excerpt and the
+    document's full text; neither is returned from here, and nothing
+    document-derived but this count is ever written to the row.
+
+    Fail-soft, on #491's own advisory posture: an unreadable or unusual
+    document yields None, the row simply carries no count, and the
+    submission proceeds exactly as it did before this existed. A missing
+    estimate is a missing line on a progress bar; a refused submission over
+    one would be a real failure invented out of a courtesy.
+    """
+    try:
+        count = preflight_pass.compute_document_stats(contents)["word_count"]
+    except Exception:  # noqa: BLE001 -- advisory: never fail a submit over a stat
+        logger.warning("submit: word count unavailable; the review proceeds without one")
+        return None
+    return count if isinstance(count, int) and count > 0 else None
 
 
 UPLOAD_NOT_STORED_INTACT_DETAIL = (

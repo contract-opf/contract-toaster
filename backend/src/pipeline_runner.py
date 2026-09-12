@@ -401,7 +401,15 @@ def _copy_output_object(result: dict[str, Any], s3_client: Any) -> bool:
 def _write_terminal(review_id: str, result: dict[str, Any], object_written: bool,
                     dynamodb_resource: Any) -> None:
     """Write the terminal reviews-row state (persist-stage equivalent).
-    output_s3_key is recorded only when the object was materialized."""
+    output_s3_key is recorded only when the object was materialized.
+
+    Deliberately does NOT stamp `completed_at` the way the real terminal
+    writes below and in infra/lambda/persist/handler.py do (issue #71). This
+    is the MOCK pipeline: it returns a canned fixture in milliseconds, so a
+    row from here is not a measurement of how long a review takes, and
+    folding one into `reviews.review_duration_estimate`'s sample would drag
+    a deployment's estimate toward zero. Carrying no stamp is what keeps
+    these rows out of that sample -- an omission with a job, not a gap."""
     decision = result["decision"]
     terminal = "DONE" if decision in ("REQUEST_CHANGE", "ACCEPT") else "MANUAL_REVIEW_REQUIRED"
     set_clauses = ["#s = :s", "decision = :d", "updated_at = :now"]
@@ -1134,6 +1142,12 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     existed. A `DONE` row gets no `failed_at`, which is correct: it didn't
     fail.
 
+    Its mirror is `completed_at` (issue #71), stamped on exactly the
+    `DONE` transition `failed_at` is withheld from, so between them every
+    terminal row carries the moment it reached that state. It is what
+    `reviews.review_duration_estimate` measures against `created_at`; see
+    the `else` branch below for why `updated_at` cannot serve.
+
     `failing_stage` (issue #584, default `None`): the stage to attribute a
     NON-EXCEPTION failure to -- absent, never a null placeholder, for a
     genuine success, identically to `normalization_notes` above.
@@ -1153,6 +1167,15 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     if terminal != reviews.REVIEW_STATUS_SUCCESS_TERMINAL:
         set_clauses.append("failed_at = :failed_at")
         values[":failed_at"] = now_str
+    else:
+        # Issue #71: the exact mirror of `failed_at` above, for the review
+        # that DIDN'T fail. `updated_at` cannot stand in for it -- every
+        # later administrative touch (a quarantine overlay, a disposition,
+        # a retention hold) moves that stamp, so a duration measured from
+        # it drifts upward for no reason connected to the pipeline. This
+        # one is written once, on the DONE transition, and never again.
+        set_clauses.append("completed_at = :completed_at")
+        values[":completed_at"] = now_str
     for index, (field, model_id) in enumerate(sorted((model_ids or {}).items())):
         placeholder = f":m{index}"
         set_clauses.append(f"{field} = {placeholder}")
