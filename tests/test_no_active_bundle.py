@@ -70,6 +70,7 @@ ARCHITECTURE_PATH = REPO_ROOT / "ARCHITECTURE.md"
 RUNBOOK_PATH = REPO_ROOT / "RUNBOOK.md"
 PLAYBOOK_GOVERNANCE_PATH = REPO_ROOT / "docs" / "playbook-governance.md"
 BACKEND_ROOT = REPO_ROOT / "backend"
+TESTS_DIR = REPO_ROOT / "tests"
 
 
 def read_text(path: Path) -> str:
@@ -182,6 +183,8 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]
 
         if str(BACKEND_ROOT) not in _sys.path:
             _sys.path.insert(0, str(BACKEND_ROOT))
+        if str(TESTS_DIR) not in _sys.path:
+            _sys.path.insert(0, str(TESTS_DIR))
         import src.main as backend_main  # backend/src/main.py, as "src.main"
     except Exception as e:  # pragma: no cover - environment-dependent
         _skip(
@@ -193,10 +196,16 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]
         )
         return failures, skips, notes
 
-    route_registered = any(
-        getattr(route, "path", None) == "/api/reviews"
-        and "POST" in getattr(route, "methods", set())
-        for route in backend_main.app.routes
+    # Walk the inventory rather than `app.routes` directly: since FastAPI
+    # 0.137 an `include_router`ed route is a lazy placeholder whose `path` is
+    # None, and POST /api/reviews is included from src.review_routes. Reading
+    # `app.routes` straight would make this gate SKIP on a live route -- a
+    # silently vacuous pass, which is the exact failure issue #638's meta-gate
+    # exists to catch. See tests/fastapi_route_inventory.py (issue #61).
+    from fastapi_route_inventory import registered_route_pairs  # noqa: PLC0415
+
+    route_registered = ("/api/reviews", "POST") in registered_route_pairs(
+        backend_main.app
     )
 
     if not route_registered:

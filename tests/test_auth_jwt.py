@@ -49,7 +49,7 @@ try:
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
-    from jose import jwt as jose_jwt
+    import jwt as pyjwt
 
     _DEPS_AVAILABLE = True
 except ImportError as _import_err:  # pragma: no cover
@@ -135,7 +135,7 @@ class _KeyFixture:
             claims["hd"] = hd
         headers = {"kid": kid if kid is not None else self.KID}
         pem = private_pem if private_pem is not None else self._private_pem
-        return jose_jwt.encode(claims, pem, algorithm="RS256", headers=headers)
+        return pyjwt.encode(claims, pem, algorithm="RS256", headers=headers)
 
     def make_wrong_key_token(self, **kwargs) -> str:
         """Build a token signed with a *different* key (forged signature)."""
@@ -410,7 +410,7 @@ def main() -> int:
     if not _DEPS_AVAILABLE:
         print(
             f"\nSKIP: required test dependencies not installed ({_import_err_msg}).\n"
-            "Install: pip install 'python-jose[cryptography]' httpx fastapi\n"
+            "Install: pip install 'PyJWT[crypto]' httpx fastapi\n"
             "Treating as FAIL to surface the missing dependency."
         )
         return 1

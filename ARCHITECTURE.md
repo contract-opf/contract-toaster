@@ -178,6 +178,21 @@ The service is stateless. All state lives in S3 and DynamoDB. (A Bedrock Knowled
 exists in infrastructure but holds nothing — see the retrieval note below — so it carries
 no live state today.)
 
+**Backend runtime dependencies** are pinned exactly in `backend/requirements.txt`:
+`fastapi` + `uvicorn[standard]` (the HTTP surface), `pydantic` (request/response
+models), `boto3` (AWS SDK), `httpx` (the Cognito JWKS fetch and the model client's
+HTTP transport), `python-multipart` (the upload path), `jsonschema` and
+`docx-editor` (the review pipeline), and
+**`PyJWT[crypto]`** for JWT verification. PyJWT replaced `python-jose` in issue
+#61, which also removed the transitively-pulled `ecdsa`; the two verifiers that
+use it — `backend/src/auth.py` (Cognito, `algorithms=["RS256"]`) and
+`backend/src/demo_auth.py` (demo sessions, `algorithms=["HS256"]`) — each pin
+their algorithm list explicitly. See [docs/threat-model.md → Identity and
+authorization](docs/threat-model.md#identity-and-authorization) for why that
+pinning is the control and not a style choice. A weekly
+`.github/workflows/dependency-audit.yml` run re-scans these pins, and the
+frontend's production tree, against the advisory databases.
+
 #### API vs. async worker
 
 App Runner runs the **API only** — fast, request/response work: auth, validation, persistence, starting and polling reviews, and admin CRUD. It never blocks on an LLM call. `POST /api/reviews` stores the upload, reserves estimated spend, creates the `reviews` row as `PENDING`, and **starts a Step Functions execution directly** (no SQS), returning `202` with the review id immediately. The browser polls `GET /api/reviews/{id}`.

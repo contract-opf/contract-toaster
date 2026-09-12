@@ -29,6 +29,7 @@ from CDK.  The JWKS URL is derived at runtime from the pool ID so it does not
 need to be hard-coded.
 """
 
+import json
 import os
 import time
 from functools import lru_cache
@@ -45,9 +46,10 @@ except ImportError:  # pragma: no cover
     import demo_auth  # type: ignore[no-redef]
 
 try:
-    from jose import JWTError, jwk, jwt
-    from jose.utils import base64url_decode
-except ImportError:  # pragma: no cover — jose is always installed in prod
+    import jwt
+    from jwt import PyJWTError
+    from jwt.algorithms import RSAAlgorithm
+except ImportError:  # pragma: no cover — PyJWT is always installed in prod
     raise
 
 _bearer = HTTPBearer(auto_error=False)
@@ -156,7 +158,7 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
     # Decode without verification to extract the kid
     try:
         unverified_header = jwt.get_unverified_header(token)
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token header: {exc!r}",
@@ -191,17 +193,36 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
             detail="No matching public key found for the token's kid.",
         )
 
-    # Verify signature, expiry, and audience
+    # Verify signature, expiry, and audience.
+    #
+    # `algorithms=["RS256"]` is pinned deliberately: PyJWT refuses to verify
+    # a token whose header `alg` is not in this list, so neither `alg: none`
+    # nor an HS256 token signed with this pool's *public* key (which JWKS
+    # publishes) is accepted. PyJWT backs that up independently — it makes
+    # `algorithms` a required argument and rejects an asymmetric key used as
+    # an HMAC secret — so the two forgeries are refused twice over;
+    # tests/test_auth_jwt_pyjwt_61.py asserts the resulting HTTP 401 rather
+    # than which layer produced it. `require` makes the claim-presence check
+    # explicit rather than relying on defaults; PyJWT validates `exp` and
+    # `iat` whenever they are present.
+    try:
+        public_key = RSAAlgorithm.from_jwk(json.dumps(key_data))
+    except Exception as exc:  # malformed JWK entry — fail closed
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Unusable signing key for the token's kid: {exc!r}",
+        ) from exc
+
     try:
         claims: dict[str, Any] = jwt.decode(
             token,
-            key_data,
+            public_key,
             algorithms=["RS256"],
             audience=client_id,
             issuer=issuer,
-            options={"verify_exp": True},
+            options={"verify_exp": True, "require": ["exp", "iat", "sub"]},
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token verification failed: {exc!r}",

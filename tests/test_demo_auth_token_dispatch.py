@@ -35,7 +35,7 @@ import auth  # noqa: E402
 import demo_auth  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402
-from jose import jwt  # noqa: E402
+import jwt  # noqa: E402  (PyJWT)
 
 SECRET = "unit-test-demo-secret"
 USER_ROW = {"cognito_sub": "local:alice", "username": "alice", "role": "user", "is_admin": False}

@@ -52,11 +52,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+TESTS_DIR = REPO_ROOT / "tests"
 
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-review-submissions-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
@@ -78,6 +81,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
 import seed_active_bundle  # noqa: E402
+from fastapi_route_inventory import (  # noqa: E402
+    registered_route_pairs,
+    registered_route_paths,
+)
 import src.main as backend_main  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
 
@@ -268,11 +275,13 @@ def _caller_row(sub: str, is_admin: bool = False) -> dict:
 
 class TestReviewRoutesMountedOnMainApp(unittest.TestCase):
     def test_registered_route_set_includes_review_paths(self):
-        registered = {
-            (getattr(r, "path", None), method)
-            for r in backend_main.app.routes
-            for method in getattr(r, "methods", set())
-        }
+        # registered_route_pairs, not a bare `app.routes` walk: since FastAPI
+        # 0.137 an included router sits in `app.routes` as a lazy placeholder
+        # whose `path` is None, so the bare walk reports these four as absent
+        # even though a TestClient request to them succeeds (issue #61). The
+        # assertions below are themselves the guard against the helper
+        # under-reporting -- they fail if the descent ever stops working.
+        registered = registered_route_pairs(backend_main.app)
         self.assertIn(("/api/reviews", "POST"), registered)
         self.assertIn(("/api/reviews", "GET"), registered)
         self.assertIn(("/api/reviews/{review_id}", "GET"), registered)
@@ -282,7 +291,7 @@ class TestReviewRoutesMountedOnMainApp(unittest.TestCase):
         """Mounting the review router must not disturb the pre-existing
         route set (issue body: "the current tree registers only /health,
         /version, /whoami, /api/users*, /api/admin/retention*")."""
-        registered_paths = {getattr(r, "path", None) for r in backend_main.app.routes}
+        registered_paths = registered_route_paths(backend_main.app)
         for path in ("/health", "/version", "/whoami", "/api/users", "/api/admin/retention"):
             self.assertIn(path, registered_paths)
 
