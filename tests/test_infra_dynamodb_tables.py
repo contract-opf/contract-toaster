@@ -51,6 +51,14 @@ Verifies that all acceptance criteria for issue #52 are satisfied:
   K. Guard: DynamoDB table references (CfnOutputs or public properties)
      exist so downstream stacks can consume them.
 
+  M. The SYNTHESIZED entity-roster table exists (issue #59): PK setting_id,
+     PAY_PER_REQUEST, a customer-managed KMS key and RemovalPolicy RETAIN,
+     and the App Runner service is handed its name as ENTITY_ROSTER_TABLE.
+     Read from the synthesized template, not a regex over the source, so a
+     table that is declared but does not synthesize cannot pass — and so the
+     backend's boot-time existence check (src/startup_checks.py) is checking
+     for something the stack actually creates.
+
   L. The SYNTHESIZED reviews table carries the `status-index` GSI
      (HASH `status`, RANGE `created_at`, ProjectionType ALL) that the
      admin-wide reads query instead of scanning the table (issue #52,
@@ -82,6 +90,10 @@ REQUIRED_TABLES = [
     "reviews",
     "review_submissions",
     "audit",
+    # Issue #59 (audit finding F9): the backend used to conjure this one with
+    # a create_table on every roster read. It is CDK-managed now, so its
+    # absence from the stack is a gate failure and not a runtime surprise.
+    "entity_roster",
 ]
 
 # Tables that require PITR
@@ -710,6 +722,135 @@ def check_l_status_index_synthesized() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Check M — entity-roster table on the SYNTHESIZED template (issue #59)
+# ---------------------------------------------------------------------------
+
+# `backend/src/entity_roster.py` reads this on every OPF review's prompt
+# assembly and `src/startup_checks.ensure_entity_roster_table` REFUSES THE
+# BOOT on the AWS target if it is missing — so "the stack creates it" is now
+# a startup precondition, not a nicety.
+ENTITY_ROSTER_TABLE_MARKER = "-entity-roster-"
+ENTITY_ROSTER_ENV_NAME = "ENTITY_ROSTER_TABLE"
+
+
+def _nested_templates() -> list[dict]:
+    """Every nested stack template Check J synthesized into infra/cdk.out."""
+    templates: list[dict] = []
+    for template_path in sorted((INFRA / "cdk.out").glob("*.nested.template.json")):
+        try:
+            templates.append(json.loads(template_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+    return templates
+
+
+def _synthesized_table(name_marker: str) -> dict | None:
+    for template in _nested_templates():
+        for resource in template.get("Resources", {}).values():
+            if resource.get("Type") != "AWS::DynamoDB::Table":
+                continue
+            table_name = json.dumps(resource.get("Properties", {}).get("TableName", ""))
+            if name_marker in table_name:
+                return resource
+    return None
+
+
+def _app_runner_environment() -> list[dict]:
+    """The App Runner service's runtime environment variables, flattened out
+    of whichever nested template carries the service."""
+    for template in _nested_templates():
+        for resource in template.get("Resources", {}).values():
+            if resource.get("Type") != "AWS::AppRunner::Service":
+                continue
+            source = resource.get("Properties", {}).get("SourceConfiguration", {})
+            image = source.get("ImageRepository", {}).get("ImageConfiguration", {})
+            variables = image.get("RuntimeEnvironmentVariables", [])
+            if isinstance(variables, list):
+                return [v for v in variables if isinstance(v, dict)]
+    return []
+
+
+def check_m_entity_roster_table() -> list[str]:
+    print("\nCheck M: entity-roster table synthesized and wired (issue #59) …")
+    failures: list[str] = []
+
+    table = _synthesized_table(ENTITY_ROSTER_TABLE_MARKER)
+    failures += _assert(
+        table is not None,
+        "synthesized entity-roster table found in infra/cdk.out (requires Check J's synth)",
+        "No AWS::DynamoDB::Table with an '-entity-roster-' TableName in any "
+        "nested template. backend/src/entity_roster.py no longer creates this "
+        "table at runtime (issue #59), so the stack must.",
+    )
+    if table is None:
+        return failures
+
+    properties = table.get("Properties", {})
+
+    failures += _assert(
+        properties.get("KeySchema") == [
+            {"AttributeName": "setting_id", "KeyType": "HASH"}
+        ],
+        "entity-roster table key is HASH setting_id",
+        f"KeySchema: {properties.get('KeySchema')}",
+    )
+    attribute_types = {
+        d.get("AttributeName"): d.get("AttributeType")
+        for d in properties.get("AttributeDefinitions", [])
+    }
+    failures += _assert(
+        attribute_types.get("setting_id") == "S",
+        "entity-roster setting_id is declared as a String key attribute",
+        f"AttributeDefinitions: {attribute_types}",
+    )
+    failures += _assert(
+        properties.get("BillingMode") == "PAY_PER_REQUEST",
+        "entity-roster table is PAY_PER_REQUEST (one row, read per review)",
+        f"BillingMode: {properties.get('BillingMode')}",
+    )
+    failures += _assert(
+        bool(properties.get("SSESpecification", {}).get("KMSMasterKeyId")),
+        "entity-roster table is encrypted with a customer-managed KMS key",
+        f"SSESpecification: {properties.get('SSESpecification')}",
+    )
+    failures += _assert(
+        properties.get("PointInTimeRecoverySpecification", {})
+        .get("PointInTimeRecoveryEnabled") is True,
+        "entity-roster table has PITR enabled (it governs every review prompt)",
+        f"PointInTimeRecoverySpecification: "
+        f"{properties.get('PointInTimeRecoverySpecification')}",
+    )
+    failures += _assert(
+        table.get("DeletionPolicy") == "Retain",
+        "entity-roster table DeletionPolicy is Retain",
+        f"DeletionPolicy: {table.get('DeletionPolicy')}",
+    )
+
+    # Env wiring: without this the deployed API silently falls back to
+    # entity_roster.DEFAULT_ENTITY_ROSTER_TABLE, which names the DOCKER
+    # COMPOSE table — and the boot check would then refuse to start.
+    env_names = {v.get("Name") for v in _app_runner_environment()}
+    failures += _assert(
+        ENTITY_ROSTER_ENV_NAME in env_names,
+        f"App Runner service receives {ENTITY_ROSTER_ENV_NAME}",
+        f"Runtime environment variable names: {sorted(n for n in env_names if n)}",
+    )
+    entity_env = next(
+        (v for v in _app_runner_environment() if v.get("Name") == ENTITY_ROSTER_ENV_NAME),
+        None,
+    )
+    if entity_env is not None:
+        failures += _assert(
+            ENTITY_ROSTER_TABLE_MARKER in json.dumps(entity_env.get("Value", "")),
+            f"{ENTITY_ROSTER_ENV_NAME} names an entity-roster table, not the "
+            f"Docker Compose default",
+            f"Value: {entity_env.get('Value')}",
+        )
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # Check K — Guard: DynamoDB table references exported for downstream stacks
 # ---------------------------------------------------------------------------
 
@@ -762,8 +903,9 @@ def main() -> int:
     all_failures += check_i_removal_policy()
     all_failures += check_j_cdk_synth()
     all_failures += check_k_table_exports()
-    # After J on purpose: L reads the template J synthesized.
+    # After J on purpose: L and M read the template J synthesized.
     all_failures += check_l_status_index_synthesized()
+    all_failures += check_m_entity_roster_table()
 
     print("\n" + "=" * 60)
     if all_failures:

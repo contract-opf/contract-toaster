@@ -160,7 +160,20 @@ deliberately not a startup refusal (the variable is read with `.get`, so the
 AST pass above does not classify it as required), but a Coolify-managed
 compose that omits it silently loses the feature: add
 `ENTITY_ROSTER_TABLE: contract-toaster-entity-roster-dts` in Coolify's UI to
-match the compose files here, then re-run `bootstrap` to create the table.
+match the compose files here, then restart the backend — `bootstrap` creates
+the table, and since issue #59 the backend creates it at **startup** too if
+bootstrap has not (`backend/src/startup_checks.py::ensure_entity_roster_table`,
+called from the ASGI lifespan: one `describe_table`, and a `create_table`
+only when it is genuinely missing AND `DEPLOY_TARGET=dts`).
+
+That startup helper replaced a `create_table` the backend used to issue on
+**every roster read** (issue #59, audit finding F9) — a write-class DynamoDB
+call on `GET /api/admin/entity-roster` and on every review's prompt assembly,
+which under throttling was pure log noise on a read path. Nothing in
+`backend/src/entity_roster.py` provisions anything any more. On the AWS
+target, where the table is CDK-managed, the same helper **refuses the boot**
+rather than creating one; here it just creates it, tolerating the race with
+`bootstrap` if both run at once.
 
 ## Not yet included (follow-ups)
 

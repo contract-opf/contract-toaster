@@ -67,6 +67,23 @@ Environment:
                         boot refusal (`src/startup_checks.py`).
   AUDIT_TABLE           DynamoDB audit table name (append-only).
 
+## Provisioning is a BOOT concern, not a request concern (issue #59)
+
+This module never calls `create_table`. It did until #59 (audit finding F9):
+`_ensure_table` fired a `create_table` on every roster read and leaned on
+`ResourceInUseException` to no-op, which put a write-class DynamoDB call on
+`GET /api/admin/entity-roster` and on every review's prompt assembly, forced
+`dynamodb:CreateTable` onto the API role, and turned throttling into log
+noise on a read path.
+
+The table is created once, at process start, by
+`src/startup_checks.ensure_entity_roster_table` — on the Docker Compose
+target only (`deploy/dts/bootstrap.py` already provisions it; the startup
+helper is belt-and-braces for a compose that skipped bootstrap). On the AWS
+target the table is CDK-managed (`infra/lib/nested/data-stack.ts`
+`EntityRosterTable`) and a missing one refuses the boot instead of being
+conjured at runtime with no CMK, no PITR and no removal policy.
+
 ## Why the input is validated so tightly
 
 An entity name typed here is interpolated VERBATIM into a model system
@@ -121,31 +138,6 @@ def _entity_roster_table_name() -> str:
     `contract-toaster-entity-roster-dts` when unset. Empty/whitespace-only
     counts as unset."""
     return os.environ.get("ENTITY_ROSTER_TABLE", "").strip() or DEFAULT_ENTITY_ROSTER_TABLE
-
-
-def _ensure_table(dynamodb_resource: Any, table_name: str) -> Any:
-    """Ensure the entity roster table exists, creating it on demand if missing."""
-    try:
-        table = dynamodb_resource.create_table(
-            TableName=table_name,
-            KeySchema=[{"AttributeName": "setting_id", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "setting_id", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST",
-        )
-        if hasattr(table, "meta") and hasattr(table.meta, "client") and hasattr(table.meta.client, "get_waiter"):
-            try:
-                table.meta.client.get_waiter("table_exists").wait(TableName=table_name)
-            except Exception:
-                pass
-        return table
-    except Exception as exc:
-        err_code = ""
-        if hasattr(exc, "response") and isinstance(exc.response, dict):
-            err_code = exc.response.get("Error", {}).get("Code", "")
-        if err_code == "ResourceInUseException":
-            return dynamodb_resource.Table(table_name)
-        logger.warning("Could not auto-create entity roster table %s: %s", table_name, exc)
-        return dynamodb_resource.Table(table_name)
 
 
 def _entity_roster_table(dynamodb_resource: Any):
@@ -273,19 +265,16 @@ def normalize_entities(raw: Any) -> list[str]:
 
 
 def _stored_row(dynamodb_resource: Any) -> dict[str, Any]:
-    """The raw roster row, or `{}` when no admin has set one (or table is newly created)."""
-    table_name = _entity_roster_table_name()
+    """The raw roster row, or `{}` when no admin has set one.
+
+    Issue #59: this is a READ. It does not provision. A missing table raises
+    `ResourceNotFoundException` to the caller, where `get_entity_roster`
+    reports an unset roster and `resolve_entity_roster` degrades to `()` —
+    the two behaviours the module docstring already promises. Provisioning
+    happens once at boot in `src/startup_checks.ensure_entity_roster_table`.
+    """
     table = _entity_roster_table(dynamodb_resource)
-    try:
-        return table.get_item(Key={"setting_id": ENTITY_ROSTER_SETTING_ID}).get("Item") or {}
-    except Exception as exc:
-        err_code = ""
-        if hasattr(exc, "response") and isinstance(exc.response, dict):
-            err_code = exc.response.get("Error", {}).get("Code", "")
-        if err_code == "ResourceNotFoundException":
-            _ensure_table(dynamodb_resource, table_name)
-            return {}
-        raise
+    return table.get_item(Key={"setting_id": ENTITY_ROSTER_SETTING_ID}).get("Item") or {}
 
 
 def _entities_from_row(item: dict[str, Any]) -> list[str]:
@@ -419,42 +408,22 @@ def set_entity_roster(
     updated_history = [history_entry] + existing_history
     updated_history = updated_history[:MAX_HISTORY_ENTRIES]
 
-    table_name = _entity_roster_table_name()
+    # Issue #59: no provisioning fallback here either. A missing table is a
+    # deployment fault, surfaced as a 500 on this admin route rather than
+    # silently repaired by a write-class `create_table` on every save.
     table = _entity_roster_table(dynamodb_resource)
-    try:
-        table.update_item(
-            Key={"setting_id": ENTITY_ROSTER_SETTING_ID},
-            UpdateExpression=(
-                "SET entities = :e, entities_updated_at = :t, entities_updated_by = :a, history = :h"
-            ),
-            ExpressionAttributeValues={
-                ":e": normalized,
-                ":t": now,
-                ":a": actor,
-                ":h": updated_history,
-            },
-        )
-    except Exception as exc:
-        err_code = ""
-        if hasattr(exc, "response") and isinstance(exc.response, dict):
-            err_code = exc.response.get("Error", {}).get("Code", "")
-        if err_code == "ResourceNotFoundException":
-            _ensure_table(dynamodb_resource, table_name)
-            table = _entity_roster_table(dynamodb_resource)
-            table.update_item(
-                Key={"setting_id": ENTITY_ROSTER_SETTING_ID},
-                UpdateExpression=(
-                    "SET entities = :e, entities_updated_at = :t, entities_updated_by = :a, history = :h"
-                ),
-                ExpressionAttributeValues={
-                    ":e": normalized,
-                    ":t": now,
-                    ":a": actor,
-                    ":h": updated_history,
-                },
-            )
-        else:
-            raise
+    table.update_item(
+        Key={"setting_id": ENTITY_ROSTER_SETTING_ID},
+        UpdateExpression=(
+            "SET entities = :e, entities_updated_at = :t, entities_updated_by = :a, history = :h"
+        ),
+        ExpressionAttributeValues={
+            ":e": normalized,
+            ":t": now,
+            ":a": actor,
+            ":h": updated_history,
+        },
+    )
 
     _write_audit_entry(
         dynamodb_resource,

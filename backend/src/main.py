@@ -534,6 +534,14 @@ async def _lifespan(_app: FastAPI):
     unbuilt feature. See `src/startup_checks.py` for why the required set is
     derived from source rather than listed by hand.
 
+    `ensure_entity_roster_table` (issue #59, audit finding F9) runs next and
+    for the same reason: the entity-roster table is provisioned ONCE here
+    instead of by a `create_table` on every roster read, which is what
+    `src/entity_roster.py` did until #59. On the Docker Compose target it
+    creates the table if `deploy/dts/bootstrap.py` did not; on the AWS target
+    the table is CDK-managed and a missing one exits by name rather than
+    being conjured at runtime without a CMK or a removal policy.
+
     The sweep itself has been correct since #454, but on the Docker Compose
     target nothing invoked it — `preview_purge_sweep` was the only thing this
     module imported, so an operator saw a healthy preview while uploaded
@@ -548,6 +556,7 @@ async def _lifespan(_app: FastAPI):
     the process's life.
     """
     startup_checks.verify_required_env()
+    startup_checks.ensure_entity_roster_table(get_dynamodb_resource())
     handle = None
     try:
         handle = purge_scheduler.start_purge_scheduler(
