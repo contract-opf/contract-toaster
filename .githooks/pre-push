@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# pre-push — refuse a direct push to `main` (issue #64, diagnostic G8/B8).
+#
+# WHY THIS EXISTS
+#   Branch protection is unavailable on this repository's GitHub plan, so
+#   nothing server-side stops a push straight to `main`. This hook is the
+#   local interim control for humans and for any tool that is not the agent
+#   harness (the `git-guardrails-claude-code` skill covers that side).
+#
+# IT IS OPT-IN
+#   Nothing installs it automatically. Run `bash scripts/setup-hooks.sh` to
+#   point `core.hooksPath` at `.githooks/`. No gate, no `scripts/check*.sh`
+#   and no npm lifecycle script may run that installer: a clean checkout must
+#   keep git's default hooks. tests/test_landing_flow_64.py enforces that.
+#
+# ESCAPE HATCHES (any one of these skips the hook entirely)
+#   LAND_TO_MAIN=1            a deliberate, human-chosen direct push
+#   CI=1                      a CI runner
+#   CONTRACT_TOASTER_LOOP=1   the autonomous backlog loop, which lands by
+#                             direct push to main by design
+#
+# TRADE-OFF, DELIBERATE
+#   `.pre-commit-config.yaml` registers the counterparty-name lint at the
+#   `pre-push` stage of the `pre-commit` framework, and `core.hooksPath`
+#   bypasses the framework's own hook. This hook therefore runs that lint too
+#   — except behind the escape hatches above, where it exits before doing any
+#   work so it can never block the loop's or CI's pushes. Those paths are
+#   covered by the `counterparty-name-gate.yml` workflow instead. RUNBOOK.md
+#   ("Deploying a code change") records the same trade-off.
+#
+# Exit 0 = allow the push; non-zero = refuse it.
+#
+set -uo pipefail
+
+_truthy() {
+  case "${1:-}" in
+    ""|0|false|FALSE|no|NO) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+if _truthy "${LAND_TO_MAIN:-}" || _truthy "${CI:-}" || _truthy "${CONTRACT_TOASTER_LOOP:-}"; then
+  exit 0
+fi
+
+# Each stdin line is: <local ref> <local sha> <remote ref> <remote sha>
+blocked=0
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [ -n "${remote_ref:-}" ] || continue
+  case "$remote_ref" in
+    refs/heads/main) blocked=1 ;;
+  esac
+done
+
+if [ "$blocked" -eq 1 ]; then
+  echo "pre-push: refusing to push to 'main'." >&2
+  echo "pre-push: land through a pull request — 'bash scripts/land.sh' runs the" >&2
+  echo "pre-push: gates, pushes the branch and opens the PR." >&2
+  echo "pre-push: to override deliberately: LAND_TO_MAIN=1 git push origin main" >&2
+  exit 1
+fi
+
+# Counterparty-name lint (issue #341, fail-open: it SKIPs with no private token
+# list reachable). Skipped when the script is absent, e.g. in a test fixture
+# repository that only carries this hook.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+COUNTERPARTY_LINT="${REPO_ROOT:-.}/tests/lint-counterparty-names.py"
+if [ -n "$REPO_ROOT" ] && [ -f "$COUNTERPARTY_LINT" ]; then
+  python3 "$COUNTERPARTY_LINT"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "pre-push: counterparty-name lint failed (exit $rc) — push refused." >&2
+    exit "$rc"
+  fi
+fi
+
+exit 0

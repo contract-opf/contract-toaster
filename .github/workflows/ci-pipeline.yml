@@ -342,6 +342,61 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # CLOSE THE MAIN-IS-RED ISSUE WHEN MAIN IS GREEN AGAIN (issue #64)
+  #
+  # The counterpart to report-main-failure above. Without it a `ci-main-red`
+  # issue outlives the breakage it reports: #1 in this repository stayed open
+  # from 2026-07-28 while main had been green since 4bbfea6, which trains
+  # everyone to ignore the one net this repository has. No `always()` here on
+  # purpose — the job's needs must all SUCCEED for it to run, so it can only
+  # ever fire on a genuinely green push to main.
+  # ---------------------------------------------------------------------------
+  close-main-red:
+    name: Close the main-is-red issue when main is green
+    needs: [test-suite, docs-lint, detector-correctness, security-scan, frontend-gate]
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+    permissions:
+      issues: write
+    steps:
+      - name: Close any open ci-main-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          OPEN=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --label ci-main-red \
+            --state open \
+            --json number \
+            --jq '.[].number')
+
+          if [ -z "$OPEN" ]; then
+            echo "No open ci-main-red issue to close."
+            exit 0
+          fi
+
+          cat > /tmp/main-green-body.md <<EOF
+          Every CI gate passed on \`main\` at ${GITHUB_SHA}.
+
+          - **Run:** ${RUN_URL}
+
+          Closing automatically: this issue reports a breakage that is no
+          longer present on \`main\`. If a gate goes red again, the
+          report-main-failure job files (or comments on) a fresh one.
+          EOF
+
+          for N in $OPEN; do
+            gh issue comment "$N" --repo "$GITHUB_REPOSITORY" --body-file /tmp/main-green-body.md
+            gh issue close "$N" --repo "$GITHUB_REPOSITORY"
+            echo "Closed main-breakage issue #$N (green at ${GITHUB_SHA})"
+          done
+
+  # ---------------------------------------------------------------------------
   # BUILD + SIGN + PUSH (runs after all gates pass)
   # ---------------------------------------------------------------------------
   build-sign-push:

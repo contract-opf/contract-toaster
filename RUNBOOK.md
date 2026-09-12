@@ -114,9 +114,36 @@ The flow:
 # 1. Make the change
 git checkout -b phase-N/short-description
 # ... make changes, commit ...
-gh pr create
+bash scripts/land.sh    # gates, then push + `gh pr create --fill`
 # ... review, merge to main ...
 ```
+
+`scripts/land.sh` (issue #64) refuses to run on `main`, runs `npm test`,
+`scripts/check.sh` and `tests/lint-brand-free.py`, and pushes nothing if any of
+them is red — it reads `check.sh`'s exit code directly, so exit 2
+(FLAKY-UNRESOLVED) and exit 3 (another gate run holds the lock) both stop the
+landing. `.githooks/pre-push` refuses a direct push to `main`; opt in with
+`bash scripts/setup-hooks.sh`, override a deliberate direct push with
+`LAND_TO_MAIN=1`.
+
+Two notes on that guard:
+
+- **When the plan allows branch protection, turn it on** and require the
+  `CI pipeline` and `brand-free-gate` status checks on `main`. Today the
+  repository's GitHub plan returns 403 for branch protection and rulesets, which
+  is the only reason the control is local. Retire the `LAND_TO_MAIN` escape
+  hatch at the same time.
+- **The hook replaces the `pre-commit` framework's pre-push stage**, which is
+  where `.pre-commit-config.yaml` registers the counterparty-name lint:
+  `core.hooksPath` bypasses that framework. `.githooks/pre-push` therefore runs
+  `tests/lint-counterparty-names.py` itself (fail-open), except when
+  `LAND_TO_MAIN`, `CI` or `CONTRACT_TOASTER_LOOP` is set, where it exits
+  immediately so it can never block CI or the autonomous loop. Those paths are
+  covered by the `counterparty-name-gate.yml` workflow instead.
+
+A `ci-main-red` issue filed by a red run on `main` is closed automatically by
+the next green run on `main` (the `close-main-red` job in
+`.github/workflows/ci-pipeline.yml`), with a comment naming the green commit.
 
 ```text
 # 2. CI runs automatically on main (CodeBuild or equivalent):

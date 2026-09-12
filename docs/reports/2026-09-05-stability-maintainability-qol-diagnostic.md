@@ -71,6 +71,39 @@
 > The finding text below is left as written; it describes the state before
 > that change.
 
+> **Status note, 2026-09-12.** G8 / B8 **landed** as public issue
+> `contract-opf/contract-toaster#64` (private #704 in the table below), as the
+> local interim control owner decision Q6 chose: branch protection and rulesets
+> still answer 403 on this repository's plan.
+> `scripts/land.sh` refuses to run on `main`, runs `npm test`,
+> `scripts/check.sh` (`SKIP_INFRA=1` unless the branch touches `infra/`, and
+> its exit code read directly, so 2/FLAKY and 3/lock-busy both stop the
+> landing) and `tests/lint-brand-free.py`, then pushes and runs
+> `gh pr create --fill`. `.githooks/pre-push` refuses a push to
+> `refs/heads/main` unless `LAND_TO_MAIN`, `CI` or `CONTRACT_TOASTER_LOOP` is
+> set, and `scripts/setup-hooks.sh` installs it — **opt-in**, never run by a
+> gate or an npm lifecycle script, because the autonomous loop lands by direct
+> push to `main` by design. A `close-main-red` job in `ci-pipeline.yml` closes
+> any open `ci-main-red` issue on a green push to `main`, commenting with
+> `GITHUB_SHA`. Repository issue #1 (the `#689` named below, renumbered by the
+> 2026-09-08 migration) is **deliberately left open**: B8 and this issue both
+> assumed it was stale, but `main` is red again as of 2026-09-12 — the
+> `CI pipeline` runs at `692b951`, `b752ebe` and `2e7762c` all failed the
+> frontend gate at `npm ci` with `Missing: @esbuild/<platform>@0.28.2 from lock
+> file` — `frontend/package-lock.json` still resolves `esbuild` to `0.21.5` and
+> carries only that version's 23 `@esbuild/*` entries, so it is out of sync
+> with `frontend/package.json`. That is a separate defect, out of scope here. Closing an issue that reports a live breakage would be wrong; the new
+> `close-main-red` job closes it on the next green push to `main`, which is the
+> mechanism B8 asked for. B8's remaining half — requiring the `CI pipeline` and
+> `brand-free-gate` checks — waits on the plan, with the reminder in
+> RUNBOOK.md's "Deploying a code change". Item 3 of the issue needed no change:
+> every gate workflow already ran on `pull_request`; the two that do not
+> (`dts-image-publish.yml`, chained off a completed run, and
+> `dependency-audit.yml`, a weekly cron) are not gates. Pinned by
+> `tests/test_landing_flow_64.py`, which drives `land.sh` and the hook as real
+> subprocesses in a throwaway `git init` repository. The finding text below is
+> left as written; it describes the state before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to
