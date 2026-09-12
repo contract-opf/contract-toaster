@@ -117,7 +117,7 @@ describe('stopping a running review', () => {
 
   it('offers no stop control before a review is submitted', async () => {
     stubFetch({ detail: RUNNING });
-    render(<ReviewSubmission catalogVersion={0} />);
+    render(<ReviewSubmission />);
     await waitFor(() => expect(screen.queryByTestId('review-progress')).toBeNull(), WAIT);
     expect(screen.queryByTestId('review-cancel-button')).toBeNull();
   });
@@ -126,7 +126,7 @@ describe('stopping a running review', () => {
     // No `progress_stage` on the detail: this is the indeterminate state the
     // reported review was wedged in, and precisely when a stop is most needed.
     stubFetch({ detail: RUNNING });
-    render(<ReviewSubmission catalogVersion={0} />);
+    render(<ReviewSubmission />);
     await screen.findByTestId('review-file-input');
     await submitAReview();
     await screen.findByTestId('review-cancel-button', {}, WAIT);
@@ -134,7 +134,7 @@ describe('stopping a running review', () => {
 
   it('POSTs the cancel and switches to an honest stopping state', async () => {
     const { cancelCalls } = stubFetch({ detail: RUNNING });
-    render(<ReviewSubmission catalogVersion={0} />);
+    render(<ReviewSubmission />);
     await screen.findByTestId('review-file-input');
     await submitAReview();
 
@@ -163,7 +163,7 @@ describe('stopping a running review', () => {
 
   it('says so plainly when the review finished before it could be stopped', async () => {
     stubFetch({ detail: RUNNING, cancelStatus: 409 });
-    render(<ReviewSubmission catalogVersion={0} />);
+    render(<ReviewSubmission />);
     await screen.findByTestId('review-file-input');
     await submitAReview();
 

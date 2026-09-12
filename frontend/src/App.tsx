@@ -39,6 +39,7 @@ import ChangePassword from './ChangePassword';
 import { isPasswordMode } from './auth';
 import { buildTimestampFromVersion } from './deployIdentity';
 import { authorizedFetch, onSessionExpired } from './api';
+import { invalidateCatalog } from './playbooksStore';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CtAppShell, CtBanner, CtButton, CtChip, CtTabBar } from './ui/react';
 import { CtPanelSkeleton } from './ui/CtPanelSkeleton';
@@ -357,6 +358,32 @@ export function AppContent({
   // moment that refusal ends; this does. See adminRefresh.ts.
   const [credentialsRefreshKey, setCredentialsRefreshKey] = useState(0);
   const defaultCredentialsWarning = useDefaultCredentialsWarning(credentialsRefreshKey);
+
+  /**
+   * The rotation seam itself — everything that has to happen at the moment the
+   * server-side refusal ends, in ONE place, because this is the only place
+   * that knows the moment (issue #635, extended by issue #72).
+   *
+   * `GET /api/playbooks` is refused for an unrotated account exactly like the
+   * admin routes are (`get_active_user_row` →
+   * `enforce_default_credentials_rotation`; only `/api/me` and
+   * `/api/me/password` are exempt), but it is NOT an admin route: the Review
+   * tab's contract-type dial is behind it for EVERY user. So the shared
+   * catalog's `invalidateCatalog()` is called from here, beside the key bump,
+   * and never from inside a consumer — `AdminPlaybooks` is rendered only
+   * inside the `isAdmin` block below, so a consumer-hosted invalidation would
+   * silently never fire for the exact user class this exists to rescue: a
+   * seeded NON-admin whose catalog read 403'd, who then rotates as the
+   * product asks and would otherwise be left with the dial's error copy for
+   * the rest of the session (a reload is no escape — it signs them out).
+   * `ReviewSubmission` is always mounted and subscribed, so the store has a
+   * listener and the re-read happens immediately. See adminRefresh.ts and
+   * playbooksStore.ts.
+   */
+  const handleCredentialsRotated = useCallback(() => {
+    invalidateCatalog();
+    setCredentialsRefreshKey((key) => key + 1);
+  }, []);
   const buildTimestamp = buildTimestampFromVersion(versionInfo?.version);
 
   // Fetch version from the authenticated /version endpoint via authorizedFetch
@@ -430,23 +457,16 @@ export function AppContent({
 
   const isAdmin = adminCapability === 'admin';
 
-  // Contract-type catalog sync (issue #464). ReviewSubmission's dial and
-  // AdminPlaybooks' table each fetch GET /api/playbooks independently and
-  // keep their own copy; nothing signalled the dial to refetch after an
-  // admin mutation (rename/remove/activate/rollback), so a renamed playbook
-  // kept its old label — or, after removing the last one, stayed selectable
-  // — in the Review tab until a full reload. `catalogVersion` is a plain
-  // refresh signal (not the catalog data itself, per this issue's own
-  // "not prescriptive" note — a full state lift touches both components'
-  // props contracts for no behavioral gain over this): AdminPlaybooks calls
-  // `bumpCatalogVersion` after every mutation that can change what
-  // GET /api/playbooks returns, and ReviewSubmission's catalog-fetch effect
-  // depends on it, so both panels stay mounted (per the tabpanel comment
-  // below) and the dial re-fetches the instant the admin table does.
-  const [catalogVersion, setCatalogVersion] = useState(0);
-  const bumpCatalogVersion = useCallback(() => {
-    setCatalogVersion((version) => version + 1);
-  }, []);
+  // Contract-type catalog sync (issue #464, re-seated by issue #72). This is
+  // where a `catalogVersion` counter used to live: a plain refresh signal
+  // threaded down to ReviewSubmission and back up from AdminPlaybooks through
+  // an `onCatalogChange` callback, because the two panels each held their own
+  // copy of GET /api/playbooks and neither could see the other's. There is
+  // one copy now — `playbooksStore.ts` — and both panels subscribe to it, so
+  // an admin mutation reaches the dial with nothing threaded through here at
+  // all. Neither panel takes a catalog prop any more. The one catalog call
+  // left in this file is `invalidateCatalog()` in `handleCredentialsRotated`
+  // below, which is an event this component owns, not a panel's copy.
 
   // Tab set (issue #599 — REVERSES issue #477's two-tablist DECISION, per
   // owner directive 2026-08-20: the owner looked at the shipped two-tier
@@ -607,7 +627,7 @@ export function AppContent({
         {isPasswordMode() && (
           <ChangePassword
             controlId={CHANGE_PASSWORD_ANCHOR}
-            onChanged={() => setCredentialsRefreshKey((key) => key + 1)}
+            onChanged={handleCredentialsRotated}
           />
         )}
         <CtButton type="button" variant="ghost" onClick={signOut}>
@@ -644,7 +664,7 @@ export function AppContent({
         className="ct-tabpanel"
         hidden={activeTab !== 'review'}
       >
-        <ErrorBoundary name="review"><ReviewSubmission catalogVersion={catalogVersion} /></ErrorBoundary>
+        <ErrorBoundary name="review"><ReviewSubmission /></ErrorBoundary>
       </section>
 
       {/* History — mounted for every signed-in user, not inside the isAdmin
@@ -714,10 +734,7 @@ export function AppContent({
           >
             <ErrorBoundary name="playbooks">
               <Suspense fallback={<CtPanelSkeleton />}>
-                <AdminPlaybooks
-                  onCatalogChange={bumpCatalogVersion}
-                  credentialsRefreshKey={credentialsRefreshKey}
-                />
+                <AdminPlaybooks />
               </Suspense>
             </ErrorBoundary>
           </section>

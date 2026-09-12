@@ -19,8 +19,9 @@
  * Fully offline — fetch stubbed, no network.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
+import { selectedPlaybookId } from './support/consoleSurface';
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -94,8 +95,15 @@ async function submitAndFail(
 ): Promise<void> {
   stubFailedReview(failing_stage, reason, status, normalization_notes);
   render(<ReviewSubmission />);
-  // Wait for the playbook catalog so the submit button is live.
   await screen.findByTestId('review-file-input');
+  // Wait for the playbook catalog, because the lever is DEAD until it lands:
+  // `canSubmit` (orbit-diner/state.ts) requires the selection to name an
+  // active entry of the catalog, so a click fired before the stubbed
+  // GET /api/playbooks has been observed is a silent no-op and every
+  // assertion below then fails for a reason that has nothing to do with
+  // failure diagnosis. The old comment here claimed this wait; only the
+  // file-input one was actually performed.
+  await waitFor(() => expect(selectedPlaybookId()).toBe('eiaa'));
   fireEvent.change(screen.getByTestId('review-file-input'), { target: { files: [docx()] } });
   fireEvent.click(screen.getByTestId('review-submit-button'));
 }

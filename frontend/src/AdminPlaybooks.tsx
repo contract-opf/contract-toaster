@@ -224,8 +224,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
+import {
+  invalidateCatalog,
+  usePlaybookCatalog,
+  type PlaybookCatalogEntry,
+  type PlaybookCatalogStatus,
+} from './playbooksStore';
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail, triggerBrowserDownload } from './api';
 import { linkifyText } from './linkify';
 import { deriveVersionIdentifier, readOpfIdentity } from './opfIdentity';
@@ -249,16 +254,18 @@ import type { CtChipVariant } from './ui/react';
 // backend/src/playbook_versions.py::list_playbook_version_trail.
 // ---------------------------------------------------------------------------
 
-/** Catalog status. Exactly two values exist (issue #433 removed the third). */
-export type PlaybookCatalogStatus = 'active' | 'coming_soon';
+// The catalog entry and its status moved to `playbooksStore.ts` when the fetch
+// became shared (issue #72), and that is now the only import site for them —
+// this module deliberately does NOT re-export them, because nothing imports
+// them from here and a second name for one type is how the two drift apart.
 
-export interface PlaybookCatalogEntry {
-  playbook_id: string;
-  display_name: string;
-  status: PlaybookCatalogStatus;
-  /** The currently-active version's admin-editable note, or "". */
-  notes: string;
-}
+/**
+ * This panel's own copy for a catalog read that failed (issue #72). The
+ * shared store carries the HTTP status and the raw failure and renders
+ * nothing; the sentence a person sees is still decided here, and is the same
+ * one this screen showed before the fetch moved.
+ */
+const CATALOG_ERROR_COPY = "We couldn't load your playbooks. Please try again.";
 
 /** `playbook_versions.status` — the sole lifecycle authority (#79). */
 export type PlaybookVersionStatus = 'draft' | 'active' | 'retired';
@@ -349,36 +356,52 @@ function versionChipVariant(status: PlaybookVersionStatus): CtChipVariant {
   }
 }
 
-export interface AdminPlaybooksProps extends AdminPanelRefreshProps {
-  /**
-   * Issue #464: called after any mutation that can change what
-   * GET /api/playbooks returns (rename, remove, activate, rollback, notes —
-   * `notes` is part of the catalog response too, see `_load_playbook_catalog`).
-   * App.tsx wires this to bump a refresh signal ReviewSubmission's dial
-   * listens on, so a rename/remove lands there without a reload. Optional so
-   * this panel still works standalone (every existing test renders it with
-   * no props).
-   */
-  onCatalogChange?: () => void;
-}
-
-export default function AdminPlaybooks({
-  onCatalogChange,
-  credentialsRefreshKey = 0,
-}: AdminPlaybooksProps = {}): React.ReactElement | null {
+/**
+ * This panel takes NO props (issue #72).
+ *
+ * Issue #464 gave it an `onCatalogChange` callback so App.tsx could bump a
+ * counter ReviewSubmission's dial listened on; issue #635 gave it a
+ * `credentialsRefreshKey` so a password rotation would make its catalog read
+ * run again. Both are gone. The mutation handlers below call
+ * `invalidateCatalog()` on the shared store, which every consumer already
+ * subscribes to, so there is no signal left to thread through a parent; and
+ * the rotation seam moved to App.tsx's `handleCredentialsRotated`, because
+ * this panel renders only for an admin while the catalog it reads is refused
+ * for every unrotated caller — hosting the invalidation here left a non-admin
+ * with no way back (see adminRefresh.ts).
+ */
+export default function AdminPlaybooks(): React.ReactElement | null {
   // Issue #511: two explicit three-state loads. Both previously shared ONE
   // `error` string alongside a `T | null` sentinel, so a failed catalog fetch
   // left a permanent "Loading playbooks…" under a danger banner, and a failed
   // version fetch was indistinguishable from one still in flight.
-  const [playbooksLoad, setPlaybooksLoad] = useState<LoadState<PlaybookCatalogEntry[]>>({
-    status: 'loading',
-  });
-  const playbooks = playbooksLoad.status === 'ready' ? playbooksLoad.data : null;
+  //
+  // Issue #72: the catalog itself is no longer this panel's to own — one
+  // shared, memoised read serves the Review tab's dial and this table alike
+  // (playbooksStore.ts), so an activation here is visible there without a
+  // reload and neither screen pays for the other's fetch. What stays local is
+  // the PRESENTATION of that one load: `playbooksLoad` is the same
+  // three-state shape the render below was written against, and the message
+  // is still this panel's own copy — the store deliberately carries the HTTP
+  // status and the raw failure, never a sentence.
+  const catalog = usePlaybookCatalog();
+  const playbooks = catalog.status === 'ready' ? catalog.data : null;
+  const playbooksLoad: LoadState<PlaybookCatalogEntry[]> =
+    catalog.status === 'ready'
+      ? { status: 'ready', data: catalog.data }
+      : catalog.status === 'failed'
+        ? { status: 'failed', message: CATALOG_ERROR_COPY }
+        : { status: 'loading' };
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   // Any admin route answering 403 hides the panel outright — no client-side
-  // admin claim is trusted here (see this module's docstring).
+  // admin claim is trusted here (see this module's docstring). The catalog's
+  // own 403 is DERIVED rather than latched into this state (issue #72): the
+  // shared store reports the status, and reading it straight means there is
+  // never a render in which the panel is forbidden but has already painted an
+  // error banner on its way to finding out.
   const [isForbidden, setIsForbidden] = useState(false);
+  const catalogForbidden = catalog.status === 'failed' && catalog.error.httpStatus === 403;
 
   // Version history is loaded for one playbook at a time (the trail route is
   // per-playbook), so the table below is scoped to this selection.
@@ -460,35 +483,20 @@ export default function AdminPlaybooks({
   const [creating, setCreating] = useState(false);
   const [createFileDropNonce, setCreateFileDropNonce] = useState(0);
 
-  const loadPlaybooks = useCallback(async () => {
-    try {
-      const response = await jsonFetch('/api/playbooks');
-      if (response.status === 403) {
-        setIsForbidden(true);
-        return;
-      }
-      if (!response.ok) {
-        throw new Error(
-          friendlyErrorMessage(
-            `GET /api/playbooks returned HTTP ${response.status}`,
-            "We couldn't load your playbooks. Please try again.",
-          ),
-        );
-      }
-      // Issue #635: the latch tracks the server's CURRENT answer, not its
-      // first one — see adminRefresh.ts.
+  // Issue #635: the latch tracks the server's CURRENT answer, not its first
+  // one — see adminRefresh.ts. A mutation's 403 sets it; the next catalog read
+  // that actually succeeds clears it. `catalog` is a new snapshot object on
+  // every publish (including a ready → ready refetch), which is what makes a
+  // post-rotation refresh observable here at all. The other half of #635 —
+  // something making that read run AGAIN, since this panel mounts once and
+  // only `hidden` toggles — is App.tsx's `handleCredentialsRotated` calling
+  // `invalidateCatalog()` on the shared store (issue #72); this panel no
+  // longer takes the refresh key, because the catalog is no longer its own.
+  useEffect(() => {
+    if (catalog.status === 'ready') {
       setIsForbidden(false);
-      const data = (await response.json()) as { playbooks: PlaybookCatalogEntry[] };
-      setPlaybooksLoad({ status: 'ready', data: data.playbooks });
-    } catch (err) {
-      setPlaybooksLoad(failedLoad(err, "We couldn't load your playbooks. Please try again."));
     }
-  }, []);
-
-  const retryLoadPlaybooks = useCallback(() => {
-    setPlaybooksLoad({ status: 'loading' });
-    void loadPlaybooks();
-  }, [loadPlaybooks]);
+  }, [catalog]);
 
   const loadVersions = useCallback(async (playbookId: string) => {
     setVersionsLoad({ status: 'loading' });
@@ -516,13 +524,6 @@ export default function AdminPlaybooks({
       );
     }
   }, []);
-
-  // `credentialsRefreshKey` (issue #635) is what makes this effect run a
-  // SECOND time: the panel is mounted once and only `hidden` toggles, so
-  // without it a rotation that ends a 403 is never observed.
-  useEffect(() => {
-    void loadPlaybooks();
-  }, [loadPlaybooks, credentialsRefreshKey]);
 
   /**
    * Issue #611, restoring #484's "one playbook installed: preselected and
@@ -681,13 +682,14 @@ export default function AdminPlaybooks({
 
   const refreshAfterVersionChange = useCallback(
     (playbookId: string) => {
-      void loadPlaybooks();
-      void loadVersions(playbookId);
       // Activate/rollback/notes-save can all change the catalog's `status`
-      // or `notes` (issue #464) — see this callback's call sites.
-      onCatalogChange?.();
+      // or `notes` (issue #464) — see this callback's call sites. One
+      // invalidation now serves BOTH this table and the Review tab's dial
+      // (issue #72); there is no second copy left to notify.
+      invalidateCatalog();
+      void loadVersions(playbookId);
     },
-    [loadPlaybooks, loadVersions, onCatalogChange],
+    [loadVersions],
   );
 
   const activateVersion = useCallback(
@@ -884,13 +886,12 @@ export default function AdminPlaybooks({
         fallback: "We couldn't rename that playbook. Please try again.",
         onSuccess: () => {
           setRenamingId(null);
-          void loadPlaybooks();
           // Issue #464: the dial elsewhere in the app shows this same
           // display_name and has no way to know it changed on its own.
-          onCatalogChange?.();
+          invalidateCatalog();
         },
       }),
-    [loadPlaybooks, onCatalogChange, runAction],
+    [runAction],
   );
 
   const removePlaybook = useCallback(
@@ -910,13 +911,12 @@ export default function AdminPlaybooks({
           setVersionsLoad((current) =>
             historyPlaybookId === playbookId ? { status: 'loading' } : current,
           );
-          void loadPlaybooks();
           // Issue #464: a removed playbook must stop being a selectable
           // option on the dial, not just disappear from this table.
-          onCatalogChange?.();
+          invalidateCatalog();
         },
       }),
-    [historyPlaybookId, loadPlaybooks, onCatalogChange, runAction],
+    [historyPlaybookId, runAction],
   );
 
   const submitUpload = useCallback(
@@ -1008,7 +1008,7 @@ export default function AdminPlaybooks({
         // straight to approving and activating it (issue #611: the overlay,
         // not the instructions selection — an upload says nothing about whose
         // standing guidance they were editing).
-        void loadPlaybooks();
+        invalidateCatalog();
         showHistoryFor(targetId);
       } catch (err) {
         setUploadError(
@@ -1020,7 +1020,7 @@ export default function AdminPlaybooks({
         setUploading(false);
       }
     },
-    [loadPlaybooks, showHistoryFor, uploadFile, uploadNotes, uploadPlaybookId, uploadVersion],
+    [showHistoryFor, uploadFile, uploadNotes, uploadPlaybookId, uploadVersion],
   );
 
   /**
@@ -1164,9 +1164,8 @@ export default function AdminPlaybooks({
         // The identity was derived server-side, not chosen here — open
         // whatever the server actually created, so the admin can go straight
         // to approving and activating it.
-        void loadPlaybooks();
+        invalidateCatalog();
         showHistoryFor(created.playbook_id);
-        onCatalogChange?.();
       } catch (err) {
         setCreateError(
           err instanceof Error
@@ -1177,10 +1176,10 @@ export default function AdminPlaybooks({
         setCreating(false);
       }
     },
-    [createFile, createNotes, createVersion, loadPlaybooks, onCatalogChange, showHistoryFor],
+    [createFile, createNotes, createVersion, showHistoryFor],
   );
 
-  if (isForbidden) {
+  if (isForbidden || catalogForbidden) {
     return null;
   }
 
@@ -1224,7 +1223,7 @@ export default function AdminPlaybooks({
               variant="secondary"
               size="sm"
               data-testid="admin-playbooks-retry"
-              onClick={retryLoadPlaybooks}
+              onClick={invalidateCatalog}
             >
               Try again
             </CtButton>

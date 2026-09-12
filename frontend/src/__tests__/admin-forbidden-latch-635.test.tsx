@@ -38,6 +38,7 @@ import AdminPlaybooks from '../AdminPlaybooks';
 import AdminRetention from '../AdminRetention';
 import AdminUsers from '../AdminUsers';
 import App from '../App';
+import { invalidateCatalog } from '../playbooksStore';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -232,7 +233,24 @@ afterEach(() => {
 // Per-panel: the latch clears and the loaders re-fire on a rotation bump.
 // ---------------------------------------------------------------------------
 
-const PANELS = [
+interface PanelCase {
+  name: string;
+  testId: string;
+  loaderPath: string;
+  element: (key: number) => React.ReactElement;
+  /**
+   * What re-runs this panel's loader after a rotation, for the panels whose
+   * loader is NOT driven by the `credentialsRefreshKey` prop. Issue #72 moved
+   * AdminPlaybooks' catalog into the shared store, and with it the seam:
+   * App.tsx's `handleCredentialsRotated` calls `invalidateCatalog()` (it must
+   * — AdminPlaybooks never mounts for a non-admin, whose Review-tab dial is
+   * behind the same refused route). Rendered standalone, this test has to
+   * play that part itself, exactly as App.tsx does.
+   */
+  rotate?: () => void;
+}
+
+const PANELS: PanelCase[] = [
   {
     name: 'AdminUsers',
     testId: 'admin-users-panel',
@@ -255,7 +273,8 @@ const PANELS = [
     name: 'AdminPlaybooks',
     testId: 'admin-playbooks-panel',
     loaderPath: '/api/playbooks',
-    element: (key: number) => <AdminPlaybooks credentialsRefreshKey={key} />,
+    element: () => <AdminPlaybooks />,
+    rotate: () => invalidateCatalog(),
   },
 ];
 
@@ -274,7 +293,10 @@ describe.each(PANELS)('$name — a rotation 403 does not latch the panel blank (
     // changes; the panel is NOT remounted (App.tsx keeps it mounted and
     // toggles `hidden`), so this rerender is the real production sequence.
     state.rotated = true;
-    view.rerender(panel.element(1));
+    await act(async () => {
+      view.rerender(panel.element(1));
+      panel.rotate?.();
+    });
 
     expect(await screen.findByTestId(panel.testId)).toBeTruthy();
   });
@@ -290,7 +312,10 @@ describe.each(PANELS)('$name — a rotation 403 does not latch the panel blank (
     expect(screen.queryByTestId(panel.testId)).toBeNull();
 
     answered.length = 0;
-    view.rerender(panel.element(1));
+    await act(async () => {
+      view.rerender(panel.element(1));
+      panel.rotate?.();
+    });
     await settleAfterRequests(answered, [panel.loaderPath]);
     expect(screen.queryByTestId(panel.testId)).toBeNull();
   });

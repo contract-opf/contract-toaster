@@ -894,7 +894,10 @@ export interface ReviewSubmissionCallbacks {
   retryPreference: () => void;
   /** Poll `GET /api/reviews/{id}` now, instead of waiting out the backoff. */
   retryPoll: () => void;
-  /** `fetchCatalog` — re-read `GET /api/playbooks`. */
+  /**
+   * `invalidateCatalog()` (playbooksStore.ts) — drop the shared catalog and
+   * re-read `GET /api/playbooks`.
+   */
   retryCatalog: () => void;
   /** The existing sound-mute toggle. */
   toggleSound: () => void;

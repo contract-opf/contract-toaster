@@ -18,8 +18,9 @@
  *      dropped, and an error left over from a closed overlay is eligible for
  *      the main region.
  *   3. INTEGRATION (the real panel, flag forced on). That each retry key
- *      reaches the app's own loader — `fetchCatalog` and the poll effect —
- *      and that Save original calls the existing retained-input route.
+ *      reaches the app's own loader — `invalidateCatalog()` on the shared
+ *      catalog store (playbooksStore.ts, issue #72) and the poll effect — and
+ *      that Save original calls the existing retained-input route.
  *
  * Save original is gated on `has_input` on BOTH sides: the projection reads
  * `detail.has_input`, and the console renders the key only when the model
@@ -549,7 +550,7 @@ describe('issue #726 — the retry keys reach the existing loaders', () => {
     vi.unstubAllGlobals();
   });
 
-  it('re-reads the contract-type catalog through fetchCatalog', async () => {
+  it('re-reads the contract-type catalog through invalidateCatalog', async () => {
     render(<ReviewSubmission />);
     await screen.findByTestId('review-file-input');
     const key = await screen.findByRole('button', { name: 'Reload contract types' });
