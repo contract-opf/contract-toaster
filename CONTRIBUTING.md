@@ -35,7 +35,13 @@ outright building `pydantic-core`.
 python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt -r backend/requirements.txt
 cd frontend && npm ci && cd ..
+bash scripts/setup-hooks.sh            # opt in to .githooks/ (see "Landing a change")
 ```
+
+`setup-hooks.sh` points `core.hooksPath` at `.githooks/`, whose `pre-push`
+refuses a direct push to `main`. It is deliberately opt-in — no gate and no
+npm lifecycle script installs it, so a clean checkout keeps git's default
+hooks. Undo with `bash scripts/setup-hooks.sh --uninstall`.
 
 Verified on Node 26.7 / npm 11.19; nothing here pins a Node version yet.
 
@@ -105,9 +111,29 @@ order.
 
 ## Landing a change
 
+```bash
+git checkout -b phase-N/short-description
+# ... commit ...
+bash scripts/land.sh
+```
+
+`scripts/land.sh` is the whole flow: it refuses to run on `main`, runs
+`cd frontend && npm test`, `bash scripts/check.sh` (with `SKIP_INFRA=1` unless
+the branch touches `infra/`) and `python3 tests/lint-brand-free.py`, and on the
+first red gate prints that gate's name and exits 1 **without pushing**. All
+green, it pushes the branch and runs `gh pr create --fill`, so CI gets its own
+say before anything reaches `main`.
+
+`main` is not protected — the plan does not offer it — so `.githooks/pre-push`
+is the local backstop (`bash scripts/setup-hooks.sh` to opt in). A deliberate
+direct push needs `LAND_TO_MAIN=1 git push origin main`.
+
 - Branch, then pull request. Conventional commits: `feat:`, `fix:`, `chore:`,
   `docs:`, `refactor:`, `test:`.
-- Run both gates before you push. Stage first (see trap 3).
+- Run both gates before you push. `land.sh` runs `check.sh` for you, but its
+  frontend gate is `npm test` (vitest) — not `check-frontend.sh` — so run
+  `bash scripts/check-frontend.sh` yourself for anything touching `frontend/`,
+  or CI's broader frontend job will find it. Stage first (see trap 3).
 - **Update the docs in the same commit.** `docs/INDEX.md` is a projection: one
   line per document, with its scope, section anchors and the code it covers.
   `python3 tools/docs_sync.py update --staged` prints which documents your

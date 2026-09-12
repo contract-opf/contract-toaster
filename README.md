@@ -244,8 +244,21 @@ backlog.
 - All work is tracked in GitHub issues in this repository.
 - Every change goes through a pull request, and CI runs on both branches and
   PRs. Note that `main` is **not** currently protected — the organisation's plan
-  does not offer it, so nothing mechanically stops a direct push. Issue #64
-  tracks the interim guard.
+  does not offer it, so nothing server-side stops a direct push. The interim
+  control (issue #64) is local:
+
+  ```bash
+  bash scripts/setup-hooks.sh   # once per clone: opt in to .githooks/
+  git checkout -b phase-N/short-description
+  # ... commit ...
+  bash scripts/land.sh          # gates, then push + `gh pr create --fill`
+  ```
+
+  `scripts/land.sh` refuses to run on `main`, runs `npm test`,
+  `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes nothing if any
+  of them is red. `.githooks/pre-push` refuses `git push origin main` outright
+  — override a deliberate direct push with `LAND_TO_MAIN=1`. The hooks are
+  opt-in: nothing installs them for you.
 - Anything that modifies `playbooks/` or `prompts/` requires legal review.
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 

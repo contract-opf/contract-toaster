@@ -40,6 +40,13 @@ Closes #
 
 ## Checklist
 
+- [ ] `bash scripts/check-frontend.sh` green (tsc + vite build + vitest + CTDS audits)
+- [ ] `bash scripts/check.sh` green — its **exit code**, not its last line
+      (`SKIP_INFRA=1` only if this PR leaves `infra/` untouched)
+- [ ] `python3 tests/lint-brand-free.py` green
+- [ ] Docs updated in the same PR (`python3 tools/docs_sync.py update --staged`,
+      then `audit` exits 0)
+- [ ] Plan/diagnostic row marked landed, or N/A
 - [ ] Linked to the issue this PR closes
 - [ ] Tests added or updated where applicable
 - [ ] Documentation updated (README / ARCHITECTURE / RUNBOOK / docs) where applicable
