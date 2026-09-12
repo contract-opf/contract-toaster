@@ -19,11 +19,11 @@ It has two roles:
 
 ```bash
 # Point at your own private corpus (any directory of .docx files):
-CORPUS_DIR=/path/to/your/corpus .venv/bin/python3.11 tools/document_spine_smoke.py
+CORPUS_DIR=/path/to/your/corpus .venv/bin/python tools/document_spine_smoke.py
 
 # Or at the generated public regression corpus (built on first run of the test):
-.venv/bin/python3.11 tests/test_document_shapes.py
-CORPUS_DIR=tests/fixtures/document-shapes .venv/bin/python3.11 tools/document_spine_smoke.py
+.venv/bin/python tests/test_document_shapes.py
+CORPUS_DIR=tests/fixtures/document-shapes .venv/bin/python tools/document_spine_smoke.py
 ```
 
 Nothing is written back to the corpus directory and nothing is uploaded anywhere — every edit the harness compiles is discarded after being counted; only the printed numbers survive.
@@ -81,7 +81,7 @@ A document that has been opened and re-saved by a *different* OOXML writer (Libr
 
 ```bash
 soffice --headless --convert-to docx --outdir /tmp/roundtripped /path/to/corpus/*.docx
-CORPUS_DIR=/tmp/roundtripped .venv/bin/python3.11 tools/document_spine_smoke.py
+CORPUS_DIR=/tmp/roundtripped .venv/bin/python tools/document_spine_smoke.py
 ```
 
 This is not run in CI and not required for this issue's gate — it is a manual step for a human operator who wants a wider discovery net, per the module docstring's "no LibreOffice dependency" scope boundary.

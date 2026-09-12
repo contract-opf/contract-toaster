@@ -1,0 +1,10 @@
+# Metadata only — this repo is not packaged or published. The single reason
+# this file exists is to DECLARE the interpreter (issue #63): CI, the DTS
+# container image, `.python-version` and this file must all agree on one
+# Python, and tests/test_python_version_parity_63.py fails if they drift.
+# Nothing here configures a build backend; do not add one without also
+# teaching that test what changed.
+[project]
+name = "contract-toaster"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"

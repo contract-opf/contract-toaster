@@ -49,6 +49,28 @@
 > public `#52`. Pinned by `tests/test_runner_recovery.py`. The finding text
 > below is left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G3 / B3 **landed** as public issue
+> `contract-opf/contract-toaster#63` (private #703 in the table below), on
+> **3.13**, not the 3.12 B3 proposes below: owner decision Q5 chose the
+> current stable rather than the tag the image happened to ship. A root
+> `.python-version` (`3.13`) and `pyproject.toml`
+> (`requires-python = ">=3.13,<3.14"`) declare it,
+> `deploy/dts/backend.Dockerfile` builds `FROM python:3.13-slim`, and the 28
+> `python-version:` pins across the 21 workflows that carry one were moved to
+> `3.13` in one commit — five of those pins written as
+> `${{ env.PYTHON_VERSION }}`, defined in `ci-pipeline.yml` and
+> `dependency-audit.yml`. The agreement is pinned by a new
+> `tests/test_python_version_parity_63.py` rather than by additions to
+> `tests/test_ci_env_parity_639.py` as B3 suggests: that file's scanner walks
+> `run:` step bodies, which is the wrong shape for a `with:` key, so the new
+> file reuses its `WORKFLOWS_DIR` and reporting helpers and adds its own pin
+> resolver. `scripts/check.sh` now prints the interpreter it actually
+> activates and warns — does not fail — when it disagrees with
+> `.python-version`, because the local venv here is still 3.11. The AWS
+> `backend/Dockerfile` is out of scope and still says `python:3.12-slim`.
+> The finding text below is left as written; it describes the state before
+> that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to

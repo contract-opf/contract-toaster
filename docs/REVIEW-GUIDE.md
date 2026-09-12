@@ -102,7 +102,9 @@ downloads need) are in [deploy/dts/README.md](../deploy/dts/README.md).
 
 ## Running the checks
 
-- Backend + infra gate: `bash scripts/check.sh` (Python 3.11 venv; see the
+- Backend + infra gate: `bash scripts/check.sh` (Python 3.13 venv, the version
+  the root `.python-version` declares; the script prints the interpreter it
+  actually activated and warns on a mismatch — see the
   script header). `SKIP_INFRA=1 bash scripts/check.sh` runs the ~20s Python-only
   subset. Each `tests/*.py` is a self-contained script-style runner.
 - Frontend: `cd frontend && npm test` (vitest), `npm run typecheck`,

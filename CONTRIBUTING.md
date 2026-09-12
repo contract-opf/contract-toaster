@@ -24,12 +24,15 @@ git clone https://github.com/contract-opf/contract-toaster.git
 cd contract-toaster
 ```
 
-**Use Python 3.11.** This is not a preference. On 3.14, `pip install` fails
-outright building `pydantic-core`. CI runs 3.11; standardising the whole
-toolchain is issue #63, which is not done.
+**Use Python 3.13.** This is not a preference: it is what the root
+`.python-version` and `pyproject.toml` declare, what every workflow's
+`python-version:` pins, and what `deploy/dts/backend.Dockerfile` ships
+(`tests/test_python_version_parity_63.py` fails if those four drift apart).
+Do not reach for the newest interpreter instead — on 3.14 `pip install` fails
+outright building `pydantic-core`.
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
+python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt -r backend/requirements.txt
 cd frontend && npm ci && cd ..
 ```
