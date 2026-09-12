@@ -9,7 +9,7 @@
 #   - the real scripts/ pipeline chain is importable (Phase 2).
 #
 # Build:  docker build -f deploy/dts/backend.Dockerfile -t contract-toaster-dts-backend .
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 

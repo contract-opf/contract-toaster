@@ -44,7 +44,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Assert GC coverage of legal-behavior paths
         run: python3 tests/test_codeowners_coverage.py

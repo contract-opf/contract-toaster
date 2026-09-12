@@ -94,7 +94,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Run docs-lint
         run: python3 scripts/docs-lint.py
@@ -109,7 +109,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Check phase-0 AC coverage
         run: python3 tests/test_phase0_ac_coverage.py
@@ -130,7 +130,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Check OOXML hygiene both directions
         run: python3 tests/test_ooxml_hygiene_both_directions.py
@@ -154,7 +154,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Install the no-active-bundle gate's backend dependencies
         # Gate 1a is BEHAVIORAL: it imports backend/src/main.py and drives
@@ -199,7 +199,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Check internal-notes marker documentation
         run: python3 tests/test_clean_copy_export_runbook.py

@@ -228,6 +228,31 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f ".venv/bin/activate" ]; then
   source .venv/bin/activate
 fi
 
+# ---------------------------------------------------------------------------
+# INTERPRETER PARITY (issue #63). The repo declares ONE Python — `.python-version`
+# at the root, matched by pyproject.toml's requires-python, the workflows'
+# `python-version:` pins and deploy/dts/backend.Dockerfile's FROM line
+# (tests/test_python_version_parity_63.py fails if those four DECLARATIONS
+# drift apart). What no gate here can check is the interpreter this run is
+# ACTUALLY using: a venv built on another minor version is invisible to a
+# declared-pins test and passes locally while CI runs something else.
+#
+# So print it, and WARN — never fail — on a major.minor mismatch. Warn because
+# the venv on the machine this was written for is 3.11 and rebuilding it is not
+# this script's business; a hard failure here would only teach people to skip
+# the gate. Deliberately after the activation block above so it reports the
+# interpreter the rest of the run will use, and deliberately clear of the
+# `export TZ=` line, which test_ci_env_parity_639.py Check 4 reads in place.
+# ---------------------------------------------------------------------------
+CHECK_PY_ACTUAL="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
+echo "CHECK: python3 is ${CHECK_PY_ACTUAL} ($(command -v python3 || echo 'not found'))"
+if [ -f ".python-version" ]; then
+  CHECK_PY_DECLARED="$(tr -d '[:space:]' < .python-version)"
+  if [ "${CHECK_PY_ACTUAL}" != "${CHECK_PY_DECLARED}" ]; then
+    echo "CHECK: WARNING - interpreter ${CHECK_PY_ACTUAL} does not match .python-version (${CHECK_PY_DECLARED}); CI runs ${CHECK_PY_DECLARED}, so a green run here is not proof of a green run there." >&2
+  fi
+fi
+
 # Clear stale CDK synth output. cdk.out is gitignored and cdk synth does NOT
 # prune templates for stacks that no longer exist, so pre-rename artifacts
 # (e.g. eiaareviewdev*.nested.template.json from before PR #184) linger and

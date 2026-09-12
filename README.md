@@ -146,8 +146,12 @@ The source docs are this README, [ARCHITECTURE.md](ARCHITECTURE.md), [RUNBOOK.md
 
 ## Local development
 
+The toolchain is pinned to **Python 3.13** (root `.python-version` and
+`pyproject.toml`); the Docker Compose backend image and the `python-version:`
+pins in CI declare the same one, and
+`tests/test_python_version_parity_63.py` fails if those declarations diverge.
 The fastest way to see the app running is the self-contained Docker Compose
-stack — no AWS account required:
+stack — no local Python and no AWS account required:
 
 ```bash
 gh repo clone contract-opf/contract-toaster
@@ -207,7 +211,7 @@ current status and blocking issues.
 
 ```bash
 # Prerequisites
-brew install node awscli gh
+brew install node awscli gh python@3.13   # Python 3.13 — see .python-version
 npm install -g aws-cdk
 
 # Infrastructure (CDK)
@@ -219,7 +223,7 @@ cdk deploy                       # deploy
 
 # Backend (run locally against deployed AWS resources)
 cd ../backend
-python -m venv .venv && source .venv/bin/activate
+python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn src.main:app --reload
 
