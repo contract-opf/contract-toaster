@@ -44,7 +44,7 @@ local working artifacts. Please read, by reference:
   prompt-injection model, row-level security, the claude-for-legal fork posture).
 - `docs/phase-0-issues.md` — the Phase 0 backlog, sized to PRs, showing what gets built
   first (note that all security-bearing work is intentionally in Phase 0).
-- `docs/architecture-issue-spotting-2026-06-01.md` — the current supplemental issue
+- `docs/reports/architecture-issue-spotting-2026-06-01.md` — the current supplemental issue
   register and suggested resolutions from the latest architecture pass.
 - `playbooks/schema.json` and `playbooks/eiaa-v1.0.0.json` — the codified review playbook
   the model reasons against.

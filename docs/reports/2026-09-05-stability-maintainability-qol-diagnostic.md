@@ -214,6 +214,32 @@
 > `tests/test_check_only_flag_68.py`. The finding text below is left as
 > written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G10 / B10 **landed** as public issue
+> `contract-opf/contract-toaster#69` (private #709 in the table below).
+> The scaffolding half landed earlier (`docs/INDEX.md`, `docs/CONTEXT.md`,
+> `docs/adr/`, `docs/plans/`, `docs/reports/`, and `tools/docs_sync.py` /
+> `tools/docs_guard.py` vendored so nothing has to be installed). This change
+> closed the two items left open: the seven historical packets
+> (`architecture-review-packet.md`, `.txt`, `architecture-review-prompt.md`,
+> `architecture-review-response.md`,
+> `architecture-issue-spotting-2026-06-01.md`, `handoff_plan_20260904.md`,
+> `handoff_walkthrough_20260904.md`) moved out of the top of `docs/` into
+> `docs/reports/` with their relative links repointed, and
+> `scripts/docs-lint.py` now DERIVES its living-docs set from `docs/INDEX.md`
+> instead of hand-listing it, so the projection is the one list.
+> One departure from B10 as written: the derivation needed a place to record
+> which entries are living, and INDEX lines had no such field. Rather than
+> keep a second block that `docs_sync.py project --write` would delete on the
+> next re-projection, `kind:` was added to the INDEX line grammar itself
+> (`tools/docs_sync.py` `parse_doc_line` / `format_line` / `cmd_project`), so
+> `kind: living` round-trips through a re-projection. `docs-lint.py` raises
+> rather than scanning an empty set if the tag is absent, missing or points at
+> a file that does not exist — an empty living set would make Checks A, B and
+> F pass vacuously. `docs/planning/` was already gone when this landed, so the
+> "14 in `docs/planning/`" half of the finding was moot. Pinned by
+> `tests/test_docs_lint_living_from_index_69.py`. The finding text below is
+> left as written; it describes the state before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to
@@ -360,6 +386,8 @@ be the per-file runner.
 `architecture-review-*` packets and `architecture-issue-spotting-*` into
 `docs/reports/`, `handoff_*` into `docs/reports/`, and let `docs-lint.py`
 derive its "living docs" list from INDEX.md instead of the hand list.
+
+**Landed** — see the G10 status note at the top of this file.
 
 ### G11–G13 — Reviewer and admin quality of life  (P3)
 
