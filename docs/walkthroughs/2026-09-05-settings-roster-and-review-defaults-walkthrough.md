@@ -1,5 +1,19 @@
 # Walkthrough: Settings Legal Entity Roster & Review Tab Defaults
 
+> **Superseded in part, 2026-09-11 (issue #59, audit finding F9).** The
+> auto-creation described below — `_ensure_table()`, and the "handle table
+> auto-creation smoothly" behaviour in `_stored_row()` and
+> `set_entity_roster()` — has been REMOVED. A `create_table` on every roster
+> read is a write-class call on a read path, needed `dynamodb:CreateTable` on
+> the API role, and produced a table with no CMK, no PITR and no removal
+> policy. Provisioning now happens once at boot in
+> `backend/src/startup_checks.py::ensure_entity_roster_table` (Docker Compose
+> target only; the AWS target's table is CDK-managed in
+> `infra/lib/nested/data-stack.ts` and a missing one refuses the boot).
+> The `test_unset_table_env_defaults_to_dts_and_auto_provisions` test named
+> below was renamed and rewritten to call that startup helper. Everything
+> else here still describes the current code.
+
 ## Overview
 This change accomplishes two key UX and reliability improvements across Contract Toaster:
 1. **Legal Entity Roster (Settings Tab)**:

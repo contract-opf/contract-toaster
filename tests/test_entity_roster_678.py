@@ -96,6 +96,7 @@ import opf_prompt  # noqa: E402
 import review_spine  # noqa: E402
 
 import src.entity_roster as entity_roster  # noqa: E402
+import src.startup_checks as startup_checks  # noqa: E402
 import src.main as backend_main  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
 
@@ -519,18 +520,44 @@ class TestRejectedInput(RosterStoreTestBase):
 
 
 class TestDegradation(RosterStoreTestBase):
-    def test_unset_table_env_defaults_to_dts_and_auto_provisions(self):
-        """`ENTITY_ROSTER_TABLE` unset -- defaults to DTS table and auto-provisions
-        the table on demand so the entity roster is always available."""
-        with patch.dict(os.environ, {"ENTITY_ROSTER_TABLE": ""}):
+    def test_unset_table_env_defaults_to_dts_and_is_provisioned_at_startup(self):
+        """`ENTITY_ROSTER_TABLE` unset -- reads and writes go to the DTS
+        default table, which the BOOT path provisions.
+
+        Rewritten for issue #59 (audit finding F9). This used to assert that
+        the request path auto-provisioned the table on demand: every roster
+        read issued a `create_table` and swallowed `ResourceInUseException`.
+        That is gone. `src/startup_checks.ensure_entity_roster_table` is the
+        one provisioner now, so the setup this test needs is a startup call
+        -- the same one `src/main.py`'s lifespan makes -- and NOT a side
+        effect of the first admin save. The no-create_table half of the
+        contract is pinned in tests/test_entity_roster_startup_59.py.
+        """
+        with patch.dict(os.environ, {"ENTITY_ROSTER_TABLE": "", "DEPLOY_TARGET": "dts"}):
+            self.assertEqual(
+                entity_roster._entity_roster_table_name(),
+                entity_roster.DEFAULT_ENTITY_ROSTER_TABLE,
+            )
+            startup_checks.ensure_entity_roster_table(self.ddb)
+
             settings = entity_roster.get_entity_roster(ADMIN, self.ddb)
             self.assertTrue(settings["roster_store_available"])
             self.assertEqual(settings["entities"], [])
             self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), ())
-            # Writing succeeds and auto-provisions the default table
+
             after = entity_roster.set_entity_roster([SIBLING], ADMIN, self.ddb)
             self.assertEqual(after["entities"], [SIBLING])
             self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), (SIBLING,))
+
+    def test_an_unprovisioned_table_degrades_and_never_wedges_a_review(self):
+        """Issue #59: with nothing having provisioned the default table, the
+        read path must degrade to the empty roster -- the pre-#678 behaviour
+        -- instead of creating the table on the fly."""
+        with patch.dict(os.environ, {"ENTITY_ROSTER_TABLE": ""}):
+            with self.assertLogs("src.entity_roster", level="WARNING"):
+                self.assertEqual(entity_roster.resolve_entity_roster(self.ddb), ())
+            existing = self.ddb.meta.client.list_tables()["TableNames"]
+            self.assertNotIn(entity_roster.DEFAULT_ENTITY_ROSTER_TABLE, existing)
 
     def test_a_dynamodb_blip_narrows_the_set_and_never_wedges_a_review(self):
         entity_roster.set_entity_roster([SIBLING], ADMIN, self.ddb)

@@ -577,6 +577,25 @@ export class AppStack extends cdk.NestedStack {
             actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
             resources: [`arn:aws:dynamodb:*:*:table/contract-toaster-user-preferences-${envName}`],
           }),
+          // entity_roster — read + update + DescribeTable (issue #59, audit
+          // finding F9). GET/PUT /api/admin/entity-roster
+          // (src/entity_roster.py::get_entity_roster, set_entity_roster) read
+          // the single global row and update_item it, and every OPF review's
+          // prompt assembly reads it via resolve_entity_roster.
+          //
+          // dynamodb:CreateTable is DELIBERATELY ABSENT. Before #59 the
+          // backend issued a create_table on every roster read and leaned on
+          // ResourceInUseException to no-op; the table is now declared in
+          // DataStack (EntityRosterTable) and src/startup_checks.py refuses
+          // the boot rather than creating one at runtime on this target —
+          // which is what DescribeTable is for: one boot-time existence
+          // check, no write-class call on any request path.
+          new iam.PolicyStatement({
+            sid: 'EntityRosterReadWrite',
+            effect: iam.Effect.ALLOW,
+            actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:DescribeTable'],
+            resources: [`arn:aws:dynamodb:*:*:table/contract-toaster-entity-roster-${envName}`],
+          }),
           // bedrock inference actions are INTENTIONALLY ABSENT from this role.
           // Inference runs under the pipeline task role (#59).
         ],
@@ -622,6 +641,7 @@ export class AppStack extends cdk.NestedStack {
     //   REVIEWS_TABLE              — src/retention.py review rows (purge preview/sweep, legal holds).
     //   RETENTION_SETTINGS_TABLE  — src/retention.py global retention-window settings.
     //   USER_PREFERENCES_TABLE    — src/user_preferences.py per-user preferences (#523).
+    //   ENTITY_ROSTER_TABLE       — src/entity_roster.py our-own-entity roster (#59/#678).
     //   UPLOADS_BUCKET             — src/retention.py purge-sweep target bucket.
     //   OUTPUTS_BUCKET             — src/retention.py purge-sweep target bucket.
     // -----------------------------------------------------------------------
@@ -665,6 +685,16 @@ export class AppStack extends cdk.NestedStack {
       {
         name: 'USER_PREFERENCES_TABLE',
         value: `contract-toaster-user-preferences-${envName}`,
+      },
+      // Issue #59 (audit finding F9): src/entity_roster.py reads this with
+      // .get(...) and degrades to the empty roster when unset, so an unset
+      // value is not a KeyError — it is a review that silently recognises
+      // only the playbook's own perspective.party. Injected so the deployed
+      // API points at the CDK-managed table above rather than at
+      // DEFAULT_ENTITY_ROSTER_TABLE, which names the Docker Compose table.
+      {
+        name: 'ENTITY_ROSTER_TABLE',
+        value: `contract-toaster-entity-roster-${envName}`,
       },
       {
         name: 'UPLOADS_BUCKET',

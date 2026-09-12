@@ -44,6 +44,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -58,6 +59,7 @@ os.environ.setdefault("ENTITY_ROSTER_TABLE", "contract-toaster-entity-roster-55-
 import boto3  # noqa: E402
 
 import src.entity_roster as entity_roster  # noqa: E402
+import src.startup_checks as startup_checks  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
 import preflight_pass  # noqa: E402
@@ -153,10 +155,15 @@ class PartySignalTestBase(pf491.PreflightRouteTestBase):
         super().setUp()
         self.roster_table_name = os.environ["ENTITY_ROSTER_TABLE"]
         real_ddb = boto3.resource("dynamodb", region_name="us-east-1")
-        # The production auto-provisioner, not a hand-rolled create_table:
-        # this is the call a deployment with no roster table makes on its
-        # first read.
-        entity_roster._ensure_table(real_ddb, self.roster_table_name)
+        # The production provisioner, not a hand-rolled create_table: since
+        # issue #59 (audit finding F9) that is the BOOT path, not a fallback
+        # on the first read. `entity_roster._ensure_table` is gone --
+        # `src/main.py`'s lifespan calls this helper, and on the Docker
+        # Compose target it is what creates the table a deployment starts
+        # with. The request path issues no create_table at all any more
+        # (pinned by tests/test_entity_roster_startup_59.py).
+        with patch.dict(os.environ, {"DEPLOY_TARGET": "dts"}):
+            startup_checks.ensure_entity_roster_table(real_ddb)
         self.ddb = _RosterBackedDynamoDB(self.ddb, real_ddb, self.roster_table_name)
         # Process-lifetime cache keyed on the active OPF version's identity
         # (#659's shape, reused by #55). This deployment has no

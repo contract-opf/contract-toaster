@@ -140,6 +140,36 @@
 > and by the extended `tests/test_infra_frontend_csp_226.py` (check 5) and
 > `tests/test_dts_nginx_csp.py` (check 4b). Posture recorded in
 > `docs/threat-model.md` → Frontend security posture.
+>
+> F9 / A9 landed as public issue `contract-opf/contract-toaster#59` (private
+> #699). `backend/src/entity_roster.py::_ensure_table` is DELETED, along with
+> the two request-path `ResourceNotFoundException` → auto-create fallbacks in
+> `_stored_row` and `set_entity_roster`, so no roster read or write issues a
+> `create_table` any more. Provisioning happens once at boot in
+> `backend/src/startup_checks.py::ensure_entity_roster_table`, called from
+> `src/main.py`'s lifespan right after `verify_required_env`: one
+> `describe_table`, and on `ResourceNotFoundException` it creates the table
+> only when `config.deploy_target()` is `dts` (tolerating
+> `ResourceInUseException` from a race with `deploy/dts/bootstrap.py`, which
+> already provisions it). On the AWS target a missing table raises
+> `SystemExit` naming `ENTITY_ROSTER_TABLE` rather than conjuring one with no
+> CMK, no PITR and no removal policy; any OTHER DynamoDB error logs and
+> continues, because the roster is a degrade-to-`()` path by design and a
+> throttle must not wedge the API. The table is now CDK-managed —
+> `infra/lib/nested/data-stack.ts` `EntityRosterTable`
+> (`contract-toaster-entity-roster-${envName}`, PK `setting_id`,
+> PAY_PER_REQUEST, the DynamoDB CMK, PITR, `RemovalPolicy.RETAIN`) — and
+> `app-stack.ts` injects `ENTITY_ROSTER_TABLE` into the App Runner
+> environment beside `RETENTION_SETTINGS_TABLE` and grants the task role
+> `GetItem`/`UpdateItem`/`DescribeTable` on it. A9's item 4 (drop
+> `dynamodb:CreateTable` from the API role) was a no-op: `grep -rn CreateTable
+> infra/lib` returned nothing — the runtime auto-create had never been
+> granted, so on the AWS target it had been failing silently all along.
+> Pinned by `tests/test_entity_roster_startup_59.py` (moto, with a spy
+> resource whose `create_table` RAISES, its own watched-red control, both
+> deploy targets and the bootstrap race) and Check M of
+> `tests/test_infra_dynamodb_tables.py` (the synthesized table plus the App
+> Runner env wiring).
 
 Principal-engineer sweep of Contract Toaster across four pillars (stability,
 accuracy, security, performance). This document is the FINDINGS record and the

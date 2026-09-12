@@ -193,6 +193,11 @@ export class DataStack extends cdk.NestedStack {
   // Issue #61 — retention purge worker: admin-configurable retention window
   // + dual-control/delay state, shared with the future admin UI.
   readonly retentionSettingsTable: dynamodb.Table;
+  // Issue #59 (audit finding F9) — the deployment's roster of our own legal
+  // entity names (#678). One admin-owned row read on every OPF review's
+  // prompt assembly; declared here so the API stops calling create_table on
+  // the request path to conjure it.
+  readonly entityRosterTable: dynamodb.Table;
   // Issue #92 — admin Users UI: single-row status of the Workspace/SSO
   // deprovisioning sync job, shared between the (future) scheduled sync
   // worker and the admin UI's sync-visibility panel.
@@ -1134,6 +1139,42 @@ export class DataStack extends cdk.NestedStack {
     cdk.Tags.of(this.retentionSettingsTable).add('contract-toaster:env', envName);
     cdk.Tags.of(this.retentionSettingsTable).add('contract-toaster:data-class', 'dynamodb');
     cdk.Tags.of(this.retentionSettingsTable).add('contract-toaster:table', 'retention_settings');
+
+    // -----------------------------------------------------------------------
+    // entity_roster table — PK: setting_id (issue #59, audit finding F9)
+    //
+    // The deployment's roster of OUR OWN legal entity names (#678): one row,
+    // setting_id = "global", carrying `entities` (a list of names), who last
+    // set it and a bounded change history. `backend/src/entity_roster.py`
+    // reads it on every OPF review's prompt assembly and the admin
+    // Entity Roster panel reads/writes it.
+    //
+    // This table exists here because the backend used to conjure it at
+    // runtime: `entity_roster._ensure_table` issued a `create_table` on every
+    // read and no-op'd on ResourceInUseException. A table created that way has
+    // no CMK, no PITR and no removal policy, and it needed dynamodb:CreateTable
+    // on the API role. Since #59 the backend only ever reads and updates, and
+    // this declaration is the sole creator on the AWS target (the Docker
+    // Compose target's is deploy/dts/bootstrap.py).
+    //
+    // Same shape as RetentionSettingsTable above and for the same reasons:
+    // it is a single admin-owned configuration row governing what every
+    // review prompt says about who we are, so its history is worth
+    // point-in-time recovery and its removal policy is RETAIN.
+    // -----------------------------------------------------------------------
+    this.entityRosterTable = new dynamodb.Table(this, 'EntityRosterTable', {
+      tableName: `${appName}-entity-roster-${envName}`,
+      partitionKey: { name: 'setting_id', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      encryption: ddbEncryption,
+      encryptionKey: dynamodbKeyEncryption,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    cdk.Tags.of(this.entityRosterTable).add('contract-toaster:env', envName);
+    cdk.Tags.of(this.entityRosterTable).add('contract-toaster:data-class', 'dynamodb');
+    cdk.Tags.of(this.entityRosterTable).add('contract-toaster:table', 'entity_roster');
 
     // -----------------------------------------------------------------------
     // user_preferences table — PK: cognito_sub (issue #523, epic #519 item F)
