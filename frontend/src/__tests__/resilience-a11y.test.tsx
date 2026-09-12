@@ -41,6 +41,7 @@ import App from '../App';
 import { OrbitDiner } from '../orbit-diner/OrbitDiner';
 import { toReviewModel, type ReviewProjectionState } from '../orbit-diner/projection';
 import type { Playbook, ReviewModel } from '../orbit-diner/types';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 interface FakeAuthSession {
   tokens: {
@@ -313,6 +314,9 @@ describe('friendly errors — no raw technical strings', () => {
   // in for the real retired name without repeating it literally (the repo's
   // own #465 gate greps the tree for that exact string).
   it('never renders the raw server `detail` for a download failure, even when one is sent', async () => {
+    // The whole point: the raw detail goes to the console and NOT to the
+    // screen, so seeing it logged here is the expected half (issue #68).
+    allowConsoleErrorsInThisTest(/EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured/);
     const CONFIG_DETAIL = 'EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured.';
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -521,6 +525,9 @@ describe('accessibility — status and error regions', () => {
 // ---------------------------------------------------------------------------
 describe('shared authorizedFetch — empty-token short circuit', () => {
   it('sends no Authorization header when getToken() resolves empty', async () => {
+    // This test lets the real fetch run against a relative path, which
+    // undici refuses to parse; the component logs the rejection (#68).
+    allowConsoleErrorsInThisTest(/Failed to parse URL/);
     // Every call, not only the first: the console reads the catalog before it
     // can submit, so a one-shot empty session would be spent on that and the
     // POST this test inspects would carry a real token (issue #733).

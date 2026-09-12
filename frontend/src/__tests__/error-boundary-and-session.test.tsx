@@ -35,14 +35,45 @@ function Fine(): React.ReactElement {
 
 let consoleError: ReturnType<typeof vi.spyOn>;
 
+/**
+ * The messages THIS file throws on purpose, and nothing else (issue #68).
+ *
+ * React's development build re-dispatches a render-time throw as a real DOM
+ * event on a detached node so a debugger can break on it. jsdom catches the
+ * listener exception and reports it: an `error` event on `window` and, if
+ * nothing cancels that event, a `jsdomError` on the virtual console
+ * (node_modules/jsdom/lib/jsdom/living/helpers/runtime-script-errors.js). The
+ * virtual console was wired to `console` when the environment was built, BEFORE
+ * vitest installed its own `globalThis.console`, so `setupTests.ts`'s
+ * `console.error` guard structurally cannot see or suppress these — which is
+ * why the five tests here that render a throwing component accounted for 110
+ * of the 115 residual noise lines in a full `npm test` before this listener
+ * existed (ten reports, eleven lines each; React retries the failed render, so
+ * each such test reports twice).
+ *
+ * Cancelling the `error` event is the one place the report can be stopped, and
+ * it is matched by MESSAGE so that anything else escaping to the window in this
+ * file is still reported loudly. React reads the same event to recover its own
+ * error; `preventDefault()` does not stop propagation, so it still does.
+ */
+const DELIBERATE_THROWS: readonly string[] = [`render exploded on ${SECRET}`, 'transient'];
+
+function cancelDeliberateThrowReport(event: ErrorEvent): void {
+  if (event.error instanceof Error && DELIBERATE_THROWS.includes(event.error.message)) {
+    event.preventDefault();
+  }
+}
+
 beforeEach(() => {
   // React logs caught boundary errors itself; silence it so a passing run is
   // readable, and so the assertion below is about OUR console call.
   consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  window.addEventListener('error', cancelDeliberateThrowReport);
   __resetSessionExpiredListeners();
 });
 
 afterEach(() => {
+  window.removeEventListener('error', cancelDeliberateThrowReport);
   consoleError.mockRestore();
   vi.unstubAllGlobals();
   __resetSessionExpiredListeners();

@@ -100,13 +100,53 @@ const BODIES: Record<string, unknown> = {
     updated_by: null,
     model_provider: 'openrouter',
   },
+  // The WHOLE body `get_model_selection_settings` sends
+  // (backend/src/model_settings.py), not a subset (issue #68).
+  //
+  // This fixture used to carry six fields. `isModelSelectionSettings`
+  // (AdminModel.tsx) requires `default_primary`, `default_critic` and both
+  // `pricing_basis_*` before the panel will price anything, so the stub was a
+  // shape the server cannot send and every mount here quietly took the
+  // "unexpected body" error path instead of the success path these tests
+  // claim to exercise. It went unnoticed because the only evidence was a
+  // `console.error` line in a wall of them; #68's console guard is what
+  // surfaced it. `default_primary` is also one of `selectable` — an invariant
+  // the server has guaranteed since issue #589.
   '/api/admin/model-selection': {
+    setting_id: 'models',
     selection_store_available: true,
-    selected_primary_model_id: null,
-    selected_critic_model_id: null,
-    selectable: [],
+    model_provider: 'openrouter',
+    selectable: [
+      {
+        model_id: 'anthropic/claude-opus-5',
+        display_name: 'Claude Opus 5',
+        tier: 'Highest',
+        note: 'Test catalogue entry.',
+        cost_per_million_input_usd: 5,
+        cost_per_million_output_usd: 25,
+        context_length: 200000,
+      },
+    ],
+    default_primary: {
+      model_id: 'anthropic/claude-opus-5',
+      cost_per_million_input_usd: 5,
+      cost_per_million_output_usd: 25,
+    },
+    default_critic: {
+      model_id: 'anthropic/claude-opus-5',
+      cost_per_million_input_usd: 5,
+      cost_per_million_output_usd: 25,
+    },
+    pricing_basis_primary: { input_tokens: 60000, output_tokens: 8000 },
+    pricing_basis_critic: { input_tokens: 70000, output_tokens: 5000 },
+    selected_primary_model_id: '',
+    selected_critic_model_id: '',
     effective_primary_model_id: 'anthropic/claude-opus-5',
     effective_critic_model_id: 'anthropic/claude-opus-5',
+    primary_source: 'default',
+    critic_source: 'default',
+    updated_at: '',
+    updated_by: '',
   },
   '/api/admin/retention': {
     retention_window_days: 90,

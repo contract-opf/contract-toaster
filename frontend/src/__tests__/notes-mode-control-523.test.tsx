@@ -49,6 +49,7 @@ import {
   NOTES_MODE_SETTINGS,
   type NotesMode,
 } from '../notesMode';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: vi.fn(async () => ({
@@ -265,6 +266,9 @@ describe('notes mode — automatically persists across sessions', () => {
   });
 
   it('renders retry button on preference save error and retries save on click', async () => {
+    // The rejected preferences save is the subject of this test; the panel
+    // logs it and shows a retry (issue #68).
+    allowConsoleErrorsInThisTest(/network hiccup/);
     let failPut = true;
     await mountForm({ notes_mode: 'external' });
 

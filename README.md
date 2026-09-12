@@ -259,6 +259,14 @@ backlog.
   of them is red. `.githooks/pre-push` refuses `git push origin main` outright
   — override a deliberate direct push with `LAND_TO_MAIN=1`. The hooks are
   opt-in: nothing installs them for you.
+- The two gates are `bash scripts/check.sh` (the Python suite, docs-lint and
+  the detectors) and `bash scripts/check-frontend.sh` (typecheck, build,
+  vitest and the design-system audits). Add `SKIP_INFRA=1` to the first unless
+  you touched `infra/`. While you are iterating on one file, narrow it with a
+  quoted glob — `bash scripts/check.sh --only 'tests/test_review_api_84.py'` —
+  which runs the same loop over just the matches and exits 4, never green, if
+  the glob matches nothing. A full run is still what lands a change.
+  [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 - Anything that modifies `playbooks/` or `prompts/` requires legal review.
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 

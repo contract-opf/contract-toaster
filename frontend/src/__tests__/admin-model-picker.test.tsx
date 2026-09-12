@@ -21,6 +21,7 @@ import AdminModel, {
   formatUsd,
   perReviewCostUsd,
 } from '../AdminModel';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -557,6 +558,9 @@ describe('AdminModel — the model picker', () => {
   });
 
   it('shows an error banner rather than blanking out on an unexpected body', async () => {
+    // The stub deliberately sends a body the panel's type guard rejects, so
+    // the log this provokes is the point of the test (issue #68).
+    allowConsoleErrorsInThisTest(/returned an unexpected body/);
     stubFetch({ get: () => ({ status: 200, body: { setting_id: 'models' } }) });
     render(<AdminModel />);
 

@@ -122,8 +122,13 @@ bash scripts/land.sh    # gates, then push + `gh pr create --fill`
 `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes nothing if any of
 them is red — it reads `check.sh`'s exit code directly, so exit 2
 (FLAKY-UNRESOLVED) and exit 3 (another gate run holds the lock) both stop the
-landing. `.githooks/pre-push` refuses a direct push to `main`; opt in with
-`bash scripts/setup-hooks.sh`, override a deliberate direct push with
+landing. It invokes `check.sh` with no arguments, so the full suite is always
+what a landing is measured against; `check.sh --only <glob>` (issue #68) is a
+development convenience, and its exit 4 — nothing ran, because the glob matched
+nothing — cannot arise here. Nor can an exported `CHECK_ONLY` narrow it:
+`check.sh` clears that variable before it parses its arguments, so the flag is
+the only way in. `.githooks/pre-push` refuses a direct push to `main`; opt in
+with `bash scripts/setup-hooks.sh`, override a deliberate direct push with
 `LAND_TO_MAIN=1`.
 
 Two notes on that guard:

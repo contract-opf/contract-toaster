@@ -27,6 +27,7 @@ import {
   pressSubmit,
 } from './support/consoleSurface';
 import ReviewHistory, { HistoryRow } from '../ReviewHistory';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -193,6 +194,9 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
   });
 
   it('shows a friendly error and never a raw HTTP detail when the write fails', async () => {
+    // The server detail this test asserts is NEVER rendered is still logged
+    // for an operator (issue #68).
+    allowConsoleErrorsInThisTest(/DYNAMODB_TABLE_NAME not configured/);
     const fetchMock = stubReviewSubmissionFetch({
       'POST /api/reviews': { review_id: 'rev-1', resumed: false },
       'GET /api/reviews/rev-1': DONE_DETAIL,
