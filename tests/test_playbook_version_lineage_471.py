@@ -57,11 +57,11 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+TESTS_DIR = REPO_ROOT / "tests"
 
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+for _path in (str(BACKEND_ROOT), str(SCRIPTS_DIR), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-review-submissions-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
@@ -74,9 +74,19 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
 import seed_active_bundle  # noqa: E402
 import src.playbook_versions as playbook_versions_module  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
+
+from ddb_fixtures import create_reviews_table  # noqa: E402
 
 # Pinned explicitly, same reasoning as tests/test_active_bundle_resolver_194
 # .py: a real, schema-valid, non-test_only registry entry so
@@ -380,28 +390,27 @@ class TestNoMatchingPlaybookVersionsRowRecordsNothing(unittest.TestCase):
 OWNER = "owner-471-projection"
 
 
-def _row_resource(*rows: dict[str, Any]):
-    class _Table:
-        def __init__(self, items: list[dict[str, Any]]):
-            self._items = [dict(r) for r in items]
+class _ReviewsProjectionTestCase(unittest.TestCase):
+    """A REAL (moto) reviews table per test, seeded row by row.
 
-        def scan(self, **_kwargs: Any) -> dict[str, Any]:
-            return {"Items": [dict(r) for r in self._items]}
+    Issue #67: this file used to hand `get_review_detail` / `list_reviews` a
+    scan-only stand-in with no `.query`, so the listing took a duck-typed
+    scan-and-filter fallback that a real boto3 Table can never reach. That
+    fallback is deleted -- `list_reviews` pages the `owner_sub-index` GSI --
+    so the table has to be one that HAS the index.
+    """
 
-        def get_item(self, Key):
-            for row in self._items:
-                if row["review_id"] == Key["review_id"]:
-                    return {"Item": dict(row)}
-            return {}
+    def setUp(self) -> None:
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.table = create_reviews_table(self.boto_ddb)
 
-    class _Resource:
-        def __init__(self, table: _Table):
-            self._table = table
-
-        def Table(self, _name: str) -> _Table:
-            return self._table
-
-    return _Resource(_Table(list(rows)))
+    def _row_resource(self, *rows: dict[str, Any]):
+        for row in rows:
+            self.table.put_item(Item=dict(row))
+        return self.boto_ddb
 
 
 def _caller_row(sub: str, is_admin: bool = False) -> dict[str, Any]:
@@ -429,24 +438,24 @@ UNVERSIONED_ROW: dict[str, Any] = {
 }
 
 
-class TestProjectionCarriesPlaybookVersionLineage(unittest.TestCase):
+class TestProjectionCarriesPlaybookVersionLineage(_ReviewsProjectionTestCase):
     def test_detail_projects_recorded_version_and_hash(self):
         detail = reviews_module.get_review_detail(
-            "rev-471-versioned", _caller_row(OWNER), _row_resource(VERSIONED_ROW)
+            "rev-471-versioned", _caller_row(OWNER), self._row_resource(VERSIONED_ROW)
         )
         self.assertEqual(detail["playbook_version"], SEEDED_VERSION)
         self.assertEqual(detail["playbook_content_hash"], SEEDED_CONTENT_HASH)
 
     def test_detail_projects_none_when_never_recorded(self):
         detail = reviews_module.get_review_detail(
-            "rev-471-unversioned", _caller_row(OWNER), _row_resource(UNVERSIONED_ROW)
+            "rev-471-unversioned", _caller_row(OWNER), self._row_resource(UNVERSIONED_ROW)
         )
         self.assertIsNone(detail["playbook_version"])
         self.assertIsNone(detail["playbook_content_hash"])
 
     def test_list_carries_both_fields(self):
         items = reviews_module.list_reviews(
-            _caller_row(OWNER), _row_resource(VERSIONED_ROW, UNVERSIONED_ROW)
+            _caller_row(OWNER), self._row_resource(VERSIONED_ROW, UNVERSIONED_ROW)
         )['items']
         by_id = {item["review_id"]: item for item in items}
 

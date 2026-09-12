@@ -60,11 +60,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+TESTS_DIR = REPO_ROOT / "tests"
 
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+for _path in (str(BACKEND_ROOT), str(SCRIPTS_DIR), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "contract-toaster-review-submissions-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
@@ -90,6 +90,8 @@ import seed_active_bundle  # noqa: E402
 import src.download as download_module  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
+
+from ddb_fixtures import create_reviews_table  # noqa: E402
 
 PLAYBOOK_ID = "synthetic-generic"
 UNSEEDED_PLAYBOOK_ID = "no-active-bundle-for-this-one"
@@ -285,6 +287,17 @@ class FakeDynamoDBResource:
     def __init__(self):
         self._tables: dict[str, FakeTable] = {}
 
+    def use_table(self, name: str, table) -> None:
+        """Install a REAL (moto) table under `name`, replacing the in-memory
+        stand-in for that one table only.
+
+        Issue #67: production no longer duck-types the table object, so any
+        read that goes through a GSI needs a table that HAS the index. The
+        rest of this file still needs `FakeTable`, because moto 5.2.2 cannot
+        parse `reserve_spend`'s atomic ConditionExpression (see this module's
+        docstring) -- so the swap is per table, not wholesale."""
+        self._tables[name] = table
+
     def Table(self, name: str) -> FakeTable:
         if name not in self._tables:
             key_name = {
@@ -414,6 +427,27 @@ class ReviewApiTestBase(unittest.TestCase):
 
     def tearDown(self):
         self._mock_aws.stop()
+
+    def use_real_reviews_table(self):
+        """Swap the in-memory reviews stand-in for a REAL (moto) table with
+        the CDK's GSIs, and return it.
+
+        Issue #67: the reviews reads that go through an index --
+        `owner_sub-index` for a `scope=mine` listing, `status-index` for the
+        admin-wide one -- no longer duck-type the table and fall back to a
+        scan, so any test that drives them needs a table that HAS the index.
+        Call this from a subclass's `setUp` AFTER `super().setUp()`. Only the
+        reviews table is swapped: moto 5.2.2 cannot parse `reserve_spend`'s
+        atomic ConditionExpression (see this module's docstring), so the
+        daily-spend table must stay a `FakeTable`.
+
+        NOTE for callers: after this, the reviews table is a boto3 Table --
+        read it with `get_item` / `scan`, not `.items`.
+        """
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = create_reviews_table(self.boto_ddb)
+        self.ddb.use_table(os.environ["REVIEWS_TABLE"], table)
+        return table
 
     def _authenticate_as(self, sub: str, is_admin: bool = False) -> dict:
         row = _caller_row(sub, is_admin=is_admin)
@@ -821,15 +855,37 @@ class TestDownloadAudit(ReviewApiTestBase):
 
 
 class TestListReviews(ReviewApiTestBase):
+    """The listing is the one route in this file that reads the reviews table
+    through a GSI: the owner scope pages `owner_sub-index`, and the admin
+    scope merges one `status-index` query per status (issue #52). Issue #67
+    deleted the duck-typed scan fallbacks those reads used to take against a
+    stand-in with no `.query()`, so this class swaps in a REAL (moto) reviews
+    table carrying the CDK's indexes -- the only table that has to be real
+    here, since moto cannot parse `reserve_spend`'s condition expression."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_real_reviews_table()
+
+    def _seed_listing_rows(self) -> None:
+        """Two rows with different owners and different `created_at` values —
+        the shape `reviews.create_review` writes."""
+        table = self._reviews_table()
+        table.put_item(
+            Item={
+                "review_id": "r1", "owner_sub": "owner-list-a", "status": "DONE",
+                "playbook_id": PLAYBOOK_ID, "created_at": "1", "updated_at": "1",
+            }
+        )
+        table.put_item(
+            Item={
+                "review_id": "r2", "owner_sub": "owner-list-b", "status": "DONE",
+                "playbook_id": PLAYBOOK_ID, "created_at": "2", "updated_at": "2",
+            }
+        )
+
     def test_owner_sees_only_own_reviews(self):
-        self._reviews_table().items["r1"] = {
-            "review_id": "r1", "owner_sub": "owner-list-a", "status": "DONE",
-            "playbook_id": PLAYBOOK_ID, "created_at": "1", "updated_at": "1",
-        }
-        self._reviews_table().items["r2"] = {
-            "review_id": "r2", "owner_sub": "owner-list-b", "status": "DONE",
-            "playbook_id": PLAYBOOK_ID, "created_at": "2", "updated_at": "2",
-        }
+        self._seed_listing_rows()
 
         self._authenticate_as("owner-list-a")
         resp = self.client.get("/api/reviews")
@@ -839,14 +895,7 @@ class TestListReviews(ReviewApiTestBase):
         self.assertEqual(ids, {"r1"})
 
     def test_admin_sees_all_reviews(self):
-        self._reviews_table().items["r1"] = {
-            "review_id": "r1", "owner_sub": "owner-list-a", "status": "DONE",
-            "playbook_id": PLAYBOOK_ID, "created_at": "1", "updated_at": "1",
-        }
-        self._reviews_table().items["r2"] = {
-            "review_id": "r2", "owner_sub": "owner-list-b", "status": "DONE",
-            "playbook_id": PLAYBOOK_ID, "created_at": "2", "updated_at": "2",
-        }
+        self._seed_listing_rows()
 
         self._authenticate_as("admin-user", is_admin=True)
         resp = self.client.get("/api/reviews")

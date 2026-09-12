@@ -71,20 +71,30 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
+TESTS_DIR = REPO_ROOT / "tests"
 
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
+for _path in (str(BACKEND_ROOT), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-test")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
+import boto3  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import src.main as backend_main  # noqa: E402
 from src import reviews as reviews_module  # noqa: E402
+
+from ddb_fixtures import create_reviews_table  # noqa: E402
 
 ROUTE = "/api/admin/diagnostics/recent-failures"
 
@@ -161,63 +171,6 @@ class FakeUsersTable:
         return {"Item": dict(item)} if item else {}
 
 
-class FakeReviewsTable:
-    """Scan-first stand-in. Deliberately has NO `query`, and returns rows in
-    an arbitrary (insertion) order -- ordering is the route's job.
-
-    Also supports `put_item`/`get_item`/`update_item` so a test can let the
-    REAL production writer shape a row instead of hand-copying what that
-    writer is believed to store. `update_item` applies a plain `SET a = :x,
-    #b = :y` expression GENERICALLY -- it does not pattern-match any
-    particular caller's expression string, so it cannot silently agree with a
-    writer that changed.
-    """
-
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
-        self.rows: list[dict[str, Any]] = list(rows or [])
-
-    def scan(self, **_kwargs):
-        return {"Items": [dict(r) for r in self.rows]}
-
-    def put_item(self, Item):  # noqa: N803 - boto3 kwarg name
-        self.rows = [r for r in self.rows if r["review_id"] != Item["review_id"]]
-        self.rows.append(dict(Item))
-
-    def get_item(self, Key):  # noqa: N803 - boto3 kwarg name
-        for row in self.rows:
-            if row["review_id"] == Key["review_id"]:
-                return {"Item": dict(row)}
-        return {}
-
-    def update_item(  # noqa: N803 - boto3 kwarg names
-        self,
-        Key,
-        UpdateExpression,
-        ExpressionAttributeValues=None,
-        ExpressionAttributeNames=None,
-        **_kwargs,
-    ):
-        expression = UpdateExpression.strip()
-        if not expression.upper().startswith("SET "):
-            raise AssertionError(f"fake only understands SET: {UpdateExpression!r}")
-        names = ExpressionAttributeNames or {}
-        values = ExpressionAttributeValues or {}
-
-        target = None
-        for row in self.rows:
-            if row["review_id"] == Key["review_id"]:
-                target = row
-                break
-        if target is None:
-            target = dict(Key)
-            self.rows.append(target)
-
-        for assignment in expression[4:].split(","):
-            attribute, _, placeholder = assignment.partition("=")
-            attribute = attribute.strip()
-            target[names.get(attribute, attribute)] = values[placeholder.strip()]
-
-
 class FakePlaybooksTable:
     """Only what `_read_active_release_bundle_hash` touches. An EMPTY table is
     the documented "no bundle is active" state, which is one of the two ways a
@@ -235,7 +188,7 @@ class FakeDynamoDBResource:
     def __init__(
         self,
         users: FakeUsersTable,
-        reviews: FakeReviewsTable,
+        reviews,
         playbooks: "FakePlaybooksTable | None" = None,
     ) -> None:
         self._tables = {
@@ -261,9 +214,22 @@ def _seed_user(table: FakeUsersTable, sub: str, *, is_admin: bool) -> None:
 
 
 class DiagnosticsRouteTestBase(unittest.TestCase):
+    """Issue #67: the reviews table here is a REAL (moto) one carrying the
+    CDK's GSIs. It used to be a scan-first stand-in that deliberately had NO
+    `query`, so `list_recent_failures` took a duck-typed scan fallback a real
+    boto3 Table can never reach. The route now issues one `status-index`
+    query per failure status, and a stand-in without the index cannot stand
+    in for that. The users/playbooks tables stay in-memory stand-ins --
+    nothing in this removal touches them."""
+
     def setUp(self) -> None:
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+
         self.users = FakeUsersTable()
-        self.reviews = FakeReviewsTable()
+        self.reviews = create_reviews_table(self.boto_ddb)
         self.playbooks = FakePlaybooksTable()
         self.ddb = FakeDynamoDBResource(self.users, self.reviews, self.playbooks)
         self.app = backend_main.app
@@ -272,6 +238,16 @@ class DiagnosticsRouteTestBase(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.app.dependency_overrides.clear()
+
+    def seed_reviews(self, rows: list[dict[str, Any]]) -> None:
+        """Write `rows` to the real reviews table. Batched because one test
+        seeds several hundred."""
+        with self.reviews.batch_writer() as batch:
+            for row in rows:
+                batch.put_item(Item=dict(row))
+
+    def review_row(self, review_id: str) -> dict[str, Any]:
+        return self.reviews.get_item(Key={"review_id": review_id}).get("Item") or {}
 
     def _authenticate_as(self, sub: str) -> None:
         claims = {"sub": sub, "email": f"{sub}@example.com", "token_use": "id"}
@@ -297,16 +273,16 @@ class DiagnosticsRouteTestBase(unittest.TestCase):
 class TestAdminGate(DiagnosticsRouteTestBase):
     def test_non_admin_is_forbidden(self) -> None:
         self._as_reviewer()
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row("r-1", status_value="ERROR", created_at="1000", reason="model_key_rejected")
-        ]
+        ])
         resp = self._get()
         self.assertEqual(resp.status_code, 403)
 
     def test_non_admin_response_carries_no_review_data(self) -> None:
         """A 403 that still echoed the rows would be worse than no route."""
         self._as_reviewer()
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row(
                 "r-secret",
                 status_value="ERROR",
@@ -315,7 +291,7 @@ class TestAdminGate(DiagnosticsRouteTestBase):
                 failing_stage="run_review",
                 sensitive=True,
             )
-        ]
+        ])
         body = self._get().text
         self.assertNotIn("r-secret", body)
         for value in SENSITIVE_FIELDS.values():
@@ -341,7 +317,7 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
 
     def test_succeeded_running_and_superseded_reviews_never_appear(self) -> None:
         self._as_admin()
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row("r-done", status_value="DONE", created_at="1005"),
             _review_row("r-pending", status_value="PENDING", created_at="1004"),
             _review_row("r-running", status_value="RUNNING", created_at="1003"),
@@ -353,7 +329,7 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
                 reason="model_account_out_of_credits",
                 failing_stage="run_review",
             ),
-        ]
+        ])
         self.assertEqual(self._ids(), ["r-error"])
 
     def test_every_failure_terminal_appears(self) -> None:
@@ -364,7 +340,7 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
             "MANUAL_REVIEW_REQUIRED",
             "QUARANTINED",
         ]
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row(
                 f"r-{i}",
                 status_value=s,
@@ -373,7 +349,7 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
                 failing_stage="run_review",
             )
             for i, s in enumerate(failure_statuses)
-        ]
+        ])
         self.assertEqual(sorted(self._ids()), sorted(f"r-{i}" for i in range(len(failure_statuses))))
 
     def test_a_quarantined_row_as_production_actually_writes_it_carries_its_cause(self) -> None:
@@ -452,11 +428,11 @@ class TestWhichRowsAppear(DiagnosticsRouteTestBase):
 
     def test_newest_first(self) -> None:
         self._as_admin()
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row("r-old", status_value="ERROR", created_at="1000", reason="x"),
             _review_row("r-new", status_value="ERROR", created_at="3000", reason="x"),
             _review_row("r-mid", status_value="ERROR", created_at="2000", reason="x"),
-        ]
+        ])
         self.assertEqual(self._ids(), ["r-new", "r-mid", "r-old"])
 
 
@@ -483,7 +459,7 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
     def setUp(self) -> None:
         super().setUp()
         self._as_admin()
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row(
                 "r-leaky",
                 status_value="ERROR",
@@ -493,7 +469,7 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
                 failed_at="1700000042",
                 sensitive=True,
             )
-        ]
+        ])
 
     def test_row_shape_is_exactly_the_ten_documented_fields(self) -> None:
         row = self._get().json()["failures"][0]
@@ -544,7 +520,9 @@ class TestNothingSensitiveIsEchoed(DiagnosticsRouteTestBase):
     def test_a_field_added_to_the_row_tomorrow_cannot_appear(self) -> None:
         """The projection is an allowlist, so an unknown field is invisible by
         construction -- not by anyone remembering to redact it."""
-        self.reviews.rows[0]["some_future_field"] = "SENTINEL-FUTURE"
+        row = self.review_row("r-leaky")
+        row["some_future_field"] = "SENTINEL-FUTURE"
+        self.reviews.put_item(Item=row)
         body = self._get().text
         self.assertNotIn("some_future_field", body)
         self.assertNotIn("SENTINEL-FUTURE", body)
@@ -559,7 +537,7 @@ class TestBounded(DiagnosticsRouteTestBase):
     def setUp(self) -> None:
         super().setUp()
         self._as_admin()
-        self.reviews.rows = [
+        self.seed_reviews([
             _review_row(
                 f"r-{i:05d}",
                 status_value="ERROR",
@@ -568,7 +546,7 @@ class TestBounded(DiagnosticsRouteTestBase):
                 failing_stage="run_review",
             )
             for i in range(reviews_module.RECENT_FAILURES_MAX_LIMIT + 250)
-        ]
+        ])
 
     def _count(self, query: str = "") -> int:
         resp = self._get(query)
@@ -597,24 +575,41 @@ class TestBounded(DiagnosticsRouteTestBase):
 
 
 class TestDecimalRowsDoNotFiveHundred(DiagnosticsRouteTestBase):
-    def test_a_decimal_created_at_is_serialized_rather_than_500ing(self) -> None:
-        """boto3's resource API returns Decimal for every stored number.
+    def test_a_decimal_numeric_field_is_serialized_rather_than_500ing(self) -> None:
+        """boto3's resource API returns Decimal for every stored NUMBER.
         `GET /api/users` 500'd in production on exactly this (issue #440)
-        while the suite stayed green, because the fakes store plain ints."""
+        while the suite stayed green, because the fakes stored plain ints.
+
+        The number in the projection is `critic_attempts` (issue #665), which
+        `pipeline_runner` writes as a plain `int` -- so a real read of a real
+        row hands this route a `Decimal` for it. (`created_at` is NOT a
+        candidate: `reviews.create_review` writes it as a STRING, and it is
+        the `status-index` sort key, so a numeric one would not even be
+        indexed. Seeding it as a Decimal here would assert over a state
+        production cannot produce.)
+        """
         self._as_admin()
-        self.reviews.rows = [
-            _review_row(
-                "r-decimal",
-                status_value="ERROR",
-                created_at=decimal.Decimal("1700000000"),
-                reason="model_rate_limited",
-                failing_stage="run_review",
-            )
-        ]
+        row_with_number = _review_row(
+            "r-decimal",
+            status_value="ERROR",
+            created_at="1700000000",
+            reason="model_rate_limited",
+            failing_stage="run_review",
+        )
+        row_with_number["critic_attempts"] = 2
+        self.seed_reviews([row_with_number])
+
+        stored = self.review_row("r-decimal")
+        self.assertIsInstance(
+            stored["critic_attempts"],
+            decimal.Decimal,
+            "precondition: a real DynamoDB read must hand the route a Decimal",
+        )
+
         resp = self._get()
         self.assertEqual(resp.status_code, 200)
         row = resp.json()["failures"][0]
-        self.assertEqual(row["created_at"], 1700000000)
+        self.assertEqual(row["critic_attempts"], 2)
         # And it really is JSON, not a repr of a Decimal.
         json.loads(resp.text)
 

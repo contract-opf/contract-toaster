@@ -26,51 +26,40 @@ Exit 0 = pass, 1 = fail.
 
 import importlib.util
 import sys
-import types
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PERSIST_HANDLER_PATH = REPO_ROOT / "infra" / "lambda" / "persist" / "handler.py"
+TESTS_DIR = REPO_ROOT / "tests"
+
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 REVIEWS_TABLE = "contract-toaster-reviews-test"
 REVIEW_SUBMISSIONS_TABLE = "contract-toaster-review-submissions-test"
 DAILY_SPEND_TABLE = "contract-toaster-daily-spend-test"
 
 
-class ClientError(Exception):
-    def __init__(self, error_response=None, operation_name=""):
-        self.response = error_response or {}
-        super().__init__(str(error_response))
-
-
-def _stub_third_party() -> None:
-    if "botocore" not in sys.modules:
-        botocore_mod = types.ModuleType("botocore")
-        exceptions_mod = types.ModuleType("botocore.exceptions")
-        exceptions_mod.ClientError = ClientError
-        botocore_mod.exceptions = exceptions_mod
-        sys.modules["botocore"] = botocore_mod
-        sys.modules["botocore.exceptions"] = exceptions_mod
-    if "boto3" not in sys.modules:
-        boto3_mod = types.ModuleType("boto3")
-
-        def _unset(*_a, **_kw):
-            raise AssertionError("boto3.resource called without test patching module._ddb")
-
-        boto3_mod.resource = _unset
-        sys.modules["boto3"] = boto3_mod
-
-
-_stub_third_party()
-
 import os  # noqa: E402
 
 os.environ["REVIEWS_TABLE"] = REVIEWS_TABLE
 os.environ["REVIEW_SUBMISSIONS_TABLE"] = REVIEW_SUBMISSIONS_TABLE
 os.environ["DAILY_SPEND_TABLE"] = DAILY_SPEND_TABLE
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-ClientErrorRef = sys.modules["botocore.exceptions"].ClientError
+# Issue #67: the handler's submission lookup is now a `review_id-index` query
+# (`from boto3.dynamodb.conditions import Key`) with no scan fallback left,
+# and that import cannot resolve against a bare `types.ModuleType("boto3")`
+# stub. Real boto3/botocore, with moto intercepting them.
+import boto3  # noqa: E402
+from botocore.exceptions import ClientError as ClientErrorRef  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
+from ddb_fixtures import create_submissions_table  # noqa: E402
 
 
 def _load_handler(module_name: str = "_persist_terminal_under_test"):
@@ -120,19 +109,14 @@ class FakeReviewsTable:
             item["analysis_report_reason"] = vals[":arr"]
 
 
-class FakeScanTable:
-    """review_submissions stand-in: scan-by-review_id returns nothing, so the
-    spend-settlement branch is a no-op and these tests isolate the terminal
-    write."""
-
-    def scan(self, FilterExpression=None, ExpressionAttributeValues=None):
-        return {"Items": []}
-
-
 class FakeDDB:
-    def __init__(self, reviews: FakeReviewsTable):
+    """The REAL (moto) review_submissions table plus the in-memory reviews
+    stand-in this file uses to observe the terminal write's exact
+    UpdateExpression."""
+
+    def __init__(self, reviews: FakeReviewsTable, submissions):
         self._reviews = reviews
-        self._subs = FakeScanTable()
+        self._subs = submissions
 
     def Table(self, name):
         if name == REVIEWS_TABLE:
@@ -140,12 +124,25 @@ class FakeDDB:
         return self._subs
 
 
-def _run(reviews: FakeReviewsTable, event: dict) -> dict:
-    _persist._ddb = lambda: FakeDDB(reviews)  # type: ignore[assignment]
-    return _persist.handler(dict(event))
-
-
 class TestPersistTerminalWrite(unittest.TestCase):
+    """Issue #67: the review_submissions table is a real (moto) one carrying
+    `review_id-index`. It used to be a scan-only stand-in whose whole job was
+    to make the handler take a duck-typed scan fallback a real boto3 Table can
+    never reach. Left EMPTY here on purpose: an empty `review_id-index` query
+    is the "no reservation to settle" state, which is what isolates these
+    tests to the terminal write."""
+
+    def setUp(self) -> None:
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.submissions = create_submissions_table(self.boto_ddb)
+
+    def _run(self, reviews: FakeReviewsTable, event: dict) -> dict:
+        _persist._ddb = lambda: FakeDDB(reviews, self.submissions)  # type: ignore[assignment]
+        return _persist.handler(dict(event))
+
     def test_request_change_with_object_written_records_done_and_key(self) -> None:
         reviews = FakeReviewsTable({"review_id": REVIEW_ID, "status": "RUNNING"})
         event = {
@@ -156,7 +153,7 @@ class TestPersistTerminalWrite(unittest.TestCase):
             "output_s3_key": f"outputs/{REVIEW_ID}/out.docx",
             "output_object_written": True,
         }
-        result = _run(reviews, event)
+        result = self._run(reviews, event)
         row = reviews.items[REVIEW_ID]
         self.assertEqual(row["status"], "DONE")
         self.assertEqual(row["decision"], "REQUEST_CHANGE")
@@ -173,7 +170,7 @@ class TestPersistTerminalWrite(unittest.TestCase):
             "output_s3_key": f"outputs/{REVIEW_ID}/out.docx",
             # no output_object_written -> the object was never materialized
         }
-        _run(reviews, event)
+        self._run(reviews, event)
         row = reviews.items[REVIEW_ID]
         self.assertEqual(row["status"], "DONE")
         self.assertNotIn(
@@ -191,7 +188,7 @@ class TestPersistTerminalWrite(unittest.TestCase):
             "summary": "playbook coming soon - separate playbook later.",
             "output_s3_key": None,
         }
-        _run(reviews, event)
+        self._run(reviews, event)
         row = reviews.items[REVIEW_ID]
         self.assertEqual(row["status"], "MANUAL_REVIEW_REQUIRED")
         self.assertEqual(row["reason"], "playbook_coming_soon")
@@ -207,7 +204,7 @@ class TestPersistTerminalWrite(unittest.TestCase):
             "output_object_written": True,
         }
         # Must not raise; ERROR must survive.
-        _run(reviews, event)
+        self._run(reviews, event)
         self.assertEqual(reviews.items[REVIEW_ID]["status"], "ERROR")
         self.assertEqual(reviews.items[REVIEW_ID]["failing_stage"], "redline")
 
@@ -216,7 +213,7 @@ class TestPersistTerminalWrite(unittest.TestCase):
         # terminal write must still land (it runs before the settlement guard).
         reviews = FakeReviewsTable({"review_id": REVIEW_ID, "status": "RUNNING"})
         event = {"review_id": REVIEW_ID, "decision": "ACCEPT", "summary": "s"}
-        _run(reviews, event)
+        self._run(reviews, event)
         self.assertEqual(reviews.items[REVIEW_ID]["status"], "DONE")
         self.assertEqual(reviews.items[REVIEW_ID]["decision"], "ACCEPT")
 

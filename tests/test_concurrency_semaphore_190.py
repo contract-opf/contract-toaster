@@ -55,6 +55,7 @@ just the .ts source):
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -63,6 +64,16 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3
+from moto import mock_aws
+
+from ddb_fixtures import create_submissions_table
 from infra_synth_helper import NEUTRAL_CDK_CONTEXT
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -424,17 +435,6 @@ class _FakeSemaphoreTable:
         return {}
 
 
-class _FakeSubmissionsTable:
-    """Stand-in for the persist stage's REVIEW_SUBMISSIONS_TABLE lookup --
-    always empty, so infra/lambda/persist/handler.py hits its documented
-    no-op branch (no spend_reservation_id found -> pass event through
-    unchanged). Spend-settlement behavior itself is covered by
-    tests/test_spend_reservation_settlement.py."""
-
-    def scan(self, FilterExpression=None, ExpressionAttributeValues=None):
-        return {"Items": []}
-
-
 def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str) -> int:
     """Runs one full successful review through the REAL acquire()/release()
     source (extracted from pipeline-stack.ts) and the REAL mock_review/
@@ -447,6 +447,7 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         "REVIEW_SUBMISSIONS_TABLE", "DAILY_SPEND_TABLE",
     ]
     saved_env = {k: os.environ.get(k) for k in env_keys}
+    stack = contextlib.ExitStack()
     os.environ["PIPELINE_SEMAPHORE_TABLE"] = "test-pipeline-semaphore-190-check-g"
     os.environ["MAX_CONCURRENT_EXECUTIONS"] = "5"
     os.environ["LEASE_SECONDS"] = "900"
@@ -502,13 +503,23 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         persist_module = importlib.util.module_from_spec(persist_spec)
         persist_spec.loader.exec_module(persist_module)
 
-        class _FakePersistDynamoDBResource:
-            def Table(self, name):
-                return _FakeSubmissionsTable()
+        # Issue #67: the persist handler looks a submission up through the
+        # `review_id-index` GSI with no scan fallback left, so it needs a REAL
+        # table that has the index. Left EMPTY on purpose -- an empty index
+        # query is its documented no-op branch (no spend_reservation_id found
+        # -> pass the event through unchanged). Spend-settlement behavior
+        # itself is covered by tests/test_spend_reservation_settlement.py.
+        mock = mock_aws()
+        mock.start()
+        stack.callback(mock.stop)
+        persist_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        create_submissions_table(
+            persist_ddb, table_name=os.environ["REVIEW_SUBMISSIONS_TABLE"]
+        )
 
         class _FakePersistBoto3:
             def resource(self, service_name):
-                return _FakePersistDynamoDBResource()
+                return persist_ddb
 
         persist_module.boto3 = _FakePersistBoto3()
 
@@ -538,6 +549,7 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         counter_item = tables[os.environ["PIPELINE_SEMAPHORE_TABLE"]].items.get(counter_key, {})
         return counter_item.get("current_count", 0)
     finally:
+        stack.close()
         for key, value in saved_env.items():
             if value is None:
                 os.environ.pop(key, None)

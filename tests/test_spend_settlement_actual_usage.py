@@ -71,8 +71,9 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
+TESTS_DIR = REPO_ROOT / "tests"
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
@@ -84,10 +85,19 @@ os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "submissions-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import model_client  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
+
+from ddb_fixtures import create_submissions_table  # noqa: E402
 
 # Cross-test-file import (established convention -- see
 # tests/test_model_invocation_ledger.py): reuse #259's real-pipeline docx
@@ -212,31 +222,43 @@ class TestOpenRouterClientTracksCumulativeUsage(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class FakeSubmissionsTable:
-    """Purpose-built REVIEW_SUBMISSIONS_TABLE stand-in: the scan+filter
-    fallback path `_find_submission_by_review_id` uses when the table has
-    no `.query()` (same lightweight-double convention as
-    tests/test_spend_reservation_settlement.py's FakeTable), plus the one
-    update_item shape `_settle_reservation` issues (the
-    `reservation_released` flip)."""
+class MotoSubmissionsMixin:
+    """A REAL (moto) `review_submissions` table for the duration of each test.
 
-    def __init__(self, submission: dict[str, Any]) -> None:
-        self.items: dict[str, dict[str, Any]] = {submission["idempotency_key"]: dict(submission)}
+    Issue #67: this used to be a purpose-built stand-in whose whole reason for
+    existing was the scan+filter fallback `_find_submission_by_review_id` took
+    when a table had no `.query()`. A real boto3 Table always has `.query`, so
+    that fallback was unreachable in production; it is deleted, and the lookup
+    is now a `review_id-index` query. `tests/ddb_fixtures.py` declares that
+    index exactly as `infra/lib/nested/data-stack.ts` does.
 
-    def scan(self, FilterExpression=None, ExpressionAttributeValues=None):
-        vals = ExpressionAttributeValues or {}
-        if FilterExpression != "review_id = :rid":
-            raise AssertionError(f"unhandled FilterExpression {FilterExpression!r}")
-        matches = [v for v in self.items.values() if v.get("review_id") == vals.get(":rid")]
-        return {"Items": [dict(v) for v in matches]}
+    The DAILY_SPEND table stays a hand-rolled stand-in: nothing in this
+    removal touches it, and moto 5.2.2 cannot parse the reservation's atomic
+    condition expression (see tests/test_review_api_84.py's docstring).
+    """
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, **_kw):
-        vals = ExpressionAttributeValues or {}
-        item = self.items[Key["idempotency_key"]]
-        if "reservation_released = :t" in UpdateExpression:
-            item["reservation_released"] = vals[":t"]
-            return
-        raise AssertionError(f"unhandled UpdateExpression {UpdateExpression!r}")
+    def setUp(self) -> None:  # noqa: N802 - unittest API
+        super().setUp()
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.submissions_table = create_submissions_table(self.boto_ddb)
+
+    def seed_submission(self, submission: dict[str, Any]):
+        """Seed one `review_submissions` row -- the shape
+        `reviews.submit_review` writes: an idempotency_key PK plus the
+        review_id the `review_id-index` GSI keys on."""
+        self.submissions_table.put_item(Item=dict(submission))
+        return self.submissions_table
+
+    def submission_row(self, idempotency_key: str) -> dict[str, Any]:
+        return (
+            self.submissions_table.get_item(
+                Key={"idempotency_key": idempotency_key}
+            ).get("Item")
+            or {}
+        )
 
 
 class FakeDailySpendTable:
@@ -265,7 +287,7 @@ class FakeDailySpendTable:
 
 
 class _SettlementOnlyDDB:
-    def __init__(self, submissions: FakeSubmissionsTable, daily_spend: FakeDailySpendTable):
+    def __init__(self, submissions, daily_spend: FakeDailySpendTable):
         self._submissions = submissions
         self._daily_spend = daily_spend
 
@@ -277,14 +299,15 @@ class _SettlementOnlyDDB:
         raise AssertionError(f"unexpected Table({name!r})")
 
 
-class TestSettleReservationActualUsdCents(unittest.TestCase):
+class TestSettleReservationActualUsdCents(MotoSubmissionsMixin, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         _clear_model_provider()
         self.spend_date = _today()
         self.reservation_cents = reviews.compute_worst_case_reservation_usd_cents()
 
     def _ddb(self, review_id: str, idempotency_key: str) -> _SettlementOnlyDDB:
-        submissions = FakeSubmissionsTable({
+        submissions = self.seed_submission({
             "idempotency_key": idempotency_key,
             "review_id": review_id,
             "spend_reservation_id": f"res-{review_id}",
@@ -327,7 +350,7 @@ class SettlementAwareFakeDDB(dts.FakeDDB):
     def __init__(
         self,
         reviews_table,
-        submissions_table: FakeSubmissionsTable,
+        submissions_table,
         daily_spend_table: FakeDailySpendTable,
         playbooks_table=None,
     ):
@@ -370,14 +393,15 @@ class UsageAccumulatingClient:
         return text
 
 
-class TestRealPipelineSettlesActualUsage(unittest.TestCase):
+class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         _clear_model_provider()
         self.spend_date = _today()
         self.reservation_cents = reviews.compute_worst_case_reservation_usd_cents()
 
     def _ddb(self, reviews_table) -> tuple[SettlementAwareFakeDDB, FakeDailySpendTable]:
-        submissions = FakeSubmissionsTable({
+        submissions = self.seed_submission({
             "idempotency_key": "idem-real-1",
             "review_id": dts.REVIEW_ID,
             "spend_reservation_id": "res-real-1",
@@ -443,7 +467,7 @@ class TestRealPipelineSettlesActualUsage(unittest.TestCase):
             settled, last_invoke_only_cents,
             "settlement must not be priced from only the LAST invoke's usage",
         )
-        self.assertTrue(ddb._submissions.items["idem-real-1"]["reservation_released"])
+        self.assertTrue(self.submission_row("idem-real-1")["reservation_released"])
 
     def test_review_failing_after_primary_pass_settles_at_primary_pass_cost(self) -> None:
         """(d): the primary pass succeeds and accumulates real usage, then
@@ -493,7 +517,7 @@ class _MockPipelineFakeS3:
         self.copies.append({"Bucket": Bucket, "Key": Key, "CopySource": CopySource})
 
 
-class TestMockPipelineStillSettlesAtZero(unittest.TestCase):
+class TestMockPipelineStillSettlesAtZero(MotoSubmissionsMixin, unittest.TestCase):
     def test_mock_pipeline_end_to_end_settles_at_zero(self) -> None:
         """(e): run_mock_pipeline's call sites never pass actual_usd_cents
         -- driven end to end (not just the direct-call check in (b) above)
@@ -502,7 +526,7 @@ class TestMockPipelineStillSettlesAtZero(unittest.TestCase):
         spend_date = _today()
         reservation_cents = reviews.compute_worst_case_reservation_usd_cents()
         reviews_table = dts.FakeReviewsTable()
-        submissions = FakeSubmissionsTable({
+        submissions = self.seed_submission({
             "idempotency_key": "idem-mock-1",
             "review_id": dts.REVIEW_ID,
             "spend_reservation_id": "res-mock-1",

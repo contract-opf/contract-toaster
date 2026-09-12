@@ -178,6 +178,13 @@ def _expected_block(level: str) -> str:
 
 
 class TestTheRoute(ReviewApiTestBase):
+    def setUp(self):
+        super().setUp()
+        # Issue #67: this class drives `GET /api/reviews?scope=mine`, which
+        # pages the `owner_sub-index` GSI with no scan fallback any more, so
+        # the reviews table has to be a real one that carries the index.
+        self.use_real_reviews_table()
+
     def _post(self, owner: str, markup_intensity: str | None, body_text: str = "Hello"):
         self._authenticate_as(owner)
         data = {"playbook_id": PLAYBOOK_ID}
