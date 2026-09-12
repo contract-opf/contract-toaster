@@ -203,7 +203,7 @@ def count_reviews_awaiting_disposition(
     admin dashboard metric) wants it.
     """
     table = _reviews_table(dynamodb_resource)
-    items = table.query_by_owner(owner_sub) if hasattr(table, "query_by_owner") else _scan_by_owner(table, owner_sub)
+    items = _query_by_owner(table, owner_sub)
 
     count = 0
     for item in items:
@@ -212,31 +212,32 @@ def count_reviews_awaiting_disposition(
     return count
 
 
-def _scan_by_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
-    """Owner-scoped fetch for callers whose table stand-in does not implement
-    `query_by_owner`. A real boto3 Table reads the `owner_sub-index` GSI
-    (infra/lib/nested/data-stack.ts) with a full `LastEvaluatedKey` loop --
-    never a scan (issue #52); the scan+filter branch is the documented
-    fallback for a lightweight stand-in without `.query()` (same convention
-    as reviews.py::_page_for_owner). The name is kept for its callers."""
-    if hasattr(table, "query"):
-        from boto3.dynamodb.conditions import Key
+def _query_by_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
+    """Every review owned by `owner_sub`, read from the `owner_sub-index` GSI
+    (infra/lib/nested/data-stack.ts) with a FULL `LastEvaluatedKey` loop --
+    never a scan (issue #52).
 
-        items: list[dict[str, Any]] = []
-        query_kwargs: dict[str, Any] = {
-            "IndexName": "owner_sub-index",
-            "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
-        }
-        resp = table.query(**query_kwargs)
+    Issue #67: this used to duck-type `table` -- probing it for `.query` and
+    `.scan` -- so a hand-rolled test stand-in without `.query()` could take
+    a scan+filter branch. A real boto3 Table always has both, so that branch
+    was dead in production and live only under fakes: tests exercising code
+    production never runs. Tests now build a real (moto) table through
+    `tests/ddb_fixtures.create_reviews_table`, which declares the same GSIs
+    the CDK does.
+    """
+    from boto3.dynamodb.conditions import Key
+
+    items: list[dict[str, Any]] = []
+    query_kwargs: dict[str, Any] = {
+        "IndexName": "owner_sub-index",
+        "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
+    }
+    resp = table.query(**query_kwargs)
+    items.extend(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table.query(**query_kwargs, ExclusiveStartKey=resp["LastEvaluatedKey"])
         items.extend(resp.get("Items", []))
-        while "LastEvaluatedKey" in resp:
-            resp = table.query(**query_kwargs, ExclusiveStartKey=resp["LastEvaluatedKey"])
-            items.extend(resp.get("Items", []))
-        return items
-    if hasattr(table, "scan"):
-        resp = table.scan()
-        return [i for i in resp.get("Items", []) if i.get("owner_sub") == owner_sub]
-    return []
+    return items
 
 
 def list_legal_triage_queue(dynamodb_resource: Any) -> list[dict[str, Any]]:

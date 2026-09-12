@@ -106,6 +106,11 @@ import test_review_api_84 as api84  # noqa: E402
 from fastapi_route_inventory import registered_route_pairs  # noqa: E402
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
 
+import boto3  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
+from ddb_fixtures import create_reviews_table  # noqa: E402
+
 import model_client as model_client_module  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 from src import download as download_module  # noqa: E402
@@ -169,29 +174,29 @@ class TestRunnerRecordsModelProvenance(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class _RowsTable:
-    """Scan-only reviews table stand-in (deliberately NO `query`, so
-    `_list_reviews_for_owner` takes its documented scan+filter fallback)."""
+class _MotoRowsTestCase(unittest.TestCase):
+    """Base for the pure-function projection/listing tests: a REAL (moto)
+    reviews table with the CDK's GSIs, seeded per test by `self._resource`.
 
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self.rows = [dict(r) for r in rows]
+    Issue #67: this used to be a scan-only stand-in that deliberately had NO
+    `query`, so `_list_reviews_for_owner` took its scan+filter fallback. A
+    real boto3 Table always has `.query`, so that fallback could never run in
+    production; it is deleted, and the listing now pages `owner_sub-index`
+    (owner scope) or merges `status-index` partitions (admin scope). Both
+    need a table that HAS those indexes.
+    """
 
-    def scan(self, **_kwargs: Any) -> dict[str, Any]:
-        return {"Items": [dict(r) for r in self.rows]}
+    def setUp(self) -> None:
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.table = create_reviews_table(self.boto_ddb)
 
-    def get_item(self, Key):  # noqa: N803 - boto3 kwarg name
-        for row in self.rows:
-            if row["review_id"] == Key["review_id"]:
-                return {"Item": dict(row)}
-        return {}
-
-
-class _RowsResource:
-    def __init__(self, table: _RowsTable) -> None:
-        self._table = table
-
-    def Table(self, _name: str) -> _RowsTable:  # noqa: N802 - boto3 method name
-        return self._table
+    def _resource(self, *rows: dict[str, Any]):
+        for row in rows:
+            self.table.put_item(Item=dict(row))
+        return self.boto_ddb
 
 
 OWNER = "sub-owner-449"
@@ -236,18 +241,14 @@ OTHER_USERS_ROW: dict[str, Any] = {
 }
 
 
-def _resource(*rows: dict[str, Any]) -> _RowsResource:
-    return _RowsResource(_RowsTable(list(rows)))
-
-
 def _row(caller: str, is_admin: bool = False) -> dict[str, Any]:
     return {"cognito_sub": caller, "status": "active", "is_admin": is_admin}
 
 
-class TestDetailProjectsModelProvenance(unittest.TestCase):
+class TestDetailProjectsModelProvenance(_MotoRowsTestCase):
     def test_detail_returns_recorded_model_ids_and_input_availability(self) -> None:
         detail = reviews_module.get_review_detail(
-            "rev-modern", _row(OWNER), _resource(MODERN_ROW)
+            "rev-modern", _row(OWNER), self._resource(MODERN_ROW)
         )
 
         self.assertEqual(detail["primary_model_id"], "vendor/primary-model-of-that-day")
@@ -260,7 +261,7 @@ class TestDetailProjectsModelProvenance(unittest.TestCase):
 
     def test_historic_row_is_not_recorded_never_todays_model(self) -> None:
         detail = reviews_module.get_review_detail(
-            "rev-historic", _row(OWNER), _resource(HISTORIC_ROW)
+            "rev-historic", _row(OWNER), self._resource(HISTORIC_ROW)
         )
 
         self.assertIsNone(detail["primary_model_id"])
@@ -276,9 +277,9 @@ class TestDetailProjectsModelProvenance(unittest.TestCase):
         )
 
 
-class TestListCarriesHistoryProvenance(unittest.TestCase):
+class TestListCarriesHistoryProvenance(_MotoRowsTestCase):
     def test_list_item_carries_provenance_and_availability(self) -> None:
-        items = reviews_module.list_reviews(_row(OWNER), _resource(MODERN_ROW))['items']
+        items = reviews_module.list_reviews(_row(OWNER), self._resource(MODERN_ROW))['items']
         self.assertEqual(len(items), 1)
         item = items[0]
 
@@ -306,7 +307,7 @@ class TestListCarriesHistoryProvenance(unittest.TestCase):
         """Availability is a boolean on the list; the object keys stay
         server-side (the same discipline `get_review_detail` already applies
         with `has_output`)."""
-        items = reviews_module.list_reviews(_row(OWNER), _resource(MODERN_ROW))['items']
+        items = reviews_module.list_reviews(_row(OWNER), self._resource(MODERN_ROW))['items']
         blob = repr(items[0])
 
         self.assertNotIn("output_s3_key", items[0])
@@ -315,7 +316,7 @@ class TestListCarriesHistoryProvenance(unittest.TestCase):
         self.assertNotIn(f"uploads/{OWNER}/rev-modern/in.docx", blob)
 
     def test_historic_row_lists_as_not_recorded(self) -> None:
-        items = reviews_module.list_reviews(_row(OWNER), _resource(HISTORIC_ROW))['items']
+        items = reviews_module.list_reviews(_row(OWNER), self._resource(HISTORIC_ROW))['items']
         item = items[0]
 
         self.assertIsNone(item["primary_model_id"])
@@ -327,10 +328,10 @@ class TestListCarriesHistoryProvenance(unittest.TestCase):
         )
 
 
-class TestOwnerScoping(unittest.TestCase):
+class TestOwnerScoping(_MotoRowsTestCase):
     def test_reviewer_never_sees_another_users_review(self) -> None:
         items = reviews_module.list_reviews(
-            _row(OWNER), _resource(MODERN_ROW, OTHER_USERS_ROW)
+            _row(OWNER), self._resource(MODERN_ROW, OTHER_USERS_ROW)
         )['items']
         ids = {i["review_id"] for i in items}
 
@@ -342,7 +343,7 @@ class TestOwnerScoping(unittest.TestCase):
         (explicitly out of scope for this ticket)."""
         items = reviews_module.list_reviews(
             _row(ADMIN, is_admin=True),
-            _resource(MODERN_ROW, OTHER_USERS_ROW),
+            self._resource(MODERN_ROW, OTHER_USERS_ROW),
             owner_scoped=True,
         )['items']
         ids = {i["review_id"] for i in items}
@@ -355,7 +356,7 @@ class TestOwnerScoping(unittest.TestCase):
         """The documented `GET /api/reviews` behavior ("admin: all reviews")
         is NOT changed by this ticket -- only opted out of."""
         items = reviews_module.list_reviews(
-            _row(ADMIN, is_admin=True), _resource(MODERN_ROW, OTHER_USERS_ROW)
+            _row(ADMIN, is_admin=True), self._resource(MODERN_ROW, OTHER_USERS_ROW)
         )['items']
         ids = {i["review_id"] for i in items}
 
@@ -368,7 +369,14 @@ class TestOwnerScoping(unittest.TestCase):
 
 
 class HistoryRouteTestBase(api84.ReviewApiTestBase):
-    """#84's base verbatim (real router, moto S3, fake DynamoDB, fake SFN)."""
+    """#84's base (real router, moto S3, fake DynamoDB for the spend tables,
+    fake SFN) with a REAL (moto) reviews table on top -- the scope=mine and
+    admin listings below page `owner_sub-index` / `status-index` and have no
+    scan fallback left to take (issue #67)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.use_real_reviews_table()
 
     def _seed_review(self, review_id: str, **fields: Any) -> None:
         table = self._reviews_table()
@@ -425,7 +433,7 @@ class TestSubmissionRecordsUploadPointer(HistoryRouteTestBase):
         self.assertEqual(resp.status_code, 202)
         review_id = resp.json()["review_id"]
 
-        row = self._reviews_table().items[review_id]
+        row = self._reviews_table().get_item(Key={"review_id": review_id}).get("Item") or {}
         self.assertEqual(
             row.get("upload_s3_key"), f"uploads/owner-449-upload/{review_id}/in.docx"
         )

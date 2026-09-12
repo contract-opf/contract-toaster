@@ -178,24 +178,18 @@ def _find_submission_for_review(review_id: str, dynamodb_resource: Any) -> dict[
 
     An unpaginated Scan only ever sees its first (<=1MB) page, so once the
     table outgrows one page a target row on a later page is silently
-    invisible and the reservation it owns never settles. Prefer the
-    `review_id-index` GSI (infra/lib/nested/data-stack.ts) via a real
-    boto3/moto Table.query(); fall back to scan+filter only for a
-    lightweight test stand-in that doesn't implement `.query()`."""
+    invisible and the reservation it owns never settles. The lookup reads the
+    `review_id-index` GSI (infra/lib/nested/data-stack.ts) via Table.query().
+
+    Issue #67: the scan+filter fallback for a stand-in without `.query()` is
+    gone -- a real boto3 Table always has `.query`, so it was dead in
+    production and live only under hand-rolled fakes."""
+    from boto3.dynamodb.conditions import Key
+
     table = dynamodb_resource.Table(REVIEW_SUBMISSIONS_TABLE)
-    if hasattr(table, "query"):
-        from boto3.dynamodb.conditions import Key
-
-        resp = table.query(
-            IndexName="review_id-index",
-            KeyConditionExpression=Key("review_id").eq(review_id),
-        )
-        items = resp.get("Items", [])
-        return items[0] if items else None
-
-    resp = table.scan(
-        FilterExpression="review_id = :rid",
-        ExpressionAttributeValues={":rid": review_id},
+    resp = table.query(
+        IndexName="review_id-index",
+        KeyConditionExpression=Key("review_id").eq(review_id),
     )
     items = resp.get("Items", [])
     return items[0] if items else None

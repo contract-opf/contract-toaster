@@ -38,9 +38,13 @@ proves the fix:
       per-model fix, $2.11 -- $2.46 since issue #625) reserved against the
       day's cap PERMANENTLY.
 
-These are unit tests against in-memory DynamoDB fakes (no live AWS, no
-moto/boto3 dependency required) -- same third-party-stubbing convention as
-tests/test_review_submission_e2e.py and tests/test_orphan_reconciler_e2e.py.
+The `review_submissions` table is a REAL (moto) table built by
+`tests/ddb_fixtures.py::create_submissions_table`: issue #67 deleted the
+duck-typed scan fallback both Lambda handlers took when a table had no
+`.query()`, so their keyed `review_id-index` lookup now needs a table that
+HAS that index. The daily_spend / reviews / semaphore tables stay in-memory
+stand-ins -- nothing in that removal touches them, and moto 5.2.2 cannot
+parse the reservation's atomic ConditionExpression.
 
 Run with: python3 tests/test_spend_reservation_settlement.py
 Exit 0 = all tests pass; non-zero = one or more tests failed (or the
@@ -51,7 +55,6 @@ import importlib.util
 import json
 import sys
 import time
-import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -62,64 +65,23 @@ MODEL_POLICY_PATH = REPO_ROOT / "model-policy" / "bedrock-us-east-1.json"
 PERSIST_HANDLER_PATH = REPO_ROOT / "infra" / "lambda" / "persist" / "handler.py"
 RECONCILER_HANDLER_PATH = REPO_ROOT / "infra" / "lambda" / "orphan_reconciler" / "handler.py"
 
-if str(BACKEND_SRC) not in sys.path:
-    sys.path.insert(0, str(BACKEND_SRC))
+TESTS_DIR = REPO_ROOT / "tests"
+
+for _path in (str(BACKEND_SRC), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 
 # ---------------------------------------------------------------------------
-# Third-party stubs (no live boto3/fastapi dependency required in CI)
+# Real third-party dependencies.
+#
+# Issue #67: this file used to inject a bare `types.ModuleType("boto3")`
+# stub. The Lambda handlers under test now do `from boto3.dynamodb.conditions
+# import Key` for their keyed `review_id-index` lookup -- there is no
+# scan+filter fallback left for a stand-in without `.query()` -- and that
+# import cannot resolve against a stub module. Real boto3 (with moto
+# intercepting it) and real fastapi/botocore are in requirements-dev.txt.
 # ---------------------------------------------------------------------------
-
-def _stub_third_party() -> None:
-    if "fastapi" not in sys.modules:
-        fastapi_mod = types.ModuleType("fastapi")
-
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str = "") -> None:
-                self.status_code = status_code
-                self.detail = detail
-                super().__init__(detail)
-
-        class status:  # noqa: N801
-            HTTP_202_ACCEPTED = 202
-            HTTP_404_NOT_FOUND = 404
-            HTTP_409_CONFLICT = 409
-            HTTP_429_TOO_MANY_REQUESTS = 429
-            HTTP_503_SERVICE_UNAVAILABLE = 503
-
-        fastapi_mod.HTTPException = HTTPException
-        fastapi_mod.status = status
-        sys.modules["fastapi"] = fastapi_mod
-
-    if "botocore" not in sys.modules:
-        botocore_mod = types.ModuleType("botocore")
-        exceptions_mod = types.ModuleType("botocore.exceptions")
-
-        class ClientError(Exception):
-            def __init__(self, error_response=None, operation_name=""):
-                self.response = error_response or {}
-                super().__init__(str(error_response))
-
-        exceptions_mod.ClientError = ClientError
-        botocore_mod.exceptions = exceptions_mod
-        sys.modules["botocore"] = botocore_mod
-        sys.modules["botocore.exceptions"] = exceptions_mod
-
-    if "boto3" not in sys.modules:
-        boto3_mod = types.ModuleType("boto3")
-
-        def _unset(*_a, **_kw):
-            raise AssertionError(
-                "boto3.resource()/client() called without being patched by "
-                "the test -- monkeypatch <module>.boto3 first."
-            )
-
-        boto3_mod.resource = _unset
-        boto3_mod.client = _unset
-        sys.modules["boto3"] = boto3_mod
-
-
-_stub_third_party()
 
 import os  # noqa: E402
 
@@ -132,11 +94,19 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 os.environ.setdefault("STALE_PENDING_THRESHOLD_SECONDS", "120")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3  # noqa: E402
+from botocore.exceptions import ClientError  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import config as _config_module  # noqa: E402
 import reviews as _reviews_module  # noqa: E402
 
-ClientError = sys.modules["botocore.exceptions"].ClientError
+from ddb_fixtures import create_submissions_table  # noqa: E402
 
 
 def _load_module(path: Path, module_name: str):
@@ -261,8 +231,14 @@ class FakeTable:
 
 
 class FakeDynamoDBResource:
-    def __init__(self):
+    def __init__(self, submissions_table=None):
         self._tables: dict[str, FakeTable] = {}
+        # Issue #67: the REAL (moto) review_submissions table, when the test
+        # supplies one. Both Lambda handlers look a submission up through the
+        # `review_id-index` GSI with no scan fallback left, so a stand-in
+        # without that index cannot stand in for it any more.
+        if submissions_table is not None:
+            self._tables[os.environ["REVIEW_SUBMISSIONS_TABLE"]] = submissions_table
 
     def Table(self, name: str) -> FakeTable:
         if name not in self._tables:
@@ -308,6 +284,32 @@ class Boto3Stub:
 
 def _today() -> str:
     return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+class MotoSubmissionsMixin:
+    """A REAL (moto) `review_submissions` table per test, wired into
+    `FakeDynamoDBResource` (issue #67 -- see this module's docstring)."""
+
+    def setUp(self) -> None:  # noqa: N802 - unittest API
+        super().setUp()
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.submissions_table = create_submissions_table(self.boto_ddb)
+
+    def seed_submission(self, submission: dict) -> None:
+        """The shape `reviews.submit_review` writes: an idempotency_key PK
+        plus the review_id the `review_id-index` GSI keys on."""
+        self.submissions_table.put_item(Item=dict(submission))
+
+    def submission_row(self, idempotency_key: str) -> dict:
+        return (
+            self.submissions_table.get_item(
+                Key={"idempotency_key": idempotency_key}
+            ).get("Item")
+            or {}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +482,7 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
 # (b) settle_spend() has a real caller and decrements daily_spend
 # ---------------------------------------------------------------------------
 
-class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
+class TestSettleSpendDecrementsDailySpend(MotoSubmissionsMixin, unittest.TestCase):
     def test_settle_spend_directly_credits_back_unspent_reservation(self):
         """Direct unit test of the canonical settle_spend(): settling a
         review that cost less than its worst-case reservation must credit
@@ -513,7 +515,7 @@ class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
         settlement logic at all) must settle the reservation for a review
         that reaches this stage, crediting the reservation back to
         daily_spend rather than leaving it held until UTC midnight."""
-        ddb = FakeDynamoDBResource()
+        ddb = FakeDynamoDBResource(self.submissions_table)
         self._orig_boto3 = _persist_module.boto3
         _persist_module.boto3 = Boto3Stub(ddb)
         self.addCleanup(lambda: setattr(_persist_module, "boto3", self._orig_boto3))
@@ -528,12 +530,11 @@ class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
             "reserved_usd_cents": reservation_cents,
             "daily_cap_usd_cents": 2000,
         }
-        submissions_table = ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions_table.items["idem-persist-1"] = {
+        self.seed_submission({
             "idempotency_key": "idem-persist-1",
             "review_id": review_id,
             "spend_reservation_id": "res-persist-1",
-        }
+        })
 
         event = {
             "review_id": review_id,
@@ -550,7 +551,7 @@ class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
             "The persist stage must settle (credit back) a completed "
             "review's worst-case reservation, not leave it held.",
         )
-        self.assertTrue(submissions_table.items["idem-persist-1"]["reservation_released"])
+        self.assertTrue(self.submission_row("idem-persist-1")["reservation_released"])
         # Pass-through contract: the event is returned unchanged (plus the
         # settlement side effect), same as every other Phase-0 stage stub.
         self.assertEqual(result, event)
@@ -558,7 +559,7 @@ class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
     def test_persist_stage_is_idempotent_against_double_settlement(self):
         """Calling the persist stage twice for the same review (e.g. a
         Step Functions task retry) must not credit daily_spend twice."""
-        ddb = FakeDynamoDBResource()
+        ddb = FakeDynamoDBResource(self.submissions_table)
         orig_boto3 = _persist_module.boto3
         _persist_module.boto3 = Boto3Stub(ddb)
         self.addCleanup(lambda: setattr(_persist_module, "boto3", orig_boto3))
@@ -573,12 +574,11 @@ class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
             "reserved_usd_cents": reservation_cents,
             "daily_cap_usd_cents": 2000,
         }
-        submissions_table = ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions_table.items["idem-persist-2"] = {
+        self.seed_submission({
             "idempotency_key": "idem-persist-2",
             "review_id": review_id,
             "spend_reservation_id": "res-persist-2",
-        }
+        })
 
         event = {"review_id": review_id}
         _persist_module.handler(dict(event))
@@ -596,9 +596,10 @@ class TestSettleSpendDecrementsDailySpend(unittest.TestCase):
 # (c) Orphan reconciler's dead-execution path credits daily_spend for real
 # ---------------------------------------------------------------------------
 
-class TestOrphanReconcilerCreditsDailySpend(unittest.TestCase):
+class TestOrphanReconcilerCreditsDailySpend(MotoSubmissionsMixin, unittest.TestCase):
     def setUp(self):
-        self.ddb = FakeDynamoDBResource()
+        super().setUp()
+        self.ddb = FakeDynamoDBResource(self.submissions_table)
         self.sfn = FakeSfnClient()
         self._orig_boto3 = _reconciler_module.boto3
         _reconciler_module.boto3 = Boto3Stub(self.ddb, self.sfn)
@@ -625,13 +626,12 @@ class TestOrphanReconcilerCreditsDailySpend(unittest.TestCase):
             "status": "RUNNING",
             "execution_arn": execution_arn,
         }
-        submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions_table.items["idem-dead-1"] = {
+        self.seed_submission({
             "idempotency_key": "idem-dead-1",
             "review_id": review_id,
             "execution_arn": execution_arn,
             "spend_reservation_id": "res-dead-1",
-        }
+        })
 
         spend_date = _today()
         reservation_cents = _reconciler_module.compute_worst_case_reservation_usd_cents()
@@ -646,7 +646,7 @@ class TestOrphanReconcilerCreditsDailySpend(unittest.TestCase):
         resolved = _reconciler_module._reconcile_dead_executions()
 
         self.assertEqual(resolved, [review_id])
-        self.assertTrue(submissions_table.items["idem-dead-1"]["reservation_released"])
+        self.assertTrue(self.submission_row("idem-dead-1")["reservation_released"])
         self.assertEqual(
             daily_spend_table.items[spend_date]["reserved_usd_cents"],
             0,

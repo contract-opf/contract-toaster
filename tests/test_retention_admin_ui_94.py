@@ -5,10 +5,16 @@ Executable tests for issue #94: retention and legal-hold admin API
 #13's dual-control gate.
 
 Covers the issue's TDD plan / acceptance criteria against the real
-enforcement code, using in-memory fakes for DynamoDB and S3 — same
-third-party-stubbing convention as tests/test_user_management_92.py and
-tests/test_retention_purge_worker.py so the suite runs in CI without extra
-installs.
+enforcement code.
+
+The REVIEWS table is a REAL (moto) DynamoDB table built by
+`tests/ddb_fixtures.py::create_reviews_table`, declaring the same GSIs
+`infra/lib/nested/data-stack.ts` does. Issue #67: the preview/sweep/hold-list
+reads used to be handed a scan-only stand-in with no `.query()`, so they took
+a duck-typed fallback a real boto3 Table can never reach; that fallback is
+deleted and each read is now one `status-index` query per terminal status.
+The retention-settings, audit and S3 stand-ins stay in-memory -- nothing in
+that removal touches them.
 
   Red (from the issue):
     - forward-looking retention change applies immediately, single-admin
@@ -30,60 +36,17 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
 import sys
-import types
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_SRC = REPO_ROOT / "backend" / "src"
+TESTS_DIR = REPO_ROOT / "tests"
 
-if str(BACKEND_SRC) not in sys.path:
-    sys.path.insert(0, str(BACKEND_SRC))
+for _path in (str(BACKEND_SRC), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
-
-def _stub_third_party() -> None:
-    """Inject minimal stubs for boto3/botocore and fastapi if absent."""
-    if "botocore" not in sys.modules:
-        botocore_mod = types.ModuleType("botocore")
-        exceptions_mod = types.ModuleType("botocore.exceptions")
-
-        class ClientError(Exception):
-            def __init__(self, error_response=None, operation_name=""):
-                self.response = error_response or {}
-                super().__init__(str(error_response))
-
-        exceptions_mod.ClientError = ClientError
-        botocore_mod.exceptions = exceptions_mod
-        sys.modules["botocore"] = botocore_mod
-        sys.modules["botocore.exceptions"] = exceptions_mod
-
-    if "boto3" not in sys.modules:
-        boto3_mod = types.ModuleType("boto3")
-        sys.modules["boto3"] = boto3_mod
-
-    if "fastapi" not in sys.modules:
-        fastapi_mod = types.ModuleType("fastapi")
-
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str = "") -> None:
-                self.status_code = status_code
-                self.detail = detail
-                super().__init__(detail)
-
-        class status:  # noqa: N801
-            HTTP_200_OK = 200
-            HTTP_400_BAD_REQUEST = 400
-            HTTP_403_FORBIDDEN = 403
-            HTTP_404_NOT_FOUND = 404
-            HTTP_409_CONFLICT = 409
-            HTTP_503_SERVICE_UNAVAILABLE = 503
-
-        fastapi_mod.HTTPException = HTTPException
-        fastapi_mod.status = status
-        sys.modules["fastapi"] = fastapi_mod
-
-
-_stub_third_party()
 
 import os  # noqa: E402
 
@@ -92,11 +55,19 @@ os.environ.setdefault("RETENTION_SETTINGS_TABLE", "contract-toaster-retention-se
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3  # noqa: E402
+from botocore.exceptions import ClientError  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import retention as _retention_module  # noqa: E402
 
-ClientError = sys.modules["botocore.exceptions"].ClientError
-HTTPException = sys.modules["fastapi"].HTTPException
+from ddb_fixtures import create_reviews_table  # noqa: E402
 
 RETROACTIVE_REDUCTION_DELAY_SECONDS = 72 * 3600
 
@@ -153,14 +124,14 @@ class FakeTable:
 
 
 class FakeDynamoDBResource:
-    def __init__(self, reviews: FakeTable, settings: FakeTable, audit: FakeTable):
+    def __init__(self, reviews, settings: FakeTable, audit: FakeTable):
         self._tables = {
             os.environ["REVIEWS_TABLE"]: reviews,
             os.environ["RETENTION_SETTINGS_TABLE"]: settings,
             os.environ["AUDIT_TABLE"]: audit,
         }
 
-    def Table(self, name: str) -> FakeTable:
+    def Table(self, name: str):
         return self._tables[name]
 
 
@@ -189,11 +160,35 @@ class FakeS3:
         return {"TagSet": [{"Key": k, "Value": v} for k, v in tags.items()]}
 
 
-def _new_ddb() -> tuple[FakeDynamoDBResource, FakeTable, FakeTable, FakeTable]:
-    reviews = FakeTable("review_id")
-    settings = FakeTable("setting_id")
-    audit = FakeTable("timestamp")
-    return FakeDynamoDBResource(reviews, settings, audit), reviews, settings, audit
+class RetentionTestCase(unittest.TestCase):
+    """Issue #67: the reviews table is a REAL (moto) one with the CDK's GSIs
+    -- the preview, sweep and hold-list reads query `status-index` per
+    terminal status and have no scan fallback left. The retention-settings
+    and audit tables stay `FakeTable`s."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+
+    def _new_ddb(self):
+        # A distinct physical table per call: a test may build a second,
+        # independent resource on top of the same mock. `FakeDynamoDBResource`
+        # maps `$REVIEWS_TABLE` onto whichever one it was handed, so the
+        # production code still asks for the name it always asks for.
+        self._reviews_table_seq = getattr(self, "_reviews_table_seq", 0) + 1
+        reviews = create_reviews_table(
+            self.boto_ddb,
+            table_name=f"{os.environ['REVIEWS_TABLE']}-{self._reviews_table_seq}",
+        )
+        settings = FakeTable("setting_id")
+        audit = FakeTable("timestamp")
+        return FakeDynamoDBResource(reviews, settings, audit), reviews, settings, audit
+
+    def _review_row(self, reviews, review_id: str) -> dict:
+        return reviews.get_item(Key={"review_id": review_id}).get("Item") or {}
 
 
 def _seed_admin(users_row_sub: str = "admin-1") -> dict:
@@ -217,37 +212,41 @@ def _output_key(review_id: str) -> str:
     return f"outputs/{review_id}/out.docx"
 
 
-def _seed_review(reviews: FakeTable, review_id: str, status_: str = "DONE",
+def _seed_review(reviews, review_id: str, status_: str = "DONE",
                   created_at: float = 0.0, window_days: int = 90,
                   legal_hold: bool = False, owner_sub: str = "owner-1") -> None:
-    reviews.items[review_id] = {
+    reviews.put_item(Item={
         "review_id": review_id,
         "owner_sub": owner_sub,
         "status": status_,
-        "created_at": created_at,
+        # `reviews.create_review` writes `created_at` as an epoch-seconds
+        # STRING (it is the `status-index` sort key, declared S); retention
+        # reads it back through `float(...)`. Seeding a float here would be
+        # a shape production cannot write and DynamoDB cannot store.
+        "created_at": str(int(created_at)),
         "retention_window_at_creation": window_days,
         "legal_hold": legal_hold,
         "verdict_summary": "some summary",
         "issue_rationale_text": "some rationale",
         "upload_s3_key": _upload_key(review_id, owner_sub),
         "output_s3_key": _output_key(review_id),
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
 # get_retention_settings — GET (admin)
 # ---------------------------------------------------------------------------
 
-class TestGetRetentionSettings(unittest.TestCase):
+class TestGetRetentionSettings(RetentionTestCase):
     def test_non_admin_403(self):
-        ddb, _, _, _ = _new_ddb()
+        ddb, _, _, _ = self._new_ddb()
         non_admin = _seed_non_admin()
         with self.assertRaises(HTTPException) as ctx:
             _retention_module.get_retention_settings(non_admin, ddb)
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_default_settings_when_no_row(self):
-        ddb, _, _, _ = _new_ddb()
+        ddb, _, _, _ = self._new_ddb()
         admin = _seed_admin()
         result = _retention_module.get_retention_settings(admin, ddb)
         self.assertEqual(result["retention_window_days"], 90)
@@ -258,9 +257,10 @@ class TestGetRetentionSettings(unittest.TestCase):
 # request_retention_change — POST (admin), dual control (issue #13/#61)
 # ---------------------------------------------------------------------------
 
-class TestRequestRetentionChange(unittest.TestCase):
+class TestRequestRetentionChange(RetentionTestCase):
     def setUp(self):
-        self.ddb, self.reviews, self.settings, self.audit = _new_ddb()
+        super().setUp()
+        self.ddb, self.reviews, self.settings, self.audit = self._new_ddb()
         self.admin = _seed_admin("admin-1")
         self.other_admin = _seed_admin("admin-2")
         self.non_admin = _seed_non_admin("reviewer-1")
@@ -334,9 +334,10 @@ class TestRequestRetentionChange(unittest.TestCase):
 # preview_purge_sweep — pre-sweep preview ("this change will purge N objects")
 # ---------------------------------------------------------------------------
 
-class TestPreviewPurgeSweep(unittest.TestCase):
+class TestPreviewPurgeSweep(RetentionTestCase):
     def setUp(self):
-        self.ddb, self.reviews, self.settings, self.audit = _new_ddb()
+        super().setUp()
+        self.ddb, self.reviews, self.settings, self.audit = self._new_ddb()
         self.admin = _seed_admin("admin-1")
         self.non_admin = _seed_non_admin("reviewer-1")
 
@@ -394,7 +395,7 @@ class TestPreviewPurgeSweep(unittest.TestCase):
         preview under-reported purges (reported 0 while the real sweep
         deleted 2) because it substituted the proposed window for the
         review's own snapshot."""
-        ddb, reviews, _settings, _audit = _new_ddb()
+        ddb, reviews, _settings, _audit = self._new_ddb()
         admin = _seed_admin("admin-1")
         now = _retention_module.now_epoch()
         # Two DONE reviews, created 40 days ago, snapshotted at a 30-day
@@ -426,9 +427,10 @@ class TestPreviewPurgeSweep(unittest.TestCase):
 # set_legal_hold / release_legal_hold — mirrors to storage layer (#61)
 # ---------------------------------------------------------------------------
 
-class TestLegalHold(unittest.TestCase):
+class TestLegalHold(RetentionTestCase):
     def setUp(self):
-        self.ddb, self.reviews, self.settings, self.audit = _new_ddb()
+        super().setUp()
+        self.ddb, self.reviews, self.settings, self.audit = self._new_ddb()
         self.admin = _seed_admin("admin-1")
         self.non_admin = _seed_non_admin("reviewer-1")
         _seed_review(self.reviews, "r-1", status_="DONE")
@@ -448,9 +450,9 @@ class TestLegalHold(unittest.TestCase):
             "r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3
         )
         self.assertTrue(result["legal_hold"])
-        self.assertEqual(self.reviews.items["r-1"]["legal_hold"], True)
-        self.assertEqual(self.reviews.items["r-1"]["legal_hold_reason"], "matter ref 123")
-        self.assertEqual(self.reviews.items["r-1"]["legal_hold_set_by"], "admin-1")
+        self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold"], True)
+        self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold_reason"], "matter ref 123")
+        self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold_set_by"], "admin-1")
 
         uploads_tags = self.fake_s3.tags.get(
             (os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}
@@ -474,7 +476,7 @@ class TestLegalHold(unittest.TestCase):
         )
         result = _retention_module.release_legal_hold("r-1", self.admin, self.ddb, self.fake_s3)
         self.assertFalse(result["legal_hold"])
-        self.assertEqual(self.reviews.items["r-1"]["legal_hold"], False)
+        self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold"], False)
 
         uploads_tags = self.fake_s3.tags.get(
             (os.environ["UPLOADS_BUCKET"], _upload_key("r-1")), {}
@@ -514,9 +516,10 @@ class TestLegalHold(unittest.TestCase):
 # list_legal_holds — hold list view
 # ---------------------------------------------------------------------------
 
-class TestListLegalHolds(unittest.TestCase):
+class TestListLegalHolds(RetentionTestCase):
     def setUp(self):
-        self.ddb, self.reviews, self.settings, self.audit = _new_ddb()
+        super().setUp()
+        self.ddb, self.reviews, self.settings, self.audit = self._new_ddb()
         self.admin = _seed_admin("admin-1")
         self.non_admin = _seed_non_admin("reviewer-1")
 

@@ -436,24 +436,19 @@ def _find_submission_by_review_id(table: Any, review_id: str) -> dict[str, Any] 
     so once the table outgrows one page a target row on a later page is
     silently invisible -- the reservation it owns then never settles.
 
-    Prefer the `review_id-index` GSI (see infra/lib/nested/data-stack.ts)
-    via a real boto3/moto Table.query() so the lookup is keyed regardless of
-    table size or Scan-page ordering. Falls back to scan+filter only for a
-    lightweight test stand-in that doesn't implement `.query()` (same
-    fallback convention as reviews.py::_list_reviews_for_owner /
-    disposition.py::_scan_by_owner)."""
-    if hasattr(table, "query"):
-        from boto3.dynamodb.conditions import Key
+    The lookup reads the `review_id-index` GSI (see
+    infra/lib/nested/data-stack.ts) via Table.query(), so it is keyed
+    regardless of table size or Scan-page ordering.
 
-        resp = table.query(
-            IndexName="review_id-index",
-            KeyConditionExpression=Key("review_id").eq(review_id),
-        )
-        items = resp.get("Items", [])
-        return items[0] if items else None
+    Issue #67: the scan+filter fallback for a stand-in without `.query()` is
+    gone -- a real boto3 Table always has `.query`, so the branch was dead in
+    production and live only under hand-rolled fakes (same removal as
+    reviews.py::_list_reviews_for_owner / disposition.py::_query_by_owner)."""
+    from boto3.dynamodb.conditions import Key
 
-    resp = table.scan(
-        FilterExpression="review_id = :rid", ExpressionAttributeValues={":rid": review_id}
+    resp = table.query(
+        IndexName="review_id-index",
+        KeyConditionExpression=Key("review_id").eq(review_id),
     )
     items = resp.get("Items", [])
     return items[0] if items else None

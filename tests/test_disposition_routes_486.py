@@ -23,10 +23,19 @@ Covers the issue's acceptance criteria:
   - The free-text note is never copied into the audit row (Environment
     notes: "never log document text, prompt text, secrets").
 
-DynamoDB is an in-memory fake -- the same update-expression matching
-tests/test_disposition_capture_74.py's FakeReviewsTable already
-established for `record_disposition`'s write path, extended with a second
-fake table for audit rows. No moto/AWS needed: this route never touches S3.
+The reviews table is a REAL (moto) DynamoDB table built by
+`tests/ddb_fixtures.py::create_reviews_table`, declaring the same GSIs
+`infra/lib/nested/data-stack.ts` does. Issue #67: it used to be an in-memory
+`FakeReviewsTable` with no `.query`, which meant every read this route makes
+took a duck-typed scan fallback that a real boto3 Table can never reach --
+`GET /api/reviews?scope=mine` in particular exercised a scan-and-filter path
+production does not have, instead of the `owner_sub-index` query it really
+runs. Those fallbacks are deleted; the table here is real, and moto refuses
+what DynamoDB refuses.
+
+The AUDIT table stays an in-memory append-only stand-in: nothing in the
+duck-typing removal touches it, these tests read the rows back in write
+order, and the router only ever `put_item`s to it.
 
 This test MUST FAIL on the pre-fix tree (no POST /api/reviews/{id}/
 disposition route exists) and PASS after the fix.
@@ -41,66 +50,35 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
+TESTS_DIR = REPO_ROOT / "tests"
 
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
+for _path in (str(BACKEND_ROOT), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
+import boto3  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
+from ddb_fixtures import create_reviews_table  # noqa: E402
 
 import src.disposition as disposition_module  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# In-memory fakes.
+# The resource the route is handed: a REAL moto reviews table plus an
+# in-memory audit stand-in.
 # ---------------------------------------------------------------------------
-
-
-class FakeReviewsTable:
-    """In-memory stand-in for the reviews DynamoDB Table resource -- the
-    SAME update-expression matching as
-    tests/test_disposition_capture_74.py's FakeReviewsTable, since this
-    exercises the identical `disposition.record_disposition` write path,
-    now reached through the route rather than called directly."""
-
-    def __init__(self):
-        self.items: dict[str, dict] = {}
-
-    def get_item(self, Key):
-        item = self.items.get(Key["review_id"])
-        return {"Item": dict(item)} if item else {}
-
-    def put_item(self, Item, ConditionExpression=None):
-        self.items[Item["review_id"]] = dict(Item)
-
-    def update_item(
-        self,
-        Key,
-        UpdateExpression,
-        ExpressionAttributeValues=None,
-        ConditionExpression=None,
-        ExpressionAttributeNames=None,
-    ):
-        review_id = Key["review_id"]
-        item = self.items.setdefault(review_id, dict(Key))
-        vals = ExpressionAttributeValues or {}
-        if "attorney_disposition = :disposition" in UpdateExpression:
-            item["attorney_disposition"] = vals[":disposition"]
-            item["attorney_disposition_reason_codes"] = vals[":reason_codes"]
-            item["attorney_disposition_topic_ids"] = vals[":topic_ids"]
-            item["attorney_disposition_note"] = vals[":note"]
-            item["attorney_disposition_recorded_at"] = vals[":recorded_at"]
-            item["legal_triage_status"] = vals[":triage_status"]
-            item["updated_at"] = vals[":now"]
-            return
-
-    def scan(self, **kwargs):  # noqa: ARG002 - unused kwargs accepted for shape parity
-        return {"Items": [dict(v) for v in self.items.values()]}
 
 
 class FakeAuditTable:
@@ -114,9 +92,12 @@ class FakeAuditTable:
         self.items.append(dict(Item))
 
 
-class FakeDynamoDBResource:
-    def __init__(self):
-        self.reviews = FakeReviewsTable()
+class HybridDynamoDBResource:
+    """`.Table(name)` router: the real moto reviews table for
+    `$REVIEWS_TABLE`, the append-only stand-in for `$AUDIT_TABLE`."""
+
+    def __init__(self, reviews_table):
+        self.reviews = reviews_table
         self.audit = FakeAuditTable()
 
     def Table(self, name: str):
@@ -136,15 +117,24 @@ def _caller_row(sub: str, is_admin: bool = False) -> dict:
     }
 
 
-def _seed_review(table: FakeReviewsTable, review_id: str, owner_sub: str, status_: str) -> None:
-    table.items[review_id] = {
-        "review_id": review_id,
-        "owner_sub": owner_sub,
-        "status": status_,
-        "decision": "REQUEST_CHANGE",
-        "created_at": "1000",
-        "updated_at": "1000",
-    }
+def _seed_review(table, review_id: str, owner_sub: str, status_: str) -> None:
+    """The row shape `backend/src/reviews.py::create_review` writes: a
+    review_id PK plus the owner_sub/status/created_at attributes the three
+    GSIs key on."""
+    table.put_item(
+        Item={
+            "review_id": review_id,
+            "owner_sub": owner_sub,
+            "status": status_,
+            "decision": "REQUEST_CHANGE",
+            "created_at": "1000",
+            "updated_at": "1000",
+        }
+    )
+
+
+def _stored(table, review_id: str) -> dict:
+    return table.get_item(Key={"review_id": review_id}).get("Item", {})
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +159,12 @@ class TestRouteRegistered(unittest.TestCase):
 
 class DispositionRouteTestBase(unittest.TestCase):
     def setUp(self):
-        self.ddb = FakeDynamoDBResource()
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.ddb = HybridDynamoDBResource(create_reviews_table(self.boto_ddb))
         self.app = FastAPI()
         self.app.include_router(review_routes.router)
         self.app.dependency_overrides[review_routes.get_dynamodb_resource] = lambda: self.ddb
@@ -333,7 +328,7 @@ class TestRecordDispositionRoute(DispositionRouteTestBase):
         )
         self.assertEqual(resp.status_code, 400)
         # Rejected before any write landed.
-        self.assertIsNone(self.ddb.reviews.items["review-7"].get("attorney_disposition"))
+        self.assertIsNone(_stored(self.ddb.reviews, "review-7").get("attorney_disposition"))
 
     def test_topic_ids_non_string_element_rejected_400(self):
         _seed_review(self.ddb.reviews, "review-8", "owner-1", "DONE")
@@ -465,7 +460,7 @@ class TestDispositionScoping(DispositionRouteTestBase):
         )
         self.assertEqual(resp.status_code, 403)
         # And the review itself is genuinely untouched.
-        self.assertIsNone(self.ddb.reviews.items["review-scoped"].get("attorney_disposition"))
+        self.assertIsNone(_stored(self.ddb.reviews, "review-scoped").get("attorney_disposition"))
 
     def test_owner_gets_200(self):
         self._authenticate_as("owner-real")

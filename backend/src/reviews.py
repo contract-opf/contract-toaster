@@ -3379,23 +3379,6 @@ def _review_list_item(item: dict[str, Any]) -> dict[str, Any]:
     return projection
 
 
-def _scan_all_reviews(table: Any) -> list[dict[str, Any]]:
-    """TEST-DOUBLE FALLBACK ONLY (issue #52). No live request path scans the
-    reviews table any more: every admin-wide read goes through
-    `_query_by_status` and the `status-index` GSI, and this loop is reached
-    only from a lightweight stand-in that implements `scan` but not `query`
-    (the convention `pipeline_runner._find_submission_by_review_id`
-    documents). `tests/test_reviews_no_scan.py` is the gate that keeps it
-    that way against a real (moto) table."""
-    items: list[dict[str, Any]] = []
-    resp = table.scan()
-    items.extend(resp.get("Items", []))
-    while "LastEvaluatedKey" in resp:
-        resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
-        items.extend(resp.get("Items", []))
-    return items
-
-
 # ---------------------------------------------------------------------------
 # status-index (issue #52) -- the one index every admin-wide read uses
 #
@@ -3439,41 +3422,27 @@ def _query_status_page(
     merge (`_page_all`) drives pages directly because it consumes a
     partition only as far as the merge needs it.
 
-    The scan fallback is for a lightweight test stand-in without `.query()`
-    (same convention as `_page_for_owner`): it reads the whole stand-in,
-    filters on status and orders in memory, then applies `start_key` and
-    `limit` to that -- so a fake pages the same way the index does, and a
-    paging bug is visible against a fake too.
+    Issue #67: the scan fallback this used to carry for a stand-in without
+    `.query()` is gone. A real boto3 Table always has `.query`, so that
+    branch was unreachable in production and only ever ran under a
+    hand-rolled fake; tests now use a real (moto) table built by
+    `tests/ddb_fixtures.create_reviews_table`.
     """
-    if hasattr(table, "query"):
-        from boto3.dynamodb.conditions import Key
+    from boto3.dynamodb.conditions import Key
 
-        kwargs: dict[str, Any] = {
-            "IndexName": REVIEWS_STATUS_INDEX,
-            "KeyConditionExpression": Key("status").eq(status_value),
-            "ScanIndexForward": not newest_first,
-        }
-        if limit is not None:
-            kwargs["Limit"] = limit
-        if start_key:
-            kwargs["ExclusiveStartKey"] = start_key
-        if projection:
-            kwargs["ProjectionExpression"] = projection
-        resp = table.query(**kwargs)
-        return resp.get("Items", []), resp.get("LastEvaluatedKey")
-
-    rows = [i for i in _scan_all_reviews(table) if i.get("status") == status_value]
-    rows.sort(
-        key=lambda i: (str(i.get("created_at") or ""), str(i.get("review_id") or "")),
-        reverse=newest_first,
-    )
+    kwargs: dict[str, Any] = {
+        "IndexName": REVIEWS_STATUS_INDEX,
+        "KeyConditionExpression": Key("status").eq(status_value),
+        "ScanIndexForward": not newest_first,
+    }
+    if limit is not None:
+        kwargs["Limit"] = limit
     if start_key:
-        ids = [r.get("review_id") for r in rows]
-        after = start_key.get("review_id")
-        rows = rows[ids.index(after) + 1 :] if after in ids else rows
-    if limit is not None and len(rows) > limit:
-        return rows[:limit], _status_index_key(rows[limit - 1])
-    return rows, None
+        kwargs["ExclusiveStartKey"] = start_key
+    if projection:
+        kwargs["ProjectionExpression"] = projection
+    resp = table.query(**kwargs)
+    return resp.get("Items", []), resp.get("LastEvaluatedKey")
 
 
 def _query_by_status(
@@ -3496,8 +3465,8 @@ def _query_by_status(
 
     `newest_first=False` reads oldest-first from the index (the stale-review
     sample); `projection` is a `ProjectionExpression` for reads that only
-    count (`"review_id"`). Falls back to a scan ONLY when `table` lacks
-    `.query` -- see `_query_status_page`.
+    count (`"review_id"`). There is no scan fallback (issue #67) -- see
+    `_query_status_page`.
     """
     items: list[dict[str, Any]] = []
     key = start_key
@@ -3518,26 +3487,25 @@ def _query_by_status(
 
 
 def _list_reviews_for_owner(table: Any, owner_sub: str) -> list[dict[str, Any]]:
-    """Prefer the `owner_sub-index` GSI (see infra/lib/nested/data-stack.ts)
-    via a real boto3/moto Table.query(); fall back to scan+filter for a
-    lightweight test stand-in that doesn't implement `.query()` (same
-    fallback convention as src/disposition.py::_scan_by_owner)."""
-    if hasattr(table, "query"):
-        from boto3.dynamodb.conditions import Key
+    """Every review owned by `owner_sub`, read from the `owner_sub-index` GSI
+    (see infra/lib/nested/data-stack.ts) with a full `LastEvaluatedKey` loop.
 
-        items: list[dict[str, Any]] = []
-        query_kwargs: dict[str, Any] = {
-            "IndexName": "owner_sub-index",
-            "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
-        }
-        resp = table.query(**query_kwargs)
+    Issue #67: the scan+filter fallback for a stand-in without `.query()` is
+    gone -- a real boto3 Table always has `.query`, so it was dead in
+    production (same removal as src/disposition.py::_query_by_owner)."""
+    from boto3.dynamodb.conditions import Key
+
+    items: list[dict[str, Any]] = []
+    query_kwargs: dict[str, Any] = {
+        "IndexName": "owner_sub-index",
+        "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
+    }
+    resp = table.query(**query_kwargs)
+    items.extend(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table.query(**query_kwargs, ExclusiveStartKey=resp["LastEvaluatedKey"])
         items.extend(resp.get("Items", []))
-        while "LastEvaluatedKey" in resp:
-            resp = table.query(**query_kwargs, ExclusiveStartKey=resp["LastEvaluatedKey"])
-            items.extend(resp.get("Items", []))
-        return items
-
-    return [i for i in _scan_all_reviews(table) if i.get("owner_sub") == owner_sub]
+    return items
 
 
 # Pagination (issue #488). The listing was unbounded on both axes: every row
@@ -3604,40 +3572,24 @@ def _page_for_owner(
     order rows it had already fetched, which is the same thing as fetching
     them all.
 
-    The scan fallback is for a lightweight test stand-in without `.query()`
-    (same convention as `_list_reviews_for_owner`). It pages the SCAN and
-    filters after, so a page can come back short and still have more behind
-    it -- which is exactly how a filtered DynamoDB read behaves. Keeping that
-    behaviour identical on both paths is deliberate: a fake that never returns
-    a short page would hide the one bug this code can have.
+    Issue #67: the scan-and-filter fallback for a stand-in without `.query()`
+    is gone (same removal as `_list_reviews_for_owner`). A DynamoDB query
+    can still return a SHORT page with a `LastEvaluatedKey` behind it, so
+    the caller must keep honouring the cursor rather than treating a short
+    page as the end of the list.
     """
-    if hasattr(table, "query"):
-        from boto3.dynamodb.conditions import Key
+    from boto3.dynamodb.conditions import Key
 
-        kwargs: dict[str, Any] = {
-            "IndexName": "owner_sub-index",
-            "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
-            "ScanIndexForward": False,
-            "Limit": limit,
-        }
-        if start_key:
-            kwargs["ExclusiveStartKey"] = start_key
-        resp = table.query(**kwargs)
-        return resp.get("Items", []), resp.get("LastEvaluatedKey")
-
-    items: list[dict[str, Any]] = []
-    key = start_key
-    while len(items) < limit:
-        kwargs = {"Limit": limit}
-        if key:
-            kwargs["ExclusiveStartKey"] = key
-        resp = table.scan(**kwargs)
-        items.extend(i for i in resp.get("Items", []) if i.get("owner_sub") == owner_sub)
-        key = resp.get("LastEvaluatedKey")
-        if not key:
-            break
-    items.sort(key=lambda i: i.get("created_at") or "", reverse=True)
-    return items[:limit], key
+    kwargs: dict[str, Any] = {
+        "IndexName": "owner_sub-index",
+        "KeyConditionExpression": Key("owner_sub").eq(owner_sub),
+        "ScanIndexForward": False,
+        "Limit": limit,
+    }
+    if start_key:
+        kwargs["ExclusiveStartKey"] = start_key
+    resp = table.query(**kwargs)
+    return resp.get("Items", []), resp.get("LastEvaluatedKey")
 
 
 # Every status the admin listing merges over. The closed vocabulary is what

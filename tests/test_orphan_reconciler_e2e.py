@@ -33,49 +33,18 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 import json
 import sys
 import time
-import types
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RECONCILER_DIR = REPO_ROOT / "infra" / "lambda" / "orphan_reconciler"
 
-if str(RECONCILER_DIR) not in sys.path:
-    sys.path.insert(0, str(RECONCILER_DIR))
+TESTS_DIR = REPO_ROOT / "tests"
 
+for _path in (str(RECONCILER_DIR), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
-def _stub_third_party() -> None:
-    """Inject minimal stubs for boto3/botocore if absent (handler.py imports
-    `boto3` and `botocore.exceptions.ClientError` at module scope)."""
-    if "botocore" not in sys.modules:
-        botocore_mod = types.ModuleType("botocore")
-        exceptions_mod = types.ModuleType("botocore.exceptions")
-
-        class ClientError(Exception):
-            def __init__(self, error_response=None, operation_name=""):
-                self.response = error_response or {}
-                super().__init__(str(error_response))
-
-        exceptions_mod.ClientError = ClientError
-        botocore_mod.exceptions = exceptions_mod
-        sys.modules["botocore"] = botocore_mod
-        sys.modules["botocore.exceptions"] = exceptions_mod
-
-    if "boto3" not in sys.modules:
-        boto3_mod = types.ModuleType("boto3")
-
-        def _unset_resource(*_a, **_kw):
-            raise AssertionError(
-                "boto3.resource() called without being patched by the test -- "
-                "tests must monkeypatch handler.boto3 before invoking the handler."
-            )
-
-        boto3_mod.resource = _unset_resource
-        boto3_mod.client = _unset_resource
-        sys.modules["boto3"] = boto3_mod
-
-
-_stub_third_party()
 
 import os  # noqa: E402
 
@@ -88,10 +57,22 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 os.environ.setdefault("STALE_PENDING_THRESHOLD_SECONDS", "120")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+# Issue #67: the handler looks a submission up through `review_id-index`
+# (`from boto3.dynamodb.conditions import Key`) with no scan fallback left,
+# and that import cannot resolve against a bare `types.ModuleType("boto3")`
+# stub. Real boto3/botocore, with moto intercepting them.
+import boto3  # noqa: E402
+from botocore.exceptions import ClientError  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import handler as _handler_module  # noqa: E402
 
-ClientError = sys.modules["botocore.exceptions"].ClientError
+from ddb_fixtures import create_submissions_table  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -207,10 +188,15 @@ class FakeTable:
 
 
 class FakeDynamoDBResource:
-    def __init__(self):
+    def __init__(self, submissions_table=None):
         self._tables: dict[str, FakeTable] = {}
+        # Issue #67: the REAL (moto) review_submissions table. The handler
+        # queries `review_id-index` for a submission with no scan fallback
+        # left, so a stand-in without that index cannot stand in for it.
+        if submissions_table is not None:
+            self._tables[os.environ["REVIEW_SUBMISSIONS_TABLE"]] = submissions_table
 
-    def Table(self, name: str) -> FakeTable:
+    def Table(self, name: str):
         if name not in self._tables:
             key_name = {
                 os.environ["REVIEW_SUBMISSIONS_TABLE"]: "idempotency_key",
@@ -278,13 +264,32 @@ class TestDeadExecutionReconciliation(unittest.TestCase):
     execution_arn must actually be discoverable on the reviews row."""
 
     def setUp(self):
-        self.ddb = FakeDynamoDBResource()
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.submissions = create_submissions_table(self.boto_ddb)
+
+        self.ddb = FakeDynamoDBResource(self.submissions)
         self.sfn = FakeSfnClient()
         self._orig_boto3 = _handler_module.boto3
         _handler_module.boto3 = Boto3Stub(self.ddb, self.sfn)
 
     def tearDown(self):
         _handler_module.boto3 = self._orig_boto3
+
+    def seed_submission(self, submission: dict) -> None:
+        """The shape `reviews.submit_review` writes: an idempotency_key PK
+        plus the review_id the `review_id-index` GSI keys on."""
+        self.submissions.put_item(Item=dict(submission))
+
+    def submission_row(self, idempotency_key: str) -> dict:
+        return (
+            self.submissions.get_item(
+                Key={"idempotency_key": idempotency_key}
+            ).get("Item")
+            or {}
+        )
 
     def _seed_running_review_with_arn(self, review_id: str, execution_arn: str,
                                        reservation_id: str = "res-1",
@@ -295,13 +300,12 @@ class TestDeadExecutionReconciliation(unittest.TestCase):
             "status": "RUNNING",
             "execution_arn": execution_arn,
         }
-        submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions_table.items[idempotency_key] = {
+        self.seed_submission({
             "idempotency_key": idempotency_key,
             "review_id": review_id,
             "execution_arn": execution_arn,
             "spend_reservation_id": reservation_id,
-        }
+        })
         semaphore_table = self.ddb.Table(os.environ["SEMAPHORE_TABLE"])
         semaphore_table.items[f"review-slot#{review_id}"] = {
             "lock_name": f"review-slot#{review_id}",
@@ -334,9 +338,8 @@ class TestDeadExecutionReconciliation(unittest.TestCase):
         reviews_table = self.ddb.Table(os.environ["REVIEWS_TABLE"])
         self.assertEqual(reviews_table.items[review_id]["status"], "ERROR")
 
-        submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
         self.assertTrue(
-            submissions_table.items["idem-1"]["reservation_released"],
+            self.submission_row("idem-1")["reservation_released"],
             "Spend reservation must be released on the dead-execution path.",
         )
 
@@ -373,8 +376,9 @@ class TestDeadExecutionReconciliation(unittest.TestCase):
         self._seed_running_review_with_arn(
             review_id, execution_arn, reservation_id="res-already", idempotency_key="idem-already"
         )
-        submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions_table.items["idem-already"]["reservation_released"] = True
+        already = self.submission_row("idem-already")
+        already["reservation_released"] = True
+        self.seed_submission(already)
         self.sfn.describe_execution_statuses[execution_arn] = "FAILED"
 
         spend_date = time.strftime("%Y-%m-%d", time.gmtime())
@@ -546,13 +550,32 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
     persisted pointer-only execution_input, never an empty "{}"."""
 
     def setUp(self):
-        self.ddb = FakeDynamoDBResource()
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.submissions = create_submissions_table(self.boto_ddb)
+
+        self.ddb = FakeDynamoDBResource(self.submissions)
         self.sfn = FakeSfnClient()
         self._orig_boto3 = _handler_module.boto3
         _handler_module.boto3 = Boto3Stub(self.ddb, self.sfn)
 
     def tearDown(self):
         _handler_module.boto3 = self._orig_boto3
+
+    def seed_submission(self, submission: dict) -> None:
+        """The shape `reviews.submit_review` writes: an idempotency_key PK
+        plus the review_id the `review_id-index` GSI keys on."""
+        self.submissions.put_item(Item=dict(submission))
+
+    def submission_row(self, idempotency_key: str) -> dict:
+        return (
+            self.submissions.get_item(
+                Key={"idempotency_key": idempotency_key}
+            ).get("Item")
+            or {}
+        )
 
     def test_redrive_uses_stored_execution_input(self):
         review_id = "review-redrive-1"
@@ -565,15 +588,14 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
                 "release_bundle_hash": "bundle-hash-v1",
             }
         )
-        submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
         stale_created_at = 0  # epoch 0 is always "old enough"
-        submissions_table.items["idem-redrive-1"] = {
+        self.seed_submission({
             "idempotency_key": "idem-redrive-1",
             "review_id": review_id,
             "execution_name": f"review-{review_id}",
             "execution_input": stored_input,
             "created_at": stale_created_at,
-        }
+        })
 
         redriven = _handler_module._reconcile_arnless_submissions()
 
@@ -597,14 +619,13 @@ class TestArnlessRedriveGetsWellFormedInput(unittest.TestCase):
     def test_submission_without_stored_input_is_skipped_not_redriven_empty(self):
         """A legacy/malformed row with no execution_input must be skipped,
         not silently re-driven with "{}"."""
-        submissions_table = self.ddb.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
-        submissions_table.items["idem-legacy-1"] = {
+        self.seed_submission({
             "idempotency_key": "idem-legacy-1",
             "review_id": "review-legacy-1",
             "execution_name": "review-review-legacy-1",
             "created_at": 0,
             # no execution_input key at all
-        }
+        })
 
         redriven = _handler_module._reconcile_arnless_submissions()
 

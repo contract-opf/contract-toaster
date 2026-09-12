@@ -61,6 +61,7 @@ Exit codes: 0 = pass, 1 = fail
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import unittest
@@ -71,8 +72,9 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
+TESTS_DIR = REPO_ROOT / "tests"
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
@@ -84,10 +86,19 @@ os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "submissions-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import leakage_scan  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
+
+from ddb_fixtures import create_reviews_table  # noqa: E402
 
 # Cross-test-file import (established convention -- see
 # tests/test_spend_settlement_actual_usage.py and
@@ -229,10 +240,11 @@ class _Run:
         through the REAL `reviews.list_recent_failures`, so its
         `_RECENT_FAILURE_FIELDS` allowlist is what decides what is visible,
         not this test's idea of it."""
-        rows = reviews.list_recent_failures(
-            {"cognito_sub": "sub-admin", "is_admin": True},
-            _DiagnosticsDDB(self.row),
-        )
+        with _diagnostics_ddb(self.row) as ddb:
+            rows = reviews.list_recent_failures(
+                {"cognito_sub": "sub-admin", "is_admin": True},
+                ddb,
+            )
         assert len(rows) == 1, f"expected exactly one failure row, got {rows!r}"
         return rows[0]
 
@@ -253,20 +265,29 @@ class _DetailDDB:
         return self._table
 
 
-class _DiagnosticsScanTable:
-    def __init__(self, row: dict[str, Any]):
-        self._row = row
+@contextlib.contextmanager
+def _diagnostics_ddb(row: dict[str, Any]):
+    """A REAL (moto) reviews table holding exactly `row`, for the duration of
+    the block.
 
-    def scan(self, **_kwargs):
-        return {"Items": [dict(self._row)]}
+    Issue #67: this used to be a scan-only stand-in with no `.query`, so
+    `reviews.list_recent_failures` took a duck-typed scan fallback a real
+    boto3 Table can never reach. That fallback is deleted -- the admin
+    Diagnostics read is one `status-index` query per failure status -- so the
+    table has to be one that HAS the index.
 
-
-class _DiagnosticsDDB:
-    def __init__(self, row: dict[str, Any]):
-        self._table = _DiagnosticsScanTable(row)
-
-    def Table(self, _name):  # noqa: N802 - boto3 resource API name
-        return self._table
+    `created_at` is filled in when the pipeline row lacks it: it is the
+    `status-index` SORT KEY, and every real row carries it because
+    `reviews.create_review` writes it at creation (this fixture starts from a
+    row the pipeline UPDATED, not one it created).
+    """
+    with mock_aws():
+        boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = create_reviews_table(boto_ddb, table_name=os.environ["REVIEWS_TABLE"])
+        item = dict(row)
+        item.setdefault("created_at", item.get("updated_at") or "1000")
+        table.put_item(Item=item)
+        yield boto_ddb
 
 
 # ---------------------------------------------------------------------------

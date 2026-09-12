@@ -129,6 +129,33 @@
 > `bool`. The finding text below is left as written; it describes the state
 > before that change.
 
+> **Status note, 2026-09-12.** G6 / B6 **landed** as public issue
+> `contract-opf/contract-toaster#67` (private #707 in the table below).
+> Every duck-typed access-path branch is gone: the tree carried nine
+> `hasattr(table, ...)` sites (the finding counted seven), across
+> `backend/src/disposition.py`, `backend/src/pipeline_runner.py`,
+> `backend/src/reviews.py`, `infra/lambda/persist/handler.py` and
+> `infra/lambda/orphan_reconciler/handler.py`, and each now issues its index
+> query unconditionally. `reviews._scan_all_reviews` — the test-double-only
+> scan loop those fallbacks called — is deleted with them.
+> One departure from B6 as written: there is no new `backend/src/ddb.py`
+> port. Each call site already named the index it reads and the paging it
+> needs (`owner_sub-index` full-drain, `owner_sub-index` one bounded page,
+> `status-index` one page with `ScanIndexForward`/projection,
+> `review_id-index` single lookup), and a four-verb port would have had to
+> carry all of that through anyway; the two Lambda handlers are
+> self-contained deployment assets that cannot import from `backend/src` at
+> all, so a shared module could not have covered them. Removing the branches
+> was the whole behaviour change, so it was made where they were.
+> The tests that existed to drive those fallbacks now build real moto tables
+> from a new `tests/ddb_fixtures.py` (`create_reviews_table` /
+> `create_submissions_table`), whose GSI declarations are asserted equal to
+> the synthesized CDK template's by `tests/test_ddb_fixtures_cdk_parity_67.py`
+> and equal to `data-stack.ts`'s source declarations by
+> `tests/test_infra_dynamodb_tables.py`'s Check D. `tests/test_no_duck_typed_tables.py`
+> is the guard that keeps the branches deleted. The finding text below is
+> left as written; it describes the state before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to

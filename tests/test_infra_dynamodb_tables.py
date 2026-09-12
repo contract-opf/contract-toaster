@@ -76,6 +76,11 @@ import sys
 from pathlib import Path
 from infra_synth_helper import NEUTRAL_CDK_CONTEXT
 
+# Issue #67: the moto tables every converted test now builds. Check D
+# compares their GSI declarations against this stack's, so a fixture cannot
+# drift away from the table it stands in for.
+import ddb_fixtures
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INFRA = REPO_ROOT / "infra"
 DATA_STACK_PATH = INFRA / "lib" / "nested" / "data-stack.ts"
@@ -328,6 +333,104 @@ def check_d_gsis() -> list[str]:
         "Per AC: 'Do NOT use event_id as the PK — it makes the timestamp SK useless for "
         "range queries.' Use YYYY-MM or target_type#target_id as the partition key.",
     )
+
+    failures += _check_d_fixture_parity(data_ts)
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
+# Check D (continued) — tests/ddb_fixtures.py vs data-stack.ts (issue #67)
+# ---------------------------------------------------------------------------
+
+# The CDK table property -> (the fixture's GSI declarations, a label).
+# Only the two tables whose indexes production queries BY NAME with no
+# fallback since #67: reviews (owner_sub-index / status-index /
+# playbook_hash-index) and review_submissions (review_id-index).
+_FIXTURE_TABLES: dict[str, tuple[list[dict], str]] = {
+    "reviewsTable": (ddb_fixtures.REVIEWS_GSIS, "reviews"),
+    "reviewSubmissionsTable": (ddb_fixtures.SUBMISSIONS_GSIS, "review_submissions"),
+}
+
+_GSI_BLOCK_RE = re.compile(
+    r"this\.(\w+)\.addGlobalSecondaryIndex\(\{(.*?)\}\);", re.DOTALL
+)
+
+
+def _parse_ts_gsis(data_ts: str) -> dict[str, dict[str, dict]]:
+    """`{tableProperty: {indexName: {"KeySchema": [...], "ProjectionType": ...}}}`
+    parsed out of data-stack.ts's `addGlobalSecondaryIndex({...})` calls.
+
+    Source-level on purpose: this is the same shape Check L reads from the
+    SYNTHESIZED template, so the two together catch both "declared but does
+    not synthesize" and "fixture disagrees with the declaration".
+    `tests/test_ddb_fixtures_cdk_parity_67.py` closes the loop by comparing
+    the fixture against the synthesized template itself.
+    """
+    parsed: dict[str, dict[str, dict]] = {}
+    for table_prop, block in _GSI_BLOCK_RE.findall(data_ts):
+        name_match = re.search(r"indexName:\s*'([^']+)'", block)
+        if not name_match:
+            continue
+        key_schema: list[dict[str, str]] = []
+        partition = re.search(r"partitionKey:\s*\{\s*name:\s*'([^']+)'", block)
+        if partition:
+            key_schema.append(
+                {"AttributeName": partition.group(1), "KeyType": "HASH"}
+            )
+        sort = re.search(r"sortKey:\s*\{\s*name:\s*'([^']+)'", block)
+        if sort:
+            key_schema.append({"AttributeName": sort.group(1), "KeyType": "RANGE"})
+        projection = re.search(r"projectionType:\s*dynamodb\.ProjectionType\.(\w+)", block)
+        parsed.setdefault(table_prop, {})[name_match.group(1)] = {
+            "KeySchema": key_schema,
+            "ProjectionType": projection.group(1) if projection else None,
+        }
+    return parsed
+
+
+def _normalize_fixture_gsis(gsis: list[dict]) -> dict[str, dict]:
+    return {
+        gsi["IndexName"]: {
+            "KeySchema": [
+                {"AttributeName": k["AttributeName"], "KeyType": k["KeyType"]}
+                for k in gsi["KeySchema"]
+            ],
+            "ProjectionType": gsi.get("Projection", {}).get("ProjectionType"),
+        }
+        for gsi in gsis
+    }
+
+
+def _check_d_fixture_parity(data_ts: str) -> list[str]:
+    """Issue #67: every production DynamoDB read now queries its index
+    unconditionally — the duck-typed scan fallbacks are gone — so the tests
+    that cover those reads build real moto tables from
+    `tests/ddb_fixtures.py`. A fixture index the stack does not create would
+    make those tests prove nothing; a stack index the fixture omits would
+    leave a production query untested. Compare both directions."""
+    print("\nCheck D (cont.): tests/ddb_fixtures.py GSIs match data-stack.ts …")
+    failures: list[str] = []
+
+    parsed = _parse_ts_gsis(data_ts)
+
+    # Non-vacuity: a parser that silently matched nothing would make every
+    # comparison below trivially pass.
+    failures += _assert(
+        set(_FIXTURE_TABLES).issubset(parsed),
+        "addGlobalSecondaryIndex(...) blocks parsed for every fixture-backed table",
+        f"parsed tables: {sorted(parsed)}; expected at least: {sorted(_FIXTURE_TABLES)}",
+    )
+
+    for table_prop, (fixture_gsis, label) in sorted(_FIXTURE_TABLES.items()):
+        declared = parsed.get(table_prop, {})
+        expected = _normalize_fixture_gsis(fixture_gsis)
+        failures += _assert(
+            declared == expected,
+            f"tests/ddb_fixtures.py declares exactly the {label} GSIs data-stack.ts does",
+            f"data-stack.ts: {json.dumps(declared, sort_keys=True)}\n"
+            f"         fixture:       {json.dumps(expected, sort_keys=True)}",
+        )
 
     return failures
 

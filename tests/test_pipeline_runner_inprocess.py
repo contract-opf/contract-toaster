@@ -27,8 +27,10 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_SRC = REPO_ROOT / "backend" / "src"
-if str(BACKEND_SRC) not in sys.path:
-    sys.path.insert(0, str(BACKEND_SRC))
+TESTS_DIR = REPO_ROOT / "tests"
+for _path in (str(BACKEND_SRC), str(TESTS_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 import os  # noqa: E402
 
@@ -36,8 +38,17 @@ os.environ.setdefault("REVIEWS_TABLE", "reviews-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "submissions-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
+# moto needs a region and (fake) credentials for boto3.resource("dynamodb").
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+
+import boto3  # noqa: E402
+from moto import mock_aws  # noqa: E402
 
 import pipeline_runner as pr  # noqa: E402
+
+from ddb_fixtures import create_submissions_table  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000001"
 
@@ -200,59 +211,75 @@ class TestRunMockPipeline(unittest.TestCase):
         self.assertEqual(reviews_table.item["failing_stage"], "inprocess_pipeline")
 
 
-class FakeSubmissionsTable:
-    def __init__(self, submission: dict | None):
-        self.submission = submission
-        self.updates: list[dict] = []
-
-    def scan(self, FilterExpression=None, ExpressionAttributeValues=None):
-        return {"Items": [self.submission] if self.submission else []}
-
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None):
-        self.updates.append({"Key": Key, "vals": ExpressionAttributeValues})
-
-
-class FakeDDBSubmissions:
-    def __init__(self, submissions):
-        self._subs = submissions
-
-    def Table(self, name):
-        return self._subs
-
-
 class TestSettleReservation(unittest.TestCase):
     """Directly exercise _settle_reservation so the settle_spend call SIGNATURE
     is verified (the run_mock_pipeline tests mock this out; a live smoke test
-    caught a wrong-arity call that this now guards)."""
+    caught a wrong-arity call that this now guards).
+
+    Issue #67: the submissions table here is a REAL (moto) one built by
+    `tests/ddb_fixtures.py::create_submissions_table`. It used to be a
+    scan-only stand-in, which meant `_find_submission_by_review_id` took a
+    duck-typed scan+filter fallback a real boto3 Table can never reach; the
+    lookup is now a `review_id-index` query with no fallback left.
+    """
+
+    def setUp(self) -> None:
+        self._mock_aws = mock_aws()
+        self._mock_aws.start()
+        self.addCleanup(self._mock_aws.stop)
+        self.boto_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        self.submissions = create_submissions_table(self.boto_ddb)
+
+    def _ddb_with(self, submission: dict | None):
+        """Seed one `review_submissions` row -- the shape
+        `reviews.submit_review` writes -- and return the resource
+        `_settle_reservation` is handed."""
+        if submission is not None:
+            self.submissions.put_item(Item=dict(submission))
+        return self.boto_ddb
+
+    def _released(self, idempotency_key: str):
+        row = self.submissions.get_item(
+            Key={"idempotency_key": idempotency_key}
+        ).get("Item") or {}
+        return row.get("reservation_released")
 
     def test_calls_settle_spend_with_review_and_reservation_id(self) -> None:
-        subs = FakeSubmissionsTable(
+        ddb = self._ddb_with(
             {"idempotency_key": "idem-1", "review_id": REVIEW_ID, "spend_reservation_id": "res-1"}
         )
         calls = []
         with patch.object(pr.reviews, "settle_spend", side_effect=lambda *a: calls.append(a)):
-            pr._settle_reservation(REVIEW_ID, FakeDDBSubmissions(subs))
+            pr._settle_reservation(REVIEW_ID, ddb)
         # (review_id, reservation_id, actual_usd_cents, dynamodb_resource)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], REVIEW_ID)
         self.assertEqual(calls[0][1], "res-1")
         self.assertEqual(calls[0][2], 0)
-        self.assertTrue(subs.updates and subs.updates[0]["vals"][":t"] is True)
+        self.assertIs(self._released("idem-1"), True)
 
     def test_no_reservation_is_noop(self) -> None:
-        subs = FakeSubmissionsTable({"idempotency_key": "idem-1", "review_id": REVIEW_ID})
+        ddb = self._ddb_with({"idempotency_key": "idem-1", "review_id": REVIEW_ID})
         with patch.object(pr.reviews, "settle_spend", side_effect=AssertionError("must not call")):
-            pr._settle_reservation(REVIEW_ID, FakeDDBSubmissions(subs))
-        self.assertEqual(subs.updates, [])
+            pr._settle_reservation(REVIEW_ID, ddb)
+        self.assertIsNone(self._released("idem-1"))
+
+    def test_no_submission_row_at_all_is_noop(self) -> None:
+        """The `review_id-index` query comes back EMPTY -- the other branch of
+        `if not submission`. Without this, a lookup that silently returned
+        nothing would be indistinguishable from one that worked."""
+        ddb = self._ddb_with(None)
+        with patch.object(pr.reviews, "settle_spend", side_effect=AssertionError("must not call")):
+            pr._settle_reservation(REVIEW_ID, ddb)
 
     def test_already_released_is_noop(self) -> None:
-        subs = FakeSubmissionsTable(
+        ddb = self._ddb_with(
             {"idempotency_key": "i", "review_id": REVIEW_ID, "spend_reservation_id": "r",
              "reservation_released": True}
         )
         with patch.object(pr.reviews, "settle_spend", side_effect=AssertionError("must not call")):
-            pr._settle_reservation(REVIEW_ID, FakeDDBSubmissions(subs))
-        self.assertEqual(subs.updates, [])
+            pr._settle_reservation(REVIEW_ID, ddb)
+        self.assertIs(self._released("i"), True)
 
 
 def _run_tests() -> int:
