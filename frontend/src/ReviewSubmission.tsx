@@ -572,6 +572,18 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
       'Reviewing your document needed more room to write than the model was allowed, so the answer was cut off before it could be finished.',
     fix: 'Sending the same document again will run into the same limit, so a retry will not help — whoever operates this deployment has to raise the output budget a review is allowed to write.',
   },
+  // Issue #62: the service running the review restarted under it (a
+  // redeploy, a container restart, an OOM kill) — `src/runner_recovery.py`
+  // relabels the row at the next boot. Kept in the operator section because
+  // that is whose event it is: nothing is wrong with the document, and the
+  // reader's only lever is to start again. The fix line says what was
+  // charged because that is the first thing a reviewer looking at a failed
+  // paid run wants to know, and the spend reservation really is credited
+  // back as part of the same recovery.
+  runner_restarted: {
+    cause: 'The service restarted while your review was running.',
+    fix: 'Nothing was charged beyond the passes that had already finished — start the review again.',
+  },
   // --- Your problem: the document itself ----------------------------------
   model_context_length_exceeded: {
     cause: 'Your document is longer than the model can read in one go, so it was not reviewed.',

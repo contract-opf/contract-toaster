@@ -1721,6 +1721,14 @@ class InProcessStepFunctionsClient:
             max_workers=max_concurrency, thread_name_prefix="pipeline"
         )
         self._started: set[str] = set()
+        # Issue #62: the review ids this pool is still holding -- submitted
+        # and not yet finished. The process shutdown path
+        # (src/main.py::_lifespan's `finally`) reads it to record a cancel
+        # intent for each, so the model client's cancel checkpoints stop
+        # spending during the container's grace period. `_started` cannot
+        # answer this: it is the execution-NAME idempotency set and is never
+        # emptied, by design.
+        self._in_flight: set[str] = set()
         self._lock = threading.Lock()
 
     @staticmethod
@@ -1747,8 +1755,48 @@ class InProcessStepFunctionsClient:
             self._started.add(name)
         payload = json.loads(input)
         review_id = payload["review_id"]
-        self._pool.submit(self._runner, review_id, payload)
+        with self._lock:
+            self._in_flight.add(review_id)
+        self._pool.submit(self._run_tracked, review_id, payload)
         return {"executionArn": f"inprocess:{name}", "startDate": int(time.time())}
+
+    def _run_tracked(self, review_id: str, payload: dict[str, Any]) -> None:
+        """`self._runner`, with the in-flight bookkeeping in a `finally`.
+
+        Deliberately NOT a `Future.add_done_callback`: `pool` is injectable
+        and the synchronous stand-in tests use returns None from `submit`,
+        so a callback registered on the return value would silently never
+        fire there -- and an in-flight set that only empties under a real
+        ThreadPoolExecutor is worse than none, because the shutdown path
+        would stamp a cancel intent on reviews that finished hours ago.
+        """
+        try:
+            self._runner(review_id, payload)
+        finally:
+            with self._lock:
+                self._in_flight.discard(review_id)
+
+    def in_flight_review_ids(self) -> list[str]:
+        """The reviews this pool is still holding, sorted for a stable log
+        line and a stable test. A snapshot: a worker can finish while the
+        caller iterates it, which is harmless -- `reviews.record_cancel_intent`
+        refuses to stamp a review that already reached a terminal status."""
+        with self._lock:
+            return sorted(self._in_flight)
+
+    def shutdown(self) -> None:
+        """Stop accepting work and drop whatever is still queued.
+
+        `wait=False` because this runs in the container's shutdown grace
+        period and a review mid-model-call can take minutes -- blocking on it
+        would turn a redeploy into a hang, and the run is going to be
+        recovered at the next boot either way (`src/runner_recovery.py`).
+        `cancel_futures=True` because a review that has not started yet must
+        not be started BY the shutdown: its row is recovered at boot, and a
+        pass begun here would spend money the process will not live to
+        persist.
+        """
+        self._pool.shutdown(wait=False, cancel_futures=True)
 
 
 # Module-level singleton: one worker pool per process, not per request.
@@ -1763,3 +1811,26 @@ def get_inprocess_sfn_client() -> InProcessStepFunctionsClient:
             if _SINGLETON is None:
                 _SINGLETON = InProcessStepFunctionsClient()
     return _SINGLETON
+
+
+def in_flight_review_ids() -> list[str]:
+    """Every review the process's runner pool is still holding (issue #62).
+
+    Empty when no review was ever submitted in this process -- read through
+    the existing singleton rather than `get_inprocess_sfn_client()`, so
+    asking the question never CONSTRUCTS a worker pool. On the AWS target,
+    where the transport is a real Step Functions client and this singleton is
+    never built, that is what makes the shutdown path a no-op rather than a
+    pool created seconds before the process exits.
+    """
+    client = _SINGLETON
+    return [] if client is None else client.in_flight_review_ids()
+
+
+def shutdown_inprocess_runner() -> None:
+    """Shut the process's runner pool down, if one was ever built (issue
+    #62). See `InProcessStepFunctionsClient.shutdown` for why it neither
+    waits nor lets queued work start."""
+    client = _SINGLETON
+    if client is not None:
+        client.shutdown()

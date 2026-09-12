@@ -362,7 +362,9 @@ from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path, Req
 from fastapi.responses import JSONResponse
 
 from src import config
+from src import pipeline_runner
 from src import purge_scheduler
+from src import runner_recovery
 from src import startup_checks
 from src.admin_dashboard import (
     MANUAL_REVIEW_DEFAULT_LIMIT,
@@ -438,6 +440,7 @@ from src.playbook_versions import (
     version_already_recorded,
 )
 from src.review_routes import checksum_sha256_b64, router as review_router
+from src import reviews as reviews_module
 from src.reviews import (
     RECENT_FAILURES_DEFAULT_LIMIT,
     list_recent_failures,
@@ -551,12 +554,46 @@ async def _lifespan(_app: FastAPI):
     owns the cadence and starting a second one would double-sweep the same
     rows. That None is the ordinary outcome there, not a failure.
 
+    `runner_recovery.recover_orphaned_reviews` (issue #62) runs next, and
+    only on the Docker Compose target. A review runs there on an in-process
+    thread pool, so every redeploy killed whatever was mid-flight with the
+    row still RUNNING: History showed a review that never ended, the
+    worst-case spend reservation was never settled, and the health endpoint
+    counted it as in-flight forever. The AWS target has
+    `infra/lambda/orphan_reconciler` for the equivalent condition and is
+    excluded here — a live Step Functions execution must be asked about, not
+    assumed dead because a container restarted.
+
+    The target test is `config.deploy_target()`, which is the not-AWS half of
+    `purge_scheduler.scheduler_enabled()` — deliberately that half and not
+    the whole predicate: `PURGE_SWEEP_ENABLED=0` turns the retention cadence
+    off, and an operator who does that has not asked for orphaned reviews to
+    stay RUNNING forever.
+
     Building the clients here rather than taking the FastAPI dependencies is
     deliberate: this runs outside any request, and the scheduler holds them for
     the process's life.
+
+    The `finally` is the other half of #62, for the restart this process is
+    itself about to be on the wrong side of: the runner pool is shut down
+    without waiting and without letting queued work start, and every review
+    it was still holding gets a cancel intent recorded, so the model client's
+    cancel checkpoints stop spending during the container's grace period.
+    Both are no-ops on the AWS target, where the in-process runner singleton
+    is never built.
     """
     startup_checks.verify_required_env()
     startup_checks.ensure_entity_roster_table(get_dynamodb_resource())
+    process_started_at = int(time.time())
+    if config.deploy_target() == "dts":
+        try:
+            runner_recovery.recover_orphaned_reviews(
+                get_dynamodb_resource(), process_started_at=process_started_at
+            )
+        except Exception:  # noqa: BLE001 - never let recovery stop the API booting
+            logger.warning(
+                "RUNNER_RECOVERY: orphaned-review recovery could not run; API continues"
+            )
     handle = None
     try:
         handle = purge_scheduler.start_purge_scheduler(
@@ -570,6 +607,33 @@ async def _lifespan(_app: FastAPI):
     finally:
         if handle is not None:
             handle.stop()
+        _stop_inprocess_runner()
+
+
+def _stop_inprocess_runner() -> None:
+    """Shutdown half of issue #62: drop the runner pool and tell every review
+    it was still holding to stop.
+
+    Ordered ids-first: `shutdown(cancel_futures=True)` drops queued work, and
+    a queued review that never ran has a row this process must still speak
+    for. Each step is guarded on its own — a failure to record one intent
+    must not skip the rest, and nothing here may turn a shutdown into a
+    traceback. Every one of these reviews is recovered at the next boot by
+    `runner_recovery`; the cancel intent is what stops spend in the meantime.
+    """
+    try:
+        in_flight = pipeline_runner.in_flight_review_ids()
+        pipeline_runner.shutdown_inprocess_runner()
+    except Exception:  # noqa: BLE001 - a shutdown must not raise
+        logger.warning("RUNNER_SHUTDOWN: could not stop the in-process runner pool")
+        return
+    for review_id in in_flight:
+        try:
+            reviews_module.record_cancel_intent(review_id, get_dynamodb_resource())
+        except Exception:  # noqa: BLE001 - one failed stamp must not skip the rest
+            logger.warning(
+                "RUNNER_SHUTDOWN: could not record a cancel intent for an in-flight review"
+            )
 
 
 app = FastAPI(
