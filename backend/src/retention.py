@@ -52,8 +52,10 @@ from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import reviews as reviews_module
+    from src.authz import require_admin
 except ImportError:  # pragma: no cover
     import reviews as reviews_module  # type: ignore[no-redef]
+    from authz import require_admin  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -175,17 +177,6 @@ def _audit_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
 
 
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
-
-
-def _require_admin(caller_user_row: dict[str, Any], detail: str) -> None:
-    if not _is_admin(caller_user_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
-
-
 def _write_audit_entry(
     dynamodb_resource: Any,
     actor: str,
@@ -248,7 +239,7 @@ def get_retention_settings(
     and render the selectable choices -- including `forever` -- without
     hard-coding them.
     """
-    _require_admin(caller_user_row, "Admin privilege required to view retention settings.")
+    require_admin(caller_user_row, "Admin privilege required to view retention settings.")
 
     table = _settings_table(dynamodb_resource)
     resp = table.get_item(Key={"setting_id": GLOBAL_SETTING_ID})
@@ -303,7 +294,7 @@ def request_retention_change(
     Raises HTTPException(403) if the caller is not an admin, 400 if
     new_window_days is neither a valid int in range nor `"forever"`.
     """
-    _require_admin(caller_user_row, "Admin privilege required to change retention settings.")
+    require_admin(caller_user_row, "Admin privilege required to change retention settings.")
 
     _validate_window(new_window_days)
 
@@ -433,7 +424,7 @@ def preview_purge_sweep(
 
     Raises HTTPException(403) if the caller is not an admin.
     """
-    _require_admin(caller_user_row, "Admin privilege required to preview a purge sweep.")
+    require_admin(caller_user_row, "Admin privilege required to preview a purge sweep.")
 
     reviews_table = _reviews_table(dynamodb_resource)
 
@@ -838,7 +829,7 @@ def set_legal_hold(
     Raises HTTPException(403) if the caller is not an admin, 400 if `reason`
     is empty, 404 if the review does not exist.
     """
-    _require_admin(caller_user_row, "Admin privilege required to place a legal hold.")
+    require_admin(caller_user_row, "Admin privilege required to place a legal hold.")
 
     if not reason:
         raise HTTPException(
@@ -894,7 +885,7 @@ def release_legal_hold(
     Raises HTTPException(403) if the caller is not an admin, 404 if the
     review does not exist.
     """
-    _require_admin(caller_user_row, "Admin privilege required to release a legal hold.")
+    require_admin(caller_user_row, "Admin privilege required to release a legal hold.")
 
     review = _get_review_or_404(review_id, dynamodb_resource)
     actor = caller_user_row.get("cognito_sub", "")
@@ -962,7 +953,7 @@ def list_legal_holds(
 
     Raises HTTPException(403) if the caller is not an admin.
     """
-    _require_admin(caller_user_row, "Admin privilege required to view legal holds.")
+    require_admin(caller_user_row, "Admin privilege required to view legal holds.")
 
     reviews_table = _reviews_table(dynamodb_resource)
     # Every known partition (issue #52): `set_legal_hold` does not require a

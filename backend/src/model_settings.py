@@ -115,9 +115,11 @@ from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import config, model_client
+    from src.authz import require_admin
 except ImportError:  # pragma: no cover
     import config  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
+    from authz import require_admin  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -213,18 +215,6 @@ def _model_settings_table(dynamodb_resource: Any):
 
 def _audit_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin, src/retention.py::_is_admin and
-    src/demo_auth.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
-
-
-def _require_admin(caller_user_row: dict[str, Any], detail: str) -> None:
-    if not _is_admin(caller_user_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 def _write_audit_entry(
@@ -326,7 +316,7 @@ def get_model_key_settings(
     store (the AWS target); the panel renders an explanation rather than a
     form, and `source` can then only ever be "env" or None.
     """
-    _require_admin(caller_user_row, "Admin privilege required to view the model key setting.")
+    require_admin(caller_user_row, "Admin privilege required to view the model key setting.")
 
     store_available = _model_settings_table_name() is not None
     row = _stored_row(dynamodb_resource) if store_available else None
@@ -371,7 +361,7 @@ def set_model_key(
     implausibly short or wrong-shaped key, or 400 when this deployment has no
     key store.
     """
-    _require_admin(caller_user_row, "Admin privilege required to change the model key setting.")
+    require_admin(caller_user_row, "Admin privilege required to change the model key setting.")
 
     candidate = (new_api_key or "").strip()
     if not candidate:
@@ -465,7 +455,7 @@ def clear_model_key(
     Raises HTTPException(403) for a non-admin caller, 400 when this
     deployment has no key store.
     """
-    _require_admin(caller_user_row, "Admin privilege required to change the model key setting.")
+    require_admin(caller_user_row, "Admin privilege required to change the model key setting.")
 
     before = get_model_key_settings(caller_user_row, dynamodb_resource)
 
@@ -633,7 +623,7 @@ def get_model_selection_settings(
     Carries NO API-key material of any kind: it reads a different row and
     never touches `api_key`.
     """
-    _require_admin(
+    require_admin(
         caller_user_row, "Admin privilege required to view the model selection setting."
     )
 
@@ -711,7 +701,7 @@ def set_model_selection(
     Raises HTTPException(403) for a non-admin caller, 400 for a non-string or
     non-selectable id, or 400 when this deployment has no settings store.
     """
-    _require_admin(
+    require_admin(
         caller_user_row, "Admin privilege required to change the model selection setting."
     )
 
@@ -980,7 +970,7 @@ def get_spend_cap_settings(
     Carries NO key material: it reads a different row and never touches
     `api_key`.
     """
-    _require_admin(
+    require_admin(
         caller_user_row, "Admin privilege required to view the daily spend cap."
     )
     store_available = _model_settings_table_name() is not None
@@ -1065,7 +1055,7 @@ def set_daily_spend_cap_cents(
     not a whole number of cents inside the accepted bounds, and 400 on a
     deployment with no settings store.
     """
-    _require_admin(
+    require_admin(
         caller_user_row, "Admin privilege required to change the daily spend cap."
     )
     if _model_settings_table_name() is None:

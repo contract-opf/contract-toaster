@@ -8,7 +8,7 @@ Security controls:
   1. Owner/admin check: only the review owner (by cognito_sub) or an admin
      may request a presigned URL for a given review.  Admin privilege is
      read from the DynamoDB `users` row's `is_admin` flag (see
-     src/users.py's `_is_admin` / ARCHITECTURE.md -> "Group-naming
+     src/authz.py's `is_admin` / ARCHITECTURE.md -> "Group-naming
      misnomer"), never from a JWT claim — a stale or mis-issued token must
      not be able to grant download access to another user's review output.
      Any other caller receives HTTP 403.
@@ -82,8 +82,15 @@ from fastapi.responses import JSONResponse
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
     from src import config
+    # Bound to the module-private name this module and
+    # tests/test_download_auth_attack.py have always used. An import binding
+    # is not a `def`, so `tests/test_authz_single_source.py` (issue #66)
+    # still sees exactly one definition of the admin predicate, in
+    # src/authz.py.
+    from src.authz import is_admin as _is_admin
 except ImportError:  # pragma: no cover
     import config  # type: ignore[no-redef]
+    from authz import is_admin as _is_admin  # type: ignore[no-redef]
 
 # PresignedURL time-to-live: 60 seconds.
 # Short-lived so a leaked URL expires quickly; the caller must re-authenticate
@@ -251,19 +258,6 @@ def get_uploads_bucket() -> str:
             detail="UPLOADS_BUCKET not configured.",
         )
     return bucket
-
-
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """Return True if the caller's users row (looked up by cognito_sub) is an admin.
-
-    NOTE: `is_admin` is a DynamoDB `users`-row flag, never a JWT claim
-    (ARCHITECTURE.md -> "Group-naming misnomer"; see src/users.py's
-    identically-shaped `_is_admin`). Callers of this module pass in the
-    caller's own users row (already fetched by `require_active_user` /
-    `get_active_user_row`) rather than trusting a token claim, so admin
-    privilege cannot be forged by a stale or crafted JWT.
-    """
-    return bool(caller_user_row.get("is_admin", False))
 
 
 def _check_owner_or_admin(

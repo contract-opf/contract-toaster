@@ -81,7 +81,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import HTTPException, status
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src.authz import require_admin
+except ImportError:  # pragma: no cover
+    from authz import require_admin  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -116,17 +119,6 @@ class IngestionError(Exception):
         self.reason_code = reason_code
         self.detail = detail
         super().__init__(f"{reason_code}: {detail}" if detail else reason_code)
-
-
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin and src/retention.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
-
-
-def _require_admin(caller_user_row: dict[str, Any], detail: str) -> None:
-    if not _is_admin(caller_user_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 # ---------------------------------------------------------------------------
@@ -649,7 +641,7 @@ def run_ingestion_request(
     the active store or any persistence layer, so its response always
     surfaces the staging manifest only, never an activated one.
     """
-    _require_admin(caller_user_row, "Admin privilege required to run corpus ingestion.")
+    require_admin(caller_user_row, "Admin privilege required to run corpus ingestion.")
     return run_ingestion(
         source_document_id=source_document_id,
         document_type=document_type,

@@ -164,6 +164,29 @@ There is no separate `disabled` state; operator docs and UI labels map urgent re
 
 Admin vs reviewer is **not** controlled by Google groups. It is controlled by a flag in the DynamoDB `users` table, settable only by an existing admin. This matches the brief: simple internal list, mutable from the app itself.
 
+**One predicate, in `backend/src/authz.py`.** Reading that flag is a single
+function — `is_admin(row)`, with `require_admin(row, detail)` raising the 403
+— imported by the twelve modules that used to declare seventeen
+near-identical copies of it between them (`admin_dashboard`, `audit_queries`,
+`bundle_authoring`, `corpus`, `demo_auth`, `download`, `entity_roster`,
+`main`, `model_settings`, `retention`, `reviews`, `users`). Seventeen copies
+of an authorization predicate is seventeen chances for one to drift, and one
+drifted copy opens a route. `authz.py` takes the caller's `users` row in and
+returns a decision: it performs no DynamoDB access of its own, because the
+row was already fetched by `users.require_active_user`. The predicate is
+`row.get("is_admin", False) is True` — a string or an integer never counts,
+so a hand-edited or break-glass row carrying `"false"` cannot pass. Every
+writer of the attribute stores a real boolean: `users.update_user` refuses a
+non-boolean with 400, `demo_auth.add_user` coerces the payload field,
+`demo_auth.seed_demo_users` writes boolean literals, and the bootstrap
+reconciliation below writes `is_admin=true`.
+`tests/test_authz_single_source.py` AST-parses every module under
+`backend/src` and fails if any of them defines the predicate locally again.
+It does not police inline reads of the raw flag: `review_routes.py`'s four
+owner-or-admin gates still test `caller_row.get("is_admin", False)`
+directly, and `users.update_user`'s last-active-admin counter still reads it
+with `bool(...)` — both deliberately left as they were.
+
 **Group-naming misnomer — known, documented.** The allowlist group is named `legal-admin@company.com`, but it serves **all ContractToaster users** (reviewers and admins alike) — the name is a misnomer. Do not treat it as "admins only": a reviewer who is not an admin must still belong to this group for the pre-token Lambda to admit them. The `is_admin` flag in the `users` DynamoDB row (not group membership) is the sole admin-privilege gate. Operators should read "legal-admin" as "ContractToaster allowlist" to avoid accidentally removing reviewers from the group on the assumption that only admins belong there.
 
 The first admin is bootstrapped by the CDK stack on first deploy. Because the `users` table is keyed by Cognito `sub` (which does not exist until first sign-in) we **do not** seed an email-keyed row in the `sub`-keyed `users` table — that would mix two incompatible key shapes in one table. Instead the seed lands in a **separate `admin_bootstrap` table keyed by email** (a stack parameter: the configured GC email). On that user's first sign-in the backend runs a **one-time reconciliation transaction**: it confirms the verified email matches an `admin_bootstrap` row, writes the real `users` row keyed by `sub` with `is_admin=true`, and atomically marks the bootstrap row consumed (conditional write, so the reconciliation cannot run twice or race a concurrent sign-in). The `admin_bootstrap` table is otherwise unused after consumption.

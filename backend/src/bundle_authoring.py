@@ -61,7 +61,7 @@ ticket intentionally does not include.
 ## Auth
 
 Admin only. ``is_admin`` is a DynamoDB ``users``-row flag, never a JWT claim
-(same convention as ``src/users.py::_is_admin``). A non-admin caller gets
+(the one predicate in ``src/authz.py``). A non-admin caller gets
 HTTP 403. The route is read-only, so -- unlike every state-mutating admin
 route -- it writes **no** audit entry (there is nothing to ledger).
 """
@@ -73,6 +73,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
+
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src.authz import is_admin
+except ImportError:  # pragma: no cover
+    from authz import is_admin  # type: ignore[no-redef]
 
 # scripts/ import seam -- the same idempotent sys.path insertion
 # src.pipeline_runner uses to import scripts modules by bare name. Every
@@ -89,12 +94,6 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import bind_bundle  # noqa: E402
 import opf_load  # noqa: E402
-
-
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin / src/retention.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
 
 
 def _error(code: str, field: str, message: str) -> dict[str, str]:
@@ -145,7 +144,7 @@ def validate_pen_rules_document(
     rule is **not** an HTTP error -- it is a 200 response carrying
     ``valid: false`` and the structured errors.
     """
-    if not _is_admin(caller_user_row):
+    if not is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to validate pen-rules/posture overrides.",
