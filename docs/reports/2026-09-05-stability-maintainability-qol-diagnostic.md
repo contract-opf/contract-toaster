@@ -7,6 +7,23 @@
 > private origin this work was done in. Read both as history, not as links
 > to follow.*
 
+> **Status note, 2026-09-11.** G2 / B2 **landed** as public issue
+> `contract-opf/contract-toaster#61` (private #701 in the table below):
+> `python-jose[cryptography] 3.3.0` is replaced by `PyJWT[crypto] 2.14.0`
+> across `backend/src/auth.py` (Cognito RS256) and
+> `backend/src/demo_auth.py` (demo HS256 session tokens), both pinning
+> `algorithms=` explicitly; `fastapi` 0.115.6 -> 0.141.1 (starlette 0.41.3 ->
+> 1.6.0), with `uvicorn`, `pydantic` and `boto3` moved to their current pins;
+> `aws-amplify` 6.18.0 -> 6.20.0 and `@aws-amplify/ui-react` 6.15.4 -> 6.15.6
+> clear the `fast-xml-parser` HIGH. `pip-audit -r backend/requirements.txt -r
+> requirements-dev.txt` and `npm audit --omit=dev --audit-level=high` both
+> report clean, and `ecdsa` is gone with `python-jose`. Pinned by
+> `tests/test_auth_jwt_pyjwt_61.py` (happy path plus `alg: none`,
+> HS256-signed-with-the-RSA-public-key, wrong `aud`, expired and unknown
+> `kid`, all asserted as HTTP 401 from `get_current_user`) and by the new
+> weekly `.github/workflows/dependency-audit.yml`. The finding text below is
+> left as written; it describes the state before that change.
+
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to
 keep running, hard to change, and tedious to use. Codes continue the series:

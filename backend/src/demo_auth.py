@@ -63,8 +63,9 @@ import time
 import uuid
 from typing import Any
 
+import jwt
 from fastapi import HTTPException, Request, Response, status
-from jose import JWTError, jwt
+from jwt import PyJWTError
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src.users import public_user_view
@@ -371,9 +372,10 @@ def looks_like_demo_token(token: str) -> bool:
     ROUTE a token to the right verifier in `both` mode. Never trusted for
     authorization -- verify_demo_token re-checks the signature."""
     try:
-        return jwt.get_unverified_claims(token).get("iss") == DEMO_TOKEN_ISSUER
-    except JWTError:
+        unverified = jwt.decode(token, options={"verify_signature": False})
+    except PyJWTError:
         return False
+    return unverified.get("iss") == DEMO_TOKEN_ISSUER
 
 
 def verify_demo_token(token: str) -> dict[str, Any]:
@@ -387,9 +389,9 @@ def verify_demo_token(token: str) -> dict[str, Any]:
             _demo_token_secret(),
             algorithms=["HS256"],
             issuer=DEMO_TOKEN_ISSUER,
-            options={"verify_aud": False},
+            options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Demo token verification failed: {exc!r}",

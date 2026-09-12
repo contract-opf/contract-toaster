@@ -1,9 +1,18 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-python-jose[cryptography]==3.3.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+# PyJWT[crypto]: the JWT library behind backend/src/auth.py (Cognito RS256) and
+# backend/src/demo_auth.py (demo HS256 session tokens). It replaced
+# python-jose[cryptography] 3.3.0 in issue #61 -- python-jose carried
+# PYSEC-2024-232, PYSEC-2024-233 and the then-unfixed PYSEC-2025-185, and
+# dragged in `ecdsa` (PYSEC-2026-1325, unfixed upstream) which neither auth
+# path uses. Both call sites pin `algorithms=` explicitly, which is the
+# algorithm-confusion defence those advisories concern; the negative cases
+# (`alg: none`, HS256-signed-with-the-RSA-public-key, wrong aud, expired,
+# unknown kid) are asserted in tests/test_auth_jwt_pyjwt_61.py.
+PyJWT[crypto]==2.14.0
 httpx==0.28.1
-pydantic==2.10.6
-boto3==1.43.44
+pydantic==2.13.5
+boto3==1.43.93
 python-multipart==0.0.32
 # jsonschema: runtime dependency of src.reviews's active-bundle resolver
 # (issue #266, scripts/playbook_validation.py) -- validates the active

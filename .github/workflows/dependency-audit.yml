@@ -1,0 +1,156 @@
+# Dependency audit — weekly advisory sweep over the pinned Python and npm
+#                    runtime dependencies (issue #61).
+#
+# Why this exists separately from ci-pipeline.yml's GATE D: that step runs
+# `pip-audit || echo …` on every push, so it is deliberately non-blocking and
+# nobody sees it go red. Advisories, though, land on their own schedule, not
+# on ours — a pin that was clean the day it was merged goes stale in place.
+# This workflow runs on a cron instead and files an issue when it finds
+# something, so a new advisory against an unchanged pin surfaces without
+# anyone having to read a green run's logs.
+#
+# It is NOT a required check and does NOT run on push or pull_request: a fresh
+# upstream advisory must not block an unrelated PR. The blocking gates stay
+# where they are (scripts/check.sh, scripts/check-frontend.sh).
+#
+# What it scans:
+#   - `pip-audit -r backend/requirements.txt -r requirements-dev.txt`
+#     (the runtime pins and the test/dev pins, including pip-audit's own).
+#   - `npm audit --omit=dev --audit-level=high` in frontend/ — production
+#     dependency tree only, high and critical only.
+#
+# On failure it opens, or comments on, an open issue labelled
+# `dependency-audit` titled "dependency audit: advisories found", using the
+# same open-or-update pattern as ci-pipeline.yml's main-breakage reporter.
+
+name: Dependency audit
+
+on:
+  schedule:
+    # 06:15 UTC every Monday.
+    - cron: '15 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  dependency-audit:
+    name: Advisory sweep (pip-audit + npm audit)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install pip-audit
+        # Pinned in requirements-dev.txt so the scheduled run and a local
+        # `python -m pip_audit` use the same scanner version.
+        run: pip install "$(grep -E '^pip-audit==' requirements-dev.txt)"
+
+      - name: Run pip-audit over the pinned Python dependencies
+        id: pip_audit
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pip-audit \
+            -r backend/requirements.txt \
+            -r requirements-dev.txt \
+            2>&1 | tee /tmp/pip-audit.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run npm audit over the production dependency tree
+        id: npm_audit
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm audit --omit=dev --audit-level=high 2>&1 | tee /tmp/npm-audit.txt
+
+      - name: Open or update the dependency-audit issue
+        if: steps.pip_audit.outcome == 'failure' || steps.npm_audit.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PIP_RESULT: ${{ steps.pip_audit.outcome }}
+          NPM_RESULT: ${{ steps.npm_audit.outcome }}
+        run: |
+          set -euo pipefail
+          gh label create dependency-audit \
+            --repo "$GITHUB_REPOSITORY" \
+            --color D93F0B \
+            --description "Auto-filed: the weekly dependency audit found advisories" \
+            --force
+
+          {
+            echo "The weekly dependency audit found advisories against the pinned"
+            echo "dependencies on \`${GITHUB_REF_NAME}\` (${GITHUB_SHA})."
+            echo
+            echo "- **pip-audit:** ${PIP_RESULT}"
+            echo "- **npm audit:** ${NPM_RESULT}"
+            echo "- **Run:** ${RUN_URL}"
+            echo
+            echo "Reproduce locally:"
+            echo
+            echo '```'
+            echo 'python -m pip_audit -r backend/requirements.txt -r requirements-dev.txt'
+            echo 'cd frontend && npm audit --omit=dev --audit-level=high'
+            echo '```'
+            echo
+            echo "### pip-audit output"
+            echo
+            echo '```'
+            cat /tmp/pip-audit.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            echo
+            echo "### npm audit output"
+            echo
+            echo '```'
+            cat /tmp/npm-audit.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } > /tmp/dependency-audit-body.md
+
+          EXISTING=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --label dependency-audit \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body-file /tmp/dependency-audit-body.md
+            echo "Commented on existing dependency-audit issue #$EXISTING"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "dependency audit: advisories found" \
+              --label dependency-audit \
+              --body-file /tmp/dependency-audit-body.md
+          fi
+
+      - name: Fail the run when either audit found advisories
+        if: steps.pip_audit.outcome == 'failure' || steps.npm_audit.outcome == 'failure'
+        run: |
+          echo "pip-audit: ${{ steps.pip_audit.outcome }}"
+          echo "npm audit: ${{ steps.npm_audit.outcome }}"
+          exit 1

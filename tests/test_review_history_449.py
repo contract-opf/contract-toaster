@@ -103,6 +103,7 @@ for _dir in (BACKEND_ROOT, SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
 # from them); #259's fakes ignore bucket names entirely (its FakeS3 is keyed
 # on the object key alone), so it is indifferent to losing the race.
 import test_review_api_84 as api84  # noqa: E402
+from fastapi_route_inventory import registered_route_pairs  # noqa: E402
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
 
 import model_client as model_client_module  # noqa: E402
@@ -439,11 +440,9 @@ class TestInputDownloadRoute(HistoryRouteTestBase):
         )
 
     def test_route_is_registered(self) -> None:
-        registered = {
-            (getattr(r, "path", None), method)
-            for r in self.app.routes
-            for method in getattr(r, "methods", set())
-        }
+        # registered_route_pairs, not a bare `app.routes` walk -- FastAPI
+        # 0.137+ includes routers lazily; see tests/fastapi_route_inventory.py.
+        registered = registered_route_pairs(self.app)
         self.assertIn(("/api/reviews/{review_id}/input", "GET"), registered)
 
     def test_owner_gets_a_presigned_url(self) -> None:
