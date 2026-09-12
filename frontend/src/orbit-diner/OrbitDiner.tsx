@@ -1439,6 +1439,20 @@ export function OrbitDiner({
                           ? "A person needs to review this result."
                           : "Document review, with a second model checking the markup."}
                 </span>
+                {/* Issue #71. The host's already-composed line — "About 4
+                    minutes", or "Taking longer than usual" past the sample's
+                    p90. Printed verbatim as a text node: the console holds no
+                    clock, fetches no estimate and never renders a countdown.
+                    Absent when there is no sample to answer from, which is
+                    the whole of the no-estimate treatment. */}
+                {m.timeRemaining && (
+                  <span
+                    className="od-time-remaining"
+                    data-testid="review-time-remaining"
+                  >
+                    {m.timeRemaining}
+                  </span>
+                )}
               </div>
             )}
           </section>
@@ -1931,12 +1945,17 @@ export function OrbitDiner({
               empty string everywhere else, and `??` would let that empty
               string win — leaving a manual-review outcome with nothing in the
               polite region at all. */}
+          {/* Issue #71 adds `timeAnnouncement` at the BOTTOM of this chain,
+              never above the handoff: while a review is in flight the two
+              fields above are empty and the estimate has this region to
+              itself, and the moment the handoff has something to say it takes
+              it back. One polite region, one voice at a time. */}
           {m.readyAnnouncement ||
             (m.status === "DONE"
               ? "Your review is ready."
               : manual
                 ? "This review needs a human."
-                : "")}
+                : m.timeAnnouncement || "")}
         </span>
       </div>
       {/* Issue #740, owner decision N7. The printed sheet, and the only thing

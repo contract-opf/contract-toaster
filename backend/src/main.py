@@ -99,6 +99,11 @@ Endpoints:
                       reserves, and nothing else. No instance-wide totals, no
                       cap, no model ids: it is the price of the caller's own
                       next action, which is why it is not admin-gated.
+  GET  /api/review-duration-estimate — authenticated: how long a review of
+                      this playbook has actually been taking (#71) — p50/p90
+                      seconds and the sample's median word count, measured
+                      from the last 50 finished reviews. Aggregates only; a
+                      sample under five rows answers with nulls.
   GET  /api/admin/health         — admin: pipeline health (#252) — review
                       counts by status, stale in-flight (PENDING/RUNNING)
                       reviews with a bounded oldest-first sample, and
@@ -358,7 +363,19 @@ import time
 from typing import Any
 
 import boto3
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path, Request, UploadFile, status
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from src import config
@@ -446,6 +463,7 @@ from src.reviews import (
     RECENT_FAILURES_DEFAULT_LIMIT,
     list_recent_failures,
     review_cost_estimate,
+    review_duration_estimate,
 )
 from src.upload_validation import MAX_UPLOAD_SIZE_BYTES
 from src.retention import (
@@ -1072,6 +1090,34 @@ async def get_review_cost_estimate(
     keeps a figure added to the admin ledger from arriving here by accident.
     """
     return JSONResponse(content=review_cost_estimate(dynamodb_resource))
+
+
+@app.get("/api/review-duration-estimate", include_in_schema=True)
+async def get_review_duration_estimate(
+    playbook_id: str = Query(..., min_length=1, max_length=256),
+    words: int | None = Query(None, ge=0, le=10_000_000),
+    _caller_row: dict[str, Any] = Depends(get_active_user_row),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+) -> JSONResponse:
+    """Authenticated: how long a review of `playbook_id` has actually been
+    taking on this deployment (issue #71, 2026-09-05 diagnostic G12).
+
+    Any active user, on the same reasoning as `/api/review-cost-estimate`
+    beside it: this is a fact about the thing the reviewer is about to do,
+    and the projection is an allowlist of four aggregates
+    (`reviews.REVIEW_DURATION_ESTIMATE_FIELDS`) over at least five finished
+    reviews -- no review id, no owner, no filename, nothing document-derived.
+
+    `words` is the caller's OWN preflight word count (issue #491). It is
+    validated here so a malformed value is a 422 rather than something the
+    client silently mis-scales with, but it deliberately does not change the
+    response: `median_words` is returned instead, and the caller scales the
+    percentiles by `words / median_words` itself. Keeping the arithmetic on
+    the caller's side is what lets the answer be identical for every reviewer
+    of a playbook -- the word count belongs to one document, the sample does
+    not.
+    """
+    return JSONResponse(content=review_duration_estimate(playbook_id, dynamodb_resource))
 
 
 @app.get("/api/admin/entity-roster", include_in_schema=True)

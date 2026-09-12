@@ -156,6 +156,19 @@ export interface ReviewProjectionState {
   preflightMismatchNote?: string;
   /** The composed completion-handoff announcement (issues #448/#492). */
   readyAnnouncement?: string;
+  /**
+   * The measured time-remaining line for the review in flight (issue #71):
+   * "About 4 minutes", or "Taking longer than usual" past the scaled p90.
+   * Composed in `ReviewSubmission` — the panel owns the estimate fetch, the
+   * preflight word count and the clock, and this module stays pure.
+   */
+  timeRemaining?: string | null;
+  /**
+   * The same fact as a sentence, for the ONE polite region (issue #71). The
+   * panel changes it exactly twice per review — when the estimate appears and
+   * when it is superseded — so it is announced twice, not once a second.
+   */
+  timeAnnouncement?: string;
   /** `dispositionNote` */
   dispositionNote: string;
   /** #730 supplies this; until then the selection is always the user's. */
@@ -706,6 +719,11 @@ export function toReviewModel(state: ReviewProjectionState): ReviewModel {
     // the existing per-review field print (issue #484).
     guidancePrecedence: `Your instructions ${GUIDANCE_PRECEDENCE_COPY}`,
     readyAnnouncement: state.readyAnnouncement,
+    // Issue #71. `?? undefined` rather than passing the null through: the
+    // model's field is optional, and "absent" is the shape every other
+    // nothing-to-say value on it already uses.
+    timeRemaining: state.timeRemaining ?? undefined,
+    timeAnnouncement: state.timeAnnouncement,
     cost: projectCost(state),
     muted: state.muted,
     notification: !state.notificationsSupported

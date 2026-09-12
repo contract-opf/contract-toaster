@@ -203,6 +203,9 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
     MANUAL_REVIEW_REQUIRED otherwise (the mock's not-yet-built /
     unknown-playbook paths, and the real pipeline's fail-closed paths).
 
+    A DONE row is additionally stamped `completed_at` (issue #71) -- the
+    input `reviews.review_duration_estimate` measures against `created_at`.
+
     Coupling (issue #188 decision): `output_s3_key` is recorded ONLY when the
     redline stage set `output_object_written` -- so the download affordance is
     never advertised for an object that was never materialized.
@@ -237,6 +240,16 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
         # backend/src/reviews.py::mark_cancelled, from the other side.
         ":cancelled": "CANCELLED",
     }
+    # Issue #71: the moment this review reached DONE, stamped only on that
+    # transition -- the same field, on the same terms, that
+    # `backend/src/pipeline_runner.py::_write_real_terminal` writes on the
+    # in-process path, so a duration is measurable whichever runner produced
+    # the row. `updated_at` beside it moves on every later administrative
+    # touch and cannot serve. A MANUAL_REVIEW_REQUIRED row gets none: it has
+    # not completed, a person still has to finish it.
+    if terminal_status == "DONE":
+        set_clauses.append("completed_at = :completed_at")
+        values[":completed_at"] = values[":now"]
     if decision is not None:
         set_clauses.append("decision = :decision")
         values[":decision"] = decision
