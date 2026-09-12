@@ -25,7 +25,33 @@
 #
 # USAGE:
 #   scripts/check.sh
+#   scripts/check.sh --only <glob>
 #   (Activate the venv first, or let this script auto-activate ./.venv.)
+#
+# SINGLE-FILE / SUBSET MODE (--only, issue #68):
+#   `--only <glob>` runs ONLY the discovered test files whose path — or whose
+#   bare filename — matches <glob>, through the same per-process loop, with
+#   the same retry, the same FLAKY rules and the same exit codes as a full run:
+#
+#       bash scripts/check.sh --only 'tests/test_ci_env_parity_*.py'
+#       bash scripts/check.sh --only 'test_review_api_84.py'
+#       SKIP_INFRA=1 bash scripts/check.sh --only 'tests/lint-*.py'
+#
+#   QUOTE THE GLOB. Unquoted, the shell expands it against the working
+#   directory before this script ever sees it.
+#
+#   It selects from what the loop already discovers; it cannot reach a file
+#   the gate does not glob, and it does not turn off SKIP_INFRA's exclusion.
+#   A glob that matches nothing is exit 4, NOT a green run — a typo that
+#   printed ALL GREEN while running zero tests is the worst outcome here.
+#   `--only` is a development convenience: a full `scripts/check.sh` is still
+#   the landing signal (scripts/land.sh runs one, with no flags).
+#
+#   THE FLAG IS THE ONLY WAY IN. A `CHECK_ONLY` inherited from the caller's
+#   environment is cleared before the arguments are parsed, so no exported
+#   variable can quietly narrow a flagless run to a subset and still print
+#   `CHECK: ALL GREEN`. (scripts/collect_test_failures.sh still reads the
+#   variable; that is its documented interface, and CI GATE A uses it.)
 #
 # EXIT CODES (authoritative — this is the landing signal):
 #   0  every discovered test file passed ("CHECK: ALL GREEN").
@@ -35,6 +61,10 @@
 #      bucket and ALLOW_FLAKY was not set ("CHECK: FLAKY-UNRESOLVED:<list>").
 #   3  another gate run holds the repo-wide lock ("CHECK: LOCK BUSY"); no
 #      tests ran at all.
+#   4  NOTHING RAN, and not because of the lock: an unusable argument, an
+#      `--only` glob that matched no discovered test file
+#      ("CHECK: ONLY-MATCHED-NOTHING"), or one whose every match SKIP_INFRA
+#      excluded ("CHECK: ONLY-ALL-SKIPPED"). Never green.
 #
 #   READ THE EXIT CODE, NOT THE LAST LINE OF OUTPUT. This script's exit code
 #   is authoritative, but a *pipeline* reports the exit code of its LAST
@@ -43,7 +73,7 @@
 #   Use `set -o pipefail`, or capture the code directly:
 #       bash scripts/check.sh; rc=$?
 #   Grepping the output for "CHECK: ALL GREEN" is a safe cross-check, because
-#   that line is printed on exit 0 and never on 1, 2, or 3.
+#   that line is printed on exit 0 and never on 1, 2, 3, or 4.
 #
 # FLAKY IS RED (ALLOW_FLAKY):
 #   A file that fails and then passes on its isolated re-run FAILS this gate
@@ -92,6 +122,56 @@
 
 set -u
 cd "$(dirname "$0")/.."
+
+# ---------------------------------------------------------------------------
+# ARGUMENTS (issue #68). The only flag is `--only <glob>`; see USAGE above.
+#
+# CHECK_ONLY is read by the shared discovery loop rather than applied here, so
+# `--only` and CI GATE A keep the ONE implementation of "which files are the
+# suite" (issue #276). An unrecognised argument is refused rather than ignored:
+# this script used to accept and silently discard anything handed to it, so a
+# mistyped flag ran the FULL suite and reported a green the caller would read
+# as a green for the subset they thought they had asked for.
+#
+# CHECK_ONLY is CLEARED unconditionally here, so `--only` is the ONLY way to
+# narrow this gate: an inherited `CHECK_ONLY` from the caller's environment
+# must not make `bash scripts/check.sh` — the invocation scripts/land.sh uses,
+# with no arguments — run a subset and still print `CHECK: ALL GREEN`. The
+# variable stays the interface collect_test_failures.sh reads (its own
+# `CHECK_ONLY=… scripts/collect_test_failures.sh .` form and CI GATE A are
+# unaffected); it is simply not an interface of THIS script.
+#
+# Deliberately above the `export TZ=` line below and clear of it —
+# tests/test_ci_env_parity_639.py Check 4 reads that line's indentation and its
+# position relative to the collect_test_failures.sh invocation.
+# ---------------------------------------------------------------------------
+CHECK_ONLY=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --only)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "CHECK: --only needs a glob, e.g. --only 'tests/test_ci_env_parity_*.py'" >&2
+        exit 4
+      fi
+      CHECK_ONLY="$1"
+      ;;
+    --only=*)
+      CHECK_ONLY="${1#--only=}"
+      if [ -z "$CHECK_ONLY" ]; then
+        echo "CHECK: --only needs a glob, e.g. --only='tests/test_ci_env_parity_*.py'" >&2
+        exit 4
+      fi
+      ;;
+    *)
+      echo "CHECK: unknown argument '$1'. Usage: scripts/check.sh [--only <glob>]" >&2
+      echo "       No tests were run." >&2
+      exit 4
+      ;;
+  esac
+  shift
+done
+export CHECK_ONLY
 
 # ---------------------------------------------------------------------------
 # CLOCK PARITY WITH CI (issue #639).

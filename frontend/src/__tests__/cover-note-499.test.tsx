@@ -15,6 +15,7 @@ import {
   pressSubmit,
 } from './support/consoleSurface';
 import ReviewHistory, { type HistoryRow } from '../ReviewHistory';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -260,6 +261,9 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
   });
 
   it('a failed generation shows the quiet copy and a retry, never a scary banner', async () => {
+    // coverNote.ts logs the server's `detail` for support correlation and
+    // renders the quiet copy instead; the stub supplies that detail (#68).
+    allowConsoleErrorsInThisTest(/Couldn't butter this one/);
     stubFetch({
       'POST /api/reviews': { review_id: 'rev-1', resumed: false },
       'GET /api/reviews/rev-1': REQUEST_CHANGE_DETAIL,
@@ -283,6 +287,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
   // NOT render the same quiet "try again" copy a transient 502 gets, since
   // retrying a 409 will never succeed.
   it('a 409 shows a real error banner, not the quiet retry copy', async () => {
+    allowConsoleErrorsInThisTest(/past its retention window/);
     stubFetch({
       'POST /api/reviews': { review_id: 'rev-1', resumed: false },
       'GET /api/reviews/rev-1': REQUEST_CHANGE_DETAIL,
@@ -306,6 +311,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
   // stale real-error banner from a PREVIOUS review survived onto a newly
   // submitted one before the reviewer had even clicked "Butter it" for it.
   it('a resubmit clears a previous review\'s real-error banner', async () => {
+    allowConsoleErrorsInThisTest(/past its retention window/);
     let coverNoteCall = 0;
     let submitCall = 0;
     const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -541,6 +547,7 @@ describe('ReviewHistory — "Butter it" in the expanded row (issue #499)', () =>
   // Issue #499 fix round 3 (review finding): same real-vs-quiet distinction
   // as ReviewSubmission's equivalent test above, per-row here.
   it('a 409 shows a real error banner for that row, not the quiet retry copy', async () => {
+    allowConsoleErrorsInThisTest(/past its retention window/);
     stubHistoryFetch({
       'GET /api/reviews': { status: 200, body: { reviews: [historyRow({})] } },
       'POST /api/reviews/rev-h1/cover-note': {

@@ -18,6 +18,21 @@
 #   scripts/collect_test_failures.sh [root_dir]
 #   PYTHON=python3 scripts/collect_test_failures.sh [root_dir]
 #   ALLOW_FLAKY=1 scripts/collect_test_failures.sh [root_dir]
+#   CHECK_ONLY='tests/test_foo_*.py' scripts/collect_test_failures.sh [root_dir]
+#
+# CHECK_ONLY — RUN A SUBSET (issue #68):
+#   When set to a glob, only the discovered files whose path (`tests/lint-x.py`)
+#   or bare filename (`lint-x.py`) matches it are run; everything else is
+#   counted and reported as deselected. This is what backs
+#   `scripts/check.sh --only <glob>`, and it lives HERE rather than in that
+#   script so the local gate and CI GATE A keep one shared answer to "which
+#   files are the suite" (issue #276).
+#
+#   It narrows the loop's own discovery — it can never reach a path the globs
+#   below do not expand to, and it does not override SKIP_INFRA's exclusions.
+#   A glob matching nothing is exit 4, deliberately NOT a green run: a typo
+#   that ran zero tests and printed ALL GREEN would be worse than any failure
+#   this script reports.
 #
 # EXIT CODES (authoritative — this is the landing signal):
 #   0  every discovered test file passed. Prints "CHECK: ALL GREEN".
@@ -27,6 +42,9 @@
 #      its isolated re-run (the FLAKY bucket) and ALLOW_FLAKY was not set.
 #      A final "CHECK: FLAKY-UNRESOLVED:<list>" line names them.
 #      "CHECK: ALL GREEN" is NOT printed.
+#   4  nothing ran: CHECK_ONLY was set and either matched no discovered file
+#      ("CHECK: ONLY-MATCHED-NOTHING:<glob>") or matched only files SKIP_INFRA
+#      excluded ("CHECK: ONLY-ALL-SKIPPED:<glob>"). Never "CHECK: ALL GREEN".
 #
 # FLAKE HANDLING — WHY FLAKY IS RED BY DEFAULT:
 #   A file that fails is re-run once, alone, before it counts. Pass-on-re-run
@@ -117,13 +135,40 @@ PY="${PYTHON:-python}"
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/check_logs.XXXXXXXX")"
 first_pass_failed=""
 skipped=""
+deselected=0
+matched=0
+selected=0
+
+# CHECK_ONLY's glob, matched against the discovered path AND its bare filename
+# so both `tests/lint-*.py` and `lint-*.py` select the same files (issue #68).
+# `case` is the match: its patterns are shell globs, which is exactly what the
+# caller typed, and unlike `[[ =~ ]]` it is POSIX and needs no regex
+# translation. The pattern is deliberately UNQUOTED — quoting it would compare
+# the glob literally and match nothing at all.
+only_selects() {
+  case "$1" in
+    $CHECK_ONLY) return 0 ;;
+  esac
+  case "${1##*/}" in
+    $CHECK_ONLY) return 0 ;;
+  esac
+  return 1
+}
 
 for t in tests/test_*.py tests/*/test_*.py tests/lint-*.py; do
   [ -e "$t" ] || continue
+  if [ -n "${CHECK_ONLY:-}" ]; then
+    if ! only_selects "$t"; then
+      deselected=$((deselected + 1))
+      continue
+    fi
+    matched=$((matched + 1))
+  fi
   if [ -n "${SKIP_INFRA:-}" ] && grep -qlE 'cdk[^A-Za-z]*synth|npx cdk' "$t"; then
     skipped="$skipped $t"
     continue
   fi
+  selected=$((selected + 1))
   "$PY" "$t" >"$LOG_DIR/$(basename "$t").log" 2>&1
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -133,6 +178,31 @@ for t in tests/test_*.py tests/*/test_*.py tests/lint-*.py; do
     echo "----------------------------------------"
   fi
 done
+
+# A CHECK_ONLY run that executed nothing is exit 4, before any verdict is
+# printed. It cannot be folded in with the greens below: every later branch
+# ends in a colour, and "zero tests ran" has no honest colour to report. The
+# two ways to get here are reported separately because the fix differs — one
+# is a glob to correct, the other a SKIP_INFRA to drop.
+if [ -n "${CHECK_ONLY:-}" ] && [ "$matched" -eq 0 ]; then
+  echo "CHECK: ONLY-MATCHED-NOTHING:$CHECK_ONLY" >&2
+  echo "      No test file the gate discovers matches that glob, so NOTHING ran." >&2
+  echo "      $deselected discovered file(s) were deselected by it. Quote the glob," >&2
+  echo "      and match a path the loop globs (tests/test_*.py, tests/*/test_*.py," >&2
+  echo "      tests/lint-*.py) or a bare filename." >&2
+  exit 4
+fi
+if [ -n "${CHECK_ONLY:-}" ] && [ "$selected" -eq 0 ]; then
+  echo "CHECK: ONLY-ALL-SKIPPED:$CHECK_ONLY" >&2
+  echo "      $matched file(s) matched the glob and SKIP_INFRA excluded every one" >&2
+  echo "      of them, so NOTHING ran. Re-run with SKIP_INFRA unset." >&2
+  exit 4
+fi
+
+if [ -n "${CHECK_ONLY:-}" ]; then
+  echo "NOTE: CHECK_ONLY='$CHECK_ONLY' — ran $selected file(s), deselected $deselected."
+  echo "      This is a SUBSET. Only a full run is the landing signal."
+fi
 
 # Retry pass: re-run each first-pass failure once, one at a time. A file that
 # passes on the isolated re-run is classified FLAKY. FLAKY is a RED result

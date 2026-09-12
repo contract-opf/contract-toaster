@@ -1,13 +1,20 @@
 /**
  * setupTests.ts — vitest global setup (issue #72).
  *
- * Registers @testing-library/jest-dom's matchers (toBeInTheDocument, etc.)
- * and cleans up the jsdom document between tests so component trees from
- * one test don't leak into the next.
+ * Registers @testing-library/jest-dom's matchers (toBeInTheDocument, etc.),
+ * cleans up the jsdom document between tests so component trees from one test
+ * don't leak into the next, and fails a test that logs an unexpected
+ * `console.error` (issue #68 — see the hook at the bottom of this file).
  */
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, beforeEach } from 'vitest';
+
+import {
+  assertNoUnexpectedConsoleErrors,
+  startConsoleErrorGuard,
+  stopConsoleErrorGuard,
+} from './__tests__/support/consoleErrorGuard';
 
 // ---------------------------------------------------------------------------
 // `window.matchMedia`, which jsdom does not implement (issue #733).
@@ -92,6 +99,28 @@ if (typeof Element.prototype.hasPointerCapture !== 'function') {
   (Element.prototype as unknown as Record<string, unknown>).hasPointerCapture = () => false;
 }
 
+// ---------------------------------------------------------------------------
+// An unexpected `console.error` fails the test that produced it (issue #68).
+//
+// `cleanup()` and the check share ONE `afterEach` rather than living in two,
+// because vitest's default `sequence.hooks` is "parallel": separate hooks are
+// started together and the order they were registered in guarantees nothing
+// about the order they complete in. Written out here, the sequence is a fact —
+// unmount the tree FIRST, so anything React logs on the way down is still
+// inside the window the guard is watching, then check, then restore the real
+// `console.error` whether the check passed or threw.
+//
+// What counts as expected, and how a single test declares its own extra
+// pattern, is documented in src/__tests__/support/consoleErrorGuard.ts.
+beforeEach(() => {
+  startConsoleErrorGuard();
+});
+
 afterEach(() => {
-  cleanup();
+  try {
+    cleanup();
+    assertNoUnexpectedConsoleErrors();
+  } finally {
+    stopConsoleErrorGuard();
+  }
 });

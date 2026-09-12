@@ -156,6 +156,64 @@
 > is the guard that keeps the branches deleted. The finding text below is
 > left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G14 / B14 **landed** as public issue
+> `contract-opf/contract-toaster#68` (private #708 in the table below).
+> `frontend/src/setupTests.ts` now installs a `console.error` guard around
+> every vitest test: three suite-wide patterns are swallowed (a non-OK fetch's
+> `… returned HTTP <status>`, the `/version` probe's variant, and the stubs'
+> simulated `network down`), anything else fails the test that logged it, and
+> a single test declares its own expected message with
+> `allowConsoleErrorsInThisTest(/…/)` rather than silencing its whole console.
+> `scripts/check.sh --only <glob>` runs a subset through the shared loop in
+> `scripts/collect_test_failures.sh` — one implementation, still shared with
+> CI GATE A (#276) — and a glob that matches nothing exits 4 rather than
+> reporting green over zero tests.
+> Three departures from B14 as written. First, the guard found a real defect
+> rather than only noise: the `/api/admin/model-selection` fixture in
+> `admin-loader-retry.test.tsx` and `admin-forbidden-latch-635.test.tsx`
+> carried six fields rather than the whole body
+> `get_model_selection_settings` sends, and omitted four
+> (`default_primary`, `default_critic`, `pricing_basis_primary`,
+> `pricing_basis_critic`) that `isModelSelectionSettings` requires — so the
+> guard rejected the stub and five tests across the two files, all of which
+> claim to exercise AdminModel's success path, were silently exercising its
+> error path instead. Both fixtures now carry the whole body. Second, B14's
+> `.gitignore` and real-corpus items were already moot here: `scratch/` and
+> `dump/` have been ignored since this repository's first commit, neither
+> directory is present, and `git ls-files | grep real-corpus` is empty — so
+> nothing was moved and nothing was re-added. B14's `public-cut-exclude.txt`
+> item was DECLINED rather than done, because that file changed jobs
+> underneath it: the 2026-07-15 cut read it as "scrub these paths before
+> publishing", but since the cut retired on 2026-09-09 the file defines the
+> SCAN SURFACE of `tests/lint-brand-free.py` and
+> `tests/lint-counterparty-names.py` as `git ls-files` MINUS its entries.
+> Listing `scratch/` there would therefore not protect it — it would exempt it
+> from the two gates that exist to catch exactly what G14 records having been
+> found in it, a real-corpus candidate agreement. Under the current semantics
+> the safe manifest is the one that does not name it, so the manifest is
+> unchanged.
+> Third, B14's `npm test` clause is met for everything that passes through
+> `console.error` and cannot be met for what does not. jsdom reports an
+> uncaught exception — and its own `Not implemented:` notices — through a
+> `VirtualConsole` wired to `console` when the environment was constructed,
+> BEFORE vitest installs its own `globalThis.console`, so a `console.error`
+> spy structurally cannot see or suppress them. Measured on this tree, a full
+> `npm test` printed 115 such lines. 110 of them were the deliberate render
+> throws in `frontend/src/__tests__/error-boundary-and-session.test.tsx`, and
+> those are gone: that file now cancels the `error` event jsdom dispatches for
+> them, matched by message, which is the one point where the report can be
+> stopped. The remaining 5 are `Not implemented: navigation to another
+> Document` — one each, measured file by file, from
+> `orbit-diner-review-details-734`, `admin-entity-roster-678`,
+> `review-terminal-distinctness` and both `session-expired-rendered-587`
+> files, raised where a rendered tree asks the browser to navigate. jsdom
+> emits those straight onto the virtual console with no `error` event to
+> cancel, so they stay. `npm test` output is therefore the vitest summary plus
+> five jsdom-forwarded lines, not the summary alone. Pinned by
+> `frontend/src/__tests__/console-error-discipline-68.test.tsx` and
+> `tests/test_check_only_flag_68.py`. The finding text below is left as
+> written; it describes the state before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to

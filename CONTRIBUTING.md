@@ -63,6 +63,60 @@ python3 tests/lint-counterparty-names.py  # no counterparty identity, ever
 python3 tools/docs_sync.py audit          # docs/INDEX.md still true
 ```
 
+### Running one file, or a few (`--only`)
+
+The Python suite is 300+ scripts run one process at a time, so a full run is
+minutes. `--only <glob>` narrows it to the files you are working on, through
+the same loop, with the same retry pass and the same exit codes:
+
+```bash
+SKIP_INFRA=1 bash scripts/check.sh --only 'tests/test_review_api_84.py'
+SKIP_INFRA=1 bash scripts/check.sh --only 'test_review_api_84.py'   # bare name
+SKIP_INFRA=1 bash scripts/check.sh --only 'tests/lint-*.py'
+```
+
+Quote the glob — unquoted, your shell expands it first. A glob that matches
+nothing exits **4** and says so rather than printing `CHECK: ALL GREEN` over
+zero tests. `--only` is for the edit loop; only a full run is the landing
+signal, and `land.sh` runs one.
+
+For the frontend, `npm test -- <path>` is the equivalent:
+
+```bash
+cd frontend && npm test -- src/__tests__/review-history.test.tsx
+```
+
+### An unexpected `console.error` fails the vitest test that logged it
+
+`src/setupTests.ts` swallows the errors the suite provokes on purpose — a
+non-OK fetch (`… returned HTTP 4xx/5xx`), the `/version` probe, the stubs'
+simulated dropped connection — and fails the test on anything else, so a React
+warning or a swallowed rejection is a red test instead of one more line in a
+wall of expected noise (issue #68). If a test of yours provokes a log on
+purpose, say so in that test:
+
+```ts
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
+// inside the it(...) that provokes it:
+allowConsoleErrorsInThisTest(/DYNAMODB_TABLE_NAME not configured/);
+```
+
+That keeps the guard live for everything else that test logs, which a blanket
+`vi.spyOn(console, 'error')` would not. Widening the suite-wide allowlist in
+`src/__tests__/support/consoleErrorGuard.ts` is a different, deliberate
+decision — the guard is worth exactly what it still refuses.
+
+**What the guard cannot reach.** A full `npm test` still prints a handful of
+jsdom-forwarded lines — today five `Not implemented: navigation to another
+Document`, one from each of five component tests whose rendered tree asks the
+browser to navigate. Those do not pass through `console.error` at all: jsdom
+emits them on a `VirtualConsole` that was wired to `console` when the
+environment was built, before vitest installed its own `globalThis.console`,
+so this guard by construction can neither see nor suppress them. An uncaught exception arrives the same way, and
+is only silenceable where a test can cancel the `error` event jsdom dispatches
+first — which is what `src/__tests__/error-boundary-and-session.test.tsx` does,
+by message, for the render throws it makes on purpose.
+
 ## Four things that will bite you
 
 **1 · A push is a publication.** There is no scrub step between your commit and

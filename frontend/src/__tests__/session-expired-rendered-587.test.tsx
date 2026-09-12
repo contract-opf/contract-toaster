@@ -36,6 +36,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 // Amplify is never used in password mode, but App.tsx imports it unconditionally.
 vi.mock('aws-amplify/auth', () => ({ fetchAuthSession: vi.fn(async () => ({ tokens: {} })) }));
@@ -141,6 +142,9 @@ afterEach(() => {
 
 describe('issue #587 — a 401 mid-session clears the signed-in UI, not just a flag', () => {
   it('rendered-level regression coverage: a stale row must not survive the 401', async () => {
+    // The mid-session 401 this test forces is logged by the loader that hit
+    // it before the signed-in UI is torn down (issue #68).
+    allowConsoleErrorsInThisTest(/Not authenticated/);
     // This is characterization/regression coverage of pre-existing
     // password-mode wiring, not a fail-first proof for #587: run unmodified
     // against HEAD (no diff from this round applied) and it passes, because

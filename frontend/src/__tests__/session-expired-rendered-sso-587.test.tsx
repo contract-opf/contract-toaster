@@ -43,6 +43,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('aws-amplify/auth', () => ({ fetchAuthSession: vi.fn(async () => ({ tokens: {} })) }));
 
@@ -170,6 +171,9 @@ afterEach(() => {
 
 describe('issue #587 — SSO mode: a 401 mid-session clears the signed-in UI', () => {
   it('a 401 forces the Authenticator back to its signed-out surface and drops rows', async () => {
+    // The mid-session 401 this test forces is logged by the loader that hit
+    // it before the signed-in UI is torn down (issue #68).
+    allowConsoleErrorsInThisTest(/Not authenticated/);
     const { expireNow } = stubFetchWithExpiry();
     render(<App />);
 
@@ -218,6 +222,7 @@ describe('issue #587 — SSO mode: a 401 mid-session clears the signed-in UI', (
   });
 
   it('fix-round-3 regression: the banner clears once the user signs back in', async () => {
+    allowConsoleErrorsInThisTest(/Not authenticated/);
     const { expireNow, reauthenticate } = stubFetchWithExpiry();
     render(<App />);
 

@@ -34,6 +34,7 @@ import ReviewSubmission, {
   submitTimeoutMs,
 } from '../ReviewSubmission';
 import { DEFAULT_PLAYBOOKS, submitArmed } from './support/consoleSurface';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('aws-amplify/auth', () => ({
   fetchAuthSession: async () => ({
@@ -175,6 +176,9 @@ describe('the rendered submit abandons a stalled upload (issue #53)', () => {
   });
 
   it('shows UPLOAD_STALLED_COPY and re-arms the lever once the budget runs out', async () => {
+    // Abandoning the stalled upload is what this test provokes, and the
+    // abort is logged with its budget and file size (issue #68).
+    allowConsoleErrorsInThisTest(/POST \/api\/reviews abandoned after \d+ ms/);
     const h = await panelWithUpload('stall');
     const budget = submitTimeoutMs(docxFile().size);
     expect(h.posts).toHaveLength(1);

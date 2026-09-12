@@ -32,6 +32,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ReviewHistory, { HistoryRow } from '../ReviewHistory';
+import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
   getToken: vi.fn(async () => 'mock-token'),
@@ -462,6 +463,9 @@ describe('History — re-downloading past work', () => {
   const CONFIG_DETAIL = 'EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured.';
 
   it('shows the shared friendly copy for a mis-configured backend, never the raw detail', async () => {
+    // Same shape as resilience-a11y's download test: the raw detail is
+    // logged, never rendered (issue #68).
+    allowConsoleErrorsInThisTest(/EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured/);
     stubRoutes({
       '/api/reviews?': listOf(MODERN),
       '/output': { status: 503, body: { detail: CONFIG_DETAIL } },
