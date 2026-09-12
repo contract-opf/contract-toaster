@@ -53,6 +53,11 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src.authz import is_admin
+except ImportError:  # pragma: no cover
+    from authz import is_admin  # type: ignore[no-redef]
+
 
 def json_safe(value: Any) -> Any:
     """Coerce boto3's `Decimal`s into plain ints/floats, recursively.
@@ -196,19 +201,6 @@ def _sync_status_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["SYNC_STATUS_TABLE"])
 
 
-def _is_admin(claims: dict[str, Any]) -> bool:
-    """Return True if the caller's users row (looked up by sub) is an admin.
-
-    NOTE: `is_admin` is a DynamoDB `users`-row flag, never a JWT claim
-    (ARCHITECTURE.md -> "Group-naming misnomer": "The `is_admin` flag in the
-    users DynamoDB row (not group membership) is the sole admin-privilege
-    gate"). Callers of this module pass in the caller's own users row
-    (already fetched by `require_active_user`) rather than trusting a token
-    claim, so admin privilege cannot be forged by a stale or crafted JWT.
-    """
-    return bool(claims.get("is_admin", False))
-
-
 def require_active_user(
     cognito_sub: str,
     dynamodb_resource: Any,
@@ -270,7 +262,7 @@ def list_users(
 
     Raises HTTPException(403) if the caller is not an admin.
     """
-    if not _is_admin(caller_user_row):
+    if not is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to list users.",
@@ -316,7 +308,7 @@ def get_user(
     #453): this function is unrouted today, and returning the raw Item would
     leak `password_hash` the moment anyone wires it to a route.
     """
-    if not _is_admin(caller_user_row):
+    if not is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to view a user.",
@@ -359,7 +351,7 @@ def update_user(
         self-targeting or not (issue #473). With at least one other active
         admin, self-demotion is allowed; the second admin retains access.
     """
-    if not _is_admin(caller_user_row):
+    if not is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to update a user.",
@@ -544,7 +536,7 @@ def get_sync_status(
 
     Raises HTTPException(403) if the caller is not an admin.
     """
-    if not _is_admin(caller_user_row):
+    if not is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to view sync status.",

@@ -68,8 +68,10 @@ from fastapi import HTTPException, Request, Response, status
 from jwt import PyJWTError
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src.authz import require_admin
     from src.users import public_user_view
 except ImportError:  # pragma: no cover
+    from authz import require_admin  # type: ignore[no-redef]
     from users import public_user_view  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
@@ -160,17 +162,6 @@ def _audit_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
 
 
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin and src/retention.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
-
-
-def _require_admin(caller_user_row: dict[str, Any], detail: str) -> None:
-    if not _is_admin(caller_user_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
-
-
 def _write_audit_entry(
     dynamodb_resource: Any,
     actor: str,
@@ -219,7 +210,7 @@ def get_auth_mode_settings(
     hard-coding the choices. Raises HTTPException(403) if the caller is not
     an admin.
     """
-    _require_admin(caller_user_row, "Admin privilege required to view the auth-mode setting.")
+    require_admin(caller_user_row, "Admin privilege required to view the auth-mode setting.")
 
     table = _auth_settings_table(dynamodb_resource)
     resp = table.get_item(Key={"setting_id": AUTH_MODE_SETTING_ID})
@@ -247,7 +238,7 @@ def set_auth_mode(
     irreversible data-destructive action). Raises HTTPException(403) if the
     caller is not an admin, 400 if `new_mode` is not a valid mode.
     """
-    _require_admin(caller_user_row, "Admin privilege required to change the auth-mode setting.")
+    require_admin(caller_user_row, "Admin privilege required to change the auth-mode setting.")
 
     if new_mode not in VALID_AUTH_MODES:
         raise HTTPException(
@@ -871,7 +862,7 @@ def add_user(
     missing/invalid field or unknown user_type, 409 if the target already
     exists.
     """
-    _require_admin(caller_user_row, "Admin privilege required to add a user.")
+    require_admin(caller_user_row, "Admin privilege required to add a user.")
 
     user_type = payload.get("user_type")
     is_admin = bool(payload.get("is_admin", False))
@@ -970,7 +961,7 @@ def remove_user(
     for the caller's own row even when a second admin could otherwise
     backstop them. Ask another admin to remove your row instead.
     """
-    _require_admin(caller_user_row, "Admin privilege required to remove a user.")
+    require_admin(caller_user_row, "Admin privilege required to remove a user.")
 
     actor = caller_user_row.get("cognito_sub", "")
     if cognito_sub == actor:

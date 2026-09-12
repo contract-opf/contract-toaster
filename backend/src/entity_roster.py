@@ -107,6 +107,11 @@ from typing import Any, Iterable
 
 from fastapi import HTTPException, status
 
+try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src.authz import require_admin
+except ImportError:  # pragma: no cover
+    from authz import require_admin  # type: ignore[no-redef]
+
 # `scripts/entity_normalize.py` is the ONE place party-name folding lives
 # (issue #55). Put `scripts/` on `sys.path` the same idempotent way
 # `src/pipeline_runner.py` does, so this module imports it by bare name
@@ -147,18 +152,6 @@ def _entity_roster_table(dynamodb_resource: Any):
 
 def _audit_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py, src/retention.py, src/demo_auth.py and
-    src/model_settings.py."""
-    return bool(caller_user_row.get("is_admin", False))
-
-
-def _require_admin(caller_user_row: dict[str, Any], detail: str) -> None:
-    if not _is_admin(caller_user_row):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 def _write_audit_entry(
@@ -331,7 +324,7 @@ def get_entity_roster(
     all, and when/by whom the roster was last set. Raises HTTPException(403)
     if the caller is not an admin.
     """
-    _require_admin(caller_user_row, "Admin privilege required to view the entity roster.")
+    require_admin(caller_user_row, "Admin privilege required to view the entity roster.")
 
     store_available = True
     try:
@@ -384,7 +377,7 @@ def set_entity_roster(
     Raises HTTPException(403) for a non-admin caller or 400 for an invalid body
     (`normalize_entities`).
     """
-    _require_admin(caller_user_row, "Admin privilege required to change the entity roster.")
+    require_admin(caller_user_row, "Admin privilege required to change the entity roster.")
 
     normalized = normalize_entities(entities)
     before = _stored_entities(dynamodb_resource)

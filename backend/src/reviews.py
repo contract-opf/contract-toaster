@@ -85,11 +85,13 @@ from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import config, model_client, model_settings
+    from src.authz import is_admin
     from src.users import json_safe
 except ImportError:  # pragma: no cover
     import config  # type: ignore[no-redef]
     import model_client  # type: ignore[no-redef]
     import model_settings  # type: ignore[no-redef]
+    from authz import is_admin  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
 
 # Cross-directory import (same convention backend/src/pipeline_runner.py and
@@ -2729,12 +2731,6 @@ STATUS_USER_MESSAGES: dict[str, str] = {
 }
 
 
-def _is_admin_caller(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin / src/download.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
-
-
 def load_analysis_artifact(item: dict[str, Any], s3_client: Any) -> dict[str, Any] | None:
     """Read this review's persisted analysis artifact
     (`outputs/{review_id}/analysis.json`, written by
@@ -2864,7 +2860,7 @@ def get_review_detail(
 
     owner_sub = item.get("owner_sub", "")
     caller_sub = caller_user_row.get("cognito_sub", "")
-    if caller_sub != owner_sub and not _is_admin_caller(caller_user_row):
+    if caller_sub != owner_sub and not is_admin(caller_user_row):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
 
     status_value = item.get("status", "PENDING")
@@ -3772,7 +3768,7 @@ def list_reviews(
     page_size = _clamp_limit(limit)
     start_key = decode_page_token(next_token)
 
-    if _is_admin_caller(caller_user_row) and not owner_scoped:
+    if is_admin(caller_user_row) and not owner_scoped:
         items, last_key = _page_all(table, page_size, start_key)
     else:
         owner_sub = caller_user_row.get("cognito_sub", "")
@@ -3946,7 +3942,7 @@ def list_recent_failures(
     non-enumerable) there is no "your own row" case to be coy about: you are
     an admin or you get nothing.
     """
-    if not _is_admin_caller(caller_user_row):
+    if not is_admin(caller_user_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to view diagnostics.",

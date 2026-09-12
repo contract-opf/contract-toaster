@@ -378,6 +378,7 @@ from src.admin_dashboard import (
 )
 from src.audit_queries import AUDIT_QUERY_DEFAULT_LIMIT, run_audit_query
 from src.auth import get_current_user
+from src.authz import is_admin
 from src.bundle_authoring import validate_pen_rules_document
 from src.corpus import deterministic_embed, run_ingestion_request
 from src.download import generate_presigned_playbook_download_url
@@ -510,12 +511,6 @@ def get_active_user_row(
     caller_row = require_active_user(current_user.get("sub", ""), dynamodb_resource)
     enforce_default_credentials_rotation(caller_row, request.url.path)
     return caller_row
-
-
-def _is_admin(caller_user_row: dict[str, Any]) -> bool:
-    """`is_admin` is a DynamoDB `users`-row flag, never a JWT claim -- same
-    convention as src/users.py::_is_admin / src/retention.py::_is_admin."""
-    return bool(caller_user_row.get("is_admin", False))
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +737,7 @@ async def get_me(
 
     `is_admin` is derived from the caller's DynamoDB `users` row (already
     fetched by `get_active_user_row` -> `require_active_user`) via
-    `src.users._is_admin` — never a JWT/Cognito claim (ARCHITECTURE.md ->
+    `src.authz.is_admin` — never a JWT/Cognito claim (ARCHITECTURE.md ->
     "Group-naming misnomer"). No secrets or tokens are included.
 
     `cognito_sub` (issue #473) is the caller's own primary key, already
@@ -767,7 +762,7 @@ async def get_me(
     """
     return JSONResponse(
         content={
-            "is_admin": _is_admin(caller_row),
+            "is_admin": is_admin(caller_row),
             "cognito_sub": caller_row.get("cognito_sub", ""),
             "username": caller_row.get("username"),
             "default_credentials_warning": default_credentials_warning(caller_row),
@@ -1521,7 +1516,7 @@ async def post_admin_playbook_create(
     playbook_id already exists (registered or DB-created) or if
     `(playbook_id, version)` was already recorded.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to create a playbook.",
@@ -1743,7 +1738,7 @@ async def post_admin_playbook_version_legal_approval(
     empty `content_hash`, 404 for an unknown `(playbook_id, version)`, 409
     for a content_hash mismatch.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to record legal approval for a playbook version.",
@@ -1807,7 +1802,7 @@ async def post_admin_playbook_version_activate(
     content_hash does not match its recorded legal approval -- the bundle
     cannot be activated).
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to activate a playbook version.",
@@ -1897,7 +1892,7 @@ async def post_admin_playbook_version_upload(
     already uploaded (append-only -- re-uploads must use a new version
     identifier).
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to upload a playbook version.",
@@ -2049,7 +2044,7 @@ async def get_admin_playbook_versions(
     uploaded versions returns an empty list. Raises HTTP 403 for a non-admin
     caller.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to view a playbook's version trail.",
@@ -2081,7 +2076,7 @@ async def get_admin_playbook_version_download(
       - Appends a playbook_version_downloaded audit entry.
       - Returns a 60-second presigned URL with Cache-Control: no-store.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to download a playbook version.",
@@ -2147,7 +2142,7 @@ async def post_admin_playbook_version_rollback(
     `(playbook_id, version)`, and 409 if the target version has never been
     successfully activated -- there is nothing to roll back to.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to roll back a playbook version.",
@@ -2203,7 +2198,7 @@ async def patch_admin_playbook_version_notes(
     `notes` is missing or not a string, 404 for an unknown
     `(playbook_id, version)`.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to update playbook version notes.",
@@ -2320,7 +2315,7 @@ async def get_admin_playbook_instructions(
     Raises HTTP 403 for a non-admin caller, 404 for a playbook_id the
     registry does not list.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to view standing instructions.",
@@ -2380,7 +2375,7 @@ async def post_admin_playbook_instructions(
     string or over 10,000 characters, 404 for an unknown playbook_id, and
     409 for a version conflict (`{"detail": ..., "current_version": int}`).
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to save standing instructions.",
@@ -2456,7 +2451,7 @@ async def patch_admin_playbook(
     400 if `display_name` is missing or not a string, 404 for a
     playbook_id the registry does not list.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to rename a playbook.",
@@ -2501,7 +2496,7 @@ async def delete_admin_playbook(
     Raises HTTP 403 for a non-admin caller, 404 for a playbook_id the
     registry does not list.
     """
-    if not _is_admin(caller_row):
+    if not is_admin(caller_row):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privilege required to remove a playbook.",

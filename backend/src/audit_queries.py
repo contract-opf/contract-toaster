@@ -35,7 +35,7 @@ nothing — that test also runs the same assertion against a deliberately
 scan-based stand-in and requires it to FAIL.
 
 ADMIN-ONLY, AND 403 RATHER THAN A FILTERED 200. Same reasoning as
-`admin_dashboard._require_admin`: every entry here is a deployment-wide
+the admin-gated `admin_dashboard` panels: every entry here is a deployment-wide
 investigative view (everything an actor did, everything that ran under a bad
 bundle), so there is no "your own row" subset a non-admin could legitimately
 be served, and a filtered 200 would be an empty 200 masquerading as a
@@ -104,9 +104,11 @@ from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src.admin_dashboard import RELEASE_ACTIVITY_ACTIONS
+    from src.authz import require_admin
     from src.users import json_safe
 except ImportError:  # pragma: no cover
     from admin_dashboard import RELEASE_ACTIVITY_ACTIONS  # type: ignore[no-redef]
+    from authz import require_admin  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
 
 
@@ -144,18 +146,11 @@ def _clamp(value: Any, default: int, lowest: int, highest: int) -> int:
 # ---------------------------------------------------------------------------
 # Admin gate
 # ---------------------------------------------------------------------------
-
-def _require_admin(caller_user_row: dict[str, Any]) -> None:
-    """Raise HTTPException(403) unless the caller's `users` row is an admin.
-
-    The detail never echoes anything caller-supplied — not even the query
-    name, which is attacker-controlled text on this route.
-    """
-    if not bool(caller_user_row.get("is_admin", False)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privilege required to run audit queries.",
-        )
+#
+# `src.authz.require_admin` is the single source of the admin predicate
+# (issue #66); this module holds no local copy. The 403 detail passed at the
+# call site is a literal and never echoes anything caller-supplied — not
+# even the query name, which is attacker-controlled text on this route.
 
 
 # ---------------------------------------------------------------------------
@@ -1048,7 +1043,7 @@ def run_audit_query(
     query name or a missing/invalid parameter (never a silently-ignored one),
     404 when a named playbook version does not exist.
     """
-    _require_admin(caller_user_row)
+    require_admin(caller_user_row, "Admin privilege required to run audit queries.")
     resolved_params = params or {}
     resolved_now = time.time() if now is None else now
 

@@ -104,6 +104,31 @@
 > subprocesses in a throwaway `git init` repository. The finding text below is
 > left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G5 / B5 **landed** as public issue
+> `contract-opf/contract-toaster#66` (private #706 in the table below).
+> `backend/src/authz.py` now holds the only `is_admin(row)` /
+> `require_admin(row, detail)` in the backend, and the 17 local definitions
+> the finding counted are gone from the twelve modules that carried them.
+> Two departures from B5 as written. First, the predicate is
+> `row.get("is_admin", False) is True`, not the `bool(...)` every copy used:
+> a hand-edited or break-glass row carrying `"false"` or `1` used to count as
+> an admin and no longer does. Every writer of the attribute persists a real
+> boolean — `users.update_user` rejects a non-bool with 400,
+> `demo_auth.add_user` coerces with `bool(...)`, `demo_auth.seed_demo_users`
+> writes the `SEED_USERS` literals — so nothing legitimate changed status.
+> Second, `download.py` keeps a module-level `from src.authz import is_admin
+> as _is_admin` alias, because `tests/test_download_auth_attack.py` binds and
+> asserts on that private name; an import binding is not a `def`, so the AST
+> rule still sees one definition. Behaviour is otherwise neutral: the 403
+> detail strings stayed per call site and byte-identical, including the two
+> variants that built or hard-coded their own (`admin_dashboard._require_admin`
+> took a `what` fragment, `audit_queries._require_admin` took no argument at
+> all). Pinned by `tests/test_authz_single_source.py`, which AST-walks every
+> module under `backend/src`, pins the truth table, and drives the three real
+> users-table writers against moto to prove the persisted flag is a real
+> `bool`. The finding text below is left as written; it describes the state
+> before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to

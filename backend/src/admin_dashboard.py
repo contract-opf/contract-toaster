@@ -80,11 +80,13 @@ from fastapi import HTTPException, status
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import model_settings as model_settings_module
     from src import reviews as reviews_module
+    from src.authz import require_admin
     from src.disposition import TRIAGE_STATUS_PENDING, TRIAGE_STATUS_TRIAGED
     from src.users import json_safe
 except ImportError:  # pragma: no cover
     import model_settings as model_settings_module  # type: ignore[no-redef]
     import reviews as reviews_module  # type: ignore[no-redef]
+    from authz import require_admin  # type: ignore[no-redef]
     from disposition import TRIAGE_STATUS_PENDING, TRIAGE_STATUS_TRIAGED  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
 
@@ -92,19 +94,12 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Admin gate
 # ---------------------------------------------------------------------------
-
-def _require_admin(caller_user_row: dict[str, Any], what: str) -> None:
-    """Raise HTTPException(403) unless the caller's `users` row is an admin.
-
-    `what` names the view in the detail string so an operator who hits this
-    knows WHICH panel refused them, matching the per-route wording the rest
-    of the codebase uses. The detail never echoes anything caller-supplied.
-    """
-    if not bool(caller_user_row.get("is_admin", False)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Admin privilege required to view {what}.",
-        )
+#
+# `src.authz.require_admin` is the single source of the admin predicate
+# (issue #66); this module holds no local copy. Each call site below passes
+# its own literal 403 detail naming WHICH panel refused the caller -- the
+# per-route wording the rest of the codebase uses, and never anything
+# caller-supplied.
 
 
 def _clamp(value: Any, default: int, lowest: int, highest: int) -> int:
@@ -289,7 +284,7 @@ def get_spend_ledger(
 
     Raises HTTPException(403) for a non-admin caller.
     """
-    _require_admin(caller_user_row, "the spend ledger")
+    require_admin(caller_user_row, "Admin privilege required to view the spend ledger.")
     # Admin-gated in its own right, and gated again above — the cap setting
     # never rides along on a read a non-admin could reach.
     cap_setting = model_settings_module.get_spend_cap_settings(
@@ -436,7 +431,7 @@ def get_pipeline_health(
 
     Raises HTTPException(403) for a non-admin caller.
     """
-    _require_admin(caller_user_row, "pipeline health")
+    require_admin(caller_user_row, "Admin privilege required to view pipeline health.")
     threshold = _clamp(
         stale_after_seconds,
         STALE_IN_FLIGHT_SECONDS_DEFAULT,
@@ -616,7 +611,7 @@ def list_manual_review_queue(
     Raises HTTPException(403) for a non-admin caller, HTTPException(400) for
     an unrecognised filter value.
     """
-    _require_admin(caller_user_row, "the manual-review queue")
+    require_admin(caller_user_row, "Admin privilege required to view the manual-review queue.")
 
     wanted_status = (status_filter or "all").strip()
     if wanted_status not in ("all",) + MANUAL_REVIEW_STATUSES:
@@ -1074,7 +1069,7 @@ def get_release_activity(
 
     Raises HTTPException(403) for a non-admin caller.
     """
-    _require_admin(caller_user_row, "release activity")
+    require_admin(caller_user_row, "Admin privilege required to view release activity.")
     bounded = _clamp(limit, RELEASE_ACTIVITY_DEFAULT_LIMIT, 1, RELEASE_ACTIVITY_MAX_LIMIT)
     sample_rows = _clamp(
         outlier_sample_rows, COST_OUTLIER_LEDGER_ROWS_DEFAULT, 1, COST_OUTLIER_LEDGER_ROWS_MAX
