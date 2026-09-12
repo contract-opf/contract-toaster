@@ -1,18 +1,23 @@
 /**
  * playbook-catalog-sync-464.test.tsx — issue #464: the contract-type dial
  * went stale after an admin rename/remove because ReviewSubmission.tsx's
- * catalog copy (`fetchCatalog`, fetched once on mount) and AdminPlaybooks'
- * own copy (refreshed only for itself after a mutation) had no shared
- * signal between them. Both panels stay mounted at once (App.tsx's
- * `hidden`-attribute tab scheme), so the measured bug was real: rename the
- * only playbook in the Playbooks tab, switch to Review without reloading,
- * and the dial still showed the OLD name; remove it, and the dial kept
- * offering it as a selectable (but guaranteed-503) option instead of the
- * "nothing to review against" state.
+ * catalog copy (fetched once on mount) and AdminPlaybooks' own copy
+ * (refreshed only for itself after a mutation) had no shared signal between
+ * them. Both panels stay mounted at once (App.tsx's `hidden`-attribute tab
+ * scheme), so the measured bug was real: rename the only playbook in the
+ * Playbooks tab, switch to Review without reloading, and the dial still
+ * showed the OLD name; remove it, and the dial kept offering it as a
+ * selectable (but guaranteed-503) option instead of the "nothing to review
+ * against" state.
  *
- * The fix threads a plain refresh signal (`catalogVersion`, App.tsx) from
- * AdminPlaybooks' mutation handlers to ReviewSubmission's own catalog
- * fetch, so both stay in sync without a reload. This test renders the
+ * #464's own fix threaded a plain refresh signal (`catalogVersion`, App.tsx)
+ * from AdminPlaybooks' mutation handlers to ReviewSubmission's fetch. Issue
+ * #72 replaced that wiring with the thing the counter stood in for: ONE
+ * shared catalog (`src/playbooksStore.ts`), read through
+ * `usePlaybookCatalog()` and re-read by `invalidateCatalog()` from the
+ * mutation handlers, so no catalog prop is threaded through App.tsx at all.
+ * The claim below is unchanged and is what still pins both: mutate through
+ * the admin UI, and the dial agrees without a reload. This test renders the
  * REAL <App/> (not the two components in isolation) so it exercises the
  * actual wiring between them, mutates through the real admin UI (not a
  * direct state poke), and asserts the dial's rendered options — the
@@ -25,11 +30,11 @@
  *
  * IMPORTANT invariant: GET /api/playbooks below must hand back a
  * value-copy of `catalog`, never the same array/object references it
- * holds. ReviewSubmission.fetchCatalog stores whatever it's given via
- * setPlaybooks(entries) by reference; if the stub aliased `catalog`
+ * holds. The store publishes whatever the response body carried, by
+ * reference (playbooksStore.ts's `load`); if the stub aliased `catalog`
  * directly, PATCH/DELETE mutating that shared object in place would make
  * the dial appear to "update" on the next render even with NO refetch at
- * all — i.e. even against production code where the #464 wiring was never
+ * all — i.e. even against production code where the sync wiring was never
  * added. That false positive was caught and fixed for #464 fix-round-1:
  * confirmed the un-copied stub passed both tests against a pre-fix
  * worktree (HEAD c1b74fa, no catalogVersion/onCatalogChange present).

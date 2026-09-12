@@ -268,6 +268,56 @@
 > `tests/test_docs_lint_living_from_index_69.py`. The finding text below is
 > left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G13 / B13 **landed** as public issue
+> `contract-opf/contract-toaster#72` (private #712 in the table below).
+> `frontend/src/playbooksStore.ts` holds ONE memoised `GET /api/playbooks`
+> for the whole SPA — `getCatalog()` / `invalidateCatalog()` /
+> `subscribeCatalog()`, plus a `usePlaybookCatalog()` hook over
+> `useSyncExternalStore` (React 18.3 ships it; no new dependency) exposing
+> `{status, data, error}`. `ReviewSubmission.tsx` and `AdminPlaybooks.tsx`
+> read it instead of fetching, so three consumers mounted together cost one
+> request and an activation in the Playbooks tab reaches the Review tab's
+> dial with no reload. Every `AdminPlaybooks` mutation that can change what
+> the catalog returns (create, upload, activate, rollback, notes, rename,
+> remove) calls `invalidateCatalog()`, as does the console's "Reload contract
+> types" retry and — the seam #635 built — App.tsx's
+> `handleCredentialsRotated`, the callback that already bumps
+> `credentialsRefreshKey` when a password rotation ends the server's refusal.
+> That invalidation is called from App.tsx itself, NOT from inside either
+> consumer: `GET /api/playbooks` is refused for every unrotated caller
+> (`get_active_user_row` → `enforce_default_credentials_rotation`) but is not
+> an admin route, while `AdminPlaybooks` renders only inside App.tsx's
+> `isAdmin` block — so a panel-hosted invalidation would never fire for a
+> seeded NON-admin, who would be left with the dial's error copy for the rest
+> of the session. `AdminPlaybooks` therefore takes no `credentialsRefreshKey`
+> at all any more; it needs none, because its latch clears on the next catalog
+> snapshot that reads `ready`. Pinned for the non-admin by
+> `frontend/src/__tests__/catalog-rotation-seam-72.test.tsx` and for the four
+> admin panels by `admin-forbidden-latch-635.test.tsx`. Memory only — no new
+> `localStorage`/`sessionStorage` key, and `security-posture.test.tsx` is
+> untouched.
+>
+> **Three departures from B13 as written.** First, `ReviewHistory.tsx` is
+> NOT wired to the store: B13 lists it as a consumer, but it never fetched
+> `/api/playbooks` — it reads `playbook_id`/`playbook_version` straight off
+> the review rows and needs no catalog display name — so subscribing it
+> would have added a consumer to serve nothing. Second, the store carries
+> the HTTP status and the raw failure, never a sentence: each panel keeps
+> its own error copy ("We couldn't load your playbooks…" vs. "We couldn't
+> load the list of contract types right now."), and `AdminPlaybooks` reads
+> `error.httpStatus === 403` to hide itself exactly as its own loader did.
+> The one `console.error` of the technical detail moved into the store,
+> because there is now one fetch and so one log line. Third, issue #464's
+> `catalogVersion` counter and `onCatalogChange` callback are REMOVED rather
+> than left beside the store — they existed only to stand in for the shared
+> copy this adds, and App.tsx now threads no catalog prop to either panel.
+> `ReviewSubmission` reconciles the selection against the catalog during
+> render rather than in an effect, because `orbit-diner/state.ts::canSubmit`
+> requires the selected id to name an active entry of the catalog rendered
+> beside it: an effect commits one frame in which the lever is dead. Pinned
+> by `frontend/src/__tests__/playbooks-store-72.test.tsx`. The finding text
+> below is left as written; it describes the state before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to
@@ -431,6 +481,7 @@ estimate and a per-deployment rolling median of recent DONE reviews'
 **B13.** A tiny in-memory catalog store (`playbooksStore.ts`) shared by
 `ReviewSubmission`, `AdminPlaybooks`, and `ReviewHistory`, invalidated by
 the admin mutations and by the existing `adminRefresh.ts` seam.
+**Landed (B13)** — see the G13 status note at the top of this file.
 
 ### G14 — Developer quality of life  (P3)
 

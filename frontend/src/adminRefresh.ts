@@ -34,6 +34,21 @@
  * Deliberately NOT a general-purpose "reload this panel" counter: it names the
  * one event it signals, so a future caller cannot quietly widen it into an
  * unconditional refetch on every render.
+ *
+ * Issue #72 note: `AdminPlaybooks` no longer owns the catalog it reloads and
+ * no longer takes this key at all. The shared read (playbooksStore.ts) is
+ * refreshed by `invalidateCatalog()`, called from App.tsx's
+ * `handleCredentialsRotated` — the SAME callback that bumps this key, one
+ * event with two consequences. It is deliberately NOT hosted inside
+ * `AdminPlaybooks`: `GET /api/playbooks` is refused for every unrotated
+ * caller, admin or not, but that panel is rendered only inside App.tsx's
+ * `isAdmin` block, so an invalidation living there would never fire for a
+ * non-admin — whose Review-tab dial is behind the same refused route, and who
+ * has no reload to fall back on (see above). Calling it from the event source
+ * also keeps it off the mount path, so a catalog that was just read is not
+ * invalidated for a second request that buys nothing. Panels that still own
+ * their own loaders list this key in their load effect's deps exactly as
+ * before.
  */
 export interface AdminPanelRefreshProps {
   /**

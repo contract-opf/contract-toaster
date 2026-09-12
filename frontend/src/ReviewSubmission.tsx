@@ -97,6 +97,13 @@ import { describeOutcome } from './outcome';
 // 4). See lastPlaybook.ts's module docstring for the storage shape and why
 // this is safe to keep in localStorage.
 import { readLastPlaybookId, writeLastPlaybookId } from './lastPlaybook';
+// The one shared read of GET /api/playbooks (issue #72) — see that module's
+// docstring for why the catalog is held once rather than per panel.
+import {
+  invalidateCatalog,
+  usePlaybookCatalog,
+  type PlaybookCatalogEntry,
+} from './playbooksStore';
 import { readLastBrowning, writeLastBrowning } from './lastBrowning';
 import { readLastNotesMode, writeLastNotesMode } from './lastNotesMode';
 // The cheap, advisory upload-time preflight check (issue #491) — fired the
@@ -289,16 +296,18 @@ interface OutputResponse {
 // activated playbook ("active") from one that is registered but not yet
 // activated ("coming_soon") — those are the only two, for every playbook
 // alike (issue #433: the playbook the image ships with is installed by a
-// deploy-time seed and carries no special marker).
-interface PlaybookCatalogEntry {
-  playbook_id: string;
-  display_name: string;
-  status: string;
-}
+// deploy-time seed and carries no special marker). The declaration itself now
+// lives in `playbooksStore.ts` (issue #72), alongside the one fetch that
+// produces it.
 
-interface PlaybookCatalogResponse {
-  playbooks: PlaybookCatalogEntry[];
-}
+/**
+ * What this panel shows when the catalog read failed (issue #72 kept the copy
+ * here; the shared store carries the failure, never a sentence). A failure
+ * degrades gracefully — no selector renders, the submission FormData simply
+ * omits `playbook_id` and the backend's own default applies — rather than
+ * blocking upload.
+ */
+const CATALOG_ERROR_COPY = "We couldn't load the list of contract types right now.";
 
 // Non-terminal pipeline statuses — keep in sync with
 // backend/src/reviews.py's REVIEW_STATUSES_NON_TERMINAL. Polling continues
@@ -936,22 +945,15 @@ function findMatchingPlaybook(
   );
 }
 
-export interface ReviewSubmissionProps {
-  /**
-   * Issue #464: a plain refresh signal (not the catalog itself — see
-   * App.tsx's `catalogVersion` comment for why a full state lift wasn't
-   * worth the props-contract churn). App.tsx bumps this after an admin
-   * rename/remove/activate/rollback lands in AdminPlaybooks, so this
-   * component's own `fetchCatalog` (below) re-runs and the dial reflects it
-   * without a reload. Optional and defaulted so every existing render of
-   * this component with no props (all current tests) is unaffected.
-   */
-  catalogVersion?: number;
-}
-
-export default function ReviewSubmission({
-  catalogVersion = 0,
-}: ReviewSubmissionProps = {}): React.ReactElement {
+/**
+ * Issue #464 threaded a `catalogVersion` counter in here from App.tsx so an
+ * admin rename/remove could make this panel re-run its own catalog fetch.
+ * Issue #72 retired the prop: the catalog is read once, by
+ * `playbooksStore.ts`, and this panel subscribes to it — an admin mutation
+ * invalidates the store and the dial follows with no prop to thread. The
+ * component takes no props at all now.
+ */
+export default function ReviewSubmission(): React.ReactElement {
   const [file, setFile] = useState<File | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
@@ -964,7 +966,7 @@ export default function ReviewSubmission({
    * effect down (cancelling the in-flight attempt and clearing the pending
    * timer through the existing cleanup) and starts it again, which polls
    * immediately and resets the backoff. Its VALUE carries no data, in the
-   * same idiom as `catalogVersion`.
+   * same idiom as the `catalogVersion` counter issue #72 retired.
    */
   const [pollNonce, setPollNonce] = useState(0);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -1005,17 +1007,25 @@ export default function ReviewSubmission({
   // current selection; `submittedPlaybookLabel` freezes the label for the
   // review actually in flight, so it keeps showing correctly even if the
   // attorney changes the selector afterward.
-  const [playbooks, setPlaybooks] = useState<PlaybookCatalogEntry[]>([]);
+  //
+  // Issue #72: the catalog itself is read ONCE for the whole app
+  // (`playbooksStore.ts`) — this panel, the admin lifecycle table, and any
+  // later consumer share that one request and one copy, so an activation in
+  // the Playbooks tab reaches this dial without a reload and without a second
+  // fetch. What is still local is the SELECTION below, and the sentence shown
+  // when the read failed.
+  const catalog = usePlaybookCatalog();
+  const playbooks: PlaybookCatalogEntry[] = catalog.data ?? [];
+  const catalogError = catalog.status === 'failed' ? CATALOG_ERROR_COPY : null;
   // Issue #489: seeded from the last-selected playbook id (if any was ever
-  // stored), not an empty string. `fetchCatalog` below already keeps the
+  // stored), not an empty string. The catalog reconciliation below already keeps the
   // CURRENT selection when it is still a loaded, active entry and otherwise
   // falls back to the first active one (issue #464) — seeding from storage
-  // here, rather than special-casing it in fetchCatalog, means that exact
+  // here, rather than special-casing it in that effect, means that exact
   // validate-or-fall-back logic does the work for a remembered id too: a
   // playbook an admin removed since the last visit degrades silently to the
   // default, never an error.
   const [playbookId, setPlaybookId] = useState<string>(() => readLastPlaybookId() ?? '');
-  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [submittedPlaybookLabel, setSubmittedPlaybookLabel] = useState<string | null>(null);
   // Issue #492: the quiet meta line's filename, frozen at submit time the
   // same way `submittedPlaybookLabel` is. `file` itself cannot be read at
@@ -1051,8 +1061,8 @@ export default function ReviewSubmission({
   // (`orbit-diner/autoPlaybook.ts`) reads: `'user'` means the reviewer picked
   // it by hand for THIS document, which no recommendation may reverse.
   // `undefined` is the honest starting value — an initial, default or
-  // remembered choice (`readLastPlaybookId`, or fetchCatalog's fall back to
-  // the first active entry) is NOT a manual override for a newly selected
+  // remembered choice (`readLastPlaybookId`, or the catalog reconciliation's
+  // fall back to the first active entry) is NOT a manual override for a newly selected
   // file, so neither of those paths writes here.
   const [playbookSelection, setPlaybookSelection] = useState<'automatic' | 'user' | undefined>(
     undefined,
@@ -1124,61 +1134,53 @@ export default function ReviewSubmission({
       });
   }, []);
 
-  // Fetch the contract-type catalog on mount. A failure here degrades
-  // gracefully (no selector renders; the submission FormData simply omits
-  // playbook_id and the backend's own default applies) rather than
-  // blocking upload.
-  const fetchCatalog = useCallback(async (): Promise<void> => {
-    try {
-      const response = await authorizedFetch('/api/playbooks');
-      if (!response.ok) {
-        throw new Error(`GET /api/playbooks returned HTTP ${response.status}`);
-      }
-      const data = (await response.json()) as PlaybookCatalogResponse;
-      // Every registered playbook reaches the console's playbook control,
-      // which renders the unactivated ones as `disabled` "· coming soon"
-      // options (`orbit-diner/OrbitDiner.tsx`; `projection.ts` applies the
-      // same `status === 'active'` gate to the recommendation). Two things
-      // are true at once: a
-      // registered-but-unactivated playbook can't be reviewed against
-      // (run_real_pipeline fails closed at load_playbook), so offering it as
-      // a *choice* only invites a guaranteed 503 — but it is still real,
-      // published intent, and the dial is the product's roadmap as much as
-      // its control. So: visible, not selectable. The catalog endpoint
-      // remains the authority on `status`; this is presentation only.
-      const entries = data.playbooks ?? [];
-      setPlaybooks(entries);
-      setCatalogError(null);
-      // Default to the first LOADED type — never park the selection on a
-      // stop the user isn't allowed to pick. This also re-runs on a refetch
-      // (issue #464, catalogVersion above): keep the current selection when
-      // it is still a loaded type (e.g. a rename left the same playbook_id
-      // selected), but fall back to the new first-loaded type when it isn't
-      // any more (e.g. an admin removed the selected playbook) — never leave
-      // `playbookId` pointing at an entry that no longer exists or is no
-      // longer active, which the dial would render as nothing checked.
-      const firstActive = entries.find((entry) => entry.status === 'active');
-      setPlaybookId((current) =>
-        entries.some((entry) => entry.playbook_id === current && entry.status === 'active')
-          ? current
-          : firstActive?.playbook_id || '',
-      );
-    } catch (err) {
-      setCatalogError(
-        friendlyErrorMessage(err, "We couldn't load the list of contract types right now."),
-      );
-    }
-  }, []);
-
-  // catalogVersion (issue #464) is a plain counter bumped by App.tsx after
-  // an admin mutation — its VALUE carries no data, only "refetch now".
-  useEffect(() => {
-    void fetchCatalog();
-  }, [fetchCatalog, catalogVersion]);
+  // Keep the selection honest against whatever the shared catalog currently
+  // says. Runs on the first read and on every refetch an `invalidateCatalog()`
+  // provokes — `catalog.data` is a fresh array per answer, never the previous
+  // one mutated, so an admin rename/remove lands here exactly once.
+  //
+  // Every registered playbook reaches the console's playbook control, which
+  // renders the unactivated ones as `disabled` "· coming soon" options
+  // (`orbit-diner/OrbitDiner.tsx`; `projection.ts` applies the same
+  // `status === 'active'` gate to the recommendation). Two things are true at
+  // once: a registered-but-unactivated playbook can't be reviewed against
+  // (run_real_pipeline fails closed at load_playbook), so offering it as a
+  // *choice* only invites a guaranteed 503 — but it is still real, published
+  // intent, and the dial is the product's roadmap as much as its control. So:
+  // visible, not selectable. The catalog endpoint remains the authority on
+  // `status`; this is presentation only.
+  //
+  // Reconciled DURING RENDER, not in an effect — React's documented
+  // "adjusting state when props change" pattern, and here it is load-bearing
+  // rather than an optimisation. `canSubmit` (orbit-diner/state.ts) requires
+  // the selected id to name an ACTIVE entry of the catalog it is rendering
+  // beside, so a commit in which the catalog has arrived but the selection
+  // has not is a commit where the lever is dead. An effect produces exactly
+  // that commit. Setting state during render makes React re-run this
+  // component before committing, so the catalog and the selection reach the
+  // screen together, as they did when one `fetchCatalog` set both at once.
+  const catalogEntries = catalog.data;
+  const [reconciledCatalog, setReconciledCatalog] = useState<PlaybookCatalogEntry[] | null>(null);
+  if (catalogEntries !== null && catalogEntries !== reconciledCatalog) {
+    setReconciledCatalog(catalogEntries);
+    // Default to the first LOADED type — never park the selection on a stop
+    // the user isn't allowed to pick. Keep the current selection when it is
+    // still a loaded type (e.g. a rename left the same playbook_id selected),
+    // but fall back to the new first-loaded type when it isn't any more (e.g.
+    // an admin removed the selected playbook) — never leave `playbookId`
+    // pointing at an entry that no longer exists or is no longer active,
+    // which the dial would render as nothing checked.
+    const firstActive = catalogEntries.find((entry) => entry.status === 'active');
+    setPlaybookId((current) =>
+      catalogEntries.some((entry) => entry.playbook_id === current && entry.status === 'active')
+        ? current
+        : firstActive?.playbook_id || '',
+    );
+  }
 
   // Issue #489: persist every change to the selection — a direct pick on the
-  // dial, or fetchCatalog's own fallback above when the stored/current id is
-  // no longer loaded and active. Writing on the fallback too (rather than
+  // dial, or the catalog reconciliation's own fallback above when the
+  // stored/current id is no longer loaded and active. Writing on the fallback too (rather than
   // only on a user-driven change) is what makes "remove B, reload -> default,
   // no error" actually stick: without this, the next reload would seed
   // straight back from the now-stale 'B' still sitting in storage. A blank
@@ -1195,7 +1197,7 @@ export default function ReviewSubmission({
   // preference cannot survive a sign-out, and this repo persists nothing
   // security-relevant in the browser anyway (see notesMode.ts / the epic).
   //
-  // Failure posture matches `fetchCatalog`'s neighbours: a preferences read
+  // Failure posture matches the catalog read's neighbours: a preferences read
   // that fails leaves the documented default in place and renders no error.
   // The control still works for this review; only the remembered default is
   // missing, and an error banner for that would be noise on a panel whose
@@ -1465,9 +1467,10 @@ export default function ReviewSubmission({
    * Every manual affordance routes here — the dial, the console's select and
    * its browse list, the mismatch banner's "Switch to X" and the `R`
    * shortcut — so "a manual selection always wins" is a property of one
-   * function rather than a rule each call site has to remember. `fetchCatalog`
-   * deliberately does NOT: its fall back to the first active entry when the
-   * remembered id is gone is the app choosing, not the reviewer.
+   * function rather than a rule each call site has to remember. The catalog
+   * reconciliation deliberately does NOT: its fall back to the first active
+   * entry when the remembered id is gone is the app choosing, not the
+   * reviewer.
    */
   const choosePlaybookManually = useCallback((nextPlaybookId: string) => {
     setPlaybookSelection('user');
@@ -2895,11 +2898,11 @@ export default function ReviewSubmission({
     retryPreference: () => void saveNotesModePreference(notesMode),
     // The two channel retries the one status window needs (#726). Both are
     // the app's existing loaders: "Check now" restarts the poll effect and
-    // "Reload contract types" re-runs the same `fetchCatalog` the mount
-    // effect and an admin mutation already use. The console starts no
-    // request of its own.
+    // "Reload contract types" drops the shared catalog and reads it again —
+    // the same `invalidateCatalog()` an admin mutation already uses (#72).
+    // The console starts no request of its own.
     retryPoll: () => setPollNonce((nonce) => nonce + 1),
-    retryCatalog: () => void fetchCatalog(),
+    retryCatalog: () => invalidateCatalog(),
     toggleSound: toggle,
     toggleNotifications: toggleNotify,
     // The hash route App.tsx already listens for — not a second navigation

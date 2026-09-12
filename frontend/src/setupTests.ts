@@ -15,6 +15,7 @@ import {
   startConsoleErrorGuard,
   stopConsoleErrorGuard,
 } from './__tests__/support/consoleErrorGuard';
+import { __resetPlaybookCatalog } from './playbooksStore';
 
 // ---------------------------------------------------------------------------
 // `window.matchMedia`, which jsdom does not implement (issue #733).
@@ -112,7 +113,23 @@ if (typeof Element.prototype.hasPointerCapture !== 'function') {
 //
 // What counts as expected, and how a single test declares its own extra
 // pattern, is documented in src/__tests__/support/consoleErrorGuard.ts.
+// ---------------------------------------------------------------------------
+// The shared playbook catalog is module state, so it survives between the
+// tests in a FILE (issue #72).
+//
+// `isolate` (vitest's default) gives each test file its own module registry,
+// which is what keeps `src/playbooksStore.ts` from leaking across files — but
+// within one file the memoised catalog and its subscriber set are the same
+// objects from the first test to the last. Without this, the second test in
+// `playbook-catalog-sync-464.test.tsx` would open on the playbook the FIRST
+// test renamed, having issued no request at all.
+//
+// It belongs here rather than in each test for the same reason `cleanup()`
+// does: a shared harness fact, not something 30-odd files should each
+// remember. Runs before the guard so a stray listener from the previous test
+// cannot log during the reset.
 beforeEach(() => {
+  __resetPlaybookCatalog();
   startConsoleErrorGuard();
 });
 
