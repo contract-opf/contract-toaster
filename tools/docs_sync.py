@@ -37,7 +37,7 @@ DEFAULT_EXCLUDE = [
 ]
 DEFAULT_PREAMBLE = (
     "Read this file first. Each line: `path` — one-sentence scope. "
-    "anchors: heading-slugs. covers: code globs."
+    "kind: classification token. anchors: heading-slugs. covers: code globs."
 )
 DEFAULT_INDEX_REL = "docs/INDEX.md"
 LAYOUT_PATHS = ["docs/", "docs/INDEX.md", "docs/CONTEXT.md", "docs/adr/", "docs/plans/", "docs/reports/"]
@@ -79,6 +79,7 @@ class DocsConfig:
 class DocEntry:
     path: str
     scope: str
+    kind: str | None = None
     anchors: list[str] | None = None
     covers: list[str] | None = None
 
@@ -412,6 +413,12 @@ def find_broken_links(repo: Path, doc_path: str, content: str) -> list[Finding]:
 # INDEX.md parse / emit
 
 ANCHORS_TOKEN_RE = re.compile(r"^[\w-]+(, [\w-]+)*$")
+# `kind:` is a single lowercase classification token (today only `living`,
+# read by scripts/docs-lint.py to build its living-docs set from this index
+# instead of a second hand-maintained list -- issue #69). Required to look
+# like a token so a hand-written scope that merely says "kind: ..." in prose
+# is left alone, the same defence ANCHORS_TOKEN_RE gives the anchors field.
+KIND_TOKEN_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
 def parse_doc_line(line: str) -> DocEntry | None:
     if not line.startswith("- `"):
@@ -451,8 +458,17 @@ def parse_doc_line(line: str) -> DocEntry | None:
             anchors = [a.strip() for a in anchors_str.split(", ") if a.strip()]
             rest = head
 
+    kind: str | None = None
+    kind_marker = " kind: "
+    idx = rest.rfind(kind_marker)
+    if idx != -1:
+        head, kind_str = rest[:idx], rest[idx + len(kind_marker) :]
+        if KIND_TOKEN_RE.match(kind_str):
+            kind = kind_str
+            rest = head
+
     scope = rest
-    return DocEntry(path=path, scope=scope, anchors=anchors, covers=covers)
+    return DocEntry(path=path, scope=scope, kind=kind, anchors=anchors, covers=covers)
 
 def parse_index(path: Path) -> IndexDoc:
     if not path.exists():
@@ -579,6 +595,8 @@ def quote_config_token(tok: str) -> str:
 
 def format_line(e: DocEntry) -> str:
     s = f"- `{e.path}` — {e.scope}"
+    if e.kind:
+        s += f" kind: {e.kind}"
     if e.anchors:
         s += f" anchors: {', '.join(e.anchors)}"
     if e.covers:
@@ -800,7 +818,7 @@ def cmd_project(args: argparse.Namespace) -> int:
         old = existing.entries.get(path)
         if old is not None:
             anchors = resolve_anchors(old.anchors, headings)
-            new_entries[path] = DocEntry(path=path, scope=old.scope, anchors=anchors, covers=old.covers)
+            new_entries[path] = DocEntry(path=path, scope=old.scope, kind=old.kind, anchors=anchors, covers=old.covers)
         else:
             scope = derive_auto_scope(content)
             anchors = regenerate_anchors(headings)

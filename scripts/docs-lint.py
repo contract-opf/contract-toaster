@@ -5,9 +5,14 @@ Docs-lint CI gate — runs six checks against the living design docs.
 "Living docs" are the files that describe the current system design:
   ARCHITECTURE.md, docs/data-handling.md, docs/evaluation.md,
   docs/output-contract.md, docs/playbook-governance.md,
-  docs/design-notes.md, docs/threat-model.md
-Historical review packets (architecture-review-*.md, architecture-issue-*.md)
-are excluded because they naturally quote historical terms they were reviewing.
+  docs/design-notes.md, docs/threat-model.md, docs/audit-queries.md,
+  docs/phase-0-issues.md
+Historical review packets (docs/reports/architecture-review-*.md,
+docs/reports/architecture-issue-*.md) are excluded because they naturally
+quote historical terms they were reviewing.
+
+The list above is illustrative: the authoritative set is every docs/INDEX.md
+entry tagged `kind: living` (issue #69) — see living_docs_from_index() below.
 
 Check A: Stale-term denylist
   Scans living docs for forbidden terms that should have been swept as part of
@@ -117,18 +122,66 @@ EVALUATION = REPO_ROOT / "docs" / "evaluation.md"
 RUNBOOK = REPO_ROOT / "RUNBOOK.md"
 IMPLEMENTATION_STATUS_LEDGER = DOCS_DIR / "implementation-status.md"
 
-# Living design docs — historical review packets are excluded
-LIVING_DOCS = [
-    ARCHITECTURE,
-    DOCS_DIR / "data-handling.md",
-    DOCS_DIR / "evaluation.md",
-    DOCS_DIR / "output-contract.md",
-    DOCS_DIR / "playbook-governance.md",
-    DOCS_DIR / "design-notes.md",
-    DOCS_DIR / "threat-model.md",
-    DOCS_DIR / "audit-queries.md",
-    DOCS_DIR / "phase-0-issues.md",
-]
+INDEX = DOCS_DIR / "INDEX.md"
+
+# Living design docs — historical review packets are excluded.
+#
+# Issue #69: this set is *derived* from docs/INDEX.md rather than hand-listed
+# here, so the projection stays the one list instead of the two that drifted
+# apart. An INDEX line tagged `kind: living` is in; everything else is out.
+# The tag is part of the INDEX grammar in tools/docs_sync.py (parse_doc_line /
+# format_line), so `docs_sync.py project --write` round-trips it.
+KIND_LIVING_MARKER = " kind: living"
+
+
+def living_docs_from_index(index_path: Path) -> list[Path]:
+    """Repo-root-relative paths of every `kind: living` entry in INDEX.md.
+
+    Raises rather than returning an empty list: an empty living set would
+    make every scan below vacuously pass, which is worse than a red gate.
+    """
+    if not index_path.exists():
+        raise SystemExit(
+            f"docs-lint: {index_path} is missing; the living-docs set is derived from it "
+            "(run `python3 tools/docs_sync.py project --write`)."
+        )
+    paths: list[Path] = []
+    missing: list[str] = []
+    for line in index_path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("- `"):
+            continue
+        rest = line[3:]
+        tick = rest.find("`")
+        if tick == -1:
+            continue
+        rel, rest = rest[:tick], rest[tick + 1 :]
+        # The marker must be a trailing field, never scope prose that merely
+        # says "kind: living" — same right-to-left rule the INDEX grammar uses.
+        idx = rest.rfind(KIND_LIVING_MARKER)
+        if idx == -1:
+            continue
+        tail = rest[idx + len(KIND_LIVING_MARKER) :]
+        if tail and not (tail.startswith(" anchors: ") or tail.startswith(" covers: ")):
+            continue
+        candidate = REPO_ROOT / rel
+        if not candidate.is_file():
+            missing.append(rel)
+            continue
+        paths.append(candidate)
+    if missing:
+        raise SystemExit(
+            "docs-lint: docs/INDEX.md tags these as `kind: living` but they do not exist: "
+            + ", ".join(sorted(missing))
+        )
+    if not paths:
+        raise SystemExit(
+            "docs-lint: no `kind: living` entries in docs/INDEX.md — the living-docs set "
+            "would be empty and every check below would pass vacuously."
+        )
+    return paths
+
+
+LIVING_DOCS = living_docs_from_index(INDEX)
 
 
 def read(path: Path) -> str:

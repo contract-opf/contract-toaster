@@ -38,7 +38,7 @@ This plan covers the three tasks handed off on 2026-09-04, incorporating the ver
 
 ### Task 1: Issue #687 — Counterparty's Accepted Position
 
-#### [MODIFY] [scripts/primary_review_pass.py](../scripts/primary_review_pass.py)
+#### [MODIFY] [scripts/primary_review_pass.py](../../scripts/primary_review_pass.py)
 - In `render_review_guidance_block(party, counterparty_type)`:
   - Sharpen the guidance block so that both v1 and OPF prompt paths receive the explicit rule:
     ```python
@@ -53,7 +53,7 @@ This plan covers the three tasks handed off on 2026-09-04, incorporating the ver
   - Sharpen Duty 2 (`2. OVER-FLAGGING AND GIVING TERMS AWAY`):
     - Explicitly state that a term running in our favour reflects terms the counterparty has agreed to; any edit that narrows, balances, or mutualizes it concedes an accepted position and must be contested in `critic_delta.rationale_objections`.
 
-#### [MODIFY] [tests/test_review_objective_block_677.py](../tests/test_review_objective_block_677.py)
+#### [MODIFY] [tests/test_review_objective_block_677.py](../../tests/test_review_objective_block_677.py)
 - Add prompt-pin assertions for the new sentences:
   - Assert presence of `"reflects terms they accept"`
   - Assert presence of `"whatever the drafting argument"`
@@ -64,7 +64,7 @@ This plan covers the three tasks handed off on 2026-09-04, incorporating the ver
 
 ### Task 2: Playbook Version Download
 
-#### [MODIFY] [backend/src/main.py](../backend/src/main.py)
+#### [MODIFY] [backend/src/main.py](../../backend/src/main.py)
 - Mount `GET /api/admin/playbooks/{playbook_id}/versions/{version}/download`:
   - Require admin (`_is_admin(caller_row)`).
   - Retrieve version record using `_get_version_item(playbook_id, version, dynamodb_resource)`. If not found, return 404.
@@ -74,14 +74,14 @@ This plan covers the three tasks handed off on 2026-09-04, incorporating the ver
   - Include `ResponseContentDisposition` with filename e.g. `{playbook_id}-v{version}.json`.
   - Return `{"url": presigned_url, "expires_in": 60, "playbook_id": playbook_id, "version": version}` with `Cache-Control: no-store`.
 
-#### [NEW] [tests/test_playbook_version_download.py](../tests/test_playbook_version_download.py)
+#### [NEW] [tests/test_playbook_version_download.py](../../tests/test_playbook_version_download.py)
 - Comprehensive unit tests:
   - Admin gate: non-admin gets 403.
   - Unknown version: gets 404.
   - Missing storage object: gets 410 Gone.
   - Success: returns 200 with presigned URL and `Cache-Control: no-store`.
 
-#### [MODIFY] [frontend/src/AdminPlaybooks.tsx](../frontend/src/AdminPlaybooks.tsx)
+#### [MODIFY] [frontend/src/AdminPlaybooks.tsx](../../frontend/src/AdminPlaybooks.tsx)
 - Add "Download" button to the Version History overlay table actions:
   - Add download action alongside existing version actions.
   - On click, call `/api/admin/playbooks/${playbookId}/versions/${version}/download`.

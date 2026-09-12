@@ -20,7 +20,7 @@ Use the source documents instead:
 - docs/data-handling.md
 - docs/evaluation.md
 - docs/phase-0-issues.md
-- docs/architecture-issue-spotting-2026-06-01.md
+- docs/reports/architecture-issue-spotting-2026-06-01.md
 - ../playbooks/schema.json
 - ../playbooks/sample-agreement-v1.0.0.json
 

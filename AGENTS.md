@@ -48,6 +48,14 @@ scope with a real one-sentence description; the suffix disappears when you do.
 `project` never re-derives a scope you have written, and never invents a
 `covers:` line — you add those by hand for docs that describe specific code.
 
+An entry line may also carry a `kind:` token between the scope and `anchors:`
+(`- `path` — scope kind: living anchors: … covers: …`). Only `kind: living` is
+used today: `scripts/docs-lint.py` builds its living-design-docs scan set from
+exactly those lines, so the index is the one list rather than a projection plus
+a hand-maintained copy. `project --write` preserves the token; docs-lint refuses
+to run if the tag is absent, or points at a file that does not exist, rather
+than scanning an empty set.
+
 One gotcha when editing `docs/INDEX.md` by hand: any line in the preamble that
 starts `` - `something` — `` is parsed as an index entry, not as prose, and the
 whole config block stops applying. Lead such bullets with a word instead.

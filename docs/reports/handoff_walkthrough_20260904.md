@@ -14,12 +14,12 @@
 ### Objective & Changes
 Enforce owner ruling that the uploaded document represents the counterparty's accepted position; the reviewer must never narrow, soften, balance, or mutualize terms that already favour us.
 
-- **[scripts/primary_review_pass.py](../scripts/primary_review_pass.py)**:
+- **[scripts/primary_review_pass.py](../../scripts/primary_review_pass.py)**:
   - Updated `render_review_guidance_block(party, counterparty_type)` for both v1 and OPF prompt paths:
     > "The document you are reviewing has already been reviewed by the counterparty and reflects terms they accept. A term that favours us is therefore a term the other side has agreed to: leave it exactly as written. Do not narrow it, balance it, make it mutual, or improve its drafting, whatever the drafting argument, even where you would have drafted it differently."
   - Updated `_CRITIC_TASKING_DUTIES_1_TO_3` Duty 2 (`OVER-FLAGGING AND GIVING TERMS AWAY`):
     Instructed the critic to contest any edit that narrows, softens, balances, or mutualizes a favourable term.
-- **[tests/test_review_objective_block_677.py](../tests/test_review_objective_block_677.py)**:
+- **[tests/test_review_objective_block_677.py](../../tests/test_review_objective_block_677.py)**:
   - Added prompt-pin assertions verifying the new guidance block phrasing and critic duty 2 wording.
 
 ### Verification
@@ -46,27 +46,27 @@ Enforce owner ruling that the uploaded document represents the counterparty's ac
 ### Objective & Changes
 Added the ability for administrators to download stored playbook version artifacts (`.json`) directly from the Version History table via short-lived presigned S3 URLs.
 
-- **[backend/src/download.py](../backend/src/download.py)**:
+- **[backend/src/download.py](../../backend/src/download.py)**:
   - Implemented `generate_presigned_playbook_download_url`:
     - Validates caller is admin (`_is_admin`).
     - Validates storage key is strictly scoped to `playbooks/{playbook_id}/` and prevents path traversal (`..`, `\`).
     - Performs S3 `head_object` check against the uploads bucket; returns HTTP 410 Gone if missing or purged.
     - Generates 60-second presigned URL with `ResponseContentDisposition: attachment; filename="<playbook_id>-v<version>.json"`.
     - Returns response with header `Cache-Control: no-store`.
-- **[backend/src/playbook_versions.py](../backend/src/playbook_versions.py)**:
+- **[backend/src/playbook_versions.py](../../backend/src/playbook_versions.py)**:
   - Added `get_playbook_version_record(playbook_id, version, dynamodb_resource)`.
   - Added `record_playbook_version_download(...)` which writes an append-only audit entry to `AUDIT_TABLE` (`action="playbook_version_downloaded"`).
-- **[backend/src/main.py](../backend/src/main.py)**:
+- **[backend/src/main.py](../../backend/src/main.py)**:
   - Mounted `GET /api/admin/playbooks/{playbook_id}/versions/{version}/download`.
-- **[frontend/src/AdminPlaybooks.tsx](../frontend/src/AdminPlaybooks.tsx)**:
+- **[frontend/src/AdminPlaybooks.tsx](../../frontend/src/AdminPlaybooks.tsx)**:
   - Added per-row `<CtButton size="sm" variant="secondary">Download</CtButton>` in the Version History table Actions cell.
   - Implemented `downloadVersion(playbookId, version)` handler calling the download route and triggering browser download via `triggerBrowserDownload(url)`.
   - Gracefully handles 403 (forbidden banner) and 410 (friendly error banner indicating the artifact was purged from storage).
 
 ### Verification
-- **[tests/test_playbook_version_download.py](../tests/test_playbook_version_download.py)**:
+- **[tests/test_playbook_version_download.py](../../tests/test_playbook_version_download.py)**:
   - 6 unit tests covering: non-admin 403, unknown version 404, missing storage_key 404, unscoped key 403, purged S3 object 410, and successful download 200 with presigned URL + audit entry.
-- **[frontend/src/__tests__/admin-playbooks.test.tsx](../frontend/src/__tests__/admin-playbooks.test.tsx)**:
+- **[frontend/src/__tests__/admin-playbooks.test.tsx](../../frontend/src/__tests__/admin-playbooks.test.tsx)**:
   - Unit tests for Download button rendering, download click triggering browser download, and 410 error banner handling.
 - **Gate Runs**:
   - `bash scripts/check-frontend.sh`: **`CHECK-FRONTEND: ALL GREEN`** (88 test files, 943 tests, contrast, focus, layout audits).
