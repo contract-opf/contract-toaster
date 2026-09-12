@@ -827,6 +827,7 @@ Every action that modifies system state, grants document access, or attempts doc
 - Document uploads (with content hash).
 - Review decisions (with release-bundle hashes, model ids, version, token counts).
 - Review views, output downloads, presigned-URL issuance, and failed owner/admin checks.
+- Reviews relabelled by boot-time runner recovery on the Docker Compose target (`action=review_runner_restarted`) — the review id, the status it was recovered from, and the `runner_restarted` reason token; see [RUNBOOK.md](RUNBOOK.md) → "What a redeploy does to running reviews".
 - Playbook version uploads.
 - Release-bundle activations and rollbacks.
 - User admin-flag changes.

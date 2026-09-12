@@ -24,6 +24,32 @@
 > weekly `.github/workflows/dependency-audit.yml`. The finding text below is
 > left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G1 / B1 **landed** as public issue
+> `contract-opf/contract-toaster#62` (private #702 in the table below).
+> `backend/src/runner_recovery.py::recover_orphaned_reviews` runs from
+> `main.py::_lifespan` on the Docker Compose target, relabels each orphaned
+> review `ERROR` / `reason=runner_restarted`, settles its reservation through
+> `reviews.settle_reservation_for_cancel` and writes an audit row with
+> `action=review_runner_restarted`; the shutdown half drops the pool
+> (`wait=False, cancel_futures=True`) and records a cancel intent for every
+> id in `pipeline_runner.in_flight_review_ids()`.
+>
+> **One correction to B1 as written below.** B1 says to select rows "whose
+> `execution_arn` is absent". On the shipped code that selects nothing:
+> `reviews.ensure_execution_started` records the ARN its client returns onto
+> the reviews row for BOTH targets, and the in-process client returns the
+> pseudo-ARN `inprocess:<execution-name>` — so a started in-process review
+> DOES carry an `execution_arn`. The implemented selector is the predicate
+> `reviews.stop_running_execution` already applies to the same field
+> (`reviews.is_step_functions_execution`): recover a non-terminal row whose
+> execution is not a Step Functions one, which covers both the absent-ARN
+> case B1 named and the `inprocess:` case it missed. Also: B1's boot-time
+> read no longer needs the "bounded scan" concession, because the
+> `status-index` GSI it made conditional on private #692 has since landed as
+> public `#52`. Pinned by `tests/test_runner_recovery.py`. The finding text
+> below is left as written; it describes the state before that change.
+
+
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to
 keep running, hard to change, and tedious to use. Codes continue the series:

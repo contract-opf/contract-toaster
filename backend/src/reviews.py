@@ -263,6 +263,14 @@ REVIEW_STATUSES_TERMINAL = {
 # guard in `record_stage_failure` refuses to overwrite a row holding it.
 REVIEW_STATUS_SUCCESS_TERMINAL = "DONE"
 
+# Issue #62: the `reason` token `src/runner_recovery.py` stamps on a review
+# that was still non-terminal when the process running it restarted. Named
+# here, beside the rest of the reason vocabulary, rather than spelled as a
+# string literal at its one writer -- the frontend's `REASON_EXPLANATIONS`
+# table and `STAGE_FAILURE_REASON_STATUS` below both have to agree with it,
+# and a literal is how two of the three drift.
+RUNNER_RESTARTED_REASON = "runner_restarted"
+
 # ---------------------------------------------------------------------------
 # Stage-failure taxonomy (issue #258) -- target-agnostic core shared by both
 # deployment targets. Today `failing_stage` is hardcoded to `'pipeline'` in
@@ -343,6 +351,15 @@ STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # exception to catch, only a "success" result with nothing to show for
     # it.
     "redline_not_persisted": "ERROR_MANUAL_REVIEW_REQUIRED",
+    # Issue #62: the process running an in-process review went away (a
+    # Coolify redeploy, a container restart, an OOM kill) before the review
+    # could reach any terminal of its own. Nothing is wrong with the
+    # document and nothing is wrong with the model account -- the run simply
+    # no longer exists -- so it stays on the generic `ERROR` status, and the
+    # token is what makes "the service restarted under you" distinguishable
+    # from a real pipeline failure in Diagnostics and in the reader's copy.
+    # Written by `src/runner_recovery.py` at boot, never by a pipeline stage.
+    RUNNER_RESTARTED_REASON: "ERROR",
 }
 
 
@@ -3074,6 +3091,34 @@ def request_review_cancel(
             f"Review {review_id} is already {current_status}.", status=current_status
         )
 
+    if not record_cancel_intent(review_id, dynamodb_resource):
+        # It finished under us. Re-read rather than guessing which terminal.
+        settled = get_review_detail(review_id, caller_user_row, dynamodb_resource)
+        raise ReviewNotCancellableError(
+            f"Review {review_id} is already {settled.get('status')}.",
+            status=str(settled.get("status") or ""),
+        )
+
+    return {"review_id": review_id, "status": current_status, "cancel_requested": True}
+
+
+def record_cancel_intent(review_id: str, dynamodb_resource: Any) -> bool:
+    """The WRITE half of `request_review_cancel`, with no HTTP layer around
+    it: stamp `cancel_requested_at` on a review that is still non-terminal.
+
+    Returns True when the stamp landed, False when the conditional write was
+    refused because the review had already reached a terminal status --
+    which is not an error at either call site, only a different answer.
+
+    Split out for issue #62. The process shutdown path
+    (`src/main.py::_lifespan`'s `finally`) has to record exactly this intent
+    for every review the in-process runner is still holding, so the model
+    client's cancel checkpoints stop spending during the container's grace
+    period -- but it has no caller, no `caller_user_row` to scope against and
+    no response to shape, so it cannot go through `request_review_cancel`.
+    Duplicating the conditional update at a second call site is how the two
+    would eventually disagree about which statuses are still cancellable.
+    """
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     now = str(int(time.time()))
     try:
@@ -3090,15 +3135,9 @@ def request_review_cancel(
         )
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-            # It finished under us. Re-read rather than guessing which terminal.
-            settled = get_review_detail(review_id, caller_user_row, dynamodb_resource)
-            raise ReviewNotCancellableError(
-                f"Review {review_id} is already {settled.get('status')}.",
-                status=str(settled.get("status") or ""),
-            ) from exc
+            return False
         raise
-
-    return {"review_id": review_id, "status": current_status, "cancel_requested": True}
+    return True
 
 
 def cancel_requested(review_id: str, dynamodb_resource: Any) -> bool:
@@ -3171,6 +3210,22 @@ def mark_cancelled(review_id: str, dynamodb_resource: Any) -> None:
 _STEP_FUNCTIONS_ARN_PREFIX = "arn:"
 
 
+def is_step_functions_execution(execution_arn: Any) -> bool:
+    """Does this recorded `execution_arn` name a real Step Functions
+    execution, as opposed to the in-process runner's pseudo-ARN or no
+    execution at all?
+
+    The predicate half of `_STEP_FUNCTIONS_ARN_PREFIX`, made public for
+    issue #62: `src/runner_recovery.py` has to ask the SAME question at boot
+    ("is this row's run something Step Functions owns?") that
+    `stop_running_execution` asks per cancel, and two spellings of it would
+    eventually disagree about which rows belong to which reconciler. False
+    for a missing/empty value, which is the submission that died between the
+    reviews-row write and `ensure_execution_started`.
+    """
+    return str(execution_arn or "").startswith(_STEP_FUNCTIONS_ARN_PREFIX)
+
+
 def stop_running_execution(
     review_id: str,
     dynamodb_resource: Any,
@@ -3206,7 +3261,7 @@ def stop_running_execution(
         ProjectionExpression="execution_arn",
     )
     execution_arn = (response.get("Item") or {}).get("execution_arn") or ""
-    if not execution_arn.startswith(_STEP_FUNCTIONS_ARN_PREFIX):
+    if not is_step_functions_execution(execution_arn):
         return False
 
     sfn_client.stop_execution(

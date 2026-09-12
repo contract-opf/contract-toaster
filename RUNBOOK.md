@@ -103,6 +103,11 @@ The first deploy of an environment requires steps that won't be needed again.
 
 **A merge to `main` does not change production.** Merging only triggers CI; promotion to prod is a deliberate, separate step. This is intentional — production renders legal output, so no merge may silently alter its behavior.
 
+On the Docker Compose target a deploy restarts the API container, which ends
+any review running inside it. That is handled automatically — see "What a
+redeploy does to running reviews (Docker Compose target)" below for what the
+operator should expect to see afterwards.
+
 The flow:
 
 ```bash
@@ -580,6 +585,48 @@ Reviews run in a Step Functions execution, so most failures self-classify: a fai
 **Observation 2 — PENDING with a dead ARN (PENDING-with-dead-ARN).** The review row is `PENDING` and has an `execution_arn`, but the Step Functions execution is in a terminal status (`FAILED`, `TIMED_OUT`, or `ABORTED`) — the execution died before its error-handling states ran, so the review row was never transitioned. This case is invisible to the missing-ARN alarm (there is an ARN) but is caught by the reconciler's DescribeExecution check: the reconciler calls DescribeExecution on non-terminal reviews with an ARN and, on finding a terminal execution status, transitions the review to `ERROR`, releases the spend reservation, and releases the concurrency slot. The stale-`PENDING` alarm covers this case — a `PENDING` review whose ARN resolves to a terminal execution is treated as a stuck review. If you see this, no manual action should be needed once the reconciler runs; if it persists, inspect the execution history in the Step Functions console for the root cause.
 
 **Observation 3 — Stale RUNNING (execution timeout fired; slot recovery).** The review row is `RUNNING` and the Step Functions execution age exceeds the state-machine-level execution timeout. The execution-level timeout automatically terminates the execution to `TIMED_OUT`, which the reconciler then detects (same dead-execution path as Observation 2) and resolves to `ERROR` with slot and reservation release. The stale-`RUNNING` alarm fires when a `RUNNING` review's execution age exceeds the execution-level timeout; this pages on-call for investigation. The slot-reaper / semaphore lease TTL reclaims any leaked concurrency slot independently of the reconciler so subsequent reviews are not permanently blocked. If the alarm fires: confirm the execution timed out in the Step Functions console, check for upstream causes (Lambda OOM, Fargate SIGKILL, Bedrock throttle loop), and verify the reconciler has run and transitioned the review. If the concurrency cap shows saturation after a timeout event, force a slot reconcile from the admin UI.
+
+### What a redeploy does to running reviews (Docker Compose target)
+
+Everything in "Reviews are stuck in PENDING / RUNNING" above is the **AWS
+target**, where a review is a Step Functions execution that outlives the
+container and `infra/lambda/orphan_reconciler` can ask whether it is still
+alive. On the **Docker Compose target** a review runs on an in-process thread
+pool inside the API container itself (`backend/src/pipeline_runner.py`), so a
+redeploy, an OOM kill or a plain `docker compose restart` takes the run away
+with the process. Before issue #62 nothing was left to write a terminal: the
+row stayed `RUNNING` forever, History showed a review that never ended, the
+worst-case spend reservation was never settled, and `GET /api/admin/health`
+counted it as in-flight indefinitely.
+
+Two automatic halves now cover that, both in `backend/src/main.py::_lifespan`:
+
+- **On the way out.** The runner pool is shut down without waiting and
+  without letting queued work start, and a cancel intent is recorded for
+  every review it was still holding — so the model client's cancel
+  checkpoints stop spending during the container's grace period.
+- **On the way back in.** `backend/src/runner_recovery.py::recover_orphaned_reviews`
+  runs once, before the purge cadence. Every non-terminal review that is not
+  a Step Functions run and whose row was last written *before this process
+  started* becomes `ERROR` with `reason=runner_restarted`; its spend
+  reservation is settled through the same function the cancel route uses, and
+  an audit row is written with `action=review_runner_restarted`.
+
+**What the operator should expect after a redeploy.** A count line in the
+container log —
+`RUNNER_RECOVERY: recovered N review(s) left running by a previous process`
+— and nothing else; review identifiers are in the audit table, not the log.
+The reviewers of those reviews see "The service restarted while your review
+was running" and are told to start again. Nothing needs doing by hand.
+
+**When it is worth looking.** If reviews are still stuck `RUNNING` after a
+restart, check that `DEPLOY_TARGET=dts` is set (recovery is skipped on the
+AWS target by design) and look for
+`RUNNER_RECOVERY: orphaned-review recovery could not run; API continues`,
+which means the boot read itself failed and the API came up anyway. If N is
+large after every deploy, the deploys are landing on top of live reviews —
+drain them first, the same way "Rolling back a bad playbook or prompt"
+advises for bundle activations.
 
 ### A wrong decision was rendered
 

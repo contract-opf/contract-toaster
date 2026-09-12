@@ -105,6 +105,14 @@ FRONTEND_REVIEW_SUBMISSION = REPO_ROOT / "frontend" / "src" / "ReviewSubmission.
 
 NEW_TOKENS = ("model_key_missing", "model_timeout")
 
+# Issue #62 minted a third token that has to satisfy the SAME three rules as
+# #472's pair: mapped in the taxonomy, opaque (no status code, no endpoint,
+# no provider name) and explained to the reader in the UI. It is not folded
+# into `NEW_TOKENS` because that tuple is #472's own subject and the two
+# assertions naming "both tokens" would stop being true of it; this file's
+# guard is the enumeration, and the enumeration is what has to grow.
+TOKENS_REQUIRING_UI_COPY = NEW_TOKENS + (reviews.RUNNER_RESTARTED_REASON,)
+
 
 # ---------------------------------------------------------------------------
 # Offline fakes (same shape as tests/test_review_failure_reason_442.py)
@@ -343,13 +351,38 @@ class TestNewTokenTaxonomyAndCopy(unittest.TestCase):
                 self.assertRegex(token, r"^[a-z_]+$")
 
     def test_both_tokens_have_user_facing_prose_in_the_ui(self) -> None:
+        """Issue #62 widened this to `TOKENS_REQUIRING_UI_COPY`: a token with
+        a taxonomy entry and no copy is a failure mode the product can label
+        and cannot explain, which is exactly the gap #670 found for
+        `structured_output_retry_exhausted` from the other direction."""
         source = FRONTEND_REVIEW_SUBMISSION.read_text(encoding="utf-8")
         explanations = source.split("const REASON_EXPLANATIONS", 1)
         self.assertEqual(len(explanations), 2, "REASON_EXPLANATIONS not found in the UI")
         block = explanations[1].split("const STAGE_EXPLANATIONS", 1)[0]
-        for token in NEW_TOKENS:
+        for token in TOKENS_REQUIRING_UI_COPY:
             with self.subTest(token=token):
                 self.assertIn(f"{token}: {{", block)
+
+
+class TestRunnerRestartedToken62(unittest.TestCase):
+    """Issue #62's token, held to #472's own two structural rules."""
+
+    def test_it_is_a_deliberate_operator_error(self) -> None:
+        self.assertEqual(reviews.RUNNER_RESTARTED_REASON, "runner_restarted")
+        self.assertIn(
+            reviews.RUNNER_RESTARTED_REASON, reviews.STAGE_FAILURE_REASON_STATUS
+        )
+        self.assertEqual(
+            reviews.STAGE_FAILURE_REASON_STATUS[reviews.RUNNER_RESTARTED_REASON],
+            "ERROR",
+        )
+
+    def test_it_carries_no_status_code_or_endpoint(self) -> None:
+        token = reviews.RUNNER_RESTARTED_REASON
+        self.assertIsNone(re.search(r"\d", token))
+        self.assertNotIn("http", token)
+        self.assertNotIn("openrouter", token)
+        self.assertRegex(token, r"^[a-z_]+$")
 
 
 # ---------------------------------------------------------------------------
