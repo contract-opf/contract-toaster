@@ -41,9 +41,16 @@ RECONCILER_DIR = REPO_ROOT / "infra" / "lambda" / "orphan_reconciler"
 
 TESTS_DIR = REPO_ROOT / "tests"
 
-for _path in (str(RECONCILER_DIR), str(TESTS_DIR)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+# Unconditional insert, deliberately NOT guarded by `not in sys.path`:
+# under pytest every infra/lambda/<bundle>/ directory is already on the
+# path (tests/conftest.py), and all six bundles contain a module named
+# `handler`. A guard would short-circuit here and leave the bare
+# `import handler` below bound to whichever bundle sits earlier on the
+# path instead of this one. See tests/README.md -> "The `handler`
+# collision".
+sys.path.insert(0, str(RECONCILER_DIR))
 
 
 import os  # noqa: E402
