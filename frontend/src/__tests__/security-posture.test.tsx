@@ -265,10 +265,17 @@ describe('source posture (regression guard)', () => {
     //   - toaster/sounds.ts    — issue #489 item 3, the sound-mute flag.
     //   - lastPlaybook.ts      — issue #489 item 4, the last-selected
     //                            contract-type id.
+    //   - inflightReview.ts    — issue #58 (audit finding F8/A8), the ONE
+    //                            sessionStorage entry: the id of the review
+    //                            this tab has in flight, so a reload resumes
+    //                            it. An opaque server-minted uuid4, not a
+    //                            credential, and nothing about the document
+    //                            or its outcome — see the value-shape test
+    //                            below, which pins that claim.
     // Recording the allowance HERE — rather than loosening the regex or
     // skipping these files — keeps this guard's teeth: any OTHER file that
     // starts writing to storage, in ANY subdirectory, still fails this test;
-    // and if any of the three grows a SECOND call site, the exact-one-match
+    // and if any of them grows a SECOND call site, the exact-one-match
     // assertion below fails too.
     const ALLOWED_SETITEM_FILES = [
       'toaster/notify.ts',
@@ -276,6 +283,7 @@ describe('source posture (regression guard)', () => {
       'lastPlaybook.ts',
       'lastBrowning.ts',
       'lastNotesMode.ts',
+      'inflightReview.ts',
     ];
     const filesChecked = new Set<string>();
 
@@ -301,14 +309,23 @@ describe('source posture (regression guard)', () => {
 // Issue #489's own acceptance criterion, checked dynamically rather than
 // only by the static source scan above: "Nothing sensitive lands in
 // localStorage (only the mute flag and a playbook id — assert in a test
-// that the auth token never does)." The two allowed writers are exercised
-// for real and the resulting storage is inspected — not just "no setItem
-// call site exists elsewhere" (the source-scan test above), but "what these
-// two call sites actually write is never token-shaped".
+// that the auth token never does)." Each allowed writer is exercised for
+// real and the resulting storage is inspected — not just "no setItem call
+// site exists elsewhere" (the source-scan test above), but "what these call
+// sites actually write is never token-shaped".
+//
+// Issue #58 extends the same treatment to the one sessionStorage writer it
+// adds (`inflightReview.ts`): the writer is driven for real and the stored
+// value inspected, and its read is shown to refuse a token-shaped value
+// outright rather than hand it back.
 // ---------------------------------------------------------------------------
-describe('localStorage content posture (issue #489)', () => {
+describe('storage content posture (issues #489, #58)', () => {
   afterEach(() => {
     window.localStorage.clear();
+    // Issue #58 added the one allowed sessionStorage writer; the same
+    // "never leave one test's storage as the next test's starting state"
+    // rule applies to it.
+    window.sessionStorage.clear();
     vi.resetModules();
   });
 
@@ -366,24 +383,77 @@ describe('localStorage content posture (issue #489)', () => {
     ).toBe(false);
   });
 
+  // Issue #58 (audit finding F8/A8). The FIFTH allowed writer, and the only
+  // one that uses `sessionStorage`: the id of the review this tab has in
+  // flight, so a reload resumes it instead of dropping the panel. The value
+  // is a server-minted uuid4 (`backend/src/review_routes.py`'s `post_review`
+  // → `str(uuid.uuid4())`) — 36 characters, no dots, and nothing about the
+  // document, the clauses or the outcome. The clear path is exercised too:
+  // a key that outlived its review is a key that must be gone.
+  it('the in-flight review id (inflightReview.ts) persists only a UUID, never a token', async () => {
+    window.sessionStorage.clear();
+    const {
+      INFLIGHT_REVIEW_STORAGE_KEY,
+      clearInflightReviewId,
+      readInflightReviewId,
+      writeInflightReviewId,
+    } = await import('../inflightReview');
+
+    // The exact shape `str(uuid.uuid4())` produces server-side.
+    const reviewId = '7f3d2c11-9a4b-4e62-8f0d-1c5b6a7e9d40';
+    writeInflightReviewId(reviewId);
+    expect(window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY)).toBe(reviewId);
+    expect(
+      looksLikeAToken(window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY) as string),
+    ).toBe(false);
+    expect(readInflightReviewId()).toBe(reviewId);
+
+    // A real Amplify id token is exactly what must never come back out of
+    // this key, even if something managed to put one in: the read validates
+    // the shape and drops what does not match rather than handing it on.
+    window.sessionStorage.setItem(
+      INFLIGHT_REVIEW_STORAGE_KEY,
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZXZpZXdlci1zdWIiLCJleHAiOjk5OTk5OTk5OTl9.c2lnbmF0dXJl',
+    );
+    expect(readInflightReviewId()).toBeNull();
+    expect(window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY)).toBeNull();
+
+    writeInflightReviewId(reviewId);
+    clearInflightReviewId();
+    expect(window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
   it('using allowed preferences together writes exactly those keys, nothing else', async () => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
     const { MUTE_STORAGE_KEY, setMuted } = await import('../toaster/sounds');
     const { LAST_PLAYBOOK_STORAGE_KEY, writeLastPlaybookId } = await import('../lastPlaybook');
     const { LAST_BROWNING_STORAGE_KEY, writeLastBrowning } = await import('../lastBrowning');
     const { LAST_NOTES_MODE_STORAGE_KEY, writeLastNotesMode } = await import('../lastNotesMode');
+    const { INFLIGHT_REVIEW_STORAGE_KEY, writeInflightReviewId } = await import(
+      '../inflightReview'
+    );
 
     setMuted(true);
     writeLastPlaybookId('sample-agreement');
     writeLastBrowning('dark');
     writeLastNotesMode('none');
+    writeInflightReviewId('7f3d2c11-9a4b-4e62-8f0d-1c5b6a7e9d40');
 
     expect(window.localStorage.length).toBe(4);
+    // Issue #58: the in-flight id is the ONLY sessionStorage entry the app
+    // is allowed to leave behind, and it is tab-scoped rather than sitting
+    // in localStorage beside the four preferences.
+    expect(window.sessionStorage.length).toBe(1);
+    expect(window.sessionStorage.key(0)).toBe(INFLIGHT_REVIEW_STORAGE_KEY);
+
     const values = [
       window.localStorage.getItem(MUTE_STORAGE_KEY),
       window.localStorage.getItem(LAST_PLAYBOOK_STORAGE_KEY),
       window.localStorage.getItem(LAST_BROWNING_STORAGE_KEY),
       window.localStorage.getItem(LAST_NOTES_MODE_STORAGE_KEY),
+      window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY),
     ];
     expect(values.every((value) => typeof value === 'string' && !looksLikeAToken(value))).toBe(
       true,

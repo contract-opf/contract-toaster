@@ -141,6 +141,29 @@
 > `tests/test_dts_nginx_csp.py` (check 4b). Posture recorded in
 > `docs/threat-model.md` → Frontend security posture.
 >
+> F8 / A8 landed as public issue `contract-opf/contract-toaster#58` (private
+> #698). `frontend/src/inflightReview.ts` is the one, narrow seam:
+> `ct:inflight-review-id` in `sessionStorage` (tab-scoped, gone when the tab
+> closes), holding one server-minted review id and nothing else, written from
+> exactly one `setItem` call site and validated on read against the canonical
+> UUID shape so a hand-edited value can never reach a request path.
+> `ReviewSubmission.tsx` writes it on the 202 from `POST /api/reviews`, drops
+> it the moment a poll returns a terminal status, and on mount resumes the
+> stored id FIRST — `GET /api/reviews/{id}`, attaching only while the status
+> is non-terminal — with issue #489's `?scope=mine` listing kept behind it as
+> the fallback for a review this tab never submitted. A terminal status, a 404
+> or a malformed value each forget the key and fall through. The console needed
+> no resume path: its stage already comes from `detail.progress_stage` through
+> `orbit-diner/projection.ts`, never from the submit event, so a resumed review
+> animates like a fresh one. `get_review_detail` does not project
+> `original_filename` and was deliberately not widened, so a resumed panel
+> shows no document name. Pinned by
+> `frontend/src/__tests__/review-resume-on-reload-58.test.tsx` (the real
+> submission drives the write; resume, terminal, 404 and non-UUID paths) and by
+> `frontend/src/__tests__/security-posture.test.tsx`, whose `setItem` allowlist
+> gains `inflightReview.ts` alongside a value-shape test that also proves the
+> read refuses a token-shaped value.
+>
 > F9 / A9 landed as public issue `contract-opf/contract-toaster#59` (private
 > #699). `backend/src/entity_roster.py::_ensure_table` is DELETED, along with
 > the two request-path `ResourceNotFoundException` → auto-create fallbacks in

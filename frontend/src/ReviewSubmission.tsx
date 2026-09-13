@@ -15,7 +15,12 @@
  *   2. Poll: GET /api/reviews/{review_id} every few seconds while `status`
  *      is a non-terminal pipeline status (`PENDING` / `RUNNING` --
  *      src/reviews.py's `REVIEW_STATUSES_NON_TERMINAL`); stop once it
- *      reaches a terminal status.
+ *      reaches a terminal status. A reload mid-review RESUMES that poll
+ *      rather than losing the panel: the submitted review id is kept for
+ *      the life of the tab (issue #58, `inflightReview.ts`) and re-checked
+ *      on mount, with issue #489's `?scope=mine` listing as the fallback
+ *      when no id is stored. Reaching a terminal status forgets the id --
+ *      a finished review belongs to History, not to this panel.
  *   3. Download: once the polled detail reports `has_output`, fetch a
  *      short-lived presigned URL via GET /api/reviews/{review_id}/output
  *      and hand it to the browser.
@@ -104,6 +109,15 @@ import {
   usePlaybookCatalog,
   type PlaybookCatalogEntry,
 } from './playbooksStore';
+// Which review this TAB has in flight, so a reload resumes the exact review
+// rather than the newest one the account happens to be running (issue #58,
+// audit finding F8/A8). See inflightReview.ts's module docstring for the
+// storage posture and why a review id is safe to keep in sessionStorage.
+import {
+  clearInflightReviewId,
+  readInflightReviewId,
+  writeInflightReviewId,
+} from './inflightReview';
 import { readLastBrowning, writeLastBrowning } from './lastBrowning';
 import { readLastNotesMode, writeLastNotesMode } from './lastNotesMode';
 // The cheap, advisory upload-time preflight check (issue #491) — fired the
@@ -1549,16 +1563,28 @@ export default function ReviewSubmission(): React.ReactElement {
     }
   }, []);
 
-  // Issue #489, item 2: reattach to a running review after a reload.
-  // `reviewId` lives only in this component's in-memory state, so a reload
-  // during a RUNNING review used to leave the reviewer looking at a blank
-  // submit form while the pipeline kept going server-side -- the redline
-  // eventually surfaced in History with nothing shown in between. On mount,
-  // ask for the caller's own reviews (the same `?scope=mine` listing History
-  // itself uses -- newest first, backend/src/reviews.py's list_reviews) and,
-  // if the most recent one is still non-terminal, attach to it exactly like
-  // a fresh submission would: setting `reviewId` is enough, since the poll
-  // effect below and every render that follows already key off it alone.
+  // Reattach to a running review after a reload. Two probes, in order, both
+  // best-effort and both mount-only.
+  //
+  // 1. Issue #58 (audit finding F8/A8) -- the id THIS TAB last submitted,
+  //    from `sessionStorage` (see inflightReview.ts). This is the primary
+  //    source because it is exact: `GET /api/reviews/{id}` for that one
+  //    review, so a reviewer with two tabs running two reviews comes back to
+  //    the one this tab was actually watching, not to whichever is newest.
+  //    A terminal status, a 404 (purged, or never the caller's to begin
+  //    with) or a malformed stored value all mean the same thing -- forget
+  //    the key and fall through.
+  //
+  // 2. Issue #489, item 2 -- the fallback, unchanged: ask for the caller's
+  //    own reviews (the same `?scope=mine` listing History itself uses --
+  //    newest first, backend/src/reviews.py's list_reviews) and, if the most
+  //    recent one is still non-terminal, attach to it. This still covers the
+  //    cases the stored id cannot: a review submitted in another tab, or in
+  //    a session whose sessionStorage is gone.
+  //
+  // Either way, attaching is the same act a fresh submission performs:
+  // setting `reviewId` is enough, since the poll effect below and every
+  // render that follows already key off it alone.
   //
   // Deliberately does NOT resurrect a TERMINAL review that finished while
   // the reviewer was away -- that is History's job (issue #449's own scope),
@@ -1573,7 +1599,48 @@ export default function ReviewSubmission(): React.ReactElement {
   useEffect(() => {
     let cancelled = false;
 
-    async function reattach(): Promise<void> {
+    // Returns true only when this probe actually attached, so the listing
+    // fallback below runs in every other case (no id stored, junk stored,
+    // finished, purged, probe failed) -- which is exactly the behaviour
+    // issue #489 shipped on its own.
+    async function resumeStoredReview(): Promise<boolean> {
+      const storedId = readInflightReviewId();
+      if (!storedId) {
+        return false;
+      }
+      try {
+        const response = await authorizedFetch(`/api/reviews/${storedId}`);
+        if (!response.ok) {
+          // 404 is the ordinary case here (purged past its retention
+          // window, or a row that is not this caller's -- the detail route
+          // answers 404 rather than 403 so it cannot be used to enumerate).
+          clearInflightReviewId();
+          return false;
+        }
+        const detailResponse = (await response.json()) as { status?: unknown };
+        const statusValue =
+          typeof detailResponse.status === 'string' ? detailResponse.status : '';
+        if (!NON_TERMINAL_STATUSES.has(statusValue)) {
+          clearInflightReviewId();
+          return false;
+        }
+        if (cancelled) {
+          return true;
+        }
+        // The poll effect fetches this same detail again straight away, so
+        // nothing is set from the probe's own response beyond the id -- one
+        // source of truth for what is on screen, and no half-populated
+        // panel if the probe and the first poll disagree.
+        setReviewId((current) => current ?? storedId);
+        return true;
+      } catch {
+        // A failed probe says nothing about whether the review is still
+        // running, so the key is left alone for the next load to retry.
+        return false;
+      }
+    }
+
+    async function reattachFromListing(): Promise<void> {
       try {
         const response = await authorizedFetch('/api/reviews?scope=mine');
         if (!response.ok) {
@@ -1591,6 +1658,16 @@ export default function ReviewSubmission(): React.ReactElement {
         // Best-effort only -- a failed probe just leaves the fresh submit
         // form on screen, exactly as it always has.
       }
+    }
+
+    async function reattach(): Promise<void> {
+      if (await resumeStoredReview()) {
+        return;
+      }
+      if (cancelled) {
+        return;
+      }
+      await reattachFromListing();
     }
 
     void reattach();
@@ -1847,6 +1924,13 @@ export default function ReviewSubmission(): React.ReactElement {
           pollTimer.current = setTimeout(() => {
             void poll();
           }, nextPollDelayMs(ageNow(), 0));
+        } else {
+          // Issue #58: terminal means there is nothing left to resume. The
+          // finished review stays on screen for this render, but a reload
+          // from here must land on a fresh submit form and leave the result
+          // to History -- the same rule the mount probe above applies to a
+          // stored id that has since finished.
+          clearInflightReviewId();
         }
       } catch (err) {
         if (cancelled) {
@@ -2032,6 +2116,10 @@ export default function ReviewSubmission(): React.ReactElement {
         // that failed priced nothing, so there is nothing to capture for it.
         setSubmittedEstimateCents(reviewCostUsdCents);
         setReviewId(data.review_id);
+        // Issue #58: the ONLY place this key is ever written -- a review id
+        // that the server has just confirmed exists and belongs to this
+        // caller. The mount probe above reads it back after a reload.
+        writeInflightReviewId(data.review_id);
       } catch (err) {
         if (controller.signal.aborted) {
           // The budget ran out, not the server. `err` here is either the
