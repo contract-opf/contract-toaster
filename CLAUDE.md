@@ -21,8 +21,15 @@ carries the docs-maintenance rules; everything below still applies to you.
   record and the baseline the next supplier patch verifies its before-hashes
   against. Our copy — compiled, tested, audited — is `frontend/src/orbit-diner/`.
   The patch procedure is in that vendor directory's own `README.md`.
-- **No new `localStorage` or `sessionStorage` key.** `security-posture.test.tsx`
-  must keep passing untouched.
+- **No new `localStorage` or `sessionStorage` key**, except one already recorded
+  in `ALLOWED_SETITEM_FILES` in `security-posture.test.tsx`. Extending that
+  allowlist takes an **owner decision recorded on the issue** — a ticket cannot
+  authorise itself (first granted for #58, 2026-09-13). Two things stay absolute:
+  `SETITEM_RE` is never loosened and no file is ever skipped, so any *other*
+  writer still fails the guard, and a second `setItem` call site in an allowed
+  file still fails the exact-one-match assertion. A new key also needs the
+  value-shape test its four siblings have, proving a token-shaped value is
+  refused rather than returned.
 - **The app owns state.** The Orbit Diner console fetches, polls, persists,
   submits and logs nothing; it calls existing guarded handlers.
 - **Escaped text only** — no clause text on the receipt, no raw server exception
