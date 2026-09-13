@@ -1,7 +1,7 @@
 # Docs index
 
 <!-- docs-sync
-roots: docs/ README.md CLAUDE.md AGENTS.md ARCHITECTURE.md RUNBOOK.md TRADEMARKS.md infra/README.md deploy/dts/README.md playbooks/opf/README.md standard-forms/README.md frontend/src/ui/README.md frontend/src/orbit-diner/audio/SOURCES.md frontend/src/assets/sounds/SOURCES.md tests/fixtures/adversarial/README.md tests/fixtures/document-shapes/README.md
+roots: docs/ README.md CLAUDE.md AGENTS.md ARCHITECTURE.md RUNBOOK.md TRADEMARKS.md infra/README.md deploy/dts/README.md playbooks/opf/README.md standard-forms/README.md frontend/src/ui/README.md frontend/src/orbit-diner/audio/SOURCES.md frontend/src/assets/sounds/SOURCES.md tests/README.md tests/fixtures/adversarial/README.md tests/fixtures/document-shapes/README.md
 exclude: docs/planning/contract-toaster-review-packet.cat.md node_modules/ .venv*/ .claude/ .git/ .pytest_cache/ frontend/vendor/ docs/planning/Internship-Agreement-Library/ scratch/ dump/
 code: backend/ deploy/ frontend/ infra/ scripts/ tests/ tools/
 -->
@@ -112,6 +112,9 @@ the shipped index will name paths that are not in it.
 
 ## standard-forms/
 - `standard-forms/README.md` — The retired standard-forms directory: what it holds, why it existed, and which gates were retired with it. anchors: contents, why-this-directory-exists, anchor-map-artifact, heading-hash-drift-gate, builder-fixture-tests, form-coverage-gate-retired-2026-09-02-issue-631, building--updating-the-anchor-map-retired-2026-09-02-issue-631, codeowners covers: standard-forms/**
+
+## tests/
+- `tests/README.md` — The two test styles (script-style `__main__` files and pytest-style new tests), how to run one file or a glob, what each gate exit code means, and how the parallel runner is allowed to differ from a serial one. anchors: the-two-styles, how-to-run, exit-codes, speed, writing-a-test-that-will-not-be-skipped-by-accident covers: tests/*.py, scripts/check.sh, scripts/collect_test_failures.sh, pytest.ini, tests/conftest.py
 
 ## tests/fixtures/adversarial/
 - `tests/fixtures/adversarial/README.md` — Why the synthetic adversarial documents exist, what each variant attacks, and the limits of what the harness proves. anchors: why-they-exist, the-variants, what-the-harness-proves-and-what-it-does-not covers: tests/fixtures/adversarial/**

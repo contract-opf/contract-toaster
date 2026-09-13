@@ -55,8 +55,14 @@ PURGE_WORKER_DIR = REPO_ROOT / "infra" / "lambda" / "purge_worker"
 
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
-if str(PURGE_WORKER_DIR) not in sys.path:
-    sys.path.insert(0, str(PURGE_WORKER_DIR))
+# Unconditional insert, deliberately NOT guarded by `not in sys.path`:
+# under pytest every infra/lambda/<bundle>/ directory is already on the
+# path (tests/conftest.py), and all six bundles contain a module named
+# `handler`. A guard would short-circuit here and leave the bare
+# `import handler` below bound to whichever bundle sits earlier on the
+# path instead of this one. See tests/README.md -> "The `handler`
+# collision".
+sys.path.insert(0, str(PURGE_WORKER_DIR))
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-454-test")

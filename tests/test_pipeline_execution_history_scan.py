@@ -74,8 +74,14 @@ from typing import Any, Callable  # noqa: UP035
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOCK_REVIEW_DIR = REPO_ROOT / "infra" / "lambda" / "mock_review"
 
-if str(MOCK_REVIEW_DIR) not in sys.path:
-    sys.path.insert(0, str(MOCK_REVIEW_DIR))
+# Unconditional insert, deliberately NOT guarded by `not in sys.path`:
+# under pytest every infra/lambda/<bundle>/ directory is already on the
+# path (tests/conftest.py), and all six bundles contain a module named
+# `handler`. A guard would short-circuit here and leave the bare
+# `import handler` below bound to whichever bundle sits earlier on the
+# path instead of this one. See tests/README.md -> "The `handler`
+# collision".
+sys.path.insert(0, str(MOCK_REVIEW_DIR))
 
 import handler as mock_review_handler  # noqa: E402  (real production handler)
 

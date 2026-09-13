@@ -19,6 +19,38 @@
 #   PYTHON=python3 scripts/collect_test_failures.sh [root_dir]
 #   ALLOW_FLAKY=1 scripts/collect_test_failures.sh [root_dir]
 #   CHECK_ONLY='tests/test_foo_*.py' scripts/collect_test_failures.sh [root_dir]
+#   COLLECT_JOBS=1 scripts/collect_test_failures.sh [root_dir]   # serial baseline
+#
+# PARALLELISM (issue #74) — COLLECT_JOBS:
+#   The per-file process is the isolation boundary and stays exactly that; what
+#   changed is that the boundaries are now crossed concurrently. Discovery still
+#   walks the globs below in one pass, in order; the selected files are then run
+#   through `xargs -P <jobs>`, and their results are REPORTED afterwards by a
+#   second walk of the same ordered list. So the `FAIL(rc=N):` blocks, the
+#   `CHECK:` verdict lines and the exit codes are identical to a serial run —
+#   only the wall clock differs. The retry pass stays SERIAL and one file at a
+#   time, because "does this file pass alone?" is the question it exists to ask.
+#
+#   COLLECT_JOBS overrides the job count; unset it defaults to `nproc` (Linux)
+#   or `sysctl -n hw.ncpu` (macOS), falling back to 1. COLLECT_JOBS=1 is the
+#   serial baseline, and it runs through the SAME xargs path as a parallel run
+#   rather than a second copy of the loop, so "serial and parallel agree" is a
+#   structural property here and not a coincidence two branches have to keep.
+#
+#   WHY THE INFRA FILES ARE NOT RUN CONCURRENTLY. The files SKIP_INFRA excludes
+#   shell out to the synth command with no `--output`, so they all write the one
+#   shared `infra/cdk.out` in this tree. Running two of them at once is exactly
+#   the corruption scripts/check.sh's repo-wide lock exists to prevent — it
+#   produced two false greens on 2026-08-20 — so this script would be
+#   manufacturing that hazard inside a single run. They are therefore partitioned
+#   out by the SAME content match SKIP_INFRA uses and run one at a time, after
+#   the parallel batch. A fast gate (SKIP_INFRA=1) has none of them and is fully
+#   parallel; a full gate parallelises everything else and serialises those.
+#
+#   Per-file log and exit-status files are keyed on the file's FULL relative
+#   path (`/` -> `_`), not its basename: `tests/test_x.py` and
+#   `tests/sub/test_x.py` collide as basenames, and two concurrent workers
+#   writing one status file would report one file's result for the other.
 #
 # CHECK_ONLY — RUN A SUBSET (issue #68):
 #   When set to a glob, only the discovered files whose path (`tests/lint-x.py`)
@@ -139,6 +171,90 @@ deselected=0
 matched=0
 selected=0
 
+# The ordered discovery list the parallel batch consumes and the report walks
+# again. One path per line; the globs below cannot produce a path containing a
+# newline, and nothing else ever writes this file.
+# DISCOVERY_LIST is every selected file in discovery order — it is what the
+# report walk reads, so the printed order never depends on execution order.
+# PARALLEL_LIST and SERIAL_LIST partition it for execution only.
+DISCOVERY_LIST="$LOG_DIR/.discovered"
+PARALLEL_LIST="$LOG_DIR/.run_parallel"
+SERIAL_LIST="$LOG_DIR/.run_serial"
+: >"$DISCOVERY_LIST"
+: >"$PARALLEL_LIST"
+: >"$SERIAL_LIST"
+
+# The content match that names a synth-running infra file. ONE definition, used
+# both by SKIP_INFRA's exclusion and by the serial partition (see PARALLELISM in
+# the header) so the fast gate and the full gate cannot disagree about which
+# files those are.
+INFRA_MATCH='cdk[^A-Za-z]*synth|npx cdk'
+
+is_infra_file() {
+  grep -qlE "$INFRA_MATCH" "$1"
+}
+
+# Log/status key: the full relative path with '/' collapsed to '_'. Basenames
+# are not unique across the globs and two workers must never share a file.
+slug_for() {
+  printf '%s' "$1" | tr '/' '_'
+}
+
+# Run one discovered file, recording its output and its exit status where the
+# report pass can find them. Exported so the xargs workers can call it.
+run_one_file() {
+  local target="$1"
+  local slug
+  slug="$(printf '%s' "$target" | tr '/' '_')"
+  # `</dev/null` is load-bearing, not hygiene. The serial pass drives this
+  # from `while IFS= read -r t; do run_one_file "$t"; done <"$SERIAL_LIST"`,
+  # so without it the child INHERITS the work list on stdin: any test whose
+  # process reads stdin swallows the remaining entries, the loop ends early,
+  # and report_pass synthesises rc=125 for files that never ran. That is not
+  # hypothetical here -- all 26 infra files shell out to `npx cdk synth`
+  # with no `stdin=`, and this script's own header documents the
+  # worktree-without-node_modules case where `npx` prompts on stdin. The
+  # damage lands in the FLAKY bucket, the one bucket this script exists to
+  # stop laundering, where ALLOW_FLAKY=1 would then turn it green.
+  #
+  # It goes HERE rather than on the serial loop so both paths are fixed by
+  # one line: xargs already gives its children /dev/null, so only the serial
+  # path diverged -- and "serial and parallel are structurally identical",
+  # which this file claims at the top, is only true with this redirect.
+  "$PY" "$target" >"$LOG_DIR/$slug.log" 2>&1 </dev/null
+  printf '%s\n' "$?" >"$LOG_DIR/$slug.rc"
+}
+export -f run_one_file
+export PY LOG_DIR
+
+# How many files to run at once. `nproc` on Linux, `sysctl -n hw.ncpu` on macOS,
+# 1 if neither answers. A COLLECT_JOBS that is not a positive integer must not
+# quietly become "unlimited" — xargs -P 0 means no limit, which on a 300-file
+# tree forks 300 interpreters at once.
+detect_cpus() {
+  local n
+  n="$(nproc 2>/dev/null || true)"
+  if [ -z "$n" ]; then
+    n="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  fi
+  case "$n" in
+    ''|*[!0-9]*|0) n=1 ;;
+  esac
+  printf '%s' "$n"
+}
+
+JOBS="${COLLECT_JOBS:-}"
+if [ -n "$JOBS" ]; then
+  case "$JOBS" in
+    ''|*[!0-9]*|0)
+      echo "CHECK: COLLECT_JOBS='$JOBS' is not a positive integer; running serially (1)." >&2
+      JOBS=1
+      ;;
+  esac
+else
+  JOBS="$(detect_cpus)"
+fi
+
 # CHECK_ONLY's glob, matched against the discovered path AND its bare filename
 # so both `tests/lint-*.py` and `lint-*.py` select the same files (issue #68).
 # `case` is the match: its patterns are shell globs, which is exactly what the
@@ -164,18 +280,20 @@ for t in tests/test_*.py tests/*/test_*.py tests/lint-*.py; do
     fi
     matched=$((matched + 1))
   fi
-  if [ -n "${SKIP_INFRA:-}" ] && grep -qlE 'cdk[^A-Za-z]*synth|npx cdk' "$t"; then
+  if [ -n "${SKIP_INFRA:-}" ] && is_infra_file "$t"; then
     skipped="$skipped $t"
     continue
   fi
   selected=$((selected + 1))
-  "$PY" "$t" >"$LOG_DIR/$(basename "$t").log" 2>&1
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    first_pass_failed="$first_pass_failed $t"
-    echo "FAIL(rc=$rc): $t"
-    tail -15 "$LOG_DIR/$(basename "$t").log"
-    echo "----------------------------------------"
+  printf '%s\n' "$t" >>"$DISCOVERY_LIST"
+  # Partition for EXECUTION only, do not run: the batch below runs these. A
+  # synth-running infra file goes to the serial list (see PARALLELISM in the
+  # header); the report still walks DISCOVERY_LIST, so this does not reorder
+  # anything the operator sees.
+  if is_infra_file "$t"; then
+    printf '%s\n' "$t" >>"$SERIAL_LIST"
+  else
+    printf '%s\n' "$t" >>"$PARALLEL_LIST"
   fi
 done
 
@@ -199,6 +317,66 @@ if [ -n "${CHECK_ONLY:-}" ] && [ "$selected" -eq 0 ]; then
   exit 4
 fi
 
+# ---------------------------------------------------------------------------
+# FIRST PASS (issue #74). Everything that is safe to run concurrently goes
+# through one `xargs -P` batch; the synth-running infra files follow one at a
+# time. Both halves go through run_one_file, which writes each file's output and
+# exit status under $LOG_DIR keyed on its full path, and NEITHER prints: the
+# report walk below prints, in discovery order, so the operator-visible output
+# does not depend on which worker finished first.
+#
+# run_one_file deliberately SWALLOWS the test's exit status: its last command is
+# the `printf` that records that status, so the function — and therefore each
+# `bash -c 'run_one_file "$0"'` worker — always exits 0, and xargs always sees a
+# successful child. That is the point, not an accident: a child exiting 255 makes
+# xargs abandon the whole batch immediately, and every file it never got to would
+# then be reported as rc=125. Do not "fix" run_one_file to propagate the child's
+# status. The per-file `.rc` files are the only record of what each test
+# returned; a missing one is reported as rc=125 rather than silently passing.
+# (The `|| true` below is belt-and-braces for the ways xargs itself can fail.)
+# ---------------------------------------------------------------------------
+if [ -s "$PARALLEL_LIST" ]; then
+  tr '\n' '\0' <"$PARALLEL_LIST" \
+    | xargs -0 -n 1 -P "$JOBS" "${BASH:-bash}" -c 'run_one_file "$0"' || true
+fi
+if [ -s "$SERIAL_LIST" ]; then
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    run_one_file "$t"
+  done <"$SERIAL_LIST"
+fi
+
+# Report pass: DISCOVERY order, the single ordered list the `for t in …` walk
+# above wrote — not the order the workers finished in, and not the
+# parallel/serial partition. Nothing here runs a test; it only reads what the
+# workers recorded.
+report_pass() {
+  local list="$1"
+  local slug rc
+  [ -s "$list" ] || return 0
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    slug="$(slug_for "$t")"
+    rc="$(cat "$LOG_DIR/$slug.rc" 2>/dev/null || true)"
+    case "$rc" in
+      ''|*[!0-9]*)
+        # The worker never recorded a status (killed, or out of file
+        # descriptors). That is a failure, not a pass.
+        rc=125
+        : >>"$LOG_DIR/$slug.log"
+        ;;
+    esac
+    if [ "$rc" -ne 0 ]; then
+      first_pass_failed="$first_pass_failed $t"
+      echo "FAIL(rc=$rc): $t"
+      tail -15 "$LOG_DIR/$slug.log"
+      echo "----------------------------------------"
+    fi
+  done <"$list"
+}
+
+report_pass "$DISCOVERY_LIST"
+
 if [ -n "${CHECK_ONLY:-}" ]; then
   echo "NOTE: CHECK_ONLY='$CHECK_ONLY' — ran $selected file(s), deselected $deselected."
   echo "      This is a SUBSET. Only a full run is the landing signal."
@@ -212,7 +390,7 @@ fail=0
 failed=""
 flaky=""
 for t in $first_pass_failed; do
-  if "$PY" "$t" >"$LOG_DIR/retry_$(basename "$t").log" 2>&1; then
+  if "$PY" "$t" >"$LOG_DIR/retry_$(slug_for "$t").log" 2>&1; then
     flaky="$flaky $t"
     echo "FLAKY (failed, then passed on isolated re-run): $t"
   else

@@ -268,6 +268,42 @@
 > `tests/test_docs_lint_living_from_index_69.py`. The finding text below is
 > left as written; it describes the state before that change.
 
+> **Status note, 2026-09-12.** G9 / B9 **landed** as public issue
+> `contract-opf/contract-toaster#74` (private #714 in the table below).
+> `scripts/collect_test_failures.sh` keeps the per-file process as the
+> isolation boundary and now crosses those boundaries concurrently: discovery
+> walks the same globs in the same order, the selected files go through one
+> `xargs -P` batch (`nproc` / `sysctl -n hw.ncpu`, overridden by
+> `COLLECT_JOBS`, and `COLLECT_JOBS=1` is the serial baseline through the same
+> path), and a second walk of the ordered discovery list prints the
+> `FAIL(rc=N):` blocks — so the reported order and every `CHECK:` verdict line
+> are what a serial run produces, only sooner. `SKIP_INFRA=1 scripts/check.sh`
+> went from 17m29s to 3m40s on a 12-core machine. The retry pass stays serial,
+> and so do the CDK-synth infra files: they all write the one shared
+> `infra/cdk.out`, so running two at once would manufacture inside a single run
+> exactly the corruption `check.sh`'s repo-wide lock exists to prevent. Per-file
+> log and exit-status files are now keyed on the full relative path, not the
+> basename, which two concurrent workers would have shared.
+> `--only <glob>` had already landed with G14 / B14 (public #68); this change
+> found — and deliberately did NOT fix — one pre-existing interaction with it:
+> `tests/test_gate_flaky_honesty.py` does not scrub the exported `CHECK_ONLY`
+> from its synthetic subprocess environment, so running that file *through*
+> `--only` makes every check in it fail with exit 4. That file is one of the
+> gate-invariant tests #74 froze as its independent evidence that the parallel
+> loop's markers and exit codes did not move, and a test edited in the same
+> commit as the gate it pins has stopped pinning it; the fix belongs to its own
+> ticket against #68. The pytest convergence half is `pytest.ini`
+> (`--import-mode=importlib`, `-p no:cacheprovider`, `python_files`),
+> `tests/conftest.py` (search paths only, no fixtures — but a search path is
+> not semantically neutral: the six same-named `infra/lambda/*/handler.py`
+> bundles it adds are documented as a hazard in `tests/README.md` -> "The
+> `handler` collision", and the tests that import one insert their own bundle
+> directory unconditionally) and `tests/README.md`;
+> NEW tests are dual-mode and existing ones convert only when touched — nothing
+> was converted wholesale. Pinned by `tests/test_parallel_runner_74.py`, which
+> passes under both runners. The finding text below is left as written; it
+> describes the state before that change.
+
 > **Status note, 2026-09-12.** G13 / B13 **landed** as public issue
 > `contract-opf/contract-toaster#72` (private #712 in the table below).
 > `frontend/src/playbooksStore.ts` holds ONE memoised `GET /api/playbooks`
@@ -545,6 +581,8 @@ the `sys.modules` pollution the header describes) but run files in parallel
 with `xargs -P` and add `scripts/check.sh --only <glob>`. Longer term, convert
 new tests to pytest style and let `pytest -p no:cacheprovider tests/<file>`
 be the per-file runner.
+
+**Landed** — see the G9 status note at the top of this file.
 
 ### G10 — Docs sprawl  (P3)
 
