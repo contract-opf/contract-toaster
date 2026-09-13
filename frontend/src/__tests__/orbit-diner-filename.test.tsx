@@ -22,8 +22,9 @@
  *      nothing here asserts a real render.
  *   2. THE BOX, derived from the shipped stylesheet's own percentages rather
  *      than picked. Every number in that derivation is pinned to `orbit.css`
- *      below, so a stylesheet edit that changes the inscription's rectangle
- *      fails this file rather than quietly invalidating its fixtures.
+ *      (in `support/orbitInscription.ts`, which two files now share), so a
+ *      stylesheet edit that changes the inscription's rectangle fails this
+ *      file rather than quietly invalidating its fixtures.
  *   3. THE RECTANGLE IS STATE-INDEPENDENT. The ticket asks for the safe
  *      rectangle to be validated in every slice state, and jsdom cannot see
  *      one. What it can prove is the thing that makes ONE browser measurement
@@ -45,250 +46,42 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { OrbitDiner } from '../orbit-diner/OrbitDiner';
 import {
   FILENAME_ELLIPSIS,
   FILENAME_MAX_LINES,
   fitFilename,
   splitExtension,
-  type MeasureText,
 } from '../orbit-diner/filename';
+// The metric fixture and the box derivation moved to `support/` when issue #78
+// added a second file that needs them (orbit-diner-filename-band-78.test.tsx).
+// They are the same numbers this file always used — `DESKTOP` is still
+// 143px/20px and `PHONE` still 95px/14px — with one correction #78 forced: the
+// derivation resolves the at-rule conditions that hold at the console width it
+// is asked about, instead of modelling every non-phone width with the
+// `min-width: 1221px` step's two-column grid and 20px type. See the module's
+// header; the hole that correction closed is the sweep below.
+import {
+  CONSOLE_MAX_PX,
+  CONSOLE_MIN_PX,
+  DESKTOP,
+  PHONE,
+  RULES,
+  declared,
+  inscriptionBox,
+  inscriptionShare,
+  metricsAt,
+  ORPHAN_PRONE,
+  px,
+  SHORT,
+  valueOf,
+  type Box,
+} from './support/orbitInscription';
 import type { ReviewModel, Status } from '../orbit-diner/types';
-
-// ---------------------------------------------------------------------------
-// The metric fixture
-// ---------------------------------------------------------------------------
-
-/**
- * Approximate advance widths for Space Grotesk 600, in em, rounded.
- *
- * They are not exact and do not need to be: this file never claims a real
- * render. What the fixture must have is VARIATION — `lillil.docx` and
- * `MWMWMW.docx` are the same length and nowhere near the same width — so that
- * an implementation which imposed a character-count limit, which the ticket
- * forbids, cannot satisfy these assertions.
- */
-const ADVANCE: Record<string, number> = {
-  ' ': 0.26,
-  '-': 0.35,
-  _: 0.5,
-  '.': 0.28,
-  '/': 0.4,
-  '…': 0.9,
-  a: 0.55, b: 0.57, c: 0.52, d: 0.58, e: 0.55, f: 0.33, g: 0.57, h: 0.56,
-  i: 0.26, j: 0.26, k: 0.53, l: 0.26, m: 0.85, n: 0.56, o: 0.57, p: 0.57,
-  q: 0.57, r: 0.38, s: 0.5, t: 0.38, u: 0.56, v: 0.5, w: 0.76, x: 0.5,
-  y: 0.5, z: 0.48,
-  A: 0.68, B: 0.66, C: 0.68, D: 0.7, E: 0.6, F: 0.58, G: 0.72, H: 0.72,
-  I: 0.3, J: 0.5, K: 0.66, L: 0.56, M: 0.85, N: 0.72, O: 0.74, P: 0.64,
-  Q: 0.74, R: 0.64, S: 0.62, T: 0.6, U: 0.72, V: 0.68, W: 0.96, X: 0.66,
-  Y: 0.64, Z: 0.6,
-};
-/** Digits are tabular in this family: one width for all ten. */
-const DIGIT_ADVANCE = 0.55;
-/** Anything the table does not name — punctuation, accents, CJK. */
-const FALLBACK_ADVANCE = 0.55;
-
-const advanceEm = (char: string): number =>
-  /[0-9]/.test(char) ? DIGIT_ADVANCE : (ADVANCE[char] ?? FALLBACK_ADVANCE);
-
-/** A `measure()` at `fontPx`, summing the fixture's per-glyph advances. */
-function metricsAt(fontPx: number): MeasureText {
-  return (text: string) =>
-    Array.from(text).reduce((sum, char) => sum + advanceEm(char) * fontPx, 0);
-}
-
-// ---------------------------------------------------------------------------
-// The shipped stylesheet
-// ---------------------------------------------------------------------------
-
-const ORBIT_CSS = path.join(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-  'orbit-diner',
-  'orbit.css',
-);
-
-interface StyleRule {
-  selector: string;
-  body: string;
-  /** At-rule preludes this rule sits under, outermost first. */
-  conditions: string[];
-}
-
-/** Every style rule in the sheet, flattened, each carrying the at-rule
- *  conditions it sits under. Comments are stripped first — this stylesheet
- *  quotes CSS inside its comments, and a commented-out declaration must never
- *  satisfy an assertion. */
-function orbitRules(): StyleRule[] {
-  const css = readFileSync(ORBIT_CSS, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const rules: StyleRule[] = [];
-  const collect = (source: string, conditions: string[]): void => {
-    let i = 0;
-    while (i < source.length) {
-      const open = source.indexOf('{', i);
-      if (open === -1) break;
-      const prelude = source.slice(i, open).trim();
-      let depth = 1;
-      let j = open + 1;
-      for (; j < source.length && depth > 0; j += 1) {
-        if (source[j] === '{') depth += 1;
-        else if (source[j] === '}') depth -= 1;
-      }
-      const body = source.slice(open + 1, j - 1);
-      i = j;
-      if (prelude.startsWith('@')) {
-        collect(body, [...conditions, prelude]);
-        continue;
-      }
-      if (prelude) rules.push({ selector: prelude, body, conditions });
-    }
-  };
-  collect(css, []);
-  return rules;
-}
-
-const RULES = orbitRules();
-
-/** The declared value of `property` in one rule, or undefined. */
-function declared(rule: StyleRule, property: string): string | undefined {
-  let found: string | undefined;
-  for (const declaration of rule.body.split(';')) {
-    const colon = declaration.indexOf(':');
-    if (colon === -1) continue;
-    if (declaration.slice(0, colon).trim().toLowerCase() !== property) continue;
-    found = declaration
-      .slice(colon + 1)
-      .trim()
-      .replace(/!\s*important$/i, '')
-      .trim();
-  }
-  return found;
-}
-
-/** Rules listing `selector`, under the at-rule `condition` (top level when
- *  omitted). */
-function rulesFor(selector: string, condition?: string): StyleRule[] {
-  return RULES.filter(
-    (rule) =>
-      rule.selector
-        .split(',')
-        .map((one) => one.trim())
-        .includes(selector) &&
-      (condition === undefined
-        ? rule.conditions.length === 0
-        : rule.conditions.includes(condition)),
-  );
-}
-
-/**
- * What the cascade resolves `property` to for `selector` at that scope: the
- * LAST declaration across every rule listing it. `orbit.css` restates several
- * selectors, so reading only the first block asserts a value the browser does
- * not use.
- */
-function valueOf(selector: string, property: string, condition?: string): string {
-  const bodies = rulesFor(selector, condition);
-  expect(
-    bodies.length,
-    `rule not found: ${selector}${condition ? ` inside ${condition}` : ''}`,
-  ).toBeGreaterThan(0);
-  let value: string | undefined;
-  for (const rule of bodies) value = declared(rule, property) ?? value;
-  expect(
-    value,
-    `${selector}${condition ? ` inside ${condition}` : ''} declares no ${property}`,
-  ).toBeDefined();
-  return value as string;
-}
-
-const px = (value: string): number => {
-  expect(value).toMatch(/^-?[\d.]+px$/);
-  return Number.parseFloat(value);
-};
-const percent = (value: string): number => {
-  expect(value).toMatch(/^[\d.]+%$/);
-  return Number.parseFloat(value) / 100;
-};
-
-// ---------------------------------------------------------------------------
-// The inscription box, derived from the stylesheet
-// ---------------------------------------------------------------------------
-
-const PHONE_STEP = '@container od-console (max-width: 560px)';
-const WIDE_STEP = '@container od-console (min-width: 1221px)';
-
-interface Box {
-  /** Usable width of the inscription, in CSS px. */
-  width: number;
-  /** `max-height` of the inscription, in CSS px. */
-  height: number;
-  /** The font size the stylesheet sets at this step. */
-  font: number;
-}
-
-/** The share of the slice the 04p2 rectangle leaves for the name. */
-function inscriptionShare(): number {
-  const left = percent(valueOf('.od-console:not(.od-plain) .od-toast-name', 'left'));
-  const right = percent(valueOf('.od-console:not(.od-plain) .od-toast-name', 'right'));
-  return 1 - left - right;
-}
-
-/** Sum of the `fr` coefficients in a `grid-template-columns` track list. */
-function frTotal(tracks: string): number {
-  const found = Array.from(tracks.matchAll(/([\d.]+)fr/g)).map((m) => Number(m[1]));
-  expect(found.length).toBeGreaterThan(0);
-  return found.reduce((sum, one) => sum + one, 0);
-}
-
-/**
- * The inscription's box at a console content width, worked out of the shipped
- * percentages: scene padding, the appliance track, the figure's aspect ratio,
- * the slice's share of the figure, and the name's share of the slice.
- *
- * The two console widths are #725's own: 1272px is the widest the console can
- * be (a 1320px shell less 24px of padding per side) and 342px is a 390px
- * phone. Every other number is read from `orbit.css` here, so a stylesheet
- * edit re-derives the box instead of leaving these fixtures asserting an
- * arrangement that no longer ships.
- */
-function inscriptionBox(consoleWidth: number, phone: boolean): Box {
-  const step = phone ? PHONE_STEP : WIDE_STEP;
-  const scene = consoleWidth - 2 * px(valueOf('.od-scene', 'padding-left', step));
-  const figure = phone
-    ? scene
-    : (scene - px(valueOf('.od-appliances', 'gap', WIDE_STEP))) /
-      frTotal(valueOf('.od-appliances', 'grid-template-columns'));
-  const sliceWidth =
-    figure * percent(valueOf('.od-slice', 'width', phone ? PHONE_STEP : undefined));
-  // The slice is `aspect-ratio: 1`, so its height is its width.
-  expect(valueOf('.od-slice', 'aspect-ratio')).toBe('1');
-  const share = inscriptionShare();
-  return {
-    width: Math.floor(sliceWidth * share),
-    height:
-      sliceWidth * percent(valueOf('.od-console:not(.od-plain) .od-toast-name', 'max-height')),
-    font: px(
-      phone
-        ? valueOf('.od-console:not(.od-plain) .od-toast-name', 'font-size', PHONE_STEP)
-        : valueOf('.od-toast-name', 'font-size'),
-    ),
-  };
-}
-
-/** 1360px viewport: the console at its 1272px ceiling, 20px type. */
-const DESKTOP = inscriptionBox(1272, false);
-/** 390px viewport: a 342px console on the phone step, 14px type. */
-const PHONE = inscriptionBox(342, true);
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-/** The designer's own short fixture (round-3, O1). */
-const SHORT = 'Mutual NDA draft-v3.docx';
 
 /** 120 characters, separator-rich, ending in a version token. */
 const LONG =
@@ -973,13 +766,6 @@ describe('issue #739 — the safe rectangle does not move with the slice state',
 // the band rather than only the two derived endpoints.
 // ---------------------------------------------------------------------------
 
-const ORPHAN_PRONE = [
-  'Amendment 2.docx',
-  'Schedule 3.docx',
-  'EIAA Northwestern.docx',
-  SHORT,
-];
-
 describe('issue #739 — the extension is never painted alone', () => {
   it('keeps the last line carrying `.docx` at both shipped widths', () => {
     for (const box of [DESKTOP, PHONE]) {
@@ -996,27 +782,46 @@ describe('issue #739 — the extension is never painted alone', () => {
     }
   });
 
-  it('holds at every console width the shell can produce, not just the two endpoints', () => {
+  it('holds at every console width the shell can produce, with no band skipped', () => {
     // The reachable range, derived the same way the two fixtures above are:
-    // 300px is the narrowest console the shell allows and 1272px the widest,
-    // and the phone step takes over at 560px. Every width in between gets its
-    // own box and font out of the shipped stylesheet.
-    for (let consoleWidth = 300; consoleWidth <= 1272; consoleWidth += 1) {
-      const box = inscriptionBox(consoleWidth, consoleWidth <= 560);
+    // 300px is the narrowest console the shell allows and 1272px the widest.
+    // Every width in between gets the box and the font that the shipped
+    // stylesheet's own at-rules give it at that width.
+    //
+    // THE HOLE THAT USED TO BE HERE (issue #78 part 2). This loop carried a
+    // `continue` for widths whose box could not hold `….docx` on a line of its
+    // own, and it fired for 561–629px — never asserting anything there. Those
+    // widths were not a documented floor, they were a bad model: the
+    // derivation gave every non-phone console the `min-width: 1221px` step's
+    // two-column grid and 20px type, while `orbit.css` actually collapses
+    // `.od-appliances` to one 720px-capped column at `max-width: 1220px` and
+    // sets the inscription at 18px. A 561px console really gets a 124px box at
+    // 18px type, not 58px at 20px. With the derivation reading the rules that
+    // apply, no width in the range is too narrow — so the escape hatch is gone
+    // and its condition is asserted instead, which is what makes the band
+    // covered rather than skipped.
+    for (
+      let consoleWidth = CONSOLE_MIN_PX;
+      consoleWidth <= CONSOLE_MAX_PX;
+      consoleWidth += 1
+    ) {
+      const box = inscriptionBox(consoleWidth);
       const measure = metricsAt(box.font);
-      // Where the box cannot hold even `…​.docx` on a line of its own, no
-      // wrapping can keep the promise and the module says so; those widths are
-      // the documented floor, not a regression. The desktop step reaches them
-      // just above its 560px breakpoint, where the grid still divides the
-      // scene into columns but the console is barely wider than a phone.
-      if (measure(`${FILENAME_ELLIPSIS}.docx`) > box.width) continue;
+      const where = `console ${consoleWidth}px (box ${box.width}px / ${box.font}px)`;
+      expect(
+        measure(`${FILENAME_ELLIPSIS}.docx`),
+        `box too narrow for the ellipsis and the extension at ${where}`,
+      ).toBeLessThanOrEqual(box.width);
       for (const name of ORPHAN_PRONE) {
         const lines = fitFilename(name, { measure, width: box.width });
+        const last = lines[lines.length - 1];
+        expect(last, `orphaned extension: ${JSON.stringify(name)} at ${where}`).not.toBe(
+          'docx',
+        );
         expect(
-          lines[lines.length - 1],
-          `orphaned extension: ${JSON.stringify(name)} at console ${consoleWidth}px ` +
-            `(box ${box.width}px / ${box.font}px)`,
-        ).not.toBe('docx');
+          last,
+          `last line does not carry the extension: ${JSON.stringify(name)} at ${where}`,
+        ).toMatch(/\.docx$/);
       }
     }
   });
