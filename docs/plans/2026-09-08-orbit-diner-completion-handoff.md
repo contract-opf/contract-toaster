@@ -130,14 +130,39 @@ so the Settings tab showing the two halves agree is the honest check.
 
 ## Open follow-ups, both filed on epic #729
 
-- Separator-heavy filenames flush line 1 short of the box, so the preserved head
-  is shorter than it needs to be. Correctness is fine; head length is not.
-- The console is cramped just above its own breakpoint: the phone step takes
-  over at 560px but the desktop grid keeps splitting the scene into columns
-  above it, so a console at 561–660px gets a 58–69px inscription box at 20px
-  type — too narrow for `….docx` on a line of its own. #739's width sweep skips
-  that band and documents why. Decide whether the phone step should extend
-  higher or the desktop grid collapse sooner.
+**Both were closed by #78.** Struck through rather than deleted, because the
+second one's answer is not the answer the ticket expected and the record of why
+is worth more than the tidier list.
+
+- ~~Separator-heavy filenames flush line 1 short of the box, so the preserved
+  head is shorter than it needs to be.~~ Fixed. `fitFilename` now re-wraps with
+  in-chunk breaks permitted when — and only when — the chunk-boundary wrap
+  cannot fit the budget, so a name that is already losing its middle to an
+  ellipsis fills line 1 instead of stopping at its first separator.
+  `EIAA_Northwestern_University_…_FINAL.docx` keeps 19 characters of head at
+  DESKTOP where it kept 11. A name that fits without an ellipsis is still
+  wrapped at its separators, untouched.
+- ~~The console is cramped just above its own breakpoint … decide whether the
+  phone step should extend higher or the desktop grid collapse sooner.~~
+  **Neither: there was nothing to decide.** The premise was wrong. `orbit.css`
+  already collapses `.od-appliances` to one 720px-capped column at
+  `@container od-console (max-width: 1220px)` and sets the inscription to 18px
+  there, so a real 561px console gets a **124px box at 18px type** — `….docx`
+  measures 60.3px in the test fixture — not the 58px at 20px the ticket
+  describes. The 58px came from the TEST HELPER, which modelled every non-phone
+  width with the `min-width: 1221px` step's two-column track list and 20px type.
+  So no breakpoint moved, no CSS changed and `CONSOLE_PHONE_MAX_PX` is still
+  560; the derivation was corrected to resolve the at-rule conditions that hold
+  at the width it is asked about. It now lives in
+  `frontend/src/__tests__/support/orbitInscription.ts`, the #739 sweep's
+  `continue` is gone (the condition it guarded is asserted instead, across
+  300–1272px with no hole), and `orbit-diner-filename-band-78.test.tsx` walks
+  561–660px on its own.
+
+  One estimate in #78 is not reachable and was not implemented: "at least 11
+  more characters" of head on line 1. Line 1 holds 143px, `EIAA_` measures
+  55.2px and the next eleven characters measure 114.6px. Seven more fit — a
+  twelve-character line 1 — and 19 characters of head is the ceiling.
 
 Also open and unrelated to this epic: **#613** (stale `/version` stamp), which
 is `afk-backlog` rather than loop-servable — its acceptance needs two real CI

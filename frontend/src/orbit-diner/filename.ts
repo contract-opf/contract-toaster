@@ -92,6 +92,13 @@ export interface FitOptions {
   width: number;
   /** Lines available. Defaults to `FILENAME_MAX_LINES`. */
   maxLines?: number;
+  /**
+   * Let a line end INSIDE a chunk rather than only at a chunk boundary.
+   *
+   * Off by default, and `fitFilename` turns it on only where the ordinary
+   * chunk-boundary wrap has already failed — see the note on `attempt`.
+   */
+  packed?: boolean;
 }
 
 /**
@@ -192,10 +199,17 @@ function cutAt(text: string, length: number): string {
  * chunk boundaries above and — when a single chunk is wider than the whole
  * line — inside the chunk, which is what `overflow-wrap: anywhere` does.
  *
+ * With `packed`, a line may also end inside a chunk that WOULD have fitted on
+ * a line of its own; see `fitFilename`'s `attempt` for the one caller that
+ * asks for that and why it is not the default.
+ *
  * Returns at least one line, and may return more than `maxLines`: the count is
  * the answer `fitFilename` needs, so this reports it rather than hiding it.
  */
-export function wrapMeasured(text: string, { measure, width }: FitOptions): string[] {
+export function wrapMeasured(
+  text: string,
+  { measure, width, packed = false }: FitOptions,
+): string[] {
   const fits = (candidate: string): boolean => measure(trimEnd(candidate)) <= width;
   // `glued()` keeps a LINE from ending at the extension's dot. This keeps a
   // CHARACTER break from landing inside the extension, which is the same
@@ -203,6 +217,33 @@ export function wrapMeasured(text: string, { measure, width }: FitOptions): stri
   // would otherwise be cut as `EIAA….` + `docx`. Treating the suffix as one
   // atom moves the cut to the dot instead, so the last line reads `.docx`.
   const { extension } = splitExtension(text);
+  /**
+   * How many UTF-16 code units of `rest` may follow `prefix` on one line.
+   *
+   * The break walks CHARACTERS, not code units: `overflow-wrap: anywhere`,
+   * which this reproduces, never splits a character, and a cut between the
+   * halves of a surrogate pair paints two .notdef boxes where one emoji
+   * belongs. `atLeastOne` is the empty-line case, where something has to be
+   * taken or the loop cannot advance; on a line that already has text, zero is
+   * a real answer and the caller flushes instead.
+   */
+  const takeFrom = (prefix: string, rest: string, atLeastOne: boolean): number => {
+    const points = Array.from(rest);
+    let take = atLeastOne ? points[0].length : 0;
+    for (let i = atLeastOne ? 1 : 0; i < points.length; i += 1) {
+      if (!fits(prefix + rest.slice(0, take + points[i].length))) break;
+      take += points[i].length;
+    }
+    // Never cut inside the extension. The boundary is a code-point boundary
+    // (the suffix begins at its `.`), and it is only imposed when there is
+    // something in front of the suffix to keep — a box too narrow for the
+    // suffix alone has no better answer and breaks as it always did.
+    const suffixStart = rest.length - extension.length;
+    if (extension !== '' && suffixStart > 0 && rest.endsWith(extension) && take > suffixStart) {
+      take = suffixStart;
+    }
+    return take;
+  };
   const lines: string[] = [];
   let line = '';
   for (const chunk of glued(text)) {
@@ -213,6 +254,17 @@ export function wrapMeasured(text: string, { measure, width }: FitOptions): stri
         break;
       }
       if (line !== '') {
+        // Packed: spend the room left on this line on the front of the chunk
+        // instead of throwing it away at the boundary. Never when what is left
+        // IS the extension — splitting `.docx` across two lines is the very
+        // orphan `glued()` and the suffix clamp above exist to prevent.
+        const take = packed && rest !== extension ? takeFrom(line, rest, false) : 0;
+        if (take > 0) {
+          lines.push(trimEnd(line + rest.slice(0, take)));
+          line = '';
+          rest = rest.slice(take);
+          continue;
+        }
         // A line of nothing but the spaces that preceded an over-wide chunk is
         // not a line; dropping it spends the room on the name instead.
         const flushed = trimEnd(line);
@@ -221,25 +273,8 @@ export function wrapMeasured(text: string, { measure, width }: FitOptions): stri
         continue;
       }
       // The chunk does not fit even on an empty line, so it is broken inside.
-      // The break walks CHARACTERS, not UTF-16 code units: `overflow-wrap:
-      // anywhere`, which this branch reproduces, never splits a character, and
-      // a cut between the halves of a surrogate pair paints two .notdef boxes
-      // where one emoji belongs. At least one character is always taken, so
-      // this cannot spin.
-      const points = Array.from(rest);
-      let take = points[0].length;
-      for (let i = 1; i < points.length; i += 1) {
-        if (!fits(rest.slice(0, take + points[i].length))) break;
-        take += points[i].length;
-      }
-      // Never cut inside the extension. The boundary is a code-point boundary
-      // (the suffix begins at its `.`), and it is only imposed when there is
-      // something in front of the suffix to keep — a box too narrow for the
-      // suffix alone has no better answer and breaks as it always did.
-      const suffixStart = rest.length - extension.length;
-      if (extension !== '' && suffixStart > 0 && rest.endsWith(extension) && take > suffixStart) {
-        take = suffixStart;
-      }
+      // At least one character is always taken, so this cannot spin.
+      const take = takeFrom('', rest, true);
       lines.push(trimEnd(rest.slice(0, take)));
       rest = rest.slice(take);
     }
@@ -297,8 +332,32 @@ export function fitFilename(name: string, options: FitOptions): string[] {
 
   const { stem, extension } = splitExtension(text);
   const { head, tail } = protectedTail(stem, extension, options, maxLines);
-  const attempt = (length: number): string[] =>
-    wrapMeasured(trimEnd(cutAt(head, length)) + tail, options);
+  /**
+   * The lines for a head of `length`, wrapped at the chunk boundaries — and,
+   * only when that overflows the budget, wrapped again with in-chunk breaks
+   * allowed (issue #78 part 1).
+   *
+   * WHY THE SECOND WRAP EXISTS. `wrapMeasured` only ever breaks inside a chunk
+   * that cannot fit an empty line, so a separator-heavy name spends line 1 on
+   * whatever fits before the first separator and throws the rest of that line
+   * away: `EIAA_Northwestern_University_…_FINAL.docx` painted as
+   * `["EIAA_", "Northw….docx"]` in a 143px box, with 88px of line 1 unused
+   * because the next chunk could not use it. The head that survived was 11
+   * characters where 19 fit. Filling line 1 costs a mid-chunk break, which is
+   * why it is not the default — `Mutual NDA` / `draft-v3.docx` must keep
+   * breaking at its separators — but a name on this path is ALREADY losing its
+   * middle to an ellipsis, so the prettier wrap has nothing left to protect.
+   *
+   * WHY IT IS NOT TRIED ON THE WHOLE NAME. `fitFilename` returns the
+   * chunk-boundary wrap untouched whenever the whole name already fits, above:
+   * a name that needs no ellipsis is painted exactly as it always was.
+   */
+  const attempt = (length: number): string[] => {
+    const candidate = trimEnd(cutAt(head, length)) + tail;
+    const chunked = wrapMeasured(candidate, options);
+    if (chunked.length <= maxLines) return chunked;
+    return wrapMeasured(candidate, { ...options, packed: true });
+  };
 
   // Binary search the longest head that still fits. Greedy wrapping is very
   // nearly monotonic in the head's length but not provably so, so the answer
