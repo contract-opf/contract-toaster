@@ -76,8 +76,8 @@ def mark_internal_footnote(text: str) -> str:
 
 
 def footnote_texts_for_notes_mode(
-    external_text: Optional[str],
-    internal_text: Optional[str],
+    external_text: Optional[str],  # noqa: UP045
+    internal_text: Optional[str],  # noqa: UP045
     notes_mode: str = NOTES_MODE_EXTERNAL,
 ) -> list[str]:
     """The ordered footnote texts one issue contributes under `notes_mode`.

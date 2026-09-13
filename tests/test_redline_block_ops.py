@@ -118,7 +118,7 @@ def _qn(tag: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _make_sectioned_docx(sections: list, *, style: str = None) -> bytes:
+def _make_sectioned_docx(sections: list, *, style: str = None) -> bytes:  # noqa: RUF013
     """`[(heading, [body, ...]), ...]` -> docx bytes."""
     import docx  # local import: python-docx is a test-only dependency
 
@@ -222,14 +222,14 @@ def _prove(docx_bytes: bytes, *, patches=None, ops=None):
 
 def _document_root(docx_bytes: bytes) -> ET.Element:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        return ET.fromstring(zf.read("word/document.xml"))
+        return ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
 
 def _footnotes_root(docx_bytes: bytes):
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
         if "word/footnotes.xml" not in zf.namelist():
             return None
-        return ET.fromstring(zf.read("word/footnotes.xml"))
+        return ET.fromstring(zf.read("word/footnotes.xml"))  # noqa: S314
 
 
 def _paragraphs(docx_bytes: bytes) -> list:
@@ -357,7 +357,7 @@ def test_insert_block_after_anchor(failures: list) -> None:
     # AC 1a: the new paragraph sits immediately after the anchor block's
     # last physical <w:p> (0 = "Section 1. Term", 1 = its body).
     texts = _paragraph_texts(out)
-    expected = before[:2] + [_NEW_CLAUSE] + before[2:]
+    expected = before[:2] + [_NEW_CLAUSE] + before[2:]  # noqa: RUF005
     if texts != expected:
         failures.append(f"[{case}] paragraph layout {texts!r} != {expected!r}")
         return
@@ -418,7 +418,7 @@ def test_insert_block_after_anchor(failures: list) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         accepted = _visible_paragraph_texts(_resolved(out, tmp_path, "accept", "accept_all"))
-        want = before[:2] + [_NEW_CLAUSE] + before[2:]
+        want = before[:2] + [_NEW_CLAUSE] + before[2:]  # noqa: RUF005
         if accepted != want:
             failures.append(f"[{case}] accept_all layout {accepted!r} != {want!r}")
         # Reject-all removes the inserted text entirely. The now-empty <w:p>
@@ -467,7 +467,7 @@ def test_insert_block_at_start(failures: list) -> None:
     # block's first physical <w:p>, i.e. between the heading (<w:p> 0) and
     # the body it introduces (<w:p> 1).
     texts = _paragraph_texts(out)
-    expected = before[:1] + [_NEW_CLAUSE] + before[1:]
+    expected = before[:1] + [_NEW_CLAUSE] + before[1:]  # noqa: RUF005
     if texts != expected:
         failures.append(f"[{case}] paragraph layout {texts!r} != {expected!r}")
 
@@ -511,7 +511,7 @@ def test_insert_lands_after_the_anchors_last_physical_paragraph(failures: list) 
     _round_trips(case, out, failures)
 
     texts = _paragraph_texts(out)
-    expected = before + [_NEW_CLAUSE]
+    expected = before + [_NEW_CLAUSE]  # noqa: RUF005
     if texts != expected:
         failures.append(
             f"[{case}] paragraph layout {texts!r} != {expected!r} -- the insertion did not "
@@ -556,7 +556,7 @@ def test_two_inserts_after_one_anchor_keep_transcript_order(failures: list) -> N
     _round_trips(case, out, failures)
 
     texts = _paragraph_texts(out)
-    expected = before[:2] + [first, second] + before[2:]
+    expected = before[:2] + [first, second] + before[2:]  # noqa: RUF005
     if texts != expected:
         failures.append(
             f"[{case}] two insertions after one anchor came out {texts!r} != {expected!r} "

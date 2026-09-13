@@ -39,7 +39,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import canonicalize  # noqa: E402
+import canonicalize  # noqa: E402, I001
 import opf_load  # noqa: E402
 import bind_bundle  # noqa: E402
 
@@ -220,7 +220,7 @@ def check_5_cli_invocation() -> list[str]:
     failures = []
     with tempfile.TemporaryDirectory() as tmp:
         out_path = Path(tmp) / "bound-bundle.json"
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(BIND_BUNDLE_SCRIPT),
@@ -267,7 +267,7 @@ def check_5_cli_invocation() -> list[str]:
             failures.append(f"  [5] CLI printed hash {printed_hash!r}, expected {expected_hash!r}")
 
         # Mismatched playbook-id via CLI -> exit 1, no output file overwritten with garbage.
-        result_bad = subprocess.run(
+        result_bad = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(BIND_BUNDLE_SCRIPT),

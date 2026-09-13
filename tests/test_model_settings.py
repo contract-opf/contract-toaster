@@ -58,7 +58,7 @@ os.environ.setdefault("AUTH_SETTINGS_TABLE", "contract-toaster-auth-settings-tes
 os.environ.setdefault("MODEL_SETTINGS_TABLE", "contract-toaster-model-settings-test")
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
@@ -352,7 +352,7 @@ class TestResolutionPrecedence(ModelSettingsTestBase):
             def Table(self, _name):  # noqa: N802 - boto3 resource API shape
                 raise RuntimeError("DynamoDB is having a moment")
 
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
                 resolved = model_settings.resolve_openrouter_api_key(ExplodingResource())
         self.assertEqual(resolved, OTHER_KEY)
@@ -379,7 +379,7 @@ class TestNoKeyStoreDegradation(ModelSettingsTestBase):
         self.assertTrue(settings["key_set"])
 
     def test_set_is_refused(self):
-        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):
+        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):  # noqa: SIM117
             with self.assertRaises(HTTPException) as ctx:
                 model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
         self.assertEqual(ctx.exception.status_code, 400)
@@ -389,7 +389,7 @@ class TestNoKeyStoreDegradation(ModelSettingsTestBase):
             self.assertEqual(model_settings.resolve_openrouter_api_key(self.ddb), OTHER_KEY)
 
     def test_non_admin_still_gated_without_a_store(self):
-        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):
+        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):  # noqa: SIM117
             with self.assertRaises(HTTPException) as ctx:
                 model_settings.get_model_key_settings(NON_ADMIN, self.ddb)
         self.assertEqual(ctx.exception.status_code, 403)
@@ -476,7 +476,7 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
         import src.pipeline_runner as pipeline_runner
 
         model_settings.set_model_key(FAKE_KEY, ADMIN, self.ddb)
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):  # noqa: SIM117
             with patch.object(pipeline_runner.model_client, "OpenRouterModelClient") as ctor:
                 pipeline_runner._build_openrouter_client(self.ddb)
         self._assert_constructed_with_key(ctor, FAKE_KEY)
@@ -484,7 +484,7 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
     def test_build_client_falls_back_to_env(self):
         import src.pipeline_runner as pipeline_runner
 
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": OTHER_KEY}):  # noqa: SIM117
             with patch.object(pipeline_runner.model_client, "OpenRouterModelClient") as ctor:
                 pipeline_runner._build_openrouter_client(self.ddb)
         self._assert_constructed_with_key(ctor, OTHER_KEY)
@@ -506,7 +506,7 @@ class TestPipelineUsesResolvedKey(ModelSettingsTestBase):
         """
         import src.pipeline_runner as pipeline_runner
 
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}):  # noqa: SIM117
             with self.assertRaises(pipeline_runner.model_client.ModelKeyMissingError):
                 pipeline_runner._build_openrouter_client(self.ddb)
 

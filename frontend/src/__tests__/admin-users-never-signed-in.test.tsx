@@ -32,6 +32,7 @@ import AdminUsers from '../AdminUsers';
 import type { UserRow } from '../AdminUsers';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -85,7 +86,9 @@ const SIGNED_IN: UserRow = {
 };
 
 function stubFetch(users: UserRow[]) {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = String(input);
     if (url.includes('/api/users/sync-status')) {
       return new Response(JSON.stringify(SYNC_STATUS_OK), {

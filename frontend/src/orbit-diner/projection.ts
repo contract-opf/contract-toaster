@@ -695,7 +695,9 @@ export function toReviewModel(state: ReviewProjectionState): ReviewModel {
 
   const preferences: Preferences = {
     playbookId: state.playbookId,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     intensity: state.browning as Intensity,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     notesMode: state.notesMode as NotesMode,
     // What is CURRENTLY typed. Deriving this from the record on every poll is
     // how an edited box silently reverts mid-review.
@@ -955,6 +957,7 @@ export function reviewActionHandlers(cb: ReviewSubmissionCallbacks): ActionHandl
     runAgain: (reviewId: string) => cb.runAgain(reviewId),
     switchRecommended: () => cb.switchToRecommendedPlaybook(),
     disposition: (outcome: Disposition, note: string) =>
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       cb.handleRecordDisposition(outcome as AttorneyDisposition, note),
   };
 }
@@ -965,7 +968,9 @@ export function reviewPreferenceHandlers(
 ): PreferenceHandlers {
   return {
     playbook: (id: string) => cb.setPlaybookId(id),
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     intensity: (value: Intensity) => cb.handleBrowningChange(value as BrowningLevel),
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     notesMode: (value: NotesMode) => cb.handleNotesModeChange(value as AppNotesMode),
     instructions: (text: string) => cb.setToasterGuidance(text),
     dispositionNote: (text: string) => cb.setDispositionNote(text),

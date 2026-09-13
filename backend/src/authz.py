@@ -37,7 +37,7 @@ WHY `is True` AND NOT `bool(...)`:
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping  # noqa: UP035
 
 from fastapi import HTTPException, status
 

@@ -213,7 +213,7 @@ def _mismatching_docx_and_client() -> tuple[bytes, Any, dict[str, Any]]:
 
 
 def _run_primary_to_transcript_rejection() -> dict[str, Any]:
-    docx_bytes, client, block_map = _mismatching_docx_and_client()
+    docx_bytes, client, block_map = _mismatching_docx_and_client()  # noqa: RUF059
     bundle = _bundle()
     return pp.run_primary_pass(
         review_id=REVIEW_ID,
@@ -271,7 +271,7 @@ class FakeDDB:
     def __init__(self, reviews_table: FakeReviewsTable) -> None:
         self._reviews = reviews_table
 
-    def Table(self, name):  # noqa: N802, ARG002 - boto3 signature
+    def Table(self, name):  # noqa: ARG002, N802 - boto3 signature
         return self._reviews
 
 
@@ -558,7 +558,7 @@ def test_each_terminal_reaches_the_row_with_its_own_explanation(
 def _module_constants(tree: ast.Module) -> dict[str, str]:
     constants: dict[str, str] = {}
     for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):  # noqa: SIM102
             if isinstance(node.value.value, str):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
@@ -576,7 +576,7 @@ def _fail_closed_terminals() -> list[tuple[str, int, ast.Dict]]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
                 continue
-            for key, value in zip(node.keys, node.values):
+            for key, value in zip(node.keys, node.values):  # noqa: B905
                 if not (isinstance(key, ast.Constant) and key.value == "status"):
                     continue
                 if isinstance(value, ast.Constant) and value.value in _FAIL_CLOSED_STATUSES:
@@ -585,7 +585,7 @@ def _fail_closed_terminals() -> list[tuple[str, int, ast.Dict]]:
 
 
 def _reason_value(terminal: ast.Dict) -> ast.AST | None:
-    for key, value in zip(terminal.keys, terminal.values):
+    for key, value in zip(terminal.keys, terminal.values):  # noqa: B905
         if isinstance(key, ast.Constant) and key.value == "reason":
             return value
     return None

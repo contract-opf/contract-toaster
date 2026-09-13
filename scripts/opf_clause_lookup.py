@@ -81,7 +81,7 @@ def _clauses(opf_doc: dict) -> list[dict]:
     return (opf_doc.get("evidence") or {}).get("clauses") or []
 
 
-def _cite_key(ref: Any) -> Optional[tuple]:
+def _cite_key(ref: Any) -> Optional[tuple]:  # noqa: UP045
     if not isinstance(ref, dict):
         return None
     return (ref.get("document_id"), ref.get("version"), ref.get("clause_path"))
@@ -104,8 +104,8 @@ def _observation_view(obs: dict) -> dict:
 def lookup_clause_evidence(
     opf_doc: dict,
     *,
-    clause_id: Optional[str] = None,
-    example_ref: Optional[dict] = None,
+    clause_id: Optional[str] = None,  # noqa: UP045
+    example_ref: Optional[dict] = None,  # noqa: UP045
 ) -> dict:
     """Return full evidence for a clause, by clause_id or by citation.
 

@@ -44,7 +44,7 @@ os.environ.setdefault("USERS_TABLE", "contract-toaster-users-test")
 os.environ.setdefault("AUTH_SETTINGS_TABLE", "contract-toaster-auth-settings-test")
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -291,12 +291,12 @@ class TestDeBrand(DemoAuthTestBase):
         try:
             demo_auth.login_with_password("admin", "admin", self.ddb)
             self.fail("expected HTTPException")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             detail = str(getattr(exc, "detail", exc))
             self.assertNotIn("exos", detail.lower())
 
     def test_logging_emits_no_branding(self):
-        import logging
+        import logging  # noqa: I001
         import io
 
         stream = io.StringIO()

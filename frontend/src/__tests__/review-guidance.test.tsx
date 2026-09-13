@@ -38,6 +38,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -52,15 +53,19 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   // Issue #733: the catalog is a fixture every scenario needs, not a scenario
   // of its own — the console will not arm its lever without an active playbook.
   routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -113,6 +118,7 @@ describe('per-review guidance field — ReviewSubmission.tsx', () => {
     // the control (screen readers get it) and cannot be dismissed.
     const description = input.getAttribute('aria-describedby');
     expect(description).toBeTruthy();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const copy = document.getElementById(description!.split(' ')[0]!)!.textContent ?? '';
 
     // Precedence stated...

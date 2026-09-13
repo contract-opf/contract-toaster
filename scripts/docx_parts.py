@@ -136,7 +136,7 @@ FOOTNOTE_STYLE_XML = {
 }
 
 
-def footnote_style_elements() -> "list[ET.Element]":
+def footnote_style_elements() -> "list[ET.Element]":  # noqa: UP037
     """Freshly parsed `<w:style>` elements for `FOOTNOTE_STYLE_XML`, in that
     mapping's order.
 
@@ -144,12 +144,12 @@ def footnote_style_elements() -> "list[ET.Element]":
     `<w:styles>` tree, and handing back a shared element would alias one
     package's styles into the next one's.
     """
-    return [ET.fromstring(xml) for xml in FOOTNOTE_STYLE_XML.values()]
+    return [ET.fromstring(xml) for xml in FOOTNOTE_STYLE_XML.values()]  # noqa: S314
 
 
-def iso_date(dt: Optional[datetime.datetime]) -> str:
+def iso_date(dt: Optional[datetime.datetime]) -> str:  # noqa: UP045
     """The `w:date` stamp OOXML tracked changes carry, UTC, second precision."""
-    dt = dt or datetime.datetime.now(datetime.timezone.utc)
+    dt = dt or datetime.datetime.now(datetime.timezone.utc)  # noqa: UP017
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

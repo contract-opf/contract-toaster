@@ -115,7 +115,7 @@ os.environ.setdefault("PIPELINE_MAX_CONCURRENCY", "5")
 os.environ.pop("MODEL_INVOCATIONS_TABLE", None)
 LEDGER_TABLE = "contract-toaster-model-invocations-dash252-test"
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

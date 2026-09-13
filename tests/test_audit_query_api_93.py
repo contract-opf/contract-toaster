@@ -113,7 +113,7 @@ os.environ.setdefault(
     "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-audit253-test"
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

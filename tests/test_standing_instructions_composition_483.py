@@ -64,7 +64,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import critic_review_pass as cp  # noqa: E402
+import critic_review_pass as cp  # noqa: E402, I001
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -89,7 +89,7 @@ PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-gene
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -195,7 +195,7 @@ def test_standing_instructions_precedence_copy_matches_epic_wording(failures: li
         "review, if any, govern over these. Rules the playbook marks as hard "
         "requirements override everything, including these instructions."
     )
-    if pp.STANDING_INSTRUCTIONS_INTRO != expected:
+    if pp.STANDING_INSTRUCTIONS_INTRO != expected:  # noqa: SIM300
         failures.append(
             "[4a] STANDING_INSTRUCTIONS_INTRO must be the SINGLE SOURCE for the "
             "epic's precedence copy, verbatim; got a differing string."
@@ -325,7 +325,7 @@ def test_run_review_threads_instructions_text_into_both_passes(failures: list[st
 # already-proven standing-instructions store fixtures/fakes from issue
 # #482's own test file (in-memory FakeDynamoDBResource, seed_active_bundle
 # wiring, pi/reviews_module) rather than re-deriving them.
-from test_playbook_instructions_482 import (  # noqa: E402
+from test_playbook_instructions_482 import (  # noqa: E402, I001
     FakeDynamoDBResource,
     FakeSfnClient,
 )

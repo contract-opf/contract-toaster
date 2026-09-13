@@ -47,6 +47,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -117,12 +118,16 @@ const LAZY_CHUNK_MS = 10_000;
 function stubFetch(routes: Record<string, unknown>): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const pathname = new URL(String(input), 'http://localhost').pathname;
       const body = routes[pathname];
       if (body === undefined) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );

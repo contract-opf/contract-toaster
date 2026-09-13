@@ -40,6 +40,7 @@ import AdminUsers from '../AdminUsers';
 import AdminRetention from '../AdminRetention';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -54,15 +55,19 @@ vi.mock('aws-amplify/auth', () => ({
  * mock so a test can count the calls that actually went out.
  */
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);

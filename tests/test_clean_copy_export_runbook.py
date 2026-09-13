@@ -591,7 +591,7 @@ THREAT_CITATION_DECISION_PATTERN = re.compile(
 
 # Pattern T5: and what that makes the artifact.
 THREAT_THIRD_PARTY_TERMS_PATTERN = re.compile(
-    r"third.part(?:y|ies)(?:’|')?s?\s+confidential"
+    r"third.part(?:y|ies)(?:’|')?s?\s+confidential"  # noqa: RUF001
     r"|confidential\s+terms\s+of\s+a\s+third\s+part",
     re.IGNORECASE,
 )

@@ -122,6 +122,7 @@ function makeMockAudioContext(state: 'running' | 'suspended' = 'suspended'): {
     createBufferSource(): MockBufferSource {
       return new MockBufferSource();
     }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     decodeAudioData(_raw: ArrayBuffer): Promise<unknown> {
       stats.decoded += 1;
       // Stand in for an AudioBuffer — the module only stores and replays it.
@@ -133,6 +134,7 @@ function makeMockAudioContext(state: 'running' | 'suspended' = 'suspended'): {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return { Ctor: MockAudioContext as unknown as new () => unknown, stats };
 }
 
@@ -150,6 +152,7 @@ function setAudioContext(Ctor: (new () => unknown) | undefined): void {
 function stubAudioFetch(ok = true): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async () => ({ ok, arrayBuffer: async () => new ArrayBuffer(8) }) as unknown as Response),
   );
 }

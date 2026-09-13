@@ -168,7 +168,7 @@ class TestConnectionReuse(unittest.TestCase):
             mock_instance.stream.side_effect = lambda *_a, **_kw: (
                 stream_context_for_response(_ok_response("ok"))
             )
-            with patch.dict("os.environ", {}, clear=True):
+            with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
                 with mc.OpenRouterModelClient(
                     api_key="sk-test", max_retries=0, sleep_fn=_no_sleep
                 ) as client:
@@ -227,7 +227,7 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=2, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
@@ -240,7 +240,7 @@ class TestBoundedJitteredRetries(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
@@ -304,7 +304,7 @@ class TestContextLengthFailClosed(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt=SECRET_PROMPT, max_output_tokens=10
@@ -319,7 +319,7 @@ class TestContextLengthFailClosed(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError):
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt=SECRET_PROMPT, max_output_tokens=10
@@ -332,7 +332,7 @@ class TestContextLengthFailClosed(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError):
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
@@ -343,7 +343,7 @@ class TestContextLengthFailClosed(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u", max_output_tokens=10
@@ -393,7 +393,7 @@ class TestNoSubstanceDiscipline(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=3, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelContextLengthExceededError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt=SECRET_PROMPT, user_prompt=SECRET_PROMPT, max_output_tokens=10
@@ -405,7 +405,7 @@ class TestNoSubstanceDiscipline(unittest.TestCase):
         client = mc.OpenRouterModelClient(
             api_key="sk-test", http_client=http, max_retries=1, sleep_fn=_no_sleep
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt=SECRET_PROMPT, max_output_tokens=10

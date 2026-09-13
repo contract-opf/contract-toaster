@@ -63,6 +63,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -147,12 +148,15 @@ function stubServer(routes: Record<string, Handler>): Server {
     'GET /api/playbooks': ok(DEFAULT_PLAYBOOKS),
     ...routes,
   };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     // The appliance's sound files are fetched as ArrayBuffers, never JSON.
     if (pathname.endsWith('.mp3')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
     }
     const key = `${method} ${pathname}`;
@@ -162,6 +166,7 @@ function stubServer(routes: Record<string, Handler>): Server {
       return {
         ok: false,
         status: 404,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ detail: 'Review not found.' }),
       } as Response;
     }
@@ -170,6 +175,7 @@ function stubServer(routes: Record<string, Handler>): Server {
     return {
       ok: reply.status >= 200 && reply.status < 300,
       status: reply.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => {
         if (reply.notJson) {
           throw new SyntaxError('Unexpected token < in JSON at position 0');
@@ -287,11 +293,16 @@ afterEach(() => {
 
 /** The href of the last temporary anchor the app handed to the browser. */
 function lastDownloadHref(): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   const anchors = createElementSpy.mock.calls
     .map((call: unknown[], index: number) => ({ tag: call[0], index }))
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     .filter((entry: { tag: unknown }) => entry.tag === 'a');
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   if (anchors.length === 0) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
   const last = anchors[anchors.length - 1]!.index;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
   return (createElementSpy.mock.results[last]!.value as HTMLAnchorElement).href;
 }
 
@@ -881,6 +892,7 @@ describe('#77 route 8 — a disposition save can fail and then succeed', () => {
     expect(screen.queryByTestId('review-disposition-recorded')).toBeNull();
     expect(screen.getByTestId('review-disposition-edited')).toBeEnabled();
     // The failure did not eat the note the reviewer typed.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('review-disposition-note') as HTMLTextAreaElement).value).toBe(
       'Tightened the cap before sending.',
     );
@@ -1000,18 +1012,23 @@ afterEach(() => {
 
 describe('#77 route 9 — the host global shortcuts, with each console dialog open', () => {
   it.each([
+    // eslint-disable-next-line @typescript-eslint/require-await
     ['shortcuts', async () => fireEvent.click(screen.getByTestId('review-shortcuts-key'))],
     [
       'playbooks',
+      // eslint-disable-next-line @typescript-eslint/require-await
       async () => fireEvent.click(screen.getByRole('button', { name: /browse playbooks/i })),
     ],
     [
       'receipt',
+      // eslint-disable-next-line @typescript-eslint/require-await
       async () => fireEvent.click(screen.getByRole('button', { name: /view review receipt/i })),
     ],
+    // eslint-disable-next-line @typescript-eslint/require-await
     ['cover', async () => fireEvent.click(screen.getByTestId('review-cover-note-butter'))],
     [
       'disposition',
+      // eslint-disable-next-line @typescript-eslint/require-await
       async () => fireEvent.click(screen.getByRole('button', { name: /record outcome/i })),
     ],
   ])('reaches nothing behind the %s dialog, and Escape closes it', async (modal, openIt) => {

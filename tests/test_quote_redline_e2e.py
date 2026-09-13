@@ -58,7 +58,7 @@ Run standalone: `python3 tests/test_quote_redline_e2e.py`
 Exit codes: 0 = pass, 1 = fail
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import io
 import json
@@ -401,11 +401,11 @@ def _part_2_docx_round_trip_and_tracked_changes(
         for name in names:
             if name.endswith(".xml") or name.endswith(".rels"):
                 try:
-                    ET.fromstring(zf.read(name))
+                    ET.fromstring(zf.read(name))  # noqa: S314
                 except ET.ParseError as exc:
                     failures.append(f"[2e] {name} failed to re-parse: {exc}")
 
-        doc_root = ET.fromstring(zf.read("word/document.xml"))
+        doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
         ins_elements = doc_root.findall(f".//{_qn('ins')}")
         del_elements = doc_root.findall(f".//{_qn('del')}")
         if not ins_elements or not del_elements:
@@ -445,7 +445,7 @@ def _part_2_docx_round_trip_and_tracked_changes(
             footnote_refs = doc_root.findall(f".//{_qn('footnoteReference')}")
             if not footnote_refs:
                 failures.append("[2k] No <w:footnoteReference> in document.xml.")
-            footnotes_root = ET.fromstring(zf.read("word/footnotes.xml"))
+            footnotes_root = ET.fromstring(zf.read("word/footnotes.xml"))  # noqa: S314
             footnote_text = "".join(
                 (t.text or "") for t in footnotes_root.findall(f".//{_qn('t')}")
             )

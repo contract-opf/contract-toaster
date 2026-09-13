@@ -31,6 +31,13 @@
 # WHAT IT DOES
 #   1. Refuses to run on `main` (and on a detached HEAD) — exit 1, no push.
 #   2. Runs, in order, stopping at the first red gate:
+#        lint       ruff check … && mypy   (issue #65 — FIRST because it is the
+#                                           cheapest gate here: seconds, against
+#                                           minutes for the suites below.
+#                                           scripts/check.sh runs the same pair
+#                                           as its own fast pre-step, so this is
+#                                           an early exit, not the only
+#                                           enforcement.)
 #        frontend   cd frontend && npm test   (vitest only — see the note above)
 #        check      bash scripts/check.sh   (SKIP_INFRA=1 unless this branch
 #                                            touches infra/ — see below)
@@ -50,7 +57,8 @@
 #   unless the branch actually touches `infra/` (`git diff --name-only main...`).
 #
 # TEST SEAMS (tests/test_landing_flow_64.py drives this script for real)
-#   LAND_GATE_FRONTEND_CMD / LAND_GATE_CHECK_CMD / LAND_GATE_BRAND_CMD each
+#   LAND_GATE_LINT_CMD / LAND_GATE_FRONTEND_CMD / LAND_GATE_CHECK_CMD /
+#   LAND_GATE_BRAND_CMD each
 #   override one gate's command line. They exist so the gate calls are
 #   fakeable in a throwaway repository; a developer run leaves them unset and
 #   gets the real gates above.
@@ -123,6 +131,10 @@ else
   esac
 fi
 
+# The lint gate activates the local venv itself when there is one: ruff and
+# mypy are pinned in requirements-dev.txt and installed there, and land.sh
+# (unlike scripts/check.sh) does not otherwise activate it.
+LINT_CMD="${LAND_GATE_LINT_CMD:-if [ -f .venv/bin/activate ]; then . .venv/bin/activate; fi; ruff check backend scripts tests infra/lambda && mypy}"
 FRONTEND_CMD="${LAND_GATE_FRONTEND_CMD:-cd frontend && npm test}"
 CHECK_CMD="${LAND_GATE_CHECK_CMD:-bash scripts/check.sh}"
 BRAND_CMD="${LAND_GATE_BRAND_CMD:-python3 tests/lint-brand-free.py}"
@@ -142,6 +154,11 @@ run_gate() {
   bash -c "$2"
   return $?
 }
+
+# --- gate: lint ------------------------------------------------------------
+run_gate lint "$LINT_CMD"
+rc=$?
+[ "$rc" -eq 0 ] || fail_gate lint "$rc"
 
 # --- gate: frontend --------------------------------------------------------
 run_gate frontend "$FRONTEND_CMD"

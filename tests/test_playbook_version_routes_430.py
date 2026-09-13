@@ -64,7 +64,7 @@ os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-routes430-test")
 # uploads S3 bucket before recording the version row.
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-routes430-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

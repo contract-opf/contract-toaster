@@ -50,8 +50,8 @@ CDK_OUT_DIR = INFRA_DIR / "cdk.out"
 
 def run_cdk_synth() -> None:
     """Synthesize the dev environment so cdk.out/*.nested.template.json is fresh."""
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "-q"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "-q"],  # noqa: S607
         cwd=INFRA_DIR,
         capture_output=True,
         text=True,

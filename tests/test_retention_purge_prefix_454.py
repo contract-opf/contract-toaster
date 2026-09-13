@@ -67,7 +67,7 @@ os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-454-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-454-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-454-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.exceptions import ClientError  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

@@ -276,7 +276,7 @@ def _base_env() -> dict[str, str]:
     supplied = compose_env(COMPOSE_LOCAL)
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": os.environ.get("HOME", "/tmp"),
+        "HOME": os.environ.get("HOME", "/tmp"),  # noqa: S108
         "PYTHONPATH": f"{BACKEND_ROOT}{os.pathsep}{SCRIPTS_ROOT}",
         "PYTHONUNBUFFERED": "1",
     }

@@ -32,6 +32,7 @@ import ReviewSubmission from '../ReviewSubmission';
 import { choosePlaybook, submitArmed } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -43,12 +44,14 @@ vi.mock('aws-amplify/auth', () => ({
 // Same routing convention as playbook-selector.test.tsx / browning-control.test.tsx.
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     if (typeof entry === 'function') {
@@ -61,8 +64,10 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
       'body' in (entry as Record<string, unknown>)
     ) {
       const { status: statusCode, body } = entry as { status: number; body: unknown };
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: statusCode < 400, status: statusCode, json: async () => body } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -230,6 +235,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
     expectsNoPreflightClaim();
 
     // Clean up the pending promise so the test doesn't leak a hung request.
+    // eslint-disable-next-line @typescript-eslint/require-await
     pending.resolve?.({ ok: true, status: 200, json: async () => ({}) } as Response);
   });
 
@@ -346,6 +352,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             ...BASE_STATS,
             classification: 'ok',
@@ -362,6 +369,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ match: 'unlikely' }),
         } as Response);
       },
@@ -399,6 +407,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             ...BASE_STATS,
             title: 'Second File Title',
@@ -435,6 +444,7 @@ describe('preflight card — ReviewSubmission.tsx', () => {
     pending.resolveFirst?.({
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({
         ...BASE_STATS,
         title: 'First File Title',

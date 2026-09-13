@@ -449,12 +449,12 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
             return errors  # further checks would be type-unsafe
 
     # enum check
-    if "enum" in schema:
+    if "enum" in schema:  # noqa: SIM102
         if obj not in schema["enum"]:
             errors.append(f"{path}: {obj!r} not in enum {schema['enum']!r}")
 
     # maxLength check (strings)
-    if "maxLength" in schema and isinstance(obj, str):
+    if "maxLength" in schema and isinstance(obj, str):  # noqa: SIM102
         if len(obj) > schema["maxLength"]:
             errors.append(
                 f"{path}: string length {len(obj)} exceeds maxLength {schema['maxLength']}"
@@ -616,7 +616,7 @@ _RESOLVER_SELF_CHECK_CASES = (
     ),
 )
 
-if sys.version_info >= (3, 10):
+if sys.version_info >= (3, 10):  # noqa: UP036
     # A bare name in a `case` pattern is a CAPTURE pattern -- it binds. This
     # case is appended rather than written into the table above because `match`
     # is a SyntaxError on 3.9, and this file must still parse and run on the

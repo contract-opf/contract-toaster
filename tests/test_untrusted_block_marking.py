@@ -41,7 +41,7 @@ Offline, pure string assembly. No model, no network.
 Exit codes: 0 = all tests pass, 1 = one or more failed.
 """
 
-import re
+import re  # noqa: I001
 import json
 import sys
 import unittest

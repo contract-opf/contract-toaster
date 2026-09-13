@@ -333,6 +333,66 @@ if [ -f ".python-version" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# LINT / TYPE PRE-STEP (issue #65, diagnostic G4 / action B4).
+#
+# Deliberately FIRST and deliberately FAST: ruff over the whole tree takes well
+# under a second and mypy a few, against minutes for the suite below. A style
+# or typing regression should cost you that, not a full gate run.
+#
+# Placement is load-bearing in two directions. It is AFTER the venv-activation
+# block above, because `ruff`/`mypy` are pinned in requirements-dev.txt and
+# live in that venv; and it is clear of the unindented `export TZ=` line, which
+# tests/test_ci_env_parity_639.py Check 4 reads in place and rejects if it moves
+# below the suite.
+#
+# WHAT GREEN MEANS HERE
+#   "No NEW violations." #65 landed a whole-tree BASELINE: the violations that
+#   already existed carry `# noqa` comments (ruff) and per-module
+#   `[[tool.mypy.overrides]] ignore_errors = true` entries mirrored in
+#   mypy-baseline.txt (mypy), which tests/test_lint_gates_65.py only ever lets
+#   shrink. `ruff format --check` is NOT run here — a whole-tree reformat
+#   collides with the in-flight #50-#59 series; follow-up issue #90 turns it on
+#   afterwards, and that same test asserts it is absent until then.
+#
+# NOT fail-open on a missing TOOL. An absent ruff/mypy is a red gate with an
+# install line, never a silent skip: a lint gate that disappears when the tool
+# is absent is a lint gate nobody can rely on.
+#
+# It IS skipped on a tree that is not this repository. tests/test_check_only_flag_68.py
+# copies THIS SCRIPT into a throwaway repo of synthetic test files and runs it
+# for real — that repo has no pyproject.toml, no `backend/` and no
+# `infra/lambda/`, so linting it would report `E902 No such file or directory`
+# and fail a test about `--only`, for a reason that has nothing to do with
+# either. The presence of `[tool.ruff]` in a pyproject.toml at the root is what
+# separates the two cases, and it cannot silently disable the gate HERE:
+# tests/test_lint_gates_65.py check 1 fails if that table goes missing, and its
+# checks 7d/7e fail if this script stops invoking ruff and mypy. Both run
+# inside this gate.
+# ---------------------------------------------------------------------------
+if [ -f pyproject.toml ] && grep -q '^\[tool\.ruff\]' pyproject.toml; then
+  if ! command -v ruff >/dev/null 2>&1 || ! command -v mypy >/dev/null 2>&1; then
+    echo "CHECK: FAIL - ruff and/or mypy not found on PATH." >&2
+    echo "CHECK:        They are pinned in requirements-dev.txt; install with" >&2
+    echo "CHECK:            pip install -r requirements-dev.txt" >&2
+    exit 1
+  fi
+
+  echo "CHECK: lint (ruff) …"
+  if ! ruff check backend scripts tests infra/lambda; then
+    echo "CHECK: FAIL - ruff reported NEW violations (the pre-#65 ones carry # noqa)." >&2
+    exit 1
+  fi
+
+  echo "CHECK: types (mypy) …"
+  if ! mypy; then
+    echo "CHECK: FAIL - mypy reported errors outside the mypy-baseline.txt modules." >&2
+    exit 1
+  fi
+else
+  echo "CHECK: lint pre-step SKIPPED - no [tool.ruff] in a root pyproject.toml, so this is not the contract-toaster tree."
+fi
+
 # Clear stale CDK synth output. cdk.out is gitignored and cdk synth does NOT
 # prune templates for stacks that no longer exist, so pre-rename artifacts
 # (e.g. eiaareviewdev*.nested.template.json from before PR #184) linger and

@@ -48,7 +48,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import model_client  # noqa: E402
+import model_client  # noqa: E402, I001
 import reconciliation as recon  # noqa: E402
 import floor_judge  # noqa: E402
 

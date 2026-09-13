@@ -40,7 +40,7 @@ Verifies that all acceptance criteria for issue #55 are satisfied:
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import json
+import json  # noqa: F401, I001
 import re
 import subprocess
 import sys
@@ -448,7 +448,7 @@ def check_g_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"],
+            ["npm", "install"],  # noqa: S607
             cwd=INFRA,
             capture_output=True,
             text=True,
@@ -460,8 +460,8 @@ def check_g_cdk_synth() -> list[str]:
                 f"stdout: {install.stdout[-500:]}\nstderr: {install.stderr[-500:]}",
             )
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

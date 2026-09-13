@@ -84,7 +84,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 logger = logging.getLogger(__name__)
 

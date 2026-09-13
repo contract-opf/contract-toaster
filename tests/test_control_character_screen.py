@@ -92,8 +92,8 @@ SCREENED_CODEPOINTS: list[tuple[int, str]] = [
 ALLOWED_CHARACTERS: list[tuple[str, str]] = [
     ("\t", "tab"),
     ("\n", "newline"),
-    (" ", "non-breaking space"),
-    ("–", "en dash"),
+    (" ", "non-breaking space"),  # noqa: RUF001
+    ("–", "en dash"),  # noqa: RUF001
     ("“", "left curly double quote"),
 ]
 
@@ -356,7 +356,7 @@ def test_the_smoke_tool_reports_the_new_reason_code(failures: list) -> None:
         [
             "Governing Law",
             "This Agreement is governed by the laws of the State of Franklin.",
-            "Each party shall bear its own costs of the arbitration.",
+            "Each party shall bear its own costs of the arbitration.",  # noqa: RUF001
         ]
     )
     clean_result = dss.scan_document(clean_docx)

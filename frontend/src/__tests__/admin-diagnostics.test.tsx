@@ -54,6 +54,7 @@ function failedAtCellText(row: HTMLElement): string {
 }
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -72,12 +73,15 @@ function failure(overrides: Partial<RecentFailure> = {}): RecentFailure {
 
 /** Stub GET /api/admin/diagnostics/recent-failures with one canned response. */
 function stubDiagnosticsFetch(response: { status: number; body: unknown }): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async () => ({
     ok: response.status >= 200 && response.status < 300,
     status: response.status,
+    // eslint-disable-next-line @typescript-eslint/require-await
     json: async () => response.body,
   }));
   vi.stubGlobal('fetch', impl);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return impl as unknown as ReturnType<typeof vi.fn>;
 }
 
@@ -86,16 +90,19 @@ function stubDiagnosticsSequence(
   responses: { status: number; body: unknown }[],
 ): ReturnType<typeof vi.fn> {
   let call = 0;
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async () => {
     const response = responses[Math.min(call, responses.length - 1)];
     call += 1;
     return {
       ok: response.status >= 200 && response.status < 300,
       status: response.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => response.body,
     };
   });
   vi.stubGlobal('fetch', impl);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return impl as unknown as ReturnType<typeof vi.fn>;
 }
 
@@ -964,6 +971,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       const filterBtn = screen.getByTestId('diagnostics-filter-incident-btn');
       fireEvent.click(filterBtn);
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       const searchInput = screen.getByTestId('diagnostics-search-input') as HTMLInputElement;
       expect(searchInput.value).toBe('model_account_out_of_credits');
       expect(screen.getByTestId('failure-row-r-1')).toBeInTheDocument();

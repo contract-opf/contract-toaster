@@ -61,7 +61,57 @@ Individual gates worth knowing:
 python3 tests/lint-brand-free.py          # no private-org reference in a pull path
 python3 tests/lint-counterparty-names.py  # no counterparty identity, ever
 python3 tools/docs_sync.py audit          # docs/INDEX.md still true
+ruff check backend scripts tests infra/lambda   # lint  (issue #65)
+mypy                                      # types (issue #65)
+cd frontend && npm run lint && npm run typecheck
 ```
+
+### Lint and types are baseline-then-ratchet (issue #65)
+
+`ruff`, `mypy` and `eslint` all run green on this tree, and that green means
+**no NEW violations** — not *no violations*. Before #65 nothing linted this
+repository at all, and fixing ~2,150 findings in one pull request is a change
+nobody can review. So a baseline was annotated in place instead:
+
+| tool | how the existing debt is marked | where |
+| --- | --- | --- |
+| ruff | `# noqa: <rule>` comments (`ruff check --add-noqa`) | in the code |
+| eslint | `eslint-disable-next-line <rule>` comments (`frontend/scripts/eslint-baseline.mjs`) | in the code |
+| mypy | `[[tool.mypy.overrides]] ignore_errors = true` per module | `pyproject.toml` + `mypy-baseline.txt` |
+
+`tests/test_lint_gates_65.py` is the ratchet. It re-runs mypy with the
+overrides stripped out and fails if `mypy-baseline.txt` has grown, or if it
+still names a module mypy now passes. **Pay debt down by deleting an
+annotation; never add one to new code** — an annotation on a line you just
+wrote is a finding a reviewer should ask about.
+
+Every annotation is **per line**, and blanket ones are refused by name: a
+file-wide `/* eslint-disable <rule> */` header
+(`frontend/src/__tests__/lint-baseline-65.test.tsx`) or a blanket `# noqa` with
+no rule after it (`tests/test_lint_gates_65.py`, check 8). Both would exempt
+code that does not exist yet, in a one-line diff no gate could see afterwards.
+
+**Scope, stated plainly.** `ruff` lints `backend scripts tests infra/lambda`;
+`tools/`, `deploy/` and `docs/assets/` are outside #65's baseline and still
+carry findings, so nothing lints them yet. `mypy` covers `backend/src` and
+`scripts`. `eslint` covers `frontend/src` and `frontend/scripts`, never
+`frontend/vendor/orbit-diner/` — that is the designer's source of record and
+must not be edited, so findings there could not be fixed.
+
+`ruff` and `mypy` are pinned in `requirements-dev.txt`; the eslint toolchain is
+in `frontend/package.json`. Both run in `.github/workflows/lint.yml`, as a fast
+pre-step in `scripts/check.sh` and `scripts/check-frontend.sh`, and as
+`scripts/land.sh`'s first gate.
+
+The FORMATTERS are configured but deliberately not enforced: `ruff format` and
+`prettier --check` would reformat the whole tree, which collides with the
+in-flight audit series, and `frontend/vitest.config.ts` runs jsdom with
+`css: false` so no gate here can see a stylesheet. Issue #90 enables them
+afterwards. `npm run format -- <paths>` is available meanwhile.
+
+Optional git hooks for both live in `.pre-commit-config.yaml` (`pre-commit
+install`). They are pre-commit hooks, not husky: husky would claim git's
+`core.hooksPath`, which `.githooks/` already holds for the pre-push main guard.
 
 ### Running one file, or a few (`--only`)
 
@@ -172,6 +222,7 @@ bash scripts/land.sh
 ```
 
 `scripts/land.sh` is the whole flow: it refuses to run on `main`, runs
+`ruff check … && mypy` (first, because it is the cheapest),
 `cd frontend && npm test`, `bash scripts/check.sh` (with `SKIP_INFRA=1` unless
 the branch touches `infra/`) and `python3 tests/lint-brand-free.py`, and on the
 first red gate prints that gate's name and exits 1 **without pushing**. All

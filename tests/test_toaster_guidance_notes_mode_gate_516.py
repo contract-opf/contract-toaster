@@ -105,7 +105,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import critic_review_pass as cp  # noqa: E402
+import critic_review_pass as cp  # noqa: E402, I001
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -135,7 +135,7 @@ def _footnote_text(redline_bytes: bytes) -> str:
     with zipfile.ZipFile(io.BytesIO(redline_bytes)) as zf:
         if "word/footnotes.xml" not in zf.namelist():
             return ""
-        root = ET.fromstring(zf.read("word/footnotes.xml"))
+        root = ET.fromstring(zf.read("word/footnotes.xml"))  # noqa: S314
         return "".join((t.text or "") for t in root.findall(f".//{_qn('t')}"))
 
 

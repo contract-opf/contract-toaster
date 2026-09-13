@@ -32,7 +32,7 @@ Assertions (all must pass for GREEN):
    as text in the #5 body).
 
 Exit codes: 0 = all pass, 1 = one or more fail.
-"""
+"""  # noqa: RUF002
 
 import re
 import sys
@@ -53,9 +53,9 @@ SYNC_CADENCE_PATTERNS = [
     re.compile(r"\b(≤\s*1\s*h(our)?|1\s*h(our)?|60\s*min(ute)?s?|every\s+hour)\b", re.IGNORECASE),
     re.compile(r"sync\s+(cadence|interval|frequency|window)\s*(:|is|of|=|≤)?\s*[\d≤]+\s*(h|hour|min)", re.IGNORECASE),
 ]
-# Token TTL: something like "15 min", "60 min", "15–60 min", "15 minutes", etc.
+# Token TTL: something like "15 min", "60 min", "15–60 min", "15 minutes", etc.  # noqa: RUF003
 TOKEN_TTL_PATTERNS = [
-    re.compile(r"\b(15|60|30)\s*(–|-|to)\s*(60|30|15)\s*min(ute)?s?\b", re.IGNORECASE),
+    re.compile(r"\b(15|60|30)\s*(–|-|to)\s*(60|30|15)\s*min(ute)?s?\b", re.IGNORECASE),  # noqa: RUF001
     re.compile(r"\b(access.?token|token)\s*(TTL|lifetime|expir\w+)\s*(:|is|of|=|≤|<)?\s*[\d≤]+\s*(h|hour|min)", re.IGNORECASE),
     re.compile(r"\bTTL\s*(is|of|=|≤|<)?\s*(15|60|30)\b", re.IGNORECASE),
     re.compile(r"\b(15|60|30)\s*min(ute)?s?\s*(TTL|access.?token|token\s*lifetime)\b", re.IGNORECASE),
@@ -195,7 +195,7 @@ def check_arch_deprovisioning_numbers() -> list[str]:
     if not ttl_found:
         failures.append(
             "  ARCHITECTURE.md Deprovisioning section: access-token TTL is not pinned "
-            "as a concrete number (e.g. '15 min', '60 min', '15–60 min'). "
+            "as a concrete number (e.g. '15 min', '60 min', '15–60 min'). "  # noqa: RUF001
             "Issue #11 requires this to be a specific value, not 'short'."
         )
 
@@ -248,7 +248,7 @@ def check_phase0_issue5_numbers() -> list[str]:
     if not ttl_found:
         failures.append(
             "  docs/phase-0-issues.md issue #5: does not contain a pinned access-token "
-            "TTL number (e.g. '15 min', '60 min', '15–60 min'). Issue #11 requires this "
+            "TTL number (e.g. '15 min', '60 min', '15–60 min'). Issue #11 requires this "  # noqa: RUF001
             "to be machine-assertable in Phase 0 #5 criteria."
         )
 

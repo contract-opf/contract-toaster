@@ -151,7 +151,7 @@ def gate_1_overlay_semantics(arch_text: str) -> list[str]:
         "post-terminal administrative overlay — not pipeline-derived from confidence_state",
         "projection-invariant paragraph acknowledges the QUARANTINED/SUPERSEDED exception",
     ]
-    for i, (pattern, label) in enumerate(zip(OVERLAY_PATTERNS, labels), 1):
+    for i, (pattern, label) in enumerate(zip(OVERLAY_PATTERNS, labels), 1):  # noqa: B905
         if pattern.search(arch_text):
             print(f"  [PASS] Gate 1.{i}: {label}")
         else:
@@ -173,7 +173,7 @@ def gate_2_inflight_rollback(arch_text: str) -> list[str]:
         "in-flight RUNNING reviews are let to finish (not aborted by rollback sweep)",
         "second/follow-up quarantine sweep keyed by bundle hash catches late DONE reviews",
     ]
-    for i, (pattern, label) in enumerate(zip(INFLIGHT_ROLLBACK_PATTERNS, labels), 1):
+    for i, (pattern, label) in enumerate(zip(INFLIGHT_ROLLBACK_PATTERNS, labels), 1):  # noqa: B905
         if pattern.search(arch_text):
             print(f"  [PASS] Gate 2.{i}: {label}")
         else:

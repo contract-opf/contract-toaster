@@ -449,7 +449,7 @@ def _pair_ops_into_edits(ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for index, op in enumerate(ops):
         if index in consumed or op["op"] != "delete":
             continue
-        partner_index: Optional[int] = None
+        partner_index: Optional[int] = None  # noqa: UP045
         for candidate in (index + 1, index - 1):
             if candidate < 0 or candidate >= len(ops) or candidate in consumed:
                 continue
@@ -489,7 +489,7 @@ def _pair_ops_into_edits(ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return edits
 
 
-def _physical_span_for(spans: list, start: int, end: int) -> Optional[int]:
+def _physical_span_for(spans: list, start: int, end: int) -> Optional[int]:  # noqa: UP045
     """Index of the physical `<w:p>` span that wholly contains `[start, end]`,
     or `None` when the range crosses a join (or falls outside every span).
 
@@ -563,7 +563,7 @@ def _resolve_physical_paragraphs(
             # paragraphs). Fail closed for the whole block rather than fall
             # back to a text scan.
             continue
-        for span_index, (span, p_index) in enumerate(zip(spans, p_indexes)):
+        for span_index, (span, p_index) in enumerate(zip(spans, p_indexes)):  # noqa: B905
             if not isinstance(p_index, int) or isinstance(p_index, bool):
                 continue
             if not 0 <= p_index < len(paragraphs):
@@ -695,7 +695,7 @@ def _plan_omitted_clause_placeholders(
 # ---------------------------------------------------------------------------
 
 
-def _copy_rpr(run: Optional[ET.Element]) -> Optional[ET.Element]:
+def _copy_rpr(run: Optional[ET.Element]) -> Optional[ET.Element]:  # noqa: UP045
     """A deep copy of `run`'s `<w:rPr>`, or None when it has none -- so the
     inserted run continues the surrounding formatting instead of resetting
     to the paragraph default."""
@@ -716,7 +716,7 @@ def _deep_copy(el: ET.Element) -> ET.Element:
     return clone
 
 
-def _make_text_run(rpr: Optional[ET.Element], text: str) -> ET.Element:
+def _make_text_run(rpr: Optional[ET.Element], text: str) -> ET.Element:  # noqa: UP045
     run = ET.Element(_w("r"))
     if rpr is not None:
         run.append(_deep_copy(rpr))
@@ -755,7 +755,7 @@ def _is_simple_text_run(run: ET.Element) -> bool:
 
 def _apply_pure_insertion(
     p: ET.Element, offset: int, text: str, revision_id: int, author: str, timestamp_iso: str
-) -> Optional[str]:
+) -> Optional[str]:  # noqa: UP045
     """Write `text` into paragraph `p` at ACCEPTED-view character `offset` as
     a `<w:ins>` -- no `<w:del>`, no anchor text, no re-matching.
 
@@ -783,9 +783,9 @@ def _apply_pure_insertion(
         p.append(_build_ins(revision_id, author, timestamp_iso, None, text))
         return None
 
-    inside: Optional[tuple] = None
-    left: Optional[dict[str, Any]] = None
-    right: Optional[dict[str, Any]] = None
+    inside: Optional[tuple] = None  # noqa: UP045
+    left: Optional[dict[str, Any]] = None  # noqa: UP045
+    right: Optional[dict[str, Any]] = None  # noqa: UP045
     cumulative = 0
     for entry in entries:
         length = len(entry["text"])
@@ -841,7 +841,7 @@ def _build_ins(
     revision_id: int,
     author: str,
     timestamp_iso: str,
-    rpr: Optional[ET.Element],
+    rpr: Optional[ET.Element],  # noqa: UP045
     text: str,
 ) -> ET.Element:
     ins = ET.Element(_w("ins"))
@@ -1016,7 +1016,7 @@ def _delete_paragraph(
     allocate,
     author: str,
     timestamp_iso: str,
-    placeholder: Optional[str] = None,
+    placeholder: Optional[str] = None,  # noqa: UP045
 ) -> list[int]:
     """One physical `<w:p>` of a `delete_block`: every run tracked-deleted,
     then the paragraph mark itself.
@@ -1076,7 +1076,7 @@ def _inherited_paragraph_properties(anchor: ET.Element) -> ET.Element:
         return ET.Element(_w("pPr"))
     pPr = _deep_copy(source)
     for child in list(pPr):
-        if child.tag in (_w("rPr"),) + _PPR_TAIL_TAGS:
+        if child.tag in (_w("rPr"),) + _PPR_TAIL_TAGS:  # noqa: RUF005
             pPr.remove(child)
     return pPr
 
@@ -1164,7 +1164,7 @@ def _footnote_style_rpr() -> ET.Element:
     return rpr
 
 
-def _footnote_styles_part(styles_xml: Optional[bytes]) -> tuple[Optional[bytes], bool]:
+def _footnote_styles_part(styles_xml: Optional[bytes]) -> tuple[Optional[bytes], bool]:  # noqa: UP045
     """`(new "word/styles.xml" bytes, part_was_created)` for a package whose
     footnotes must be able to RESOLVE `FootnoteReference` / `FootnoteText`,
     or `(None, False)` when the package's own part already defines both.
@@ -1185,7 +1185,7 @@ def _footnote_styles_part(styles_xml: Optional[bytes]) -> tuple[Optional[bytes],
     caller adds the relationship and content-type override for it.
     """
     created = styles_xml is None
-    original_open_tag: Optional[str] = None
+    original_open_tag: Optional[str] = None  # noqa: UP045
     if created:
         root = ET.Element(_w("styles"))
     else:
@@ -1194,7 +1194,7 @@ def _footnote_styles_part(styles_xml: Optional[bytes]) -> tuple[Optional[bytes],
         ooxml_util.register_declared_namespaces(
             ooxml_util.declared_namespaces_anywhere(styles_text)
         )
-        root = ET.fromstring(styles_xml)
+        root = ET.fromstring(styles_xml)  # noqa: S314
 
     already_defined = {style.get(_w("styleId")) for style in root.findall(_w("style"))}
     missing = [
@@ -1268,11 +1268,11 @@ def inject_issue_footnotes(
     doc_xml_text = originals[DOCUMENT_PART].decode("utf-8")
     original_root_open_tag = ooxml_util.root_open_tag(doc_xml_text)
     ooxml_util.register_declared_namespaces(ooxml_util.declared_namespaces_anywhere(doc_xml_text))
-    doc_root = ET.fromstring(originals[DOCUMENT_PART])
+    doc_root = ET.fromstring(originals[DOCUMENT_PART])  # noqa: S314
 
     have_footnotes = FOOTNOTES_PART in names
     if have_footnotes:
-        footnotes_root = ET.fromstring(originals[FOOTNOTES_PART])
+        footnotes_root = ET.fromstring(originals[FOOTNOTES_PART])  # noqa: S314
         next_footnote_id = redline_generate._max_footnote_id(footnotes_root) + 1
     else:
         footnotes_root = None
@@ -1426,11 +1426,11 @@ def inject_issue_footnotes(
 
     if added_parts:
         rels_root = (
-            ET.fromstring(originals[RELS_PART])
+            ET.fromstring(originals[RELS_PART])  # noqa: S314
             if RELS_PART in names
             else ET.Element(_pkg("Relationships"))
         )
-        ct_root = ET.fromstring(originals[CONTENT_TYPES_PART])
+        ct_root = ET.fromstring(originals[CONTENT_TYPES_PART])  # noqa: S314
         next_rel_id = redline_generate._max_rel_id(rels_root) + 1
         for part_name, target, rel_type, content_type in added_parts:
             rel = ET.SubElement(rels_root, _pkg("Relationship"))
@@ -1504,7 +1504,7 @@ def apply_block_transcript(
     *,
     author: str,
     timestamp_iso: str,
-    rationale_by_issue: Optional[dict[str, str]] = None,
+    rationale_by_issue: Optional[dict[str, str]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Compile a PROVEN block transcript into OOXML tracked changes.
 
@@ -1571,7 +1571,7 @@ def apply_block_transcript(
         return dict(empty, failures=failures)
 
     block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
-    doc_root = ET.fromstring(_read_package(docx_bytes)[1][DOCUMENT_PART])
+    doc_root = ET.fromstring(_read_package(docx_bytes)[1][DOCUMENT_PART])  # noqa: S314
     resolved = _resolve_physical_paragraphs(doc_root, norm["paragraphs"])
 
     # ---- Plan every edit against the LIVE document before touching bytes.
@@ -1933,7 +1933,7 @@ def apply_block_transcript(
         ooxml_util.register_declared_namespaces(
             ooxml_util.declared_namespaces_anywhere(doc_xml_text)
         )
-        root = ET.fromstring(originals[DOCUMENT_PART])
+        root = ET.fromstring(originals[DOCUMENT_PART])  # noqa: S314
 
         # Document-wide `w:id` uniqueness, the same sweep
         # `ooxml_util.max_existing_id` documents: never collide with an
@@ -2170,7 +2170,7 @@ def apply_block_transcript(
         return {
             "docx_bytes": None,
             "applied": [],
-            "failures": failures + [batch_failure],
+            "failures": failures + [batch_failure],  # noqa: RUF005
             "revision_ids_by_issue": {},
         }
 

@@ -113,7 +113,7 @@ def _write_audit_entry(
     }
     try:
         dynamodb_resource.Table(table_name).put_item(Item=item)
-    except Exception:  # noqa: BLE001 - audit is best-effort; never gate the boot on it
+    except Exception:  # audit is best-effort; never gate the boot on it
         logger.warning(
             "RUNNER_RECOVERY: failed to write the audit row for a recovered review",
             exc_info=True,
@@ -217,7 +217,7 @@ def _relabel(review_id: str, dynamodb_resource: Any) -> bool:
                 ":running": "RUNNING",
             },
         )
-    except Exception as exc:  # noqa: BLE001 - only the race guard is swallowed
+    except Exception as exc:  # only the race guard is swallowed
         if not reviews_module._is_conditional_check_failed(exc):
             raise
         return False
@@ -253,7 +253,7 @@ def recover_orphaned_reviews(
                 continue
             try:
                 relabelled = _relabel(str(review_id), dynamodb_resource)
-            except Exception:  # noqa: BLE001 - one bad row must not strand the rest
+            except Exception:  # one bad row must not strand the rest
                 logger.warning(
                     "RUNNER_RECOVERY: could not relabel one orphaned review",
                     exc_info=True,
@@ -277,7 +277,7 @@ def recover_orphaned_reviews(
                         "previous_status": str(status_value),
                     },
                 )
-            except Exception:  # noqa: BLE001 - the relabel already landed
+            except Exception:  # the relabel already landed
                 logger.warning(
                     "RUNNER_RECOVERY: recovered a review but could not settle or "
                     "audit it",

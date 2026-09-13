@@ -37,6 +37,7 @@ import AdminSettings, {
 } from '../AdminSettings';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -89,7 +90,9 @@ interface RosterHandlers {
 }
 
 function stubRosterFetch(handlers: RosterHandlers): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = String(input);
     if (url.includes('/api/admin/entity-roster')) {
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -98,11 +101,13 @@ function stubRosterFetch(handlers: RosterHandlers): ReturnType<typeof vi.fn> {
           ? handlers.put?.(init?.body ? JSON.parse(init.body as string) : undefined)
           : handlers.get?.();
       if (!handler) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }
       return {
         ok: handler.status >= 200 && handler.status < 300,
         status: handler.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => handler.body,
       } as Response;
     }
@@ -111,14 +116,17 @@ function stubRosterFetch(handlers: RosterHandlers): ReturnType<typeof vi.fn> {
       return {
         ok: handler.status >= 200 && handler.status < 300,
         status: handler.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => handler.body,
       } as Response;
     }
     const pathname = new URL(url, 'http://localhost').pathname;
     const body = INERT[pathname];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -161,6 +169,7 @@ describe('the entity roster editor (#678)', () => {
 
     render(<AdminSettings />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const box = (await screen.findByTestId('admin-settings-roster-text')) as HTMLTextAreaElement;
     expect(box.value).toBe(STORED.join('\n'));
     expect(screen.getByTestId('admin-settings-roster-last-saved').textContent).toMatch(
@@ -210,6 +219,7 @@ describe('the entity roster editor (#678)', () => {
     window.URL.revokeObjectURL = revokeObjectURLMock;
 
     render(<AdminSettings />);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const box = (await screen.findByTestId('admin-settings-roster-text')) as HTMLTextAreaElement;
     expect(box.value).toBe(STORED.join('\n'));
 
@@ -311,6 +321,7 @@ describe('the entity roster editor (#678)', () => {
 
     fireEvent.click(screen.getByTestId('admin-settings-retry'));
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const box = (await screen.findByTestId('admin-settings-roster-text')) as HTMLTextAreaElement;
     expect(box.value).toBe(STORED.join('\n'));
     expect(screen.queryByTestId('admin-settings-roster-error')).toBeNull();

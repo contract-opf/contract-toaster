@@ -248,7 +248,7 @@ def _json_pointer(path_segments: Any) -> str:
     return "/" + "/".join(escaped)
 
 
-def _describe(exc: "jsonschema.ValidationError") -> str:
+def _describe(exc: "jsonschema.ValidationError") -> str:  # noqa: UP037
     pointer = _json_pointer(exc.absolute_path)
     location = pointer if pointer else "'' (document root)"
     if exc.validator == "required":
@@ -283,7 +283,7 @@ def resolve_opf_version(doc: dict) -> str:
     return version
 
 
-def resolve_digest_version(doc: dict) -> Optional[str]:
+def resolve_digest_version(doc: dict) -> Optional[str]:  # noqa: UP045
     """Return the document's `digest.digest_version`, or None if it has no digest.
 
     Raises OpfDigestVersionError if a digest is present but declares a version
@@ -479,7 +479,7 @@ def agreement_type_keys(opf_doc: dict) -> list[str]:
     """[agreement_type.id] + agreement_type.aliases (if present), lowercased,
     order-preserved, de-duplicated."""
     agreement_type = opf_doc.get("agreement_type") or {}
-    candidates = [agreement_type.get("id")] + list(agreement_type.get("aliases") or [])
+    candidates = [agreement_type.get("id")] + list(agreement_type.get("aliases") or [])  # noqa: RUF005
     keys: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -495,7 +495,7 @@ def agreement_type_keys(opf_doc: dict) -> list[str]:
 def match_registry_playbook(
     opf_doc: dict,
     registry_path: Path = playbook_registry.REGISTRY_PATH,
-) -> Optional[str]:
+) -> Optional[str]:  # noqa: UP045
     """First registry playbook_id (via playbook_registry.load_registry) that
     appears in agreement_type_keys(opf_doc); None if no match.
 

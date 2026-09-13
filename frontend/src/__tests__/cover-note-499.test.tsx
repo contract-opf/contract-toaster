@@ -18,6 +18,7 @@ import ReviewHistory, { type HistoryRow } from '../ReviewHistory';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -31,16 +32,20 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   // Issue #733: the catalog is a fixture every scenario needs, not a scenario
   // of its own — the console will not arm its lever without an active playbook.
   routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname.endsWith('.mp3')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
     }
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     if (entry && typeof entry === 'object' && '__httpStatus' in (entry as Record<string, unknown>)) {
@@ -48,9 +53,11 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
       return {
         ok: __httpStatus >= 200 && __httpStatus < 300,
         status: __httpStatus,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => body,
       } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -161,6 +168,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     fireEvent.click(screen.getByTestId('review-cover-note-butter'));
     await screen.findByTestId('review-cover-note-card');
 
+    // eslint-disable-next-line @typescript-eslint/require-await
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
 
@@ -214,18 +222,23 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     // return different bodies.
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const pathname = new URL(String(input), 'http://localhost').pathname;
         const method = (init?.method ?? 'GET').toUpperCase();
         // Issue #733: the console needs an active playbook before it will
         // submit at all.
         if (pathname === '/api/playbooks') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
         }
         if (pathname === '/api/reviews' && method === 'POST') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
         }
         if (pathname === '/api/reviews/rev-1' && method === 'GET') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => REQUEST_CHANGE_DETAIL } as Response;
         }
         if (pathname === '/api/reviews/rev-1/cover-note' && method === 'POST') {
@@ -234,6 +247,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({
               review_id: 'rev-1',
               draft,
@@ -244,6 +258,7 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
             }),
           } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }),
     );
@@ -314,12 +329,15 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
     allowConsoleErrorsInThisTest(/past its retention window/);
     let coverNoteCall = 0;
     let submitCall = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const pathname = new URL(String(input), 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       // Issue #733: the console needs an active playbook before it will
       // submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (pathname === '/api/reviews' && method === 'POST') {
@@ -328,16 +346,19 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: reviewId, resumed: false }),
         } as Response;
       }
       if (pathname === '/api/reviews/rev-1' && method === 'GET') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => REQUEST_CHANGE_DETAIL } as Response;
       }
       if (pathname === '/api/reviews/rev-2' && method === 'GET') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ ...REQUEST_CHANGE_DETAIL, review_id: 'rev-2' }),
         } as Response;
       }
@@ -346,9 +367,11 @@ describe('ReviewSubmission — "Butter it" cover-note draft (issue #499)', () =>
         return {
           ok: false,
           status: 409,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ detail: 'This review is past its retention window.' }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', impl);
@@ -383,6 +406,7 @@ function fetchCallFor(
 ): unknown[] | undefined {
   return fetchMock.mock.calls.find((call: unknown[]) => {
     const [input, init] = call as [RequestInfo | URL, RequestInit | undefined];
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = new URL(String(input), 'http://localhost').pathname;
     return url === pathname && (init?.method ?? 'GET').toUpperCase() === method;
   });
@@ -393,18 +417,22 @@ function fetchCallFor(
 // ---------------------------------------------------------------------------
 
 function stubHistoryFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key] as { status: number; body: unknown } | undefined;
     if (!entry) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     return {
       ok: entry.status >= 200 && entry.status < 300,
       status: entry.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => entry.body,
     } as Response;
   });
@@ -458,22 +486,28 @@ describe('ReviewHistory — "Butter it" in the expanded row (issue #499)', () =>
   it('drafts, copies, and regenerates from the expanded row', async () => {
     const secondDraft = 'Attached is an updated markup. Happy to discuss further.';
     let coverNoteCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const pathname = new URL(String(input), 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       if (pathname === '/api/reviews' && method === 'GET') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ reviews: [historyRow({})] }) } as Response;
       }
       if (pathname === '/api/reviews/rev-h1/cover-note' && method === 'POST') {
         coverNoteCalls += 1;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const body = init?.body ? JSON.parse(init.body as string) : {};
         const draft = coverNoteCalls === 1 ? DRAFT_TEXT : secondDraft;
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-h1',
             draft,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             cost_usd_cents: body.regenerate ? 4 : 2,
             cached: false,
             generated_at: '1800000000',
@@ -481,6 +515,7 @@ describe('ReviewHistory — "Butter it" in the expanded row (issue #499)', () =>
           }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', impl);
@@ -495,6 +530,7 @@ describe('ReviewHistory — "Butter it" in the expanded row (issue #499)', () =>
     expect(card).toBeInTheDocument();
     expect(screen.getByTestId('history-cover-note-text-rev-h1').textContent).toBe(DRAFT_TEXT);
 
+    // eslint-disable-next-line @typescript-eslint/require-await
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     fireEvent.click(screen.getByTestId('history-cover-note-copy-rev-h1'));

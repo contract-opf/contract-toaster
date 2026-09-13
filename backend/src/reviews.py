@@ -104,7 +104,7 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-import playbook_validation  # noqa: E402
+import playbook_validation  # noqa: E402, I001
 
 # Issue #287 (OPF bind 5/5): resolve v2-bundle OPF §8 lineage
 # (opf_content_hash / opf_section_digests / the incoming corpus snapshot
@@ -685,7 +685,7 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
         critic_input_rate / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (critic_output_rate / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
-    return int(round(usd * 100))
+    return int(round(usd * 100))  # noqa: RUF046
 
 
 def compute_actual_usd_cents_from_usage(
@@ -734,7 +734,7 @@ def compute_actual_usd_cents_from_usage(
     if critic_usage:
         total_usd += critic_usage.get("input_tokens", 0) * (critic_input_rate / 1_000_000)
         total_usd += critic_usage.get("output_tokens", 0) * (critic_output_rate / 1_000_000)
-    return int(round(total_usd * 100))
+    return int(round(total_usd * 100))  # noqa: RUF046
 
 
 def estimate_review_usd_cents(dynamodb_resource: Any = None) -> int | None:
@@ -778,7 +778,7 @@ def estimate_review_usd_cents(dynamodb_resource: Any = None) -> int | None:
         block = policy["models"][role]
         usd += int(block["approx_tokens_per_review_input"]) * (input_rate / 1_000_000)
         usd += int(block["approx_tokens_per_review_output"]) * (output_rate / 1_000_000)
-    return int(round(usd * 100))
+    return int(round(usd * 100))  # noqa: RUF046
 
 
 # The ONLY fields a non-admin reviewer's estimate carries. An explicit tuple,
@@ -1228,7 +1228,7 @@ def compute_preflight_actual_usd_cents(usage: dict[str, int] | None) -> int:
     output_rate = float(entry.get("cost_per_million_output_usd", 0.0))
     total_usd = usage.get("input_tokens", 0) * (input_rate / 1_000_000)
     total_usd += usage.get("output_tokens", 0) * (output_rate / 1_000_000)
-    return int(round(total_usd * 100))
+    return int(round(total_usd * 100))  # noqa: RUF046
 
 
 def record_preflight_spend(
@@ -1288,7 +1288,7 @@ def compute_cover_note_actual_usd_cents(usage: dict[str, int] | None) -> int:
     output_rate = float(entry.get("cost_per_million_output_usd", 0.0))
     total_usd = usage.get("input_tokens", 0) * (input_rate / 1_000_000)
     total_usd += usage.get("output_tokens", 0) * (output_rate / 1_000_000)
-    return int(round(total_usd * 100))
+    return int(round(total_usd * 100))  # noqa: RUF046
 
 
 def record_cover_note_spend(
@@ -2868,7 +2868,7 @@ def record_stage_failure(
             ExpressionAttributeNames={"#status": "status"},
             ExpressionAttributeValues=values,
         )
-    except Exception as exc:  # noqa: BLE001 - only the guard is swallowed
+    except Exception as exc:  # only the guard is swallowed
         if not _is_conditional_check_failed(exc):
             raise
         logger.warning(
@@ -3350,7 +3350,7 @@ def cancel_requested(review_id: str, dynamodb_resource: Any) -> bool:
             ConsistentRead=True,
             ProjectionExpression="cancel_requested_at",
         )
-    except Exception:  # noqa: BLE001 - a failed poll must never fail the review
+    except Exception:  # a failed poll must never fail the review
         logger.warning(
             "Could not read the cancel flag for review %s; treating it as not "
             "cancelled. The review is UNAFFECTED.",

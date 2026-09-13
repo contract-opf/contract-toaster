@@ -65,7 +65,7 @@ _WS_RUN = re.compile(r"\s+")
 # Models reliably ASCII-fold it when copying text back out of what we showed
 # them. Measured 2026-08-05 on a real review: both of the model's quotes
 # located `not_found` and the redline died with `quote_patches_not_applied`,
-# one stopping at `Institution's` against the document's `Institution’s`
+# one stopping at `Institution's` against the document's `Institution’s`  # noqa: RUF003
 # after 393 of 522 characters had matched.
 #
 # That is the SAME class of divergence the whitespace collapse tolerates: a
@@ -82,25 +82,25 @@ _WS_RUN = re.compile(r"\s+")
 # toward fuzzy matching.
 # ---------------------------------------------------------------------------
 TYPOGRAPHIC_FOLD = {
-    ord("‘"): "'",  # LEFT SINGLE QUOTATION MARK
-    ord("’"): "'",  # RIGHT SINGLE QUOTATION MARK (Word's apostrophe)
-    ord("‚"): "'",  # SINGLE LOW-9 QUOTATION MARK
-    ord("‛"): "'",  # SINGLE HIGH-REVERSED-9 QUOTATION MARK
-    ord("′"): "'",  # PRIME
-    ord("ʼ"): "'",  # MODIFIER LETTER APOSTROPHE
-    ord("´"): "'",  # ACUTE ACCENT (used as an apostrophe in pasted text)
+    ord("‘"): "'",  # LEFT SINGLE QUOTATION MARK  # noqa: RUF001
+    ord("’"): "'",  # RIGHT SINGLE QUOTATION MARK (Word's apostrophe)  # noqa: RUF001
+    ord("‚"): "'",  # SINGLE LOW-9 QUOTATION MARK  # noqa: RUF001
+    ord("‛"): "'",  # SINGLE HIGH-REVERSED-9 QUOTATION MARK  # noqa: RUF001
+    ord("′"): "'",  # PRIME  # noqa: RUF001
+    ord("ʼ"): "'",  # MODIFIER LETTER APOSTROPHE  # noqa: RUF001
+    ord("´"): "'",  # ACUTE ACCENT (used as an apostrophe in pasted text)  # noqa: RUF001
     ord("“"): '"',  # LEFT DOUBLE QUOTATION MARK
     ord("”"): '"',  # RIGHT DOUBLE QUOTATION MARK
     ord("„"): '"',  # DOUBLE LOW-9 QUOTATION MARK
     ord("‟"): '"',  # DOUBLE HIGH-REVERSED-9 QUOTATION MARK
     ord("″"): '"',  # DOUBLE PRIME
-    ord("‐"): "-",  # HYPHEN
-    ord("‑"): "-",  # NON-BREAKING HYPHEN
-    ord("‒"): "-",  # FIGURE DASH
-    ord("–"): "-",  # EN DASH
+    ord("‐"): "-",  # HYPHEN  # noqa: RUF001
+    ord("‑"): "-",  # NON-BREAKING HYPHEN  # noqa: RUF001
+    ord("‒"): "-",  # FIGURE DASH  # noqa: RUF001
+    ord("–"): "-",  # EN DASH  # noqa: RUF001
     ord("—"): "-",  # EM DASH
     ord("―"): "-",  # HORIZONTAL BAR
-    ord("−"): "-",  # MINUS SIGN
+    ord("−"): "-",  # MINUS SIGN  # noqa: RUF001
 }
 
 

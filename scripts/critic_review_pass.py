@@ -37,7 +37,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -123,9 +123,9 @@ def run_critic_pass(
     review_id: str,
     primary_output: dict[str, Any],
     playbook: dict[str, Any],
-    model_client: "_model_client.BedrockModelClient",
+    model_client: "_model_client.BedrockModelClient",  # noqa: UP037
     model_id: str,
-    ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],
+    ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],  # noqa: UP037
     doc_text: str = "",
     max_input_tokens: int = MAX_INPUT_TOKENS,
     toaster_guidance: str = "",
@@ -138,7 +138,7 @@ def run_critic_pass(
     playbook_hash_override: str | None = None,
     output_schema_path: Path = pp.OUTPUT_SCHEMA_PATH,
     cancel_checkpoint: Callable[[], None] | None = None,
-    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,
+    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Run the adversarial critic pass end-to-end (data-flow step 16, critic
     half).
@@ -372,7 +372,7 @@ def run_critic_pass(
         try:
             # Issue #418: same "only when set" kwarg-threading as
             # run_primary_pass -- see that function's identical comment.
-            invoke_kwargs: dict[str, Any] = dict(
+            invoke_kwargs: dict[str, Any] = dict(  # noqa: C408
                 model_id=model_id,
                 system_prompt=system_prompt_text,
                 user_prompt=user_prompt + pp.render_retry_correction_block(correction),
@@ -486,7 +486,7 @@ def run_critic_pass(
             ledger_write(
                 _model_client.ModelInvocationRecord(
                     review_id=review_id,
-                    pass_name="critic",
+                    pass_name="critic",  # noqa: S106
                     model_id=model_id,
                     attempt_number=attempt,
                     outcome=outcome,

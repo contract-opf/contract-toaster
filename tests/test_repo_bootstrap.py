@@ -288,7 +288,7 @@ def main() -> int:
         return 1
 
     print(
-        f"\nPASS: all repo-bootstrap structural checks passed."
+        f"\nPASS: all repo-bootstrap structural checks passed."  # noqa: F541
     )
     return 0
 

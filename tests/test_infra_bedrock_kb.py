@@ -57,7 +57,7 @@ ingestion/extraction is out of scope, see issue notes):
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import json
+import json  # noqa: F401, I001
 import re
 import subprocess
 import sys
@@ -463,7 +463,7 @@ def check_i_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first ...)")
         install = subprocess.run(
-            ["npm", "install"],
+            ["npm", "install"],  # noqa: S607
             cwd=INFRA,
             capture_output=True,
             text=True,
@@ -475,8 +475,8 @@ def check_i_cdk_synth() -> list[str]:
                 f"stderr: {install.stderr[-500:]}",
             )
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,
@@ -508,7 +508,7 @@ def check_j_no_opensearch_serverless() -> list[str]:
     offenders = []
     for p in _find_ts_sources():
         t = _read(p)
-        if re.search(r"CfnCollection|aoss\.amazonaws|opensearchserverless", t, re.IGNORECASE):
+        if re.search(r"CfnCollection|aoss\.amazonaws|opensearchserverless", t, re.IGNORECASE):  # noqa: SIM102
             # OpenSearchServerlessConfigurationProperty is a *type* the CDK
             # library exposes for other storage backends; only flag an actual
             # OpenSearch Serverless COLLECTION resource being provisioned.

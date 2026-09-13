@@ -98,7 +98,7 @@ def _ensure_npm_install() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,
+            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
         )
         if install.returncode != 0:
             return _assert(
@@ -110,8 +110,8 @@ def _ensure_npm_install() -> list[str]:
 
 def _synth(extra_context: list[str]) -> subprocess.CompletedProcess:
     shutil.rmtree(CDK_OUT, ignore_errors=True)
-    return subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", "--quiet", *extra_context],
+    return subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", "--quiet", *extra_context],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

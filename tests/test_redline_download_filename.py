@@ -93,7 +93,7 @@ class TestItCannotInjectAHeader(unittest.TestCase):
         self.assertTrue(all(ord(ch) >= 0x20 for ch in header))
 
     def test_non_ascii_is_rfc5987_encoded_and_never_emitted_raw(self):
-        header = download.content_disposition_for("Vertrag – Müller.docx", REVIEW_ID)
+        header = download.content_disposition_for("Vertrag – Müller.docx", REVIEW_ID)  # noqa: RUF001
         # The ASCII `filename=` parameter must stay ASCII-only for any client
         # that ignores `filename*`; the real name rides in the encoded one.
         self.assertTrue(header.isascii())

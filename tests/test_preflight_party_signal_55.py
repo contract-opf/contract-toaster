@@ -56,7 +56,7 @@ for _dir in (BACKEND_ROOT, SCRIPTS_DIR, _TESTS_DIR):
 
 os.environ.setdefault("ENTITY_ROSTER_TABLE", "contract-toaster-entity-roster-55-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 
 import src.entity_roster as entity_roster  # noqa: E402
 import src.startup_checks as startup_checks  # noqa: E402

@@ -60,7 +60,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import block_transcript  # noqa: E402
+import block_transcript  # noqa: E402, I001
 import extraction_normalization_stage  # noqa: E402
 import redline_block_apply  # noqa: E402
 import docx_parts  # noqa: E402
@@ -141,7 +141,7 @@ def _rewrite_part(docx_bytes: bytes, replacements: dict) -> bytes:
     """A copy of `docx_bytes` with each named part replaced by the given
     bytes; a value of `None` DROPS the part."""
     out = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zin:
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zin:  # noqa: SIM117
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
             for info in zin.infolist():
                 if info.filename in replacements:
@@ -236,7 +236,7 @@ def _styles_by_id(docx_bytes: bytes) -> dict:
     data = _part(docx_bytes, STYLES_PART)
     if data is None:
         return {}
-    root = ET.fromstring(data)
+    root = ET.fromstring(data)  # noqa: S314
     return {style.get(_qn("styleId")): style for style in root.findall(_qn("style"))}
 
 
@@ -256,7 +256,7 @@ def _canonical(element: ET.Element) -> str:
 def _reference_runs(docx_bytes: bytes) -> list:
     """Every `<w:r>` in `word/document.xml` that carries a
     `<w:footnoteReference>`."""
-    root = ET.fromstring(_part(docx_bytes, "word/document.xml"))
+    root = ET.fromstring(_part(docx_bytes, "word/document.xml"))  # noqa: S314
     return [r for r in root.iter(_qn("r")) if r.find(_qn("footnoteReference")) is not None]
 
 
@@ -265,7 +265,7 @@ def _footnote_paragraphs(docx_bytes: bytes) -> list:
     data = _part(docx_bytes, "word/footnotes.xml")
     if data is None:
         return []
-    root = ET.fromstring(data)
+    root = ET.fromstring(data)  # noqa: S314
     out = []
     for fn in root.findall(_qn("footnote")):
         if fn.get(_qn("type")) is not None:
@@ -331,7 +331,7 @@ def _part_1_reference_renders_superscript(failures: list) -> None:
             f"<w:r><w:rPr><w:rStyle w:val=\"FootnoteReference\"/></w:rPr>"
             f"<w:footnoteReference .../></w:r>, and without it the number is plain text."
         )
-    if list(run)[0].tag != _qn("rPr"):
+    if list(run)[0].tag != _qn("rPr"):  # noqa: RUF015
         failures.append(
             f"[{case}] <w:rPr> is not the run's first child ({[c.tag for c in run]!r}); "
             f"OOXML fixes run child order and Word rejects properties after content."
@@ -415,7 +415,7 @@ def _part_2_footnote_body_is_styled(failures: list) -> None:
 
     # Issue #615 is untouched: the reference still sits inside the issue's
     # <w:ins>, and the footnote BODY is still tracked.
-    doc_root = ET.fromstring(_part(out, "word/document.xml"))
+    doc_root = ET.fromstring(_part(out, "word/document.xml"))  # noqa: S314
     inside_ins = [
         ref
         for ins in doc_root.iter(_qn("ins"))
@@ -461,7 +461,7 @@ def _part_3_existing_definitions_survive(failures: list) -> None:
         their_style = _styles_by_id(out).get(
             docx_parts.FOOTNOTE_REFERENCE_STYLE_ID
         )
-        theirs = ET.fromstring(_FOREIGN_REFERENCE_STYLE)
+        theirs = ET.fromstring(_FOREIGN_REFERENCE_STYLE)  # noqa: S314
         if their_style is None or _canonical(their_style) != _canonical(theirs):
             failures.append(
                 f"[{case}] the document's own FootnoteReference definition was replaced: "
@@ -490,7 +490,7 @@ def _part_3_existing_definitions_survive(failures: list) -> None:
     out = result["docx_bytes"]
     styles = _styles_by_id(out)
     their_style = styles.get(docx_parts.FOOTNOTE_REFERENCE_STYLE_ID)
-    theirs = ET.fromstring(_FOREIGN_REFERENCE_STYLE)
+    theirs = ET.fromstring(_FOREIGN_REFERENCE_STYLE)  # noqa: S314
     if their_style is None or _canonical(their_style) != _canonical(theirs):
         failures.append(
             f"[{case}] the document's own FootnoteReference definition did not survive."
@@ -545,7 +545,7 @@ def _part_4_missing_styles_part_is_created(failures: list) -> None:
 
     # A part with no relationship and no content-type override is a package
     # Word will not open.
-    rels = ET.fromstring(_part(out, RELS_PART))
+    rels = ET.fromstring(_part(out, RELS_PART))  # noqa: S314
     has_rel = any(
         (rel.get("Target") or "").endswith("styles.xml")
         and rel.get("Type") == docx_parts.STYLES_REL_TYPE
@@ -556,7 +556,7 @@ def _part_4_missing_styles_part_is_created(failures: list) -> None:
     rel_ids = [rel.get("Id") for rel in rels.findall(f"{{{PKG_RELS_NS}}}Relationship")]
     if len(rel_ids) != len(set(rel_ids)):
         failures.append(f"[{case}] duplicate relationship ids in the output: {rel_ids!r}")
-    content_types = ET.fromstring(_part(out, CONTENT_TYPES_PART))
+    content_types = ET.fromstring(_part(out, CONTENT_TYPES_PART))  # noqa: S314
     has_ct = any(
         override.get("PartName") == "/" + STYLES_PART
         and override.get("ContentType") == docx_parts.STYLES_CONTENT_TYPE
@@ -574,7 +574,7 @@ _HEADING_1 = "Heading1"
 
 
 def _mutate_styles(docx_bytes: bytes, mutate) -> bytes:
-    root = ET.fromstring(_part(docx_bytes, STYLES_PART))
+    root = ET.fromstring(_part(docx_bytes, STYLES_PART))  # noqa: S314
     mutate(root)
     return _rewrite_part(
         docx_bytes,

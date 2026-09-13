@@ -99,7 +99,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.exceptions import ClientError  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -327,7 +327,7 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
         at a flat 8_000 output over two attempts)."""
         cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(cents, 686, "Must match ARCHITECTURE.md's $6.86 worst-case/review.")
-        blended = int(round(
+        blended = int(round(  # noqa: RUF046
             (1 + _reviews_module.MAX_RETRIES_PER_PASS
              + _reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS)
             * 2

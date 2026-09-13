@@ -47,7 +47,7 @@ os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-vers
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-gate7-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-gate7-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402

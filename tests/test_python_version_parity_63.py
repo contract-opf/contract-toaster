@@ -65,7 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # WORKFLOWS_DIR/REPO_ROOT/_assert are the ones the sibling CI-parity gate
 # already uses, so both files enumerate the same tree by the same rule.
-from test_ci_env_parity_639 import (  # noqa: E402
+from test_ci_env_parity_639 import (
     REPO_ROOT,
     WORKFLOWS_DIR,
     _assert,
@@ -101,6 +101,7 @@ EXPECTED_PINNED_WORKFLOWS = frozenset(
         "frontend-stack-gate.yml",
         "identity-auth-threat-model.yml",
         "input-normalization-gate.yml",
+        "lint.yml",
         "output-schema.yml",
         "pipeline-execution-history-gate.yml",
         "playbook-lint.yml",

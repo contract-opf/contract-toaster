@@ -27,6 +27,7 @@ import ReviewSubmission from '../ReviewSubmission';
 import { pressSubmit } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: { idToken: { toString: () => 'mock-id-token' } },
   })),
@@ -45,7 +46,9 @@ interface Routes {
 
 function stubFetch(routes: Routes): { cancelCalls: string[] } {
   const cancelCalls: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
 
@@ -55,6 +58,7 @@ function stubFetch(routes: Routes): { cancelCalls: string[] } {
       return {
         ok: statusCode < 400,
         status: statusCode,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({}),
       } as Response;
     }
@@ -62,17 +66,21 @@ function stubFetch(routes: Routes): { cancelCalls: string[] } {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           playbooks: [{ playbook_id: 'pb', display_name: 'Contract', status: 'active' }],
         }),
       } as Response;
     }
     if (pathname === '/api/reviews' && (init?.method ?? 'GET') === 'POST') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 202, json: async () => ({ review_id: 'r-1' }) } as Response;
     }
     if (pathname.startsWith('/api/reviews/')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => routes.detail } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);

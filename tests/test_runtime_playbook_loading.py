@@ -90,7 +90,7 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

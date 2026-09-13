@@ -14,6 +14,9 @@
     "audit:focus": "node scripts/focus-audit.mjs",
     "audit:layout": "node scripts/layout-audit.mjs",
     "audit:bundle": "node scripts/bundle-budget.mjs",
+    "lint": "eslint .",
+    "lint:baseline": "node scripts/eslint-baseline.mjs",
+    "format": "prettier --write",
     "test": "node scripts/run-vitest.mjs"
   },
   "dependencies": {
@@ -28,14 +31,21 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^26.1.1",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^17.12.0",
     "jsdom": "^29.1.1",
+    "prettier": "^3.9.6",
     "typescript": "^5.3.0",
+    "typescript-eslint": "^8.70.0",
     "vite": "^5.0.0",
     "vitest": "^4.1.10"
   }

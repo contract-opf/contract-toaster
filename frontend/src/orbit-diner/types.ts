@@ -127,6 +127,7 @@ export interface Result {
 export interface ReviewModel {
   status: Status;
   fileSelected: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   stage?: Stage | string | null;
   reviewId?: string;
   filename?: string;

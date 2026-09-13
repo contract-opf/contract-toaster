@@ -38,6 +38,7 @@ import App from '../App';
 import { playbookStop, playbookStops } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -99,23 +100,28 @@ const BODIES: Record<string, unknown> = {
  */
 function stubRotationEnforcingFetch(state: { rotated: boolean }): string[] {
   const answered: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     answered.push(pathname);
 
     if (pathname === '/api/me') {
       const body = state.rotated ? ME_USER_ROTATED : ME_USER_UNROTATED;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
     }
     if (pathname === '/api/me/password') {
       state.rotated = true;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ changed: true }) } as Response;
     }
     if (!EXEMPT_PATHS.has(pathname) && !state.rotated) {
       return {
         ok: false,
         status: 403,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           detail:
             'This account still uses the shipped default password. ' +
@@ -125,8 +131,10 @@ function stubRotationEnforcingFetch(state: { rotated: boolean }): string[] {
     }
     const body = BODIES[pathname];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -182,6 +190,7 @@ describe('issue #72 — a non-admin rotation recovers the Review tab dial', () =
     fireEvent.change(screen.getByTestId('change-password-new'), {
       target: { value: 'a-rotated-passphrase' },
     });
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       fireEvent.click(screen.getByTestId('change-password-submit'));
     });

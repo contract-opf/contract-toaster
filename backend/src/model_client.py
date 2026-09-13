@@ -88,7 +88,7 @@ def enforce_single_region_native_model_id(model_id: str) -> None:
 
 def load_model_policy(path: Path = MODEL_POLICY_PATH) -> dict[str, Any]:
     """Load the model-policy artifact (model-policy/bedrock-us-east-1.json)."""
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -193,7 +193,7 @@ def bedrock_model_capabilities(
 
 
 def load_openrouter_policy(path: Path = OPENROUTER_POLICY_PATH) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -1457,7 +1457,7 @@ def _accumulate_openrouter_stream(
         if cancel_checkpoint is not None:
             try:
                 cancel_checkpoint()
-            except BaseException as exc:  # noqa: BLE001 - re-raised verbatim by invoke()
+            except BaseException as exc:  # re-raised verbatim by invoke()
                 raise _CancelledMidStream(exc) from exc
 
         if isinstance(raw_line, bytes):
@@ -1720,7 +1720,7 @@ class OpenRouterModelClient:
             self._http_client.close()
             self._http_client = None
 
-    def __enter__(self) -> "OpenRouterModelClient":
+    def __enter__(self) -> "OpenRouterModelClient":  # noqa: UP037
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
@@ -1734,7 +1734,7 @@ class OpenRouterModelClient:
         base = min(
             self._backoff_base_seconds * (2**attempt_index), self._backoff_max_seconds
         )
-        jitter = random.uniform(0, self._backoff_jitter_seconds)
+        jitter = random.uniform(0, self._backoff_jitter_seconds)  # noqa: S311
         return base + jitter
 
     @staticmethod

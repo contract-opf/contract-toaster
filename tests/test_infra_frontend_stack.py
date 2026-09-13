@@ -882,7 +882,7 @@ def check_i_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"],
+            ["npm", "install"],  # noqa: S607
             cwd=INFRA,
             capture_output=True,
             text=True,
@@ -895,8 +895,8 @@ def check_i_cdk_synth() -> list[str]:
             )
 
     with tempfile.TemporaryDirectory(prefix="contract-toaster-gate-frontend-cdk-out-") as tmp_out:
-        result = subprocess.run(
-            [
+        result = subprocess.run(  # noqa: S603
+            [  # noqa: S607
                 "npx", "cdk", "synth",
                 "--context", "env=dev",
                 *NEUTRAL_CDK_CONTEXT,

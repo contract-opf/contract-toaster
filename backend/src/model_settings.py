@@ -283,7 +283,7 @@ def resolve_openrouter_api_key(dynamodb_resource: Any = None) -> str:
     if dynamodb_resource is not None:
         try:
             row = _stored_row(dynamodb_resource)
-        except Exception:  # noqa: BLE001 - degrade to the env var, never wedge a review
+        except Exception:  # degrade to the env var, never wedge a review
             logger.warning(
                 "Could not read the admin-set model key; falling back to "
                 "OPENROUTER_API_KEY.",
@@ -515,7 +515,7 @@ def _selection_row_or_default(dynamodb_resource: Any) -> dict[str, Any]:
     """
     try:
         return _selection_row(dynamodb_resource)
-    except Exception:  # noqa: BLE001 - degrade to the default, never wedge a review
+    except Exception:  # degrade to the default, never wedge a review
         logger.warning(
             "Could not read the admin-set model selection; falling back to the "
             "env override / policy pin.",
@@ -555,7 +555,7 @@ def resolve_openrouter_model_ids(dynamodb_resource: Any = None) -> dict[str, str
     selection = (
         _stored_selection(dynamodb_resource)
         if dynamodb_resource is not None
-        else {role: "" for role in MODEL_SELECTION_ROLES}
+        else {role: "" for role in MODEL_SELECTION_ROLES}  # noqa: C420
     )
     return {
         "primary": model_client.openrouter_primary_model_id(
@@ -863,7 +863,7 @@ def _spend_row_or_default(dynamodb_resource: Any) -> dict[str, Any]:
     """
     try:
         return _spend_row(dynamodb_resource)
-    except Exception:  # noqa: BLE001 - degrade to the env cap, never wedge a review
+    except Exception:  # degrade to the env cap, never wedge a review
         logger.warning(
             "Could not read the admin-set daily spend cap; falling back to "
             "DAILY_SPEND_CAP_USD_CENTS / the built-in default.",

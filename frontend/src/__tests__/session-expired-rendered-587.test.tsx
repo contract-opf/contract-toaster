@@ -39,6 +39,7 @@ import App from '../App';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 // Amplify is never used in password mode, but App.tsx imports it unconditionally.
+// eslint-disable-next-line @typescript-eslint/require-await
 vi.mock('aws-amplify/auth', () => ({ fetchAuthSession: vi.fn(async () => ({ tokens: {} })) }));
 vi.mock('@aws-amplify/ui-react', () => ({
   Authenticator: ({ children }: { children: () => React.ReactElement }) => children(),
@@ -83,32 +84,41 @@ function stubFetchWithExpiry(): { fetchMock: ReturnType<typeof vi.fn>; expireNow
     '/api/reviews/row-under-test/output': { url: 'https://example.com/signed-output-url' },
     '/api/reviews/row-under-test/input': { url: 'https://example.com/signed-input-url' },
   };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     if (pathname === '/api/auth/login') {
       loggedIn = true;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ username: 'admin', is_admin: true }) } as Response;
     }
     if (pathname === '/api/me') {
       if (!loggedIn) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 401, json: async () => ({}) } as Response;
       }
       if (expired) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 401, json: async () => ({ detail: 'Not authenticated.' }) } as Response;
       }
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ is_admin: true, cognito_sub: 'local:admin', username: 'admin' }),
       } as Response;
     }
     if (expired) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 401, json: async () => ({ detail: 'Not authenticated.' }) } as Response;
     }
     const body = routes[pathname];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);

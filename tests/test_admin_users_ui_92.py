@@ -179,7 +179,7 @@ def check_e_break_glass_read_only() -> list[str]:
     if m:
         # Look at a window of text around the mention for any request call.
         window = text[max(0, m.start() - 200): m.start() + 1200]
-        has_request_call = re.search(r"authorizedFetch\(|fetch\(", window) is not None
+        has_request_call = re.search(r"authorizedFetch\(|fetch\(", window) is not None  # noqa: F841
         # The component-level authorizedFetch calls for users/sync-status are
         # defined well before this section; only flag if a NEW call is made
         # specifically inside the break-glass JSX block (delimited by <details>).

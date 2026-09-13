@@ -594,6 +594,7 @@ export default function AdminDiagnostics(): React.ReactElement | null {
       )}
 
       {selectedFailure !== null && (
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
         <div
           className="ct-overlay"
           role="dialog"

@@ -78,7 +78,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402, I001
 
 import cover_note_pass  # noqa: E402
 import leakage_scan  # noqa: E402
@@ -1287,7 +1287,7 @@ class TestCoverNotePassPureFunctions(unittest.TestCase):
             "counterparty_change_summary": "Indemnification obligation made mutual.",
             "external_rationale_for_footnote": "Playbook fallback position.",
         }
-        issues = skippable + [real_issue]
+        issues = skippable + [real_issue]  # noqa: RUF005
 
         digest = cover_note_pass.build_edit_digest(issues)
 

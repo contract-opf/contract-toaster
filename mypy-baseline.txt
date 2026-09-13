@@ -1,0 +1,96 @@
+# mypy baseline — issue #65 (diagnostic G4 / action B4).
+#
+# THIS LIST CAN ONLY SHRINK.
+#
+# Every path below is a module that did NOT type-check under `[tool.mypy]`
+# `strict = true` on the commit that introduced the gate. Each one also has a
+# matching `[[tool.mypy.overrides]] ignore_errors = true` entry in
+# `pyproject.toml`, which is what keeps `mypy` green while the debt is paid
+# down module by module.
+#
+# THE RATCHET, and how it is enforced (tests/test_lint_gates_65.py, check 4):
+#
+#   * Every `[[tool.mypy.overrides]] ignore_errors = true` module in
+#     pyproject.toml must appear here. You cannot silence a NEW module without
+#     also writing it down here, in the diff, where a reviewer sees it.
+#   * No path here may be one that mypy now PASSES. The test re-runs mypy with
+#     the `ignore_errors` overrides stripped out and compares. So the moment
+#     you actually fix a module, this gate goes red until you delete its line
+#     here AND its override in pyproject.toml — which is the only direction
+#     this file is allowed to move.
+#
+# Paths are repo-relative POSIX paths, one per line, sorted. `#` comments and
+# blank lines are ignored.
+#
+# PATH -> OVERRIDE MODULE NAME. An override entry names a MODULE, not a path,
+# and mypy derives that name by walking up from the file for as long as the
+# directory holds an `__init__.py`. `backend/src/__init__.py` exists, so
+# `backend/src/reviews.py` is the module `src.reviews`; `scripts/` has no
+# `__init__.py`, so `scripts/opf_load.py` is simply `opf_load`. Get that wrong
+# and the override silently matches nothing while mypy stays red — which is
+# how the first cut of this file was written. tests/test_lint_gates_65.py
+# re-derives the names by the same rule and asserts they are unique, because
+# two files deriving the same module name would let one override silence both.
+
+backend/src/admin_dashboard.py
+backend/src/audit_queries.py
+backend/src/auth.py
+backend/src/bundle_authoring.py
+backend/src/config.py
+backend/src/corpus.py
+backend/src/demo_auth.py
+backend/src/disposition.py
+backend/src/download.py
+backend/src/entity_roster.py
+backend/src/invocation_ledger.py
+backend/src/main.py
+backend/src/model_client.py
+backend/src/model_settings.py
+backend/src/pipeline_runner.py
+backend/src/playbook_instructions.py
+backend/src/playbook_upload.py
+backend/src/playbook_versions.py
+backend/src/retention.py
+backend/src/review_routes.py
+backend/src/reviews.py
+backend/src/sample_playbooks.py
+backend/src/user_preferences.py
+backend/src/users.py
+scripts/bind_bundle.py
+scripts/block_transcript.py
+scripts/canonicalize.py
+scripts/clause_boundaries.py
+scripts/critic_review_pass.py
+scripts/detector_common.py
+scripts/docs-lint.py
+scripts/docx_parts.py
+scripts/eval_budget.py
+scripts/eval_harness.py
+scripts/extraction_normalization_stage.py
+scripts/floor_judge.py
+scripts/footnote_audience.py
+scripts/generate_aws_exports.py
+scripts/generate_gold_fixtures.py
+scripts/live_smoke_eval.py
+scripts/normalize_input.py
+scripts/ooxml_util.py
+scripts/opf_acceptance.py
+scripts/opf_clause_lookup.py
+scripts/opf_html.py
+scripts/opf_injection_scan.py
+scripts/opf_load.py
+scripts/opf_prompt.py
+scripts/playbook_registry.py
+scripts/playbook_validation.py
+scripts/policy_load.py
+scripts/primary_review_pass.py
+scripts/redline_block_apply.py
+scripts/redline_generate.py
+scripts/redline_projections.py
+scripts/replacement_text_enforcement.py
+scripts/review_knowledge.py
+scripts/review_spine.py
+scripts/seed_active_bundle.py
+scripts/third_party_clause_matching.py
+scripts/third_party_output_integration.py
+scripts/third_party_position_findings.py

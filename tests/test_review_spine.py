@@ -860,8 +860,8 @@ def main() -> int:
         print(f"[G0] {missing}")
         return 1
 
-    import synthetic_form_paragraphs as sfp_module  # noqa: E402
-    import model_client as model_client_module  # noqa: E402
+    import synthetic_form_paragraphs as sfp_module  # noqa: I001
+    import model_client as model_client_module
 
     _part_1_request_change(rs, model_client_module, sfp_module, failures)
     _part_2_accept(rs, model_client_module, sfp_module, failures)

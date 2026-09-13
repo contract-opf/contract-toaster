@@ -243,6 +243,7 @@ export function acceptedChangesSummary(
       maxUnnamedAuthors = Math.max(maxUnnamedAuthors, Number(match[2]));
     } else {
       edits += 1;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       namedAuthors.add(match[3] as string);
     }
   }

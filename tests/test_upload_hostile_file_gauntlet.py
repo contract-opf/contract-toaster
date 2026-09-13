@@ -28,7 +28,7 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
 import io
-import struct
+import struct  # noqa: F401
 import sys
 import types
 import unittest

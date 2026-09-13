@@ -254,9 +254,9 @@ backlog.
   bash scripts/land.sh          # gates, then push + `gh pr create --fill`
   ```
 
-  `scripts/land.sh` refuses to run on `main`, runs `npm test`,
-  `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes nothing if any
-  of them is red. `.githooks/pre-push` refuses `git push origin main` outright
+  `scripts/land.sh` refuses to run on `main`, runs `ruff check … && mypy`,
+  `npm test`, `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes
+  nothing if any of them is red. `.githooks/pre-push` refuses `git push origin main` outright
   — override a deliberate direct push with `LAND_TO_MAIN=1`. The hooks are
   opt-in: nothing installs them for you.
 - The two gates are `bash scripts/check.sh` (the Python suite, docs-lint and
@@ -267,6 +267,33 @@ backlog.
   which runs the same loop over just the matches and exits 4, never green, if
   the glob matches nothing. A full run is still what lands a change.
   [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+- **Lint and types** (issue #65). `ruff` + `mypy` for Python and `eslint` +
+  `tsc` for TypeScript run in `.github/workflows/lint.yml` on every push and
+  pull request, as a fast pre-step inside `scripts/check.sh` and
+  `scripts/check-frontend.sh`, and as `scripts/land.sh`'s first gate:
+
+  ```bash
+  pip install -r requirements-dev.txt          # ruff + mypy are pinned there
+  ruff check backend scripts tests infra/lambda
+  mypy                                         # config: [tool.mypy] in pyproject.toml
+  cd frontend && npm run lint && npm run typecheck
+  ```
+
+  These are **baseline-then-ratchet** gates: green means *no NEW violations*,
+  not *no violations*. The tree as of #65 carries `# noqa` comments (ruff),
+  `eslint-disable-next-line` comments (eslint), and per-module
+  `[[tool.mypy.overrides]] ignore_errors = true` entries mirrored in
+  `mypy-baseline.txt` (mypy). `tests/test_lint_gates_65.py` fails if that mypy
+  list grows, or if it still names a module mypy now passes — so the baseline
+  can only shrink. Pay debt down by DELETING an annotation, never by adding
+  one to new code.
+
+  The formatters (`ruff format`, `prettier`) are configured but deliberately
+  not enforced yet — a whole-tree reformat collides with the in-flight audit
+  series. Issue #90 turns them on afterwards.
+
+  Optional pre-commit hooks for both live in `.pre-commit-config.yaml`
+  (`pre-commit install`).
 - Anything that modifies `playbooks/` or `prompts/` requires legal review.
 - Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
 

@@ -261,7 +261,7 @@ def main() -> int:
             failures.append(f"[2] Expected non-empty docx bytes, got {docx_bytes!r}")
         else:
             with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
-                doc_root = ET.fromstring(zf.read("word/document.xml"))
+                doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
                 del_texts = {
                     (el.text or "")

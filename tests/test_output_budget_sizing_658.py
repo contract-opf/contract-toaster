@@ -455,7 +455,7 @@ def test_the_reservation_is_computed_from_the_sizing_function(failures: list[str
     expected = model_client.output_budget_for_document(
         reviews_module.MAX_INPUT_TOKENS, model_client.DEFAULT_MAX_OUTPUT_TOKENS
     )
-    if reviews_module.MAX_OUTPUT_TOKENS != expected:
+    if reviews_module.MAX_OUTPUT_TOKENS != expected:  # noqa: SIM300
         failures.append(
             f"[9a] reviews.MAX_OUTPUT_TOKENS must be the sizing function's worst case "
             f"({expected}); got {reviews_module.MAX_OUTPUT_TOKENS}"
@@ -477,7 +477,7 @@ def test_the_reservation_is_computed_from_the_sizing_function(failures: list[str
         + reviews_module.MAX_RETRIES_PER_PASS
         + reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS
     )
-    expected_cents = int(round(
+    expected_cents = int(round(  # noqa: RUF046
         attempts
         * (
             (

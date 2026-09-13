@@ -56,6 +56,7 @@ import AdminSettings, {
 } from '../AdminSettings';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -151,12 +152,15 @@ function stubRoutes(
   responses: Record<string, RouteAnswer | RouteAnswer[]>,
 ): ReturnType<typeof vi.fn> {
   const counts: Record<string, number> = {};
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${init?.method ?? 'GET'} ${pathname}`;
     const entry = responses[key] ?? responses[pathname];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     const sequence = Array.isArray(entry) ? entry : [entry];
@@ -166,10 +170,12 @@ function stubRoutes(
     return {
       ok: chosen.status >= 200 && chosen.status < 300,
       status: chosen.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => chosen.body,
     } as Response;
   });
   vi.stubGlobal('fetch', impl);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return impl as unknown as ReturnType<typeof vi.fn>;
 }
 

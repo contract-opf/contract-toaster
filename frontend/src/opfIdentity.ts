@@ -101,6 +101,7 @@ export function readOpfIdentity(text: string): OpfIdentity | null {
   // and a reader that silently diverged from the writer would be a trap for
   // the next caller who does need the bytes. No test asserts it — see
   // opf-identity-597.test.ts for why one would be tautological.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   const jsonText = embedded ? embedded[1]!.replace(/<\\\//g, '</') : text;
 
   let doc: unknown;

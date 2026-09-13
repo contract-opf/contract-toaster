@@ -407,6 +407,94 @@ test already enumerates workflows for the Node case).
 
 ### G4 — No mechanical lint or type gates  (P2)
 
+> **Status note, 2026-09-13.** G4 / B4 **landed** as public issue
+> `contract-opf/contract-toaster#65` (private #705 in the table below), as a
+> BASELINE plus a ratchet rather than as a clean tree. `pyproject.toml` gains
+> `[tool.ruff]` (line-length 100, `target-version = "py313"`, the
+> `E/F/W/I/B/UP/S/BLE/C4/SIM/RUF` selection, `E501` ignored,
+> `S101/S105/S106` exempt under `tests/**`) and `[tool.mypy]`
+> (`strict = true` over `backend/src` and `scripts`); `requirements-dev.txt`
+> pins both. `ruff check --add-noqa` annotated the pre-existing violations —
+> a net 1,105 added `# noqa` rule codes across 303 files — and 62 of the 81
+> modules mypy checks carry
+> `[[tool.mypy.overrides]] ignore_errors = true` entries mirrored in a new
+> root `mypy-baseline.txt`. On the TypeScript side `frontend/eslint.config.js`
+> (flat) runs typescript-eslint's recommended-TYPE-CHECKED set plus
+> `react-hooks` and `jsx-a11y` over `src/**`, with `vendor/orbit-diner/`
+> ignored; `frontend/scripts/eslint-baseline.mjs` annotated 865 findings
+> across 109 files.
+>
+> Two deliberate departures from B4 as written below:
+>
+> * **No `--fix` pass, on either side.** B4 allows semantics-preserving
+>   autofixes. The autofixable set in this tree is almost entirely
+>   `@typescript-eslint/no-unnecessary-type-assertion` inside
+>   `src/orbit-diner/` and `src/toaster/` — the exact area where #727 and #739
+>   shipped through green suites, because `frontend/vitest.config.ts` runs
+>   jsdom with `css: false` and no gate here can see a stylesheet. The
+>   baselines edit comments only. The Python side is 1,172 insertions against
+>   1,163 deletions over 303 modified files; take out the two tests this issue
+>   updates in their own right (`tests/test_landing_flow_64.py` at 22/14 and
+>   `tests/test_python_version_parity_63.py` at 2/1) and the remainder is
+>   exactly 1,148 insertions against 1,148 deletions — every other changed
+>   Python line is the same line of code with its trailing comment rewritten,
+>   and `git diff --numstat` shows insertions equal to deletions file by file.
+>   The frontend diff is 860 added lines and zero removed over 109 files.
+>
+>   "Comment-only" is not the same as "a `# noqa` appended", which is what an
+>   earlier draft of this note claimed, and the difference is exactly where a
+>   mechanical `--add-noqa` pass does damage no gate here can see. Those 1,148
+>   lines split three ways, and only the first is an append:
+>
+>   * 979 lines that carried no directive gain one;
+>   * 145 directives the tree ALREADY carried gain codes;
+>   * 24 directives are DELETED, because ruff reports them as dead (RUF100)
+>     under this config. Repo-wide that is 28 dead directives retired: 25 lines
+>     lose the comment outright, three keep a directive that had a live code
+>     alongside the dead one.
+>
+>   `--add-noqa` does not append to a directive that already exists — it
+>   REWRITES the line, dropping whatever prose followed the codes. It did that
+>   to 73 hand-written rationales (`# noqa: BLE001 - degrade to the playbook's
+>   own party, never wedge a review` became `# noqa: BLE001, RUF100`). All 73
+>   are restored: 49 back to the pre-#65 line byte for byte, four carrying
+>   their rationale beside a newly added code, and 20 keeping it as a plain
+>   trailing comment on a line whose directive turned out to be dead. No
+>   pre-existing justification was deleted.
+>
+>   The same pass appended `RUF100` to 136 directives — RUF100 being ruff's own
+>   "unused `noqa` directive" rule, so each directive silenced the one report
+>   that could ever retire it, and "a baseline that can only shrink" became one
+>   that cannot move at all. Those tokens are gone, and
+>   `tests/test_lint_gates_65.py` check 8 refuses to let another into the tree.
+>   Separately, 108 directive lines carry 115 codes for real ruff rules that
+>   `select` deliberately leaves off (`ARG001/2`, `N801/2/3`, `A002`,
+>   `PLC0415`, `ANN001`, `SLF001`) — all hand-written, all predating any linter
+>   here. RUF100 calls those "non-enabled". They are declared once in
+>   `[tool.ruff.lint] external`, which keeps RUF100 live without deleting other
+>   people's reasoning line by line and without widening `select` into a second
+>   unreviewable mass annotation. Every entry in that list is load-bearing:
+>   drop any one and `ruff check` goes red.
+> * **pre-commit, not husky.** B4 names the `setup-pre-commit` skill's
+>   husky + lint-staged pattern. Husky claims git's `core.hooksPath`, which
+>   `.githooks/` already holds for the pre-push guard that refuses a direct
+>   push to `main` (G8 / #64's interim control, since branch protection is
+>   unavailable on this plan). A second hook manager would silently disable
+>   it. The hooks are `local` entries in the existing `.pre-commit-config.yaml`
+>   instead — pre-commit passes the staged filenames itself, which is
+>   lint-staged's whole job.
+>
+> The FORMATTERS stay off, as B4's own staging implies: neither `ruff format`
+> nor `prettier --check` is invoked by `lint.yml` or the gate scripts, and
+> `tests/test_lint_gates_65.py` check 7 asserts that, parsing command text
+> rather than file text so the decision can still be documented in comments.
+> Follow-up issue `contract-opf/contract-toaster#90` enables both once the
+> #50-#59 series has landed. `scripts/land.sh` gained a `lint` gate (first,
+> being the cheapest) and `scripts/check.sh` / `scripts/check-frontend.sh`
+> each gained a lint pre-step. The 14 px floor audit scripts are untouched, as
+> B4 requires. The finding text below is left as written; it describes the
+> state before that change.
+
 **B4.** Python: `ruff` (lint + format) with a config that starts at the
 current baseline (`ruff check --add-noqa` once, then forbid new violations)
 and `mypy --strict` on `backend/src` with a per-module ignore list that

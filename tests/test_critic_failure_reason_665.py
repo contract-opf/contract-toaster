@@ -277,7 +277,7 @@ class FakeDDB:
     def __init__(self, reviews_table: FakeReviewsTable) -> None:
         self._reviews = reviews_table
 
-    def Table(self, name):  # noqa: N802, ARG002 - boto3 signature
+    def Table(self, name):  # noqa: ARG002, N802 - boto3 signature
         return self._reviews
 
 
@@ -605,7 +605,7 @@ def test_the_attempt_count_reaches_the_row_and_the_diagnostics_projection(
 def _module_constants(tree: ast.Module) -> dict[str, str]:
     constants: dict[str, str] = {}
     for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):  # noqa: SIM102
             if isinstance(node.value.value, str):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
@@ -640,7 +640,7 @@ def _result_reason_tokens() -> set[str]:
             if isinstance(node, ast.Dict):
                 keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
                 if "status" in keys and "reason" in keys:
-                    for key, value in zip(node.keys, node.values):
+                    for key, value in zip(node.keys, node.values):  # noqa: B905
                         if isinstance(key, ast.Constant) and key.value == "reason":
                             literal = _literal_reason(value, constants)
                             if literal is not None:

@@ -86,7 +86,7 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test-266",
 )
 
-from fastapi import HTTPException  # noqa: E402
+from fastapi import HTTPException  # noqa: E402, I001
 
 import canonicalize  # noqa: E402
 import synthetic_form_paragraphs  # noqa: E402

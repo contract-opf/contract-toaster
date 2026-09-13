@@ -692,6 +692,7 @@ export default function AdminUsers({
 
       {addUserOpen && (
         <CtCard data-testid="admin-users-add-panel">
+          {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form className="ct-stack" noValidate onSubmit={submitAddUser}>
             <CtToolbar title="Add user" />
 

@@ -57,7 +57,7 @@ target) and PASS after the fix.
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 from infra_synth_helper import NEUTRAL_CDK_CONTEXT
 
 import json
@@ -119,7 +119,7 @@ def _run_cdk_synth() -> subprocess.CompletedProcess:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"],
+            ["npm", "install"],  # noqa: S607
             cwd=INFRA,
             capture_output=True,
             text=True,
@@ -127,8 +127,8 @@ def _run_cdk_synth() -> subprocess.CompletedProcess:
         if install.returncode != 0:
             raise RuntimeError(f"npm install failed: {install.stderr[-500:]}")
 
-    return subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    return subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

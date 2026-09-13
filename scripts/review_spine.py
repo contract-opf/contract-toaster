@@ -139,7 +139,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -176,8 +176,8 @@ STATUS_ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
 # review's UI to the honest-but-uninformative indeterminate treatment, so
 # treat these as API, not as internal labels. `PROGRESS_STAGES` is the
 # ordered tuple; the frontend's step numbering is this order.
-PROGRESS_PRIMARY_PASS = "primary_pass"
-PROGRESS_CRITIC_PASS = "critic_pass"
+PROGRESS_PRIMARY_PASS = "primary_pass"  # noqa: S105
+PROGRESS_CRITIC_PASS = "critic_pass"  # noqa: S105
 PROGRESS_RECONCILIATION = "reconciliation"
 PROGRESS_REDLINE = "redline"
 PROGRESS_STAGES = (
@@ -472,7 +472,7 @@ def document_text_for_review(paragraphs: list[dict[str, Any]]) -> str:
 
 
 def _assemble_opf_system_blocks(
-    knowledge: "review_knowledge.ReviewKnowledge",
+    knowledge: "review_knowledge.ReviewKnowledge",  # noqa: UP037
     toaster_guidance: str,
     notes_mode: str = "external",
     markup_intensity: str = "medium",
@@ -560,7 +560,7 @@ def _assemble_opf_system_blocks(
 
 
 def _floor_perspective_note(
-    opf_doc: Optional[dict[str, Any]], entity_roster: Optional[Sequence[str]] = None
+    opf_doc: Optional[dict[str, Any]], entity_roster: Optional[Sequence[str]] = None  # noqa: UP045
 ) -> str:
     """Who this review acts for, rendered for `floor_judge
     .judge_floor_invariants(perspective_note=...)` (issue #679).
@@ -731,12 +731,12 @@ def critic_failure_reason(two_pass_result: dict[str, Any]) -> str:
 def _terminal(
     *,
     status: str,
-    reason: Optional[str] = None,
-    analysis_report: Optional[dict[str, Any]] = None,
-    detail: Optional[dict[str, Any]] = None,
-    floor_judgment: Optional[dict[str, Any]] = None,
-    normalization_notes: Optional[str] = None,
-    critic_attempts: Optional[int] = None,
+    reason: Optional[str] = None,  # noqa: UP045
+    analysis_report: Optional[dict[str, Any]] = None,  # noqa: UP045
+    detail: Optional[dict[str, Any]] = None,  # noqa: UP045
+    floor_judgment: Optional[dict[str, Any]] = None,  # noqa: UP045
+    normalization_notes: Optional[str] = None,  # noqa: UP045
+    critic_attempts: Optional[int] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """A fail-closed ReviewResult: no decision, no redline, no findings --
     per ARCHITECTURE.md/docs/output-contract.md, a SYSTEM status (MANUAL_
@@ -791,21 +791,21 @@ def _terminal(
 def run_review(
     docx_bytes: bytes,
     bundle: dict[str, Any],
-    model_client: "_model_client.BedrockModelClient",
+    model_client: "_model_client.BedrockModelClient",  # noqa: UP037
     *,
     review_id: str = "spine-review",
-    ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,
-    corpus: Optional["leakage_scan.ConfidentialCorpus"] = None,
-    current_counterparty_name: Optional[str] = None,
+    ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,  # noqa: UP037, UP045
+    corpus: Optional["leakage_scan.ConfidentialCorpus"] = None,  # noqa: UP037, UP045
+    current_counterparty_name: Optional[str] = None,  # noqa: UP045
     toaster_guidance: str = "",
     instructions_text: str = "",
-    entity_roster: Optional[Sequence[str]] = None,
+    entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
     notes_mode: str = "external",
     markup_intensity: str = "medium",
-    on_progress: Optional[Callable[[str], None]] = None,
-    policy: Optional[dict[str, Any]] = None,
-    cancel_checkpoint: Optional[Callable[[], None]] = None,
-    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,
+    on_progress: Optional[Callable[[str], None]] = None,  # noqa: UP045
+    policy: Optional[dict[str, Any]] = None,  # noqa: UP045
+    cancel_checkpoint: Optional[Callable[[], None]] = None,  # noqa: UP045
+    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Compose the full review pipeline: extract -> normalize -> primary ->
     critic -> reconcile -> leakage scan -> redline, with `model_client`
@@ -1291,7 +1291,7 @@ def run_review(
     # result -- see `_terminal`'s `floor_judgment` param and the final
     # `return` below.
     detector_fires: list[dict[str, Any]] = []
-    floor_judgment_report: Optional[dict[str, Any]] = None
+    floor_judgment_report: Optional[dict[str, Any]] = None  # noqa: UP045
     if floor_invariants:
         judgment = floor_judge.judge_floor_invariants(
             invariants=floor_invariants,

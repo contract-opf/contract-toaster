@@ -24,7 +24,7 @@ Three invariants checked here:
 Usage:
     python3 tests/test_latency_baseline.py
     Exit 0 = all checks pass; non-zero = one or more checks fail.
-"""
+"""  # noqa: RUF002
 
 import re
 import sys
@@ -45,7 +45,7 @@ def read(path: Path) -> str:
 # The canonical figure is expressed in minutes, not seconds.
 # Both "typical" and "p95" components must be present together.
 CANONICAL_LATENCY_TYPICAL = re.compile(
-    r"1[–\-]3\s+minutes?\s+typical",
+    r"1[–\-]3\s+minutes?\s+typical",  # noqa: RUF001
     re.IGNORECASE,
 )
 CANONICAL_LATENCY_P95 = re.compile(
@@ -54,9 +54,9 @@ CANONICAL_LATENCY_P95 = re.compile(
 )
 
 # Old seconds-based figures must not appear in living docs.
-# Matches e.g. "20–90 seconds", "15–60 seconds", "15–90 seconds"
+# Matches e.g. "20–90 seconds", "15–60 seconds", "15–90 seconds"  # noqa: RUF003
 OLD_SECONDS_LATENCY = re.compile(
-    r"\b\d+[–\-]\d+\s+seconds?\s+typical",
+    r"\b\d+[–\-]\d+\s+seconds?\s+typical",  # noqa: RUF001
     re.IGNORECASE,
 )
 
@@ -73,7 +73,7 @@ def check_ac1_canonical_latency() -> list[str]:
     The canonical latency budget ('1–3 minutes typical, 5 minutes p95') must
     appear at least once in the documentation, and no old seconds-based figure
     ('N–M seconds typical') may appear in living docs.
-    """
+    """  # noqa: RUF002
     failures = []
 
     # Check that the new canonical figure is present somewhere
@@ -90,7 +90,7 @@ def check_ac1_canonical_latency() -> list[str]:
 
     if not found_typical:
         failures.append(
-            "  AC1 FAIL: canonical latency figure '1–3 minutes typical' not found "
+            "  AC1 FAIL: canonical latency figure '1–3 minutes typical' not found "  # noqa: RUF001
             "in any of: ARCHITECTURE.md, docs/design-notes.md, docs/phase-0-issues.md"
         )
     if not found_p95:
@@ -108,7 +108,7 @@ def check_ac1_canonical_latency() -> list[str]:
             if OLD_SECONDS_LATENCY.search(line):
                 failures.append(
                     f"  AC1 FAIL: {path.relative_to(REPO_ROOT)}:{lineno} — "
-                    f"stale seconds-based latency figure (must be '1–3 minutes "
+                    f"stale seconds-based latency figure (must be '1–3 minutes "  # noqa: RUF001
                     f"typical, 5 minutes p95'):\n"
                     f"    > {line.strip()}"
                 )
@@ -222,7 +222,7 @@ def main() -> int:
     checks = [
         (
             "AC1",
-            "Exactly one canonical latency figure (1–3 min typical, 5 min p95)",
+            "Exactly one canonical latency figure (1–3 min typical, 5 min p95)",  # noqa: RUF001
             check_ac1_canonical_latency,
         ),
         (

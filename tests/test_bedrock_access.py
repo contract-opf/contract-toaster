@@ -84,7 +84,7 @@ def read_model_policy() -> dict | None:
     try:
         with MODEL_POLICY_PATH.open(encoding="utf-8") as fh:
             return json.load(fh)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"  FAIL: could not parse model-policy JSON: {exc}")
         return None
 
@@ -377,7 +377,7 @@ def check_ac4_hashable_artifact() -> list[str]:
     try:
         hash1 = canonical_hash(MODEL_POLICY_PATH)
         hash2 = canonical_hash(MODEL_POLICY_PATH)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         failures.append(f"  AC4 FAIL: could not hash model-policy artifact: {exc}")
         return failures
 

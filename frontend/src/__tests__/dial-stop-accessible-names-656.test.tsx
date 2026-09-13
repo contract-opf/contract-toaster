@@ -30,6 +30,7 @@ import App from '../App';
 // Without these the app renders the Amplify sign-in screen and none of the
 // review controls exist to assert on.
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -69,11 +70,15 @@ const ROUTES: Record<string, unknown> = {
 function stubFetch(): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const body = ROUTES[pathname];
+      // eslint-disable-next-line @typescript-eslint/require-await
       if (body === undefined) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );
@@ -112,18 +117,23 @@ describe('the console names its groups natively (#733)', () => {
   it('carries the unavailable state as a real disabled control, not only as styling', async () => {
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const url = typeof input === 'string' ? input : input.toString();
         const pathname = new URL(url, 'http://localhost').pathname;
         if (pathname === '/api/me/preferences') {
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({ preferences: {}, notes_mode_available: false }),
           } as Response;
         }
         const body = ROUTES[pathname];
+        // eslint-disable-next-line @typescript-eslint/require-await
         if (body === undefined) return { ok: false, status: 404, json: async () => ({}) } as Response;
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => body } as Response;
       }),
     );

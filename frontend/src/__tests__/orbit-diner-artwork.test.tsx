@@ -108,6 +108,7 @@ class TestImage {
 /** Settle every outstanding decode successfully. */
 async function decodeAll(): Promise<void> {
   const batch = inflight.splice(0);
+  // eslint-disable-next-line @typescript-eslint/require-await
   await act(async () => {
     for (const request of batch) request.resolve();
   });
@@ -121,6 +122,7 @@ async function decodeExcept(plate: PlateName): Promise<void> {
     batch.map((request) => request.src),
     'the console never asked for the plate this test fails',
   ).toContain(url);
+  // eslint-disable-next-line @typescript-eslint/require-await
   await act(async () => {
     for (const request of batch) {
       if (request.src === url) request.reject();
@@ -154,12 +156,16 @@ function docxFile(name = 'contract.docx'): File {
 let apiCalls: string[] = [];
 
 function mockFetch() {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     apiCalls.push(`${(init?.method ?? 'GET').toUpperCase()} ${pathname}`);
     if (pathname === '/api/playbooks') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ playbooks: PLAYBOOKS }) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => ({}) } as Response;
   });
 }
@@ -204,6 +210,7 @@ async function mount(): Promise<void> {
   render(<ReviewSubmission />);
   await screen.findByTestId('review-file-input');
   await waitFor(() =>
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('review-playbook-dial') as HTMLSelectElement).value).not.toBe(''),
   );
 }
@@ -358,6 +365,7 @@ describe('issue #738 (N4) — the plain layout is the waiting room, and it works
     await mount();
     reportWidth(1272);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const instructions = screen.getByTestId('review-guidance-input') as HTMLTextAreaElement;
     fireEvent.change(instructions, { target: { value: 'Clause 7 is the one that matters.' } });
     fireEvent.change(screen.getByTestId('review-playbook-dial'), { target: { value: 'msa' } });
@@ -378,9 +386,11 @@ describe('issue #738 (N4) — the plain layout is the waiting room, and it works
     expect(playMotionEvent).not.toHaveBeenCalled();
     expect(isPlain()).toBe(false);
     expect(shellPlate()).toBe(platePath('toaster'));
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('review-guidance-input') as HTMLTextAreaElement).value).toBe(
       'Clause 7 is the one that matters.',
     );
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('review-playbook-dial') as HTMLSelectElement).value).toBe('msa');
     expect(screen.getByTestId('review-browning-option-dark')).toBeChecked();
     expect(screen.getByTestId('review-notes-mode-option-external')).toBeChecked();
@@ -395,6 +405,7 @@ describe('issue #738 (N4) — the plain layout is the waiting room, and it works
     await decodeAll();
     expect(isPlain()).toBe(true);
 
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       fireEvent.blur(instructions);
     });
@@ -409,6 +420,7 @@ describe('issue #738 (N4) — the plain layout is the waiting room, and it works
     await decodeAll();
     expect(isPlain()).toBe(true);
 
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       fireEvent.pointerUp(consoleRoot(), { pointerId: 1 });
     });
@@ -424,6 +436,7 @@ describe('issue #738 (N4) — the plain layout is the waiting room, and it works
     await decodeAll();
     expect(isPlain()).toBe(true);
 
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     });
@@ -508,6 +521,7 @@ describe('issue #738 (N5) — a failed plate costs the picture and nothing else'
     expect(screen.queryByTestId('toaster-state-error')).toBeNull();
     expect(screen.queryByTestId('review-submit-error')).toBeNull();
     expect(screen.queryByTestId('review-poll-error')).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('review-guidance-input') as HTMLTextAreaElement).value).toBe(
       'Keep the indemnity cap.',
     );

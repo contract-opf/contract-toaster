@@ -59,6 +59,7 @@ import App from '../App';
 // is the only credential seam `authorizedFetch` needs, same as
 // admin-tab-grouping-599.test.tsx.
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -77,12 +78,15 @@ vi.mock('@aws-amplify/ui-react', () => ({
 
 /** One canned answer for every call, in GET /api/me/preferences' real shape. */
 function stubPreferences(response: { status: number; body: unknown }): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async () => ({
     ok: response.status >= 200 && response.status < 300,
     status: response.status,
+    // eslint-disable-next-line @typescript-eslint/require-await
     json: async () => response.body,
   }));
   vi.stubGlobal('fetch', impl);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return impl as unknown as ReturnType<typeof vi.fn>;
 }
 
@@ -92,16 +96,19 @@ function stubPreferencesSequence(
   responses: { status: number; body: unknown }[],
 ): ReturnType<typeof vi.fn> {
   let call = 0;
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async () => {
     const response = responses[Math.min(call, responses.length - 1)];
     call += 1;
     return {
       ok: response.status >= 200 && response.status < 300,
       status: response.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => response.body,
     };
   });
   vi.stubGlobal('fetch', impl);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return impl as unknown as ReturnType<typeof vi.fn>;
 }
 
@@ -322,13 +329,17 @@ const ADMIN_ROUTES: Record<string, unknown> = {
 };
 
 function stubRoutes(routes: Record<string, unknown>): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const body = routes[pathname];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);

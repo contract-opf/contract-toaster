@@ -82,8 +82,8 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from dataclasses import dataclass, field  # noqa: F401
+from typing import Any, Callable, Protocol  # noqa: UP035
 from xml.parsers import expat
 
 from fastapi import HTTPException, status
@@ -532,7 +532,7 @@ def _check_relationships(zf: zipfile.ZipFile) -> None:
         for rel in relationships:
             rel_type = rel.get("type", "")
 
-            if rel.get("target_mode", "").lower() == "external":
+            if rel.get("target_mode", "").lower() == "external":  # noqa: SIM102
                 # Hyperlinks are the sole permitted external target: inert until
                 # a human clicks them, they never fetch at parse/open time.
                 # Every other external target (image, subdocument, template,
@@ -733,7 +733,7 @@ def _rewrite_zip_with_replacements(file_bytes: bytes, replacements: dict[str, by
     out_buf = io.BytesIO()
     with zipfile.ZipFile(out_buf, "w") as dst:
         for info in src.infolist():
-            data = replacements.get(info.filename, None)
+            data = replacements.get(info.filename, None)  # noqa: SIM910
             if data is None:
                 data = src.read(info.filename)
             new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)

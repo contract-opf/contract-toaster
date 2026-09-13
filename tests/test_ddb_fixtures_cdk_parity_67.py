@@ -52,7 +52,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import ddb_fixtures  # noqa: E402
@@ -67,8 +67,8 @@ TABLE_UNDER_TEST = {
 def _synth() -> None:
     """Synthesize the CDK app into infra/cdk.out. Offline: no AWS calls, no
     credentials, no network -- `cdk synth` renders templates locally."""
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

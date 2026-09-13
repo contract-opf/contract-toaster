@@ -167,11 +167,15 @@ const PLAYBOOKS = [
 ];
 
 function mockFetch() {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     if (pathname === '/api/playbooks') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ playbooks: PLAYBOOKS }) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => ({}) } as Response;
   });
 }
@@ -393,6 +397,7 @@ describe('issue #725 — N6, a long playbook name on the phone step', () => {
 
   it('renders each long name whole, in one element, with nothing else beside it', async () => {
     render(<ReviewSubmission />);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const dial = (await screen.findByTestId('review-playbook-dial')) as HTMLSelectElement;
     reportWidth(342);
 
@@ -413,6 +418,7 @@ describe('issue #725 — N6, a long playbook name on the phone step', () => {
 
   it('the announced value, and the picker, keep every name complete', async () => {
     render(<ReviewSubmission />);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const dial = (await screen.findByTestId('review-playbook-dial')) as HTMLSelectElement;
     reportWidth(342);
     await waitFor(() => expect(dial.value).not.toBe(''));

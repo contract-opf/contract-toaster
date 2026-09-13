@@ -146,7 +146,7 @@ def check_no_real_names() -> list[str]:
     allowed_party_tokens = {"acme", "fixture", "example", "template"}
     failures = []
     for path in (FULL_JSON, EMPTY_JSON):
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")  # noqa: F841
         for doc in _load(path)["corpus"]["documents"]:
             did = doc["document_id"].lower()
             if not any(tok in did for tok in allowed_party_tokens):

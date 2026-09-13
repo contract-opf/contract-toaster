@@ -121,8 +121,8 @@ def _run_loop(root: Path, env_extra: dict[str, str] | None = None):
     env["PYTHON"] = sys.executable
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(
-        ["bash", str(SHARED_LOOP), str(root)],
+    return subprocess.run(  # noqa: S603
+        ["bash", str(SHARED_LOOP), str(root)],  # noqa: S607
         capture_output=True,
         text=True,
         timeout=120,
@@ -270,8 +270,8 @@ def check_check_sh_refuses_concurrent_runs() -> list[str]:
         env.pop("SKIP_INFRA", None)
         env.pop("CHECK_NO_LOCK", None)
 
-        proc = subprocess.run(
-            ["bash", str(CHECK_SH)],
+        proc = subprocess.run(  # noqa: S603
+            ["bash", str(CHECK_SH)],  # noqa: S607
             capture_output=True,
             text=True,
             timeout=120,

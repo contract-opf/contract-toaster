@@ -283,7 +283,7 @@ def get_spend_ledger(
     the cap and the spend it bounds are always one answer taken at one moment.
 
     Raises HTTPException(403) for a non-admin caller.
-    """
+    """  # noqa: RUF002
     require_admin(caller_user_row, "Admin privilege required to view the spend ledger.")
     # Admin-gated in its own right, and gated again above — the cap setting
     # never rides along on a read a non-admin could reach.
@@ -448,7 +448,7 @@ def get_pipeline_health(
     # not the rows -- and the vocabulary is closed: a status outside it has
     # no partition this read visits, which is why a new terminal status is
     # added to `reviews.REVIEW_STATUSES_*` rather than written ad hoc.
-    status_counts: dict[str, int] = {
+    status_counts: dict[str, int] = {  # noqa: C420
         name: 0
         for name in sorted(
             reviews_module.REVIEW_STATUSES_NON_TERMINAL | reviews_module.REVIEW_STATUSES_TERMINAL
@@ -614,12 +614,12 @@ def list_manual_review_queue(
     require_admin(caller_user_row, "Admin privilege required to view the manual-review queue.")
 
     wanted_status = (status_filter or "all").strip()
-    if wanted_status not in ("all",) + MANUAL_REVIEW_STATUSES:
+    if wanted_status not in ("all",) + MANUAL_REVIEW_STATUSES:  # noqa: RUF005
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Unsupported status filter {wanted_status!r}; must be one of "
-                f"{sorted(('all',) + MANUAL_REVIEW_STATUSES)}."
+                f"{sorted(('all',) + MANUAL_REVIEW_STATUSES)}."  # noqa: RUF005
             ),
         )
     wanted_triage = (triage or "all").strip()

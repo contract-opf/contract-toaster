@@ -59,7 +59,7 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.exceptions import ClientError  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
@@ -214,7 +214,7 @@ class PlaybookInstructionsStoreTests(unittest.TestCase):
                 return None
             return real_get_current(playbook_id, dynamodb_resource)
 
-        with mock.patch.object(pi, "get_current_instructions", side_effect=_stale_once_then_real):
+        with mock.patch.object(pi, "get_current_instructions", side_effect=_stale_once_then_real):  # noqa: SIM117
             with self.assertRaises(pi.PlaybookInstructionsConflictError) as ctx:
                 pi.save_instructions(PLAYBOOK_ID, "loser text", "local:loser", self.ddb)
 
@@ -722,7 +722,7 @@ class TestReviewInstructionsLineageStamp(unittest.TestCase):
             return real_ensure_execution_started(*args, **kwargs)
 
         idempotency_key = "fixed-key-482-retry"
-        with mock.patch.object(
+        with mock.patch.object(  # noqa: SIM117
             reviews_module,
             "ensure_execution_started",
             side_effect=_crash_before_execution_arn_is_recorded,

@@ -59,7 +59,7 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401
 import os
 import sys
 import unittest
@@ -84,7 +84,7 @@ os.environ.setdefault(
     "RETENTION_SETTINGS_TABLE", "contract-toaster-retention-artifact-test"
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.pipeline_runner as pipeline_runner  # noqa: E402
@@ -381,7 +381,7 @@ class TestPurgeDestroysTheArtifact(AnalysisArtifactTestBase):
         self.assertIn("rid-purge", summary["deleted_reviews"])
 
         listed = self.s3.list_objects_v2(
-            Bucket=os.environ["OUTPUTS_BUCKET"], Prefix=f"outputs/rid-purge/"
+            Bucket=os.environ["OUTPUTS_BUCKET"], Prefix=f"outputs/rid-purge/"  # noqa: F541
         )
         self.assertEqual(
             listed.get("KeyCount", 0),

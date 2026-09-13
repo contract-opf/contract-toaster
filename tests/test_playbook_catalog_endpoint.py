@@ -75,7 +75,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402

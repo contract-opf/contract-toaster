@@ -355,7 +355,7 @@ Security invariants:
     uvicorn is started with --no-access-log to avoid logging request bodies.
 """
 
-import contextlib
+import contextlib  # noqa: I001
 import hashlib
 import logging
 import os
@@ -514,8 +514,8 @@ def get_embed_fn() -> Any:
 
 def get_active_user_row(
     request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> dict[str, Any]:
     """FastAPI dependency: re-verify `users.status == active` on every
     request (backend-side gate, independent of the edge/token layers), then
@@ -683,7 +683,7 @@ async def health() -> JSONResponse:
 
 @app.get("/version", include_in_schema=True)
 async def version(
-    _current_user: dict[str, Any] = Depends(get_current_user),
+    _current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> JSONResponse:
     """Allowlisted (authenticated) version endpoint.
 
@@ -707,7 +707,7 @@ async def version(
 
 @app.get("/whoami", include_in_schema=False)
 async def whoami(
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated echo endpoint — proves JWT verification end-to-end.
 
@@ -743,7 +743,7 @@ async def whoami(
 
 @app.get("/api/me", include_in_schema=True)
 async def get_me(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated capability route (issue #235): resolved role for
     pre-render admin-UI gating.
@@ -790,9 +790,9 @@ async def get_me(
 
 @app.post("/api/me/password", include_in_schema=True)
 async def post_me_password(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated: change the CALLER'S OWN password (issue #469).
 
@@ -816,8 +816,8 @@ async def post_me_password(
 
 @app.get("/api/me/preferences", include_in_schema=True)
 async def get_me_preferences(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated: the CALLER'S OWN preferences (issue #523, epic #519 F).
 
@@ -834,9 +834,9 @@ async def get_me_preferences(
 
 @app.put("/api/me/preferences", include_in_schema=True)
 async def put_me_preferences(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated: change the CALLER'S OWN preferences (issue #523).
 
@@ -852,8 +852,8 @@ async def put_me_preferences(
 
 @app.get("/api/users", include_in_schema=True)
 async def get_users(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the allowlist view (issue #92).
 
@@ -867,9 +867,9 @@ async def get_users(
 
 @app.post("/api/users", include_in_schema=True)
 async def post_users(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: add a user, either type (issue #232).
 
@@ -885,8 +885,8 @@ async def post_users(
 
 @app.get("/api/users/sync-status", include_in_schema=True)
 async def get_users_sync_status(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: Workspace/SSO deprovisioning sync-job visibility (issue #92).
 
@@ -903,9 +903,9 @@ async def get_users_sync_status(
 @app.patch("/api/users/{sub}", include_in_schema=True)
 async def patch_user(
     sub: str = Path(...),
-    updates: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    updates: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: set admin flag and/or lifecycle status for a user (issue #92).
 
@@ -923,8 +923,8 @@ async def patch_user(
 @app.delete("/api/users/{sub}", include_in_schema=True)
 async def delete_user_route(
     sub: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: remove a user, either SSO or username/password (issue #232).
 
@@ -937,8 +937,8 @@ async def delete_user_route(
 
 @app.get("/api/admin/auth-mode", include_in_schema=True)
 async def get_admin_auth_mode(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the demo auth-mode setting — sso/password/both, stored+served
     (issue #232). Raises HTTP 403 for a non-admin caller."""
@@ -948,9 +948,9 @@ async def get_admin_auth_mode(
 
 @app.post("/api/admin/auth-mode", include_in_schema=True)
 async def post_admin_auth_mode(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: set the demo auth-mode setting (issue #232).
 
@@ -963,8 +963,8 @@ async def post_admin_auth_mode(
 
 @app.get("/api/admin/model-key", include_in_schema=True)
 async def get_admin_model_key(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: status of the instance-wide model-provider (OpenRouter) API key.
 
@@ -980,9 +980,9 @@ async def get_admin_model_key(
 
 @app.post("/api/admin/model-key", include_in_schema=True)
 async def post_admin_model_key(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: set the instance-wide model-provider (OpenRouter) API key.
 
@@ -999,8 +999,8 @@ async def post_admin_model_key(
 
 @app.delete("/api/admin/model-key", include_in_schema=True)
 async def delete_admin_model_key(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: clear the admin-set model-provider API key, reverting to
     OPENROUTER_API_KEY. Idempotent. Raises HTTP 403 for a non-admin caller.
@@ -1011,8 +1011,8 @@ async def delete_admin_model_key(
 
 @app.get("/api/admin/model-selection", include_in_schema=True)
 async def get_admin_model_selection(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: which models reviews run on, and which ones may be chosen
     (issue #445).
@@ -1030,9 +1030,9 @@ async def get_admin_model_selection(
 
 @app.post("/api/admin/model-selection", include_in_schema=True)
 async def post_admin_model_selection(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: set the instance-wide primary/critic model choice (issue #445).
 
@@ -1053,9 +1053,9 @@ async def post_admin_model_selection(
 
 @app.post("/api/admin/spend-cap", include_in_schema=True)
 async def post_admin_spend_cap(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: set the instance-wide daily spend ceiling (issue #653).
 
@@ -1074,8 +1074,8 @@ async def post_admin_spend_cap(
 
 @app.get("/api/review-cost-estimate", include_in_schema=True)
 async def get_review_cost_estimate(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated: what the next review will cost (issue #653, epic #649).
 
@@ -1096,8 +1096,8 @@ async def get_review_cost_estimate(
 async def get_review_duration_estimate(
     playbook_id: str = Query(..., min_length=1, max_length=256),
     words: int | None = Query(None, ge=0, le=10_000_000),
-    _caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    _caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Authenticated: how long a review of `playbook_id` has actually been
     taking on this deployment (issue #71, 2026-09-05 diagnostic G12).
@@ -1122,8 +1122,8 @@ async def get_review_duration_estimate(
 
 @app.get("/api/admin/entity-roster", include_in_schema=True)
 async def get_admin_entity_roster(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the deployment's roster of OUR OWN legal entity names (issue
     #678).
@@ -1140,9 +1140,9 @@ async def get_admin_entity_roster(
 
 @app.put("/api/admin/entity-roster", include_in_schema=True)
 async def put_admin_entity_roster(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: replace the roster of our own legal entity names (issue #678).
 
@@ -1160,8 +1160,8 @@ async def put_admin_entity_roster(
 @app.post("/api/auth/login", include_in_schema=True)
 async def post_auth_login(
     request: Request,
-    body: dict[str, Any] = Body(...),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Unauthenticated: username/password sign-in for the demo auth feature
     (issue #232), gated by the stored auth-mode setting. This is deliberately
@@ -1207,8 +1207,8 @@ async def post_auth_logout() -> JSONResponse:
 
 @app.get("/api/admin/retention", include_in_schema=True)
 async def get_admin_retention(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: retention settings — the retention slider's current state and
     any in-flight pending retroactive reduction (issue #94). Raises HTTP 403
@@ -1219,9 +1219,9 @@ async def get_admin_retention(
 
 @app.post("/api/admin/retention", include_in_schema=True)
 async def post_admin_retention(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: request a retention-window change (issue #94).
 
@@ -1247,9 +1247,9 @@ async def post_admin_retention(
 
 @app.post("/api/admin/retention/preview", include_in_schema=True)
 async def post_admin_retention_preview(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: pre-sweep purge preview — "this change will purge N objects"
     (issue #94). Body: {"proposed_window_days": int}. Raises HTTP 403 for a
@@ -1267,8 +1267,8 @@ async def post_admin_retention_preview(
 
 @app.get("/api/admin/retention/holds", include_in_schema=True)
 async def get_admin_retention_holds(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the legal-hold list view (issue #94). Raises HTTP 403 for a
     non-admin caller.
@@ -1283,10 +1283,10 @@ async def get_admin_retention_holds(
 @app.post("/api/admin/retention/holds/{review_id}", include_in_schema=True)
 async def post_admin_retention_hold(
     review_id: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: place a legal hold on a review, mirrored to the storage layer
     (issue #94 / #61). Body: {"reason": str}. Raises HTTP 403 for a
@@ -1300,9 +1300,9 @@ async def post_admin_retention_hold(
 @app.delete("/api/admin/retention/holds/{review_id}", include_in_schema=True)
 async def delete_admin_retention_hold(
     review_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: release a legal hold on a review, mirrored to the storage
     layer (issue #94 / #61). Raises HTTP 403 for a non-admin caller, 404 for
@@ -1314,8 +1314,8 @@ async def delete_admin_retention_hold(
 @app.get("/api/admin/diagnostics/recent-failures", include_in_schema=True)
 async def get_admin_diagnostics_recent_failures(
     limit: int = RECENT_FAILURES_DEFAULT_LIMIT,
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: why recent reviews failed (issue #443).
 
@@ -1339,8 +1339,8 @@ async def get_admin_diagnostics_recent_failures(
 @app.get("/api/admin/spend", include_in_schema=True)
 async def get_admin_spend(
     days: int = SPEND_LEDGER_DEFAULT_DAYS,
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the spend ledger + reconcile view (issue #252).
 
@@ -1364,8 +1364,8 @@ async def get_admin_spend(
 @app.get("/api/admin/health", include_in_schema=True)
 async def get_admin_pipeline_health(
     stale_after_seconds: int = STALE_IN_FLIGHT_SECONDS_DEFAULT,
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the pipeline-health summary (issue #252).
 
@@ -1389,8 +1389,8 @@ async def get_admin_manual_review_queue(
     status_filter: str | None = None,
     triage: str | None = None,
     limit: int = MANUAL_REVIEW_DEFAULT_LIMIT,
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the manual-review queue, filterable (issues #252 / #37).
 
@@ -1419,8 +1419,8 @@ async def get_admin_manual_review_queue(
 @app.get("/api/admin/releases", include_in_schema=True)
 async def get_admin_releases(
     limit: int = RELEASE_ACTIVITY_DEFAULT_LIMIT,
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: release activity + the per-review cost-outlier flag (#252).
 
@@ -1456,8 +1456,8 @@ async def get_audit(
     playbook_id: str | None = None,
     playbook_version: str | None = None,
     limit: int = AUDIT_QUERY_DEFAULT_LIMIT,
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the docs/audit-queries.md catalogue, as a query API (issue #253).
 
@@ -1504,12 +1504,12 @@ async def get_audit(
 
 @app.post("/api/admin/playbooks", include_in_schema=True)
 async def post_admin_playbook_create(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     version: str = Form(...),
     accept_stub_basis: bool = Form(False),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: create a brand-new playbook_id AND its first version,
     atomically (issue #485) — the missing counterpart to `POST .../
@@ -1759,9 +1759,9 @@ async def post_admin_playbook_create(
 async def post_admin_playbook_version_legal_approval(
     playbook_id: str = Path(...),
     version: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: record legal approval of a specific (playbook_id, version,
     content_hash) — the missing product path for Gate 7's step 2 (docs/
@@ -1831,8 +1831,8 @@ async def post_admin_playbook_version_legal_approval(
 async def post_admin_playbook_version_activate(
     playbook_id: str = Path(...),
     version: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: activate a playbook release-bundle version (issue #242).
 
@@ -1888,13 +1888,13 @@ async def post_admin_playbook_version_activate(
 )
 async def post_admin_playbook_version_upload(
     playbook_id: str = Path(...),
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     version: str = Form(...),
     content_hash: str | None = Form(None),
     accept_stub_basis: bool = Form(False),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: upload a new playbook release-bundle version (issue #430,
     extended by issue #478 to parse, validate, and persist the bytes).
@@ -2077,8 +2077,8 @@ async def post_admin_playbook_version_upload(
 )
 async def get_admin_playbook_versions(
     playbook_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the full version-upload trail for a playbook, oldest first
     (issue #430).
@@ -2106,9 +2106,9 @@ async def get_admin_playbook_versions(
 async def get_admin_playbook_version_download(
     playbook_id: str = Path(...),
     version: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: generate a presigned download URL for a stored playbook version artifact.
 
@@ -2164,8 +2164,8 @@ async def get_admin_playbook_version_download(
 async def post_admin_playbook_version_rollback(
     playbook_id: str = Path(...),
     version: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: roll back to a previously-active playbook version (issue #430,
     resolver wiring fixed by issue #462).
@@ -2227,9 +2227,9 @@ async def post_admin_playbook_version_rollback(
 async def patch_admin_playbook_version_notes(
     playbook_id: str = Path(...),
     version: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: set/replace the `notes` field on a playbook version (issue
     #411) — the one deliberately-mutable field on an otherwise-immutable
@@ -2281,8 +2281,8 @@ async def patch_admin_playbook_version_notes(
 )
 async def post_admin_playbook_pen_rules_validate(
     playbook_id: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
 ) -> JSONResponse:
     """Admin: validate a candidate pen-rules / posture-override document for a
     playbook (issue #432) — the backend surface an authoring UI (separate,
@@ -2331,7 +2331,7 @@ def _require_registered_playbook(
 
             if playbook_versions.list_playbook_version_trail(playbook_id, dynamodb_resource):
                 return
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     raise HTTPException(
@@ -2346,8 +2346,8 @@ def _require_registered_playbook(
 )
 async def get_admin_playbook_instructions(
     playbook_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: the current standing-instructions version for a playbook plus
     its append-only history (issue #482, epic #481).
@@ -2393,9 +2393,9 @@ async def get_admin_playbook_instructions(
 )
 async def post_admin_playbook_instructions(
     playbook_id: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: save a new standing-instructions version for a playbook
     (issue #482, epic #481) — append-only, always creates version N+1.
@@ -2483,9 +2483,9 @@ async def post_admin_playbook_instructions(
 @app.patch("/api/admin/playbooks/{playbook_id}", include_in_schema=True)
 async def patch_admin_playbook(
     playbook_id: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: rename a playbook — set the catalog `display_name` (issue
     #412). A presentation-only override stored on the `playbooks` DB row so
@@ -2521,8 +2521,8 @@ async def patch_admin_playbook(
 @app.delete("/api/admin/playbooks/{playbook_id}", include_in_schema=True)
 async def delete_admin_playbook(
     playbook_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Admin: remove a playbook from the catalog (issue #412) — deletes its
     `playbook_versions` rows, clears the active bundle, and writes the
@@ -2558,9 +2558,9 @@ async def delete_admin_playbook(
 
 @app.post("/api/corpus", include_in_schema=True)
 async def post_corpus(
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    embed_fn: Any = Depends(get_embed_fn),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    embed_fn: Any = Depends(get_embed_fn),  # noqa: B008
 ) -> JSONResponse:
     """Admin: corpus ingestion (issue #197).
 

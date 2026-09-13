@@ -545,6 +545,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
     if (playbooks === null || playbooks.length !== 1) {
       return;
     }
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const only = playbooks[0]!.playbook_id;
     setSelectedPlaybookId((current) => current ?? only);
   }, [playbooks]);
@@ -1475,6 +1476,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           history → standing instructions → forms) is unchanged for anything
           walking the document. */}
       {historyPlaybookId !== null && (
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions
         <div
           className="ct-overlay"
           data-testid="admin-playbooks-versions-overlay"
@@ -2029,6 +2031,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           though the buttons that open them stay in the toolbar above. */}
       {createOpen && (
         <CtCard data-testid="admin-playbooks-create-panel">
+          {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form className="ct-stack" noValidate onSubmit={submitCreate}>
             <CtToolbar title="Upload a new playbook" />
 
@@ -2132,6 +2135,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
 
       {uploadOpen && (
         <CtCard data-testid="admin-playbooks-upload-panel">
+          {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form className="ct-stack" noValidate onSubmit={submitUpload}>
             <CtToolbar title="Upload a version" />
 

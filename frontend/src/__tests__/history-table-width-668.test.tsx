@@ -52,6 +52,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import ReviewHistory, { modelDisplayName, type HistoryRow } from '../ReviewHistory';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -121,9 +122,11 @@ const BEDROCK: HistoryRow = {
 function stubReviews(...rows: HistoryRow[]): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async () => ({
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({ reviews: rows }),
     })),
   );

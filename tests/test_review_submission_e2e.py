@@ -265,7 +265,7 @@ class TestSpendReservation(unittest.TestCase):
             _reviews_module.CRITIC_OUTPUT_RATE_USD_PER_MILLION / 1_000_000
         )
         expected_usd = attempts_per_pass * (primary_usd + critic_usd)
-        expected_cents = int(round(expected_usd * 100))
+        expected_cents = int(round(expected_usd * 100))  # noqa: RUF046
         self.assertEqual(
             _reviews_module.compute_worst_case_reservation_usd_cents(), expected_cents
         )

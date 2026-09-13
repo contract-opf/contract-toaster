@@ -58,7 +58,7 @@ Exit codes: 0 = pass, 1 = fail
 from __future__ import annotations
 
 import json
-import re
+import re  # noqa: F401
 import sys
 from pathlib import Path
 from typing import Any
@@ -72,7 +72,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import primary_review_pass  # noqa: E402
+import primary_review_pass  # noqa: E402, I001
 import review_spine  # noqa: E402
 
 

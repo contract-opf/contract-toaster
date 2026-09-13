@@ -164,7 +164,7 @@ def gate_1_physical_store_pin(arch_text: str) -> list[str]:
         "retrieval queries the exact pinned store, not 'active' at query time",
     ]
     for i, (pattern, label) in enumerate(
-        zip(PHYSICAL_STORE_PIN_PATTERNS, labels), 1
+        zip(PHYSICAL_STORE_PIN_PATTERNS, labels), 1  # noqa: B905
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -185,7 +185,7 @@ def gate_2_rollback_window(arch_text: str) -> list[str]:
         "re-ingestion is the documented recovery path beyond the rollback window",
     ]
     for i, (pattern, label) in enumerate(
-        zip(ROLLBACK_WINDOW_PATTERNS, labels), 1
+        zip(ROLLBACK_WINDOW_PATTERNS, labels), 1  # noqa: B905
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -204,7 +204,7 @@ def gate_3_reindex_route(arch_text: str) -> list[str]:
 
     route_present = REINDEX_ROUTE_PATTERN.search(arch_text)
 
-    if route_present:
+    if route_present:  # noqa: SIM102
         # Route is still in the doc — it must have staging/draft/removed semantics
         if not REINDEX_STAGING_PATTERN.search(arch_text):
             failures.append(
@@ -231,7 +231,7 @@ def gate_4_in_flight_semantics(arch_text: str) -> list[str]:
         "interlock restated as: resolved store is active AND has no in-progress ingestion job",
     ]
     for i, (pattern, label) in enumerate(
-        zip(IN_FLIGHT_SEMANTICS_PATTERNS, labels), 1
+        zip(IN_FLIGHT_SEMANTICS_PATTERNS, labels), 1  # noqa: B905
     ):
         if not pattern.search(arch_text):
             failures.append(

@@ -55,6 +55,7 @@ import {
 } from '../deployIdentity';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -141,6 +142,7 @@ const MODEL_KEY_BODY = {
 function stubRoutes(versionResponse: { status: number; body: unknown }): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (url: string) => {
       const route = String(url);
       const answer = route.includes('/version')
@@ -151,6 +153,7 @@ function stubRoutes(versionResponse: { status: number; body: unknown }): void {
       return {
         ok: answer.status >= 200 && answer.status < 300,
         status: answer.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => answer.body,
       };
     }),

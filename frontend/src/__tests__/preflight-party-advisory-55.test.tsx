@@ -26,6 +26,7 @@ import ReviewSubmission from '../ReviewSubmission';
 import { submitArmed } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -36,15 +37,19 @@ vi.mock('aws-amplify/auth', () => ({
 
 // Same routing convention as preflight-491.test.tsx.
 function stubFetch(routes: Record<string, unknown>): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);

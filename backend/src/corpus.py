@@ -75,11 +75,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+import os  # noqa: F401
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src.authz import require_admin

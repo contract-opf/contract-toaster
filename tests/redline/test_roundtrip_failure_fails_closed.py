@@ -81,7 +81,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import block_transcript  # noqa: E402
+import block_transcript  # noqa: E402, F401
 import extraction_normalization_stage as ens  # noqa: E402
 import leakage_scan  # noqa: E402
 import redline_block_apply  # noqa: E402

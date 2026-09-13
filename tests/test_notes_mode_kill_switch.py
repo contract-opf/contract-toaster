@@ -118,7 +118,7 @@ class TestResolveNotesModeGatedOnTheFlag(unittest.TestCase):
         the existing one (an unrecognized string is always a ValueError,
         flag on or off)."""
         for env_value in ("", "1"):
-            with patch.dict(os.environ, {"NOTES_MODE_ENABLED": env_value}):
+            with patch.dict(os.environ, {"NOTES_MODE_ENABLED": env_value}):  # noqa: SIM117
                 with self.assertRaises(ValueError):
                     reviews.resolve_notes_mode("public")
 

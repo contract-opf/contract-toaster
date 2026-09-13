@@ -38,6 +38,7 @@ import type { Playbook, ReviewModel } from '../orbit-diner/types';
 import { resolveStyle } from './support/orbitCss';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -267,6 +268,7 @@ describe('all three renderings say the same thing', () => {
   });
 
   it('copies the text rendering to the clipboard', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     render(<ToastReceipt review={FULL} playbookName="Synthetic NDA Sample" />);
@@ -480,12 +482,15 @@ describe('History prints the same receipt for a past review', () => {
     const detailCalls: string[] = [];
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const pathname = new URL(String(input), 'http://localhost').pathname;
         if (pathname === '/api/reviews') {
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({
               reviews: [
                 {
@@ -503,6 +508,7 @@ describe('History prints the same receipt for a past review', () => {
           } as Response;
         }
         detailCalls.push(pathname);
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => FULL } as Response;
       }),
     );

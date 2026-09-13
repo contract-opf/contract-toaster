@@ -95,7 +95,7 @@ Denylist governance:
     Document the term, the reason it is stale, and when it was added.
     Reviewers should update this list at each release when model IDs or
     addresses change.
-"""
+"""  # noqa: RUF002
 
 import json
 import re
@@ -253,23 +253,23 @@ def check_a() -> list[str]:
 
 # ── Check B — latency-figure consistency ──────────────────────────────────────
 
-# Pattern that matches seconds-based latency ranges like "15–60 seconds" or
-# "20–90 seconds".  Handles both en-dash (–) and ASCII hyphen (-).
+# Pattern that matches seconds-based latency ranges like "15–60 seconds" or  # noqa: RUF003
+# "20–90 seconds".  Handles both en-dash (–) and ASCII hyphen (-).  # noqa: RUF003
 # Updated 2026-06-22 (issue #31): the canonical figure is now minutes-based
-# ("1–3 minutes typical, 5 minutes p95"); seconds-based ranges are stale.
-LATENCY_SECONDS_PATTERN = re.compile(r"\b(\d+)[––-](\d+)\s+seconds?\s+typical\b", re.IGNORECASE)
+# ("1–3 minutes typical, 5 minutes p95"); seconds-based ranges are stale.  # noqa: RUF003
+LATENCY_SECONDS_PATTERN = re.compile(r"\b(\d+)[––-](\d+)\s+seconds?\s+typical\b", re.IGNORECASE)  # noqa: RUF001
 
 # Pattern that matches the new canonical minutes-based latency figure.
-# Must match: "1–3 minutes typical, 5 minutes p95"
+# Must match: "1–3 minutes typical, 5 minutes p95"  # noqa: RUF003
 LATENCY_MINUTES_PATTERN = re.compile(
-    r"1[–\-]3\s+minutes?\s+typical,\s+5\s+minutes?\s+p95",
+    r"1[–\-]3\s+minutes?\s+typical,\s+5\s+minutes?\s+p95",  # noqa: RUF001
     re.IGNORECASE,
 )
 
 # The one canonical figure — updated to minutes after the full two-pass pipeline
-# latency was measured (issue #31).  The old "20–90 seconds" figure predated
+# latency was measured (issue #31).  The old "20–90 seconds" figure predated  # noqa: RUF003
 # the adversarial critic pass and is superseded.
-CANONICAL_LATENCY = "1–3 minutes typical, 5 minutes p95"
+CANONICAL_LATENCY = "1–3 minutes typical, 5 minutes p95"  # noqa: RUF001
 
 
 def check_b() -> list[str]:
@@ -323,7 +323,7 @@ def check_c() -> list[str]:
         with PLAYBOOK.open() as fh:
             pb = json.load(fh)
         playbook_count = len(pb.get("hard_rejections", []))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return [f"  Could not load playbook: {exc}"]
 
     # Parse the planted-case count from the evaluation.md table

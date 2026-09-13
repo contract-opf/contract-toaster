@@ -150,7 +150,7 @@ class TestOpenRouterInvoke(unittest.TestCase):
 
     def test_non_200_raises_without_body(self) -> None:
         http = FakeHttpClient(FakeResponse(429, {"error": SECRET_PROMPT}))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 self._client(http).invoke(
                     model_id=PRIMARY_MODEL_ID,
@@ -164,7 +164,7 @@ class TestOpenRouterInvoke(unittest.TestCase):
 
     def test_malformed_response_raises(self) -> None:
         http = FakeHttpClient(FakeResponse(200, {"unexpected": "shape"}))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 self._client(http).invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
@@ -173,7 +173,7 @@ class TestOpenRouterInvoke(unittest.TestCase):
 
     def test_transport_error_raises_without_echoing_request(self) -> None:
         http = FakeHttpClient(raise_exc=OSError(SECRET_PROMPT))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 self._client(http).invoke(
                     model_id=PRIMARY_MODEL_ID,
@@ -203,7 +203,7 @@ class TestOpenRouterInvoke(unittest.TestCase):
         # Issue #269: invoke() refuses a model_id that matches neither the
         # policy pin nor an active override -- never spends a request on it.
         http = FakeHttpClient(_ok_response("should not be reached"))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.OpenRouterModelPolicyViolation):
                 self._client(http).invoke(
                     model_id="openai/gpt-4o",
@@ -217,7 +217,7 @@ class TestOpenRouterInvoke(unittest.TestCase):
         # An explicit OPENROUTER_PRIMARY_MODEL_ID override is honored, but
         # logged so an operator can see the deployment is running off-policy.
         http = FakeHttpClient(_ok_response("ok"))
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ", {"OPENROUTER_PRIMARY_MODEL_ID": "openai/gpt-4o"}, clear=True
         ):
             with self.assertLogs("model_client", level="WARNING") as log_ctx:
@@ -270,7 +270,7 @@ class TestEnforceOpenRouterPolicyModelId(unittest.TestCase):
             mc.enforce_openrouter_policy_model_id(CRITIC_MODEL_ID)  # must not raise
 
     def test_unpinned_id_with_no_override_raises(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.OpenRouterModelPolicyViolation) as ctx:
                 mc.enforce_openrouter_policy_model_id("openai/gpt-4o")
         msg = str(ctx.exception)
@@ -279,7 +279,7 @@ class TestEnforceOpenRouterPolicyModelId(unittest.TestCase):
         self.assertIn(CRITIC_MODEL_ID, msg)
 
     def test_matching_primary_override_passes_and_logs(self) -> None:
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ", {"OPENROUTER_PRIMARY_MODEL_ID": "openai/gpt-4o"}, clear=True
         ):
             with self.assertLogs("model_client", level="WARNING") as log_ctx:
@@ -287,7 +287,7 @@ class TestEnforceOpenRouterPolicyModelId(unittest.TestCase):
         self.assertTrue(any("override" in msg.lower() for msg in log_ctx.output))
 
     def test_matching_critic_override_passes_and_logs(self) -> None:
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ", {"OPENROUTER_CRITIC_MODEL_ID": "mistral/large"}, clear=True
         ):
             with self.assertLogs("model_client", level="WARNING") as log_ctx:
@@ -298,7 +298,7 @@ class TestEnforceOpenRouterPolicyModelId(unittest.TestCase):
         # An override env var is set, but the invoked id doesn't match it
         # (or the pin) -- still refused, not silently allowed because SOME
         # override happens to be active.
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ", {"OPENROUTER_PRIMARY_MODEL_ID": "openai/gpt-4o"}, clear=True
         ):
             with self.assertRaises(mc.OpenRouterModelPolicyViolation):
@@ -350,7 +350,7 @@ class TestOpenRouterDataRetentionPosture(unittest.TestCase):
         # attempt, not just the first -- a retry that dropped it would
         # disclose the contract on exactly the paths nobody watches.
         http = FakeHttpClient(FakeResponse(429, {}))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError):
                 self._client(http, max_retries=2).invoke(
                     model_id=PRIMARY_MODEL_ID,

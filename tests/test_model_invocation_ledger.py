@@ -479,7 +479,7 @@ class TestMakeLedgerWrite(unittest.TestCase):
     """Acceptance criteria 2 and 3."""
 
     def _record(self, **overrides: Any) -> model_client.ModelInvocationRecord:
-        kwargs = dict(
+        kwargs = dict(  # noqa: C408
             review_id="r-1",
             pass_name="primary",
             model_id=_PRIMARY_MODEL_ID,

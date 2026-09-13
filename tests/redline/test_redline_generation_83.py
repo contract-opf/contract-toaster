@@ -291,7 +291,7 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
         names = set(zf.namelist())
 
         # --- quote-located patch landed as w:ins/w:del ----------------------
-        doc_root = ET.fromstring(zf.read("word/document.xml"))
+        doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
         ins_elements = doc_root.findall(f".//{_qn('ins')}")
         del_elements = doc_root.findall(f".//{_qn('del')}")
         if not ins_elements or not del_elements:
@@ -315,7 +315,7 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
             footnote_ref = doc_root.findall(f".//{_qn('footnoteReference')}")
             if not footnote_ref:
                 failures.append("[1g] No <w:footnoteReference> in document.xml.")
-            footnotes_root = ET.fromstring(zf.read("word/footnotes.xml"))
+            footnotes_root = ET.fromstring(zf.read("word/footnotes.xml"))  # noqa: S314
             footnote_text = "".join(
                 (t.text or "") for t in footnotes_root.findall(f".//{_qn('t')}")
             )
@@ -334,7 +334,7 @@ def _part_1_known_issue_list(rg, failures: list) -> None:
         else:
             header_text = zf.read("word/header1.xml")
             footer_text = zf.read("word/footer1.xml")
-            marker_bytes = "contains internal notes".encode("utf-8")
+            marker_bytes = "contains internal notes".encode("utf-8")  # noqa: UP012
             if marker_bytes not in header_text:
                 failures.append("[1k] Marker text not found in word/header1.xml.")
             if marker_bytes not in footer_text:
@@ -422,7 +422,7 @@ def _part_2_result_mapping(rg, failures: list) -> None:
     if not mixed_docx:
         failures.append("[2k] Expected partial redline docx_bytes alongside the analysis report (issue #203).")
     else:
-        doc_root = ET.fromstring(zipfile.ZipFile(io.BytesIO(bytes(mixed_docx))).read("word/document.xml"))
+        doc_root = ET.fromstring(zipfile.ZipFile(io.BytesIO(bytes(mixed_docx))).read("word/document.xml"))  # noqa: S314
         all_text = "".join((t.text or "") for t in doc_root.findall(f".//{_qn('t')}"))
         if "is uncapped" not in all_text:
             failures.append("[2l] The compilable edit should still have applied in the partial delivery.")
@@ -526,7 +526,7 @@ def _part_3_hostile_text_inert_literal_runs(rg, failures: list) -> None:
         failures.append(f"[3c] Output OOXML scan unexpectedly failed: {exc}")
 
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
-        doc_root = ET.fromstring(zf.read("word/document.xml"))
+        doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
         # No field-code / hyperlink structure was created from the hostile text.
         for tag in ("fldChar", "instrText", "fldSimple", "hyperlink"):
@@ -550,7 +550,7 @@ def _part_3_hostile_text_inert_literal_runs(rg, failures: list) -> None:
 
         # No external relationship or embedded object exists anywhere.
         if "word/_rels/document.xml.rels" in zf.namelist():
-            rels_root = ET.fromstring(zf.read("word/_rels/document.xml.rels"))
+            rels_root = ET.fromstring(zf.read("word/_rels/document.xml.rels"))  # noqa: S314
             for rel in rels_root:
                 if rel.get("TargetMode", "").lower() == "external":
                     failures.append("[3f] An external relationship was created from hostile text.")
@@ -678,7 +678,7 @@ def _part_5_word_round_trip(rg, failures: list) -> None:
         for name in zf.namelist():
             if name.endswith(".xml") or name.endswith(".rels"):
                 try:
-                    ET.fromstring(zf.read(name))
+                    ET.fromstring(zf.read(name))  # noqa: S314
                 except ET.ParseError as exc:
                     failures.append(f"[5e] {name} failed to re-parse: {exc}")
 
@@ -709,7 +709,7 @@ def _part_6_marker_conditional_on_notes_mode(rg, failures: list) -> None:
                     f"[6-{case}] Expected NO header1.xml/footer1.xml with no "
                     f"internal notes in scope. Got parts: {sorted(names)}"
                 )
-            doc_root = ET.fromstring(zf.read("word/document.xml"))
+            doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
             if doc_root.findall(f".//{_qn('headerReference')}") or doc_root.findall(
                 f".//{_qn('footerReference')}"
             ):

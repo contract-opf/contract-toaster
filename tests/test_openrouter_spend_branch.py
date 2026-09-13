@@ -155,7 +155,7 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 
-import reviews as _reviews_module  # noqa: E402
+import reviews as _reviews_module  # noqa: E402, I001
 import model_client as _model_client_module  # noqa: E402
 from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 
@@ -295,7 +295,7 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
             _reviews_module.MAX_INPUT_TOKENS * critic["cost_per_million_input_usd"] / 1_000_000
             + _reviews_module.MAX_OUTPUT_TOKENS * critic["cost_per_million_output_usd"] / 1_000_000
         )
-        expected_cents = int(round(attempts_per_pass * (primary_usd + critic_usd) * 100))
+        expected_cents = int(round(attempts_per_pass * (primary_usd + critic_usd) * 100))  # noqa: RUF046
 
         actual_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(actual_cents, expected_cents)
@@ -391,7 +391,7 @@ class TestSettleFromActualProviderUsage(unittest.TestCase):
             + critic_usage["input_tokens"] * critic_rates["cost_per_million_input_usd"] / 1_000_000
             + critic_usage["output_tokens"] * critic_rates["cost_per_million_output_usd"] / 1_000_000
         )
-        expected_cents = int(round(expected_usd * 100))
+        expected_cents = int(round(expected_usd * 100))  # noqa: RUF046
 
         actual_cents = _reviews_module.compute_actual_usd_cents_from_usage(
             primary_usage, critic_usage

@@ -31,12 +31,12 @@ need to be hard-coded.
 
 import json
 import os
-import time
+import time  # noqa: F401
 from functools import lru_cache
 from typing import Any
 
 import httpx
-from fastapi import Cookie, Depends, HTTPException, Security, status
+from fastapi import Cookie, Depends, HTTPException, Security, status  # noqa: F401
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
@@ -248,7 +248,7 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer),  # noqa: B008
     session_cookie: str | None = Cookie(default=None, alias=demo_auth.DEMO_SESSION_COOKIE_NAME),
 ) -> dict[str, Any]:
     """FastAPI dependency: verify the caller's credential and return the claims.

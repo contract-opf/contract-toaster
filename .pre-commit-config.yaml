@@ -7,6 +7,63 @@ repos:
         language: system
         pass_filenames: false
         verbose: true
+      # Issue #65. `ruff check` on the Python files being committed, so a new
+      # violation costs seconds instead of a full `scripts/check.sh` run. Green
+      # means "no NEW violations": the pre-#65 tree carries `# noqa` comments
+      # written by `ruff check --add-noqa`, and the config is
+      # `[tool.ruff]` in pyproject.toml.
+      #
+      # `language: system` and a bare `ruff`, in the style of the two hooks
+      # around it: this repo's hooks run the tools the contributor already has
+      # from requirements-dev.txt (where ruff is pinned) rather than letting
+      # pre-commit build a second, differently-versioned environment.
+      #
+      # DELIBERATELY NOT `ruff format`. A whole-tree reformat collides with the
+      # in-flight #50-#59 series; follow-up issue #90 enables it, and
+      # tests/test_lint_gates_65.py check 7 asserts it stays absent until then.
+      #
+      # SCOPE: the same four roots scripts/check.sh and lint.yml lint. #65
+      # baselined `backend scripts tests infra/lambda` and nothing else, so
+      # `tools/`, `deploy/` and `docs/assets/` still carry 20 un-baselined
+      # findings between them. A hook that goes red where the gate is green
+      # teaches people `--no-verify`, which costs more than it buys; widen
+      # this regex and the gate's root list together, not separately.
+      - id: ruff
+        name: ruff (no NEW lint violations in the staged Python)
+        entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^(backend|scripts|tests|infra/lambda)/
+        require_serial: true
+        verbose: true
+      # Issue #65, the TypeScript half. ESLint over the staged frontend files.
+      #
+      # WHY THIS IS A pre-commit HOOK AND NOT husky + lint-staged
+      #   The issue sketched the `setup-pre-commit` skill's husky+lint-staged
+      #   pattern. Installing husky here would be actively harmful: husky sets
+      #   git's `core.hooksPath`, and this repository already points that at
+      #   `.githooks/` (issue #64, opted into by the installer under scripts/)
+      #   for the pre-push hook that refuses a direct push to `main` — the
+      #   interim control standing in for branch protection, which this plan's
+      #   GitHub tier does not offer. A second hook manager claiming
+      #   `core.hooksPath` silently disables the first, and the failure mode is
+      #   a push to `main` that nothing refuses. pre-commit is the manager this
+      #   repo already uses, it passes the staged filenames itself (which is
+      #   lint-staged's whole job), and it composes with `.githooks/` instead
+      #   of fighting it.
+      #
+      #   (This file must not contain the installer script's name: issue #64's
+      #   own gate, tests/test_landing_flow_64.py check 8, asserts that no gate
+      #   config mentions it, so that nothing can quietly install a push policy
+      #   a contributor did not ask for.)
+      - id: eslint-frontend
+        name: eslint (no NEW lint violations in the staged frontend files)
+        entry: frontend/scripts/eslint-staged.sh
+        language: system
+        files: ^frontend/(src|scripts)/.*\.(ts|tsx|js|jsx|mjs)$
+        exclude: ^frontend/vendor/
+        require_serial: true
+        verbose: true
       # Issue #341. Runs at PUSH time, not commit time: it scans the whole
       # public surface, which is too slow per-commit and only matters when
       # something is about to leave the machine. Fail-open without the private

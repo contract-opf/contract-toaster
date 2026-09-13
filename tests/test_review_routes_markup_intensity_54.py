@@ -90,7 +90,7 @@ for _dir in (BACKEND_ROOT, SCRIPTS_DIR, TESTS_DIR):
 # tests/test_toaster_guidance_readback.py): the #84 route fixture mounts the
 # REAL router with an in-memory DynamoDB fake and moto S3, and its module-level
 # env-var setdefaults happen once, on first import.
-from test_review_api_84 import PLAYBOOK_ID, ReviewApiTestBase, _valid_docx_bytes  # noqa: E402
+from test_review_api_84 import PLAYBOOK_ID, ReviewApiTestBase, _valid_docx_bytes  # noqa: E402, I001
 
 import critic_review_pass  # noqa: E402
 import model_client  # noqa: E402
@@ -337,7 +337,7 @@ class TestTheOpfPrompt(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.doc = opf_load.load_opf(FIXTURE_PATH)
 
-    def _knowledge(self, instructions_text: str = "") -> "review_knowledge.ReviewKnowledge":
+    def _knowledge(self, instructions_text: str = "") -> "review_knowledge.ReviewKnowledge":  # noqa: UP037
         return review_knowledge.resolve_knowledge(
             bundle_v2={"opf": self.doc, "overrides": None},
             policy=None,

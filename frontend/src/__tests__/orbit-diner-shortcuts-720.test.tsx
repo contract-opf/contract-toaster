@@ -45,16 +45,20 @@ function docxFile(name = 'contract.docx'): File {
 }
 
 function mockFetch() {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === '/api/playbooks') {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ playbooks: PLAYBOOKS }),
       } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => ({}) } as Response;
   });
 }

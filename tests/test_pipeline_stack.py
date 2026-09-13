@@ -74,7 +74,7 @@ Verifies:
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import re
+import re  # noqa: I001
 import subprocess
 import sys
 from pathlib import Path
@@ -306,7 +306,7 @@ def check_e_cmk_encryption() -> list[str]:
     if TOP_STACK_PATH.is_file():
         top_text = _read(TOP_STACK_PATH)
         failures += _assert(
-            "Pipeline" in top_text and "pipeline-stack" not in top_text or "PipelineStack" in top_text,
+            "Pipeline" in top_text and "pipeline-stack" not in top_text or "PipelineStack" in top_text,  # noqa: RUF021
             "contract-toaster-stack.ts instantiates PipelineStack",
         )
 
@@ -579,7 +579,7 @@ def check_k_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True
+            ["npm", "install"], cwd=INFRA, capture_output=True, text=True  # noqa: S607
         )
         if install.returncode != 0:
             return _assert(
@@ -588,8 +588,8 @@ def check_k_cdk_synth() -> list[str]:
                 f"stdout: {install.stdout[-500:]}\nstderr: {install.stderr[-500:]}",
             )
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

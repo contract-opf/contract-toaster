@@ -54,7 +54,7 @@ named docs-gates; do not attempt a per-check split here). See
 tests/test_docs_gate_labeling.py, which enforces that this marker exists.
 """
 
-import re
+import re  # noqa: I001
 import subprocess
 import sys
 from pathlib import Path
@@ -306,8 +306,8 @@ def check_cdk_synth() -> list[str]:
     print("Check E: cdk synth runs cleanly with the CICD stack included …")
     failures = []
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=str(INFRA),
         capture_output=True,
         text=True,

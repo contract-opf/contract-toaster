@@ -22,6 +22,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewHistory from '../ReviewHistory';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -45,13 +46,17 @@ function stubPages(pages: Array<{ reviews: unknown[]; next_token: string | null 
   let index = 0;
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = String(input);
       if (url.includes('/api/reviews?')) {
         urls.push(url);
         const body = url.includes('next_token=') ? pages[index++ + 1] : ((index = 0), pages[0]);
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => body } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );
@@ -134,9 +139,12 @@ describe('History pages instead of fetching everything', () => {
     let calls = 0;
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const url = String(input);
         if (!url.includes('/api/reviews?')) {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: false, status: 404, json: async () => ({}) } as Response;
         }
         calls += 1;
@@ -144,9 +152,11 @@ describe('History pages instead of fetching everything', () => {
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({ reviews: [row('a-1')], next_token: 'TOKEN-2' }),
           } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }),
     );

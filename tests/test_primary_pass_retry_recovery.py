@@ -62,7 +62,7 @@ def _fixture(name: str) -> str:
 
 
 def _playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as handle:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as handle:  # noqa: UP015
         return json.load(handle)
 
 
@@ -217,8 +217,8 @@ def test_schema_error_is_fed_back_into_the_retry_prompt(failures: list[str]) -> 
         )
     if "confidence_state" not in second:
         failures.append(
-            f"[1d] The retry prompt must name the field that failed validation; "
-            f"it did not mention confidence_state"
+            f"[1d] The retry prompt must name the field that failed validation; "  # noqa: F541
+            f"it did not mention confidence_state"  # noqa: F541
         )
     if pp.RETRY_CORRECTION_HEADING not in second:
         failures.append(

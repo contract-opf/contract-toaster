@@ -79,7 +79,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import critic_review_pass as cp  # noqa: E402
+import critic_review_pass as cp  # noqa: E402, I001
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -111,7 +111,7 @@ def _load_fixture_text(name: str) -> str:
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 

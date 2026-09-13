@@ -39,6 +39,7 @@ describe('CtField', () => {
         <input data-testid="ctl" />
       </CtField>,
     );
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const input = screen.getByTestId('ctl') as HTMLInputElement;
     expect(input.id).not.toBe('');
     const label = document.querySelector('ct-field label') as HTMLLabelElement;
@@ -51,6 +52,7 @@ describe('CtField', () => {
         <input id="explicit-id" data-testid="ctl" />
       </CtField>,
     );
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const input = screen.getByTestId('ctl') as HTMLInputElement;
     expect(input.id).toBe('explicit-id');
     expect(screen.getByLabelText('Username')).toBe(input);

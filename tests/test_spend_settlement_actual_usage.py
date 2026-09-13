@@ -90,7 +90,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import model_client  # noqa: E402

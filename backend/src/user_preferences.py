@@ -61,9 +61,9 @@ Environment variables:
   USER_PREFERENCES_TABLE — this module's table (PK: cognito_sub)
 """
 
-import os
+import os  # noqa: I001
 import time
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 from fastapi import HTTPException, status
 

@@ -41,6 +41,7 @@ import App from '../App';
 import { invalidateCatalog } from '../playbooksStore';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -172,24 +173,29 @@ const BODIES: Record<string, unknown> = {
  */
 function stubRotationEnforcingFetch(state: { rotated: boolean }): string[] {
   const answered: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     answered.push(pathname);
 
     if (pathname === '/api/me') {
       const body = state.rotated ? ME_ADMIN_ROTATED : ME_ADMIN_UNROTATED;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
     }
     if (pathname === '/api/me/password') {
       // The rotation itself. POSTing it is what clears the block server-side.
       state.rotated = true;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ changed: true }) } as Response;
     }
     if (!EXEMPT_PATHS.has(pathname) && !state.rotated) {
       return {
         ok: false,
         status: 403,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           detail:
             'This account still uses the shipped default password. ' +
@@ -199,8 +205,10 @@ function stubRotationEnforcingFetch(state: { rotated: boolean }): string[] {
     }
     const body = BODIES[pathname];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -293,6 +301,7 @@ describe.each(PANELS)('$name — a rotation 403 does not latch the panel blank (
     // changes; the panel is NOT remounted (App.tsx keeps it mounted and
     // toggles `hidden`), so this rerender is the real production sequence.
     state.rotated = true;
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       view.rerender(panel.element(1));
       panel.rotate?.();
@@ -312,6 +321,7 @@ describe.each(PANELS)('$name — a rotation 403 does not latch the panel blank (
     expect(screen.queryByTestId(panel.testId)).toBeNull();
 
     answered.length = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       view.rerender(panel.element(1));
       panel.rotate?.();
@@ -359,6 +369,7 @@ describe('App — rotating the seeded password recovers every admin panel (#635)
     fireEvent.change(screen.getByTestId('change-password-new'), {
       target: { value: 'a-rotated-passphrase' },
     });
+    // eslint-disable-next-line @typescript-eslint/require-await
     await act(async () => {
       fireEvent.click(screen.getByTestId('change-password-submit'));
     });

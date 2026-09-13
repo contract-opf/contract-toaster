@@ -149,7 +149,7 @@ def main() -> int:
 
     # 8. fail-open with no token list
     with tempfile.TemporaryDirectory() as d:
-        proc = subprocess.run(
+        proc = subprocess.run(  # noqa: S603
             [sys.executable, str(SCANNER), "--tokens", str(Path(d) / "nonexistent.txt")],
             capture_output=True,
             text=True,

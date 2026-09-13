@@ -84,7 +84,7 @@ for _dir in (BACKEND_SRC, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import model_client as mc  # noqa: E402
+import model_client as mc  # noqa: E402, I001
 import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
 import floor_judge as fj  # noqa: E402
@@ -97,7 +97,7 @@ SHORT_DOC_TEXT = "Section 8. Each party's aggregate liability shall not exceed $
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -165,7 +165,7 @@ def test_cached_content_has_exactly_one_cache_control_block_on_the_doc_block(
 
 
 def test_capability_false_byte_identical_to_legacy_assembler(failures: list[str]) -> None:
-    kwargs = dict(
+    kwargs = dict(  # noqa: C408
         retrieved_precedent=[],
         doc_text=SHORT_DOC_TEXT,
     )
@@ -401,7 +401,7 @@ def test_openrouter_capability_true_sends_content_array_with_cache_control(
             max_output_tokens=100,
         )
     body = http.calls[0]["json"]
-    user_message = [m for m in body["messages"] if m["role"] == "user"][0]
+    user_message = [m for m in body["messages"] if m["role"] == "user"][0]  # noqa: RUF015
     if user_message["content"] != CACHE_BLOCKS:
         failures.append(f"[10a] Capability-True OpenRouter model must send the content-block array verbatim; got {user_message['content']!r}")
 
@@ -421,7 +421,7 @@ def test_openrouter_capability_false_flattens_list_content(failures: list[str]) 
             max_output_tokens=100,
         )
     body = http.calls[0]["json"]
-    user_message = [m for m in body["messages"] if m["role"] == "user"][0]
+    user_message = [m for m in body["messages"] if m["role"] == "user"][0]  # noqa: RUF015
     if user_message["content"] != "DOC\n\nINSTRUCTION":
         failures.append(f"[11a] Capability-False OpenRouter model must flatten list content; got {user_message['content']!r}")
 

@@ -493,16 +493,20 @@ function docxFile(): File {
 }
 
 function mockFetch() {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const parsed = new URL(url, 'http://localhost');
     const pathname = parsed.pathname;
     calls.push(`${method} ${pathname}${parsed.search}`);
     const ok = (body: unknown) =>
+      // eslint-disable-next-line @typescript-eslint/require-await
       ({ ok: true, status: 200, json: async () => body }) as Response;
     if (pathname === '/api/playbooks') {
       if (catalogFails) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 503, json: async () => ({}) } as Response;
       }
       return ok({ playbooks: PLAYBOOKS });
@@ -515,6 +519,7 @@ function mockFetch() {
     }
     if (pathname === '/api/reviews/rev-1') {
       if (pollFails) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 502, json: async () => ({}) } as Response;
       }
       return ok({

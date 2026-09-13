@@ -151,7 +151,7 @@ def is_boundary_paragraph(
         return True
     if is_bold and "\n" not in stripped:
         return True
-    if _is_all_caps_short_line(stripped):
+    if _is_all_caps_short_line(stripped):  # noqa: SIM103
         return True
 
     return False

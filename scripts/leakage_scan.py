@@ -190,7 +190,7 @@ import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -246,7 +246,7 @@ def _contains_token(text: str, token: str) -> bool:
 
 
 @lru_cache(maxsize=8192)
-def _token_pattern(token: str) -> "re.Pattern[str]":
+def _token_pattern(token: str) -> "re.Pattern[str]":  # noqa: UP037
     """The compiled boundary-anchored pattern for one corpus gram.
 
     Cached because the corpus is now an order of magnitude larger: issue
@@ -703,7 +703,7 @@ class ConfidentialCorpus:
         internal_precedent_ids: list[str] | None = None,
         counterparty_names: list[str] | None = None,
         precedent_verbatim_spans: list[str] | None = None,
-    ) -> "ConfidentialCorpus":
+    ) -> "ConfidentialCorpus":  # noqa: UP037
         """Derive playbook_ngrams and standard_clause_ngrams from a loaded
         playbook dict (the standard playbook JSON shape).
 
@@ -769,7 +769,7 @@ class ConfidentialCorpus:
         system_prompt_ngrams: list[str] | None = None,
         counterparty_names: list[str] | None = None,
         precedent_verbatim_spans: list[str] | None = None,
-    ) -> "ConfidentialCorpus":
+    ) -> "ConfidentialCorpus":  # noqa: UP037
         """The OPF analogue of `from_playbook` (issue #479): an OPF-governed
         review (`scripts/review_spine.py::run_review`, `bundle
         ["opf_bundle_v2"]`) sends the model real confidential material --

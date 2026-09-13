@@ -53,7 +53,7 @@ if str(BACKEND_ROOT) not in sys.path:
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 from src import users as users_module  # noqa: E402
@@ -75,7 +75,7 @@ class _Harness:
     keyword and the regression would go unnoticed (see the module docstring).
     """
 
-    def __enter__(self) -> "_Harness":
+    def __enter__(self) -> "_Harness":  # noqa: UP037
         self._mock_aws = mock_aws()
         self._mock_aws.start()
         self.ddb = boto3.resource("dynamodb", region_name="us-east-1")

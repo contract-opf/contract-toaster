@@ -37,6 +37,7 @@ import { DEFAULT_PLAYBOOKS, submitArmed } from './support/consoleSurface';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -117,10 +118,12 @@ function stillSubmitting(): boolean {
 async function panelWithUpload(respond: 'stall' | 'accept'): Promise<Harness> {
   const posts: RequestInit[] = [];
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === '/api/playbooks') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return Promise.resolve({ ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response);
     }
     if (method === 'POST' && pathname === '/api/reviews') {
@@ -131,6 +134,7 @@ async function panelWithUpload(respond: 'stall' | 'accept'): Promise<Harness> {
       return Promise.resolve({
         ok: true,
         status: 202,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ review_id: 'rev-53', resumed: false }),
       } as Response);
     }
@@ -138,6 +142,7 @@ async function panelWithUpload(respond: 'stall' | 'accept'): Promise<Harness> {
       return Promise.resolve({
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           review_id: 'rev-53',
           status: 'RUNNING',
@@ -147,6 +152,7 @@ async function panelWithUpload(respond: 'stall' | 'accept'): Promise<Harness> {
         }),
       } as Response);
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return Promise.resolve({ ok: false, status: 404, json: async () => ({}) } as Response);
   });
   vi.stubGlobal('fetch', fetchMock);

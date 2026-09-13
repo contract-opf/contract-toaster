@@ -65,11 +65,11 @@ from __future__ import annotations
 import copy
 import json
 import sys
-import time
+import time  # noqa: F401
 import unittest
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOCK_REVIEW_DIR = REPO_ROOT / "infra" / "lambda" / "mock_review"
@@ -240,7 +240,7 @@ def _looks_like_pointer_or_enum(value: str) -> bool:
         return True
     if value.startswith(_POINTER_LIKE_PREFIXES):
         return True
-    if len(value) <= _MAX_PLAUSIBLE_POINTER_LENGTH:
+    if len(value) <= _MAX_PLAUSIBLE_POINTER_LENGTH:  # noqa: SIM103
         # Short strings are allowed to be free-form enums/ids/short summaries
         # per the AC's "or short fixed strings" carve-out.
         return True

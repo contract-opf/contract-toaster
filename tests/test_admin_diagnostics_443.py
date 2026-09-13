@@ -87,7 +87,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -189,7 +189,7 @@ class FakeDynamoDBResource:
         self,
         users: FakeUsersTable,
         reviews,
-        playbooks: "FakePlaybooksTable | None" = None,
+        playbooks: "FakePlaybooksTable | None" = None,  # noqa: UP037
     ) -> None:
         self._tables = {
             os.environ["USERS_TABLE"]: users,

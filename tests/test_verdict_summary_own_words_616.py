@@ -84,17 +84,17 @@ _REPLACEMENT_TEXT_ALLOWLIST = leakage_scan._REPLACEMENT_TEXT_FIELDS
 
 
 def _load_fixture_text(name: str) -> str:
-    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:
+    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:  # noqa: UP015
         return fh.read()
 
 
 def _v1_playbook() -> dict[str, Any]:
-    with open(V1_PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(V1_PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
 def _opf_doc() -> dict[str, Any]:
-    with open(OPF_FIXTURE_PATH, "r", encoding="utf-8") as fh:
+    with open(OPF_FIXTURE_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 

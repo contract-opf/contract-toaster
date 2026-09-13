@@ -227,7 +227,7 @@ def check_e_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,
+            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
         )
         if install.returncode != 0:
             return _assert(
@@ -235,8 +235,8 @@ def check_e_cdk_synth() -> list[str]:
                 f"stderr: {install.stderr[-500:]}",
             )
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "envName=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "envName=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,
@@ -297,7 +297,7 @@ def main() -> int:
     ]
 
     overall_pass = True
-    for code, fn in checks:
+    for code, fn in checks:  # noqa: B007
         failures = fn()
         if failures:
             overall_pass = False

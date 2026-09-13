@@ -119,7 +119,7 @@ def load_synthetic_text_supplements(
     return raw.get("synthetic_text_supplements", {})
 
 
-def topic_text_by_anchor(playbook: dict, synthetic_text_supplements: dict = None) -> dict:
+def topic_text_by_anchor(playbook: dict, synthetic_text_supplements: dict = None) -> dict:  # noqa: RUF013
     """
     Map section_anchor -> our_standard prose, for anchors covered by a topic.
     A topic can cover multiple anchors; each covered anchor gets the same

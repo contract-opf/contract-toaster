@@ -46,6 +46,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import AdminPlaybooks from '../AdminPlaybooks';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -65,25 +66,31 @@ const CATALOG = {
 function stubRoutes(): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const pathname = new URL(
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         typeof input === 'string' ? input : input.toString(),
         'http://localhost',
       ).pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       if (method === 'GET' && pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => CATALOG } as Response;
       }
       if (method === 'GET' && pathname.endsWith('/versions')) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ versions: [] }) } as Response;
       }
       if (method === 'GET' && pathname.endsWith('/instructions')) {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ current: null, history: [] }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );

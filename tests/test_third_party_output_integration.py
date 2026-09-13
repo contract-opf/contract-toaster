@@ -58,7 +58,7 @@ assumed:
 Exit codes: 0 = pass, 1 = fail
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import io
 import json
@@ -76,7 +76,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import jsonschema  # type: ignore  # noqa: E402
+import jsonschema  # type: ignore  # noqa: E402, I001
 import model_client  # type: ignore  # noqa: E402
 import extraction_normalization_stage  # type: ignore  # noqa: E402
 import leakage_scan  # type: ignore  # noqa: E402
@@ -485,7 +485,7 @@ def _extract_docx_text(docx_bytes: bytes) -> str:
         for name in zf.namelist():
             if not name.startswith("word/") or not name.endswith(".xml"):
                 continue
-            root = ET.fromstring(zf.read(name))
+            root = ET.fromstring(zf.read(name))  # noqa: S314
             for el in root.iter():
                 tag = el.tag.rsplit("}", 1)[-1]
                 if tag in ("t", "delText") and el.text:
@@ -507,7 +507,7 @@ def _footnote_texts(docx_bytes: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
         if FOOTNOTES_PART not in zf.namelist():
             return []
-        root = ET.fromstring(zf.read(FOOTNOTES_PART))
+        root = ET.fromstring(zf.read(FOOTNOTES_PART))  # noqa: S314
     texts = []
     for footnote in root.findall(_qn("footnote")):
         if int(footnote.get(_qn("id"), "0")) <= 0:
@@ -528,7 +528,7 @@ def _footnote_reference_owner_ins_ids(docx_bytes: bytes) -> list[str]:
     """The `w:id` of every `<w:ins>` that CONTAINS a footnote reference --
     i.e. the revision each footnote is anchored to."""
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
-        root = ET.fromstring(zf.read(DOCUMENT_PART))
+        root = ET.fromstring(zf.read(DOCUMENT_PART))  # noqa: S314
     owners = []
     for ins in root.iter(_qn("ins")):
         if any(True for _ in ins.iter(_qn("footnoteReference"))):
@@ -777,9 +777,9 @@ def test_flag_finding_leaves_its_clause_untouched(failures, mod, clauses):
     # delivered document is the source paragraph, unchanged, with no
     # revision markup anywhere inside it.
     with zipfile.ZipFile(io.BytesIO(uploaded)) as zf:
-        source_root = ET.fromstring(zf.read(DOCUMENT_PART))
+        source_root = ET.fromstring(zf.read(DOCUMENT_PART))  # noqa: S314
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        out_root = ET.fromstring(zf.read(DOCUMENT_PART))
+        out_root = ET.fromstring(zf.read(DOCUMENT_PART))  # noqa: S314
 
     source_p = _paragraph_containing(source_root, _ASSIGNMENT_BODY)
     out_p = _paragraph_containing(out_root, _ASSIGNMENT_BODY)
@@ -888,9 +888,9 @@ def test_reject_on_a_non_fixed_mode_topic_is_flag_only(failures, mod, clauses):
     # Byte-identical: the counterparty's own paragraph survives untouched,
     # with no revision markup anywhere inside it.
     with zipfile.ZipFile(io.BytesIO(uploaded)) as zf:
-        source_root = ET.fromstring(zf.read(DOCUMENT_PART))
+        source_root = ET.fromstring(zf.read(DOCUMENT_PART))  # noqa: S314
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        out_root = ET.fromstring(zf.read(DOCUMENT_PART))
+        out_root = ET.fromstring(zf.read(DOCUMENT_PART))  # noqa: S314
     source_p = _paragraph_containing(source_root, _DEFINITIONS_BODY)
     out_p = _paragraph_containing(out_root, _DEFINITIONS_BODY)
     if source_p is None or out_p is None:

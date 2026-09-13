@@ -59,7 +59,7 @@ import json
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -77,7 +77,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import model_client as model_client_module  # noqa: E402
+import model_client as model_client_module  # noqa: E402, I001
 import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
 import review_knowledge  # noqa: E402
@@ -206,7 +206,7 @@ def test_lineage_record_carries_prompt_omissions(failures: list[str]) -> None:
     # named: posture_source == "playbook" coexisting with a record that
     # says nothing else about it, unless prompt_omissions is read too.
     if record.get("posture_source") != "playbook":
-        failures.append(f"[5g] fixture precondition broken: expected posture_source == 'playbook'")
+        failures.append(f"[5g] fixture precondition broken: expected posture_source == 'playbook'")  # noqa: F541
 
 
 def test_lineage_record_omits_nothing_extra_for_a_full_playbook(failures: list[str]) -> None:
@@ -349,7 +349,7 @@ def test_v1_review_carries_no_opf_knowledge_lineage(failures: list[str]) -> None
     all -- the key must be absent, never a null placeholder, matching this
     repo's own convention for every other OPF-only result field."""
     sys.path.insert(0, str(REPO_ROOT / "tests"))
-    from test_review_spine import _build_draft_docx, _load_bundle  # noqa: E402 (local import)
+    from test_review_spine import _build_draft_docx, _load_bundle  # noqa: I001 (local import)
     import synthetic_form_paragraphs as sfp_module
 
     bundle = _load_bundle()

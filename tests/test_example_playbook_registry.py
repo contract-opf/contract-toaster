@@ -131,8 +131,8 @@ class TestRegistryDefaultRepointed(unittest.TestCase):
         once at import time) must not raise, even though the default is now
         a KNOWLEDGE profile entry (issue #412) -- importing every one of
         them fresh (this test process has not imported any of them yet)."""
-        import canonicalize  # noqa: F401
-        import eval_harness  # noqa: F401
+        import canonicalize
+        import eval_harness
         import seed_active_bundle  # noqa: F401
 
         self.assertEqual(
@@ -232,7 +232,7 @@ class FakeS3:
 
 class TestDtsMockPipelineCompletesAgainstDefault(unittest.TestCase):
     def test_review_against_the_default_playbook_reaches_a_terminal_status(self):
-        import pipeline_runner as pr
+        import pipeline_runner as pr  # noqa: I001
         from unittest.mock import patch
 
         review_id = "00000000-0000-4000-a000-000000000343"

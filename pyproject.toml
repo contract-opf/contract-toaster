@@ -8,3 +8,373 @@
 name = "contract-toaster"
 version = "0.0.0"
 requires-python = ">=3.13,<3.14"
+
+# ---------------------------------------------------------------------------
+# Lint / type-check configuration (issue #65, diagnostic G4 / action B4).
+#
+# BASELINE-THEN-RATCHET, not a mass reformat. Every violation that existed on
+# the tree when this landed is annotated in place (`# noqa: RULE` for ruff,
+# a per-module `ignore_errors` override for mypy) by a mechanical pass; the
+# gate then refuses NEW ones. Nothing below reformats or rewrites code, so the
+# baseline commits carry no behaviour change.
+#
+# `ruff format --check` is deliberately NOT wired up yet: a whole-repo reformat
+# collides with the in-flight #50-#59 series. Follow-up issue #90 turns it on
+# once that series has landed. tests/test_lint_gates_65.py asserts it is absent
+# from lint.yml and scripts/check.sh, so "not yet" cannot drift into "never
+# noticed".
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "C4", "SIM", "RUF"]
+ignore = ["E501"]
+
+# RUF100 ("unused `noqa` directive") is live, and it must stay live: it is the
+# half of the ratchet that makes the baseline SHRINK. Fix the code under an
+# annotation and ruff tells you the annotation is now dead, so it can be
+# deleted. A `# noqa` that lists RUF100 among its own codes would suppress
+# exactly that report and freeze the annotation in place forever, which is why
+# tests/test_lint_gates_65.py check 8 refuses to let one into the tree.
+#
+# `external` is the other half. These codes are real ruff rules that the
+# `select` above deliberately does NOT enable, but the tree carried
+# hand-written `# noqa` directives for them — with their authors' rationales —
+# long before any linter ran here. Without this list RUF100 would report all
+# 108 of those lines (115 code occurrences) as "non-enabled", and the only ways
+# to silence it would be to delete other people's reasoning or to widen
+# `select` into a second unreviewable mass annotation. Declaring them here
+# keeps the comments, keeps RUF100 honest about the rules we DO enable, and
+# leaves one place to edit when a family is promoted into `select`. Every entry
+# is load-bearing: drop any one and `ruff check` goes red.
+external = ["A002", "ANN001", "ARG001", "ARG002", "N801", "N802", "N803", "PLC0415", "SLF001"]
+
+[tool.ruff.lint.per-file-ignores]
+# The test tree is assertions, throwaway credentials and subprocess drivers by
+# construction; S101/S105/S106 there are the shape of the code, not a finding.
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["backend/src", "scripts"]
+
+# ---------------------------------------------------------------------------
+# mypy baseline overrides (issue #65). One entry per module that did not
+# type-check under `strict = true` when the gate landed; the same list is
+# checked in as `mypy-baseline.txt`, and tests/test_lint_gates_65.py holds the
+# two in lockstep and refuses to let either grow. Deleting an entry (after
+# actually typing the module) is the only edit this block should ever see.
+# ---------------------------------------------------------------------------
+
+# backend/src/admin_dashboard.py
+[[tool.mypy.overrides]]
+module = "src.admin_dashboard"
+ignore_errors = true
+
+# backend/src/audit_queries.py
+[[tool.mypy.overrides]]
+module = "src.audit_queries"
+ignore_errors = true
+
+# backend/src/auth.py
+[[tool.mypy.overrides]]
+module = "src.auth"
+ignore_errors = true
+
+# backend/src/bundle_authoring.py
+[[tool.mypy.overrides]]
+module = "src.bundle_authoring"
+ignore_errors = true
+
+# backend/src/config.py
+[[tool.mypy.overrides]]
+module = "src.config"
+ignore_errors = true
+
+# backend/src/corpus.py
+[[tool.mypy.overrides]]
+module = "src.corpus"
+ignore_errors = true
+
+# backend/src/demo_auth.py
+[[tool.mypy.overrides]]
+module = "src.demo_auth"
+ignore_errors = true
+
+# backend/src/disposition.py
+[[tool.mypy.overrides]]
+module = "src.disposition"
+ignore_errors = true
+
+# backend/src/download.py
+[[tool.mypy.overrides]]
+module = "src.download"
+ignore_errors = true
+
+# backend/src/entity_roster.py
+[[tool.mypy.overrides]]
+module = "src.entity_roster"
+ignore_errors = true
+
+# backend/src/invocation_ledger.py
+[[tool.mypy.overrides]]
+module = "src.invocation_ledger"
+ignore_errors = true
+
+# backend/src/main.py
+[[tool.mypy.overrides]]
+module = "src.main"
+ignore_errors = true
+
+# backend/src/model_client.py
+[[tool.mypy.overrides]]
+module = "src.model_client"
+ignore_errors = true
+
+# backend/src/model_settings.py
+[[tool.mypy.overrides]]
+module = "src.model_settings"
+ignore_errors = true
+
+# backend/src/pipeline_runner.py
+[[tool.mypy.overrides]]
+module = "src.pipeline_runner"
+ignore_errors = true
+
+# backend/src/playbook_instructions.py
+[[tool.mypy.overrides]]
+module = "src.playbook_instructions"
+ignore_errors = true
+
+# backend/src/playbook_upload.py
+[[tool.mypy.overrides]]
+module = "src.playbook_upload"
+ignore_errors = true
+
+# backend/src/playbook_versions.py
+[[tool.mypy.overrides]]
+module = "src.playbook_versions"
+ignore_errors = true
+
+# backend/src/retention.py
+[[tool.mypy.overrides]]
+module = "src.retention"
+ignore_errors = true
+
+# backend/src/review_routes.py
+[[tool.mypy.overrides]]
+module = "src.review_routes"
+ignore_errors = true
+
+# backend/src/reviews.py
+[[tool.mypy.overrides]]
+module = "src.reviews"
+ignore_errors = true
+
+# backend/src/sample_playbooks.py
+[[tool.mypy.overrides]]
+module = "src.sample_playbooks"
+ignore_errors = true
+
+# backend/src/user_preferences.py
+[[tool.mypy.overrides]]
+module = "src.user_preferences"
+ignore_errors = true
+
+# backend/src/users.py
+[[tool.mypy.overrides]]
+module = "src.users"
+ignore_errors = true
+
+# scripts/bind_bundle.py
+[[tool.mypy.overrides]]
+module = "bind_bundle"
+ignore_errors = true
+
+# scripts/block_transcript.py
+[[tool.mypy.overrides]]
+module = "block_transcript"
+ignore_errors = true
+
+# scripts/canonicalize.py
+[[tool.mypy.overrides]]
+module = "canonicalize"
+ignore_errors = true
+
+# scripts/clause_boundaries.py
+[[tool.mypy.overrides]]
+module = "clause_boundaries"
+ignore_errors = true
+
+# scripts/critic_review_pass.py
+[[tool.mypy.overrides]]
+module = "critic_review_pass"
+ignore_errors = true
+
+# scripts/detector_common.py
+[[tool.mypy.overrides]]
+module = "detector_common"
+ignore_errors = true
+
+# scripts/docs-lint.py
+[[tool.mypy.overrides]]
+module = "docs-lint"
+ignore_errors = true
+
+# scripts/docx_parts.py
+[[tool.mypy.overrides]]
+module = "docx_parts"
+ignore_errors = true
+
+# scripts/eval_budget.py
+[[tool.mypy.overrides]]
+module = "eval_budget"
+ignore_errors = true
+
+# scripts/eval_harness.py
+[[tool.mypy.overrides]]
+module = "eval_harness"
+ignore_errors = true
+
+# scripts/extraction_normalization_stage.py
+[[tool.mypy.overrides]]
+module = "extraction_normalization_stage"
+ignore_errors = true
+
+# scripts/floor_judge.py
+[[tool.mypy.overrides]]
+module = "floor_judge"
+ignore_errors = true
+
+# scripts/footnote_audience.py
+[[tool.mypy.overrides]]
+module = "footnote_audience"
+ignore_errors = true
+
+# scripts/generate_aws_exports.py
+[[tool.mypy.overrides]]
+module = "generate_aws_exports"
+ignore_errors = true
+
+# scripts/generate_gold_fixtures.py
+[[tool.mypy.overrides]]
+module = "generate_gold_fixtures"
+ignore_errors = true
+
+# scripts/live_smoke_eval.py
+[[tool.mypy.overrides]]
+module = "live_smoke_eval"
+ignore_errors = true
+
+# scripts/normalize_input.py
+[[tool.mypy.overrides]]
+module = "normalize_input"
+ignore_errors = true
+
+# scripts/ooxml_util.py
+[[tool.mypy.overrides]]
+module = "ooxml_util"
+ignore_errors = true
+
+# scripts/opf_acceptance.py
+[[tool.mypy.overrides]]
+module = "opf_acceptance"
+ignore_errors = true
+
+# scripts/opf_clause_lookup.py
+[[tool.mypy.overrides]]
+module = "opf_clause_lookup"
+ignore_errors = true
+
+# scripts/opf_html.py
+[[tool.mypy.overrides]]
+module = "opf_html"
+ignore_errors = true
+
+# scripts/opf_injection_scan.py
+[[tool.mypy.overrides]]
+module = "opf_injection_scan"
+ignore_errors = true
+
+# scripts/opf_load.py
+[[tool.mypy.overrides]]
+module = "opf_load"
+ignore_errors = true
+
+# scripts/opf_prompt.py
+[[tool.mypy.overrides]]
+module = "opf_prompt"
+ignore_errors = true
+
+# scripts/playbook_registry.py
+[[tool.mypy.overrides]]
+module = "playbook_registry"
+ignore_errors = true
+
+# scripts/playbook_validation.py
+[[tool.mypy.overrides]]
+module = "playbook_validation"
+ignore_errors = true
+
+# scripts/policy_load.py
+[[tool.mypy.overrides]]
+module = "policy_load"
+ignore_errors = true
+
+# scripts/primary_review_pass.py
+[[tool.mypy.overrides]]
+module = "primary_review_pass"
+ignore_errors = true
+
+# scripts/redline_block_apply.py
+[[tool.mypy.overrides]]
+module = "redline_block_apply"
+ignore_errors = true
+
+# scripts/redline_generate.py
+[[tool.mypy.overrides]]
+module = "redline_generate"
+ignore_errors = true
+
+# scripts/redline_projections.py
+[[tool.mypy.overrides]]
+module = "redline_projections"
+ignore_errors = true
+
+# scripts/replacement_text_enforcement.py
+[[tool.mypy.overrides]]
+module = "replacement_text_enforcement"
+ignore_errors = true
+
+# scripts/review_knowledge.py
+[[tool.mypy.overrides]]
+module = "review_knowledge"
+ignore_errors = true
+
+# scripts/review_spine.py
+[[tool.mypy.overrides]]
+module = "review_spine"
+ignore_errors = true
+
+# scripts/seed_active_bundle.py
+[[tool.mypy.overrides]]
+module = "seed_active_bundle"
+ignore_errors = true
+
+# scripts/third_party_clause_matching.py
+[[tool.mypy.overrides]]
+module = "third_party_clause_matching"
+ignore_errors = true
+
+# scripts/third_party_output_integration.py
+[[tool.mypy.overrides]]
+module = "third_party_output_integration"
+ignore_errors = true
+
+# scripts/third_party_position_findings.py
+[[tool.mypy.overrides]]
+module = "third_party_position_findings"
+ignore_errors = true

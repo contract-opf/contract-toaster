@@ -721,6 +721,7 @@ export default function ReviewHistory(): React.ReactElement {
     setCoverNoteLoading((current) => ({ ...current, [reviewId]: true }));
     setCoverNoteFailed((current) => ({ ...current, [reviewId]: false }));
     setCoverNoteErrorMessage((current) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [reviewId]: _dropped, ...rest } = current;
       return rest;
     });

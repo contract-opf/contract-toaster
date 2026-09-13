@@ -42,12 +42,14 @@ import App from '../App';
 // the component under test, which is exactly what this file exists to avoid.
 vi.mock('aws-amplify/auth', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('aws-amplify/auth');
+  // eslint-disable-next-line @typescript-eslint/require-await
   return { ...actual, fetchAuthSession: vi.fn(async () => ({ tokens: {} })) };
 });
 
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async () => {
       throw new Error('no network in tests');
     }),

@@ -111,7 +111,7 @@ NEW_TOKENS = ("model_key_missing", "model_timeout")
 # into `NEW_TOKENS` because that tuple is #472's own subject and the two
 # assertions naming "both tokens" would stop being true of it; this file's
 # guard is the enumeration, and the enumeration is what has to grow.
-TOKENS_REQUIRING_UI_COPY = NEW_TOKENS + (reviews.RUNNER_RESTARTED_REASON,)
+TOKENS_REQUIRING_UI_COPY = NEW_TOKENS + (reviews.RUNNER_RESTARTED_REASON,)  # noqa: RUF005
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +286,7 @@ class TestTimeoutClassified(unittest.TestCase):
             max_retries=0,
             sleep_fn=lambda _seconds: None,
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelTimeoutError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID,
@@ -318,7 +318,7 @@ class TestTimeoutClassified(unittest.TestCase):
             api_key="sk-test", http_client=BoomClient(), max_retries=0,
             sleep_fn=lambda _seconds: None,
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",

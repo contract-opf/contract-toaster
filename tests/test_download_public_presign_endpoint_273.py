@@ -55,7 +55,7 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 
 import config  # noqa: E402
 import download  # noqa: E402
@@ -156,7 +156,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
         must use exactly the s3_client the caller injected."""
         s3_client = boto3.client("s3", region_name="us-east-1")
 
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ",
             {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
             clear=True,
@@ -229,7 +229,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
         internal_client = _internal_s3_client()
         attacker_row = {"cognito_sub": "attacker-sub", "is_admin": False}
 
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ",
             {
                 "OUTPUTS_BUCKET": "contract-toaster-outputs-dts",
@@ -255,7 +255,7 @@ class TestPresignedUrlHostSwap(unittest.TestCase):
         even when S3_PUBLIC_ENDPOINT_URL is set."""
         internal_client = _internal_s3_client()
 
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ",
             {
                 "OUTPUTS_BUCKET": "contract-toaster-outputs-dts",

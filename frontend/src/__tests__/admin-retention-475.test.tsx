@@ -35,6 +35,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminRetention from '../AdminRetention';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -49,15 +50,19 @@ vi.mock('aws-amplify/auth', () => ({
  * playbook-selector.test.tsx.
  */
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -130,6 +135,7 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const daysInput = (await screen.findByTestId('retention-days-input')) as HTMLInputElement;
     expect(daysInput.value).toBe('90');
 
@@ -146,6 +152,7 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
     fireEvent.change(daysInput, { target: { value: '365' } });
 
     expect(daysInput.value).toBe('365');
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const slider = screen.getByTestId('retention-slider') as HTMLInputElement;
     expect(slider.value).toBe('365');
   });
@@ -159,6 +166,7 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const daysInput = (await screen.findByTestId('retention-days-input')) as HTMLInputElement;
     fireEvent.change(daysInput, { target: { value: '9' } });
     fireEvent.change(daysInput, { target: { value: '' } });
@@ -185,6 +193,7 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const daysInput = (await screen.findByTestId('retention-days-input')) as HTMLInputElement;
     fireEvent.change(daysInput, { target: { value: '5000' } });
     // Mid-typing: the field shows exactly what was typed, not a
@@ -193,6 +202,7 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
 
     fireEvent.blur(daysInput);
     expect(daysInput.value).toBe('1095');
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('retention-slider') as HTMLInputElement).value).toBe('1095');
   });
 
@@ -211,7 +221,9 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const daysInput = (await screen.findByTestId('retention-days-input')) as HTMLInputElement;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const slider = () => screen.getByTestId('retention-slider') as HTMLInputElement;
 
     // Commit the boundary first, so the next clamp is a no-op state change.
@@ -235,7 +247,9 @@ describe('AdminRetention #475 AC1 — exact numeric entry syncs the slider and s
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const daysInput = (await screen.findByTestId('retention-days-input')) as HTMLInputElement;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const slider = () => screen.getByTestId('retention-slider') as HTMLInputElement;
 
     fireEvent.change(daysInput, { target: { value: '0' } });
@@ -280,6 +294,7 @@ describe('AdminRetention #475 AC2 — a hold can be placed without ever seeing a
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const select = (await screen.findByTestId('hold-review-select')) as HTMLSelectElement;
     await waitFor(() => expect(select.textContent).toContain('jane@example.com'));
     fireEvent.change(select, { target: { value: REVIEW_A.review_id } });
@@ -309,6 +324,7 @@ describe('AdminRetention #475 AC2 — a hold can be placed without ever seeing a
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const select = (await screen.findByTestId('hold-review-select')) as HTMLSelectElement;
     await waitFor(() => expect(select.textContent).toContain('jane@example.com'));
 
@@ -318,6 +334,7 @@ describe('AdminRetention #475 AC2 — a hold can be placed without ever seeing a
     // straight into `holdReviewId`, which the visible Review ID input is
     // bound to -- rendering the raw UUID in a bordered input the instant a
     // review was picked.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const idInput = screen.getByTestId('hold-review-id-input') as HTMLInputElement;
     expect(idInput.value).toBe('');
 
@@ -416,6 +433,7 @@ describe('AdminRetention #475 finding 2 (round 2) — a pasted id outside the pi
     });
     render(<AdminRetention />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const select = (await screen.findByTestId('hold-review-select')) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
 

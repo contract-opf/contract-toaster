@@ -93,7 +93,7 @@ class _StubSfnClient:
     def __init__(self) -> None:
         self.started_names: set[str] = set()
 
-    def start_execution(self, stateMachineArn, name, input):  # noqa: A002,N803
+    def start_execution(self, stateMachineArn, name, input):  # noqa: A002, N803
         if name in self.started_names:
             raise self.exceptions.ExecutionAlreadyExists()
         self.started_names.add(name)

@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import block_transcript as bt  # noqa: E402
+import block_transcript as bt  # noqa: E402, I001
 
 from test_block_transcript import _block_map, _delete, _insert, _keep, _patch  # noqa: E402
 

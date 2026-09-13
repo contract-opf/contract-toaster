@@ -35,7 +35,7 @@ Test-integrity notes:
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import importlib
+import importlib  # noqa: F401
 import re
 import sys
 import types
@@ -185,7 +185,7 @@ def test_domain_mismatch_deny() -> list[str]:
             raised = False
             try:
                 module.handler(event, None)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 raised = True
                 denied_for_domain = (
                     "domain" in str(exc).lower()
@@ -235,7 +235,7 @@ def test_non_allowlisted_deny() -> list[str]:
         exc_str = ""
         try:
             module.handler(event, None)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raised = True
             exc_str = str(exc).lower()
 
@@ -295,7 +295,7 @@ def test_directory_unavailable_deny() -> list[str]:
         exc_str = ""
         try:
             module.handler(event, None)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raised = True
             exc_str = str(exc).lower()
 
@@ -351,7 +351,7 @@ def test_unverified_email_deny() -> list[str]:
         raised = False
         try:
             module.handler(event, None)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raised = True
             denied_unverified = (
                 "verified" in str(exc).lower()
@@ -408,7 +408,7 @@ def test_happy_path_no_deny() -> list[str]:
                 "handler returns the event unmodified for a valid @teamexos.com group member",
                 f"Expected: {event!r}\n         Got: {result!r}",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             failures += _assert(
                 False,
                 "handler does NOT raise for a valid @teamexos.com group member",
@@ -422,7 +422,7 @@ def test_happy_path_no_deny() -> list[str]:
 # Test 6 — TDD RED-state verification (strengthened for per-path fail-open)
 #
 # This test re-establishes the required RED phase for the behavioral deny-path
-# invariants (findings 1–3 in the issue #53 fix round 2 review), and has been
+# invariants (findings 1–3 in the issue #53 fix round 2 review), and has been  # noqa: RUF003
 # strengthened to surface per-path fail-open mutations, not just a wholesale
 # fail-open handler stub.
 #
@@ -563,7 +563,7 @@ def test_tdd_red_state_verification() -> list[str]:
         exc_str_a = ""
         try:
             stub_module_a.handler(event, None)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raised_a = True
             exc_str_a = str(exc).lower()
 
@@ -571,7 +571,7 @@ def test_tdd_red_state_verification() -> list[str]:
         # The mutation stub raised — only acceptable if it's NOT a DynamoDB/boto3 mask.
         # If it IS the masking message, the isolation has a gap.
         is_masking = "dynamodb" in exc_str_a or "boto3" in exc_str_a
-        if is_masking:
+        if is_masking:  # noqa: SIM108
             # Masking still present despite patch — test isolation is broken.
             test2_would_fail = False
         else:
@@ -611,13 +611,13 @@ def test_tdd_red_state_verification() -> list[str]:
         exc_str_b = ""
         try:
             stub_module_b.handler(event, None)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raised_b = True
             exc_str_b = str(exc).lower()
 
     if raised_b:
         is_masking = "dynamodb" in exc_str_b or "boto3" in exc_str_b
-        if is_masking:
+        if is_masking:  # noqa: SIM108
             # Masking still present — test isolation is broken.
             test3_would_fail = False
         else:
@@ -656,7 +656,7 @@ def test_tdd_red_state_verification() -> list[str]:
             stub_module_c.handler(event, None)
             # The fail-open stub returned normally — this is the expected RED outcome.
             test2_wholesale_would_fail = True
-        except Exception:
+        except Exception:  # noqa: BLE001
             # The stub should NOT raise; if it does, the module is broken.
             test2_wholesale_would_fail = False
 
@@ -686,7 +686,7 @@ def test_tdd_red_state_verification() -> list[str]:
             stub_module_d.handler(event, None)
             # The fail-open stub returned normally — expected RED outcome for Test 3.
             test3_wholesale_would_fail = True
-        except Exception:
+        except Exception:  # noqa: BLE001
             test3_wholesale_would_fail = False
 
     failures += _assert(

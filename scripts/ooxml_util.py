@@ -191,7 +191,7 @@ def merge_hoisted_namespaces(original_open_tag: str, auto_open_tag: str) -> str:
     a corrupt document with a plausible shape, so it raises instead.
     """
     original = declared_namespaces(original_open_tag)
-    original_uri_by_prefix = {prefix: uri for prefix, uri in original}
+    original_uri_by_prefix = {prefix: uri for prefix, uri in original}  # noqa: C416
 
     missing = []
     for prefix, uri in declared_namespaces(auto_open_tag):

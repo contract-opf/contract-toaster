@@ -38,6 +38,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminUsers from '../AdminUsers';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -103,29 +104,37 @@ let requests: Recorded[] = [];
  * refreshed settings back.
  */
 function stubRoutes(storedMode: string | null, postOutcome?: PostOutcome): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const method = (init?.method ?? 'GET').toUpperCase();
     const rawBody = init?.body;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body = typeof rawBody === 'string' ? JSON.parse(rawBody) : undefined;
     requests.push({ method, pathname, body });
 
     if (method === 'GET' && pathname === '/api/users') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ users: [REVIEWER_ROW] }) } as Response;
     }
     if (method === 'GET' && pathname === '/api/users/sync-status') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => SYNC_STATUS_OK } as Response;
     }
     if (method === 'GET' && pathname === '/api/admin/auth-mode') {
       if (storedMode === null) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => authModeSettings(storedMode) } as Response;
     }
     if (method === 'POST' && pathname === '/api/admin/auth-mode') {
       const outcome =
         postOutcome ??
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
         ({
           status: 200,
           body: authModeSettings(String((body as { auth_mode?: unknown }).auth_mode)),
@@ -133,12 +142,15 @@ function stubRoutes(storedMode: string | null, postOutcome?: PostOutcome): void 
       return {
         ok: outcome.status >= 200 && outcome.status < 300,
         status: outcome.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => outcome.body,
       } as Response;
     }
     if (method === 'GET' && pathname === '/api/me') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -162,6 +174,7 @@ describe('AdminUsers — auth-mode toggle renders server-supplied choices (#246)
     render(<AdminUsers />);
     await screen.findByTestId('user-row-sub-reviewer');
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const select = (await screen.findByTestId(
       'admin-users-auth-mode-select',
     )) as HTMLSelectElement;
@@ -181,6 +194,7 @@ describe('AdminUsers — auth-mode toggle renders server-supplied choices (#246)
     render(<AdminUsers />);
     await screen.findByTestId('user-row-sub-reviewer');
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const select = (await screen.findByTestId(
       'admin-users-auth-mode-select',
     )) as HTMLSelectElement;
@@ -195,6 +209,7 @@ describe('AdminUsers — auth-mode toggle renders server-supplied choices (#246)
     });
     expect(requestsMatching('POST', '/api/admin/auth-mode')[0].body).toEqual({ auth_mode: 'both' });
     expect(
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       (screen.getByTestId('admin-users-auth-mode-select') as HTMLSelectElement).value,
     ).toBe('both');
   });
@@ -249,6 +264,7 @@ describe('AdminUsers — selecting a mode writes it and the screen reacts in pla
     expect(requestsMatching('GET', '/api/users/sync-status')).toHaveLength(1);
 
     // The control now shows the new mode, confirmed by the server's echo.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('admin-users-auth-mode-select') as HTMLSelectElement).value).toBe(
       'password',
     );
@@ -297,6 +313,7 @@ describe('AdminUsers — a failed mode change degrades in place (#246)', () => {
     );
     // No false success, and the OLD mode still governs the screen.
     expect(screen.queryByTestId('admin-users-auth-mode-notice')).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('admin-users-auth-mode-select') as HTMLSelectElement).value).toBe(
       'sso',
     );

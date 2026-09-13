@@ -74,6 +74,7 @@ beforeEach(() => {
 
 afterEach(() => {
   window.removeEventListener('error', cancelDeliberateThrowReport);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   consoleError.mockRestore();
   vi.unstubAllGlobals();
   __resetSessionExpiredListeners();
@@ -125,6 +126,7 @@ describe('issue #487 — a panel crash does not take the app with it', () => {
       </ErrorBoundary>,
     );
     expect(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       consoleError.mock.calls.some((call: unknown[]) => String(call[0]).includes('[review] panel error')),
     ).toBe(true);
   });
@@ -160,6 +162,7 @@ describe('issue #487 — one central place notices an expired session', () => {
   function stubStatus(status: number) {
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async () => ({ ok: status < 400, status, json: async () => ({}) }) as Response),
     );
   }

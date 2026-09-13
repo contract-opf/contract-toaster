@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 # Auth modes
 # ---------------------------------------------------------------------------
 AUTH_MODE_SSO = "sso"
-AUTH_MODE_PASSWORD = "password"
+AUTH_MODE_PASSWORD = "password"  # noqa: S105
 AUTH_MODE_BOTH = "both"
 VALID_AUTH_MODES = {AUTH_MODE_SSO, AUTH_MODE_PASSWORD, AUTH_MODE_BOTH}
 
@@ -102,7 +102,7 @@ AUTH_MODE_OPTIONS: tuple[dict[str, Any], ...] = (
 # User types
 # ---------------------------------------------------------------------------
 USER_TYPE_SSO = "sso"
-USER_TYPE_PASSWORD = "password"
+USER_TYPE_PASSWORD = "password"  # noqa: S105
 VALID_USER_TYPES = {USER_TYPE_SSO, USER_TYPE_PASSWORD}
 
 # Prefix for the synthetic cognito_sub value used to key password-type users
@@ -325,7 +325,7 @@ def password_login_allowed(mode: str) -> bool:
 # JSON/multipart from the same origin, never a cross-site HTML form post, so
 # a dedicated CSRF token was judged not to add meaningfully more.
 # ---------------------------------------------------------------------------
-DEMO_TOKEN_ISSUER = "contract-toaster-demo"
+DEMO_TOKEN_ISSUER = "contract-toaster-demo"  # noqa: S105
 DEMO_TOKEN_TTL_SECONDS = int(os.environ.get("DEMO_TOKEN_TTL_SECONDS", str(12 * 3600)))
 
 # httpOnly session-cookie name password-mode login sets/clears (issue #468).

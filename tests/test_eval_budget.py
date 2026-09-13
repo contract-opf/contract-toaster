@@ -27,7 +27,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import eval_budget  # noqa: E402
+import eval_budget  # noqa: E402, I001
 
 
 # ── CI eval budget plumbing fails loudly over the documented caps ───────────

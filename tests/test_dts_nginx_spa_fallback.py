@@ -163,7 +163,7 @@ def select_location(path: str, locations: list[Location]) -> Location | None:
             return loc
     best: Location | None = None
     for loc in locations:
-        if loc.modifier in ("", "^~") and path.startswith(loc.pattern):
+        if loc.modifier in ("", "^~") and path.startswith(loc.pattern):  # noqa: SIM102
             if best is None or len(loc.pattern) > len(best.pattern):
                 best = loc
     return best

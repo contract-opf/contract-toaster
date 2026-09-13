@@ -33,7 +33,7 @@ if str(BACKEND_ROOT) not in sys.path:
 os.environ.setdefault("PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.playbook_versions as pv  # noqa: E402

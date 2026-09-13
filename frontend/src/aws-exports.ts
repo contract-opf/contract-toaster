@@ -27,12 +27,15 @@ const awsExports = {
   Auth: {
     Cognito: {
       // Cognito User Pool ID — replaced by generate_aws_exports.py at deploy time.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID ?? 'us-east-1_PLACEHOLDER',
       // Cognito App Client ID — replaced by generate_aws_exports.py at deploy time.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       userPoolClientId: import.meta.env.VITE_COGNITO_CLIENT_ID ?? 'PLACEHOLDER_CLIENT_ID',
       // Cognito hosted UI domain — replaced by generate_aws_exports.py at deploy time.
       loginWith: {
         oauth: {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           domain: import.meta.env.VITE_COGNITO_DOMAIN ?? 'contract-toaster-dev.auth.us-east-1.amazoncognito.com',
           scopes: ['email', 'openid', 'profile'],
           redirectSignIn: [import.meta.env.VITE_REDIRECT_SIGN_IN ?? 'http://localhost:3000'],
@@ -49,6 +52,7 @@ const awsExports = {
 // `import.meta.env.VITE_API_BASE_URL` directly (see PasswordLogin.tsx,
 // ReviewSubmission.tsx, AdminUsers.tsx, AdminRetention.tsx, App.tsx); this
 // export exists so the value is also discoverable from this file.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export default awsExports;

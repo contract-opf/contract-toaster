@@ -22,6 +22,7 @@ import { render, screen } from '@testing-library/react';
 import AdminModel, { ModelSelectionSettings } from '../AdminModel';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -92,9 +93,12 @@ const KEY_SETTINGS = {
 function stubFetch(): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = String(input);
       const body = url.includes('/api/admin/model-selection') ? selection() : KEY_SETTINGS;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );

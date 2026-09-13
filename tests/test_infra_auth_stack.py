@@ -891,7 +891,7 @@ def check_m_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"],
+            ["npm", "install"],  # noqa: S607
             cwd=INFRA,
             capture_output=True,
             text=True,
@@ -907,8 +907,8 @@ def check_m_cdk_synth() -> list[str]:
     # This avoids stale cdk.out artifacts from a previous (possibly RED-commit)
     # synth run causing check_g to see the wrong template.
     with tempfile.TemporaryDirectory(prefix="contract-toaster-gate-cdk-out-") as tmp_out:
-        result = subprocess.run(
-            [
+        result = subprocess.run(  # noqa: S603
+            [  # noqa: S607
                 "npx", "cdk", "synth",
                 "--context", "env=dev",
                 *NEUTRAL_CDK_CONTEXT,

@@ -231,7 +231,7 @@ def main():
                 )
             failures.append("\n".join(details))
 
-    print(f"D2 new-standalone-section planted violation tests")
+    print(f"D2 new-standalone-section planted violation tests")  # noqa: F541
     print(f"  Cases: {len(D2_CASES)}, Pass: {len(passes)}, Fail: {len(failures)}\n")
 
     for p in passes:
@@ -251,7 +251,7 @@ def main():
         sys.exit(1)
     else:
         print(
-            f"\nAll D2 new-section planted violations detected correctly."
+            f"\nAll D2 new-section planted violations detected correctly."  # noqa: F541
         )
         sys.exit(0)
 

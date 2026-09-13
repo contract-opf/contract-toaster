@@ -27,6 +27,7 @@ async function settleHost(tagName: string): Promise<HTMLElement> {
     throw new Error(`no <${tagName}> found in the document`);
   }
   await host.updateComplete;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return host as unknown as HTMLElement;
 }
 

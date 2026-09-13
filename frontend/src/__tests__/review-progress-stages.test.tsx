@@ -53,6 +53,7 @@ import {
 import { STAGE_VIGNETTES, stageNumber } from '../toaster/stageTheater';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -66,20 +67,26 @@ vi.mock('aws-amplify/auth', () => ({
 function stubPollingFetch(reviewId: string, detail: { current: Record<string, unknown> }): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       // Issue #733: the console needs an active playbook before it will submit.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
       }
       if (pathname === `/api/reviews/${reviewId}`) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => detail.current } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );
@@ -116,6 +123,7 @@ describe('staged review progress — the toast darkens through four real stages'
     ['reconciliation', 3, 'Reconciling both passes'],
     ['redline', 4, 'Writing your redline'],
   ])('%s renders as step %i with its own label and doneness level', async (token, step, label) => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     stubPollingFetch('rev-progress', { current: runningDetail(token as string) });
     await submit();
 

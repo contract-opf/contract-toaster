@@ -28,6 +28,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -45,15 +46,19 @@ vi.mock('@aws-amplify/ui-react', () => ({
 }));
 
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -345,14 +350,18 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
       'GET /api/playbooks': { playbooks: [] },
       'GET /api/reviews': { reviews: [RUNNING_ROW] },
     });
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises, @typescript-eslint/require-await
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ playbooks: [] }) } as Response;
       }
       if (pathname === '/api/reviews' && method === 'GET') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ reviews: [RUNNING_ROW] }) } as Response;
       }
       if (pathname === '/api/reviews/rev-resumed') {
@@ -361,6 +370,7 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({
               review_id: 'rev-resumed',
               status: 'RUNNING',
@@ -373,6 +383,7 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-resumed',
             status: 'DONE',
@@ -382,6 +393,7 @@ describe('reattach to a running review after reload (issue #489, item 2)', () =>
           }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
 

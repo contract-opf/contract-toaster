@@ -108,7 +108,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import synthetic_form_paragraphs as sfp_module  # noqa: E402
+import synthetic_form_paragraphs as sfp_module  # noqa: E402, I001
 import leakage_scan as ls  # noqa: E402
 import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402

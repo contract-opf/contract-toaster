@@ -36,11 +36,14 @@ function liveRegions(): HTMLElement[] {
 }
 
 function mockFetch(detail: Record<string, unknown>) {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (method === 'POST' && pathname === '/api/reviews') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
     }
     if (pathname === '/api/playbooks') {
@@ -54,11 +57,13 @@ function mockFetch(detail: Record<string, unknown>) {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           playbooks: [{ playbook_id: 'eiaa', display_name: 'Affiliation', status: 'active' }],
         }),
       } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => detail } as Response;
   });
 }

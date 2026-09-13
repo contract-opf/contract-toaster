@@ -44,7 +44,7 @@ This test asserts the following invariants that were missing before the fix:
 
 Run with: python3 tests/test_cost_model_invariants.py
 Exit 0 = all checks pass; non-zero = one or more invariants not met.
-"""
+"""  # noqa: RUF002
 
 import re
 import sys
@@ -117,7 +117,7 @@ def check_reservation_formula_retry_inclusive() -> list[str]:
         failures.append(
             "  ARCHITECTURE.md Cost shape reservation formula does not reference\n"
             "  'max_retries_per_pass'. The reservation must be retry-inclusive\n"
-            "  (passes × (1 + max_retries_per_pass) × max tokens × price)\n"
+            "  (passes × (1 + max_retries_per_pass) × max tokens × price)\n"  # noqa: RUF001
             "  so bounded retries cannot overshoot the reservation. (issue #14)"
         )
 
@@ -176,7 +176,7 @@ def check_unit_economics_table() -> list[str]:
         (
             re.compile(r"prod.*month|monthly.*prod|50.{0,10}200.*review|production.*month",
                        re.IGNORECASE),
-            "prod monthly target (50–200 reviews range or equivalent)",
+            "prod monthly target (50–200 reviews range or equivalent)",  # noqa: RUF001
         ),
     ]
 

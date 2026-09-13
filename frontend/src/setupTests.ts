@@ -41,6 +41,7 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   (window as unknown as { matchMedia: (q: string) => MediaQueryList }).matchMedia = (
     query: string
   ) =>
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     ({
       matches: false,
       media: query,

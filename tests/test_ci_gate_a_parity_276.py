@@ -169,8 +169,8 @@ def check_multi_failure_reporting() -> list[str]:
             "    sys.exit(main())\n"
         )
 
-        proc = subprocess.run(
-            ["bash", str(SHARED_LOOP), str(root)],
+        proc = subprocess.run(  # noqa: S603
+            ["bash", str(SHARED_LOOP), str(root)],  # noqa: S607
             capture_output=True,
             text=True,
             timeout=60,

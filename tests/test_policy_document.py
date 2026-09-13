@@ -491,8 +491,8 @@ def check_7_hashing() -> list[str]:
 
 
 def _git(*args: str) -> tuple[int, str]:
-    proc = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True
+    proc = subprocess.run(  # noqa: S603
+        ["git", "-C", str(REPO_ROOT), *args], capture_output=True, text=True  # noqa: S607
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -530,7 +530,7 @@ def provenance_resolves_failures(spec: HarvestSpec) -> list[str]:
     blob_sha = harvested.get("git_blob_sha") or ""
     commit = harvested.get("git_commit") or ""
 
-    for field, value in (("path", path), ("content_hash", recorded)):
+    for field, value in (("path", path), ("content_hash", recorded)):  # noqa: F402
         if not value:
             failures.append(f"  approval.harvested_from.{field} is empty; provenance must resolve")
     if failures:
@@ -552,8 +552,8 @@ def provenance_resolves_failures(spec: HarvestSpec) -> list[str]:
             return failures
 
         # The blob still exists and hashes to what we recorded.
-        proc = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "cat-file", "blob", blob_sha], capture_output=True
+        proc = subprocess.run(  # noqa: S603
+            ["git", "-C", str(REPO_ROOT), "cat-file", "blob", blob_sha], capture_output=True  # noqa: S607
         )
         # FRESH-HISTORY TREE (the public cut, issue #406): `git archive` →
         # `git init` keeps the files and drops the past, so the recorded COMMIT

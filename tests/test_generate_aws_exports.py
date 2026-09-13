@@ -73,7 +73,7 @@ def test_script_emits_real_cognito_and_api_values():
         outputs_path = _write_sample_outputs(tmp_path)
         emitted_path = tmp_path / "aws-exports.ts"
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(SCRIPT_PATH),
@@ -145,7 +145,7 @@ def test_missing_outputs_file_errors_cleanly():
         missing_path = tmp_path / "does-not-exist.json"
         emitted_path = tmp_path / "aws-exports.ts"
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(SCRIPT_PATH),
@@ -177,7 +177,7 @@ def test_ambiguous_multi_stack_outputs_requires_stack_flag():
         outputs_path.write_text(json.dumps(multi, indent=2), encoding="utf-8")
         emitted_path = tmp_path / "aws-exports.ts"
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(SCRIPT_PATH),
@@ -194,7 +194,7 @@ def test_ambiguous_multi_stack_outputs_requires_stack_flag():
         assert "--stack" in result.stderr or "--stack" in result.stdout
 
         # Passing --stack disambiguates and succeeds.
-        result2 = subprocess.run(
+        result2 = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(SCRIPT_PATH),
@@ -231,7 +231,7 @@ def main() -> int:
     for test in tests:
         try:
             test()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             failures.append((test.__name__, exc))
             print(f"FAIL: {test.__name__}: {exc}")
 

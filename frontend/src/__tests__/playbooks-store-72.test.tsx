@@ -55,6 +55,7 @@ import {
 } from '../playbooksStore';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -83,7 +84,9 @@ const CATALOG: PlaybookCatalogEntry[] = [
 
 /** The same catalog after an admin activated the second playbook. */
 const CATALOG_AFTER_ACTIVATION: PlaybookCatalogEntry[] = [
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   CATALOG[0]!,
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   { ...CATALOG[1]!, status: 'active', notes: 'Activated by the admin.' },
 ];
 
@@ -103,12 +106,14 @@ function stubFetch(): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       if (method === 'GET' && pathname === '/api/playbooks') {
         catalogCalls.push(`${method} ${pathname}`);
         if (nextStatus !== 200) {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: false, status: nextStatus, json: async () => ({}) } as Response;
         }
         // A value-copy, never a reference into the fixture: a consumer that
@@ -121,6 +126,7 @@ function stubFetch(): void {
             release = resolve;
           });
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ playbooks: snapshot }) } as Response;
       }
       throw new Error(`unexpected request: ${method} ${pathname}`);
@@ -249,15 +255,21 @@ describe('playbooksStore — one catalog for every consumer (#72)', () => {
       const distinct = snapshots.filter((snap, index) => index === 0 || snap !== snapshots[index - 1]);
       expect(distinct.map((snap) => snap.status)).toEqual(['loading', 'ready', 'ready']);
       expect(distinct[0]).toEqual({ status: 'loading', data: null, error: null });
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(distinct[1]!.data).toEqual(CATALOG);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(distinct[1]!.error).toBeNull();
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(distinct[2]!.data).toEqual(CATALOG_AFTER_ACTIVATION);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(distinct[2]!.error).toBeNull();
     }
 
     // …and all three were handed the SAME objects, not three equal copies.
     const latest = (name: string): PlaybookCatalogState => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       const snapshots = seen[name]!;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       return snapshots[snapshots.length - 1]!;
     };
     expect(latest('admin')).toBe(latest('dial'));
