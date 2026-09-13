@@ -44,6 +44,28 @@ import { playMotionEvent, playDetent, primeAudio } from '../toaster/sounds';
 // is dropped at `play()`'s empty-buffer guard. sounds.test.tsx proves that
 // consequence on a mock AudioContext; this file proves the console actually
 // calls it, in a session that has submitted nothing.
+// Issue #56 made `auth.ts::getToken` reach `fetchAuthSession` through a
+// dynamic `import('aws-amplify/auth')`, and `api.ts::authorizedFetch` calls
+// getToken on EVERY authenticated request — so the submit POST this file
+// asserts on now sits behind a module import. Unmocked, that import is the
+// real Amplify auth runtime: fast enough on a dev machine to land inside
+// `waitFor`'s 1000 ms default, too slow on a CI runner, where "a lever press
+// submits through submitReview" failed at 1070 ms on every push from 380aa7c
+// onward. The eight sibling suites that already stub this module never saw it.
+//
+// Stubbing it removes the machine-speed dependency rather than hiding it
+// behind a longer timeout: what this file is about is that a lever press
+// REACHES the guarded handler, not how long Amplify takes to load.
+vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
+  fetchAuthSession: vi.fn(async () => ({
+    tokens: {
+      idToken: { toString: () => 'mock-id-token.jwt.value' },
+      accessToken: { toString: () => 'mock-access-token.jwt.value' },
+    },
+  })),
+}));
+
 vi.mock('../toaster/sounds', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../toaster/sounds')>();
   return {
