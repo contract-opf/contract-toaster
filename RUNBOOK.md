@@ -118,9 +118,10 @@ bash scripts/land.sh    # gates, then push + `gh pr create --fill`
 # ... review, merge to main ...
 ```
 
-`scripts/land.sh` (issue #64) refuses to run on `main`, runs `npm test`,
-`scripts/check.sh` and `tests/lint-brand-free.py`, and pushes nothing if any of
-them is red — it reads `check.sh`'s exit code directly, so exit 2
+`scripts/land.sh` (issue #64) refuses to run on `main`, runs
+`ruff check … && mypy` (issue #65, first because it is the cheapest gate),
+`npm test`, `scripts/check.sh` and `tests/lint-brand-free.py`, and pushes
+nothing if any of them is red — it reads `check.sh`'s exit code directly, so exit 2
 (FLAKY-UNRESOLVED) and exit 3 (another gate run holds the lock) both stop the
 landing. It invokes `check.sh` with no arguments, so the full suite is always
 what a landing is measured against; `check.sh --only <glob>` (issue #68) is a

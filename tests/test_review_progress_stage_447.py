@@ -82,7 +82,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
 # fake playbooks table, plus its module-level env-var setdefaults. Reusing the
 # real fixture is the point -- this drives the ACTUAL composed spine, not a
 # stubbed one, so the tokens it reports are the stages that really ran.
-import test_dts_pipeline_runner_real_review as dts  # noqa: E402
+import test_dts_pipeline_runner_real_review as dts  # noqa: E402, I001
 
 import pipeline_runner as pr  # noqa: E402
 import reviews as reviews_module  # noqa: E402

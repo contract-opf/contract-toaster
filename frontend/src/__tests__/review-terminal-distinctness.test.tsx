@@ -40,6 +40,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -54,18 +55,23 @@ function stubFetch(routes: Record<string, unknown>): void {
   routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname.endsWith('.mp3')) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
       }
       const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
       const entry = routes[key];
       if (entry === undefined) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => entry } as Response;
     }),
   );

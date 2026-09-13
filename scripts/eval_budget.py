@@ -117,7 +117,7 @@ def _acquire_lock(lock_path: Path, timeout_s: float = 30.0) -> None:
             return
         except FileExistsError:
             if time.time() > deadline:
-                raise BudgetExceededError(
+                raise BudgetExceededError(  # noqa: B904
                     f"Could not acquire CI eval ledger lock at {lock_path} within "
                     f"{timeout_s}s; refusing to proceed rather than risk an "
                     f"unsynchronized double-reservation."
@@ -126,7 +126,7 @@ def _acquire_lock(lock_path: Path, timeout_s: float = 30.0) -> None:
 
 
 def _release_lock(lock_path: Path) -> None:
-    try:
+    try:  # noqa: SIM105
         os.remove(str(lock_path))
     except FileNotFoundError:
         pass

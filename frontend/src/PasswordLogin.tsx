@@ -44,6 +44,7 @@ import { CtButton, CtBanner, CtCard, CtField } from './ui/react';
 // Mirrors App.tsx's PRODUCT_NAME (issue #274) without importing App.tsx —
 // App.tsx imports PasswordLogin, and a PasswordLogin -> App import back
 // would make the two modules circular.
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 const PRODUCT_NAME: string = import.meta.env.VITE_PRODUCT_NAME ?? 'Contract Toaster';
 
 // The only copy shown when the server gives us nothing usable. It must stay

@@ -162,14 +162,14 @@ def _prove(docx_bytes: bytes, segments: list):
 
 def _document_root(docx_bytes: bytes) -> ET.Element:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        return ET.fromstring(zf.read("word/document.xml"))
+        return ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
 
 def _footnotes_root(docx_bytes: bytes):
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
         if "word/footnotes.xml" not in zf.namelist():
             return None
-        return ET.fromstring(zf.read("word/footnotes.xml"))
+        return ET.fromstring(zf.read("word/footnotes.xml"))  # noqa: S314
 
 
 def _body_paragraph(docx_bytes: bytes, index: int) -> ET.Element:
@@ -821,7 +821,7 @@ def test_footnote_body_is_itself_tracked(failures: list) -> None:
         body = "".join(t.text or "" for t in fn.iter(_qn("t")))
         if not body.strip():
             continue  # the two mandatory separator footnotes carry no text
-        tracked = [ins for ins in fn.iter(_qn("ins"))]
+        tracked = [ins for ins in fn.iter(_qn("ins"))]  # noqa: C416
         if not tracked:
             failures.append(
                 f"[{case}] footnote {fn.get(_qn('id'))} body {body!r} is UNTRACKED -- "
@@ -911,9 +911,9 @@ def test_ooxml_util_is_the_single_definition(failures: list) -> None:
     # And it still does its job: an xmlns declared only inside an attribute
     # VALUE survives the splice, which is the property the helpers exist for.
     open_tag = (
-        '<w:document xmlns:w="%s" xmlns:mc="urn:example:mc" mc:Ignorable="w14 wp14">' % WORD_NS
+        '<w:document xmlns:w="%s" xmlns:mc="urn:example:mc" mc:Ignorable="w14 wp14">' % WORD_NS  # noqa: UP031
     )
-    auto = '<w:document xmlns:w="%s" xmlns:a="urn:example:hoisted">' % WORD_NS
+    auto = '<w:document xmlns:w="%s" xmlns:a="urn:example:hoisted">' % WORD_NS  # noqa: UP031
     merged = ooxml_util.merge_hoisted_namespaces(open_tag, auto)
     if 'mc:Ignorable="w14 wp14"' not in merged or "urn:example:hoisted" not in merged:
         failures.append(f"[{case}] merge_hoisted_namespaces lost a declaration: {merged!r}")

@@ -316,7 +316,7 @@ def _rejected_blocks(case: str, docx_bytes: bytes, failures: list):
 def _document_paragraph_texts(docx_bytes: bytes) -> list:
     """One entry per `<w:p>`: every `<w:t>` AND `<w:delText>` it carries."""
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     return [
         "".join(
             el.text or "" for el in p.iter() if el.tag in (_qn("t"), _qn("delText"))
@@ -331,7 +331,7 @@ def _accepted_paragraph_text(docx_bytes: bytes, p_index: int) -> str:
     writer's own paragraph numbering -- so a test about the writer's
     text-equality guard sees exactly what the guard sees."""
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     paragraphs = redline_block_apply._body_paragraph_elements(root)
     return redline_block_apply._accepted_text(paragraphs[p_index])
 
@@ -339,7 +339,7 @@ def _accepted_paragraph_text(docx_bytes: bytes, p_index: int) -> str:
 def _deleted_paragraph_flags(docx_bytes: bytes) -> list:
     """One bool per `<w:p>`: does it carry any deletion this compiler wrote?"""
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     return [bool(list(p.iter(_qn("del")))) for p in root.iter(_qn("p"))]
 
 
@@ -352,7 +352,7 @@ def _deleted_paragraph_mark_flags(docx_bytes: bytes) -> list:
     decides whether accept-all merges the paragraph into its successor.
     """
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     flags = []
     for p in root.iter(_qn("p")):
         pPr = p.find(_qn("pPr"))
@@ -371,7 +371,7 @@ def _inserted_paragraph_texts(docx_bytes: bytes) -> list:
     by somebody else's edit.
     """
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     texts = []
     for p in root.iter(_qn("p")):
         parts = []
@@ -730,7 +730,7 @@ def test_a_sibling_block_under_one_heading_suppresses_the_placeholder(
         },
     ]
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
     only_one = redline_block_apply._plan_omitted_clause_placeholders(
         root, paragraphs, {"p0001"}, set()

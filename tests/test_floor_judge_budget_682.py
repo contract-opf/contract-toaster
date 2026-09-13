@@ -106,7 +106,7 @@ os.environ.setdefault("UPLOADS_BUCKET", "uploads-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 
-import model_client  # noqa: E402
+import model_client  # noqa: E402, I001
 import floor_judge  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -676,7 +676,7 @@ class FakeDDB:
     def __init__(self, reviews_table: FakeReviewsTable) -> None:
         self._reviews = reviews_table
 
-    def Table(self, name):  # noqa: N802, ARG002 - boto3 signature
+    def Table(self, name):  # noqa: ARG002, N802 - boto3 signature
         return self._reviews
 
 

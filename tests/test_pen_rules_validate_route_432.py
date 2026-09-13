@@ -62,7 +62,7 @@ os.environ.setdefault("USERS_TABLE", "contract-toaster-users-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402, I001
 
 import src.main as backend_main  # noqa: E402
 

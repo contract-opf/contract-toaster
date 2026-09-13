@@ -24,6 +24,7 @@ import {
 import { FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED } from '../toaster/faviconFrames';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -36,6 +37,7 @@ type Permission = 'default' | 'granted' | 'denied';
 
 class MockNotification {
   static permission: Permission = 'granted';
+  // eslint-disable-next-line @typescript-eslint/require-await
   static requestPermission = vi.fn(async () => MockNotification.permission);
   static instances: MockNotification[] = [];
   title: string;
@@ -52,6 +54,7 @@ class MockNotification {
 
 function installMockLocalStorage(): void {
   const store = new Map<string, string>();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => (store.has(key) ? (store.get(key) as string) : null),
     setItem: (key: string, value: string) => store.set(key, value),
@@ -112,20 +115,26 @@ function setHidden(hidden: boolean): void {
 function stubPollingFetch(reviewId: string, detail: { current: Record<string, unknown> }): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
       // Issue #733: the console needs an active playbook before it will submit.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
       }
       if (pathname === `/api/reviews/${reviewId}`) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => detail.current } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );

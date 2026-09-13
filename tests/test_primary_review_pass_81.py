@@ -67,7 +67,7 @@ def _load_fixture_text(name: str) -> str:
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -266,9 +266,9 @@ def test_primary_user_prompt_block_order_full_doc(failures: list[str]) -> None:
     ]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
-        failures.append(f"[1g] Primary prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")
+        failures.append(f"[1g] Primary prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
     elif positions != sorted(positions):
-        failures.append(f"[1h] Primary prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")
+        failures.append(f"[1h] Primary prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
 
     if pp.UNTRUSTED_BLOCK_WARNING not in prompt:
         failures.append("[1j] Counterparty document block must carry the untrusted-input anti-injection warning.")
@@ -289,9 +289,9 @@ def test_critic_user_prompt_manifest(failures: list[str]) -> None:
     required_tags_in_order = ["<PRIMARY_REVIEWER_OUTPUT>"]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
-        failures.append(f"[1o] Critic prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")
+        failures.append(f"[1o] Critic prompt missing a required manifest block. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
     elif positions != sorted(positions):
-        failures.append(f"[1p] Critic prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")
+        failures.append(f"[1p] Critic prompt manifest blocks out of order. Positions: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
 
     # This call passes no `doc_text`, so no document block is composed
     # (issue #618's absent-or-populated doctrine); retrieved precedent is
@@ -313,14 +313,14 @@ def test_assembled_size_within_cap_on_every_gold_case(failures: list[str]) -> No
     for path in gold_case_paths:
         if path.name == "canonicalize-golden-hash.json":
             continue  # not a review gold case
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:  # noqa: UP015
             case = json.load(fh)
         if "planted_variation" not in case:
             continue
         checked += 1
         altered_hunk = case["planted_variation"].get("altered_hunk", "")
-        diff_hunks = [{"kind": "modified_new", "anchor": case["planted_variation"].get("topic_id", "?"), "text": altered_hunk}]
-        anchored_clauses = [
+        diff_hunks = [{"kind": "modified_new", "anchor": case["planted_variation"].get("topic_id", "?"), "text": altered_hunk}]  # noqa: F841
+        anchored_clauses = [  # noqa: F841
             {"anchor": case["planted_variation"].get("topic_id", "?"), "standard_text": "", "counterparty_text": altered_hunk, "delta": altered_hunk}
         ]
         user_prompt = pp.assemble_user_prompt_primary(

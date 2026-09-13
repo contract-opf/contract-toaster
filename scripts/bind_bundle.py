@@ -100,9 +100,9 @@ _PRECISION_PATH_KEYS = (
     "section_config_path",
     "legacy_playbook_path",
 )
-_PRECISION_REQUIRED_KEYS = _PRECISION_PATH_KEYS + ("standard_form_docx",)
+_PRECISION_REQUIRED_KEYS = _PRECISION_PATH_KEYS + ("standard_form_docx",)  # noqa: RUF005
 
-_BUNDLE_SCHEMA_CACHE: Optional[dict] = None
+_BUNDLE_SCHEMA_CACHE: Optional[dict] = None  # noqa: UP045
 
 
 class BindBundleError(ValueError):
@@ -169,7 +169,7 @@ def _validate_pen_rules_floor_refs(pen_rules: dict, opf_doc: dict) -> None:
 def _validate_overrides(
     overrides: dict,
     opf_doc: dict,
-    previous_bundle: Optional[dict],
+    previous_bundle: Optional[dict],  # noqa: UP045
 ) -> None:
     """Fail-closed validation for the `overrides` block (issue #294 scope
     items 2-3):
@@ -245,13 +245,13 @@ def bind_bundle(
     *,
     playbook_id: str,
     model_policy_path: Path,
-    review_policy_path: Optional[Path] = None,
-    precision: Optional[dict] = None,
-    approved_by: Optional[str] = None,
-    approved_at: Optional[str] = None,
-    pen_rules: Optional[dict] = None,
-    overrides: Optional[dict] = None,
-    previous_bundle: Optional[dict] = None,
+    review_policy_path: Optional[Path] = None,  # noqa: UP045
+    precision: Optional[dict] = None,  # noqa: UP045
+    approved_by: Optional[str] = None,  # noqa: UP045
+    approved_at: Optional[str] = None,  # noqa: UP045
+    pen_rules: Optional[dict] = None,  # noqa: UP045
+    overrides: Optional[dict] = None,  # noqa: UP045
+    previous_bundle: Optional[dict] = None,  # noqa: UP045
 ) -> dict:
     """Pure: OPF doc + deployment concerns -> a bound-bundle v2 dict.
 
@@ -316,7 +316,7 @@ def bind_bundle(
         model_policy_doc = json.load(f)
     model_policy_hash = canonicalize.content_hash(model_policy_doc)
 
-    review_policy_block: Optional[dict] = None
+    review_policy_block: Optional[dict] = None  # noqa: UP045
     if review_policy_path is not None:
         review_policy_path = Path(review_policy_path)
         try:
@@ -489,7 +489,7 @@ def main() -> int:
     if args.no_policy and args.policy:
         print("ERROR: --no-policy and --policy are mutually exclusive.", file=sys.stderr)
         return 1
-    review_policy_path: Optional[Path] = None
+    review_policy_path: Optional[Path] = None  # noqa: UP045
     if not args.no_policy:
         if args.policy:
             review_policy_path = Path(args.policy)

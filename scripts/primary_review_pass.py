@@ -106,7 +106,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -207,7 +207,7 @@ def load_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
     key = str(Path(path).resolve())
     cached = _OUTPUT_SCHEMA_CACHE.get(key)
     if cached is None:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:  # noqa: UP015
             cached = json.load(fh)
         _OUTPUT_SCHEMA_CACHE[key] = cached
     return cached
@@ -267,8 +267,8 @@ OUTPUT_SCHEMA_VERSION = output_schema_version_const(load_output_schema(OUTPUT_SC
 # the prompt with no code change at all.
 _RETIRED_ISSUE_KEYS = tuple(
     sorted(
-        set((load_output_schema(OUTPUT_SCHEMA_V2_PATH)["definitions"]["Issue"]["properties"]))
-        - set((load_output_schema(OUTPUT_SCHEMA_PATH)["definitions"]["Issue"]["properties"]))
+        set((load_output_schema(OUTPUT_SCHEMA_V2_PATH)["definitions"]["Issue"]["properties"]))  # noqa: UP034
+        - set((load_output_schema(OUTPUT_SCHEMA_PATH)["definitions"]["Issue"]["properties"]))  # noqa: UP034
     )
 )
 
@@ -853,7 +853,7 @@ def schema_max_length(schema: dict[str, Any], pointer: str) -> int | None:
 
 
 def _render_budget_lines(
-    budgets: "tuple[tuple[str, str], ...]", schema: dict[str, Any]
+    budgets: "tuple[tuple[str, str], ...]", schema: dict[str, Any]  # noqa: UP037
 ) -> str:
     """`"field" -- N characters` lines for `budgets`, deduplicated on
     (label, cap) so two pointers at the same field name and the same cap
@@ -1458,7 +1458,7 @@ def render_length_budget_detail(*, location: str, value_length: int, maximum: in
 # (issue #627), in this module's own "TOKEN: detail" convention -- so
 # `_error_token` ledgers it as `block_transcript_rejected` and
 # `render_retry_correction_block` can frame the retry for the right fault.
-BLOCK_TRANSCRIPT_ERROR_TOKEN = "block_transcript_rejected"
+BLOCK_TRANSCRIPT_ERROR_TOKEN = "block_transcript_rejected"  # noqa: S105
 
 # ---------------------------------------------------------------------------
 # Fail-closed `reason` TOKENS for this pass's terminals (issue #670).
@@ -2546,7 +2546,7 @@ def assemble_user_prompt_critic(
     return "\n\n".join(blocks)
 
 
-def estimate_user_content_tokens(user_content: "str | list[dict[str, Any]]") -> int:
+def estimate_user_content_tokens(user_content: "str | list[dict[str, Any]]") -> int:  # noqa: UP037
     """Token estimate for `user_content` regardless of shape -- issue #568's
     list-shaped cached-document content sums each block's own `text`, so
     callers (`assembled_prompt_tokens` below, and `run_primary_pass`'s
@@ -2558,7 +2558,7 @@ def estimate_user_content_tokens(user_content: "str | list[dict[str, Any]]") -> 
 
 
 def assembled_prompt_tokens(
-    system_blocks: list[dict[str, Any]], user_prompt: "str | list[dict[str, Any]]"
+    system_blocks: list[dict[str, Any]], user_prompt: "str | list[dict[str, Any]]"  # noqa: UP037
 ) -> int:
     """Total assembled input size (system + user), the quantity step-14
     enforces against `max_input_tokens`. `user_prompt` may be the legacy
@@ -2649,7 +2649,7 @@ def assemble_user_content_primary(
     retrieved_precedent: list[dict[str, Any]],
     doc_text: str = "",
     prompt_caching_enabled: bool = False,
-) -> "str | list[dict[str, Any]]":
+) -> "str | list[dict[str, Any]]":  # noqa: UP037
     """The primary-pass user content `run_primary_pass` sends to
     `model_client.invoke()` (issue #568).
 
@@ -2696,8 +2696,8 @@ def assemble_user_content_primary(
 
 
 def append_user_content_suffix(
-    user_content: "str | list[dict[str, Any]]", suffix: str
-) -> "str | list[dict[str, Any]]":
+    user_content: "str | list[dict[str, Any]]", suffix: str  # noqa: UP037
+) -> "str | list[dict[str, Any]]":  # noqa: UP037
     """Append `suffix` (the retry-correction block, issue #417) to
     `user_content`, whichever shape `assemble_user_content_primary`
     returned.
@@ -3151,7 +3151,7 @@ def validate_model_response(
     *,
     issue_provenance: str = "model",
     schema_path: Path = OUTPUT_SCHEMA_PATH,
-    schema_error_sink: Optional[Callable[[dict[str, Any]], None]] = None,
+    schema_error_sink: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
 ) -> tuple[bool, Any]:
     """Unwrap -> parse -> stamp envelope -> strictly schema-validate a raw
     model response.
@@ -3405,9 +3405,9 @@ def run_primary_pass(
     review_id: str,
     retrieved_precedent: list[dict[str, Any]],
     playbook: dict[str, Any],
-    model_client: "_model_client.BedrockModelClient",
+    model_client: "_model_client.BedrockModelClient",  # noqa: UP037
     model_id: str,
-    ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],
+    ledger_write: Callable[["_model_client.ModelInvocationRecord"], None],  # noqa: UP037
     doc_text: str = "",
     toaster_guidance: str = "",
     instructions_text: str = "",
@@ -3421,7 +3421,7 @@ def run_primary_pass(
     output_schema_path: Path = OUTPUT_SCHEMA_PATH,
     block_map: dict[str, Any] | None = None,
     cancel_checkpoint: Callable[[], None] | None = None,
-    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,
+    attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Run the primary review pass end-to-end (data-flow steps 14-15-17 for
     the primary pass).
@@ -3776,7 +3776,7 @@ def run_primary_pass(
             # set -- see the comment above where it is resolved. This is
             # the "only when structured_output_enabled()" thread: the flag
             # off means the keyword is never sent at all.
-            invoke_kwargs: dict[str, Any] = dict(
+            invoke_kwargs: dict[str, Any] = dict(  # noqa: C408
                 model_id=model_id,
                 system_prompt=system_prompt_text,
                 # Issue #568: `append_user_content_suffix` appends the retry
@@ -3991,7 +3991,7 @@ def run_primary_pass(
             ledger_write(
                 _model_client.ModelInvocationRecord(
                     review_id=review_id,
-                    pass_name="primary",
+                    pass_name="primary",  # noqa: S106
                     model_id=model_id,
                     attempt_number=attempt,
                     outcome=outcome,

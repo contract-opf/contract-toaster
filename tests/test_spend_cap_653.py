@@ -87,7 +87,7 @@ os.environ.setdefault("MODEL_SETTINGS_TABLE", "contract-toaster-model-settings-t
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
@@ -218,7 +218,7 @@ class SpendTestBase(unittest.TestCase):
                 reviews.MAX_INPUT_TOKENS * rates["cost_per_million_input_usd"] / 1_000_000
                 + reviews.MAX_OUTPUT_TOKENS * rates["cost_per_million_output_usd"] / 1_000_000
             )
-        return int(round(attempts * total * 100))
+        return int(round(attempts * total * 100))  # noqa: RUF046
 
     def _ledger(self, **env: str) -> dict:
         with _no_env_overrides(**env):
@@ -289,7 +289,7 @@ class TestTheCapResolution(SpendTestBase):
 
     def test_a_ddb_blip_degrades_to_the_deployment_cap(self):
         """The no-stored-cap case: a blip must not fail every submission."""
-        with _no_env_overrides(DAILY_SPEND_CAP_USD_CENTS="500"):
+        with _no_env_overrides(DAILY_SPEND_CAP_USD_CENTS="500"):  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
                 cents = model_settings.resolve_daily_spend_cap_cents(ExplodingResource())
         self.assertEqual(cents, 500)
@@ -340,7 +340,7 @@ class TestTheCapResolution(SpendTestBase):
         built-in default, not "no cap"."""
         env = dict(os.environ)
         env.pop("DAILY_SPEND_CAP_USD_CENTS", None)
-        with patch.dict(os.environ, env, clear=True):
+        with patch.dict(os.environ, env, clear=True):  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
                 cents = model_settings.resolve_daily_spend_cap_cents(ExplodingResource())
         self.assertEqual(cents, model_settings.DAILY_SPEND_CAP_USD_CENTS_DEFAULT)
@@ -918,7 +918,7 @@ class TestTheReviewerFacingEstimate(SpendTestBase):
                 * rates["cost_per_million_output_usd"]
                 / 1_000_000
             )
-        self.assertEqual(body["estimated_usd_cents"], int(round(expected * 100)))
+        self.assertEqual(body["estimated_usd_cents"], int(round(expected * 100)))  # noqa: RUF046
         self.assertLess(
             body["estimated_usd_cents"],
             body["worst_case_reservation_usd_cents"],

@@ -121,7 +121,7 @@ def _stub_third_party() -> None:
 _stub_third_party()
 
 # Now we can safely import the module under test.
-import download as _download_module  # noqa: E402
+import download as _download_module  # noqa: E402, I001
 
 
 # Re-export the enforcement functions and exception class for the tests.
@@ -470,7 +470,7 @@ class TestPresignedUrlExpiry(unittest.TestCase):
             "is_admin": False,
         }
 
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ",
             {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
@@ -577,7 +577,7 @@ class TestKeyBoundToReviewId(unittest.TestCase):
             "is_admin": False,
         }
 
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ",
             {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):
@@ -798,7 +798,7 @@ class TestPerUserLimits(unittest.TestCase):
             "is_admin": False,
         }
 
-        with patch.dict(
+        with patch.dict(  # noqa: SIM117
             "os.environ",
             {"OUTPUTS_BUCKET": "contract-toaster-outputs-dev"},
         ):

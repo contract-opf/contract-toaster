@@ -160,7 +160,7 @@ ARTICLE_VI_TEXT = (
 )
 
 
-def build_document() -> "docx.Document":
+def build_document() -> "docx.Document":  # noqa: UP037
     document = docx.Document()
     document.add_heading(TITLE, level=1)
     document.add_paragraph(PREAMBLE)

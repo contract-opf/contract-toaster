@@ -310,7 +310,7 @@ class TestEmptyReplacementTextWiring(unittest.TestCase):
         still flows through untouched and produces no failure -- proves the
         EMPTY_REPLACEMENT_TEXT check is additive, not a regression on the
         happy path."""
-        topic = rte.find_topic(self.playbook, "limitation-of-liability")
+        topic = rte.find_topic(self.playbook, "limitation-of-liability")  # noqa: F841
         issue = {
             "playbook_topic_id": "limitation-of-liability",
             "proposed_replacement_text": (

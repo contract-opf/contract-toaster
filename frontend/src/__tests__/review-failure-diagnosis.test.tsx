@@ -24,6 +24,7 @@ import ReviewSubmission from '../ReviewSubmission';
 import { selectedPlaybookId } from './support/consoleSurface';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -46,7 +47,9 @@ function stubFailedReview(
 ): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
 
@@ -54,6 +57,7 @@ function stubFailedReview(
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             playbooks: [{ playbook_id: 'eiaa', display_name: 'EIAA', status: 'active' }],
           }),
@@ -63,6 +67,7 @@ function stubFailedReview(
         return {
           ok: true,
           status: 202,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: REVIEW_ID, resumed: false }),
         } as Response;
       }
@@ -70,6 +75,7 @@ function stubFailedReview(
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: REVIEW_ID,
             status,
@@ -82,6 +88,7 @@ function stubFailedReview(
           }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );

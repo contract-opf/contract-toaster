@@ -84,7 +84,7 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-upload478-t
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-upload478-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-upload478-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

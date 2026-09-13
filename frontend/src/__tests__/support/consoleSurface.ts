@@ -116,6 +116,7 @@ export async function findReviewResult(
     const details = screen.queryByRole('button', { name: /review details/i });
     if (details) fireEvent.click(details);
     else {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       const receipt = screen.queryByRole('button', {
         name: /view review receipt/i,
       }) as HTMLButtonElement | null;
@@ -139,6 +140,7 @@ export async function openReviewRecord(): Promise<HTMLElement> {
     const details = screen.queryByRole('button', { name: /review details/i });
     if (details) fireEvent.click(details);
     else {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       const receipt = screen.queryByRole('button', {
         name: /view review receipt/i,
       }) as HTMLButtonElement | null;
@@ -153,6 +155,7 @@ export async function openReceipt(): Promise<HTMLElement> {
   return waitFor(() => {
     const [printed] = screen.queryAllByTestId('review-receipt-text');
     if (printed) return printed;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const printer = screen.queryByRole('button', {
       name: /view review receipt/i,
     }) as HTMLButtonElement | null;

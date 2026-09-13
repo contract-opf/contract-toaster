@@ -32,6 +32,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import AdminUsers from '../AdminUsers';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -100,10 +101,13 @@ type Body = Record<string, unknown>;
 function stubFetch(byPath: Record<string, Body>): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const body = byPath[pathname];
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: body !== undefined, status: body === undefined ? 404 : 200, json: async () => body ?? {} } as Response;
     }),
   );
@@ -229,9 +233,11 @@ describe('AdminUsers — self-recognition drives the Revoke-admin confirm copy (
     // reflected attribute — see ct-button.ts's `get/set confirm`), and
     // `/api/me` resolves after the initial render, so read it via `waitFor`
     // rather than asserting synchronously or clicking to arm the button.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const selfCtButton = buttonWithin(selfRow, 'Revoke admin').closest('ct-button') as
       | (HTMLElement & { confirm: string })
       | null;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const otherCtButton = buttonWithin(otherRow, 'Revoke admin').closest('ct-button') as
       | (HTMLElement & { confirm: string })
       | null;

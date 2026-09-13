@@ -96,7 +96,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import jsonschema  # noqa: E402
+import jsonschema  # noqa: E402, I001
 
 import extraction_normalization_stage  # noqa: E402
 import leakage_scan  # noqa: E402
@@ -244,7 +244,7 @@ def _footnote_texts(docx_bytes: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
         if FOOTNOTES_PART not in zf.namelist():
             return []
-        root = ET.fromstring(zf.read(FOOTNOTES_PART))
+        root = ET.fromstring(zf.read(FOOTNOTES_PART))  # noqa: S314
     texts = []
     for fn in root.findall(_qn("footnote")):
         if int(fn.get(_qn("id"), "0")) <= 0:
@@ -257,7 +257,7 @@ def _footnote_texts(docx_bytes: bytes) -> list[str]:
 
 def _footnote_reference_ids(docx_bytes: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     return [
         ref.get(_qn("id"))
         for ref in root.iter(_qn("footnoteReference"))
@@ -266,7 +266,7 @@ def _footnote_reference_ids(docx_bytes: bytes) -> list[str]:
 
 def _reference_ids_inside_ins(docx_bytes: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     ids = []
     for ins in root.iter(_qn("ins")):
         ids.extend(ref.get(_qn("id")) for ref in ins.iter(_qn("footnoteReference")))
@@ -286,14 +286,14 @@ def _declares_footnotes_part(docx_bytes: bytes) -> tuple[bool, bool]:
         names = zf.namelist()
         has_rel = False
         if "word/_rels/document.xml.rels" in names:
-            rels = ET.fromstring(zf.read("word/_rels/document.xml.rels"))
+            rels = ET.fromstring(zf.read("word/_rels/document.xml.rels"))  # noqa: S314
             has_rel = any(
                 (rel.get("Target") or "").endswith("footnotes.xml")
                 for rel in rels.findall(f"{{{PKG_RELS_NS}}}Relationship")
             )
         has_ct = False
         if "[Content_Types].xml" in names:
-            ct = ET.fromstring(zf.read("[Content_Types].xml"))
+            ct = ET.fromstring(zf.read("[Content_Types].xml"))  # noqa: S314
             has_ct = any(
                 (o.get("PartName") or "").endswith("/footnotes.xml")
                 for o in ct.findall(f"{{{CT_NS}}}Override")
@@ -389,7 +389,7 @@ def _part_1_live_path_four_modes(failures: list) -> None:
         # The tracked changes themselves are unaffected by notes mode: every
         # mode still delivers the redline, `none` just delivers it bare.
         with zipfile.ZipFile(io.BytesIO(bytes(docx_bytes))) as zf:
-            doc_root = ET.fromstring(zf.read("word/document.xml"))
+            doc_root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
         if not doc_root.findall(f".//{_qn('ins')}") or not doc_root.findall(f".//{_qn('del')}"):
             failures.append(
                 f"[1e/{mode}] Expected the tracked change itself (<w:ins>/<w:del>) "
@@ -823,8 +823,8 @@ _TP_EXPECTED_BY_MODE = {
 
 
 def _part_7_third_party_path_honours_the_mode(failures: list) -> None:
-    import third_party_clause_segmentation  # noqa: E402 - local to this part
-    import third_party_output_integration  # noqa: E402 - local to this part
+    import third_party_clause_segmentation  # local to this part
+    import third_party_output_integration  # local to this part
 
     # The real upload, segmented by #248's real segmenter -- since issue
     # #629 the third-party path writes IN PLACE into these bytes, so a
@@ -943,7 +943,7 @@ def _part_8_the_prompt_asks_for_the_field_it_renders(failures: list) -> None:
     field = redline_generate.INTERNAL_RATIONALE_FIELD
 
     # 8a. One name, spelled on both sides of the pipeline.
-    if primary_review_pass.INTERNAL_RATIONALE_FIELD != field:
+    if primary_review_pass.INTERNAL_RATIONALE_FIELD != field:  # noqa: SIM300
         failures.append(
             f"[8a] The prompt asks for "
             f"{primary_review_pass.INTERNAL_RATIONALE_FIELD!r} and the renderer reads "

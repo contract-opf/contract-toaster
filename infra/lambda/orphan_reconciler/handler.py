@@ -108,7 +108,7 @@ def compute_worst_case_reservation_usd_cents() -> int:
         CRITIC_INPUT_RATE_USD_PER_MILLION / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (CRITIC_OUTPUT_RATE_USD_PER_MILLION / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
-    return int(round(usd * 100))
+    return int(round(usd * 100))  # noqa: RUF046
 
 
 def settle_spend(actual_usd_cents: int, dynamodb_resource: Any,
@@ -209,7 +209,7 @@ def _release_semaphore_slot(review_id: str) -> None:
     # Slots are also self-expiring via DynamoDB TTL (see pipeline-stack.ts
     # semaphore table `ttl` attribute); this explicit delete is best-effort
     # immediate reclaim so a burst of retries does not wait out the TTL.
-    try:
+    try:  # noqa: SIM105
         table.delete_item(Key={"lock_name": f"review-slot#{review_id}"})
     except ClientError:
         pass
@@ -385,7 +385,7 @@ def _find_submission_for_review(review_id: str) -> dict[str, Any] | None:
     return items[0] if items else None
 
 
-def handler(_event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any]:
+def handler(_event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any]:  # noqa: RUF013
     """EventBridge-scheduled entry point."""
     redriven = _reconcile_arnless_submissions()
     resolved = _reconcile_dead_executions()

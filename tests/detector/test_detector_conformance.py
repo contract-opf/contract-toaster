@@ -490,7 +490,7 @@ def _parse(path: Path) -> tuple[str, ast.Module]:
 
 def _imports_whole_module(tree: ast.Module, module_name: str) -> bool:
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
+        if isinstance(node, ast.Import):  # noqa: SIM102
             if any(alias.name == module_name for alias in node.names):
                 return True
     return False

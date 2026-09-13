@@ -85,7 +85,7 @@ _TEST_MODEL_ID = "anthropic.claude-opus-4-8"
 
 
 def _nda_playbook() -> dict[str, Any]:
-    with open(NDA_PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(NDA_PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 

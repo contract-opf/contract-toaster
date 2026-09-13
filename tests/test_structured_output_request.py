@@ -93,7 +93,7 @@ for _dir in (BACKEND_SRC, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import jsonschema  # noqa: E402
+import jsonschema  # noqa: E402, I001
 import model_client as mc  # noqa: E402
 import model_output_schema as mos  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -126,7 +126,7 @@ _PRIMARY_VALID_FIXTURE = "primary_request_change_valid.json"
 
 
 def _load_fixture(name: str) -> dict[str, Any]:
-    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:
+    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -395,7 +395,7 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
     def test_source_schema_actually_had_these_constraints(self) -> None:
         # Negative-control: prove the stripping did something, not that the
         # source never had the keywords to begin with.
-        with open(mos.OUTPUT_SCHEMA_PATH, "r", encoding="utf-8") as fh:
+        with open(mos.OUTPUT_SCHEMA_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
             on_disk = json.load(fh)
         self.assertIn("minLength", on_disk["definitions"]["Issue"]["properties"]["section_ref"])
         self.assertIn("maxLength", on_disk["definitions"]["Issue"]["properties"]["section_ref"])
@@ -419,7 +419,7 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
     def test_source_schema_on_disk_is_untouched(self) -> None:
         second = mos.project_output_schema_for_provider()
         self.assertEqual(self.schema, second)
-        with open(mos.OUTPUT_SCHEMA_PATH, "r", encoding="utf-8") as fh:
+        with open(mos.OUTPUT_SCHEMA_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
             on_disk = json.load(fh)
         self.assertIn("schema_version", on_disk["required"])
         self.assertIn("minLength", on_disk["definitions"]["Issue"]["properties"]["section_ref"])
@@ -983,7 +983,7 @@ class LegacyShapedFakeClient:
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 

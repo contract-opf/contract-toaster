@@ -29,6 +29,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import AdminUsers from '../AdminUsers';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -86,11 +87,14 @@ let requests: Recorded[] = [];
  * `authMode` is non-null) resolve to the happy path, everything else 404s.
  */
 function stubRoutes(users: unknown[], authMode: string | null, overrides: Handler[] = []): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const method = (init?.method ?? 'GET').toUpperCase();
     const rawBody = init?.body;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body = typeof rawBody === 'string' ? JSON.parse(rawBody) : undefined;
     requests.push({ method, pathname, body });
 
@@ -99,22 +103,27 @@ function stubRoutes(users: unknown[], authMode: string | null, overrides: Handle
       return {
         ok: override.status >= 200 && override.status < 300,
         status: override.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => override.body,
       } as Response;
     }
     if (method === 'GET' && pathname === '/api/users') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ users }) } as Response;
     }
     if (method === 'GET' && pathname === '/api/users/sync-status') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => SYNC_STATUS_OK } as Response;
     }
     if (method === 'GET' && pathname === '/api/admin/auth-mode') {
       if (authMode === null) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           setting_id: 'global',
           auth_mode: authMode,
@@ -124,8 +133,10 @@ function stubRoutes(users: unknown[], authMode: string | null, overrides: Handle
       } as Response;
     }
     if (method === 'GET' && pathname === '/api/me') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -356,26 +367,33 @@ describe('AdminUsers — Remove is a distinct hard delete (#474)', () => {
     // /api/me resolves to sub-admin-1 so isSelf is true for that row.
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const url = typeof input === 'string' ? input : input.toString();
         const pathname = new URL(url, 'http://localhost').pathname;
         const method = (init?.method ?? 'GET').toUpperCase();
         if (method === 'GET' && pathname === '/api/users') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => ({ users: [ADMIN_ROW, secondAdmin] }) } as Response;
         }
         if (method === 'GET' && pathname === '/api/users/sync-status') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => SYNC_STATUS_OK } as Response;
         }
         if (method === 'GET' && pathname === '/api/admin/auth-mode') {
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({ setting_id: 'global', auth_mode: 'sso', default_auth_mode: 'sso', auth_mode_options: [] }),
           } as Response;
         }
         if (method === 'GET' && pathname === '/api/me') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => ({ cognito_sub: 'sub-admin-1' }) } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }),
     );

@@ -235,7 +235,7 @@ def check_non_retired_playbooks(supported: list[str] | None) -> list[str]:
         try:
             with pb_path.open() as fh:
                 data = json.load(fh)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             failures.append(f"  FAIL: could not load {pb_path.name}: {exc}")
             continue
 

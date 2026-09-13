@@ -56,7 +56,7 @@ for _dir in (BACKEND_SRC, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.config import Config  # noqa: E402
 from botocore.exceptions import (  # noqa: E402
     ClientError,

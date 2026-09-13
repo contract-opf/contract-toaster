@@ -111,7 +111,7 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402, I001
 
 import src.main as _backend_main  # noqa: E402
 
@@ -278,7 +278,7 @@ class TestRequireActiveUser(unittest.TestCase):
         """RED scenario from the issue: suspend -> next request from that
         user 403 within TTL. This models the backend-side re-check firing
         on the very next call, independent of token expiry."""
-        ddb, users, audit, _ = _new_ddb()
+        ddb, users, audit, _ = _new_ddb()  # noqa: RUF059
         _seed_user(users, "sub-5", "reviewer@example.com", status_="active")
         admin_sub = "admin-1"
         _seed_user(users, admin_sub, "admin@example.com", status_="active", is_admin=True)

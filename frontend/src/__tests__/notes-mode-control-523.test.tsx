@@ -52,6 +52,7 @@ import {
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -61,15 +62,19 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -90,6 +95,7 @@ function callsTo(
 function submittedFormData(fetchMock: ReturnType<typeof vi.fn>): FormData {
   const calls = callsTo(fetchMock, '/api/reviews', 'POST');
   expect(calls.length, 'expected exactly one POST /api/reviews call').toBe(1);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return calls[0]![1]!.body as FormData;
 }
 
@@ -260,7 +266,9 @@ describe('notes mode — automatically persists across sessions', () => {
     await waitFor(() =>
       expect(callsTo(fetchMock, '/api/me/preferences', 'PUT')).toHaveLength(1),
     );
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const [, init] = callsTo(fetchMock, '/api/me/preferences', 'PUT')[0]!;
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     expect(JSON.parse(String(init!.body))).toEqual({ preferences: { notes_mode: 'none' } });
     expect(screen.queryByTestId('review-notes-mode-remember')).toBeNull();
   });
@@ -274,7 +282,9 @@ describe('notes mode — automatically persists across sessions', () => {
 
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const url = String(input);
         if (url.includes('/api/me/preferences') && (init?.method ?? 'GET').toUpperCase() === 'PUT') {
           if (failPut) {
@@ -282,15 +292,18 @@ describe('notes mode — automatically persists across sessions', () => {
             return {
               ok: false,
               status: 500,
+              // eslint-disable-next-line @typescript-eslint/require-await
               json: async () => ({ detail: 'network hiccup' }),
             } as Response;
           }
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({ preferences: { notes_mode: 'none' } }),
           } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }),
     );
@@ -356,6 +369,7 @@ describe('notes mode — the disclosure', () => {
       expect(disclosures).toHaveLength(1);
       // Verbatim, not a paraphrase: the sentence on screen names the exact
       // marker `scripts/redline_generate.py` stamps on every page.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(disclosures[0]!.textContent ?? '').toContain(INTERNAL_MARKER_TEXT);
     }
   });

@@ -130,7 +130,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -140,7 +140,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import canonicalize  # noqa: E402
+import canonicalize  # noqa: E402, I001
 import eval_budget  # noqa: E402
 import playbook_registry  # noqa: E402
 import review_spine  # noqa: E402
@@ -581,10 +581,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(
-    argv: Optional[list[str]] = None,
+    argv: Optional[list[str]] = None,  # noqa: UP045
     *,
-    build_client: Optional[Callable[[], Any]] = None,
-    resolve_api_key: Optional[Callable[[], str]] = None,
+    build_client: Optional[Callable[[], Any]] = None,  # noqa: UP045
+    resolve_api_key: Optional[Callable[[], str]] = None,  # noqa: UP045
 ) -> int:
     """`build_client` / `resolve_api_key` are injection seams for
     `tests/test_live_smoke_eval_offline.py` -- both default to the real,
@@ -681,7 +681,7 @@ def main(
     # so a `KeyboardInterrupt` is covered too; caught here ONLY to let the
     # report-writing `finally` below run before it propagates, never
     # swallowed.
-    pending_exc: Optional[BaseException] = None
+    pending_exc: Optional[BaseException] = None  # noqa: UP045
     try:
         for doc in docs:
             for run_index in range(args.runs_per_doc):

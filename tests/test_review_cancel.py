@@ -69,7 +69,7 @@ def _fixture(name: str) -> str:
 
 
 def _playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as handle:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as handle:  # noqa: UP015
         return json.load(handle)
 
 

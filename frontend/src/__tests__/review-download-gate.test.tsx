@@ -29,6 +29,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -43,15 +44,19 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   // The catalog is part of every route table here, not part of any scenario:
   // without it the console's lever never arms (issue #733).
   routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -138,6 +143,7 @@ describe('download affordance — ReviewSubmission.tsx', () => {
     // click adds a download of its own — the button stays a real, working
     // affordance whether or not the automatic save ran.
     await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(1));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const clicksBefore = anchorClickSpy.mock.calls.length;
 
     fireEvent.click(screen.getByTestId('review-download-button'));
@@ -149,12 +155,18 @@ describe('download affordance — ReviewSubmission.tsx', () => {
     // ...and hand the returned URL to the browser via a clicked anchor whose
     // href is the presigned URL — never window.location.assign, so the SPA
     // itself never navigates away.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     await waitFor(() => expect(anchorClickSpy).toHaveBeenCalledTimes(clicksBefore + 1));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const anchorCalls = createElementSpy.mock.calls
       .map((call: unknown[], i: number) => ({ tag: call[0], index: i }))
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       .filter((entry: { tag: unknown }) => entry.tag === 'a');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(anchorCalls.length).toBeGreaterThan(0);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const lastAnchorIndex = anchorCalls[anchorCalls.length - 1]!.index;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const anchor = createElementSpy.mock.results[lastAnchorIndex]!.value as HTMLAnchorElement;
     expect(anchor.href).toBe(presignedUrl);
     expect(assignMock).not.toHaveBeenCalled();

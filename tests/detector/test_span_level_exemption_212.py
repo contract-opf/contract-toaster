@@ -83,7 +83,7 @@ def _hunk_wide_is_exempted(text: str, exempt_terms: list[str], match_type: str) 
     trigger match is. Used only to prove these fixtures actually exercise
     the bug this fix closes (i.e. that the old logic would have wrongly
     suppressed the fire)."""
-    for exempt in exempt_terms:
+    for exempt in exempt_terms:  # noqa: SIM110
         if detector_common.phrase_matches(text, exempt, match_type):
             return True
     return False

@@ -46,6 +46,7 @@ import { DEFAULT_PLAYBOOKS, pressSubmit } from './support/consoleSurface';
 import { BROWNING_SETTINGS, composeGuidance, DEFAULT_BROWNING } from '../toaster/browning';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -55,15 +56,19 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -180,6 +185,7 @@ describe('browning control — what you see is what the model is told', () => {
     const fetchMock = mountForm();
     await submitWith('light', TYPED);
     const formData = submittedFormData(fetchMock);
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const sent = String(formData.get('toaster_guidance'));
 
     // Issue #54: no sentence in front of the reviewer's words any more.

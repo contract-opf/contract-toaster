@@ -47,6 +47,7 @@ import {
 } from '../durationEstimate';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -118,24 +119,30 @@ function stubPanelFetch(options: {
   const estimateCalls: string[] = [];
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const parsed = new URL(url, 'http://localhost');
       const method = (init?.method ?? 'GET').toUpperCase();
       if (parsed.pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (parsed.pathname === '/api/review-duration-estimate') {
         estimateCalls.push(parsed.search);
         if (!options.estimate) {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: false, status: 404, json: async () => ({}) } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => options.estimate } as Response;
       }
       if (method === 'POST' && parsed.pathname === '/api/reviews/preflight') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => preflightBody(options.words),
         } as Response;
       }
@@ -143,6 +150,7 @@ function stubPanelFetch(options: {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: REVIEW_ID, resumed: false }),
         } as Response;
       }
@@ -150,6 +158,7 @@ function stubPanelFetch(options: {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: REVIEW_ID,
             status: 'RUNNING',
@@ -160,6 +169,7 @@ function stubPanelFetch(options: {
           }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );

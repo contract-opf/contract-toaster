@@ -50,6 +50,7 @@ interface FakeAuthSession {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/require-await
 const fetchAuthSessionMock = vi.fn<() => Promise<FakeAuthSession>>(async () => ({
   tokens: {
     idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -98,12 +99,15 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
     vi.useFakeTimers();
 
     let getCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       // Issue #733: the console needs an active playbook to submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
 
@@ -111,6 +115,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: 'rev-flaky', resumed: false }),
         } as Response;
       }
@@ -123,6 +128,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-flaky',
             status: 'DONE',
@@ -133,6 +139,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
         } as Response;
       }
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -168,12 +175,15 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
   it('shows a friendly outcome for a MANUAL_REVIEW_REQUIRED review, never the raw token', async () => {
     vi.useFakeTimers();
 
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       // Issue #733: the console needs an active playbook to submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
 
@@ -181,6 +191,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: 'rev-manual', resumed: false }),
         } as Response;
       }
@@ -189,6 +200,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-manual',
             status: 'MANUAL_REVIEW_REQUIRED',
@@ -199,6 +211,7 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
         } as Response;
       }
 
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -240,10 +253,14 @@ describe('friendly errors — no raw technical strings', () => {
       'fetch',
       // Issue #733: the catalog succeeds so the console can get as far as the
       // failing submit this test is about; everything else still 500s.
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         if (new URL(String(input), 'http://localhost').pathname === '/api/playbooks') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }),
     );
@@ -259,18 +276,22 @@ describe('friendly errors — no raw technical strings', () => {
   });
 
   it('shows friendly copy for a download failure with no server detail', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       // Issue #733: the console needs an active playbook to submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: 'rev-dl', resumed: false }),
         } as Response;
       }
@@ -278,6 +299,7 @@ describe('friendly errors — no raw technical strings', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-dl',
             status: 'DONE',
@@ -288,8 +310,10 @@ describe('friendly errors — no raw technical strings', () => {
         } as Response;
       }
       if (pathname === '/api/reviews/rev-dl/output') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -318,18 +342,22 @@ describe('friendly errors — no raw technical strings', () => {
     // screen, so seeing it logged here is the expected half (issue #68).
     allowConsoleErrorsInThisTest(/EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured/);
     const CONFIG_DETAIL = 'EXAMPLE_STORAGE_BUCKET_ENV_VAR not configured.';
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       // Issue #733: the console needs an active playbook to submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: 'rev-cfg', resumed: false }),
         } as Response;
       }
@@ -337,6 +365,7 @@ describe('friendly errors — no raw technical strings', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-cfg',
             status: 'DONE',
@@ -347,8 +376,10 @@ describe('friendly errors — no raw technical strings', () => {
         } as Response;
       }
       if (pathname === '/api/reviews/rev-cfg/output') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 503, json: async () => ({ detail: CONFIG_DETAIL }) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -381,15 +412,20 @@ describe('friendly errors — no raw technical strings', () => {
   });
 
   it('shows friendly copy for a version-fetch failure in App.tsx', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/api/me') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ is_admin: false }) } as Response;
       }
       if (pathname === '/version') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 503, json: async () => ({}) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -400,16 +436,20 @@ describe('friendly errors — no raw technical strings', () => {
   });
 
   it('shows friendly copy for AdminUsers load failure', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/api/users') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }
       if (pathname === '/api/users/sync-status') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             sync_type: 'workspace',
             last_run_at: null,
@@ -419,6 +459,7 @@ describe('friendly errors — no raw technical strings', () => {
           }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -438,10 +479,14 @@ describe('accessibility — status and error regions', () => {
       'fetch',
       // Issue #733: the catalog succeeds so the console can get as far as the
       // failing submit this test is about; everything else still 500s.
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async (input: RequestInfo | URL) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         if (new URL(String(input), 'http://localhost').pathname === '/api/playbooks') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }),
     );
@@ -464,24 +509,29 @@ describe('accessibility — status and error regions', () => {
   // one region written to announce it; see single-terminal-announcement.test.tsx,
   // which owns that property now.
   it('leaves the review-status region silent, so the terminal moment is announced once', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       // Issue #733: the console needs an active playbook to submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: 'rev-status', resumed: false }),
         } as Response;
       }
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           review_id: 'rev-status',
           status: 'DONE',
@@ -511,6 +561,7 @@ describe('accessibility — status and error regions', () => {
   it('announces AdminUsers error region via role="alert"', async () => {
     vi.stubGlobal(
       'fetch',
+      // eslint-disable-next-line @typescript-eslint/require-await
       vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }) as Response),
     );
 
@@ -533,14 +584,18 @@ describe('shared authorizedFetch — empty-token short circuit', () => {
     // POST this test inspects would carry a real token (issue #733).
     fetchAuthSessionMock.mockResolvedValue({ tokens: {} });
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       // Issue #733: the console needs a catalog before it will submit.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       if (new URL(String(input), 'http://localhost').pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ review_id: 'rev-anon', resumed: false }),
       } as Response;
     });
@@ -555,6 +610,7 @@ describe('shared authorizedFetch — empty-token short circuit', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [, init] = fetchMock.mock.calls.find(
       ([input]) =>
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         new URL(String(input), 'http://localhost').pathname === '/api/reviews',
     ) as [RequestInfo | URL, RequestInit | undefined];
     const headers = (init?.headers ?? {}) as Record<string, string>;
@@ -579,18 +635,22 @@ describe('download — non-navigating', () => {
       .mockImplementation(() => {});
 
     const presignedUrl = 'https://s3.example.test/outputs/rev-anchor/out.docx?sig=abc';
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       // Issue #733: the console needs an active playbook to submit at all.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ review_id: 'rev-anchor', resumed: false }),
         } as Response;
       }
@@ -598,6 +658,7 @@ describe('download — non-navigating', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-anchor',
             status: 'DONE',
@@ -611,9 +672,11 @@ describe('download — non-navigating', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ url: presignedUrl, expires_in: 60 }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);

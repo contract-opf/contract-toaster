@@ -46,6 +46,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import ReviewSubmission from '../ReviewSubmission';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -69,12 +70,15 @@ let scenario: Scenario;
 let calls: string[] = [];
 
 function ok(body: unknown): Response {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
 function stubFetch(): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     calls.push(`${method} ${pathname}`);
     if (pathname === '/api/playbooks') return ok({ playbooks: PLAYBOOKS });
@@ -96,6 +100,7 @@ function stubFetch(): ReturnType<typeof vi.fn> {
         failing_stage: scenario.failing_stage ?? 'run_review',
       });
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);

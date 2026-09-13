@@ -128,14 +128,14 @@ def check_a() -> list[str]:
 
     if "regex-dialect and redos constraint" not in text_lower:
         failures.append(
-            f"  docs/playbook-governance.md: missing 'Regex-dialect and ReDoS "
-            f"constraint' section (issue #7 requires this decision to be recorded)."
+            f"  docs/playbook-governance.md: missing 'Regex-dialect and ReDoS "  # noqa: F541
+            f"constraint' section (issue #7 requires this decision to be recorded)."  # noqa: F541
         )
 
     if "backtrack" not in text_lower:
         failures.append(
-            f"  docs/playbook-governance.md: does not mention 'backtrack' — "
-            f"the catastrophic-backtracking risk must be documented in the regex section."
+            f"  docs/playbook-governance.md: does not mention 'backtrack' — "  # noqa: F541
+            f"the catastrophic-backtracking risk must be documented in the regex section."  # noqa: F541
         )
 
     # Check for timeout mention in context of regex
@@ -144,8 +144,8 @@ def check_a() -> list[str]:
     )
     if not has_timeout_context:
         failures.append(
-            f"  docs/playbook-governance.md: does not document a per-rule regex "
-            f"execution-time bound (timeout) for match:'regex' rules."
+            f"  docs/playbook-governance.md: does not document a per-rule regex "  # noqa: F541
+            f"execution-time bound (timeout) for match:'regex' rules."  # noqa: F541
         )
 
     return failures
@@ -164,9 +164,9 @@ def check_b() -> list[str]:
     # The match property description must warn about backtracking
     if "backtrack" not in schema_text and "redos" not in schema_text:
         failures.append(
-            f"  playbooks/schema.json: the 'match' property description does not "
-            f"mention 'backtrack' or 'ReDoS'. Authors using match:'regex' must be "
-            f"warned about forbidden constructs in the schema itself."
+            f"  playbooks/schema.json: the 'match' property description does not "  # noqa: F541
+            f"mention 'backtrack' or 'ReDoS'. Authors using match:'regex' must be "  # noqa: F541
+            f"warned about forbidden constructs in the schema itself."  # noqa: F541
         )
 
     return failures

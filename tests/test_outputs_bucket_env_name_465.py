@@ -202,8 +202,8 @@ def check_deploy_targets(reader_name: str | None) -> list[str]:
 
 def check_retired_name_gone() -> list[str]:
     print(f"\nCheck 3: the retired name {RETIRED_NAME!r} appears nowhere in the tree …")
-    result = subprocess.run(
-        [
+    result = subprocess.run(  # noqa: S603
+        [  # noqa: S607
             "grep",
             "-rn",
             RETIRED_NAME,

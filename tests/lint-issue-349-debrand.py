@@ -142,7 +142,7 @@ def _self_test() -> None:
         dirty_py = tmp_path / "dirty.py"
         dirty_py.write_text('topic.get("exos_standard")\n', encoding="utf-8")
         hits = []
-        for lineno, line in enumerate(dirty_py.read_text().splitlines(), start=1):
+        for lineno, line in enumerate(dirty_py.read_text().splitlines(), start=1):  # noqa: B007
             if _EXOS_STANDARD_RE.search(line):
                 hits.append(line)
         if not hits:

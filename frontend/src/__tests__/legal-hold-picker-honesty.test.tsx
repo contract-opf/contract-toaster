@@ -23,6 +23,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import AdminRetention from '../AdminRetention';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -49,25 +50,34 @@ const REVIEW = {
 };
 
 function stub({ reviewsOk = true, usersOk = true, reviews = [REVIEW] } = {}) {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === '/api/reviews') {
       return reviewsOk
+        // eslint-disable-next-line @typescript-eslint/require-await
         ? ({ ok: true, status: 200, json: async () => ({ reviews }) } as Response)
+        // eslint-disable-next-line @typescript-eslint/require-await
         : ({ ok: false, status: 404, json: async () => ({}) } as Response);
     }
     if (pathname === '/api/users') {
       return usersOk
+        // eslint-disable-next-line @typescript-eslint/require-await
         ? ({ ok: true, status: 200, json: async () => ({ users: [] }) } as Response)
+        // eslint-disable-next-line @typescript-eslint/require-await
         : ({ ok: false, status: 500, json: async () => ({}) } as Response);
     }
     if (pathname === '/api/admin/retention') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => SETTINGS } as Response;
     }
     if (pathname === '/api/admin/retention/holds') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ holds: [] }) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => ({}) } as Response;
   });
 }

@@ -48,7 +48,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import entity_normalize as en  # noqa: E402
+import entity_normalize as en  # noqa: E402, I001
 
 
 # ---------------------------------------------------------------------------

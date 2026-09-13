@@ -102,7 +102,7 @@ os.environ.setdefault("UPLOADS_BUCKET", UPLOADS_BUCKET)
 os.environ.setdefault("OUTPUTS_BUCKET", OUTPUTS_BUCKET)
 os.environ.setdefault("AWS_REGION", "us-east-1")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 import time  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

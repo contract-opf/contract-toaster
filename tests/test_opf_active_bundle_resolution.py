@@ -66,7 +66,7 @@ os.environ.setdefault(
     "PLAYBOOK_VERSIONS_TABLE", "contract-toaster-playbook-versions-opfresolve-test"
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.reviews as reviews_module  # noqa: E402

@@ -102,7 +102,7 @@ for _dir in (BACKEND_ROOT, SCRIPTS_DIR, BACKEND_SRC_DIR, TESTS_DIR):
 # the ones the route tests below assert against (its moto buckets are created
 # from them); #259's fakes ignore bucket names entirely (its FakeS3 is keyed
 # on the object key alone), so it is indifferent to losing the race.
-import test_review_api_84 as api84  # noqa: E402
+import test_review_api_84 as api84  # noqa: E402, I001
 from fastapi_route_inventory import registered_route_pairs  # noqa: E402
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
 
@@ -114,7 +114,7 @@ from ddb_fixtures import create_reviews_table  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 from src import download as download_module  # noqa: E402
-from src import review_routes  # noqa: E402
+from src import review_routes  # noqa: E402, F401
 from src import reviews as reviews_module  # noqa: E402
 
 REVIEW_ID = dts.REVIEW_ID

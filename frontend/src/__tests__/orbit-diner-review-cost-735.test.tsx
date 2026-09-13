@@ -196,6 +196,7 @@ describe('Estimate unavailable (#735 H2)', () => {
 // ---------------------------------------------------------------------------
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -222,10 +223,12 @@ let postFails = false;
 
 function mockFetch(): ReturnType<typeof vi.fn> {
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = String(input);
     const path = new URL(url, 'http://localhost').pathname;
     const method = (init?.method ?? 'GET').toUpperCase();
     const ok = (body: unknown) =>
+      // eslint-disable-next-line @typescript-eslint/require-await
       ({ ok: true, status: 200, json: async () => body }) as Response;
     if (path === '/api/playbooks') return ok({ playbooks: PLAYBOOKS });
     if (path === '/api/me/preferences')
@@ -239,6 +242,7 @@ function mockFetch(): ReturnType<typeof vi.fn> {
         return {
           ok: false,
           status: 503,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ detail: 'The toaster is offline.' }),
         } as Response;
       }
@@ -253,6 +257,7 @@ function mockFetch(): ReturnType<typeof vi.fn> {
         has_output: false,
         has_input: true,
       });
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -364,6 +369,7 @@ describe('a reset takes the captured estimate off the screen with the review (#7
     // review's glass: that review really was submitted without a price.
     await act(async () => {
       landEstimate();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       await Promise.all(impl.mock.results.map((result) => result.value));
     });
     expect(priceText()).toContain('Estimate unavailable');
@@ -413,6 +419,7 @@ describe('a failed re-submit does not price the next document at the last one (#
     // The estimate arrives afterwards. The live figure is now a known $0.79.
     await act(async () => {
       landEstimate();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       await Promise.all(impl.mock.results.map((result) => result.value));
     });
 

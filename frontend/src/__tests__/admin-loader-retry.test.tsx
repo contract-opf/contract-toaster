@@ -28,6 +28,7 @@ import AdminPlaybooks from '../AdminPlaybooks';
 import AdminRetention from '../AdminRetention';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -114,14 +115,18 @@ const BODIES: Record<string, unknown> = {
  */
 function stubFetchFailingOnce(failPath: string) {
   let failed = false;
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === failPath && !failed) {
       failed = true;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 500, json: async () => ({}) } as Response;
     }
     if (pathname.includes('/versions')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ versions: [] }) } as Response;
     }
     // EXACT match, never a prefix: `/api/admin/retention` is a prefix of
@@ -129,6 +134,7 @@ function stubFetchFailingOnce(failPath: string) {
     // holds request produced an `undefined.length` crash that looked like a
     // component bug rather than a stub bug.
     const body = BODIES[pathname] ?? {};
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
 }
@@ -219,24 +225,31 @@ describe('AdminPlaybooks — version history', () => {
 
   function stub() {
     let failed = false;
+    // eslint-disable-next-line @typescript-eslint/require-await
     return vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname.includes('/versions')) {
         if (!failed) {
           failed = true;
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: false, status: 500, json: async () => ({}) } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ versions: [] }) } as Response;
       }
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => CATALOG } as Response;
       }
       // Issue #605: selecting the playbook (below) also mounts its
       // standing-instructions pane, which fetches this on its own.
       if (pathname.endsWith('/instructions')) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ current: null, history: [] }) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({}) } as Response;
     });
   }

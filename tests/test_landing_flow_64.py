@@ -24,13 +24,13 @@ a feature branch, which is exactly what a developer runs land.sh in.
 
 Two seams are faked, both of them seams that exist in the non-test code:
 
-  * The three gate commands. `scripts/land.sh` reads them from
-    LAND_GATE_FRONTEND_CMD / LAND_GATE_CHECK_CMD / LAND_GATE_BRAND_CMD and
-    falls back to the real gates. The stubs here stand in for `npm test`,
-    `scripts/check.sh` and `tests/lint-brand-free.py`, whose real exit codes
-    are what land.sh consumes — including check.sh's documented 2
-    (FLAKY-UNRESOLVED) and 3 (lock busy), both seeded below so neither branch
-    can rot green.
+  * The four gate commands. `scripts/land.sh` reads them from
+    LAND_GATE_LINT_CMD / LAND_GATE_FRONTEND_CMD / LAND_GATE_CHECK_CMD /
+    LAND_GATE_BRAND_CMD and falls back to the real gates. The stubs here stand
+    in for `ruff check … && mypy` (issue #65), `npm test`, `scripts/check.sh`
+    and `tests/lint-brand-free.py`, whose real exit codes are what land.sh
+    consumes — including check.sh's documented 2 (FLAKY-UNRESOLVED) and 3 (lock
+    busy), both seeded below so neither branch can rot green.
   * `git push` and `gh`, through a PATH shim that appends every invocation to
     a log. The `git` shim delegates every OTHER subcommand to the real git, so
     land.sh's branch detection and `git diff` run for real; only the network
@@ -47,7 +47,7 @@ of tests/test_ci_pipeline.py.
 Checks:
   1. `land.sh` on `main` exits 1 and pushes nothing.
   2. `land.sh` on a feature branch with a red gate exits 1, names the failing
-     gate, and pushes nothing — seeded for EACH of the three gates, and for
+     gate, and pushes nothing — seeded for EACH of the four gates, and for
      check.sh's exit 2 and exit 3.
   3. `land.sh` with every gate green pushes the branch and then runs
      `gh pr create --fill`; SKIP_INFRA=1 for a branch that leaves `infra/`
@@ -137,8 +137,8 @@ exit "${SHIM_GH_RC:-0}"
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args],
+    return subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
         cwd=str(repo),
         capture_output=True,
         text=True,
@@ -209,6 +209,7 @@ def _run_land(
     root: Path,
     repo: Path,
     *,
+    lint_rc: int = 0,
     frontend_rc: int = 0,
     check_rc: int = 0,
     brand_rc: int = 0,
@@ -226,6 +227,7 @@ def _run_land(
         SHIM_LOG=str(log),
         SHIM_PUSH_RC=str(push_rc),
         SHIM_GH_RC=str(gh_rc),
+        LAND_GATE_LINT_CMD=f'printf "gate lint\\n" >> "$SHIM_LOG"; exit {lint_rc}',
         LAND_GATE_FRONTEND_CMD=(
             f'printf "gate frontend\\n" >> "$SHIM_LOG"; exit {frontend_rc}'
         ),
@@ -241,7 +243,7 @@ def _run_land(
     )
 
     proc = subprocess.run(
-        ["bash", "scripts/land.sh"],
+        ["bash", "scripts/land.sh"],  # noqa: S607
         cwd=str(repo),
         capture_output=True,
         text=True,
@@ -291,6 +293,7 @@ def check_red_gate_blocks_push() -> int:
     failures = 0
     # Every gate in land.sh's vocabulary, plus check.sh's two non-1 red codes.
     scenarios = [
+        ("lint", {"lint_rc": 1}, None),
         ("frontend", {"frontend_rc": 1}, None),
         ("check", {"check_rc": 1}, None),
         ("brand-free", {"brand_rc": 1}, None),
@@ -372,9 +375,14 @@ def check_green_pushes_and_opens_pr() -> int:
             f"shim log: {log}",
         )
         failures += _assert(
-            ["gate frontend", f"gate check SKIP_INFRA=[{expected_skip}]", "gate brand-free"]
+            [
+                "gate lint",
+                "gate frontend",
+                f"gate check SKIP_INFRA=[{expected_skip}]",
+                "gate brand-free",
+            ]
             == [line for line in log if line.startswith("gate ")],
-            f"all three gates ran, in order ({label})",
+            f"all four gates ran, in order ({label})",
             f"shim log: {log}",
         )
 
@@ -508,7 +516,7 @@ def _hook_repo(root: Path, *, with_counterparty_lint: bool) -> Path:
 def _run_hook(repo: Path, stdin: str, log: Path, **env_extra) -> tuple[int, str, list[str]]:
     env = _clean_env(SHIM_LOG=str(log), **env_extra)
     proc = subprocess.run(
-        ["bash", ".githooks/pre-push", "origin", "git@example.invalid:o/r.git"],
+        ["bash", ".githooks/pre-push", "origin", "git@example.invalid:o/r.git"],  # noqa: S607
         cwd=str(repo),
         input=stdin,
         capture_output=True,

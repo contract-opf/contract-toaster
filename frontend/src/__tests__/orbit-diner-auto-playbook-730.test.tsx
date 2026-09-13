@@ -31,6 +31,7 @@ import ReviewSubmission from '../ReviewSubmission';
 import { LAST_PLAYBOOK_STORAGE_KEY } from '../lastPlaybook';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -77,6 +78,7 @@ const UNCLASSIFIED = {
 };
 
 function json(body: unknown): Response {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return { ok: true, status: 200, json: async () => body } as Response;
 }
 
@@ -102,12 +104,14 @@ function docxFile(name = 'contract.docx'): File {
  */
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     if (typeof entry === 'function') {
@@ -124,6 +128,7 @@ function selectFile(file: File): void {
 }
 
 function dial(): HTMLSelectElement {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return screen.getByTestId('review-playbook-dial') as HTMLSelectElement;
 }
 

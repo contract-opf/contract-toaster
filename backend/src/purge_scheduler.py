@@ -43,13 +43,13 @@ transient S3 blip that silently ended the cadence would restore exactly the
 gap this issue is about, and would look completely healthy from outside.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import logging
 import os
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 from . import config
 from . import retention

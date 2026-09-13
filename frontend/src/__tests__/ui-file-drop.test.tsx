@@ -50,6 +50,7 @@ describe('CtFileDrop', () => {
     fireEvent.change(screen.getByTestId('fd'), { target: { files: [file] } });
 
     expect(onFiles).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const event = onFiles.mock.calls[0]![0] as CustomEvent<{ files: File[] }>;
     expect(event.detail.files).toEqual([file]);
   });
@@ -63,6 +64,7 @@ describe('CtFileDrop', () => {
     fireEvent.drop(well, { dataTransfer: { files: [file] } });
 
     expect(onFiles).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const event = onFiles.mock.calls[0]![0] as CustomEvent<{ files: File[] }>;
     expect(event.detail.files).toEqual([file]);
   });
@@ -94,6 +96,7 @@ describe('CtFileDrop', () => {
   it('clear (×) resets the selection and emits ct-files with an empty list', () => {
     const onFiles = vi.fn();
     render(<CtFileDrop data-testid="fd" label="Upload" onFiles={onFiles} />);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const input = screen.getByTestId('fd') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [docxFile()] } });
 
@@ -105,6 +108,7 @@ describe('CtFileDrop', () => {
 
     expect(pill.hidden).toBe(true);
     expect(input.value).toBe('');
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const lastCall = onFiles.mock.calls[onFiles.mock.calls.length - 1]![0] as CustomEvent<{
       files: File[];
     }>;

@@ -345,7 +345,7 @@ def load_gold_cases(fixtures_dir: Path = FIXTURES_PATH) -> list[GoldCase]:
 
 def build_fake_model_client(
     playbook: dict[str, Any], model_responses: dict[str, list[dict[str, Any]]]
-) -> "model_client.FakeBedrockClient":
+) -> "model_client.FakeBedrockClient":  # noqa: UP037
     """Queue a fixture's canned `model_responses.primary` / `.critic`
     dicts, JSON-serialized in order, under the SCORED playbook's own
     `primary_model_id` / `critic_model_id` -- exactly how `review_spine
@@ -387,7 +387,7 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
         )
 
     expected = case.expected
-    docx_bytes, shown_paragraphs = build_document(case.clauses)
+    docx_bytes, shown_paragraphs = build_document(case.clauses)  # noqa: RUF059
     fake_client = build_fake_model_client(playbook, case.model_responses)
 
     try:

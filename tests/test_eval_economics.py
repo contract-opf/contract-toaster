@@ -301,7 +301,7 @@ def check_per_run_cost_stated() -> list[str]:
     failures = []
     text = read(EVALUATION)
     # Look for a dollar figure near 'run' or 'full' stochastic context
-    # Accept: '$70', '$150', '$70–$150', etc. near 'full', 'stochastic', or 'run'
+    # Accept: '$70', '$150', '$70–$150', etc. near 'full', 'stochastic', or 'run'  # noqa: RUF003
     pattern = re.compile(
         r"\$\d+[^\n]{0,50}(?:full|stochastic|per.run|run)[^\n]{0,50}"
         r"|(?:full|stochastic|per.run|run)[^\n]{0,50}\$\d+",
@@ -311,7 +311,7 @@ def check_per_run_cost_stated() -> list[str]:
         failures.append(
             "  docs/evaluation.md does not state an expected per-run cost estimate\n"
             "  for a full stochastic eval run.\n"
-            "  Required: a dollar figure (e.g. '$70–$150 for a full stochastic run')\n"
+            "  Required: a dollar figure (e.g. '$70–$150 for a full stochastic run')\n"  # noqa: RUF001
             "  so cost can be compared against the CI budget. (issue #15)"
         )
     return failures
@@ -337,7 +337,7 @@ def check_wall_clock_stated() -> list[str]:
         failures.append(
             "  docs/evaluation.md does not state expected eval wall-clock time\n"
             "  (hours or minutes) for a full stochastic run.\n"
-            "  Required: a wall-clock estimate (e.g. '~2–4 hours wall-clock') so\n"
+            "  Required: a wall-clock estimate (e.g. '~2–4 hours wall-clock') so\n"  # noqa: RUF001
             "  CI can be sized accordingly. (issue #15)"
         )
     return failures

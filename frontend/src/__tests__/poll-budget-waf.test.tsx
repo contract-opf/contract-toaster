@@ -132,6 +132,7 @@ describe('poll budget vs WAF polling rule (issue #50)', () => {
 // ---------------------------------------------------------------------------
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -165,17 +166,21 @@ interface Harness {
 async function runningReview(ageMs: number, failEveryOther = false): Promise<Harness> {
   let polls = 0;
   const createdAt = new Date(Date.now() - ageMs).toISOString();
+  // eslint-disable-next-line @typescript-eslint/require-await
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname === '/api/playbooks') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
     }
     if (method === 'POST' && pathname === '/api/reviews') {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ review_id: 'rev-cadence', resumed: false }),
       } as Response;
     }
@@ -187,6 +192,7 @@ async function runningReview(ageMs: number, failEveryOther = false): Promise<Har
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           review_id: 'rev-cadence',
           status: 'RUNNING',
@@ -197,6 +203,7 @@ async function runningReview(ageMs: number, failEveryOther = false): Promise<Har
         }),
       } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);

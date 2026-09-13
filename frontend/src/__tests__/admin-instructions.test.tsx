@@ -42,6 +42,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminInstructions from '../AdminInstructions';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -71,11 +72,14 @@ let requests: Recorded[] = [];
  * unmatched 404s.
  */
 function stubRoutes(overrides: Handler[] = []): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const method = (init?.method ?? 'GET').toUpperCase();
     const rawBody = init?.body;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body = typeof rawBody === 'string' ? JSON.parse(rawBody) : undefined;
     requests.push({ method, pathname, body });
 
@@ -84,12 +88,15 @@ function stubRoutes(overrides: Handler[] = []): void {
       return {
         ok: override.status >= 200 && override.status < 300,
         status: override.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => override.body,
       } as Response;
     }
     if (method === 'GET' && pathname.endsWith('/instructions')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => NOTHING_SAVED } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -176,6 +183,7 @@ describe('AdminInstructions — precedence copy', () => {
     // Review screen's own guidance field in review-guidance.test.tsx.
     const describedBy = textarea.getAttribute('aria-describedby');
     expect(describedBy).toBeTruthy();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const hint = document.getElementById(describedBy!.split(' ')[0]!)!.textContent ?? '';
 
     expect(hint).toContain("govern over the playbook's positions");
@@ -232,6 +240,7 @@ describe('AdminInstructions — saving', () => {
     ]);
     render(<AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const textarea = (await screen.findByTestId('admin-instructions-text')) as HTMLTextAreaElement;
     await waitFor(() => expect(textarea.value).toBe('Old text.'));
     fireEvent.change(textarea, { target: { value: '' } });
@@ -259,7 +268,9 @@ describe('AdminInstructions — saving', () => {
 describe('AdminInstructions — 409 conflict', () => {
   it('never overwrites: keeps the unsaved draft and shows the version that won, side by side', async () => {
     let getCount = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
@@ -268,12 +279,14 @@ describe('AdminInstructions — 409 conflict', () => {
       if (method === 'GET' && pathname.endsWith('/instructions')) {
         getCount += 1;
         if (getCount === 1) {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => NOTHING_SAVED } as Response;
         }
         // The refetch after the 409 sees the version that won the race.
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             current: { version: 1, text: "Someone else's edit.", saved_by: 'local:other', saved_at: 1_700_000_050 },
             history: [{ version: 1, text: "Someone else's edit.", saved_by: 'local:other', saved_at: 1_700_000_050 }],
@@ -284,9 +297,11 @@ describe('AdminInstructions — 409 conflict', () => {
         return {
           ok: false,
           status: 409,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({ detail: { message: 'conflict', current_version: 1 } }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', impl);
@@ -304,6 +319,7 @@ describe('AdminInstructions — 409 conflict', () => {
     expect(screen.getByTestId('admin-instructions-conflict-theirs')).toHaveTextContent("Someone else's edit.");
 
     // The admin's draft is untouched, not silently replaced by theirs.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('admin-instructions-text') as HTMLTextAreaElement).value).toBe(
       'My unsaved edit.',
     );

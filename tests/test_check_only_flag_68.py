@@ -183,8 +183,8 @@ class SyntheticRepo:
             env["SKIP_INFRA"] = "1"
         else:
             env.pop("SKIP_INFRA", None)
-        proc = subprocess.run(
-            ["bash", str(self.root / "scripts" / "check.sh"), *args],
+        proc = subprocess.run(  # noqa: S603
+            ["bash", str(self.root / "scripts" / "check.sh"), *args],  # noqa: S607
             capture_output=True,
             text=True,
             timeout=180,

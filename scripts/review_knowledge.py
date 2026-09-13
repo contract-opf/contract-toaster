@@ -74,7 +74,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence  # noqa: UP035
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -117,9 +117,9 @@ class ReviewKnowledge:
     """
 
     mode: str
-    opf_doc: Optional[dict]
-    overrides: Optional[dict]
-    policy: Optional[dict]
+    opf_doc: Optional[dict]  # noqa: UP045
+    overrides: Optional[dict]  # noqa: UP045
+    policy: Optional[dict]  # noqa: UP045
     #: Composed once, by `resolve_knowledge`, so a refusal cannot be dodged by
     #: constructing this object and composing later.
     blocks: tuple[str, ...] = ()
@@ -205,7 +205,7 @@ class ReviewKnowledge:
         }
 
 
-def _posture_prose(opf_doc: dict, overrides: Optional[dict]) -> tuple[Optional[str], str]:
+def _posture_prose(opf_doc: dict, overrides: Optional[dict]) -> tuple[Optional[str], str]:  # noqa: UP045
     """The posture prose that will actually reach the model, and its source."""
     override_posture = (overrides or {}).get("posture") or {}
     if override_posture.get("system_prompt"):
@@ -214,7 +214,7 @@ def _posture_prose(opf_doc: dict, overrides: Optional[dict]) -> tuple[Optional[s
     return (str(prose), "playbook") if prose else (None, "playbook")
 
 
-def _policy_rule_count(policy: Optional[dict]) -> int:
+def _policy_rule_count(policy: Optional[dict]) -> int:  # noqa: UP045
     rules = (policy or {}).get("rules")
     return len(rules) if isinstance(rules, list) else 0
 
@@ -222,12 +222,12 @@ def _policy_rule_count(policy: Optional[dict]) -> int:
 def resolve_knowledge(
     *,
     bundle_v2: dict,
-    policy: Optional[dict],
+    policy: Optional[dict],  # noqa: UP045
     declared_mode: str,
     accept_stub_basis: bool = False,
     accept_empty_posture: bool = False,
     instructions_text: str = "",
-    entity_roster: Optional[Sequence[str]] = None,
+    entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
 ) -> ReviewKnowledge:
     """Resolve one review's knowledge, or refuse.
 

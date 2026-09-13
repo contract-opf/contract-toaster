@@ -188,7 +188,7 @@ def check_workflow_installs_gate_dependencies() -> list:
     return failures
 
 
-# ── subprocess helpers for Checks 2–4 ───────────────────────────────────────
+# ── subprocess helpers for Checks 2–4 ───────────────────────────────────────  # noqa: RUF003
 
 
 def _run_gate(env_overrides: dict, poison_import: bool) -> subprocess.CompletedProcess:
@@ -212,7 +212,7 @@ def _run_gate(env_overrides: dict, poison_import: bool) -> subprocess.CompletedP
             )
             existing = env.get("PYTHONPATH", "")
             env["PYTHONPATH"] = tmp + (os.pathsep + existing if existing else "")
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603
             [sys.executable, str(GATE_FILE)],
             cwd=str(REPO_ROOT),
             env=env,
@@ -338,7 +338,7 @@ def check_ci_is_strict_variants() -> list:
     sys.path.insert(0, str(REPO_ROOT / "tests"))
     try:
         import test_no_active_bundle as gate_module
-    except Exception as e:  # pragma: no cover - import of a sibling test module
+    except Exception as e:  # pragma: no cover - import of a sibling test module  # noqa: BLE001
         return [
             f"  Could not import tests/test_no_active_bundle.py ({e!r}) to\n"
             "  exercise ci_is_strict(). (issue #638)"

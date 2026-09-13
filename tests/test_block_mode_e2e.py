@@ -141,7 +141,7 @@ extraction_normalization_stage = MODULES.get("extraction_normalization_stage")
 AUTHOR = "contract-toaster"
 # `generate_redline_from_blocks` takes the same `date` the quote path takes
 # (`docx_parts.iso_date` formats it), never a pre-formatted string.
-TIMESTAMP = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+TIMESTAMP = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)  # noqa: UP017
 
 # ---------------------------------------------------------------------------
 # Synthetic fixture. Nothing here is drawn from any real document or any real
@@ -191,14 +191,14 @@ def _empty_corpus():
 
 def _document_root(docx_bytes: bytes) -> ET.Element:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        return ET.fromstring(zf.read("word/document.xml"))
+        return ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
 
 def _footnote_texts(docx_bytes: bytes) -> list:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
         if "word/footnotes.xml" not in zf.namelist():
             return []
-        root = ET.fromstring(zf.read("word/footnotes.xml"))
+        root = ET.fromstring(zf.read("word/footnotes.xml"))  # noqa: S314
     texts = []
     for footnote in root.iter(_qn("footnote")):
         if footnote.get(_qn("type")):

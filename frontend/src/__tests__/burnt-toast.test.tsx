@@ -40,6 +40,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -54,7 +55,9 @@ vi.mock('../toaster/sounds', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../toaster/sounds')>();
   return {
     ...actual,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     playPop: () => playPop(),
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     playClunk: () => playClunk(),
   };
 });
@@ -86,14 +89,18 @@ function stubFetch(detail: Record<string, unknown>): ReturnType<typeof vi.fn> {
     'POST /api/reviews': { review_id: 'rev-burnt', resumed: false },
     'GET /api/reviews/rev-burnt': detail,
   };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase();
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);

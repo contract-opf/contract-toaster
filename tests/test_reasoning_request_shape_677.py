@@ -25,9 +25,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from src import model_client as mc  # noqa: E402
+from src import model_client as mc  # noqa: I001
 
-from test_reasoning_budget_527 import (  # noqa: E402
+from test_reasoning_budget_527 import (
     FakeHttpClient,
     _choice_response,
     _client,

@@ -1,0 +1,13 @@
+# Prettier is available (`npm run format -- <paths>`) but is deliberately NOT a
+# gate yet — issue #65. A whole-tree reformat collides with the in-flight
+# #50-#59 series, exactly as `ruff format --check` does on the Python side, and
+# CLAUDE.md warns that no gate in this repo can see a stylesheet. Follow-up
+# issue #90 turns both on together, once that series has landed.
+dist
+node_modules
+public
+package-lock.json
+
+# Never formatted, never edited: the designer's source of record and the
+# baseline the next supplier patch verifies its before-hashes against.
+vendor/orbit-diner

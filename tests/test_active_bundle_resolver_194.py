@@ -57,12 +57,12 @@ os.environ.setdefault(
     "arn:aws:states:us-east-1:123456789012:stateMachine:contract-toaster-test",
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
 import canonicalize  # noqa: E402
-import playbook_registry  # noqa: E402
+import playbook_registry  # noqa: E402, F401
 import seed_active_bundle  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
 

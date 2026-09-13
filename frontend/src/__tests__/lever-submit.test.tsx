@@ -43,18 +43,22 @@ function docxFile(): File {
 let posts: string[] = [];
 
 function mockFetch(status = 'RUNNING') {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (method === 'POST' && pathname === '/api/reviews') {
       posts.push(pathname);
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ review_id: 'rev-1', resumed: false }) } as Response;
     }
     if (pathname === '/api/playbooks') {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           playbooks: [{ playbook_id: 'eiaa', display_name: 'Affiliation', status: 'active' }],
         }),
@@ -63,6 +67,7 @@ function mockFetch(status = 'RUNNING') {
     return {
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({ review_id: 'rev-1', status, decision: null, message: null, has_output: false }),
     } as Response;
   });

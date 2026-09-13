@@ -32,7 +32,7 @@ os.environ.setdefault(
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-download-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-download-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

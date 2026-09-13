@@ -65,7 +65,7 @@ just the .ts source):
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import json
+import json  # noqa: I001
 import subprocess
 import sys
 from pathlib import Path
@@ -103,7 +103,7 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,
+            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
         )
         if install.returncode != 0:
             return _assert(
@@ -111,8 +111,8 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
                 f"stderr: {install.stderr[-500:]}",
             ), None
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

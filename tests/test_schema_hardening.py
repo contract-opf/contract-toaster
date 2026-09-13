@@ -107,7 +107,7 @@ def check_a_seed_no_unknown_rule_keys(playbook: dict) -> tuple[bool, str]:
             )
     if violations:
         return False, (
-            f"FAIL (a-playbook): hard_rejections rules have unknown keys: "
+            f"FAIL (a-playbook): hard_rejections rules have unknown keys: "  # noqa: F541
             + "; ".join(violations)
         )
     return True, "PASS (a-playbook): no unknown keys in hard_rejections rules."
@@ -217,7 +217,7 @@ def check_c_schema_encodes_present_section_min_anchors(schema: dict) -> tuple[bo
     # Look for a conditional that says: if not not_in_standard (or not_in_standard==false),
     # then section_anchors.minItems >= 1
     for clause in all_of:
-        cond = clause.get("if", {})
+        cond = clause.get("if", {})  # noqa: F841
         then = clause.get("then", {})
         # We want: then.properties.section_anchors.minItems >= 1
         sa = then.get("properties", {}).get("section_anchors", {})

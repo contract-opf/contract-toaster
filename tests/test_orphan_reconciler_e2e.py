@@ -66,7 +66,7 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 # (`from boto3.dynamodb.conditions import Key`) with no scan fallback left,
 # and that import cannot resolve against a bare `types.ModuleType("boto3")`
 # stub. Real boto3/botocore, with moto intercepting them.
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.exceptions import ClientError  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

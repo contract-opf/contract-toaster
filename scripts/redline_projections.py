@@ -122,14 +122,14 @@ import xml.etree.ElementTree as ET
 import zipfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import block_transcript  # noqa: E402
+import block_transcript  # noqa: E402, I001
 import extraction_normalization_stage  # noqa: E402
 import docx_parts  # noqa: E402
 import ooxml_util  # noqa: E402
@@ -254,7 +254,7 @@ _UNDELETED_TEXT_TAGS = {
 }
 
 
-def _is_owned(el: ET.Element, owned_ids: Optional[set]) -> bool:
+def _is_owned(el: ET.Element, owned_ids: Optional[set]) -> bool:  # noqa: UP045
     """Whether this `<w:ins>`/`<w:del>` is one the projection should reject.
 
     `owned_ids is None` means "reject every revision" (the correct reading
@@ -289,7 +289,7 @@ def _undelete_text_tags(el: ET.Element) -> None:
         el.tag = replacement
 
 
-def _splice_reject_all(el: ET.Element, owned_ids: Optional[set]) -> None:
+def _splice_reject_all(el: ET.Element, owned_ids: Optional[set]) -> None:  # noqa: UP045
     """Mutate `el`'s children in place, REJECTING every owned tracked change
     under them: an owned `<w:ins>` is removed entirely (including its
     subtree -- text that was only ever proposed never existed), and an owned
@@ -327,7 +327,7 @@ def _splice_reject_all(el: ET.Element, owned_ids: Optional[set]) -> None:
 
 
 def materialize_reject_all(
-    docx_bytes: bytes, *, revision_ids: Optional[Iterable[int]] = None
+    docx_bytes: bytes, *, revision_ids: Optional[Iterable[int]] = None  # noqa: UP045
 ) -> bytes:
     """Physically REJECT the tracked changes named by `revision_ids` (or every
     one of them, when `revision_ids is None`) in `word/document.xml`.
@@ -357,7 +357,7 @@ def materialize_reject_all(
         ooxml_util.declared_namespaces_anywhere(document_xml_text)
     )
 
-    root = ET.fromstring(originals[DOCUMENT_PART])
+    root = ET.fromstring(originals[DOCUMENT_PART])  # noqa: S314
     owned_ids = None if revision_ids is None else {int(rid) for rid in revision_ids}
     _splice_reject_all(root, owned_ids)
 
@@ -490,7 +490,7 @@ def _first_divergence(expected: str, actual: str) -> str:
 def _verify_reject_all(
     source_norm: dict[str, Any],
     output_docx_bytes: bytes,
-    revision_ids: Optional[Iterable[int]],
+    revision_ids: Optional[Iterable[int]],  # noqa: UP045
 ) -> list[dict[str, Any]]:
     try:
         projected_bytes = materialize_reject_all(
@@ -529,7 +529,7 @@ def _verify_reject_all(
         )
 
     reported = 0
-    for index, (expected_entry, actual_entry) in enumerate(zip(expected, actual)):
+    for index, (expected_entry, actual_entry) in enumerate(zip(expected, actual)):  # noqa: B905
         expected_block_id, expected_heading, expected_text = expected_entry
         actual_block_id, actual_heading, actual_text = actual_entry
         if expected_entry == actual_entry:
@@ -635,7 +635,7 @@ def _placeholder_block_ids_from_transcript(
     # Read-only: this parse is never serialized back, so it needs none of
     # `materialize_reject_all`'s namespace-preservation dance.
     with zipfile.ZipFile(io.BytesIO(source_docx_bytes)) as zf:
-        root = ET.fromstring(zf.read(DOCUMENT_PART))
+        root = ET.fromstring(zf.read(DOCUMENT_PART))  # noqa: S314
     return redline_block_apply._plan_omitted_clause_placeholders(
         root, source_norm.get("paragraphs") or [], deleted, anchored
     )
@@ -645,7 +645,7 @@ def _expected_accept_all_texts(
     source_docx_bytes: bytes,
     source_norm: dict[str, Any],
     proven: dict[str, Any],
-    applied_edits: Optional[list[dict[str, Any]]],
+    applied_edits: Optional[list[dict[str, Any]]],  # noqa: UP045
 ) -> list[str]:
     """The block texts the accept-all projection must read, in document order.
 
@@ -745,7 +745,7 @@ def _verify_accept_all(
     source_norm: dict[str, Any],
     output_docx_bytes: bytes,
     proven: dict[str, Any],
-    applied_edits: Optional[list[dict[str, Any]]],
+    applied_edits: Optional[list[dict[str, Any]]],  # noqa: UP045
 ) -> list[dict[str, Any]]:
     try:
         projected_bytes = extraction_normalization_stage.materialize_accept_all(
@@ -834,7 +834,7 @@ def _settings_without_rsids(data: bytes) -> tuple[str, list[str]]:
     remainder may not change at all. `<w:rsidRoot>` is a different tag and
     stays in the remainder, where altering it is a violation like any other.
     """
-    root = ET.fromstring(data.decode("utf-8"))
+    root = ET.fromstring(data.decode("utf-8"))  # noqa: S314
     values: list[str] = []
     for rsids in root.iter(_RSIDS_TAG):
         for child in list(rsids):
@@ -897,7 +897,7 @@ def _verify_settings_rsids_only(
     return failures
 
 
-def _styles_split(data: Optional[bytes]) -> tuple[str, dict[str, str]]:
+def _styles_split(data: Optional[bytes]) -> tuple[str, dict[str, str]]:  # noqa: UP045
     """`word/styles.xml` split into (everything that is not a `<w:style>`,
     `styleId` -> that style's canonical form).
 
@@ -910,7 +910,7 @@ def _styles_split(data: Optional[bytes]) -> tuple[str, dict[str, str]]:
     on one key would silently collapse into one and hide a difference from
     every comparison below.
     """
-    root = ET.fromstring(data.decode("utf-8")) if data is not None else ET.Element(_w("styles"))
+    root = ET.fromstring(data.decode("utf-8")) if data is not None else ET.Element(_w("styles"))  # noqa: S314
     styles: dict[str, str] = {}
     for index, style in enumerate(list(root.findall(_STYLE_TAG))):
         style_id = style.get(_STYLE_ID_ATTR)
@@ -939,7 +939,7 @@ def _canonical_footnote_styles() -> dict[str, str]:
 
 
 def _verify_styles_footnote_additions_only(
-    source: Optional[bytes], output: bytes
+    source: Optional[bytes], output: bytes  # noqa: UP045
 ) -> list[dict[str, Any]]:
     """Proof 3's narrower rule for `word/styles.xml` (see the allowlist
     comment): the ONLY difference permitted is the APPEARANCE of the two
@@ -1106,8 +1106,8 @@ def verify_projections(
     output_docx_bytes: bytes,
     proven: dict[str, Any],
     *,
-    revision_ids: Optional[Iterable[int]] = None,
-    applied_edits: Optional[list[dict[str, Any]]] = None,
+    revision_ids: Optional[Iterable[int]] = None,  # noqa: UP045
+    applied_edits: Optional[list[dict[str, Any]]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Prove a compiled redline against its input, three ways.
 

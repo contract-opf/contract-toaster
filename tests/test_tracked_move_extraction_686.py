@@ -74,7 +74,7 @@ for _path in (str(SCRIPTS_DIR), str(TESTS_DIR)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import block_transcript  # noqa: E402
+import block_transcript  # noqa: E402, I001
 import extraction_normalization_stage as stage  # noqa: E402
 import redline_block_apply  # noqa: E402
 
@@ -179,7 +179,7 @@ def _clean_text_by_p_index(docx_bytes: bytes) -> dict[int, str]:
         text = paragraph["text"]
         spans = paragraph["physical_spans"]
         indexes = paragraph["physical_p_indexes"]
-        for (start, end), p_index in zip(spans, indexes):
+        for (start, end), p_index in zip(spans, indexes):  # noqa: B905
             out[p_index] = text[start:end]
     return out
 

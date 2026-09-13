@@ -295,7 +295,7 @@ def _textbox_hyperlink_payload_p(payload: str) -> str:
     output."""
     return (
         "<w:p><w:r>"
-        f'<w:drawing><wp:anchor><wp:docPr id="2" name="TextBox 2"/>'
+        f'<w:drawing><wp:anchor><wp:docPr id="2" name="TextBox 2"/>'  # noqa: F541
         "<a:graphic><a:graphicData><wps:txbx><w:txbxContent><w:p>"
         + _hyperlink(_HYPERLINK_RUNS.format(text=f"{payload}_TEXTBOX_LINK"), anchor="x")
         + "</w:p></w:txbxContent></wps:txbx>"

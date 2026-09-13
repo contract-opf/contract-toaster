@@ -144,7 +144,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # Issue #627 (the hard cutover) flipped this default from
@@ -294,7 +294,7 @@ def model_facing_output_schema(
     it), so a caller serializing or further mutating it cannot corrupt
     another caller's copy.
     """
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8") as fh:  # noqa: UP015
         schema: dict[str, Any] = json.load(fh)
 
     top_properties = schema.get("properties") or {}
@@ -686,7 +686,7 @@ def _break_recursive_refs_in_place(schema: dict[str, Any]) -> None:
                     "(with the real $ref) still governs post-hoc validation."
                 )
                 return
-            _walk(definitions[target], path + (target,))
+            _walk(definitions[target], path + (target,))  # noqa: RUF005
             return
         for value in node.values():
             _walk(value, path)
@@ -749,7 +749,7 @@ def _make_nullable_in_place(prop_schema: Any) -> None:
         return
     if isinstance(existing_type, list):
         if "null" not in existing_type:
-            prop_schema["type"] = existing_type + ["null"]
+            prop_schema["type"] = existing_type + ["null"]  # noqa: RUF005
         return
     any_of = prop_schema.get("anyOf")
     if isinstance(any_of, list):

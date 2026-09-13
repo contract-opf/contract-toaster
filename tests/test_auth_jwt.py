@@ -26,7 +26,7 @@ Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
 import base64
-import json
+import json  # noqa: F401
 import math
 import os
 import sys
@@ -46,7 +46,7 @@ sys.path.insert(0, str(BACKEND_SRC))
 # Try to import test dependencies; skip gracefully if absent.
 # ---------------------------------------------------------------------------
 try:
-    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.backends import default_backend  # noqa: I001
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
     import jwt as pyjwt
@@ -56,8 +56,8 @@ except ImportError as _import_err:  # pragma: no cover
     _DEPS_AVAILABLE = False
     _import_err_msg = str(_import_err)
 
-from fastapi import HTTPException
-from fastapi.security import HTTPAuthorizationCredentials
+from fastapi import HTTPException  # noqa: E402, I001
+from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402, F401
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ def _call_verify(token: str, key: "_KeyFixture", allowed_domains: str | None = "
     """Call _verify_cognito_token with env + JWKS patched."""
     import auth as auth_module  # noqa: PLC0415
 
-    with _patch_env(key.POOL_ID, key.CLIENT_ID, key.REGION, allowed_domains=allowed_domains):
+    with _patch_env(key.POOL_ID, key.CLIENT_ID, key.REGION, allowed_domains=allowed_domains):  # noqa: SIM117
         with _patch_jwks(key.jwks):
             # Clear lru_cache so patched function is used fresh each call
             auth_module._fetch_jwks.cache_clear() if hasattr(
@@ -226,7 +226,7 @@ def _assert_http_exc(
             return []
         print(f"  [FAIL] {label}: expected {expected_status}, got {exc.status_code}")
         return [label]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"  [FAIL] {label}: unexpected exception {exc!r}")
         return [label]
     print(f"  [FAIL] {label}: no exception raised — got claims {claims!r}")
@@ -246,7 +246,7 @@ def test_t1_happy_path(key: "_KeyFixture") -> list[str]:
     except HTTPException as exc:
         print(f"  [FAIL] Expected claims dict, got HTTPException({exc.status_code}): {exc.detail}")
         return ["T1 happy-path"]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"  [FAIL] Unexpected exception: {exc!r}")
         return ["T1 happy-path"]
 
@@ -349,7 +349,7 @@ def test_t12_custom_configured_domain_accepted(key: "_KeyFixture") -> list[str]:
     except HTTPException as exc:
         print(f"  [FAIL] expected claims dict, got HTTPException({exc.status_code}): {exc.detail}")
         return ["T12 custom-configured domain accepted"]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"  [FAIL] unexpected exception: {exc!r}")
         return ["T12 custom-configured domain accepted"]
 
@@ -383,7 +383,7 @@ def test_t10_no_bearer_token() -> list[str]:
     # by directly calling _verify_cognito_token with a malformed string.
     label = "absent/malformed Bearer => 401"
     try:
-        with _patch_env(_KeyFixture.POOL_ID, _KeyFixture.CLIENT_ID, _KeyFixture.REGION):
+        with _patch_env(_KeyFixture.POOL_ID, _KeyFixture.CLIENT_ID, _KeyFixture.REGION):  # noqa: SIM117
             with _patch_jwks(_get_key().jwks):
                 auth_module._verify_cognito_token("not.a.jwt")
     except HTTPException as exc:
@@ -392,7 +392,7 @@ def test_t10_no_bearer_token() -> list[str]:
             return []
         print(f"  [FAIL] {label}: expected 401, got {exc.status_code}")
         return [label]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"  [FAIL] {label}: unexpected exception {exc!r}")
         return [label]
     print(f"  [FAIL] {label}: no exception raised")

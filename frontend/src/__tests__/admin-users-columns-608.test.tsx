@@ -28,6 +28,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import AdminUsers from '../AdminUsers';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -57,19 +58,24 @@ const SYNC_STATUS_OK = {
 function stubRoutes(authMode: string): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/api/users') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ users: [REVIEWER_ROW] }) } as Response;
       }
       if (pathname === '/api/users/sync-status') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => SYNC_STATUS_OK } as Response;
       }
       if (pathname === '/api/admin/auth-mode') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             setting_id: 'global',
             auth_mode: authMode,
@@ -78,6 +84,7 @@ function stubRoutes(authMode: string): void {
           }),
         } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }),
   );

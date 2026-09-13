@@ -213,7 +213,7 @@ Usage:
 """
 
 import sys
-from typing import Any
+from typing import Any  # noqa: F401
 
 # --- Control-character screen (issue #632) ---------------------------------
 #

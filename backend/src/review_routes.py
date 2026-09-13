@@ -72,7 +72,7 @@ src/upload_validation.py, and src/download.py already document):
                    already wired there.
 """
 
-import base64
+import base64  # noqa: I001
 import hashlib
 import json
 import os
@@ -81,7 +81,7 @@ import pathlib
 import sys
 import time
 import uuid
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator  # noqa: UP035
 
 import boto3
 from botocore.exceptions import ClientError
@@ -218,8 +218,8 @@ def get_env_name() -> str:
 
 def get_active_user_row(
     request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    current_user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> dict[str, Any]:
     """Re-verify `users.status == active` on every request, then (issue
     #586) refuse the request if the caller's own row still verifies against
@@ -267,7 +267,7 @@ def get_av_client() -> upload_validation.AvClient:
 # timeout budget re-paying for the same likely-transient failure instead of
 # just falling back to stats-only quickly.
 def get_preflight_model_client(
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> Iterator[Any | None]:
     api_key = model_settings.resolve_openrouter_api_key(dynamodb_resource)
     if not api_key:
@@ -302,7 +302,7 @@ def get_preflight_model_client(
 # closes the httpx client it built in a `finally` so a test-double override
 # (which replaces this whole function) is never double-closed.
 def get_cover_note_model_client(
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> Iterator[Any | None]:
     api_key = model_settings.resolve_openrouter_api_key(dynamodb_resource)
     if not api_key:
@@ -377,8 +377,8 @@ def _default_cover_note_leakage_corpus(
 
 
 def get_cover_note_leakage_corpus_resolver(
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> Callable[[str | None], "leakage_scan.ConfidentialCorpus"]:
     def _resolve(playbook_id: str | None) -> "leakage_scan.ConfidentialCorpus":
         return _default_cover_note_leakage_corpus(playbook_id, dynamodb_resource, s3_client)
@@ -496,17 +496,17 @@ def _upload_rejection_audit_write(dynamodb_resource: Any, actor: str):
 
 @router.post("/api/reviews", status_code=status.HTTP_202_ACCEPTED, include_in_schema=True)
 async def post_review(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
     idempotency_key: str | None = Form(None),
     toaster_guidance: str = Form(""),
     notes_mode: str = Form(""),
     markup_intensity: str = Form(""),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
-    sfn_client: Any = Depends(get_sfn_client),
-    av_client: upload_validation.AvClient = Depends(get_av_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
+    sfn_client: Any = Depends(get_sfn_client),  # noqa: B008
+    av_client: upload_validation.AvClient = Depends(get_av_client),  # noqa: B008
 ) -> JSONResponse:
     """Multipart .docx upload -> hostile-file gauntlet -> idempotent
     submission (ARCHITECTURE.md data flow steps 1-8).
@@ -1076,14 +1076,14 @@ def _vocabulary_has_installed_types(known_types: list[str]) -> bool:
     "/api/reviews/preflight", status_code=status.HTTP_200_OK, include_in_schema=True
 )
 async def post_review_preflight(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001 -- auth gate only
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
-    registry_path: pathlib.Path = Depends(get_playbook_registry_path),
-    av_client: upload_validation.AvClient = Depends(get_av_client),
-    preflight_model_client: Any = Depends(get_preflight_model_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001, B008 -- auth gate only
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
+    registry_path: pathlib.Path = Depends(get_playbook_registry_path),  # noqa: B008
+    av_client: upload_validation.AvClient = Depends(get_av_client),  # noqa: B008
+    preflight_model_client: Any = Depends(get_preflight_model_client),  # noqa: B008
 ) -> JSONResponse:
     """Deterministic stats + a cheap-model type/side guess + a server-side
     match verdict against `playbook_id`'s own agreement type.
@@ -1297,9 +1297,9 @@ async def post_review_preflight(
 async def post_review_preflight_match(
     agreement_type_guess: str = Form(""),
     playbook_id: str = Form(DEFAULT_PLAYBOOK_ID),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001 -- auth gate only
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001, B008 -- auth gate only
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Recompute just the match verdict against `playbook_id`, the exact
     same way `post_review_preflight` computes it
@@ -1476,9 +1476,9 @@ def _load_playbook_catalog(
 
 @router.get("/api/playbooks", status_code=status.HTTP_200_OK, include_in_schema=True)
 async def get_playbooks(
-    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001 -- auth gate only
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    registry_path: pathlib.Path = Depends(get_playbook_registry_path),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: ARG001, B008 -- auth gate only
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    registry_path: pathlib.Path = Depends(get_playbook_registry_path),  # noqa: B008
 ) -> JSONResponse:
     """The contract-type catalog (issue #272): any authenticated active
     user may read it (same `get_active_user_row` gate every other route in
@@ -1521,8 +1521,8 @@ async def get_reviews(
             "that is not one is a 400, never a silent restart from page one."
         ),
     ),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """List the caller's own reviews; an admin sees every review
     (ARCHITECTURE.md Routes table).
@@ -1558,9 +1558,9 @@ async def get_reviews(
 @router.get("/api/reviews/{review_id}", include_in_schema=True)
 async def get_review(
     review_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Status + result payload (provenance / critic deltas / confidence
     band for #35/#36). Owner-or-admin; a non-owner gets the same 404 as an
@@ -1581,9 +1581,9 @@ async def get_review(
 @router.post("/api/reviews/{review_id}/cancel", include_in_schema=True)
 async def post_review_cancel(
     review_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    sfn_client: Any = Depends(get_sfn_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    sfn_client: Any = Depends(get_sfn_client),  # noqa: B008
 ) -> JSONResponse:
     """Ask a running review to stop. Owner-or-admin; a non-owner gets the same
     404 as an unknown review_id (reviews.get_review_detail's scoping).
@@ -1628,7 +1628,7 @@ async def post_review_cancel(
 
     try:
         stopped = reviews.stop_running_execution(review_id, dynamodb_resource, sfn_client)
-    except Exception as exc:  # noqa: BLE001 - the caller must learn this failed
+    except Exception as exc:  # the caller must learn this failed
         logger.exception("StopExecution failed for review %s", review_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1753,9 +1753,9 @@ def _validate_disposition_note(value: Any) -> str | None:
 @router.post("/api/reviews/{review_id}/disposition", include_in_schema=True)
 async def post_review_disposition(
     review_id: str = Path(...),
-    body: dict[str, Any] = Body(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
+    body: dict[str, Any] = Body(...),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
     """Record the reviewer's OPTIONAL disposition of a finished review's
     output (issue #486) -- wires the already-implemented, previously
@@ -1868,10 +1868,10 @@ async def post_review_disposition(
 @router.get("/api/reviews/{review_id}/output", include_in_schema=True)
 async def get_review_output(
     review_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    dynamodb_client: Any = Depends(get_dynamodb_client),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    dynamodb_client: Any = Depends(get_dynamodb_client),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
     env_name: str = Depends(get_env_name),
 ) -> JSONResponse:
     """Scoped presigned download (issue #71 AC2/AC5) -- owner-or-admin
@@ -1984,10 +1984,10 @@ async def get_review_output(
 @router.get("/api/reviews/{review_id}/input", include_in_schema=True)
 async def get_review_input(
     review_id: str = Path(...),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    dynamodb_client: Any = Depends(get_dynamodb_client),
-    s3_client: Any = Depends(get_s3_client),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    dynamodb_client: Any = Depends(get_dynamodb_client),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
     env_name: str = Depends(get_env_name),
 ) -> JSONResponse:
     """Scoped presigned download of the review's INPUT document -- the same
@@ -2096,11 +2096,11 @@ async def get_review_input(
 )
 async def post_review_cover_note(
     review_id: str = Path(...),
-    body: dict[str, Any] = Body(default={}),
-    caller_row: dict[str, Any] = Depends(get_active_user_row),
-    dynamodb_resource: Any = Depends(get_dynamodb_resource),
-    cover_note_model_client: Any = Depends(get_cover_note_model_client),
-    s3_client: Any = Depends(get_s3_client),
+    body: dict[str, Any] = Body(default={}),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+    cover_note_model_client: Any = Depends(get_cover_note_model_client),  # noqa: B008
+    s3_client: Any = Depends(get_s3_client),  # noqa: B008
     leakage_corpus_resolver: Callable[
         [str | None], "leakage_scan.ConfidentialCorpus"
     ] = Depends(get_cover_note_leakage_corpus_resolver),
@@ -2386,7 +2386,7 @@ async def post_review_cover_note(
     invocation_ledger.make_ledger_write(review_id, dynamodb_resource)(
         model_client.ModelInvocationRecord(
             review_id=review_id,
-            pass_name="cover_note",
+            pass_name="cover_note",  # noqa: S106
             model_id=model_id,
             attempt_number=1,
             outcome="success",

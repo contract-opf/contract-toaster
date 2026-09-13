@@ -123,7 +123,7 @@ def main():
     # document -- there is no fail-closed report to build; a downstream
     # caller branching on normalizable=True must produce a real redline, not
     # an analysis report with changes_not_applied: [].
-    if result.get("normalizable") is True and "normalization_notes" in result:
+    if result.get("normalizable") is True and "normalization_notes" in result:  # noqa: SIM102
         # Sanity: this key is legitimately present on the SUCCESS path too
         # (it carries the accept-all disposition note), so its presence
         # alone must not be mistaken for a fail-closed result downstream.

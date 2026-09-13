@@ -250,7 +250,7 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
 
     try:
         logical_paragraphs = ens.extract_document_paragraphs(reviewable_bytes)
-    except Exception as exc:  # noqa: BLE001 -- normalized into one error type
+    except Exception as exc:  # normalized into one error type
         raise DocumentStatsError(str(exc)) from exc
 
     word_count = 0

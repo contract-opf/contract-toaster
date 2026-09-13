@@ -19,7 +19,9 @@ let posts: string[] = [];
 
 function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightGuess?: string } = {}) {
   posts = [];
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
@@ -28,6 +30,7 @@ function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightG
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           playbooks: [
             { playbook_id: 'eiaa', display_name: 'Affiliation Agreement', status: 'active' },
@@ -42,6 +45,7 @@ function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightG
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ review_id: 'rev-kbd-1', resumed: false }),
       } as Response;
     }
@@ -50,6 +54,7 @@ function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightG
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           classification: 'ok',
           agreement_type_guess: options.preflightGuess ?? 'Mutual NDA',
@@ -70,6 +75,7 @@ function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightG
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           preferences: { notes_mode: 'external' },
           notes_mode_available: true,
@@ -81,6 +87,7 @@ function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightG
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({
           review_id: 'rev-kbd-1',
           status: 'RUNNING',
@@ -94,6 +101,7 @@ function mockFetch(options: { preflightMatch?: 'likely' | 'unlikely'; preflightG
     return {
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({}),
     } as Response;
   });
@@ -119,6 +127,7 @@ describe('Review Tab Keyboard Shortcuts & Preflight Switch', () => {
     });
   });
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   it('toggles appliance sound on M key and quick-bar button', async () => {
     vi.stubGlobal('fetch', mockFetch());
     render(<ReviewSubmission />);
@@ -131,6 +140,7 @@ describe('Review Tab Keyboard Shortcuts & Preflight Switch', () => {
     // Sound toggled without errors
   });
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   it('adjusts browning level detents with [ and ]', async () => {
     vi.stubGlobal('fetch', mockFetch());
     render(<ReviewSubmission />);
@@ -157,6 +167,7 @@ describe('Review Tab Keyboard Shortcuts & Preflight Switch', () => {
 
       // Initial selection is the first active playbook (eiaa).
       const dialFor = (): HTMLSelectElement =>
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
         screen.getByTestId('review-playbook-dial') as HTMLSelectElement;
       await waitFor(() => expect(dialFor().value).toBe('eiaa'));
 

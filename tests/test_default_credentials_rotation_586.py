@@ -57,7 +57,7 @@ os.environ.setdefault(
 )
 os.environ.setdefault("DEMO_TOKEN_SECRET", "unit-test-demo-secret")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402

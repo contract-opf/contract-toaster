@@ -203,7 +203,7 @@ class _Check:
     check_id: str
     kind: str
     subject_id: str
-    section_ref: Optional[str]
+    section_ref: Optional[str]  # noqa: UP045
     system_prompt: str
     user_prompt: str
 
@@ -249,7 +249,7 @@ class SelfCheckTranscript:
         }
 
 
-def terminal_status_for(transcript: SelfCheckTranscript) -> Optional[str]:
+def terminal_status_for(transcript: SelfCheckTranscript) -> Optional[str]:  # noqa: UP045
     """`MANUAL_REVIEW_REQUIRED` when the transcript is fail-closed, else None.
 
     The mapping lives here, next to the gate it interprets, so a caller cannot
@@ -303,7 +303,7 @@ def render_redline_for_selfcheck(reconciled_result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def bind_config_replacement_bounds(bundle: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
+def bind_config_replacement_bounds(bundle: Optional[dict[str, Any]]) -> list[dict[str, Any]]:  # noqa: UP045
     """The replacement-text bounds a bound artifact carries, or `[]`.
 
     Reads `pen_rules.default.must_not_introduce` off a v2 bundle -- the

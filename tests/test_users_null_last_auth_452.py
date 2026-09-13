@@ -93,7 +93,7 @@ os.environ.setdefault(
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-nullauth452-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-nullauth452-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

@@ -31,7 +31,7 @@ Three invariants checked here (all fail against the repo state before the fix):
 Usage:
     python3 tests/test_caching_claims.py
     Exit 0 = all checks pass; non-zero = one or more checks fail.
-"""
+"""  # noqa: RUF002
 
 import re
 import sys
@@ -135,7 +135,7 @@ def check_ac1_no_cross_model_claim() -> list[str]:
 # The cost-shape section must carry a line that states the production
 # steady-state hit rate is near zero at v1 volume — not just "it's an
 # optimization" (that already exists) but an honest acknowledgement that
-# at 2–7/day with a ~5-min TTL, inter-review hits won't materialize.
+# at 2–7/day with a ~5-min TTL, inter-review hits won't materialize.  # noqa: RUF003
 STEADY_STATE_HIT_RATE_PATTERN = re.compile(
     r"steady.state\s+hit\s+rate"
     r"|inter.review\s+(?:cache\s+)?hit\s+rate"
@@ -151,7 +151,7 @@ def check_ac2_steady_state_hit_rate() -> list[str]:
     ARCHITECTURE.md cost-shape section must explicitly acknowledge that the
     steady-state inter-review cache-hit rate is near zero at v1 production
     volume (2–7 reviews/day spread across a workday).
-    """
+    """  # noqa: RUF002
     failures = []
 
     if not ARCHITECTURE.exists():
@@ -164,7 +164,7 @@ def check_ac2_steady_state_hit_rate() -> list[str]:
         failures.append(
             "  AC2 FAIL: ARCHITECTURE.md cost-shape section lacks an explicit\n"
             "  'steady-state hit rate ≈ 0 at v1 volume' statement (or equivalent).\n"
-            "  The issue: at 2–7 reviews/day spread across a workday and a TTL of\n"
+            "  The issue: at 2–7 reviews/day spread across a workday and a TTL of\n"  # noqa: RUF001
             "  ~5 min, inter-review cache hits will not materialize in production.\n"
             "  Required: an honest acknowledgement that caching only helps on eval\n"
             "  runs and back-to-back retries, not typical production usage."

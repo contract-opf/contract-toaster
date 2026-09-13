@@ -45,6 +45,7 @@ import App from '../App';
 import { playbookStop, playbookStops } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -110,7 +111,9 @@ const STATIC_ROUTES: Record<string, unknown> = {
  * every request — never a snapshot frozen at stub-setup time.
  */
 function stubStatefulFetch(catalog: CatalogEntry[]): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -123,6 +126,7 @@ function stubStatefulFetch(catalog: CatalogEntry[]): void {
       // would pass even against unwired production code. Snapshotting on
       // every request is what forces a real refetch to be observable.
       const snapshot = JSON.parse(JSON.stringify(catalog)) as CatalogEntry[];
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ playbooks: snapshot }) } as Response;
     }
 
@@ -134,6 +138,7 @@ function stubStatefulFetch(catalog: CatalogEntry[]): void {
       if (entry && body.display_name) {
         entry.display_name = body.display_name;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ ok: true }) } as Response;
     }
     if (renameMatch && method === 'DELETE') {
@@ -142,17 +147,21 @@ function stubStatefulFetch(catalog: CatalogEntry[]): void {
       if (index >= 0) {
         catalog.splice(index, 1);
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ ok: true }) } as Response;
     }
 
     if (method === 'GET' && pathname.endsWith('/versions')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ versions: [] }) } as Response;
     }
 
     const staticBody = STATIC_ROUTES[pathname];
     if (staticBody !== undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => staticBody } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);

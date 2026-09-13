@@ -35,6 +35,7 @@ import ReviewHistory, { HistoryRow } from '../ReviewHistory';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -112,20 +113,24 @@ let fetchMock: ReturnType<typeof vi.fn>;
  */
 function stubRoutes(routes: Record<string, StubbedCall | StubbedCall[]>): void {
   const cursors: Record<string, number> = {};
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchMock = vi.fn(async (url: string) => {
     const path = String(url);
     const key = Object.keys(routes).find((candidate) => path.includes(candidate));
     if (!key) {
       throw new Error(`unstubbed request: ${path}`);
     }
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const entry = routes[key]!;
     const list = Array.isArray(entry) ? entry : [entry];
     const index = Math.min(cursors[key] ?? 0, list.length - 1);
     cursors[key] = index + 1;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const response = list[index]!;
     return {
       ok: response.status >= 200 && response.status < 300,
       status: response.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => response.body,
     };
   });
@@ -153,6 +158,7 @@ describe('History — the provenance record', () => {
     await screen.findByTestId('history-row-rev-modern');
 
     // Owner-scoped by request: an admin opening History sees their own.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const requested = String(fetchMock.mock.calls[0]![0]);
     expect(requested).toContain('scope=mine');
 

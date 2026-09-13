@@ -42,7 +42,7 @@ import io
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -314,7 +314,7 @@ def test_heading_signals_are_boundaries_and_siblings_stay_one_clause(failures: l
         failures.append(f"[G3] 'Assignment' clause text wrong: {assignment!r}")
 
     # Two distinct clauses must never merge into one record.
-    if confidentiality is not None and indemnification is not None:
+    if confidentiality is not None and indemnification is not None:  # noqa: SIM102
         if confidentiality.get("clause_id") == indemnification.get("clause_id"):
             failures.append("[G3] Distinct clauses must not share a clause_id.")
 

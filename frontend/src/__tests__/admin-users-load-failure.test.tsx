@@ -28,6 +28,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminUsers from '../AdminUsers';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -58,10 +59,13 @@ type Responder = (pathname: string) => { ok: boolean; status: number; body: unkn
 
 /** Stub only the network transport; the component under test is the real one. */
 function stubFetch(responder: Responder): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const { ok, status, body } = responder(pathname);
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok, status, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);

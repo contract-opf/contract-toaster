@@ -600,7 +600,7 @@ class TestSeedRefusals(unittest.TestCase):
         resolve as valid -- and leave NOTHING behind (no version row, no
         active hash), so a broken image cannot half-install a playbook."""
         ddb = FakeDDB(FakeReviewsTable())
-        with patch.object(
+        with patch.object(  # noqa: SIM117
             playbook_validation,
             "load_and_validate_playbook",
             side_effect=playbook_validation.PlaybookValidationError("boom"),

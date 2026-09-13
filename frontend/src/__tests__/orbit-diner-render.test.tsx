@@ -74,7 +74,9 @@ let posts: string[] = [];
 let pollStatus = 'RUNNING';
 
 function mockFetch() {
+  // eslint-disable-next-line @typescript-eslint/require-await
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
@@ -83,6 +85,7 @@ function mockFetch() {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ review_id: 'rev-1', resumed: false }),
       } as Response;
     }
@@ -90,12 +93,14 @@ function mockFetch() {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => ({ playbooks: playbookCatalog }),
       } as Response;
     }
     return {
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({
         review_id: 'rev-1',
         status: pollStatus,
@@ -318,6 +323,7 @@ describe('issue #721 — the console prints and exports the canonical receipt', 
     'hands copy-as-text and the PNG the same array, and confirms inside the dialog',
     async () => {
       const drawn: string[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/require-await
       const writeText = vi.fn(async (_text: string) => undefined);
       vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
       vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
@@ -432,6 +438,7 @@ describe('issue #722 — console sound routes through the one audio owner', () =
     // no change event, no `key`, nothing to assert — depending on what ran
     // before this test.
     const options = (['light', 'medium', 'dark'] as const).map(
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       (value) => screen.getByTestId(`review-browning-option-${value}`) as HTMLInputElement,
     );
     const target = options.find((option) => !option.checked);

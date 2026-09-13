@@ -48,7 +48,7 @@ sys.path.insert(0, str(REPO_ROOT / "backend" / "src"))
 
 os.environ.setdefault("REVIEWS_TABLE", "reviews-test")
 
-from fastapi import HTTPException  # noqa: E402
+from fastapi import HTTPException  # noqa: E402, I001
 
 from src import reviews as reviews_module  # noqa: E402
 

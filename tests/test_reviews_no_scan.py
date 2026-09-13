@@ -71,7 +71,7 @@ os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-noscan52-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-noscan52-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-noscan52-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.exceptions import ClientError  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -359,7 +359,7 @@ class PipelineHealthTests(NoScanTestBase):
         for name in sorted(TERMINAL | IN_FLIGHT):
             self.assertEqual(
                 body["status_counts"][name],
-                len(_expected_ids(lambda _r, st, _a, _u: st == name)),
+                len(_expected_ids(lambda _r, st, _a, _u: st == name)),  # noqa: B023
                 name,
             )
         self.assertEqual(body["in_flight"], {"total": 6, "pending": 3, "running": 3})

@@ -617,7 +617,7 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
     }
 
 
-def handler(event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any]:
+def handler(event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any]:  # noqa: RUF013
     """Entry point for both the scheduled (EventBridge) invocation and the
     on-demand invocation triggered by an admin settings save.
 

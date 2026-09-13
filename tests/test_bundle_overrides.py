@@ -67,7 +67,7 @@ import bind_bundle  # noqa: E402
 import canonicalize  # noqa: E402
 import floor_judge  # noqa: E402
 import model_client  # noqa: E402
-import opf_load  # noqa: E402
+import opf_load  # noqa: E402, F401
 import opf_prompt  # noqa: E402
 import reconciliation as recon  # noqa: E402
 
@@ -199,7 +199,7 @@ def check_2_stale_edit_guard() -> list[str]:
         override_path = Path(tmp) / "posture-override.json"
         override_path.write_text(json.dumps(stale_override), encoding="utf-8")
         out_path = Path(tmp) / "should-not-exist.json"
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(BIND_BUNDLE_SCRIPT),
@@ -404,7 +404,7 @@ def check_6_composition_posture_and_floor_union() -> list[str]:
     resolved = opf_prompt.resolve_floor_invariants(opf_doc, overrides)
     if len(resolved) != len(genesis_ids) + 1:
         failures.append(f"  [6f] resolve_floor_invariants returned {len(resolved)} invariants, expected {len(genesis_ids) + 1}")
-    if [inv["id"] for inv in resolved] != genesis_ids + [_VALID_FLOOR_ADDITION["id"]]:
+    if [inv["id"] for inv in resolved] != genesis_ids + [_VALID_FLOOR_ADDITION["id"]]:  # noqa: RUF005
         failures.append(f"  [6g] resolve_floor_invariants order is not genesis-first-stable: {[inv['id'] for inv in resolved]!r}")
 
     # No overrides -> unaffected (byte-identical to pre-#294 behavior).
@@ -489,7 +489,7 @@ def check_8_cli_end_to_end() -> list[str]:
         floor_path.write_text(json.dumps([_VALID_FLOOR_ADDITION]), encoding="utf-8")
         out_path = tmp_path / "bound-bundle.json"
 
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(BIND_BUNDLE_SCRIPT),
@@ -531,7 +531,7 @@ def check_8_cli_end_to_end() -> list[str]:
         # Re-bind with --previous-bundle pointing at the just-written bundle
         # (posture version 1) and the SAME version -> monotonic violation.
         out_path_2 = tmp_path / "bound-bundle-2.json"
-        result_2 = subprocess.run(
+        result_2 = subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 str(BIND_BUNDLE_SCRIPT),

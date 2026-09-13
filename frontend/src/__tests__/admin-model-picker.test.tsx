@@ -24,6 +24,7 @@ import AdminModel, {
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -133,9 +134,12 @@ function stubFetch(handlers: {
   get?: () => { status: number; body: unknown };
   post?: (body: unknown) => { status: number; body: unknown };
 }): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = String(input);
     if (!url.includes('/api/admin/model-selection')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => KEY_SETTINGS } as Response;
     }
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -144,11 +148,13 @@ function stubFetch(handlers: {
         ? handlers.post?.(init?.body ? JSON.parse(init.body as string) : undefined)
         : handlers.get?.();
     if (!handler) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     return {
       ok: handler.status >= 200 && handler.status < 300,
       status: handler.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => handler.body,
     } as Response;
   });
@@ -234,6 +240,7 @@ describe('AdminModel — the model picker', () => {
     stubFetch({ get: () => ({ status: 200, body: selection() }) });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     const opus = optionTexts(primary).find((t) => t.includes('Claude Opus 5'));
     expect(opus).toContain('$0.500');
@@ -249,6 +256,7 @@ describe('AdminModel — the model picker', () => {
     stubFetch({ get: () => ({ status: 200, body: selection() }) });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const critic = (await screen.findByTestId('admin-model-critic-select')) as HTMLSelectElement;
     const opus = optionTexts(critic).find((t) => t.includes('Claude Opus 5'));
     expect(opus).toContain('$0.475');
@@ -258,6 +266,7 @@ describe('AdminModel — the model picker', () => {
     stubFetch({ get: () => ({ status: 200, body: selection() }) });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     const dflt = optionTexts(primary).find((t) => t.includes('Claude Opus 5'));
     expect(dflt).toContain('$0.500');
@@ -269,6 +278,7 @@ describe('AdminModel — the model picker', () => {
     stubFetch({ get: () => ({ status: 200, body: selection() }) });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     // The old shape was an extra first option reading
     // "Default: anthropic/claude-opus-5 — $0.500 per review", on top of the
@@ -285,6 +295,7 @@ describe('AdminModel — the model picker', () => {
     stubFetch({ get: () => ({ status: 200, body: selection() }) });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     const marked = optionTexts(primary).filter((t) => t.includes('✓'));
     expect(marked).toHaveLength(1);
@@ -308,6 +319,7 @@ describe('AdminModel — the model picker', () => {
     });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     expect(primary.value).toBe(GEMINI);
     // Picking the marked default row is the "revert this pass" gesture now.
@@ -320,6 +332,7 @@ describe('AdminModel — the model picker', () => {
     const post = fetchMock.mock.calls.find(
       ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
     );
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(JSON.parse((post?.[1] as RequestInit).body as string).primary_model_id).toBe('');
   });
 
@@ -339,6 +352,7 @@ describe('AdminModel — the model picker', () => {
     });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     expect(primary.value).toBe('');
     expect(primary.selectedIndex).toBeGreaterThanOrEqual(0);
@@ -352,6 +366,7 @@ describe('AdminModel — the model picker', () => {
     stubFetch({ get: () => ({ status: 200, body: selection() }) });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const critic = (await screen.findByTestId('admin-model-critic-select')) as HTMLSelectElement;
     expect(critic.value).toBe('');
     expect(optionTexts(critic)[0]).toContain('anthropic/claude-sonnet-4.6');
@@ -380,6 +395,7 @@ describe('AdminModel — the model picker', () => {
     });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     const marked = Array.from(primary.options).find((o) => o.textContent?.includes('✓'));
     expect(marked?.textContent).toContain('Gemini 3.1 Pro (preview)');
@@ -452,8 +468,10 @@ describe('AdminModel — the model picker', () => {
     });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const primary = (await screen.findByTestId('admin-model-primary-select')) as HTMLSelectElement;
     expect(primary.value).toBe(GEMINI);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('admin-model-critic-select') as HTMLSelectElement).value).toBe(
       DEEPSEEK,
     );
@@ -527,6 +545,7 @@ describe('AdminModel — the model picker', () => {
     const post = fetchMock.mock.calls.find(
       ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
     );
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     expect(JSON.parse((post?.[1] as RequestInit).body as string).primary_model_id).toBe('');
   });
 

@@ -960,6 +960,7 @@ export function OrbitDiner({
     </>
   );
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       ref={root}
       className={`od-console ${plainView ? "od-plain" : ""}`}
@@ -1995,6 +1996,7 @@ export function OrbitDiner({
           </p>
         )}
       </div>
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
       <dialog
         ref={dialog}
         className="od-dialog"
@@ -2028,6 +2030,7 @@ export function OrbitDiner({
                         ? "Cover note"
                         : "Keyboard shortcuts"}
             </h2>
+            {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
             <button type="button" className="od-key" onClick={close} autoFocus>
               Close
             </button>

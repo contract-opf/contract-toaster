@@ -287,8 +287,8 @@ def check_on_remove_or_alter_rule_fires(
     norm_text = normalize(altered_text)
     missing = [tok for tok in required_tokens if normalize(tok) not in norm_text]
 
-    if token_policy == "any" and missing:
+    if token_policy == "any" and missing:  # noqa: S105
         return [{"rule_id": rule["id"], "missing_tokens": missing}]
-    if token_policy == "all" and required_tokens and len(missing) == len(required_tokens):
+    if token_policy == "all" and required_tokens and len(missing) == len(required_tokens):  # noqa: S105
         return [{"rule_id": rule["id"], "missing_tokens": missing}]
     return []

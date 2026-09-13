@@ -139,7 +139,7 @@ class TestRedlineCopyStage(unittest.TestCase):
             "output_s3_key": f"outputs/{REVIEW_ID}/out.docx",
             "pre_baked_source_key": "mock-fixtures/eiaa/pre-baked-redline.docx",
         }
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             self._run(event, fake)
         self.assertEqual(fake.copies, [])
 
@@ -151,7 +151,7 @@ class TestRedlineCopyStage(unittest.TestCase):
             "output_s3_key": f"outputs/{REVIEW_ID}/out.docx",
             "pre_baked_source_key": "mock-fixtures/eiaa/pre-baked-redline.docx",
         }
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             self._run(event, fake)
 
 

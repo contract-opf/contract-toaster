@@ -100,7 +100,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -311,7 +311,7 @@ def judge_floor_invariants(
     model_id: str,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     review_id: str = "",
-    ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,
+    ledger_write: Optional[Callable[["_model_client.ModelInvocationRecord"], None]] = None,  # noqa: UP037, UP045
     perspective_note: str = "",
 ) -> FloorJudgment:
     """Judge every Floor invariant against `review_context`, one
@@ -464,7 +464,7 @@ def judge_floor_invariants(
                 ledger_write(
                     _model_client.ModelInvocationRecord(
                         review_id=review_id,
-                        pass_name="floor",
+                        pass_name="floor",  # noqa: S106
                         model_id=model_id,
                         attempt_number=attempt,
                         outcome=outcome,

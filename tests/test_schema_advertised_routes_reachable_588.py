@@ -75,7 +75,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI  # noqa: E402, I001
 
 import src.main as backend_main  # noqa: E402
 

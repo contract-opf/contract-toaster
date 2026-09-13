@@ -50,7 +50,7 @@ above.
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator
+from typing import Any, Iterator  # noqa: UP035
 
 # OpenRouter's keep-alive comment line, sent while a provider is still
 # thinking. It is an SSE comment (`:`-prefixed), not an event, and must

@@ -186,7 +186,7 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]
         if str(TESTS_DIR) not in _sys.path:
             _sys.path.insert(0, str(TESTS_DIR))
         import src.main as backend_main  # backend/src/main.py, as "src.main"
-    except Exception as e:  # pragma: no cover - environment-dependent
+    except Exception as e:  # pragma: no cover - environment-dependent  # noqa: BLE001
         _skip(
             "  Gate 1a: SKIP (documented reason) — could not import\n"
             f"  backend/src/main.py ({e!r}). Cannot determine whether\n"
@@ -226,7 +226,7 @@ def gate_1a_route_refusal_behavioral() -> tuple[list[str], list[str], list[str]]
     # The route IS wired — exercise it for real instead of reading docs.
     # Get a real, authenticated caller past auth and the upload gauntlet so
     # the ONLY thing under test is the no-active-bundle refusal itself.
-    import io
+    import io  # noqa: I001
     import zipfile
 
     from fastapi.testclient import TestClient
@@ -440,7 +440,7 @@ def gate_2_deactivate_action(arch_text: str) -> list[str]:
         "deactivate is audited (writes an audit entry)",
         "deactivate is GC-gated consistently with activation controls",
     ]
-    for i, (pattern, label) in enumerate(zip(DEACTIVATE_ACTION_PATTERNS, labels), 1):
+    for i, (pattern, label) in enumerate(zip(DEACTIVATE_ACTION_PATTERNS, labels), 1):  # noqa: B905
         if not pattern.search(arch_text):
             failures.append(
                 f"  Gate 2.{i}: ARCHITECTURE.md does not contain required language\n"
@@ -459,7 +459,7 @@ def gate_3_runbook_suspend_intake(runbook_text: str) -> list[str]:
         "RUNBOOK references the deactivate action as the mechanism to suspend intake",
         "RUNBOOK documents how to re-enable intake after suspension",
     ]
-    for i, (pattern, label) in enumerate(zip(RUNBOOK_SUSPEND_INTAKE_PATTERNS, labels), 1):
+    for i, (pattern, label) in enumerate(zip(RUNBOOK_SUSPEND_INTAKE_PATTERNS, labels), 1):  # noqa: B905
         if not pattern.search(runbook_text):
             failures.append(
                 f"  Gate 3.{i}: RUNBOOK.md does not contain required language\n"

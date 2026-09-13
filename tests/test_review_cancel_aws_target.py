@@ -62,7 +62,7 @@ for _dir in (BACKEND_SRC, str(REPO_ROOT / "tests")):
 os.environ.setdefault("REVIEWS_TABLE", "test-reviews")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "test-submissions")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.stub import Stubber  # noqa: E402
 
 import reviews  # noqa: E402
@@ -284,8 +284,8 @@ def _synth_template() -> dict[str, Any] | None:
         shutil.rmtree(CDK_OUT)
     from infra_synth_helper import NEUTRAL_CDK_CONTEXT
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA_DIR,
         capture_output=True,
         text=True,

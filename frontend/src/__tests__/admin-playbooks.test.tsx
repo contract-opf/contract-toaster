@@ -28,6 +28,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import AdminPlaybooks, { shortenHash } from '../AdminPlaybooks';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -105,11 +106,14 @@ let requests: Recorded[] = [];
  * as a visible error rather than silently looking like a pass.
  */
 function stubRoutes(overrides: Handler[] = []): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const pathname = new URL(url, 'http://localhost').pathname;
     const method = (init?.method ?? 'GET').toUpperCase();
     const rawBody = init?.body;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body =
       typeof rawBody === 'string'
         ? JSON.parse(rawBody)
@@ -123,13 +127,16 @@ function stubRoutes(overrides: Handler[] = []): void {
       return {
         ok: override.status >= 200 && override.status < 300,
         status: override.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => override.body,
       } as Response;
     }
     if (method === 'GET' && pathname === '/api/playbooks') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => CATALOG } as Response;
     }
     if (method === 'GET' && pathname.endsWith('/versions')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => TRAIL } as Response;
     }
     // Issue #605: selecting a playbook (the "Version history" click below)
@@ -137,11 +144,14 @@ function stubRoutes(overrides: Handler[] = []): void {
     // its own — every test that selects a playbook needs a safe default for
     // it, not just the ones that exercise the pane directly.
     if (method === 'GET' && pathname.endsWith('/instructions')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({ current: null, history: [] }) } as Response;
     }
     if (method !== 'GET') {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -400,6 +410,7 @@ describe('AdminPlaybooks — upload', () => {
 
     const uploads = requestsMatching('POST', '/synthetic-nda-sample/versions');
     expect(uploads).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const form = uploads[0]!.body as Record<string, unknown>;
     expect(form.version).toBe('v4.0.0');
     expect(form.file).toBeInstanceOf(File);
@@ -436,6 +447,7 @@ describe('AdminPlaybooks — upload', () => {
     await screen.findByTestId('admin-playbooks-upload-success');
     const notesCalls = requestsMatching('PATCH', '/versions/v4.0.0/notes');
     expect(notesCalls).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect(notesCalls[0]!.body).toEqual({ notes: 'Adds the new indemnity position.' });
   });
 
@@ -638,6 +650,7 @@ describe('AdminPlaybooks — approve for activation', () => {
     await waitFor(() => {
       expect(requestsMatching('POST', '/versions/v1.0.0/legal-approval')).toHaveLength(1);
     });
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const call = requestsMatching('POST', '/versions/v1.0.0/legal-approval')[0]!;
     expect(call.body).toEqual({ content_hash: FULL_HASH });
   });
@@ -1004,6 +1017,7 @@ describe('AdminPlaybooks — derived version identifier', () => {
       expect(requestsMatching('POST', '/api/admin/playbooks')).toHaveLength(1);
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const form = requestsMatching('POST', '/api/admin/playbooks')[0]!.body as Record<
       string,
       unknown
@@ -1148,6 +1162,7 @@ describe('AdminPlaybooks — approve & activate as one action', () => {
     expect(activateIndex).toBeGreaterThan(approvalIndex);
 
     // The approval names the EXACT bytes on this row — never free-text.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect(requests[approvalIndex]!.body).toEqual({ content_hash: FULL_HASH });
   });
 
@@ -1257,6 +1272,7 @@ describe('AdminPlaybooks — create playbook', () => {
 
     const creates = requestsMatching('POST', '/api/admin/playbooks');
     expect(creates).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const form = creates[0]!.body as Record<string, unknown>;
     expect(form.version).toBe('1.0.0');
     expect(form.file).toBeInstanceOf(File);
@@ -1295,6 +1311,7 @@ describe('AdminPlaybooks — create playbook', () => {
     await screen.findByTestId('admin-playbooks-create-success');
     const notesCalls = requestsMatching('PATCH', '/educational-affiliation/versions/1.0.0/notes');
     expect(notesCalls).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect(notesCalls[0]!.body).toEqual({ notes: 'A brand-new agreement type.' });
   });
 
@@ -1397,6 +1414,7 @@ describe('AdminPlaybooks — rename', () => {
     await waitFor(() => {
       const calls = requestsMatching('PATCH', '/api/admin/playbooks/synthetic-nda-sample');
       expect(calls).toHaveLength(1);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(calls[0]!.body).toEqual({ display_name: 'House NDA' });
     });
   });
@@ -1431,6 +1449,7 @@ describe('AdminPlaybooks — per-version notes', () => {
     await waitFor(() => {
       const calls = requestsMatching('PATCH', '/versions/v1.0.0/notes');
       expect(calls).toHaveLength(1);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(calls[0]!.body).toEqual({ notes: 'Superseded by v2.' });
     });
   });
@@ -1774,6 +1793,7 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     for (let i = 1; i < order.length; i += 1) {
       // Each element's DOM position is after the previous one's.
       // eslint-disable-next-line no-bitwise
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
   });
@@ -1808,15 +1828,18 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const pathname = new URL(
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string
           typeof input === 'string' ? input : input.toString(),
           'http://localhost',
         ).pathname;
         const method = (init?.method ?? 'GET').toUpperCase();
 
         if (method === 'GET' && pathname === '/api/playbooks') {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => CATALOG } as Response;
         }
         if (method === 'GET' && pathname.endsWith('/versions')) {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: true, status: 200, json: async () => TRAIL } as Response;
         }
         // Both playbooks' instruction GETs are held open deliberately, so
@@ -1831,6 +1854,7 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
             resolveOther = resolve;
           });
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 404, json: async () => ({}) } as Response;
       }),
     );
@@ -1851,6 +1875,7 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     resolveOther!({
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({
         current: { version: 9, text: 'B TEXT', saved_by: 'other-admin', saved_at: 1_700_000_500 },
         history: [],
@@ -1858,6 +1883,7 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     } as Response);
 
     await waitFor(() => {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       expect((screen.getByTestId('admin-instructions-text') as HTMLTextAreaElement).value).toBe(
         'B TEXT',
       );
@@ -1868,6 +1894,7 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     resolveSample!({
       ok: true,
       status: 200,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => ({
         current: { version: 2, text: 'A TEXT', saved_by: 'sample-admin', saved_at: 1_700_000_100 },
         history: [],
@@ -1876,6 +1903,7 @@ describe('AdminPlaybooks — merged standing instructions (#605)', () => {
     // Give the discarded promise's microtasks a turn, then assert nothing moved.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('admin-instructions-text') as HTMLTextAreaElement).value).toBe(
       'B TEXT',
     );

@@ -75,7 +75,7 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from cryptography.hazmat.backends import default_backend  # noqa: E402
+from cryptography.hazmat.backends import default_backend  # noqa: E402, I001
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import rsa as _rsa  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
@@ -202,7 +202,7 @@ def _call_get_current_user(token: str) -> dict:
         "AWS_REGION": REGION,
         "ALLOWED_EMAIL_DOMAINS": ALLOWED_DOMAIN,
     }
-    with unittest.mock.patch.dict(os.environ, env):
+    with unittest.mock.patch.dict(os.environ, env):  # noqa: SIM117
         with unittest.mock.patch.object(
             auth_module, "_fetch_jwks", side_effect=lambda url: keys.jwks
         ):

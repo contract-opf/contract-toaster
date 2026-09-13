@@ -144,7 +144,7 @@ def check_a_frontend_security_posture() -> list[str]:
     failures: list[str] = []
 
     if not THREAT_MODEL.exists():
-        return fail(f"docs/threat-model.md does not exist")
+        return fail(f"docs/threat-model.md does not exist")  # noqa: F541
 
     text = read(THREAT_MODEL)
 

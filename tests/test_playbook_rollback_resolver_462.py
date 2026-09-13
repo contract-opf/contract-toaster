@@ -72,7 +72,7 @@ os.environ.setdefault(
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-rollback462-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-rollback462-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

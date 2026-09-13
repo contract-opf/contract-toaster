@@ -31,7 +31,7 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-import auth  # noqa: E402
+import auth  # noqa: E402, I001
 import demo_auth  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402
@@ -137,7 +137,7 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
         # (the cookie counterpart of test_sso_mode_does_not_accept_demo_token).
         with patch.dict("os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": "sso"}, clear=True):
             token = demo_auth.issue_demo_token(ADMIN_ROW)
-            with patch.object(auth, "_verify_cognito_token") as m:
+            with patch.object(auth, "_verify_cognito_token") as m:  # noqa: SIM117
                 with self.assertRaises(HTTPException) as ctx:
                     auth.get_current_user(credentials=None, session_cookie=token)
             m.assert_not_called()
@@ -148,7 +148,7 @@ class TestGetCurrentUserDispatch(unittest.TestCase):
         # Authorization header and no session cookie, get_current_user must
         # be the sole 401 gate in every AUTH_MODE.
         for mode in ("sso", "password", "both"):
-            with self.subTest(mode=mode):
+            with self.subTest(mode=mode):  # noqa: SIM117
                 with patch.dict(
                     "os.environ", {"DEMO_TOKEN_SECRET": SECRET, "AUTH_MODE": mode}, clear=True
                 ):

@@ -52,7 +52,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", REVIEW_SUBMISSIONS_TABLE)
 os.environ.setdefault("DAILY_SPEND_TABLE", DAILY_SPEND_TABLE)
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 import time  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

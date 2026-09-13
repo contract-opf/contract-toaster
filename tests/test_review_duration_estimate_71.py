@@ -94,7 +94,7 @@ os.environ.setdefault("ENV_NAME", "dev")
 # configured, which keeps this file to the one table it is actually about.
 os.environ.pop("RETENTION_SETTINGS_TABLE", None)
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

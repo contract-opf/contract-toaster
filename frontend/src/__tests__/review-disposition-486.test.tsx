@@ -30,6 +30,7 @@ import ReviewHistory, { HistoryRow } from '../ReviewHistory';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -47,16 +48,20 @@ function stubReviewSubmissionFetch(routes: Record<string, unknown>): ReturnType<
   // Issue #733: the catalog is a fixture every scenario needs, not a scenario
   // of its own — the console will not arm its lever without an active playbook.
   routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname.endsWith('.mp3')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
     }
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     // `__httpStatus` (not `status`) so a stubbed REVIEW body — which has its
@@ -67,9 +72,11 @@ function stubReviewSubmissionFetch(routes: Record<string, unknown>): ReturnType<
       return {
         ok: __httpStatus >= 200 && __httpStatus < 300,
         status: __httpStatus,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => body,
       } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -155,6 +162,7 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
       );
     });
     expect(call, 'expected a POST to the disposition route').toBeTruthy();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body).toEqual({ disposition: 'ACCEPTED' });
   });
@@ -186,6 +194,7 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
         (init as RequestInit | undefined)?.method === 'POST'
       );
     });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body = JSON.parse((call![1] as RequestInit).body as string);
     expect(body).toEqual({
       disposition: 'EDITED',
@@ -246,18 +255,22 @@ describe('ReviewSubmission — disposition capture (issue #486)', () => {
 // request the LISTING body instead of the disposition response — the write
 // path below was therefore never actually exercised by these tests.
 function stubHistoryFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key] as { status: number; body: unknown } | undefined;
     if (!entry) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     return {
       ok: entry.status >= 200 && entry.status < 300,
       status: entry.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => entry.body,
     } as Response;
   });
@@ -349,6 +362,7 @@ describe('ReviewHistory — the Disposition column (issue #486)', () => {
       );
     });
     expect(postCall, 'expected a POST to the disposition route').toBeTruthy();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const body = JSON.parse((postCall![1] as RequestInit).body as string);
     expect(body).toEqual({ disposition: 'REJECTED' });
 

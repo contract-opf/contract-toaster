@@ -132,7 +132,7 @@ TEAMEXOS_BEHAVIOR_FILES = {
 
 def _tracked_files() -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True  # noqa: S607
     )
     return [line for line in out.stdout.splitlines() if line.strip()]
 
@@ -189,7 +189,7 @@ def docx_missing_synthetic_marker(rel: str) -> bool:
         with zipfile.ZipFile(REPO_ROOT / rel) as z:
             body = z.read("word/document.xml").decode("utf8", "ignore")
         return "SYNTHETIC" not in body.upper()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return True  # unreadable .docx is a failure, not a pass
 
 
@@ -231,7 +231,7 @@ def self_test() -> None:
             d = tmp / f"f{expect_flag}.docx"
             with zipfile.ZipFile(d, "w") as z:
                 z.writestr("word/document.xml", f"<w:t>{marker}</w:t>")
-            rel = str(d.relative_to(REPO_ROOT)) if str(d).startswith(str(REPO_ROOT)) else None
+            rel = str(d.relative_to(REPO_ROOT)) if str(d).startswith(str(REPO_ROOT)) else None  # noqa: F841
             # scan directly (path is outside the repo)
             with zipfile.ZipFile(d) as z:
                 body = z.read("word/document.xml").decode("utf8", "ignore")

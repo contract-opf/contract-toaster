@@ -33,6 +33,7 @@ import { getToken } from '../auth';
 
 // Amplify is never used in password mode, but App.tsx imports it — mock so the
 // import resolves without a real Cognito/Amplify runtime.
+// eslint-disable-next-line @typescript-eslint/require-await
 vi.mock('aws-amplify/auth', () => ({ fetchAuthSession: vi.fn(async () => ({ tokens: {} })) }));
 vi.mock('@aws-amplify/ui-react', () => ({
   Authenticator: ({ children }: { children: () => React.ReactElement }) => children(),
@@ -40,10 +41,14 @@ vi.mock('@aws-amplify/ui-react', () => ({
 }));
 
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     const body = routes[pathname];
+    // eslint-disable-next-line @typescript-eslint/require-await
     if (body === undefined) return { ok: false, status: 404, json: async () => ({}) } as Response;
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -52,6 +57,7 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
 
 /** Stub every fetch with one canned failure response (login is the only call). */
 function stubLoginFailure(status: number, json: () => Promise<unknown>): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json }) as unknown as Response));
 }
 
@@ -118,6 +124,7 @@ describe('PasswordLogin error copy', () => {
 
   it('renders no HTTP status code when the failure body carries no detail', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // eslint-disable-next-line @typescript-eslint/require-await
     stubLoginFailure(503, async () => ({}));
     submitLogin();
 
@@ -136,6 +143,7 @@ describe('PasswordLogin error copy', () => {
   });
 
   it('still renders the server-supplied rejection message verbatim', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
     stubLoginFailure(401, async () => ({ detail: 'Invalid username or password.' }));
     submitLogin();
 
@@ -232,9 +240,12 @@ describe('Sign out in password mode (issue #468)', () => {
     // restore probe would just sign it straight back in on the next reload.
     vi.stubEnv('VITE_AUTH_MODE', 'password');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // eslint-disable-next-line @typescript-eslint/require-await
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const pathname = new URL(String(input), 'http://localhost').pathname;
       if (pathname === '/api/auth/logout') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 500, json: async () => ({}) } as Response;
       }
       const routes: Record<string, unknown> = {
@@ -243,7 +254,9 @@ describe('Sign out in password mode (issue #468)', () => {
         '/version': { version: '0.0.0', commit: 'deadbeef', image_digest: '', uptime_seconds: 0 },
       };
       const body = routes[pathname];
+      // eslint-disable-next-line @typescript-eslint/require-await
       if (body === undefined) return { ok: false, status: 404, json: async () => ({}) } as Response;
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, json: async () => body } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);

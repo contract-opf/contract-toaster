@@ -122,7 +122,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 RULE_INSTRUCTION_OVERRIDE = "instruction-override"
-RULE_ROLE_TOKEN_SMUGGLING = "role-token-smuggling"
+RULE_ROLE_TOKEN_SMUGGLING = "role-token-smuggling"  # noqa: S105
 RULE_TOOL_CALL_SYNTAX = "tool-call-syntax"
 RULE_EXFILTRATION_DIRECTIVE = "exfiltration-directive"
 RULE_ENCODED_BLOB = "encoded-blob"
@@ -174,7 +174,7 @@ _INVISIBLE_CHARS_RE = re.compile("[\u200b-\u200d\ufeff\u202a-\u202e]")
 # text. (Encoded-blob and invisible-text are checked separately below --
 # same shape, kept as their own constants for readability at the call
 # site.)
-_SIMPLE_RULES: list[tuple[str, "re.Pattern[str]"]] = [
+_SIMPLE_RULES: list[tuple[str, "re.Pattern[str]"]] = [  # noqa: UP037
     (RULE_INSTRUCTION_OVERRIDE, _INSTRUCTION_OVERRIDE_RE),
     (RULE_ROLE_TOKEN_SMUGGLING, _ROLE_TOKEN_RE),
     (RULE_TOOL_CALL_SYNTAX, _TOOL_CALL_RE),

@@ -247,7 +247,7 @@ def main() -> int:
     for test in tests:
         try:
             test()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             failures.append((test.__name__, exc))
             print(f"FAIL: {test.__name__}: {exc}")
 

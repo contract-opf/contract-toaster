@@ -41,7 +41,7 @@ Verifies that all acceptance criteria for issue #51 are satisfied:
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import json
+import json  # noqa: F401, I001
 import re
 import subprocess
 import sys
@@ -344,7 +344,7 @@ def check_e_key_isolation() -> list[str]:
     data_ts = _read(DATA_STACK_PATH)
 
     all_ts_files = _find_ts_sources()
-    all_ts = "\n".join(_read(f) for f in all_ts_files)
+    all_ts = "\n".join(_read(f) for f in all_ts_files)  # noqa: F841
 
     # The DataStack props must carry each named key — already verified in #70 gate,
     # but we re-verify here that each key is actually used as encryptionKey somewhere.
@@ -393,7 +393,7 @@ def check_f_legal_hold_enforcement() -> list[str]:
     print("\nCheck F: Legal-hold enforcement at storage layer (bucket policy DENY or Object Lock) …")
     failures: list[str] = []
 
-    data_ts = _read(DATA_STACK_PATH)
+    data_ts = _read(DATA_STACK_PATH)  # noqa: F841
     all_ts_files = _find_ts_sources()
     all_ts = "\n".join(_read(f) for f in all_ts_files)
 
@@ -536,7 +536,7 @@ def check_i_cdk_synth() -> list[str]:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"],
+            ["npm", "install"],  # noqa: S607
             cwd=INFRA,
             capture_output=True,
             text=True,
@@ -548,8 +548,8 @@ def check_i_cdk_synth() -> list[str]:
                 f"stderr: {install.stderr[-500:]}",
             )
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,
@@ -572,11 +572,11 @@ def check_j_bucket_exports() -> list[str]:
     print("\nCheck J: Bucket names/ARNs exported for downstream stack consumption …")
     failures: list[str] = []
 
-    data_ts = _read(DATA_STACK_PATH)
+    data_ts = _read(DATA_STACK_PATH)  # noqa: F841
     all_ts_files = _find_ts_sources()
     all_ts = "\n".join(_read(f) for f in all_ts_files)
 
-    for data_class, prefix in REQUIRED_BUCKETS.items():
+    for data_class, prefix in REQUIRED_BUCKETS.items():  # noqa: B007
         # Accept: public readonly property, CfnOutput, or exported variable
         pattern = re.compile(
             rf"readonly\s+\w*{re.escape(data_class)}\w*[Bb]ucket|"

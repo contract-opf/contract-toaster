@@ -109,7 +109,7 @@ os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-479-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "contract-toaster-playbooks-479-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-479-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import leakage_scan  # noqa: E402

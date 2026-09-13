@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -66,7 +66,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import review_spine  # noqa: E402
+import review_spine  # noqa: E402, I001
 
 # Cross-file reuse of the already-proven docx builder / playbook loader /
 # canned model responses (same convention tests/test_llm_native_overlay.py
@@ -93,7 +93,7 @@ def test_heading_and_text_both_present(failures: list[str]) -> None:
         failures.append(f"[1a] heading missing from doc_text entirely: {doc_text!r}")
     if "Each party shall keep" not in doc_text:
         failures.append(f"[1b] body text missing from doc_text: {doc_text!r}")
-    if "Confidentiality" in doc_text and "Each party shall keep" in doc_text:
+    if "Confidentiality" in doc_text and "Each party shall keep" in doc_text:  # noqa: SIM102
         if doc_text.index("Confidentiality") > doc_text.index("Each party shall keep"):
             failures.append(f"[1c] heading must precede its own body text: {doc_text!r}")
 
@@ -223,7 +223,7 @@ def test_no_headings_matches_pre_fix_join(failures: list[str]) -> None:
 
 
 def test_run_review_sends_heading_to_model(failures: list[str]) -> None:
-    import synthetic_form_paragraphs as sfp_module
+    import synthetic_form_paragraphs as sfp_module  # noqa: I001
     import model_client as model_client_module
 
     bundle = _load_bundle()
@@ -275,8 +275,8 @@ def test_run_review_sends_heading_to_model(failures: list[str]) -> None:
             f"the normalized document, does not reach doc_text/the prompt."
         )
     if body_snippet not in user_prompt:
-        failures.append(f"[9e] setup failure -- expected body text not found in user_prompt at all")
-    if heading in user_prompt and body_snippet in user_prompt:
+        failures.append(f"[9e] setup failure -- expected body text not found in user_prompt at all")  # noqa: F541
+    if heading in user_prompt and body_snippet in user_prompt:  # noqa: SIM102
         if user_prompt.index(heading) > user_prompt.index(body_snippet):
             failures.append(
                 f"[9f] heading {heading!r} must appear in the prompt BEFORE its own body text"

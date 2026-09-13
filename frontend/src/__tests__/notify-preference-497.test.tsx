@@ -37,6 +37,7 @@ type Permission = 'default' | 'granted' | 'denied';
  *  this sandbox needs one at all. */
 function installMockLocalStorage(): Storage {
   const store = new Map<string, string>();
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   const storage: Storage = {
     getItem: (key: string) => (store.has(key) ? (store.get(key) as string) : null),
     setItem: (key: string, value: string) => {
@@ -59,6 +60,7 @@ function installMockLocalStorage(): Storage {
 
 class MockNotification {
   static permission: Permission = 'default';
+  // eslint-disable-next-line @typescript-eslint/require-await
   static requestPermission = vi.fn(async () => MockNotification.permission);
   static instances: MockNotification[] = [];
   title: string;
@@ -77,6 +79,7 @@ class MockNotification {
 
 function installNotificationApi(permission: Permission = 'default'): void {
   MockNotification.permission = permission;
+  // eslint-disable-next-line @typescript-eslint/require-await
   MockNotification.requestPermission = vi.fn(async () => MockNotification.permission);
   MockNotification.instances = [];
   vi.stubGlobal('Notification', MockNotification);
@@ -135,6 +138,7 @@ describe('issue #497 — permission is requested ONLY from the opt-in click', ()
 
   it('a GRANTED response persists the preference and flips the toggle on', async () => {
     installNotificationApi('default');
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/require-await
     MockNotification.requestPermission = vi.fn(async () => 'granted' as Permission);
     const notify = await loadNotify();
     const { result } = renderHook(() => notify.useNotifyPreference());
@@ -150,6 +154,7 @@ describe('issue #497 — permission is requested ONLY from the opt-in click', ()
 
   it('a DENIED response degrades silently: no persisted opt-in, toggle stays off, no throw', async () => {
     installNotificationApi('default');
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/require-await
     MockNotification.requestPermission = vi.fn(async () => 'denied' as Permission);
     const notify = await loadNotify();
     const { result } = renderHook(() => notify.useNotifyPreference());

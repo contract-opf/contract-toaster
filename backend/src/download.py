@@ -68,20 +68,20 @@ Usage (FastAPI dependency injection):
       )
 """
 
-import os
+import os  # noqa: I001
 import re
 import time
 from urllib.parse import quote
 from typing import Any
 
 import boto3
-from botocore.config import Config
+from botocore.config import Config  # noqa: F401
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
-    from src import config
+    from src import config  # noqa: I001
     # Bound to the module-private name this module and
     # tests/test_download_auth_attack.py have always used. An import binding
     # is not a `def`, so `tests/test_authz_single_source.py` (issue #66)

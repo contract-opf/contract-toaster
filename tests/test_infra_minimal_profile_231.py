@@ -64,7 +64,7 @@ Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 
 from __future__ import annotations
 
-import glob
+import glob  # noqa: F401
 import json
 import subprocess
 import sys
@@ -93,15 +93,15 @@ def _run_synth(context_args: list[str]) -> subprocess.CompletedProcess:
     if not node_modules.is_dir():
         print("  (node_modules absent — running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True
+            ["npm", "install"], cwd=INFRA, capture_output=True, text=True  # noqa: S607
         )
         if install.returncode != 0:
             raise RuntimeError(
                 f"npm install failed:\nstdout: {install.stdout[-800:]}\n"
                 f"stderr: {install.stderr[-800:]}"
             )
-    return subprocess.run(
-        ["npx", "cdk", "synth", *context_args, *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    return subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", *context_args, *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,

@@ -34,6 +34,7 @@ import {
 import * as sounds from '../toaster/sounds';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -60,18 +61,23 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   // Issue #733: the catalog is a fixture every scenario needs, not a scenario
   // of its own — the console will not arm its lever without an active playbook.
   routes = { '/api/playbooks': DEFAULT_PLAYBOOKS, ...routes };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     if (pathname.endsWith('.mp3')) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
     }
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);
@@ -136,8 +142,10 @@ let createElementSpy: ReturnType<typeof vi.spyOn>;
 /** Every anchor the component created, in creation order. */
 function createdAnchors(): HTMLAnchorElement[] {
   const anchors: HTMLAnchorElement[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   createElementSpy.mock.calls.forEach((call: unknown[], i: number) => {
     if (call[0] === 'a') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       anchors.push(createElementSpy.mock.results[i]!.value as HTMLAnchorElement);
     }
   });
@@ -173,9 +181,11 @@ describe('completion handoff — automatic save', () => {
 
     const anchors = createdAnchors();
     expect(anchors).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect(anchors[0]!.href).toBe(PRESIGNED_URL);
     // A plain download anchor — NOT showSaveFilePicker, which would throw
     // SecurityError here for want of transient user activation.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect(anchors[0]!.hasAttribute('download')).toBe(true);
 
     // The announcement upgrades from "ready" to "saved" only once the fetch
@@ -218,25 +228,30 @@ describe('completion handoff — automatic save', () => {
     const PRESIGNED_URL_B = 'https://s3.example.test/outputs/rev-B/out.docx?sig=def';
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const method = (init?.method ?? 'GET').toUpperCase();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname.endsWith('.mp3')) {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) } as Response;
       }
       // Issue #733: the console arms nothing without an active playbook.
       if (pathname === '/api/playbooks') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => DEFAULT_PLAYBOOKS } as Response;
       }
       if (method === 'POST' && pathname === '/api/reviews') {
         submitCount += 1;
         const reviewId = submitCount === 1 ? 'rev-A' : 'rev-B';
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ review_id: reviewId, resumed: false }) } as Response;
       }
       if (pathname === '/api/reviews/rev-A') {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-A',
             status: 'DONE',
@@ -250,6 +265,7 @@ describe('completion handoff — automatic save', () => {
         return {
           ok: true,
           status: 200,
+          // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: 'rev-B',
             status: 'DONE',
@@ -263,8 +279,10 @@ describe('completion handoff — automatic save', () => {
         return outputAPromise;
       }
       if (pathname === '/api/reviews/rev-B/output') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ url: PRESIGNED_URL_B, expires_in: 60 }) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', fetchMock);

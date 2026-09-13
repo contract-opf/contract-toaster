@@ -67,7 +67,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "outputs-test")
 os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "submissions-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import corpus  # noqa: E402
@@ -161,7 +161,7 @@ class TestRegistryOwnedDefault(unittest.TestCase):
     def test_missing_default_field_raises_not_registered(self):
         with tempfile.TemporaryDirectory() as tmp:
             registry_path = _build_synthetic_registry(Path(tmp), default_playbook_id=None)
-            with _RegistryPatch(registry_path):
+            with _RegistryPatch(registry_path):  # noqa: SIM117
                 with self.assertRaises(playbook_registry.PlaybookNotRegisteredError):
                     playbook_registry.default_playbook_id()
 

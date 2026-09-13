@@ -79,7 +79,7 @@ import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -89,7 +89,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import block_transcript  # noqa: E402
+import block_transcript  # noqa: E402, I001
 import extraction_normalization_stage  # noqa: E402
 import docx_parts  # noqa: E402
 import footnote_audience  # noqa: E402
@@ -299,7 +299,7 @@ def _check_no_field_codes(zf: zipfile.ZipFile) -> None:
             continue
         xml_bytes = zf.read(name)
         try:
-            root = ET.fromstring(xml_bytes)
+            root = ET.fromstring(xml_bytes)  # noqa: S314
         except ET.ParseError as exc:
             raise OutputScanError(
                 "malformed_output_part", f"{name} did not parse: {exc}"
@@ -356,7 +356,7 @@ def verify_docx_round_trip(docx_bytes: bytes) -> None:
         for name in names:
             if name.endswith(".xml") or name.endswith(".rels"):
                 try:
-                    ET.fromstring(zf.read(name))
+                    ET.fromstring(zf.read(name))  # noqa: S314
                 except ET.ParseError as exc:
                     raise ValueError(f"{name} did not parse: {exc}") from exc
 
@@ -409,7 +409,7 @@ def _max_footnote_id(footnotes_root: ET.Element) -> int:
     return max_id
 
 
-def _find_patched_paragraph(body: ET.Element, source_text: str) -> Optional[ET.Element]:
+def _find_patched_paragraph(body: ET.Element, source_text: str) -> Optional[ET.Element]:  # noqa: UP045
     """Locate the paragraph the compiler just rewrote for one applied
     patch, by its now-unique `<w:del>` delText.
 
@@ -465,7 +465,7 @@ def _append_marker_paragraph(part_bytes: bytes, marker_text: str) -> bytes:
     `word/footer1.xml` part (issue #291 scope item 2: 'if headers exist,
     append the marker paragraph to them') -- the part's own existing content
     is otherwise untouched."""
-    root = ET.fromstring(part_bytes)
+    root = ET.fromstring(part_bytes)  # noqa: S314
     p = ET.SubElement(root, _w("p"))
     run = ET.SubElement(p, _w("r"))
     text_el = ET.SubElement(run, _w("t"))
@@ -573,14 +573,14 @@ def inject_export_marker_and_footnotes(
     ooxml_util.register_declared_namespaces(
         ooxml_util.declared_namespaces(original_root_open_tag)
     )
-    doc_root = ET.fromstring(originals[ooxml_util.DOCUMENT_PART])
+    doc_root = ET.fromstring(originals[ooxml_util.DOCUMENT_PART])  # noqa: S314
     body = doc_root.find(_w("body"))
 
     # ---- Footnotes: compute the id assignment before touching any XML, so
     # a patch batch with nothing to footnote is a true no-op.
     have_footnotes = "word/footnotes.xml" in names
     if have_footnotes:
-        footnotes_root = ET.fromstring(originals["word/footnotes.xml"])
+        footnotes_root = ET.fromstring(originals["word/footnotes.xml"])  # noqa: S314
         next_footnote_id = _max_footnote_id(footnotes_root) + 1
     else:
         footnotes_root = None
@@ -607,7 +607,7 @@ def inject_export_marker_and_footnotes(
 
     # ---- word/_rels/document.xml.rels: merge in, never replace.
     if "word/_rels/document.xml.rels" in names:
-        rels_root = ET.fromstring(originals["word/_rels/document.xml.rels"])
+        rels_root = ET.fromstring(originals["word/_rels/document.xml.rels"])  # noqa: S314
     else:
         rels_root = ET.Element(_pkg("Relationships"))
     next_rid = _max_rel_id(rels_root) + 1
@@ -748,7 +748,7 @@ def inject_export_marker_and_footnotes(
     if new_footnotes_rid:
         new_ct_parts.append(("/word/footnotes.xml", docx_parts.FOOTNOTES_CONTENT_TYPE))
     if new_ct_parts:
-        ct_root = ET.fromstring(originals["[Content_Types].xml"])
+        ct_root = ET.fromstring(originals["[Content_Types].xml"])  # noqa: S314
         for part_name, content_type in new_ct_parts:
             override = ET.SubElement(ct_root, _ct("Override"))
             override.set("PartName", part_name)
@@ -778,7 +778,7 @@ def _flag_only_entry(
     issue: dict[str, Any],
     reason: str,
     *,
-    patch_reasons: "Optional[list[dict[str, Any]]]" = None,
+    patch_reasons: "Optional[list[dict[str, Any]]]" = None,  # noqa: UP037, UP045
 ) -> dict[str, Any]:
     """One `flag_only` entry -- the shape BOTH redline paths produce and
     every consumer of `flag_only` reads (`{new_text, rationale, reason,
@@ -824,11 +824,11 @@ def _labelled_flag_only_reason(issue: dict[str, Any]) -> str:
 def generate_redline(
     *,
     reconciled_result: dict[str, Any],
-    corpus: "leakage_scan.ConfidentialCorpus",
+    corpus: "leakage_scan.ConfidentialCorpus",  # noqa: UP037
     normalized_docx_bytes: bytes,
-    review_id: Optional[str] = None,
-    audit_write: Optional[Callable[..., None]] = None,
-    current_counterparty_name: Optional[str] = None,
+    review_id: Optional[str] = None,  # noqa: UP045
+    audit_write: Optional[Callable[..., None]] = None,  # noqa: UP045
+    current_counterparty_name: Optional[str] = None,  # noqa: UP045
     author: str = docx_parts.DEFAULT_AUTHOR,
     date: Any = None,
     notes_mode: str = "external",
@@ -1200,7 +1200,7 @@ def _build_analysis_report(
     flag_only: list[dict[str, Any]],
     *,
     has_attempted_failure: bool,
-    transcript_failures: Optional[list[dict[str, Any]]] = None,
+    transcript_failures: Optional[list[dict[str, Any]]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """The `analysis_report` artifact (docs/output-contract.md ->
     "Fail-closed internal analysis report" -> "Format") for the issues that
@@ -1312,15 +1312,15 @@ def _joined_footnote_text(issue, notes_mode: str) -> str:
 def generate_redline_from_blocks(
     *,
     reconciled_result: dict[str, Any],
-    corpus: "leakage_scan.ConfidentialCorpus",
+    corpus: "leakage_scan.ConfidentialCorpus",  # noqa: UP037
     normalized_docx_bytes: bytes,
-    review_id: Optional[str] = None,
-    audit_write: Optional[Callable[..., None]] = None,
-    current_counterparty_name: Optional[str] = None,
+    review_id: Optional[str] = None,  # noqa: UP045
+    audit_write: Optional[Callable[..., None]] = None,  # noqa: UP045
+    current_counterparty_name: Optional[str] = None,  # noqa: UP045
     author: str = docx_parts.DEFAULT_AUTHOR,
     date: Any = None,
     notes_mode: str = "external",
-    pen_rules_bundle: Optional[dict[str, Any]] = None,
+    pen_rules_bundle: Optional[dict[str, Any]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Block-mode (v3) analogue of `generate_redline` -- issue #626.
 
@@ -1570,7 +1570,7 @@ def generate_redline_from_blocks(
         issue_key: _joined_footnote_text(issues_by_key.get(issue_key), notes_mode)
         for issue_key in by_issue
     }
-    compile_result: Optional[dict[str, Any]] = None
+    compile_result: Optional[dict[str, Any]] = None  # noqa: UP045
     attempted = _transcript_has_edits(proven)
 
     # One iteration per issue that could still be rolled back, plus the

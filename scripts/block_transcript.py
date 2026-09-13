@@ -534,7 +534,7 @@ def _prove_patch(patch: dict[str, Any], block: dict[str, Any]) -> dict[str, Any]
 
     final_parts: list[str] = []
     for op in ops:
-        if op["op"] == "keep":
+        if op["op"] == "keep":  # noqa: SIM114
             final_parts.append(op["text"])
         elif op["op"] == "insert":
             final_parts.append(op["text"])

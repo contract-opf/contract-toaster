@@ -213,7 +213,7 @@ def test_churn_that_changes_physical_shape_leaves_the_logical_ids_alone(
             "[churn] split_paragraphs did not change any paragraph's physical "
             f"shape ({baseline_spans!r}) -- the fixture is not exercising churn"
         )
-    elif not any(s > b for s, b in zip(split_spans, baseline_spans)):
+    elif not any(s > b for s, b in zip(split_spans, baseline_spans)):  # noqa: B905
         failures.append(
             f"[churn] expected split_paragraphs to ADD physical siblings; "
             f"baseline={baseline_spans!r} split={split_spans!r}"

@@ -49,12 +49,14 @@ import AdminDiagnostics, { RecentFailure } from '../AdminDiagnostics';
 import { explainFailure, REASON_EXPLANATIONS } from '../ReviewSubmission';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
 }));
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -87,6 +89,7 @@ const EXPECTED_FIX =
 function stubFetch(body: unknown): void {
   vi.stubGlobal(
     'fetch',
+    // eslint-disable-next-line @typescript-eslint/require-await
     vi.fn(async () => ({ ok: true, status: 200, json: async () => body }) as Response),
   );
 }

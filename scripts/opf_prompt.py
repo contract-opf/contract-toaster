@@ -137,7 +137,7 @@ import json
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence  # noqa: UP035
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -248,7 +248,7 @@ def _strip_x_keys(value: Any) -> Any:
     return value
 
 
-def _posture_block(opf_doc: dict, overrides: Optional[dict] = None) -> str | None:
+def _posture_block(opf_doc: dict, overrides: Optional[dict] = None) -> str | None:  # noqa: UP045
     """`overrides.posture.system_prompt` verbatim when a governed
     Posture-version override is given (issue #294 scope item 4 -- a GC
     single-item correction lever); otherwise `posture.system_prompt`
@@ -495,7 +495,7 @@ def _digest_block(opf_doc: dict) -> str:
     return f"{DIGEST_INTRO}\n\n{body}"
 
 
-def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:
+def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:  # noqa: UP045
     """Union of `opf.floor.invariants` and `overrides.floor_additions`,
     genesis first, stable order (issue #294 scope item 4). No dedup logic
     needed: `scripts/bind_bundle.py::bind_bundle` already rejects any
@@ -516,7 +516,7 @@ def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) ->
     return invariants
 
 
-def policy_rules_by_strength(policy: Optional[dict], strength: str) -> list[dict]:
+def policy_rules_by_strength(policy: Optional[dict], strength: str) -> list[dict]:  # noqa: UP045
     """Renderable policy rules of `strength`, in document order.
 
     Guarded like every other renderer here (a policy reaches this module as a
@@ -554,7 +554,7 @@ def policy_rules_by_strength(policy: Optional[dict], strength: str) -> list[dict
 
 
 def _binding_block(
-    opf_doc: dict, overrides: Optional[dict] = None, policy: Optional[dict] = None
+    opf_doc: dict, overrides: Optional[dict] = None, policy: Optional[dict] = None  # noqa: UP045
 ) -> str | None:
     """The rules that bind: Floor invariants, then policy `must` rules.
 
@@ -629,7 +629,7 @@ def _binding_block(
     return "\n".join(lines)
 
 
-def _guidance_block(policy: Optional[dict] = None) -> str | None:
+def _guidance_block(policy: Optional[dict] = None) -> str | None:  # noqa: UP045
     """Policy `should` rules, verbatim. None when the policy has none.
 
     Separate from the Binding block because `should` and `must` are different
@@ -712,7 +712,7 @@ def _recognition_key(name: str) -> str:
 
 
 def resolve_party_recognition_set(
-    opf_doc: dict, entity_roster: Optional[Sequence[str]] = None
+    opf_doc: dict, entity_roster: Optional[Sequence[str]] = None  # noqa: UP045
 ) -> list[str]:
     """Every legal-entity name that IS us, as ONE flat, deduplicated,
     source-free list (issue #678).
@@ -774,7 +774,7 @@ def resolve_party_recognition_set(
     return sorted(by_identity.values(), key=lambda n: (_recognition_key(n), n))
 
 
-def _context_block(opf_doc: dict, entity_roster: Optional[Sequence[str]] = None) -> str | None:
+def _context_block(opf_doc: dict, entity_roster: Optional[Sequence[str]] = None) -> str | None:  # noqa: UP045
     """`perspective` and `de_minimis`, only if at least one is present in
     the source doc. Returns None (no block emitted) when neither is
     present.
@@ -816,13 +816,13 @@ def _context_block(opf_doc: dict, entity_roster: Optional[Sequence[str]] = None)
 
 def compose_opf_system_blocks(
     opf_doc: dict,
-    overrides: Optional[dict] = None,
+    overrides: Optional[dict] = None,  # noqa: UP045
     *,
-    policy: Optional[dict] = None,
+    policy: Optional[dict] = None,  # noqa: UP045
     mode: str = MODE_PLAYBOOK_DIGEST,
     instructions_text: str = "",
-    entity_roster: Optional[Sequence[str]] = None,
-    omissions_out: Optional[dict[str, list]] = None,
+    entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
+    omissions_out: Optional[dict[str, list]] = None,  # noqa: UP045
 ) -> list[str]:
     """Compose an OPF document's knowledge into review system-prompt blocks.
 

@@ -70,7 +70,7 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
-import boto3
+import boto3  # noqa: I001
 from moto import mock_aws
 
 from ddb_fixtures import create_submissions_table
@@ -120,7 +120,7 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
     if not node_modules.is_dir():
         print("  (node_modules absent -- running npm install first …)")
         install = subprocess.run(
-            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,
+            ["npm", "install"], cwd=INFRA, capture_output=True, text=True,  # noqa: S607
         )
         if install.returncode != 0:
             return _assert(
@@ -128,8 +128,8 @@ def _run_cdk_synth() -> tuple[list[str], Path | None]:
                 f"stderr: {install.stderr[-500:]}",
             ), None
 
-    result = subprocess.run(
-        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],
+    result = subprocess.run(  # noqa: S603
+        ["npx", "cdk", "synth", "--context", "env=dev", *NEUTRAL_CDK_CONTEXT, "--quiet"],  # noqa: S607
         cwd=INFRA,
         capture_output=True,
         text=True,
@@ -458,7 +458,7 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         # 1. The REAL acquire()/release() functions, exec'd from the exact
         #    source embedded in pipeline-stack.ts (not a re-implementation).
         semaphore_ns: dict = {}
-        exec(compile(semaphore_src, "<pipeline-stack.ts:semaphoreCode>", "exec"), semaphore_ns)
+        exec(compile(semaphore_src, "<pipeline-stack.ts:semaphoreCode>", "exec"), semaphore_ns)  # noqa: S102
 
         tables: dict[str, _FakeSemaphoreTable] = {}
         client_error_cls = semaphore_ns["ClientError"]
@@ -480,7 +480,7 @@ def _run_real_stage_chain_and_get_final_count(semaphore_src: str, stub_src: str)
         # 2. The REAL Phase-0 stub source (extract/retrieve/redline/audit),
         #    exec'd from the exact source embedded in pipeline-stack.ts.
         stub_ns: dict = {}
-        exec(compile(stub_src, "<pipeline-stack.ts:stubHandlerCode>", "exec"), stub_ns)
+        exec(compile(stub_src, "<pipeline-stack.ts:stubHandlerCode>", "exec"), stub_ns)  # noqa: S102
         stub_handler = stub_ns["handler"]
 
         # 3. The REAL mock_review handler -- the culprit stage (issue #190

@@ -45,7 +45,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -68,7 +68,7 @@ POLICY_SCHEMA_PATH = PLAYBOOKS_DIR / "policy.schema.json"
 #: <playbook_id>-policy-v<N>.json — N is an integer, no leading zeros.
 POLICY_FILENAME_RE = re.compile(r"^(?P<playbook_id>[a-z0-9][a-z0-9-]*)-policy-v(?P<version>[1-9]\d*)\.json$")
 
-_SCHEMA_CACHE: Optional[dict] = None
+_SCHEMA_CACHE: Optional[dict] = None  # noqa: UP045
 
 
 class PolicyValidationError(ValueError):
@@ -105,7 +105,7 @@ def list_policy_versions(playbook_id: str, playbooks_dir: Path = PLAYBOOKS_DIR) 
 
 def resolve_latest_policy_path(
     playbook_id: str, playbooks_dir: Path = PLAYBOOKS_DIR
-) -> Optional[Path]:
+) -> Optional[Path]:  # noqa: UP045
     """Path to the highest-versioned policy for *playbook_id*, or None.
 
     None means "this playbook has no policy document", which is a legitimate

@@ -102,7 +102,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -511,7 +511,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
         # deliberately never read -- the allowlist is enforced by never
         # calling zf.read() on anything but ALLOWED_DOCUMENT_PART.
 
-    root = ET.fromstring(document_xml)
+    root = ET.fromstring(document_xml)  # noqa: S314
     body = root.find(_w("body"))
     if body is None:
         return []
@@ -962,7 +962,7 @@ def materialize_accept_all_with_report(docx_bytes: bytes) -> tuple[bytes, dict[s
         ooxml_util.declared_namespaces_anywhere(original_document_xml)
     )
 
-    root = ET.fromstring(originals[ALLOWED_DOCUMENT_PART])
+    root = ET.fromstring(originals[ALLOWED_DOCUMENT_PART])  # noqa: S314
     accepted: dict[str, int] = {}
     _splice_accept_all(root, accepted)
     # Whatever revision markup survives the splice is, by definition, a kind
@@ -1029,7 +1029,7 @@ def _block_id(position: int) -> str:
 
 def build_block_map(
     normalized_paragraphs: list[dict[str, Any]],
-) -> "OrderedDict[str, dict[str, Any]]":
+) -> "OrderedDict[str, dict[str, Any]]":  # noqa: UP037
     """
     Addressing view over `normalize_paragraphs`' logical-paragraph records
     (issue #619): an ORDERED mapping `block_id -> {"text", "heading",
@@ -1053,7 +1053,7 @@ def build_block_map(
     `block_id`, or a duplicate id, raises `ValueError`. A block map is only
     trustworthy if it is 1:1 with the paragraphs it addresses.
     """
-    block_map: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+    block_map: "OrderedDict[str, dict[str, Any]]" = OrderedDict()  # noqa: UP037
     for index, paragraph in enumerate(normalized_paragraphs):
         block_id = paragraph.get("block_id")
         if not block_id:

@@ -63,7 +63,7 @@ os.environ["REVIEWS_TABLE"] = "contract-toaster-reviews-test"
 os.environ["REVIEW_SUBMISSIONS_TABLE"] = "contract-toaster-review-submissions-test"
 os.environ["DAILY_SPEND_TABLE"] = "contract-toaster-daily-spend-test"
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.pipeline_runner as pipeline_runner  # noqa: E402

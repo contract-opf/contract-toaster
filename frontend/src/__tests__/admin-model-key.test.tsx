@@ -15,6 +15,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminModel, { ModelKeySettings } from '../AdminModel';
 
 vi.mock('../auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   getToken: vi.fn(async () => 'mock-token'),
   isPasswordMode: () => true,
   setDemoToken: vi.fn(),
@@ -92,13 +93,16 @@ function stubModelKeyFetch(handlers: {
    */
   selection?: () => { status: number; body: unknown };
 }): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = String(input);
     if (url.includes('/api/admin/model-selection')) {
       const selection = handlers.selection?.() ?? { status: 200, body: INERT_SELECTION };
       return {
         ok: selection.status >= 200 && selection.status < 300,
         status: selection.status,
+        // eslint-disable-next-line @typescript-eslint/require-await
         json: async () => selection.body,
       } as Response;
     }
@@ -110,11 +114,13 @@ function stubModelKeyFetch(handlers: {
           ? handlers.delete?.()
           : handlers.get?.();
     if (!handler) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     return {
       ok: handler.status >= 200 && handler.status < 300,
       status: handler.status,
+      // eslint-disable-next-line @typescript-eslint/require-await
       json: async () => handler.body,
     } as Response;
   });
@@ -179,6 +185,7 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const input = (await screen.findByTestId('admin-model-key-input')) as HTMLInputElement;
     // A password input is what keeps the key off-screen while it is typed.
     expect(input.type).toBe('password');
@@ -198,6 +205,7 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     });
     render(<AdminModel />);
 
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const input = (await screen.findByTestId('admin-model-key-input')) as HTMLInputElement;
     fireEvent.change(input, { target: { value: KEY } });
     fireEvent.click(screen.getByTestId('admin-model-save'));
@@ -210,6 +218,7 @@ describe('AdminModel — the instance-wide OpenRouter key', () => {
     expect(JSON.parse((post?.[1] as RequestInit).body as string)).toEqual({ api_key: KEY });
 
     // The secret must not survive in component state after a successful save.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     expect((screen.getByTestId('admin-model-key-input') as HTMLInputElement).value).toBe('');
     expect(await screen.findByTestId('admin-model-key-fingerprint')).toHaveTextContent('a1b2c3d4');
   });

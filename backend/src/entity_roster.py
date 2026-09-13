@@ -103,7 +103,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable  # noqa: UP035
 
 from fastapi import HTTPException, status
 
@@ -302,7 +302,7 @@ def resolve_entity_roster(dynamodb_resource: Any = None) -> tuple[str, ...]:
         return ()
     try:
         return tuple(_stored_entities(dynamodb_resource))
-    except Exception:  # noqa: BLE001 - degrade to the playbook's own party, never wedge a review
+    except Exception:  # degrade to the playbook's own party, never wedge a review
         logger.warning(
             "Could not read the admin-set entity roster; this review recognises "
             "only the playbook's own perspective.party.",
@@ -398,7 +398,7 @@ def set_entity_roster(
     existing_history = current_row.get("history") or []
     if not isinstance(existing_history, list):
         existing_history = []
-    updated_history = [history_entry] + existing_history
+    updated_history = [history_entry] + existing_history  # noqa: RUF005
     updated_history = updated_history[:MAX_HISTORY_ENTRIES]
 
     # Issue #59: no provisioning fallback here either. A missing table is a

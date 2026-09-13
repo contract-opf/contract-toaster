@@ -46,7 +46,7 @@ import logging
 import os
 from dataclasses import asdict
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import model_client
@@ -56,7 +56,7 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
-def _record_to_item(record: "model_client.ModelInvocationRecord") -> dict[str, Any]:
+def _record_to_item(record: "model_client.ModelInvocationRecord") -> dict[str, Any]:  # noqa: UP037
     """`ModelInvocationRecord` -> a DynamoDB-`put_item`-ready dict.
 
     `dataclasses.asdict` is the metadata-only invariant enforced by
@@ -76,7 +76,7 @@ def _record_to_item(record: "model_client.ModelInvocationRecord") -> dict[str, A
 
 def make_ledger_write(
     review_id: str, dynamodb_resource: Any
-) -> Callable[["model_client.ModelInvocationRecord"], None]:
+) -> Callable[["model_client.ModelInvocationRecord"], None]:  # noqa: UP037
     """Build the `ledger_write` callable `run_real_pipeline` passes into
     `review_spine.run_review` for ONE review.
 
@@ -90,7 +90,7 @@ def make_ledger_write(
     "Ledger write failures must NEVER fail a review".
     """
 
-    def _ledger_write(record: "model_client.ModelInvocationRecord") -> None:
+    def _ledger_write(record: "model_client.ModelInvocationRecord") -> None:  # noqa: UP037
         if record.review_id != review_id:
             logger.warning(
                 "model-invocation ledger write skipped: record review_id did not "

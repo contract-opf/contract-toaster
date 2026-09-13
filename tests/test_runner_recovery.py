@@ -131,7 +131,7 @@ os.environ.setdefault(
 # this file is about, and softening `reserve_spend` itself would be.
 os.environ.setdefault("DAILY_SPEND_CAP_USD_CENTS", "500000")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.main as backend_main  # noqa: E402
@@ -195,7 +195,7 @@ class AwsShapedSfnClient:
         class ExecutionAlreadyExists(Exception):
             pass
 
-    def start_execution(self, *, stateMachineArn: str, name: str, input: str) -> dict:  # noqa: A002,N803
+    def start_execution(self, *, stateMachineArn: str, name: str, input: str) -> dict:  # noqa: A002, N803
         prefix = stateMachineArn.replace(":stateMachine:", ":execution:")
         return {"executionArn": f"{prefix}:{name}", "startDate": int(time.time())}
 
@@ -888,7 +888,7 @@ class TestLifespanRecovery(LifespanFixture):
         self.assertEqual(self.rows()[ORPHAN_INPROCESS]["status"], "ERROR")
 
     def test_a_failing_recovery_does_not_stop_the_api_booting(self) -> None:
-        with patch.object(
+        with patch.object(  # noqa: SIM117
             backend_main.runner_recovery,
             "recover_orphaned_reviews",
             side_effect=RuntimeError("dynamodb is unreachable"),
@@ -998,7 +998,7 @@ class TestInFlightTracking(unittest.TestCase):
     def test_a_review_whose_body_raised_leaves_the_in_flight_set(self) -> None:
         class SyncPool:
             def submit(self, fn, *args):
-                try:
+                try:  # noqa: SIM105
                     fn(*args)
                 except RuntimeError:
                     pass

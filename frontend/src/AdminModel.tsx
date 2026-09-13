@@ -673,6 +673,7 @@ export default function AdminModel({
         </CtCard>
       ) : (
         <CtCard data-testid="admin-model-selection-body">
+          {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form onSubmit={handleSaveModels} className="ct-stack">
             <p>
               Every review runs twice: a primary reviewer marks the document up, then a second
@@ -841,6 +842,7 @@ export default function AdminModel({
               )}
             </p>
 
+            {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
             <form onSubmit={handleSave} className="ct-stack">
               <CtField label={settings.key_source === 'admin' ? 'Replace the key' : 'OpenRouter API key'}>
                 <input

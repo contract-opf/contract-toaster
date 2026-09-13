@@ -70,19 +70,19 @@ def _validate(obj, schema: dict, root_schema: dict, path: str = "") -> list:
             errors.append(f"{path}: expected type {schema_type!r}, got {type(obj).__name__!r}")
             return errors
 
-    if "enum" in schema:
+    if "enum" in schema:  # noqa: SIM102
         if obj not in schema["enum"]:
             errors.append(f"{path}: {obj!r} not in enum {schema['enum']!r}")
 
-    if "const" in schema:
+    if "const" in schema:  # noqa: SIM102
         if obj != schema["const"]:
             errors.append(f"{path}: {obj!r} does not match const {schema['const']!r}")
 
-    if "maxLength" in schema and isinstance(obj, str):
+    if "maxLength" in schema and isinstance(obj, str):  # noqa: SIM102
         if len(obj) > schema["maxLength"]:
             errors.append(f"{path}: string length {len(obj)} exceeds maxLength {schema['maxLength']}")
 
-    if "minLength" in schema and isinstance(obj, str):
+    if "minLength" in schema and isinstance(obj, str):  # noqa: SIM102
         if len(obj) < schema["minLength"]:
             errors.append(f"{path}: string length {len(obj)} less than minLength {schema['minLength']}")
 
@@ -151,7 +151,7 @@ def check_group_naming_decision(failures: list) -> None:
     # mistake risk the issue calls out.
 
     has_misnomer_note = False
-    for path, text in texts_to_search:
+    for path, text in texts_to_search:  # noqa: B007
         # Pattern (a): explicit "misnomer" near the group name (within 600 chars)
         misnomer_near_group = False
         for m in re.finditer(r"legal-admin@company\.com", text, re.IGNORECASE):

@@ -64,7 +64,7 @@ os.environ.setdefault(
 )
 
 import bind_bundle  # noqa: E402
-import opf_canonicalize  # noqa: E402
+import opf_canonicalize  # noqa: E402, F401
 import opf_load  # noqa: E402
 import playbook_registry  # noqa: E402
 import policy_load  # noqa: E402

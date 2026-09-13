@@ -39,7 +39,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator  # noqa: UP035
 from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

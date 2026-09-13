@@ -67,7 +67,7 @@ os.environ.setdefault("MODEL_SETTINGS_TABLE", "contract-toaster-model-settings-t
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "contract-toaster-daily-spend-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
@@ -232,7 +232,7 @@ class TestSelectableAllowlist(unittest.TestCase):
 
     def test_enforcement_still_refuses_an_arbitrary_id(self):
         """`selectable` widens the check; it must not delete it."""
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True):  # noqa: SIM117
             with self.assertRaises(model_client.OpenRouterModelPolicyViolation):
                 model_client.enforce_openrouter_policy_model_id(ARBITRARY_ID)
 
@@ -310,7 +310,7 @@ class TestShippedDefaults(ModelSelectionTestBase):
         with _no_env_overrides():
             self.assertNotEqual(model_client.openrouter_primary_model_id(), OPUS_48)
         self.assertNotIn(OPUS_48, model_client.openrouter_selectable_model_ids())
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True):  # noqa: SIM117
             with self.assertRaises(model_client.OpenRouterModelPolicyViolation):
                 model_client.enforce_openrouter_policy_model_id(OPUS_48)
 
@@ -380,7 +380,7 @@ class TestLiveClientHonorsTheAllowlist(unittest.TestCase):
 
     def test_an_unlisted_model_is_refused_before_any_request(self):
         http = FakeHttpClient()
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True):  # noqa: SIM117
             with self.assertRaises(model_client.OpenRouterModelPolicyViolation):
                 self._client(http).invoke(
                     model_id=ARBITRARY_ID,
@@ -444,7 +444,7 @@ class TestResolutionPrecedence(ModelSelectionTestBase):
                 "critic_model_id": "",
             }
         )
-        with _no_env_overrides():
+        with _no_env_overrides():  # noqa: SIM117
             with self.assertLogs("src.model_client", level="WARNING"):
                 resolved = model_settings.resolve_openrouter_model_ids(self.ddb)
         self.assertEqual(resolved["primary"], policy["models"]["primary"]["model_id"])
@@ -460,7 +460,7 @@ class TestResolutionPrecedence(ModelSelectionTestBase):
 
     def test_ddb_read_failure_degrades_to_the_default(self):
         policy = _policy()
-        with _no_env_overrides():
+        with _no_env_overrides():  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
                 resolved = model_settings.resolve_openrouter_model_ids(ExplodingResource())
         self.assertEqual(resolved["primary"], policy["models"]["primary"]["model_id"])
@@ -477,7 +477,7 @@ class TestResolutionPrecedence(ModelSelectionTestBase):
         paid for once).
         """
         policy = _policy()
-        with _no_env_overrides():
+        with _no_env_overrides():  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
                 settings = model_settings.get_model_selection_settings(
                     ADMIN, ExplodingResource()
@@ -609,13 +609,13 @@ class TestNoStoreDegradation(ModelSelectionTestBase):
         self.assertTrue(settings["selectable"])
 
     def test_set_is_refused(self):
-        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):
+        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):  # noqa: SIM117
             with self.assertRaises(HTTPException) as ctx:
                 model_settings.set_model_selection(NON_ANTHROPIC_ID, "", ADMIN, self.ddb)
         self.assertEqual(ctx.exception.status_code, 400)
 
     def test_non_admin_still_gated_without_a_store(self):
-        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):
+        with patch.dict(os.environ, {"MODEL_SETTINGS_TABLE": ""}):  # noqa: SIM117
             with self.assertRaises(HTTPException) as ctx:
                 model_settings.get_model_selection_settings(NON_ADMIN, self.ddb)
         self.assertEqual(ctx.exception.status_code, 403)
@@ -631,7 +631,7 @@ class TestPipelineUsesTheSelection(ModelSelectionTestBase):
     `bundle["playbook"]["metadata"]`. If the selection does not land there, the
     picker changes nothing."""
 
-    BUNDLE = {"playbook": {"metadata": {"primary_model_id": "anthropic.claude-opus-4-8"}}}
+    BUNDLE = {"playbook": {"metadata": {"primary_model_id": "anthropic.claude-opus-4-8"}}}  # noqa: RUF012
 
     def test_selection_lands_in_the_bundle_the_spine_reads(self):
         model_settings.set_model_selection(
@@ -742,7 +742,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
                 reviews.MAX_INPUT_TOKENS * rates["cost_per_million_input_usd"] / 1_000_000
                 + reviews.MAX_OUTPUT_TOKENS * rates["cost_per_million_output_usd"] / 1_000_000
             )
-        return int(round(attempts * total * 100))
+        return int(round(attempts * total * 100))  # noqa: RUF046
 
     def _reserved_cents(self) -> int:
         table = self.ddb.Table(os.environ["DAILY_SPEND_TABLE"])
@@ -825,7 +825,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         model_settings.set_model_selection(CHEAPEST_ID, CHEAPEST_ID, ADMIN, self.ddb)
         usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
         rates = self._rates(CHEAPEST_ID)
-        expected = int(
+        expected = int(  # noqa: RUF046
             round(
                 2
                 * (rates["cost_per_million_input_usd"] + rates["cost_per_million_output_usd"])
@@ -850,7 +850,7 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
         self.assertEqual(self._reserved_cents(), self._expected_cents(*self._default_pair()))
 
     def test_a_ddb_blip_reserves_the_default_rather_than_failing_the_review(self):
-        with _no_env_overrides():
+        with _no_env_overrides():  # noqa: SIM117
             with self.assertLogs("src.model_settings", level="WARNING"):
                 cents = reviews.compute_worst_case_reservation_usd_cents(ExplodingResource())
         self.assertEqual(cents, self._expected_cents(*self._default_pair()))

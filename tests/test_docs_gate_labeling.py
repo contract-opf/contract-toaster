@@ -114,7 +114,7 @@ def check_gate_kind_marker_importable() -> list[str]:
             continue
         try:
             module = _load_module(path)
-        except Exception as e:  # pragma: no cover - environment-dependent
+        except Exception as e:  # pragma: no cover - environment-dependent  # noqa: BLE001
             failures.append(
                 f"  tests/{filename} raised {e!r} on import; cannot verify\n"
                 f"  GATE_KIND at runtime. (issue #196)"
@@ -199,7 +199,7 @@ def check_no_active_bundle_gate_1a_behavioral() -> list[str]:
                     "  outcome or explicitly skip with a documented reason,\n"
                     "  never silently no-op. (issue #196)"
                 )
-    except Exception as e:  # pragma: no cover - environment-dependent
+    except Exception as e:  # pragma: no cover - environment-dependent  # noqa: BLE001
         failures.append(
             f"  tests/test_no_active_bundle.py raised {e!r} while running\n"
             f"  gate_1a_route_refusal_behavioral(). (issue #196)"

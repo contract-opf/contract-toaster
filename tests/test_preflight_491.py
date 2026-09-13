@@ -89,7 +89,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("ENV_NAME", "dev")
 
-import src.model_client as model_client  # noqa: E402
+import src.model_client as model_client  # noqa: E402, I001
 import src.review_routes as review_routes  # noqa: E402
 import src.reviews as reviews_module  # noqa: E402
 import src.upload_validation as upload_validation  # noqa: E402

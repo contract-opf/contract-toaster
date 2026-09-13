@@ -248,7 +248,7 @@ def check_gc_alarm() -> list[str]:
     )
 
     found = False
-    for fname, text in texts.items():
+    for fname, text in texts.items():  # noqa: B007
         if gc_alarm_pattern.search(text):
             found = True
             break

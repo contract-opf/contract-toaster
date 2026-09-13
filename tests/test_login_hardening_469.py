@@ -61,7 +61,7 @@ os.environ.setdefault("AUTH_SETTINGS_TABLE", "contract-toaster-auth-settings-log
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-loginhardening-test")
 os.environ.setdefault("DEMO_TOKEN_SECRET", "unit-test-demo-secret")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -129,7 +129,7 @@ class TestThrottleSchedule(unittest.TestCase):
     def test_exponential_delay_from_soft_threshold(self):
         soft = demo_auth._THROTTLE_SOFT_FAIL_THRESHOLD
         delays = [demo_auth._throttle_delay_seconds(soft + i) for i in range(4)]
-        for earlier, later in zip(delays, delays[1:]):
+        for earlier, later in zip(delays, delays[1:]):  # noqa: B905, RUF007
             self.assertGreater(later, earlier, "delay must grow with each additional failure")
         self.assertTrue(all(d > 0 for d in delays))
 
@@ -194,9 +194,9 @@ class TestLoginThrottle(LoginHardeningTestBase):
 
     def test_correct_password_during_lockout_is_still_refused(self):
         for _ in range(demo_auth._THROTTLE_HARD_LOCKOUT_THRESHOLD):
-            try:
+            try:  # noqa: SIM105
                 demo_auth.login_with_password("admin", "wrong", self.ddb, client_ip="9.9.9.9")
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         with self.assertRaises(Exception) as ctx:
@@ -206,9 +206,9 @@ class TestLoginThrottle(LoginHardeningTestBase):
 
     def test_lockout_clears_once_locked_until_passes(self):
         for _ in range(demo_auth._THROTTLE_HARD_LOCKOUT_THRESHOLD):
-            try:
+            try:  # noqa: SIM105
                 demo_auth.login_with_password("admin", "wrong", self.ddb, client_ip="5.5.5.5")
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         with self.assertRaises(Exception) as ctx:
@@ -222,9 +222,9 @@ class TestLoginThrottle(LoginHardeningTestBase):
 
     def test_independent_usernames_never_share_a_bucket(self):
         for _ in range(demo_auth._THROTTLE_HARD_LOCKOUT_THRESHOLD):
-            try:
+            try:  # noqa: SIM105
                 demo_auth.login_with_password("admin", "wrong", self.ddb, client_ip="7.7.7.7")
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         # "admin" is now locked out at this IP; "user" at the SAME IP must
@@ -234,9 +234,9 @@ class TestLoginThrottle(LoginHardeningTestBase):
 
     def test_successful_login_clears_prior_failures(self):
         for _ in range(3):
-            try:
+            try:  # noqa: SIM105
                 demo_auth.login_with_password("admin", "wrong", self.ddb, client_ip="3.3.3.3")
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
         demo_auth.login_with_password("admin", "admin", self.ddb, client_ip="3.3.3.3")
 

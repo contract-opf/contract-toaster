@@ -1,0 +1,122 @@
+# lint — ruff + mypy (Python) and ESLint + tsc (TypeScript).
+#
+# Issue #65, diagnostic G4 / action B4. Before this workflow no linter,
+# formatter or type checker ran anywhere in the repository: `tsc` ran only
+# inside `npm run build:ci`, and every style and typing rule was enforced by
+# prose review.
+#
+# BASELINE-THEN-RATCHET. Green here means "no NEW violations", not "no
+# violations". The violations that existed when #65 landed are annotated in
+# place and cannot grow:
+#   * ruff   — `# noqa: <rule>` comments added by `ruff check --add-noqa`.
+#   * mypy   — per-module `[[tool.mypy.overrides]] ignore_errors = true`
+#              entries in pyproject.toml, mirrored in `mypy-baseline.txt`.
+#              tests/test_lint_gates_65.py fails if that list grows, or if it
+#              keeps a module mypy now passes.
+#   * ESLint — `eslint-disable-next-line` comments written by
+#              `frontend/scripts/eslint-baseline.mjs`.
+# Deleting an annotation is how the debt gets paid down; adding one shows up in
+# a diff where a reviewer can see it.
+#
+# Which is why ruff's RUF100 ("unused `noqa` directive") is selected and stays
+# selected: it is what TELLS you an annotation is now dead, once the code under
+# it is fixed. A directive that names RUF100 among its own codes suppresses
+# that report and pins itself in the tree forever — and `--add-noqa` writes
+# exactly such directives, so tests/test_lint_gates_65.py check 8 scans the
+# whole tree for them. Hand-written directives for rules `select` leaves off
+# are declared once in `[tool.ruff.lint] external`, never masked line by line.
+#
+# `ruff format --check` and `prettier --check` are deliberately NOT run here. A
+# whole-tree reformat collides with the in-flight #50-#59 series, and CLAUDE.md
+# warns that no gate in this repo can see a stylesheet. Follow-up issue #90
+# turns both on once that series has landed; tests/test_lint_gates_65.py
+# asserts `ruff format` appears in neither this file nor scripts/check.sh until
+# then, so "not yet" cannot quietly become "never noticed".
+#
+# RELATED
+#   scripts/check.sh runs the same ruff/mypy pair as a fast pre-step, and
+#   scripts/land.sh runs it as its first gate, so a contributor sees a lint
+#   regression before the push rather than after it.
+#   The Python version pinned below is the repository's one declared
+#   interpreter (#63); tests/test_python_version_parity_63.py fails if this
+#   file drifts from `.python-version`, and it names this workflow in its
+#   frozen list of pinned workflows.
+
+name: lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  python-lint:
+    name: Python lint + types (ruff, mypy)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install the lint toolchain
+        # ruff and mypy are PINNED in requirements-dev.txt, alongside the rest
+        # of the gate's dependencies, so this job and a local
+        # `bash scripts/check.sh` run the same versions. An unpinned bump adds
+        # rules and would turn someone else's push red for a reason their diff
+        # did not cause. mypy also needs the runtime packages on the path to
+        # resolve third-party imports, so backend/requirements.txt comes too —
+        # without it every `import fastapi` is an unresolved-import error and
+        # the baseline this job compares against is meaningless.
+        run: |
+          python3 -m pip install --disable-pip-version-check --quiet \
+            -r requirements-dev.txt -r backend/requirements.txt
+
+      - name: ruff check
+        # The same four roots scripts/check.sh lints. NOT `ruff format --check`
+        # — see the header.
+        run: ruff check backend scripts tests infra/lambda
+
+      - name: mypy
+        # Roots and strictness come from `[tool.mypy]` in pyproject.toml.
+        run: mypy
+
+      - name: Lint-gate invariants (baseline can only shrink)
+        # Reads the committed pyproject.toml / mypy-baseline.txt / this file /
+        # frontend/package.json and re-runs ruff and mypy for real. This is the
+        # test that keeps the baselines honest.
+        run: python3 tests/test_lint_gates_65.py
+
+  frontend-lint:
+    name: Frontend lint + types (eslint, tsc)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # `working-directory:` is repeated on each step rather than hoisted into a
+      # job-level `defaults: run:` block. That block contains a `run:` key that
+      # is NOT a step body, and tests/test_ci_env_parity_639.py check 0h counts
+      # raw `run:` keys against parsed step bodies to prove its scanner is not
+      # silently reading less of a workflow than it contains — a `defaults:`
+      # block makes that count disagree and takes the whole CI-parity gate red.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: npm run lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: npm run typecheck
+        working-directory: frontend
+        run: npm run typecheck

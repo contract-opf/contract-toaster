@@ -41,7 +41,7 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -53,7 +53,7 @@ if str(BACKEND_ROOT) not in sys.path:
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-test")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi import HTTPException  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -174,7 +174,7 @@ def test_every_former_copy_now_resolves_to_the_authz_objects() -> None:
     """Name-level proof that the replacement actually happened: importing a
     module and finding some other function bound to `is_admin` would pass
     check 1 (no `def`) while still being a second predicate."""
-    from src import admin_dashboard, audit_queries, bundle_authoring, corpus
+    from src import admin_dashboard, audit_queries, bundle_authoring, corpus  # noqa: I001
     from src import download, entity_roster, main, model_settings
     from src import retention, reviews
 
@@ -216,7 +216,7 @@ class _Harness:
     """A moto-backed `users` + `audit` pair, same shape as
     tests/test_user_update_reserved_keyword.py's harness."""
 
-    def __enter__(self) -> "_Harness":
+    def __enter__(self) -> "_Harness":  # noqa: UP037
         self._mock_aws = mock_aws()
         self._mock_aws.start()
         self.ddb = boto3.resource("dynamodb", region_name="us-east-1")

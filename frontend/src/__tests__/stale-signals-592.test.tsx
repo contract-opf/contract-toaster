@@ -34,6 +34,7 @@ import App from '../App';
 import ReviewSubmission from '../ReviewSubmission';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -60,15 +61,20 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     let currentVersion = { version: '0', commit: 'aaaaaaaa11111111', image_digest: '', uptime_seconds: 0 };
+    // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/version') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => currentVersion } as Response;
       }
       if (pathname === '/api/me') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ is_admin: false }) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', impl);
@@ -95,18 +101,24 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
 
     let versionShouldFail = true;
     const goodVersion = { version: '2', commit: 'cccccccc33333333', image_digest: '', uptime_seconds: 0 };
+    // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/version') {
         if (versionShouldFail) {
+          // eslint-disable-next-line @typescript-eslint/require-await
           return { ok: false, status: 503, json: async () => ({}) } as Response;
         }
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => goodVersion } as Response;
       }
       if (pathname === '/api/me') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ is_admin: false }) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', impl);
@@ -133,7 +145,9 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     let versionCallCount = 0;
+    // eslint-disable-next-line @typescript-eslint/require-await
     const impl = vi.fn(async (input: RequestInfo | URL) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
       const url = typeof input === 'string' ? input : input.toString();
       const pathname = new URL(url, 'http://localhost').pathname;
       if (pathname === '/version') {
@@ -142,15 +156,19 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
           return {
             ok: true,
             status: 200,
+            // eslint-disable-next-line @typescript-eslint/require-await
             json: async () => ({ version: '0', commit: 'aaaaaaaa11111111', image_digest: '', uptime_seconds: 0 }),
           } as Response;
         }
         // The session lapsed while the tab sat idle: the poll now gets a 401.
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: false, status: 401, json: async () => ({}) } as Response;
       }
       if (pathname === '/api/me') {
+        // eslint-disable-next-line @typescript-eslint/require-await
         return { ok: true, status: 200, json: async () => ({ is_admin: false }) } as Response;
       }
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal('fetch', impl);
@@ -174,15 +192,19 @@ describe('version footer re-fetches after a backend redeploy (#592)', () => {
 // --- Grammar fix -------------------------------------------------------
 
 function stubReviewFetch(routes: Record<string, unknown>): void {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const body = routes[key];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', impl);

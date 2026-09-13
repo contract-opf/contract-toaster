@@ -66,7 +66,7 @@ now asserts the closed invariant instead.
 Exit codes: 0 = pass, 1 = fail
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import io
 import sys
@@ -266,7 +266,7 @@ def _tracked_cell_insertion_docx() -> bytes:
 
 def _document_root(docx_bytes: bytes) -> ET.Element:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        return ET.fromstring(zf.read("word/document.xml"))
+        return ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
 
 
 def _revision_markup_counts(docx_bytes: bytes) -> dict[str, int]:

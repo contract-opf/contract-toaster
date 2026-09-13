@@ -120,7 +120,7 @@ def normalize(text: str) -> str:
 
 def _tracked_files() -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True  # noqa: S607
     )
     return [line for line in out.stdout.splitlines() if line.strip()]
 

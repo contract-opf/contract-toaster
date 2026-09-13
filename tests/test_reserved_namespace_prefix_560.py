@@ -62,7 +62,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import extraction_normalization_stage as ens  # noqa: E402
+import extraction_normalization_stage as ens  # noqa: E402, I001
 import leakage_scan  # noqa: E402
 import redline_generate  # noqa: E402
 import ooxml_util  # noqa: E402
@@ -166,7 +166,7 @@ def _apply(docx_bytes: bytes) -> dict:
         normalized_docx_bytes=docx_bytes,
         notes_mode="internal",
         author="Test",
-        date=datetime.datetime(2026, 8, 6, tzinfo=datetime.timezone.utc),
+        date=datetime.datetime(2026, 8, 6, tzinfo=datetime.timezone.utc),  # noqa: UP017
     )
     return {
         "docx_bytes": result.get("docx_bytes"),
@@ -232,12 +232,12 @@ def test_a_legitimate_prefix_is_still_registered(failures: list) -> None:
     """The guard must skip ONLY what ElementTree refuses. A fix that skipped
     every prefix would pass every test above while quietly letting the
     serializer rename bindings this module exists to preserve."""
-    before = dict(getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),
+    before = dict(getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),  # noqa: B009
                           "_namespace_map"))
     ooxml_util.register_declared_namespaces(
         [("ns0", "http://example.com/reserved"), ("mc", "http://example.com/legit")]
     )
-    after = getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),
+    after = getattr(__import__("xml.etree.ElementTree", fromlist=["_namespace_map"]),  # noqa: B009
                     "_namespace_map")
     if after.get("http://example.com/legit") != "mc":
         failures.append("a legitimate prefix was not registered")

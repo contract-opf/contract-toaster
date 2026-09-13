@@ -64,7 +64,7 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 os.environ.setdefault("AUDIT_TABLE", "contract-toaster-audit-59-test")
 os.environ.setdefault("ENTITY_ROSTER_TABLE", "contract-toaster-entity-roster-59-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.config as config  # noqa: E402
@@ -260,7 +260,7 @@ class TestStartupHelperOnDts(MotoTestBase):
         self._create_roster_table()
         spy = SpyResource(self.ddb)
         spy_meta = _CountingMeta(self.ddb.meta, spy)
-        with patch.object(SpyResource, "meta", spy_meta, create=True):
+        with patch.object(SpyResource, "meta", spy_meta, create=True):  # noqa: SIM117
             with patch.dict(os.environ, {"DEPLOY_TARGET": "dts"}):
                 startup_checks.ensure_entity_roster_table(spy)
         self.assertEqual(spy.describe_calls, 1)
@@ -326,7 +326,7 @@ class TestStartupHelperOnAws(MotoTestBase):
         self.assertFalse(self._table_exists())
 
     def test_an_explicit_aws_target_refuses_the_boot_too(self):
-        with patch.dict(os.environ, {"DEPLOY_TARGET": "aws"}):
+        with patch.dict(os.environ, {"DEPLOY_TARGET": "aws"}):  # noqa: SIM117
             with self.assertRaises(SystemExit) as caught:
                 startup_checks.ensure_entity_roster_table(self.ddb)
         self.assertIn("ENTITY_ROSTER_TABLE", str(caught.exception))
@@ -365,7 +365,7 @@ class TestStartupHelperOnAws(MotoTestBase):
         class ThrottlingResource(SpyResource):
             meta = Meta()
 
-        with patch.dict(os.environ, {"DEPLOY_TARGET": "aws"}):
+        with patch.dict(os.environ, {"DEPLOY_TARGET": "aws"}):  # noqa: SIM117
             with self.assertLogs("src.startup_checks", level="WARNING"):
                 startup_checks.ensure_entity_roster_table(ThrottlingResource(self.ddb))
 

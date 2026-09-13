@@ -45,6 +45,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
 
+// eslint-disable-next-line @typescript-eslint/require-await
 vi.mock('aws-amplify/auth', () => ({ fetchAuthSession: vi.fn(async () => ({ tokens: {} })) }));
 
 const authStore = vi.hoisted(() => {
@@ -138,15 +139,20 @@ function stubFetchWithExpiry(): {
     '/api/reviews': { reviews: [HISTORY_ROW] },
     '/api/reviews/row-under-test/output': { url: 'https://example.com/signed-output-url' },
   };
+  // eslint-disable-next-line @typescript-eslint/require-await
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const pathname = new URL(String(input), 'http://localhost').pathname;
     if (expired) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 401, json: async () => ({ detail: 'Not authenticated.' }) } as Response;
     }
     const body = routes[pathname];
     if (body === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => body } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);

@@ -43,7 +43,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-test")
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 

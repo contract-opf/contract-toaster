@@ -25,6 +25,20 @@ if [ ! -d node_modules ]; then
   npm ci
 fi
 
+# Lint (issue #65). FIRST because it is the cheapest step here — seconds,
+# against the minutes the build and the vitest suite below cost.
+#
+# Green means "no NEW violations": the ~865 violations that existed when #65
+# landed carry `eslint-disable-next-line` comments written by
+# scripts/eslint-baseline.mjs, and eslint.config.js is the committed config.
+# `npm run lint` is the plain `eslint .` — it fails on ERRORS, not warnings;
+# the remaining warnings are the exhaustive-deps backlog and pre-existing
+# `no-console` directives, both deliberately visible rather than silenced.
+# `prettier --check` is NOT run: a whole-tree reformat is deferred to #90,
+# for the reason CLAUDE.md gives — no gate here can see a stylesheet.
+echo "Lint (eslint) …"
+npm run lint
+
 echo "Typecheck + production build (build:ci) …"
 npm run build:ci
 

@@ -129,7 +129,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -190,7 +190,7 @@ _OUTPUT_SCHEMA_CACHE: dict[str, Any] | None = None
 def load_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
     global _OUTPUT_SCHEMA_CACHE
     if _OUTPUT_SCHEMA_CACHE is None:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:  # noqa: UP015
             _OUTPUT_SCHEMA_CACHE = json.load(fh)
     return _OUTPUT_SCHEMA_CACHE
 
@@ -678,7 +678,7 @@ def build_third_party_response(
     clause_records: list[dict[str, Any]],
     playbook: dict[str, Any],
     *,
-    block_id_by_clause_id: Optional[dict[str, str]] = None,
+    block_id_by_clause_id: Optional[dict[str, str]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """Folds #250's position-level findings into a valid
     `playbooks/output-schema-v3.json` response (issue #251 Scope, moved to
@@ -769,12 +769,12 @@ def generate_third_party_review_output(
     clause_records: list[dict[str, Any]],
     playbook: dict[str, Any],
     document_docx_bytes: bytes,
-    corpus: "leakage_scan.ConfidentialCorpus",
+    corpus: "leakage_scan.ConfidentialCorpus",  # noqa: UP037
     source_document_id: str = third_party_clause_segmentation.DEFAULT_SOURCE_DOCUMENT_ID,
-    review_id: Optional[str] = None,
-    audit_write: Optional[Callable[..., None]] = None,
-    current_counterparty_name: Optional[str] = None,
-    author: Optional[str] = None,
+    review_id: Optional[str] = None,  # noqa: UP045
+    audit_write: Optional[Callable[..., None]] = None,  # noqa: UP045
+    current_counterparty_name: Optional[str] = None,  # noqa: UP045
+    author: Optional[str] = None,  # noqa: UP045
     date: Any = None,
     notes_mode: str = "external",
 ) -> dict[str, Any]:

@@ -73,7 +73,7 @@ def _load_playbook() -> dict[str, Any]:
 
 
 def _write_temp_json(data: dict) -> Path:
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)  # noqa: SIM115
     json.dump(data, tmp)
     tmp.close()
     return Path(tmp.name)

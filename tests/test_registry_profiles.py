@@ -50,7 +50,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import playbook_registry  # noqa: E402
+import playbook_registry  # noqa: E402, I001
 
 # Imported HERE, at module load time, against the REAL playbooks/registry.json
 # (before any test below monkeypatches playbook_registry.REGISTRY_PATH).

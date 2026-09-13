@@ -39,6 +39,21 @@
 #                 advisory databases (issue #61). Declared here so the weekly
 #                 .github/workflows/dependency-audit.yml run and a local
 #                 `python -m pip_audit` use the same pinned scanner.
+#   ruff        — the lint gate (issue #65). Configured in pyproject.toml
+#                 (`[tool.ruff]`); the whole-tree baseline is annotated in
+#                 place with `# noqa` comments, so a green `ruff check` means
+#                 "no NEW violations", not "no violations". Pinned because a
+#                 ruff minor release adds rules, and an unpinned bump would
+#                 turn someone else's push red for a reason their diff did not
+#                 cause.
+#   mypy        — the type gate (issue #65). `[tool.mypy]` runs it
+#                 `strict = true` over backend/src and scripts; the modules
+#                 that do not pass yet carry `[[tool.mypy.overrides]]
+#                 ignore_errors = true` entries mirrored in mypy-baseline.txt,
+#                 which tests/test_lint_gates_65.py only ever lets shrink.
+#                 Pinned for the same reason as ruff. NOTE: it runs here on a
+#                 3.11 interpreter with `python_version = "3.13"` in config —
+#                 mypy accepts that; CI (3.13) is the real proof.
 #   docx-editor — REQUIRED runtime dependency of scripts/redline_block_apply.py
 #                 (issue #626's pass 1; it was issue #377's quote patcher's
 #                 dependency first, until issue #628 deleted that module),
@@ -58,3 +73,5 @@ python-docx==1.2.0
 docx-editor==0.6.0
 PyJWT[crypto]==2.14.0
 pip-audit==2.10.1
+ruff==0.16.7
+mypy==2.3.1

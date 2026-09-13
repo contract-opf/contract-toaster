@@ -81,7 +81,7 @@ os.environ.setdefault(
     "RETENTION_SETTINGS_TABLE", "contract-toaster-retention-settings-summary-test"
 )
 
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import src.pipeline_runner as pipeline_runner  # noqa: E402

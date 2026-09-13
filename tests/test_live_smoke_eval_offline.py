@@ -276,9 +276,9 @@ class _ScriptedClient:
         critic_texts = critic_text if isinstance(critic_text, list) else [critic_text]
         self._queues = {primary_id: list(primary_texts), critic_id: list(critic_texts)}
         self._usage_by_model = {primary_id: _PRIMARY_USAGE, critic_id: _CRITIC_USAGE}
-        self.last_usage: Optional[dict[str, int]] = None
-        self.last_served_model: Optional[str] = None
-        self.last_generation_id: Optional[str] = None
+        self.last_usage: Optional[dict[str, int]] = None  # noqa: UP045
+        self.last_served_model: Optional[str] = None  # noqa: UP045
+        self.last_generation_id: Optional[str] = None  # noqa: UP045
         # Issue #420 fix round 1, finding 1: every invoke() call recorded
         # here (model_id + whether `tool_spec` reached the call), shared
         # across every client `_scripted_build_client_factory` builds for
@@ -446,7 +446,7 @@ def _part_1_matrix_report(lse, tmp_path: Path, failures: list[str]) -> None:
     # the SEPARATE `cost_usd_cents` field (the settlement-equivalent
     # whole-cent figure) must still equal.
     expected_cost_usd = expected_primary_cost + expected_critic_cost
-    expected_cost_cents = int(round(expected_cost_usd * 100))
+    expected_cost_cents = int(round(expected_cost_usd * 100))  # noqa: RUF046
     expected_total_tokens = (
         _PRIMARY_USAGE["input_tokens"]
         + _PRIMARY_USAGE["output_tokens"]

@@ -141,7 +141,7 @@ def compute_worst_case_reservation_usd_cents() -> int:
         CRITIC_INPUT_RATE_USD_PER_MILLION / 1_000_000
     ) + MAX_OUTPUT_TOKENS * (CRITIC_OUTPUT_RATE_USD_PER_MILLION / 1_000_000)
     usd = attempts_per_pass * (primary_usd + critic_usd)
-    return int(round(usd * 100))
+    return int(round(usd * 100))  # noqa: RUF046
 
 
 def settle_spend(actual_usd_cents: int, dynamodb_resource: Any,

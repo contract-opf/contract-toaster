@@ -55,7 +55,7 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 # (`from boto3.dynamodb.conditions import Key`) with no scan fallback left,
 # and that import cannot resolve against a bare `types.ModuleType("boto3")`
 # stub. Real boto3/botocore, with moto intercepting them.
-import boto3  # noqa: E402
+import boto3  # noqa: E402, I001
 from botocore.exceptions import ClientError as ClientErrorRef  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
@@ -87,7 +87,7 @@ class FakeReviewsTable:
         vals = ExpressionAttributeValues or {}
         current = self.items.get(key, {}).get("status")
         # ConditionExpression: attribute_not_exists(#status) OR #status <> :error
-        if ConditionExpression and ":error" in vals:
+        if ConditionExpression and ":error" in vals:  # noqa: SIM102
             if current is not None and current == vals[":error"]:
                 raise ClientErrorRef(
                     {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"

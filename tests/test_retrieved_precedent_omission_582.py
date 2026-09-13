@@ -181,11 +181,11 @@ def test_nonempty_precedent_still_composes_the_block_plain_string(failures: list
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
         failures.append(
-            f"[2c] Manifest block missing when precedent is non-empty: {dict(zip(required_tags_in_order, positions))}"
+            f"[2c] Manifest block missing when precedent is non-empty: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
         )
     elif positions != sorted(positions):
         failures.append(
-            f"[2d] Manifest block order changed when precedent is non-empty: {dict(zip(required_tags_in_order, positions))}"
+            f"[2d] Manifest block order changed when precedent is non-empty: {dict(zip(required_tags_in_order, positions))}"  # noqa: B905
         )
     if pp.UNTRUSTED_BLOCK_WARNING not in prompt.split("<RETRIEVED_PRECEDENT>")[0].split(
         "<ANCHORED_CLAUSES>"

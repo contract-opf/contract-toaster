@@ -198,7 +198,7 @@ class TestModelInvocationErrorCarriesStatusCode(unittest.TestCase):
             max_retries=0,
             sleep_fn=lambda _seconds: None,
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID,
@@ -243,7 +243,7 @@ class TestModelInvocationErrorCarriesStatusCode(unittest.TestCase):
             max_retries=0,
             sleep_fn=lambda _seconds: None,
         )
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelInvocationError) as ctx:
                 client.invoke(
                     model_id=PRIMARY_MODEL_ID,

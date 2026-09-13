@@ -134,7 +134,7 @@ def gate_2_retrieval_failure(arch_text: str) -> list[str]:
         "degraded_mode flag recorded on the review row",
     ]
     for i, (pattern, label) in enumerate(
-        zip(RETRIEVAL_FAILURE_PATTERNS, labels), 1
+        zip(RETRIEVAL_FAILURE_PATTERNS, labels), 1  # noqa: B905
     ):
         if not pattern.search(arch_text):
             failures.append(
@@ -213,7 +213,7 @@ def main() -> int:
     try:
         with PLAYBOOK_PATH.open() as fh:
             playbook = json.load(fh)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"FAIL: Could not load playbook: {e}")
         return 1
 

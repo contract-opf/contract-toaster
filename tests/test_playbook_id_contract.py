@@ -370,7 +370,7 @@ def check_h() -> list[str]:
     failures: list[str] = []
 
     try:
-        import playbook_registry
+        import playbook_registry  # noqa: I001
         import canonicalize
         import eval_harness
         import synthetic_form_paragraphs

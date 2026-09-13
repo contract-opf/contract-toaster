@@ -264,7 +264,7 @@ class LeakageScanner:
         raw_text = text
         norm_text = _normalize(text)
 
-        for raw_gram, norm_gram in zip(self._raw, self._normalized):
+        for raw_gram, norm_gram in zip(self._raw, self._normalized):  # noqa: B905
             # Exact (case-sensitive) match
             if raw_gram in raw_text:
                 return True, f"exact match: {raw_gram!r}"

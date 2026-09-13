@@ -207,7 +207,7 @@ class TestReasoningAllowanceAppliedToRequest(unittest.TestCase):
 class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
     def test_null_content_raises_model_empty_content_error(self) -> None:
         http = FakeHttpClient(_choice_response(content=None, finish_reason="stop"))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelEmptyContentError) as ctx:
                 _client(http).invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
@@ -217,7 +217,7 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
 
     def test_empty_string_content_also_raises_model_empty_content_error(self) -> None:
         http = FakeHttpClient(_choice_response(content="", finish_reason="stop"))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelEmptyContentError):
                 _client(http).invoke(
                     model_id=PRIMARY_MODEL_ID, system_prompt="s", user_prompt="u",
@@ -226,7 +226,7 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
 
     def test_finish_reason_length_raises_model_output_truncated_error(self) -> None:
         http = FakeHttpClient(_choice_response(content='{"ok', finish_reason="length"))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelOutputTruncatedError) as ctx:
                 _client(http).invoke(
                     model_id=KIMI_MODEL_ID, system_prompt="s", user_prompt="u",
@@ -240,7 +240,7 @@ class TestFailClosedOnEmptyOrTruncatedContent(unittest.TestCase):
         truncation (the more specific, actionable cause), never the generic
         empty-content error."""
         http = FakeHttpClient(_choice_response(content=None, finish_reason="length"))
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True):  # noqa: SIM117
             with self.assertRaises(mc.ModelOutputTruncatedError):
                 _client(http).invoke(
                     model_id=KIMI_MODEL_ID, system_prompt="s", user_prompt="u",

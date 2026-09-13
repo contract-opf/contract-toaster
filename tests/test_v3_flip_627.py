@@ -570,7 +570,7 @@ def test_the_primary_prompt_teaches_block_transcript_authoring(failures: list[st
         failures.append(
             "[2b] the minimality instruction must appear VERBATIM in the assembled overlay"
         )
-    if pp.MINIMALITY_INSTRUCTION != minimality:
+    if pp.MINIMALITY_INSTRUCTION != minimality:  # noqa: SIM300
         failures.append(
             f"[2c] MINIMALITY_INSTRUCTION drifted from the ticket's wording: "
             f"{pp.MINIMALITY_INSTRUCTION!r}"
@@ -627,7 +627,7 @@ def test_rendered_block_ids_match_the_block_map_exactly(failures: list[str]) -> 
         )
         return
 
-    for block_id, rendered in zip(block_map, rendered_blocks):
+    for block_id, rendered in zip(block_map, rendered_blocks):  # noqa: B905
         marker = f"[{block_id}] "
         # Issue #642: a heading-bearing paragraph renders its heading on its
         # own line ABOVE the marker ("## Heading\n[pNNNN] body"), so the
@@ -770,7 +770,7 @@ def _mismatched_response(block_id: str, real_text: str) -> str:
     one word of the block retyped rather than copied. This is the single
     most likely real failure of the new contract, and the one an informed
     retry can actually fix."""
-    head, _, tail = real_text.partition(" ")
+    head, _, tail = real_text.partition(" ")  # noqa: RUF059
     return json.dumps(
         {
             "decision": "REQUEST_CHANGE",

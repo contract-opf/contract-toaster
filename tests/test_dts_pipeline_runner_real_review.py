@@ -99,7 +99,7 @@ os.environ.setdefault("REVIEW_SUBMISSIONS_TABLE", "submissions-test")
 os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 
-import pipeline_runner as pr  # noqa: E402
+import pipeline_runner as pr  # noqa: E402, I001
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 
@@ -384,7 +384,7 @@ class FakeDDB:
     def __init__(
         self,
         reviews_table: FakeReviewsTable,
-        playbooks_table: "FakePlaybooksTable | None" = None,
+        playbooks_table: "FakePlaybooksTable | None" = None,  # noqa: UP037
     ):
         self._reviews = reviews_table
         # Issue #401: defaults "synthetic-generic" to already resolving as active with

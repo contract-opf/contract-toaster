@@ -98,7 +98,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
@@ -190,8 +190,8 @@ def _token_bucket(token: str, embed_fn: EmbedFn) -> int:
         vector = embed_fn(token, 2)
     except TypeError:
         vector = embed_fn(token)
-    byte0 = int(round(vector[0] * 255))
-    byte1 = int(round(vector[1] * 255)) if len(vector) > 1 else 0
+    byte0 = int(round(vector[0] * 255))  # noqa: RUF046
+    byte1 = int(round(vector[1] * 255)) if len(vector) > 1 else 0  # noqa: RUF046
     return (byte0 * 256 + byte1) % _HASH_BUCKETS
 
 
@@ -204,7 +204,7 @@ def _term_counts(text: str, embed_fn: EmbedFn) -> list[float]:
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b))  # noqa: B905
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0.0 or norm_b == 0.0:
@@ -247,7 +247,7 @@ def _idf_weights(topic_term_counts: dict[str, list[float]]) -> list[float]:
 
 
 def _weighted(counts: list[float], idf: list[float]) -> list[float]:
-    return [count * weight for count, weight in zip(counts, idf)]
+    return [count * weight for count, weight in zip(counts, idf)]  # noqa: B905
 
 
 # ---------------------------------------------------------------------------

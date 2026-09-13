@@ -69,21 +69,21 @@ class PlaybookNotRegisteredError(KeyError):
 class PlaybookEntry:
     playbook_id: str
     playbook_path: Path
-    anchor_map_path: Optional[Path]
-    section_config_path: Optional[Path]
+    anchor_map_path: Optional[Path]  # noqa: UP045
+    section_config_path: Optional[Path]  # noqa: UP045
     fixtures_dir: Path
-    standard_form_docx: Optional[Path] = None
+    standard_form_docx: Optional[Path] = None  # noqa: UP045
     # Issue #287: this playbook's v2 bundle artifact (OPF + lineage,
     # playbooks/bundle.schema-v2.json), or None for a playbook not yet
     # bound to an OPF -- see module docstring above.
-    bundle_path: Optional[Path] = None
+    bundle_path: Optional[Path] = None  # noqa: UP045
     # Issue #289: the Docker Compose mock pipeline's canned pre-baked-redline S3 key
     # (e.g. "mock-fixtures/eiaa/pre-baked-redline.docx"), or None for a
     # playbook the mock pipeline doesn't have a canned fixture for yet.
     # This is an S3 KEY (a string), not a filesystem path, so -- unlike
     # every other field above -- it is carried through verbatim, never
     # joined against `root` in resolve_playbook() below.
-    mock_output_key: Optional[str] = None
+    mock_output_key: Optional[str] = None  # noqa: UP045
     # Issue #412: True when this entry exists ONLY to give the test suite a
     # real, registered, on-disk playbook to resolve fixtures through (e.g.
     # "synthetic-generic") -- it is never surfaced on `GET /api/playbooks`
@@ -98,7 +98,7 @@ class PlaybookEntry:
     # notes from then on: an admin edits them through the normal
     # `update_playbook_version_notes` path and the seed never rewrites them.
     # None (the default) for an entry that ships no note.
-    seed_notes: Optional[str] = None
+    seed_notes: Optional[str] = None  # noqa: UP045
 
 
 def load_registry(registry_path: Path = REGISTRY_PATH) -> dict:
@@ -106,7 +106,7 @@ def load_registry(registry_path: Path = REGISTRY_PATH) -> dict:
         return json.load(f)
 
 
-def list_playbook_ids(registry_path: Optional[Path] = None) -> list[str]:
+def list_playbook_ids(registry_path: Optional[Path] = None) -> list[str]:  # noqa: UP045
     """
     `registry_path` is late-bound to the CURRENT value of the module-level
     REGISTRY_PATH global when not given explicitly -- same rationale, and
@@ -119,7 +119,7 @@ def list_playbook_ids(registry_path: Optional[Path] = None) -> list[str]:
     return sorted(load_registry(resolved_path).get("playbooks", {}).keys())
 
 
-def default_playbook_id(registry_path: Optional[Path] = None) -> str:
+def default_playbook_id(registry_path: Optional[Path] = None) -> str:  # noqa: UP045
     """
     Return the registry's designated default playbook_id (issue #289):
     reads playbooks/registry.json's top-level "default_playbook_id" field --
@@ -164,7 +164,7 @@ DEFAULT_PLAYBOOK_ID = default_playbook_id()
 
 def resolve_playbook(
     playbook_id: str = DEFAULT_PLAYBOOK_ID,
-    registry_path: Optional[Path] = None,
+    registry_path: Optional[Path] = None,  # noqa: UP045
 ) -> PlaybookEntry:
     """
     Resolve a playbook_id to its artifact paths via the registry.
@@ -197,7 +197,7 @@ def resolve_playbook(
     # against (see module docstring).
     root = registry_path.resolve().parent.parent
 
-    def _resolve(key: str) -> Optional[Path]:
+    def _resolve(key: str) -> Optional[Path]:  # noqa: UP045
         value = raw.get(key)
         return (root / value) if value else None
 

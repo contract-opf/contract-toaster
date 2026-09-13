@@ -55,7 +55,7 @@ for _path in (BACKEND_ROOT, SCRIPTS_DIR, TESTS_DIR):
         sys.path.insert(0, str(_path))
 
 # The mounted-router harness sets every env var the app needs on import.
-from test_review_routes_mounted_186 import (  # noqa: E402
+from test_review_routes_mounted_186 import (  # noqa: E402, I001
     PLAYBOOK_ID,
     FakeDynamoDBResource,
     FakeSfnClient,

@@ -62,7 +62,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import playbook_registry  # noqa: E402
+import playbook_registry  # noqa: E402, I001
 from detector_common import check_on_insert_rule_fires as _check_on_insert_rule_fires  # noqa: E402
 from detector_common import check_on_remove_or_alter_rule_fires as _check_on_remove_or_alter_rule_fires  # noqa: E402
 

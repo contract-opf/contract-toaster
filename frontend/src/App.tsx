@@ -86,6 +86,7 @@ const SsoShell =
 // default) so the tab has a name before this module evaluates; this line
 // overrides it to the configured VITE_PRODUCT_NAME when one is set.
 // ---------------------------------------------------------------------------
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 export const PRODUCT_NAME: string = import.meta.env.VITE_PRODUCT_NAME ?? 'Contract Toaster';
 if (typeof document !== 'undefined') {
   document.title = PRODUCT_NAME;

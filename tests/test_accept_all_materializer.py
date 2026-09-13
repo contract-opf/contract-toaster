@@ -34,7 +34,7 @@ being encoded as a permanent regression gate.
 Exit codes: 0 = pass, 1 = fail
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import io
 import sys
@@ -278,7 +278,7 @@ def _revision_authors(docx_bytes: bytes) -> set[str]:
     `word/document.xml` -- used to prove no leftover foreign-author markup
     survives (or, on the raw-bytes control, that it does)."""
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     return {
         el.get(_w("author"))
         for el in root.iter()
@@ -288,7 +288,7 @@ def _revision_authors(docx_bytes: bytes) -> set[str]:
 
 def _revision_tag_count(docx_bytes: bytes) -> int:
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     return sum(1 for el in root.iter() if el.tag in (_w("ins"), _w("del")))
 
 
@@ -315,7 +315,7 @@ def test_single_cluster_del_removed_ins_unwrapped(failures: list) -> None:
         )
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Payment is due within 45 days of invoice.":
         failures.append(
@@ -333,7 +333,7 @@ def test_multi_cluster_multi_author_all_accepted(failures: list) -> None:
         )
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     expected = "The Term is two (2) years, renewable upon mutual agreement."
     if body_text != expected:
@@ -355,7 +355,7 @@ def test_nested_ins_wrapping_del_is_excluded_entirely(failures: list) -> None:
         failures.append("nested w:ins/w:del markup was not fully removed")
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Payment is due within days.":
         failures.append(
@@ -417,7 +417,7 @@ def test_untouched_content_survives_byte_for_byte(failures: list) -> None:
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
         if zf.read("docProps/core.xml").decode("utf-8") != _CORE_PROPS_XML:
             failures.append("a zip entry other than word/document.xml was modified")
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     paragraphs = list(root.iter(_w("p")))
     if _paragraph_text(paragraphs[0]) != "This clause was never edited by anyone.":
         failures.append(
@@ -535,7 +535,7 @@ def test_materialized_bytes_deliver_a_clean_single_author_redline(failures: list
         )
 
     with zipfile.ZipFile(io.BytesIO(result["docx_bytes"])) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if "three (3) years" not in body_text:
         failures.append(f"the new proposed text is missing from the delivered document: {body_text!r}")
@@ -588,7 +588,7 @@ def test_deleted_paragraph_mark_pins_known_unmerged_limitation(failures: list) -
         )
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
-        root = ET.fromstring(zf.read("word/document.xml"))
+        root = ET.fromstring(zf.read("word/document.xml"))  # noqa: S314
     materialized_paragraphs = list(root.iter(_w("p")))
 
     # PINS THE LIMITATION: two <w:p> elements survive, not one merged
@@ -664,7 +664,7 @@ def test_field_code_pending_change_materializes_without_corrupting_the_field(fai
 
     with zipfile.ZipFile(io.BytesIO(materialized)) as zf:
         document_xml = zf.read("word/document.xml").decode("utf-8")
-        root = ET.fromstring(document_xml)
+        root = ET.fromstring(document_xml)  # noqa: S314
 
     # The field itself survives, untouched -- its w:instr attribute is
     # exactly what it was before materialization.
@@ -722,7 +722,7 @@ def test_reserved_root_namespace_prefix_survives_materialization(failures: list)
             f"either vanished or was rebound: {document_xml!r}"
         )
 
-    root = ET.fromstring(document_xml.encode("utf-8"))
+    root = ET.fromstring(document_xml.encode("utf-8"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Payment is due within 45 days of invoice.":
         failures.append(
@@ -780,7 +780,7 @@ def test_non_root_namespace_prefix_survives_materialization(failures: list) -> N
             f"all: {document_xml!r}"
         )
 
-    root = ET.fromstring(document_xml.encode("utf-8"))
+    root = ET.fromstring(document_xml.encode("utf-8"))  # noqa: S314
     body_text = "".join(_paragraph_text(p) for p in root.iter(_w("p")))
     if body_text != "Notice period is sixty (60) days.":
         failures.append(

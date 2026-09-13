@@ -55,7 +55,7 @@ def check_ac1_quota_artifact() -> list[str]:
     try:
         with MODEL_POLICY_PATH.open() as fh:
             policy = json.load(fh)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         failures.append(f"  AC1 FAIL: could not parse model-policy JSON: {exc}")
         return failures
 
@@ -176,7 +176,7 @@ def check_ac3_throttle_vs_error_alarm() -> list[str]:
     # The "Bedrock errors > 0" alarm specification in phase-0-issues.md / ARCHITECTURE.md
     # must be updated to exclude throttle retries
     phase0_path = REPO_ROOT / "docs" / "phase-0-issues.md"
-    phase0_text = phase0_path.read_text(encoding="utf-8")
+    phase0_text = phase0_path.read_text(encoding="utf-8")  # noqa: F841
 
     # Check that the alarm spec (wherever it lives) carves out throttle retries
     bedrock_error_alarm_pattern = re.compile(

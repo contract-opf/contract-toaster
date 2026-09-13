@@ -75,7 +75,7 @@ for _dir in (BACKEND_SRC, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import config  # noqa: E402
+import config  # noqa: E402, I001
 import jsonschema  # noqa: E402
 import model_client as mc  # noqa: E402
 import model_output_schema as mos  # noqa: E402
@@ -107,7 +107,7 @@ _PRIMARY_VALID_FIXTURE = "primary_request_change_valid.json"
 
 
 def _load_fixture(name: str) -> dict[str, Any]:
-    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:
+    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -227,7 +227,7 @@ class TestModelFacingOutputSchema(unittest.TestCase):
         # exact same stripped shape every time, not an accumulating one).
         second = mos.model_facing_output_schema()
         self.assertEqual(self.schema, second)
-        with open(mos.OUTPUT_SCHEMA_PATH, "r", encoding="utf-8") as fh:
+        with open(mos.OUTPUT_SCHEMA_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
             on_disk = json.load(fh)
         self.assertIn("schema_version", on_disk["required"])
         self.assertIn("provenance", on_disk["definitions"]["Issue"]["required"])
@@ -505,7 +505,7 @@ class LegacyShapedFakeClient:
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 

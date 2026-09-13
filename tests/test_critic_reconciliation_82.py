@@ -58,7 +58,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
-import model_client  # noqa: E402
+import model_client  # noqa: E402, I001
 import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
 import reconciliation as recon  # noqa: E402
@@ -67,7 +67,7 @@ _CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 
 
 def _load_fixture(name: str) -> dict[str, Any]:
-    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:
+    with open(MODEL_RESPONSES_DIR / name, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -76,7 +76,7 @@ def _load_fixture_text(name: str) -> str:
 
 
 def _sample_playbook() -> dict[str, Any]:
-    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:
+    with open(PLAYBOOK_PATH, "r", encoding="utf-8") as fh:  # noqa: UP015
         return json.load(fh)
 
 
@@ -399,9 +399,9 @@ def test_critic_invoked_with_manifest_input_on_pinned_model(failures: list[str])
     required_tags_in_order = ["<PRIMARY_REVIEWER_OUTPUT>"]
     positions = [user_prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):
-        failures.append(f"[7e] Critic user prompt missing a required manifest block: {dict(zip(required_tags_in_order, positions))}")
+        failures.append(f"[7e] Critic user prompt missing a required manifest block: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
     elif positions != sorted(positions):
-        failures.append(f"[7f] Critic user prompt manifest blocks out of order: {dict(zip(required_tags_in_order, positions))}")
+        failures.append(f"[7f] Critic user prompt manifest blocks out of order: {dict(zip(required_tags_in_order, positions))}")  # noqa: B905
     for forbidden_tag in ("<RETRIEVED_PRECEDENT>", "<COUNTERPARTY_DOCUMENT>"):
         if forbidden_tag in user_prompt:
             failures.append(f"[7g] Critic prompt must not include {forbidden_tag} -- this call passes no document, and retrieved precedent is primary-only.")

@@ -73,7 +73,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable  # noqa: UP035
 
 import boto3
 
@@ -285,7 +285,7 @@ def _write_progress_stage(review_id: str, stage_token: str, dynamodb_resource: A
                 ":now": str(int(time.time())),
             },
         )
-    except Exception as exc:  # noqa: BLE001 - a cosmetic write must never fail the review
+    except Exception as exc:  # a cosmetic write must never fail the review
         if type(exc).__name__ == "ConditionalCheckFailedException" or _is_conditional(exc):
             return
         logger.warning(
@@ -518,7 +518,7 @@ def _settle_reservation_safely(
     """
     try:
         _settle_reservation(review_id, dynamodb_resource, actual_usd_cents)
-    except Exception:  # noqa: BLE001 - an unsettled reservation must not fail the review
+    except Exception:  # an unsettled reservation must not fail the review
         logger.exception(
             "Failed to settle the spend reservation for review %s. The review's own "
             "result is UNAFFECTED; the reservation is still held against the daily "
@@ -572,7 +572,7 @@ def run_mock_pipeline(review_id: str, payload: dict[str, Any], *,
         object_written = _copy_output_object(result, s3_client)
         _write_terminal(review_id, result, object_written, dynamodb_resource)
         _settle_reservation_safely(review_id, dynamodb_resource)
-    except Exception:  # noqa: BLE001 - fail closed to ERROR, never wedge PENDING
+    except Exception:  # fail closed to ERROR, never wedge PENDING
         logger.exception("In-process mock pipeline failed for review %s", review_id)
         _fail_review(review_id, dynamodb_resource)
         _settle_reservation_safely(review_id, dynamodb_resource)
@@ -865,7 +865,7 @@ def _build_openrouter_client(
     dynamodb_resource: Any = None,
     *,
     cancel_checkpoint: Callable[[], None] | None = None,
-) -> "model_client.OpenRouterModelClient":
+) -> "model_client.OpenRouterModelClient":  # noqa: UP037
     """Build the real OpenRouter client for one review.
 
     The key comes from `model_settings.resolve_openrouter_api_key`, which
@@ -1675,7 +1675,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         _settle_reservation_safely(
             review_id, dynamodb_resource, _actual_cents_from_client(client, dynamodb_resource)
         )
-    except Exception as exc:  # noqa: BLE001 - fail closed, never wedge PENDING/RUNNING
+    except Exception as exc:  # fail closed, never wedge PENDING/RUNNING
         # Still one catch-all -- failing closed is deliberate. What changes
         # (issue #442) is that the cause is CLASSIFIED here instead of being
         # discarded into the container log: the review row now records WHY it
@@ -1766,7 +1766,7 @@ class InProcessStepFunctionsClient:
                 review_id, payload, dynamodb_resource=_ddb_resource(), s3_client=_s3_client()
             )
 
-    def start_execution(self, *, stateMachineArn: str, name: str, input: str) -> dict[str, Any]:  # noqa: A002,N803
+    def start_execution(self, *, stateMachineArn: str, name: str, input: str) -> dict[str, Any]:  # noqa: A002, N803
         with self._lock:
             if name in self._started:
                 raise ExecutionAlreadyExists(f"execution {name!r} already started")

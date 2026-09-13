@@ -77,10 +77,12 @@ export function createSoundBus(options: SoundOptions) {
     for (const v of [...voices])
       try {
         v.source.stop();
+      // eslint-disable-next-line no-empty
       } catch {}
     voices.clear();
     try {
       options.duckTick?.(1, 120);
+    // eslint-disable-next-line no-empty
     } catch {}
   };
   const available = () => !disposed && !options.getMuted() && !document.hidden;
@@ -90,6 +92,7 @@ export function createSoundBus(options: SoundOptions) {
       context ??= new AudioContext();
       void context.resume().catch(() => {});
       primed = true;
+    // eslint-disable-next-line no-empty
     } catch {}
   };
   const play = async (id: SoundId) => {
@@ -122,6 +125,7 @@ export function createSoundBus(options: SoundOptions) {
         if (oldest.priority > priority(id)) return;
         try {
           oldest.source.stop();
+        // eslint-disable-next-line no-empty
         } catch {}
         voices.delete(oldest);
       }
@@ -158,6 +162,7 @@ export function createSoundBus(options: SoundOptions) {
                     gains.tick,
                     context.currentTime + 0.12,
                   );
+          // eslint-disable-next-line no-empty
           } catch {}
       };
       source.start();
@@ -202,6 +207,7 @@ export function createSoundBus(options: SoundOptions) {
       Object.prototype.hasOwnProperty.call(stageSound, stage)
     )
       void play(stageSound[stage as Stage]);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     else if (singles[event]) void play(singles[event]!);
   };
   const visibility = () => {

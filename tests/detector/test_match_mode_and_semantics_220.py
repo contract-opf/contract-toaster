@@ -184,7 +184,7 @@ def test_invalid_regex_trigger_term_raises_not_silently_falls_back() -> None:
         detector_common.check_on_insert_rule_fires(malformed_rule, text, "any-topic")
     except detector_common.DetectorConfigError:
         pass
-    except Exception as exc:  # pragma: no cover - diagnostic path
+    except Exception as exc:  # pragma: no cover - diagnostic path  # noqa: BLE001
         FAILURES.append(
             f"malformed regex_trigger_terms entry raised {type(exc).__name__} "
             f"instead of DetectorConfigError: {exc!r}"

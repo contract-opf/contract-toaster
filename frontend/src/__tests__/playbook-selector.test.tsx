@@ -52,6 +52,7 @@ import {
 } from './support/consoleSurface';
 
 vi.mock('aws-amplify/auth', () => ({
+  // eslint-disable-next-line @typescript-eslint/require-await
   fetchAuthSession: vi.fn(async () => ({
     tokens: {
       idToken: { toString: () => 'mock-id-token.jwt.value' },
@@ -63,13 +64,16 @@ vi.mock('aws-amplify/auth', () => ({
 // fetch stub — routes by "METHOD path" (falls back to path-only for GETs),
 // same convention as review-download-gate.test.tsx / security-posture.test.tsx.
 function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+  // eslint-disable-next-line @typescript-eslint/require-await
   const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
     const pathname = new URL(url, 'http://localhost').pathname;
     const key = `${method} ${pathname}` in routes ? `${method} ${pathname}` : pathname;
     const entry = routes[key];
     if (entry === undefined) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     }
     if (
@@ -79,8 +83,10 @@ function stubFetch(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
       'body' in (entry as Record<string, unknown>)
     ) {
       const { status: statusCode, body } = entry as { status: number; body: unknown };
+      // eslint-disable-next-line @typescript-eslint/require-await
       return { ok: statusCode < 400, status: statusCode, json: async () => body } as Response;
     }
+    // eslint-disable-next-line @typescript-eslint/require-await
     return { ok: true, status: 200, json: async () => entry } as Response;
   });
   vi.stubGlobal('fetch', impl);

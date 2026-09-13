@@ -79,7 +79,7 @@ PLAIN_BLOCK = "The Term shall be sixty (60) days from the Effective Date."
 # double quotes, and an em dash. This is the text a model reliably
 # ASCII-folds when it copies it back out.
 CURLY_BLOCK = (
-    "Each party’s obligations — including the “Confidentiality” "
+    "Each party’s obligations — including the “Confidentiality” "  # noqa: RUF001
     "covenant — survive for sixty (60) days."
 )
 
@@ -286,7 +286,7 @@ def test_straightened_punctuation_and_collapsed_whitespace_realign(
     kept = next(op for op in block["ops"] if op["op"] == "keep")
     kept_slice = block_text[kept["start"] : kept["end"]]
     for label, codepoint in (
-        ("RIGHT SINGLE QUOTATION MARK", "’"),
+        ("RIGHT SINGLE QUOTATION MARK", "’"),  # noqa: RUF001
         ("LEFT DOUBLE QUOTATION MARK", "“"),
         ("RIGHT DOUBLE QUOTATION MARK", "”"),
         ("EM DASH", "—"),
@@ -847,7 +847,7 @@ def test_the_extracted_fold_holds_its_invariants(failures: list[str]) -> None:
                 f"[fold_extraction] U+{source:04X} folds to {folded!r} (not 1 character)"
             )
 
-    folded, starts, ends = text_fold.fold_text_with_map("a \t\n b’c")
+    folded, starts, ends = text_fold.fold_text_with_map("a \t\n b’c")  # noqa: RUF001
     if folded != "a b'c":
         failures.append(f"[fold_extraction] folded form is {folded!r}")
     elif (starts, ends) != ([0, 1, 5, 6, 7], [1, 5, 6, 7, 8]):

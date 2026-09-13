@@ -67,7 +67,7 @@ import ast
 import logging
 import os
 from pathlib import Path
-from typing import Iterable, Mapping, Optional
+from typing import Iterable, Mapping, Optional  # noqa: UP035
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 BACKEND_SRC = Path(__file__).resolve().parent
 
 
-def _environ_subscript_name(node: ast.Subscript) -> Optional[str]:
+def _environ_subscript_name(node: ast.Subscript) -> Optional[str]:  # noqa: UP045
     """The literal env var name of an `os.environ[...]`/`environ[...]`
     subscript, or None for anything else (including a non-literal subscript
     like `os.environ[name]`, which no static pass can resolve)."""
@@ -111,7 +111,7 @@ def required_env_names_in_source(source: str) -> set[str]:
     }
 
 
-def required_env_names(source_root: Optional[Path] = None) -> tuple[str, ...]:
+def required_env_names(source_root: Optional[Path] = None) -> tuple[str, ...]:  # noqa: UP045
     """The sorted set of env var names the code under `source_root`
     (default: `backend/src`) treats as REQUIRED — i.e. dereferences with
     `os.environ[<literal>]`, which has no default and raises `KeyError`.
@@ -127,8 +127,8 @@ def required_env_names(source_root: Optional[Path] = None) -> tuple[str, ...]:
 
 
 def missing_required_env(
-    environ: Optional[Mapping[str, str]] = None,
-    source_root: Optional[Path] = None,
+    environ: Optional[Mapping[str, str]] = None,  # noqa: UP045
+    source_root: Optional[Path] = None,  # noqa: UP045
 ) -> tuple[str, ...]:
     """The required names absent from `environ` (default: the real one), in
     sorted order. An empty value counts as absent: a table name of `""` is
@@ -155,8 +155,8 @@ def format_missing_env_message(missing: Iterable[str]) -> str:
 
 
 def verify_required_env(
-    environ: Optional[Mapping[str, str]] = None,
-    source_root: Optional[Path] = None,
+    environ: Optional[Mapping[str, str]] = None,  # noqa: UP045
+    source_root: Optional[Path] = None,  # noqa: UP045
 ) -> None:
     """Fail the process if any required environment variable is missing.
 
@@ -290,7 +290,7 @@ def ensure_entity_roster_table(dynamodb_resource: object) -> None:
             AttributeDefinitions=[{"AttributeName": "setting_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         if _error_code(exc) == "ResourceInUseException":
             # deploy/dts/bootstrap.py won the race. That is the expected
             # outcome on a normally-bootstrapped compose, not a problem.

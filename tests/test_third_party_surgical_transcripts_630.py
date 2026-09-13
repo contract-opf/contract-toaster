@@ -350,7 +350,7 @@ def test_an_unprovable_transcript_falls_back_to_governed_fixed_text(failures: li
         source_text="The Provider may terminate this Agreement at any time and for any reason "
         "upon written notice to a different party entirely.",
     )
-    docx_bytes, clauses, block_map, block_ids, found = _findings(
+    docx_bytes, clauses, block_map, block_ids, found = _findings(  # noqa: RUF059
         _PLAYBOOK, [bad, bad], offer_transcripts=True
     )
     finding = next(f for f in found if f.get("clause_id") is not None)
@@ -460,7 +460,7 @@ def test_a_copied_block_marker_is_stripped_rather_than_failing_the_transcript(
     )
     first = poisoned["block_patches"][0]["segments"][0]
     first["text"] = f"[{block_id}] " + first["text"]
-    _docx, clauses, _bm, block_ids, found = _findings(
+    _docx, clauses, _bm, block_ids, found = _findings(  # noqa: RUF059
         _PLAYBOOK, [json.dumps(poisoned)], offer_transcripts=True
     )
     finding = next(f for f in found if f.get("clause_id") is not None)

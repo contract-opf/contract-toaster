@@ -62,7 +62,7 @@ os.environ.setdefault("REVIEWS_TABLE", "contract-toaster-reviews-test")
 os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-test")
 os.environ.setdefault("UPLOADS_BUCKET", "contract-toaster-uploads-test")
 
-import src.reviews as reviews  # noqa: E402
+import src.reviews as reviews  # noqa: E402, I001
 import primary_review_pass as pp  # noqa: E402
 
 PLAYBOOK = {"playbook_id": "eiaa", "metadata": {}}
