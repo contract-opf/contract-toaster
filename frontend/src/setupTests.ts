@@ -7,7 +7,7 @@
  * `console.error` (issue #68 — see the hook at the bottom of this file).
  */
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach, beforeEach } from 'vitest';
 
 import {
@@ -16,6 +16,32 @@ import {
   stopConsoleErrorGuard,
 } from './__tests__/support/consoleErrorGuard';
 import { __resetPlaybookCatalog } from './playbooksStore';
+
+// ---------------------------------------------------------------------------
+// Testing Library's async budget, aligned with vitest's (issues #56/#61
+// fallout, 2026-09-13).
+//
+// `vitest.config.ts` gives a test 15 s (`testTimeout: 15_000`) and runs at
+// `maxWorkers: '50%'`, but Testing Library's own `asyncUtilTimeout` — the
+// budget for a single `findBy*` / `waitFor` — was left at its 1000 ms
+// default. So a test had fifteen seconds to finish and one second to await,
+// and as the suite grew to 1333 tests across 113 files the SHORTER of the two
+// became the binding constraint.
+//
+// That is not a hypothetical. `orbit-diner-render.test.tsx` failed in CI at
+// 1070 ms and `review-history.test.tsx` at 1150 ms — both under a second and
+// a half, both passing in isolation, both on the wrong side of a 1000 ms line
+// that has nothing to do with what they assert. A CI runner is slower than a
+// dev machine, so the same suite fails there and passes here, which is the
+// worst shape a gate can have: `scripts/check.sh`'s own doctrine is that a
+// file which fails and then passes on re-run is RED, not "flaky, ignore it".
+//
+// Five seconds is the budget, not fifteen: enough headroom that machine load
+// stops deciding outcomes, short enough that a genuinely stuck render still
+// fails well inside vitest's own ceiling rather than hanging the run. This
+// raises the polling window only — it makes no failing assertion pass, it
+// just stops a busy CPU from being one.
+configure({ asyncUtilTimeout: 5_000 });
 
 // ---------------------------------------------------------------------------
 // `window.matchMedia`, which jsdom does not implement (issue #733).
