@@ -58,6 +58,21 @@ advice.
   `completed_at`, so those rows are never samples and cannot drag a real
   deployment's estimate toward zero. The AWS persist stage does stamp it, and
   should: on that target a mock review IS what a review takes there.
+- **"Run again" restores settings, never the document.** A burnt review and
+  every History row offer a *Run again* control (issue #70) that puts the
+  playbook, markup dial, footnote audience and per-review instructions back the
+  way that review had them, and then asks for the file again. That last half is
+  a deliberate owner decision (2026-09-13), not an unfinished feature: the input
+  route hands back a presigned URL on a different origin, and the SPA's
+  `connect-src` forbids reading it on **both** targets
+  (`infra/lib/nested/frontend-stack.ts`, `deploy/dts/nginx.conf`) — today's
+  input download works only because it is an anchor navigation, which that
+  directive does not govern. There is no bucket CORS either, and every presign
+  spends a slot of the caller's daily download quota and writes a
+  `review_input_downloaded` audit row. Fetching the bytes would therefore have
+  cost a reviewer's quota and logged a read nobody performed, to work around a
+  policy this deployment sets on purpose. The reviewer-facing walkthrough is
+  [RUNBOOK.md → Reviewer workflow guidance](../RUNBOOK.md#reviewer-workflow-guidance).
 - **What ships vs. what's stubbed/planned** for the admin-UI and observability
   surfaces is tracked plainly in
   [docs/implementation-status.md](implementation-status.md) (a lint-enforced

@@ -41,7 +41,15 @@
  * ## What this screen deliberately does NOT do
  *
  * **Re-run a past review.** That spends money and needs its own deliberate
- * design — same reasoning as `AdminDiagnostics.tsx`'s missing retry.
+ * design — same reasoning as `AdminDiagnostics.tsx`'s missing retry. Issue #70
+ * adds a *Run again* row action, and it deliberately stops short of that line:
+ * it carries the review id to the Review tab and lets THAT tab restore the
+ * four settings the review ran under. No review is submitted, nothing is
+ * spent, and the reviewer still has to choose a document and pull the lever.
+ * It does not fetch the original document either — `/api/reviews/{id}/input`
+ * is never called from this screen's Run again, because a presign spends a
+ * slot of the caller's daily download quota and writes a
+ * `review_input_downloaded` audit row (owner ruling, 2026-09-13).
  *
  * Conventions follow the existing screens exactly (docs/frontend-design-system
  * .md §15.1): `CtToolbar` header, `CtCard` body, `CtTable`, `CtProgress` while
@@ -92,6 +100,9 @@ import {
 // Design section's "and in History's expanded row"). See coverNote.ts's
 // module docstring for why a 502 degrades quietly instead of throwing.
 import { butterIt, formatCostUsdCents, COVER_NOTE_FAILURE_COPY } from './coverNote';
+// "Run again" (issue #70) — the one-slot, in-memory hand-off to the Review
+// tab. No storage, no props: see that module's docstring.
+import { requestRunAgain } from './runAgainRequest';
 import {
   CtBanner,
   CtButton,
@@ -399,6 +410,26 @@ function AbsentMark({ label, testId }: { label: string; testId: string }): React
       —
     </span>
   );
+}
+
+/**
+ * App.tsx's own hash for the Review tab (`hashForTab('review')`, issue #489).
+ * Named here rather than inlined for the same reason ReviewSubmission.tsx
+ * names the History one: the routing mechanism is App.tsx's, and this is a
+ * reference to it, not a second navigation scheme.
+ */
+const REVIEW_TAB_HASH = '#/review';
+
+/**
+ * "Run again" (issue #70): name the review, then go to the tab that owns the
+ * controls. Two steps and no third — this component fetches nothing new,
+ * reads no settings and never touches the document. `ReviewSubmission` is
+ * mounted for the whole session (App.tsx only toggles `hidden`), so the slot
+ * is drained by a listener that is already there.
+ */
+function runAgainFromRow(reviewId: string): void {
+  requestRunAgain(reviewId);
+  window.location.hash = REVIEW_TAB_HASH;
 }
 
 export default function ReviewHistory(): React.ReactElement {
@@ -1212,6 +1243,39 @@ export default function ReviewHistory(): React.ReactElement {
                                   testId={`history-no-input-${row.review_id}`}
                                 />
                               )}
+                              {/*
+                                "Run again" (issue #70) — the third mark in
+                                this cell, and the only one that is not a
+                                download. It hands the review id to the
+                                Review tab and navigates there; the Review
+                                tab reads the settings from the app's own
+                                detail route and the reviewer chooses the
+                                document again.
+
+                                It is offered on EVERY row, including one
+                                whose input pointer is gone, because what it
+                                restores — playbook, markup dial, footnote
+                                audience, instructions — is on the row
+                                itself and does not depend on the document
+                                surviving. Nothing on this path asks for
+                                `/api/reviews/{id}/input`: a presign would
+                                spend a slot of the caller's daily download
+                                quota and write a `review_input_downloaded`
+                                audit row for a read nobody performed (owner
+                                ruling, 2026-09-13).
+
+                                Same accessible-name discipline as the two
+                                downloads beside it (#668): the glyph is
+                                unreadable on its own, the name is not.
+                              */}
+                              <CtIconButton
+                                label="Run again with this review's settings"
+                                title="Run again with this review's settings"
+                                data-testid={`history-run-again-${row.review_id}`}
+                                onClick={() => runAgainFromRow(row.review_id)}
+                              >
+                                ↻
+                              </CtIconButton>
                             </div>
                             {/* The 410-Gone retention message stays PROSE and
                                 stays in the cell: it is a state the user has

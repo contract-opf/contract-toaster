@@ -236,6 +236,17 @@ export interface ReviewProjectionState {
   catalogError?: string | null;
   notesModeSaveError?: string | null;
   cancelError?: string | null;
+  /**
+   * Issue #70 ("Run again"). `prefilledFromReview` says the controls were
+   * restored from a stored review and no document came with them — settings
+   * only, by owner ruling, so the console explains the empty picker instead
+   * of leaving it looking like a prefill that half worked.
+   * `prefillError` is the app's FIXED sentence for a settings read that
+   * failed; like every other entry in this block it is already-classified
+   * copy, never a server response.
+   */
+  prefilledFromReview?: boolean;
+  prefillError?: string | null;
   /** `decisionCopy` — the ACCEPT sentence, or the backend's own `message`. */
   decisionCopy?: string | null;
   /** `explainFailure(detail)` */
@@ -599,6 +610,18 @@ function projectMessages(
       detail: state.cancelError,
     });
   }
+  // Issue #70. No retry key: the press that failed belongs to a review this
+  // channel does not name, and a key here would have to invent one. The
+  // controls are all still operable by hand, which the copy says.
+  if (state.prefillError) {
+    push({
+      id: 'prefill-error',
+      scope: 'submit',
+      tone: 'error',
+      title: "Couldn't restore those settings",
+      detail: state.prefillError,
+    });
+  }
   if (state.downloadError) {
     push({
       id: 'download-error',
@@ -851,6 +874,14 @@ export function toReviewModel(state: ReviewProjectionState): ReviewModel {
   if (state.runAgainAvailable !== undefined) {
     model.runAgainAvailable = state.runAgainAvailable;
   }
+  // Issue #70. The sentence it drives answers ONE question — "why are my
+  // settings set but the picker empty?" — so it is projected only while that
+  // is actually the state. The moment a document is chosen the question is
+  // answered and the flag goes with it, which is also why the app does not
+  // have to clear it on every path that could load a file.
+  if (state.prefilledFromReview && !fileSelected) {
+    model.prefilledFromReview = true;
+  }
   if (state.odometer !== undefined) {
     model.odometer = state.odometer;
   }
@@ -907,7 +938,12 @@ export interface ReviewSubmissionCallbacks {
   toggleNotifications: () => void;
   /** Navigate to the History tab. */
   openHistory: () => void;
-  /** History's existing run-again helper. */
+  /**
+   * `prefillFromReview(reviewId)` (issue #70) — restore that review's
+   * playbook, markup dial, footnote audience and instructions. SETTINGS ONLY:
+   * it never fetches the document, and the reviewer still chooses a file and
+   * pulls the lever. Owner ruling, 2026-09-13.
+   */
   runAgain: (reviewId: string) => void;
   /** Apply the preflight recommendation — `setPlaybookId` with the matched id. */
   switchToRecommendedPlaybook: () => void;
