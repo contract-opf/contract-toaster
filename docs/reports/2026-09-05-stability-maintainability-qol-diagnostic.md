@@ -354,6 +354,52 @@
 > by `frontend/src/__tests__/playbooks-store-72.test.tsx`. The finding text
 > below is left as written; it describes the state before that change.
 
+> **Status note, 2026-09-13.** G11 / B11 **landed** as public issue
+> `contract-opf/contract-toaster#70` (private #710 in the table below).
+> A *Run again* control sits beside *Toast another slice* on the burnt panel
+> (`frontend/src/orbit-diner/OrbitDiner.tsx`, dispatching the console kit's
+> existing `run-again` action) and as a row action on every History row
+> (`frontend/src/ReviewHistory.tsx`), which names the review through a
+> one-slot in-memory module (`frontend/src/runAgainRequest.ts` — no new
+> storage key) and navigates with App.tsx's own `#/review` hash.
+> `ReviewSubmission.tsx::prefillFromReview` then reads
+> `GET /api/reviews/{id}` and restores the playbook, the markup dial, the
+> footnote audience and the per-review instructions through the same guarded
+> handlers a reviewer's own gesture uses. Pinned by
+> `frontend/src/__tests__/run-again-70.test.tsx` and
+> `tests/test_review_detail_prefill_fields_70.py`.
+>
+> **One reversal of B11 as written below**, by owner ruling on the issue
+> (2026-09-13). B11 says the file "is re-fetched from
+> `GET /api/reviews/{id}/input` when it is still retained". It is not, ever.
+> That route answers with a presigned URL on the STORAGE origin, and
+> `connect-src` forbids the SPA from reading another origin on both targets
+> (`infra/lib/nested/frontend-stack.ts`, `deploy/dts/nginx.conf`, pinned by
+> `tests/test_infra_frontend_csp_226.py` and `tests/test_dts_nginx_csp.py`);
+> the existing input download works only because it is an anchor navigation,
+> which that directive does not govern, and no S3/MinIO bucket CORS exists
+> anywhere in `infra/`. Every presign also spends a slot of the caller's
+> daily download quota and writes a `review_input_downloaded` audit row, so
+> the fetch B11 describes would have charged a reviewer for a download they
+> never asked for and logged a document read nobody performed. The three ways
+> forward (widen the CSP + add bucket CORS; add a same-origin streaming
+> route; restore settings only) went to the owner, who chose the third as
+> both the most secure — it changes no security control at all — and the
+> cheapest to maintain. So the picker is always shown, with fixed copy that
+> says why, and `run-again-70.test.tsx` asserts ZERO requests to
+> `/api/reviews/{id}/input` on every path, for `has_input: true` and
+> `has_input: false` alike, because jsdom cannot see a CSP any more than it
+> can see a stylesheet.
+>
+> A second, smaller departure: B11's "pre-fills ... from the stored row" is
+> read strictly. `get_review_detail`'s projection is UNCHANGED —
+> `original_filename` stays off it, as #58 left it, because the prefill has
+> no use for the filename and that attribute is classified Confidential
+> (a contract filename routinely names the counterparty).
+> `tests/test_review_detail_prefill_fields_70.py` pins that: the row carries
+> it, the route does not. The finding text below is left as written; it
+> describes the state before that change.
+
 
 Second sweep of the day, following `2026-09-05-audit-hardening-diagnostic.md`
 (F1–F14, issues #690–#700). This one covers what makes the project hard to
@@ -599,6 +645,9 @@ derive its "living docs" list from INDEX.md instead of the hand list.
 playbook, dial, notes mode, and guidance from the stored row; the file is
 re-fetched from `GET /api/reviews/{id}/input` when it is still retained,
 otherwise the user is asked to choose it. Uses the existing submit path.
+**Landed (B11)** — see the G11 status note at the top of this file, which
+records the owner ruling that reversed the re-fetch half: the document is
+never fetched, and the reviewer is always asked to choose it.
 **B12.** Time-remaining estimate on the progress bar from the preflight page
 estimate and a per-deployment rolling median of recent DONE reviews'
 `created_at → completed_at` (the `pipeline_health` data already exists).

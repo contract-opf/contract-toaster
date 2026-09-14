@@ -91,6 +91,39 @@ export function toMarkupIntensity(level: BrowningLevel): MarkupIntensity {
 }
 
 /**
+ * The inverse of `toMarkupIntensity` (issue #70's "Run again"): the control
+ * level that reproduces a stored review's `markup_intensity`.
+ *
+ * Absent/null maps to Medium ON PURPOSE, and it is not a guess. Medium sends
+ * NO `markup_intensity` field and injects NO intensity block (see
+ * `BROWNING_SETTINGS` above), so a row carrying no value — whether it was
+ * submitted at Medium or predates the field entirely — ran with exactly the
+ * request Medium produces. Restoring Medium therefore reproduces what that
+ * review actually did, where leaving the dial wherever it happened to be
+ * would rerun the document under an intensity nobody chose for it.
+ *
+ * A value this build does not know (a newer server's vocabulary) returns
+ * null instead — same discipline as `ReviewHistory.describeMarkupIntensity`:
+ * an unrecognised setting is not painted, and here it is not silently
+ * downgraded to Medium either. The caller leaves the dial alone.
+ */
+export function fromMarkupIntensity(
+  value: string | null | undefined,
+): BrowningLevel | null {
+  if (value === null || value === undefined || value === '') return DEFAULT_BROWNING;
+  switch (value) {
+    case 'light':
+      return 'light';
+    case 'medium':
+      return 'medium';
+    case 'heavy':
+      return 'dark';
+    default:
+      return null;
+  }
+}
+
+/**
  * The instructions text actually submitted: the reviewer's own words, and
  * nothing else.
  *

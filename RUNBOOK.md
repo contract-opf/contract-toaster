@@ -490,6 +490,59 @@ The model is governed by an explicit **model-policy matrix** ([ARCHITECTURE.md](
 
 ## Reviewer workflow guidance
 
+### Running a review again with the same settings
+
+A review often needs a second run: it burnt, an admin activated a different
+playbook version, or you want the same document reviewed at a different markup
+intensity. Before issue #70 that meant re-selecting the contract type, the
+markup dial, the footnote audience and re-typing your instructions from memory.
+
+**Where the control is.** Two places, and both do the same thing:
+
+- on the **Review tab**, beside *Toast another slice* on a burnt review — that
+  key clears the failure, *Run again* clears it **and** puts your settings back;
+- on the **History tab**, the ↻ action on any row (accessible name: *"Run again
+  with this review's settings"*). It switches you to the Review tab and prefills
+  from there.
+
+**What comes back.** The contract type, the markup dial, the footnote audience
+and the per-review instructions that review ran under — read from the review's
+own record (`GET /api/reviews/{id}`), not from whatever your controls happened
+to be set to. A review that ran at the default markup intensity comes back as
+**Medium**, which is the setting that sends no instruction at all — the same
+request it originally made.
+
+**What does not come back: the document.** The picker stays empty and says so:
+*"Choose the document again — Run again restores your settings, not the file."*
+Choose the file again and press the lever. Nothing is submitted until you do.
+
+This is deliberate (owner decision, 2026-09-13), and it is worth knowing why,
+because the alternative looks free and is not:
+
+- The input document is served as a **presigned URL on the storage origin**, and
+  the app's Content-Security-Policy `connect-src` does not allow the page to
+  read another origin on either deployment target. The existing *Download the
+  input document* action works because it is a link the browser navigates, which
+  that policy does not cover; a background fetch is a different thing and would
+  be blocked in production.
+- Every presign **spends one of your daily document-download slots** and writes
+  a `review_input_downloaded` audit row. A silent re-fetch would have charged
+  you for a download you never asked for and put a document read in the audit
+  log that nobody performed.
+
+**If it says "We couldn't restore those settings just now."** The record could
+not be read — transient, and nothing was lost: the review you pressed it from is
+still on screen and your controls have not moved. Press it again, or set the
+four controls by hand.
+
+**If it says "That review is still running."** You pressed ↻ while a review was
+in flight on the Review tab. Restoring settings clears the Review tab, and
+clearing it would take the running review off your screen without stopping it on
+the server — it would keep running, and keep costing, with nothing on screen to
+watch it or to save its result. So the press is refused and the running review
+is left alone. Wait for it to finish, or press *Stop review* first, then press ↻
+again.
+
 ### Counterparty sent a PDF — what to do
 
 v1 accepts `.docx` only. If a school or counterparty sends a PDF, the tool rejects it with a format-specific message (not the generic hostile-file error — see [ARCHITECTURE.md → Wrong-format rejection UX](ARCHITECTURE.md#wrong-format-rejection-ux--pdf-and-legacy-doc-v1-scope)). The reviewer should take one of the following paths:

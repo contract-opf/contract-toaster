@@ -58,6 +58,10 @@ const MESSAGE_TEST_IDS: Record<string, string | undefined> = {
   "disposition-error": "review-disposition-error",
   "cover-error": "review-cover-note-error",
   "cover-failed": "review-cover-note-real-error",
+  // Issue #70. Its own id, not `submit-error`'s: a settings read that failed
+  // is not a submission that failed, and the suite has to be able to tell a
+  // "Run again" that came back empty from a review that was refused.
+  "prefill-error": "review-prefill-error",
 };
 /** The retry key each of those messages offers, same reasoning. */
 const MESSAGE_ACTION_TEST_IDS: Record<string, string | undefined> = {
@@ -1330,12 +1334,34 @@ export function OrbitDiner({
                     {m.downloading ? "Preparing…" : "Save redline"}
                   </Key>
                 ) : m.status === "ERROR" ? (
-                  <Key
-                    testId="review-retry-button"
-                    onClick={() => action({ type: "retry" })}
-                  >
-                    Toast another slice
-                  </Key>
+                  <>
+                    <Key
+                      testId="review-retry-button"
+                      onClick={() => action({ type: "retry" })}
+                    >
+                      Toast another slice
+                    </Key>
+                    {/* Issue #70. The second half of the burnt panel's way
+                        out, beside the first: "Toast another slice" clears,
+                        this one clears AND puts the dials back where the
+                        review that burnt had them. It is NOT a resubmit —
+                        the host prefills settings only, the picker stays
+                        empty, and the lever is still the reviewer's to
+                        press. Gated on `reviewId` because a submit that
+                        failed before a review existed has nothing to
+                        restore from. */}
+                    {m.reviewId && (
+                      <Key
+                        testId="review-run-again-button"
+                        title="Restore this review's settings and choose a document"
+                        onClick={() =>
+                          action({ type: "run-again", reviewId: m.reviewId })
+                        }
+                      >
+                        Run again
+                      </Key>
+                    )}
+                  </>
                 ) : m.reviewId && !(manual && m.result) ? (
                   // Issue #734. One "Review details" at a time. The result
                   // card owns the key on the two manual statuses, because
@@ -1386,6 +1412,24 @@ export function OrbitDiner({
                 </>
               )}
             </div>
+            {/* Issue #70. Why the dials are set but the toaster is empty.
+                One static sentence — it names no file and echoes nothing
+                from the stored review, because "Run again" deliberately
+                carries the SETTINGS and not the document (owner ruling
+                2026-09-13). `od-fine` is the console's existing 14px quiet-
+                text rule; no new class, and nothing here is a control. The
+                host drops `prefilledFromReview` the moment a document is
+                chosen, so this cannot linger as a stale explanation. */}
+            {m.prefilledFromReview && !working && !terminal && (
+              <p
+                className="od-fine"
+                role="status"
+                data-testid="review-prefill-note"
+              >
+                Choose the document again — Run again restores your settings,
+                not the file.
+              </p>
+            )}
             {!active.length && (
               <p
                 className="od-local-error"

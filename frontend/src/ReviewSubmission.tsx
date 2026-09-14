@@ -172,9 +172,14 @@ import { copyReceipt as copyOrbitReceipt, saveReceipt as saveOrbitReceipt } from
 import {
   composeGuidance,
   DEFAULT_BROWNING,
+  fromMarkupIntensity,
   toMarkupIntensity,
   type BrowningLevel,
 } from './toaster/browning';
+// "Run again" (issue #70): the one-slot, in-memory hand-off History uses to
+// name the review this panel should prefill itself from. No storage, no
+// props threaded through App.tsx — see that module's docstring.
+import { consumeRunAgainRequest, subscribeRunAgain } from './runAgainRequest';
 import {
   DEFAULT_NOTES_MODE,
   isNotesMode,
@@ -260,6 +265,15 @@ interface ReviewDetail {
   // submitted without any, and on every review created before that field
   // was recorded.
   toaster_guidance?: string | null;
+  // The footnote audience (issue #520) and the markup-intensity dial (issue
+  // #54) this review was submitted under, both already projected by
+  // get_review_detail. Read by `prefillFromReview` (issue #70) and by nothing
+  // else: the running panel's own controls are driven by this component's
+  // state, never re-derived from the poll, or an edited control would
+  // silently revert mid-review. Null/absent on a review that predates the
+  // field — and, for `markup_intensity`, on one submitted at the default.
+  notes_mode?: string | null;
+  markup_intensity?: string | null;
   // Whether a stop has been asked for but has not taken effect yet.
   // Cancellation is cooperative — the pipeline stops at its next checkpoint,
   // which may be on the far side of an in-flight model call — so this gap is
@@ -322,6 +336,39 @@ interface OutputResponse {
  * blocking upload.
  */
 const CATALOG_ERROR_COPY = "We couldn't load the list of contract types right now.";
+
+/**
+ * What "Run again" says when the stored review's settings could not be read
+ * (issue #70). Fixed copy on purpose: the escaped-text rule forbids putting a
+ * raw server response in a message, and the reviewer's next step is the same
+ * whatever the status code was — set the controls by hand, or press it again.
+ * Nothing has been cleared when this shows, so the screen is exactly as it
+ * was before the press.
+ */
+const PREFILL_ERROR_COPY =
+  "We couldn't read that review's settings just now. Set the controls yourself, or try again.";
+
+/**
+ * What "Run again" says when it is pressed while a review is still in flight
+ * (issue #70, review round 1). The prefill's first act is `resetForRetry()`,
+ * which stops the poller and takes the running review off the screen without
+ * cancelling it server-side — a silent detach, followed by an intake that
+ * invites an immediate second submission of work already being paid for.
+ *
+ * The Review tab already forbids that gesture: the intake region is
+ * `hidden={working || terminal}` and the only `review-retry-button` renders
+ * on `ERROR` alone, so no manual press can reach this reset mid-flight. The
+ * History row's key is a programmatic caller of the same handler and has no
+ * such gate of its own, so it is gated here instead — a programmatic path
+ * inherits every side effect of the gesture it reuses, including the ones
+ * the UI made unreachable by hiding the control.
+ *
+ * Fixed copy, same as above: no status code, no server words. Nothing has
+ * been cleared when this shows; the running review is untouched.
+ */
+const PREFILL_BUSY_COPY =
+  'That review is still running. Wait for it to finish, or stop it, before restoring an earlier ' +
+  "review's settings.";
 
 // Non-terminal pipeline statuses — keep in sync with
 // backend/src/reviews.py's REVIEW_STATUSES_NON_TERMINAL. Polling continues
@@ -2249,6 +2296,12 @@ export default function ReviewSubmission(): React.ReactElement {
     }
   }, [reviewId]);
 
+  // "Run again" (issue #70), declared here because `resetForRetry` below
+  // clears both. See the block comment on `prefillFromReview` for the owner
+  // ruling this path is built to: SETTINGS ONLY, never the document.
+  const [prefilledFromReview, setPrefilledFromReview] = useState(false);
+  const [prefillError, setPrefillError] = useState<string | null>(null);
+
   /**
    * "Toast another slice" — the reset that clears the finished/failed review
    * off the screen. Extracted from the button's own onClick (issue #719) so
@@ -2273,7 +2326,136 @@ export default function ReviewSubmission(): React.ReactElement {
     // rest of the session even once the live estimate has arrived.
     setSubmittedEstimateCents(undefined);
     handedOffReviewRef.current = null;
+    setPrefilledFromReview(false);
+    setPrefillError(null);
   }, [stopPolling]);
+
+  // -------------------------------------------------------------------------
+  // "Run again" (issue #70; 2026-09-05 diagnostic finding G11, action B11)
+  // -------------------------------------------------------------------------
+  //
+  // SETTINGS ONLY. Owner ruling recorded on issue #70 (2026-09-13): this path
+  // restores the playbook, the markup dial, the footnote audience and the
+  // per-review instructions, and the reviewer chooses the document again. It
+  // does NOT fetch, download or reconstruct the file, and in particular it
+  // never touches `GET /api/reviews/{id}/input`.
+  //
+  // That is not a shortcut, it is the decision. The input route answers with a
+  // presigned URL on a DIFFERENT origin, which `connect-src` forbids the SPA
+  // from reading on both deployment targets (`infra/lib/nested/
+  // frontend-stack.ts`, `deploy/dts/nginx.conf`) — today's input download works
+  // only because `triggerBrowserDownload` navigates an anchor, which that
+  // directive does not govern. There is no bucket CORS either. And every
+  // presign spends a slot of the caller's daily download quota and writes a
+  // `review_input_downloaded` audit row, so a silent fetch here would log a
+  // document read that nobody performed. jsdom can no more see a CSP than it
+  // can see a stylesheet, so none of that would have failed a test here — it
+  // would simply have failed in production.
+  //
+  // `prefilledFromReview` drives one static sentence in the intake area (the
+  // console renders it; see `orbit-diner/OrbitDiner.tsx`), so the empty file
+  // picker reads as deliberate rather than as a prefill that half worked.
+
+  // Which prefill is the current one. Two presses in quick succession (a
+  // History row, then the burnt panel) must not have the slower response
+  // repaint the dials the newer one already set.
+  const prefillTicketRef = useRef(0);
+
+  /**
+   * Is a review in flight right now — the same state the console hides the
+   * intake behind (`working` in `OrbitDiner.tsx`, i.e. `submitting ||
+   * reviewId !== null` while the status is non-terminal). Derived as a
+   * BOOLEAN rather than read off `detail` inside the callback below, so the
+   * callback's identity — and with it the subscription effect that depends on
+   * it — changes when the answer flips, not on every poll tick.
+   */
+  const reviewInFlight =
+    submitting ||
+    (reviewId !== null && (!detail || NON_TERMINAL_STATUSES.has(detail.status)));
+
+  const prefillFromReview = useCallback(
+    async (sourceReviewId: string): Promise<void> => {
+      const ticket = ++prefillTicketRef.current;
+      // Refuse BEFORE the read, so a press made mid-flight costs neither a
+      // detail fetch nor — far more important — the `resetForRetry()` below,
+      // which would detach the running review from the screen while it keeps
+      // running (and keeps billing) server-side.
+      if (reviewInFlight) {
+        setPrefillError(PREFILL_BUSY_COPY);
+        return;
+      }
+      setPrefillError(null);
+      let source: ReviewDetail;
+      try {
+        // The app's own owner-scoped detail route — the same one the poller
+        // and the reload-resume path read, with the same `authorizedFetch`
+        // guard. No new route, no presign, no second source of truth.
+        const response = await authorizedFetch(
+          `/api/reviews/${encodeURIComponent(sourceReviewId)}`,
+        );
+        if (!response.ok) throw new Error(`detail read rejected (${response.status})`);
+        source = (await response.json()) as ReviewDetail;
+      } catch {
+        // Fixed copy, never the server's words: the escaped-text rule applies
+        // to a failure message as much as to a result. Nothing has been
+        // cleared at this point, so a failed prefill costs the reviewer
+        // nothing but the press.
+        if (ticket === prefillTicketRef.current) setPrefillError(PREFILL_ERROR_COPY);
+        return;
+      }
+      if (ticket !== prefillTicketRef.current) return;
+
+      // Only now is the screen cleared. Doing this after the read, rather than
+      // before it, is what lets the failure path above leave a burnt review
+      // and its diagnosis exactly where they were.
+      resetForRetry();
+
+      // Every setting goes through the SAME handler a reviewer's own gesture
+      // goes through, so nothing here can bypass a guard those handlers hold:
+      // `choosePlaybookManually` marks the selection as the user's, so the
+      // #730 auto-playbook effect cannot reverse it; `handleNotesModeChange`
+      // keeps #572's kill switch, so an unavailable mode stored on an older
+      // review is refused here exactly as it is refused in the control.
+      if (source.playbook_id) {
+        choosePlaybookManually(source.playbook_id);
+      }
+      // Silent: `applyBrowningChange` rather than `handleBrowningChange`,
+      // because no detent was clicked. One gesture, one sound (#722).
+      const level = fromMarkupIntensity(source.markup_intensity);
+      if (level) {
+        applyBrowningChange(level);
+      }
+      const storedMode = source.notes_mode;
+      if (isNotesMode(storedMode) && storedMode !== notesMode) {
+        handleNotesModeChange(storedMode);
+      }
+      setToasterGuidance(source.toaster_guidance ?? '');
+      setPrefilledFromReview(true);
+    },
+    [
+      reviewInFlight,
+      resetForRetry,
+      choosePlaybookManually,
+      applyBrowningChange,
+      handleNotesModeChange,
+      notesMode,
+    ],
+  );
+
+  // History's row action names the review through the in-memory slot
+  // (`runAgainRequest.ts`) and then sets App.tsx's own `#/review` hash. This
+  // panel is mounted for the whole session, so it hears the request wherever
+  // the reviewer was standing; the drain on mount covers the ordering case
+  // where the request was left in the slot before this subscription existed.
+  useEffect(() => {
+    const unsubscribe = subscribeRunAgain(() => {
+      const requested = consumeRunAgainRequest();
+      if (requested) void prefillFromReview(requested);
+    });
+    const waiting = consumeRunAgainRequest();
+    if (waiting) void prefillFromReview(waiting);
+    return unsubscribe;
+  }, [prefillFromReview]);
 
   // The automatic save (issue #448) — the same anchor click the button
   // performs, fired once on completion without a user gesture.
@@ -2941,6 +3123,11 @@ export default function ReviewSubmission(): React.ReactElement {
     catalogError,
     notesModeSaveError,
     cancelError,
+    // Issue #70: the prefill's two facts — whether the controls were restored
+    // from a stored review (which is what the "choose the document again"
+    // sentence explains) and the fixed sentence shown when that read failed.
+    prefilledFromReview,
+    prefillError,
     decisionCopy,
     failureExplanation,
     unclassifiedReason: UNCLASSIFIED_REASON,
@@ -2998,14 +3185,14 @@ export default function ReviewSubmission(): React.ReactElement {
     openHistory: () => {
       window.location.hash = HISTORY_TAB_HASH;
     },
-    // The real per-review "run again" control lives on the History tab, and
-    // this projection supplies no `history` strip, so the console cannot
-    // dispatch this action at all today. Until #726 lands that strip
-    // alongside its own helper, the honest hand-off is to open the tab that
-    // owns the control rather than to invent a second submit path here.
-    runAgain: () => {
-      window.location.hash = HISTORY_TAB_HASH;
-    },
+    // Issue #70. The burnt panel's "Run again" key dispatches this with the
+    // failed review's own id, and the History row reaches the same handler
+    // through `runAgainRequest.ts`. It prefills the SETTINGS and nothing else
+    // — no document, no submit — which is why it can sit beside
+    // `review-retry-button` without being a second submit path: that key
+    // clears, this one clears AND restores the dials, and the reviewer still
+    // has to choose a file and press the lever.
+    runAgain: (sourceReviewId: string) => void prefillFromReview(sourceReviewId),
     switchToRecommendedPlaybook: () => {
       if (recommendedPlaybook) {
         playDetent();

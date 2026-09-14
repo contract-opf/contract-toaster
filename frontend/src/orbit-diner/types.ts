@@ -215,6 +215,14 @@ export interface ReviewModel {
     hasInput: boolean;
   }[];
   runAgainAvailable?: boolean;
+  /**
+   * The reviewer pressed "Run again": the controls below were restored from a
+   * stored review and NO document came with them (issue #70, owner ruling
+   * 2026-09-13 — settings only, the file is always chosen again). True only
+   * while the picker is still empty, so the sentence it prints disappears the
+   * moment it stops being the answer to "why is nothing loaded?".
+   */
+  prefilledFromReview?: boolean;
   odometer?: number;
   resumed?: boolean;
   motionEvent?: { id: string; type: MotionEvent };
