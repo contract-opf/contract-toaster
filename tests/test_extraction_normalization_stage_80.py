@@ -172,10 +172,16 @@ def _two_author_conflict_p(original: str, resulting_a: str, resulting_b: str) ->
     )
 
 
-def _malformed_deletion_p(original: str) -> str:
+def _whole_paragraph_deletion_p(original: str) -> str:
     """A tracked-change deletion with nothing inserted to replace it, plus
-    an open reviewer comment on the same clause -- structurally
-    irreconcilable (empty resulting_text): must fail closed."""
+    an open reviewer comment on the same clause. Every run sits inside the
+    `<w:del>`, so `_build_paragraph_record` computes `resulting_text == ""`.
+
+    Until issue #93 this was read as "structurally irreconcilable" and
+    failed the whole upload closed. It is not irreconcilable: the operative
+    text after accepting the change is determinately the empty string. It
+    now normalizes as a whole-paragraph DELETION (see
+    `tests/test_whole_paragraph_deletion_93.py`)."""
     return (
         "<w:p>"
         '<w:del w:id="1" w:author="unknown" w:date="2026-01-01T00:00:00Z">'
@@ -183,6 +189,22 @@ def _malformed_deletion_p(original: str) -> str:
         '<w:r><w:commentReference w:id="0"/></w:r>'
         "</w:p>"
     )
+
+
+# U+200B ZERO WIDTH SPACE -- the control-character screen's own fail-closed
+# shape (issue #632), and, since issue #93 reclassified the whole-paragraph
+# deletion above, the fail-closed shape these fixtures reach through REAL
+# OOXML extraction. `scripts/normalize_input.py`'s malformed-record branch
+# is unreachable from a real `.docx` (the extractor always sets the
+# `resulting_text` key), so a fail-closed document fixture must use a
+# refusal the extractor can actually produce.
+_ZERO_WIDTH_SPACE = "​"
+
+
+def _control_character_p(text: str) -> str:
+    """A paragraph carrying an invisible zero-width space -- fails closed
+    under the control-character screen (issue #632)."""
+    return f"<w:p><w:r><w:t>{text}{_ZERO_WIDTH_SPACE}payable monthly.</w:t></w:r></w:p>"
 
 
 def _field_code_conflict_p(original: str, resulting: str, author: str = "counterparty") -> str:
@@ -591,16 +613,41 @@ def test_pending_change_inside_field_code_accepts_all(failures: list[str]) -> No
         )
 
 
-def test_malformed_deletion_with_comment_fails_closed(failures: list[str]) -> None:
-    body = _heading_p("Limitation on Liability") + _malformed_deletion_p(
-        "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+def test_whole_paragraph_deletion_with_comment_normalizes(failures: list[str]) -> None:
+    """Issue #93 reverses this case's expected outcome. A tracked deletion
+    covering an ENTIRE paragraph, with nothing inserted to replace it, used
+    to fail the whole upload closed as a malformed revision record; it is an
+    ordinary redline move whose operative text is determinately empty, and
+    an open comment on the same clause still does not gate it (issue #199)."""
+    struck = "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+    body = (
+        _heading_p("Limitation on Liability")
+        + _whole_paragraph_deletion_p(struck)
+        + _body_p("Fees are payable monthly.")
     )
     result = stage.extract_and_normalize(_build_docx_bytes(body))
-    if result.get("status") != "unnormalizable_input":
+    if result.get("status") != "normalized":
         failures.append(
-            f"[G3d] A deletion with nothing inserted to replace it (malformed -- no "
-            f"resulting_text) must fail closed even though it co-occurs with an open "
-            f"comment. Got: {result}"
+            f"[G3d] A tracked deletion covering a whole paragraph must normalize as a "
+            f"deletion, not fail closed as a malformed record (issue #93). Got: {result}"
+        )
+        return
+    texts = " ".join(p["text"] for p in result["paragraphs"])
+    if struck in texts:
+        failures.append(
+            f"[G3d2] The struck paragraph must not survive into the operative draft. "
+            f"Got: {texts!r}"
+        )
+    if "Fees are payable monthly." not in texts:
+        failures.append(
+            f"[G3d3] A sibling paragraph under the same heading must survive the "
+            f"deletion of its neighbour. Got: {texts!r}"
+        )
+    notes = result.get("normalization_notes") or ""
+    if "accepted-all into the operative draft." not in notes or "struck paragraph is omitted" not in notes:
+        failures.append(
+            f"[G3d4] The deletion must be disclosed in normalization_notes, in the "
+            f"established accept-all sentence shape. Got: {notes!r}"
         )
 
 
@@ -694,8 +741,12 @@ def test_comment_never_gates_accept_all(failures: list[str]) -> None:
 
 
 def test_unnormalizable_document_emits_analysis_report_shape(failures: list[str]) -> None:
-    body = _heading_p("Limitation on Liability") + _malformed_deletion_p(
-        "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+    # The refusal fixture is the control-character screen (issue #632), not
+    # the whole-paragraph deletion this file used before issue #93 -- that
+    # shape now normalizes, and the malformed-record branch it used to reach
+    # is unreachable from real OOXML. See `_control_character_p`.
+    body = _heading_p("Limitation on Liability") + _control_character_p(
+        "Each party's aggregate liability under this Agreement shall not exceed $150,000. Fees are "
     )
     result = stage.extract_and_normalize(_build_docx_bytes(body))
     if result.get("status") != "unnormalizable_input":
@@ -732,8 +783,8 @@ def test_one_unnormalizable_paragraph_fails_whole_document(failures: list[str]) 
         _heading_p("Governing Law")
         + _body_p("This Agreement shall be governed by the laws of Delaware.")
         + _heading_p("Limitation on Liability")
-        + _malformed_deletion_p(
-            "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+        + _control_character_p(
+            "Each party's aggregate liability under this Agreement shall not exceed $150,000. Fees are "
         )
     )
     result = stage.extract_and_normalize(_build_docx_bytes(body))
@@ -793,8 +844,10 @@ def test_run_stage_pointer_only_payload_success_path(failures: list[str]) -> Non
 
 
 def test_run_stage_pointer_only_payload_fail_closed_path(failures: list[str]) -> None:
-    body = _heading_p("Limitation on Liability") + _malformed_deletion_p(
-        "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+    # Control-character screen, not the pre-#93 whole-paragraph deletion --
+    # see `test_unnormalizable_document_emits_analysis_report_shape`.
+    body = _heading_p("Limitation on Liability") + _control_character_p(
+        "Each party's aggregate liability under this Agreement shall not exceed $150,000. Fees are "
     )
     docx_bytes = _build_docx_bytes(body)
 
@@ -1088,7 +1141,7 @@ TESTS = [
     test_single_author_pending_change_accepts_all,
     test_multi_author_conflict_accepts_all,
     test_pending_change_inside_field_code_accepts_all,
-    test_malformed_deletion_with_comment_fails_closed,
+    test_whole_paragraph_deletion_with_comment_normalizes,
     test_hidden_text_and_field_result_normalize_cleanly,
     test_sibling_body_paragraph_survives_accept_all_on_other_sibling,
     test_comment_never_gates_accept_all,

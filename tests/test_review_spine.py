@@ -142,20 +142,22 @@ def _body_p(text: str) -> str:
     return f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
 
 
-def _malformed_deletion_p(original: str) -> str:
-    """A tracked-change deletion with nothing inserted to replace it --
-    empty resulting_text, the one condition `scripts/normalize_input.py`
-    still fails closed on (issue #530). Same convention as
-    `tests/test_extraction_normalization_stage_80.py::_malformed_deletion_p`,
-    reproduced locally here so this file stays self-contained (this file's
-    own docstring: per-file test-process isolation, no cross-file fixture
-    imports)."""
-    return (
-        "<w:p>"
-        '<w:del w:id="1" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
-        f"<w:r><w:delText>{original}</w:delText></w:r></w:del>"
-        "</w:p>"
-    )
+# U+200B ZERO WIDTH SPACE -- the control-character screen's refusal shape
+# (issue #632). A tracked deletion with nothing inserted used to serve as
+# this file's fail-closed fixture; since issue #93 that shape normalizes as a
+# whole-paragraph deletion, and because
+# `extraction_normalization_stage._build_paragraph_record` always sets
+# `resulting_text`, the malformed-record branch is unreachable from real
+# bytes. The screen is the refusal a real `.docx` can still reach.
+_ZERO_WIDTH_SPACE = "\u200b"
+
+
+def _control_character_p(original: str) -> str:
+    """A paragraph carrying an invisible zero-width character -- refused,
+    never stripped (issue #632). Built locally rather than imported so this
+    file stays self-contained (this file's own docstring: per-file
+    test-process isolation, no cross-file fixture imports)."""
+    return f"<w:p><w:r><w:t>{original}{_ZERO_WIDTH_SPACE}</w:t></w:r></w:p>"
 
 
 def _build_docx_bytes(body_paragraphs_xml: str) -> bytes:
@@ -757,7 +759,7 @@ def _part_5_unnormalizable_input_carries_normalization_notes(
 ) -> None:
     bundle = _load_bundle()
     heading = "Limitation on Liability"
-    body = _heading_p(heading) + _malformed_deletion_p(
+    body = _heading_p(heading) + _control_character_p(
         "Each party's aggregate liability under this Agreement shall not exceed $150,000."
     )
     docx_bytes = _build_docx_bytes(body)
@@ -769,7 +771,7 @@ def _part_5_unnormalizable_input_carries_normalization_notes(
 
     if result["status"] == "OK":
         failures.append(
-            f"[5a] Expected a malformed (textless) revision record to fail "
+            f"[5a] Expected a document the normalization pass refuses to fail "
             f"closed, got status=OK: {result}"
         )
         return
@@ -783,15 +785,34 @@ def _part_5_unnormalizable_input_carries_normalization_notes(
     notes = result.get("normalization_notes")
     if not notes:
         failures.append(
-            f"[5d] The refusal path must carry normalization_notes naming "
-            f"the offending paragraph -- asserted here on the refusal path "
-            f"itself, not just the post-stage-1 fail-closed path Part 3 "
+            f"[5d] The refusal path must carry normalization_notes on the "
+            f"RESULT's own top-level field -- asserted here on the refusal "
+            f"path itself, not just the post-stage-1 fail-closed path Part 3 "
             f"covers. Got: {result}"
         )
-    elif heading not in notes:
+        return
+    # #530's actual fix, stated as the identity it is: ONE channel, not two.
+    # The text the top-level field carries must be the SAME text
+    # `normalize_input.build_unnormalizable_report` computed, which is what
+    # used to be stranded inside `analysis_report`.
+    #
+    # This asserts the THREADING, not the wording. Since issue #93 no real
+    # `.docx` can reach a refusal note that names its paragraph: the
+    # paragraph-naming branches are the malformed-record ones (unreachable --
+    # `_build_paragraph_record` always sets `resulting_text`, and a
+    # whole-paragraph deletion now normalizes), while the refusal a real
+    # document CAN still reach -- the control-character screen -- is
+    # deliberately counts-only and names nothing (issue #632). What the note
+    # says is `normalize_input`'s own contract, pinned by
+    # tests/test_control_character_screen.py and
+    # tests/test_whole_paragraph_deletion_93.py.
+    report_notes = (result.get("analysis_report") or {}).get("normalization_notes")
+    if notes != report_notes:
         failures.append(
-            f"[5e] normalization_notes must name the offending paragraph "
-            f"({heading!r}). Got: {notes!r}"
+            f"[5e] normalization_notes must be the SAME text the analysis "
+            f"report computed, threaded onto the result's own field rather "
+            f"than a second one. Got top-level {notes!r} vs report "
+            f"{report_notes!r}"
         )
 
 

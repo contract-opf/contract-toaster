@@ -21,8 +21,10 @@ Instead of adding complex, fragile programmatic whitespace-claiming rules and an
 
 ### [`scripts/extraction_normalization_stage.py`](../scripts/extraction_normalization_stage.py)
 - In `_build_paragraph_record`, returned `resulting_text` (the operative post-acceptance text) alongside `text` (`original_text`) and `revisions`.
-- In `extract_document_paragraphs`, evaluated `clause_boundaries.is_boundary_paragraph_ooxml` on `operative_text = record.get("resulting_text") or record["text"]`.
+- In `extract_document_paragraphs`, evaluated `clause_boundaries.is_boundary_paragraph_ooxml` on the operative (post-acceptance) text rather than on `original_text`.
 - `heading_source_text` remains `record["text"]` to preserve heading-text equality guards in downstream checks.
+
+**Amended by issue #93.** The operative text was originally read as `record.get("resulting_text") or record["text"]`, which falls back to the pre-acceptance text whenever the operative text is the empty string — exactly what a paragraph struck in full produces. That reintroduced this same desync from the other direction: the struck line's OLD text started or named a block in the raw read that does not exist in the materialized read, where the emptied `<w:p>` is a skippable spacer. The read is now `record["resulting_text"]` with no fallback, an empty operative text never starts a clause, and a wholly struck `<w:p>` that precedes the document's first clause boundary is held out of the block numbering entirely (it is emitted as a notes-only group, `"emits_block": False`, so its deletion is still normalized and disclosed) rather than opening an implicit leading block the materialized read never opens. `tests/test_whole_paragraph_deletion_93.py` pins raw/materialized block-map equality for each of those shapes.
 
 ### [`tests/test_extraction_normalization_stage_80.py`](../tests/test_extraction_normalization_stage_80.py)
 - Added `test_boundary_paragraph_detection_evaluates_operative_text` asserting that a paragraph whose pre-edit text is a short all-caps string (`'EEE'`) and whose post-edit text is a long body paragraph is NOT misclassified as a heading boundary, and asserting that `build_block_map` on raw bytes matches `build_block_map` on materialized bytes.
