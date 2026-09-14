@@ -141,6 +141,35 @@ if (typeof Element.prototype.hasPointerCapture !== 'function') {
 // What counts as expected, and how a single test declares its own extra
 // pattern, is documented in src/__tests__/support/consoleErrorGuard.ts.
 // ---------------------------------------------------------------------------
+// Web Storage is reset between tests (issue #92, second finding).
+//
+// Same class of leak as the playbook catalog below, and until #58 it was
+// theoretical: nothing in the app wrote to Storage, so nothing could survive
+// into the next test. `ct:inflight-review-id` (inflightReview.ts) changed
+// that — a value written by one test now outlives it, and the panel's mount
+// probe reads that key on every render. Today that is harmless only because
+// most fixtures use review ids like `rev-time-remaining` which fail the
+// module's UUID check and are rejected; a fixture that happened to use a
+// real uuid4 would silently resume a review the next test never submitted.
+// That is luck, not isolation, and luck is what a flaky test is made of.
+//
+// `clear()`, not `setItem` — no key is written here, so the posture
+// `src/__tests__/security-posture.test.tsx` pins is untouched. Wrapped in
+// try/catch for the same reason the app's own helpers are: a jsdom without
+// Storage (or a Node whose experimental Web Storage globals are shadowing
+// it) must mean "nothing to clear", never a failed setup.
+function clearWebStorage(): void {
+  if (typeof window === 'undefined') return;
+  for (const area of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      window[area]?.clear();
+    } catch {
+      /* no Storage in this environment; there is nothing to leak either */
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The shared playbook catalog is module state, so it survives between the
 // tests in a FILE (issue #72).
 //
@@ -156,6 +185,7 @@ if (typeof Element.prototype.hasPointerCapture !== 'function') {
 // remember. Runs before the guard so a stray listener from the previous test
 // cannot log during the reset.
 beforeEach(() => {
+  clearWebStorage();
   __resetPlaybookCatalog();
   startConsoleErrorGuard();
 });

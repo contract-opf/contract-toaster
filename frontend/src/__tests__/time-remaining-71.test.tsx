@@ -33,10 +33,29 @@
  * (review-progress-stages.test.tsx, which deliberately uses none) this line
  * IS time-driven — that is the thing under test.
  *
+ * ## Two clocks, and which test gets which (issue #92)
+ *
+ * Most of the tests below arrange with `shouldAdvanceTime: true`, because the
+ * arrange phase leans on `waitFor`, and `waitFor` under Vitest polls the
+ * global timers — with a frozen clock it can never settle. That flag lets
+ * REAL elapsed time tick the fake clock on top of every explicit advance,
+ * which is harmless for an assertion that is nowhere near a threshold.
+ *
+ * It is NOT harmless for the ten-minute tick loop, which sits exactly on one:
+ * the scaled p90 is 600 s and `timeRemaining` crosses at `> p90`, so sixty
+ * 10 s advances land one millisecond short and the crossing was only ever
+ * delivered by ~1.7 s of accumulated real-time bleed. Sinon's
+ * `shouldAdvanceTime` bleed is a real 20 ms interval ticking the fake clock a
+ * fixed 20 ms per firing, and a loaded CI runner coalesces the missed
+ * firings — so the bleed shrinks below the second the assertion needed and
+ * the `over` phase never arrives. That test therefore runs on a FROZEN clock
+ * and arranges without `waitFor` (`startReviewOnAFrozenClock` below), so the
+ * only time that passes is time the test asked for.
+ *
  * Fully offline: aws-amplify/auth is mocked and fetch is stubbed per test.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
 import { DEFAULT_PLAYBOOKS, pressSubmit } from './support/consoleSurface';
 import {
@@ -78,6 +97,23 @@ const MEASURED: EstimateBody = {
   median_words: 1000,
   sample_size: 12,
 };
+
+/** The document every DOM test below uploads — twice the sample's median. */
+const DOC_WORDS = 2000;
+
+/**
+ * `MEASURED`'s p90 scaled to that document: 300 s against a 1000-word median
+ * sample is 600 s for a 2000-word upload. DERIVED from the fixture rather
+ * than written out as ten minutes, so the tick loop and the estimate it is
+ * chasing cannot drift apart if the fixture is ever retuned. (The scaling
+ * rule itself is pinned on the pure function in the first describe block;
+ * this is only the same arithmetic, restated where the loop can use it.)
+ */
+const SCALED_P90_MS =
+  ((MEASURED.p90_seconds ?? 0) * DOC_WORDS * 1000) / (MEASURED.median_words ?? DOC_WORDS);
+
+/** One step of the tick loop — the cadence the panel's elapsed clock ticks at. */
+const TICK_STEP_MS = 10_000;
 
 /** What the route answers before a deployment has five finished reviews. */
 const TOO_THIN: EstimateBody = {
@@ -192,6 +228,40 @@ async function startReview(): Promise<void> {
   await screen.findByTestId('review-status');
 }
 
+/**
+ * The same arrange, on a clock that moves only when this test says so
+ * (issue #92).
+ *
+ * `startReview` above cannot be reused here: it waits with `waitFor` and
+ * `findBy*`, which poll the global timers, and a frozen clock never delivers
+ * that poll. Everything the arrange needs — the playbook catalog, the
+ * preflight, the duration estimate — resolves on microtasks and zero-delay
+ * timers, and no repeating timer exists until the review is in flight, so
+ * draining them terminates. This is the pattern `review-submit-stall.test.tsx`
+ * already uses for the same reason.
+ *
+ * `act` wraps each drain so React has flushed every scheduled render before
+ * the DOM is read: outside `act`, a state update from a timer callback is
+ * flushed by React's own scheduler on a macrotask this test does not control,
+ * which is the second thing that made the tick loop sample stale text.
+ */
+async function startReviewOnAFrozenClock(): Promise<void> {
+  render(<ReviewSubmission />);
+  fireEvent.change(screen.getByTestId('review-file-input'), {
+    target: { files: [docxFile()] },
+  });
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+  fireEvent.click(screen.getByTestId('review-submit-button'));
+  // The submit POST and the first poll are promise chains, not delays: let
+  // them settle without moving the clock, so the elapsed counter this test is
+  // about starts from zero.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
 function lineText(): string | null {
   return screen.queryByTestId('review-time-remaining')?.textContent ?? null;
 }
@@ -302,11 +372,16 @@ describe('the progress bar says how long this is going to take (#71)', () => {
   });
 
   it('announces exactly twice across ten minutes of ticks', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    stubPanelFetch({ estimate: MEASURED, words: 2000 });
+    // FROZEN, not `shouldAdvanceTime` — issue #92, and the file docstring for
+    // why this one test differs from its neighbours.
+    vi.useFakeTimers();
+    stubPanelFetch({ estimate: MEASURED, words: DOC_WORDS });
 
-    await startReview();
-    await waitFor(() => expect(lineText()).toBe('About 4 minutes'));
+    await startReviewOnAFrozenClock();
+
+    // No `waitFor`: on a frozen clock the arrange above has already settled,
+    // so a retry loop here would only hide a render that never happened.
+    expect(lineText()).toBe('About 4 minutes');
 
     // Every distinct thing the ONE polite region has held. A per-tick
     // announcement would pile up dozens of entries here.
@@ -318,12 +393,30 @@ describe('the progress bar says how long this is going to take (#71)', () => {
       }
     };
     record();
-    for (let elapsed = 0; elapsed < 600_000; elapsed += 10_000) {
-      await vi.advanceTimersByTimeAsync(10_000);
+
+    const clockAtFirstTick = Date.now();
+    let advanced = 0;
+    // One step PAST the scaled p90, deliberately. `timeRemaining` crosses at
+    // `elapsedSeconds > p90`, so a loop that stops AT 600 s is still in the
+    // `estimate` phase by one millisecond — which is exactly why the old
+    // version of this test needed a second of real-time bleed to go green,
+    // and why it went red on a runner that did not supply one.
+    while (advanced <= SCALED_P90_MS) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TICK_STEP_MS);
+      });
+      advanced += TICK_STEP_MS;
       record();
     }
 
+    // The clock moved by exactly what was asked for and not one tick more:
+    // the assertion below is now a property of this test's own advances,
+    // not of how loaded the machine was.
+    expect(Date.now() - clockAtFirstTick).toBe(advanced);
+    expect(advanced).toBe(SCALED_P90_MS + TICK_STEP_MS);
+    // Sixty-one samples, two announcements.
     expect(spoken).toEqual(['About 4 minutes remaining.', 'Taking longer than usual.']);
+    expect(lineText()).toBe(TAKING_LONGER_COPY);
   });
 
   it('renders no estimate at all when the sample is too thin to answer', async () => {
