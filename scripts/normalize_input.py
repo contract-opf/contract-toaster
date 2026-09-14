@@ -66,11 +66,57 @@ cluster / multi-author acceptance" and "Field code resolution" below for why
 more than one pending cluster/author, or a pending change inside a field
 code, no longer gate on their own:
 
-  1. Malformed records -- a pending (or accepted) tracked_change with no
-     `resulting_text` cannot be accepted into anything; the operative text is
-     unknown. This is the ONE condition that still fails closed: there is
-     genuinely no text to read, and no amount of model intelligence helps a
-     truncated or corrupt revision record.
+  1. Malformed records -- a pending (or accepted) tracked_change whose
+     `resulting_text` KEY IS ABSENT (or carries a non-string value) cannot be
+     accepted into anything; the operative text is unknown. This is the ONE
+     condition that still fails closed: there is genuinely no text to read,
+     and no amount of model intelligence helps a truncated or corrupt
+     revision record. A `resulting_text` that is PRESENT and EMPTY is NOT
+     this condition -- see "Whole-paragraph deletion" below.
+
+### Whole-paragraph deletion (issue #93)
+
+`resulting_text == ""` is a determinate answer, not a missing one: it is the
+shape the extractor writes when every run in a `<w:p>` sits inside a
+`<w:del>` -- a counterparty striking a whole clause, one of the commonest
+things a redline does. `extraction_normalization_stage._build_paragraph_record`
+computes `"".join(builder.resulting_parts).strip()` and stamps that value onto
+every cluster on the paragraph, so a wholly-struck paragraph arrives here as a
+pending `tracked_change` carrying `resulting_text: ""`.
+
+Before issue #93 both the pending branch and the `accepted` branch tested
+`if not resulting_text`, which conflates "the key is absent" (genuinely
+malformed) with "the key is present and empty" (a complete deletion). The
+result was that an ordinary whole-paragraph strike-out failed the WHOLE
+upload closed with a note telling the attorney their document was malformed.
+It is not: the operative text after accepting that change is the empty
+string.
+
+Both branches now test PRESENCE (`isinstance(..., str)`), not truthiness.
+Absent/non-string keeps today's fail-closed message verbatim -- nothing about
+the fail-closed posture is relaxed. Present-and-empty accepts, and the
+paragraph is reported as DELETED IN FULL:
+
+  * `_normalize_paragraph` returns the additive key
+    `"deleted_in_full": True` alongside `clean_text: ""`;
+  * `normalize()` OMITS that paragraph from `clean_body` entirely rather
+    than carrying it as an empty `"<heading>: "` clause -- a clause the
+    counterparty struck is not a clause with no text, it is not there;
+  * the disposition note says so, and for the accept-all paths it keeps the
+    established sentence shape: the FIRST sentence still ends with the exact
+    literal `accepted-all into the operative draft.` tail that
+    `frontend/src/toaster/receipt.ts`'s `acceptedChangesSummary` counts
+    (and still matches its structured parse, so a struck paragraph is
+    counted as the one pending edit it is), and a SECOND sentence names the
+    deletion. The `accepted`-status branch, which is not an accept-all and
+    never was, records its own note WITHOUT that tail, so it cannot inflate
+    that count.
+
+`extraction_normalization_stage.normalize_paragraphs` needs no change for
+this: it already drops a physical paragraph whose clean text is empty from
+`text`/`physical_spans`/`physical_p_indexes` (see its docstring, "A physical
+paragraph whose own clean text is empty"), which is the structured-path
+equivalent of the `clean_body` omission above.
 
 ### Multi-cluster / multi-author acceptance (issue #563)
 
@@ -123,8 +169,8 @@ folded silently into the generic accept-all note) because "which field
 result is operative" was the exact question this branch used to refuse to
 answer.
 
-The one condition this does NOT touch is a malformed record with no
-`resulting_text` -- there being no text at all is a different problem than
+The one condition this does NOT touch is a malformed record with NO
+`resulting_text` KEY -- there being no text at all is a different problem than
 "the field text is fine, but which field's text applies", and that branch
 keeps failing closed regardless of whether it also happens to sit inside a
 field code (see `build_unnormalizable_report`'s message for that path).
@@ -294,6 +340,14 @@ def _normalize_paragraph(paragraph: dict) -> dict:
         (a pending tracked change was accepted-all; `note` records the
         disposition and MUST be surfaced, per issue #199)
       or
+      {"normalizable": True, "clean_text": "", "note": "...",
+       "deleted_in_full": True}
+        (issue #93 -- the accepted revision strikes the WHOLE paragraph;
+        `clean_text` is the empty string because that IS the operative text,
+        and `deleted_in_full` tells the caller to omit the paragraph rather
+        than carry an empty clause. ADDITIVE: a caller that does not know
+        the key still reads `clean_text` correctly.)
+      or
       {"normalizable": False, "note": "..."}
     """
     revisions = paragraph.get("revisions", [])
@@ -301,6 +355,12 @@ def _normalize_paragraph(paragraph: dict) -> dict:
     clean_text = paragraph.get("text", "")
 
     pending_tracked_changes = []  # unresolved/rejected tracked_change revisions
+    # Set by the `accepted` branch below when the accepted revision's
+    # resulting_text is present-and-empty (issue #93). Deliberately NOT
+    # conflated with "clean_text happens to be empty": a paragraph that was
+    # always empty, or one emptied by nothing in particular, is not a
+    # counterparty striking a clause and must keep its existing disposition.
+    accepted_empty = False
 
     for rev in revisions:
         rev_type = rev.get("type")
@@ -309,7 +369,12 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             status = rev.get("status")
             if status == "accepted":
                 resulting_text = rev.get("resulting_text")
-                if not resulting_text:
+                # PRESENCE, not truthiness (issue #93): an absent key -- or a
+                # non-string value, which is no more readable than an absent
+                # one -- is the malformed record this branch has always
+                # refused. A present, EMPTY string is a determinate answer:
+                # the whole paragraph was struck.
+                if not isinstance(resulting_text, str):
                     return {
                         "normalizable": False,
                         "note": (
@@ -318,6 +383,7 @@ def _normalize_paragraph(paragraph: dict) -> dict:
                             f"malformed revision record."
                         ),
                     }
+                accepted_empty = resulting_text == ""
                 clean_text = resulting_text
             elif status in ("unresolved", "rejected"):
                 # Pending revision -- disposition decided below, once every
@@ -371,6 +437,23 @@ def _normalize_paragraph(paragraph: dict) -> dict:
         blocked = _screen_control_characters(heading, clean_text)
         if blocked:
             return blocked
+        if accepted_empty and not clean_text:
+            # Issue #93. `accepted_empty and not clean_text` rather than
+            # `accepted_empty` alone: a `field` revision later in the same
+            # paragraph can fold its resolved result back in, and a paragraph
+            # that ends up with text is not a deleted one. No accept-all tail
+            # here -- this is not an accept-all disposition, and
+            # `acceptedChangesSummary` must not count it as a pending edit.
+            return {
+                "normalizable": True,
+                "clean_text": "",
+                "deleted_in_full": True,
+                "note": (
+                    f"Paragraph '{heading}': tracked change marked "
+                    f"'accepted' strikes the paragraph in full; the "
+                    f"struck paragraph is omitted from the operative draft."
+                ),
+            }
         return {"normalizable": True, "clean_text": clean_text}
 
     # --- Pending tracked change(s): accept-all unless genuinely ambiguous ---
@@ -399,7 +482,12 @@ def _normalize_paragraph(paragraph: dict) -> dict:
     # "which field result wins" decision left to make.
     rev = pending_tracked_changes[0]
     resulting_text = rev.get("resulting_text")
-    if not resulting_text:
+    # PRESENCE, not truthiness (issue #93) -- see the module docstring,
+    # "Whole-paragraph deletion". An absent key (or a non-string value) is
+    # still the malformed record this branch has always refused, with the
+    # same message; a present, EMPTY string is a whole-paragraph strike-out,
+    # whose operative text is determinately "".
+    if not isinstance(resulting_text, str):
         return {
             "normalizable": False,
             "note": (
@@ -408,6 +496,7 @@ def _normalize_paragraph(paragraph: dict) -> dict:
                 f"determine the operative text to accept."
             ),
         }
+    deleted_in_full = resulting_text == ""
     clean_text = resulting_text
 
     # Control-character screen (issue #632) runs BEFORE any disposition note
@@ -436,9 +525,13 @@ def _normalize_paragraph(paragraph: dict) -> dict:
         # names what the field resolved to.
         note = (
             f"Paragraph '{heading}': pending tracked change inside a field "
-            f"code accepted-all into the operative draft. The field now "
-            f"resolves to '{resulting_text}'."
+            f"code accepted-all into the operative draft."
         )
+        if not deleted_in_full:
+            # The deleted-in-full sentence below replaces this one: "the
+            # field now resolves to ''" reads as a parse failure, when what
+            # actually happened is that the whole paragraph was struck.
+            note += f" The field now resolves to '{resulting_text}'."
     elif len(pending_tracked_changes) > 1:
         authors = {rev.get("author") for rev in pending_tracked_changes}
         note = (
@@ -452,6 +545,36 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             f"(author: {rev.get('author', 'unknown')}, status: {rev.get('status')}) "
             f"accepted-all into the operative draft."
         )
+
+    if deleted_in_full:
+        # Issue #93. APPENDED as a second sentence, never woven into the
+        # first: the first sentence keeps the exact `accepted-all into the
+        # operative draft.` tail AND the structured shape
+        # `frontend/src/toaster/receipt.ts`'s `acceptedChangesSummary`
+        # parses, so a struck paragraph is counted as the pending edit it is
+        # rather than tripping that function's parsed-vs-tail-count
+        # safeguard. The second sentence is what names the disposition, and
+        # carries no document text -- only the fixed words below.
+        #
+        # Worded at PHYSICAL-paragraph granularity, deliberately: this
+        # function is called once per physical `<w:p>` by
+        # `extraction_normalization_stage.normalize_paragraphs` while a
+        # LOGICAL clause heading is interpolated over several such calls, so
+        # "the paragraph" here must never be read as "the clause". It says
+        # only that THIS struck paragraph contributes nothing -- never that
+        # the clause it sits under, which may carry other, surviving
+        # physical paragraphs, was itself removed. (`normalize_input.normalize`
+        # is the one caller where paragraph and clause coincide, and its own
+        # `clean_body` omission -- not this note's wording -- is what makes
+        # the clause-level claim there.)
+        note += " The struck paragraph is omitted from the operative draft."
+        return {
+            "normalizable": True,
+            "clean_text": "",
+            "deleted_in_full": True,
+            "note": note,
+        }
+
     return {"normalizable": True, "clean_text": clean_text, "note": note}
 
 
@@ -473,6 +596,12 @@ def normalize(document: dict) -> dict:
 
     A document normalizes iff every paragraph normalizes -- one
     un-normalizable paragraph fails the whole document closed.
+
+    A paragraph whose accepted operative text is EMPTY because the
+    counterparty struck the whole clause (issue #93 -- `_normalize_paragraph`
+    returns `deleted_in_full`) contributes NO line to `clean_body`; its
+    disposition note is still recorded in `normalization_notes`, so the
+    omission is disclosed rather than silent.
     """
     paragraphs = document.get("paragraphs", [])
 
@@ -486,7 +615,15 @@ def normalize(document: dict) -> dict:
             fail_notes.append(result["note"])
         else:
             heading = paragraph.get("heading", "<untitled>")
-            clean_lines.append(f"{heading}: {result['clean_text']}")
+            if not result.get("deleted_in_full"):
+                # A paragraph the counterparty struck in full is OMITTED
+                # (issue #93), not carried as an empty `"<heading>: "`
+                # clause: an empty clause reads to every downstream consumer
+                # as a clause that exists and says nothing, which is not what
+                # the document says. The disposition is still disclosed --
+                # `result["note"]` is appended below either way, so the
+                # omission is never silent.
+                clean_lines.append(f"{heading}: {result['clean_text']}")
             if result.get("note"):
                 accept_notes.append(result["note"])
 

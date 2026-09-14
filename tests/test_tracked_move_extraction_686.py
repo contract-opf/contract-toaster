@@ -35,13 +35,15 @@ Routing `<w:moveFrom>` into `del` mode instead -- the obvious reading of
 moved-away text in the pre-edit stream only, manufacturing a pending
 tracked-change record whose `resulting_text` is empty for any paragraph that
 was moved away WHOLE (the shape Word writes when a clause is dragged
-elsewhere). `normalize_input._normalize_paragraph` refuses that record as a
-malformed one and fails the ENTIRE upload closed
-(`test_a_wholly_moved_away_paragraph_normalizes_...` below is the case).
-Excluding it from both streams handles that case by construction rather than
-by loosening a fail-closed rule that is protecting a different shape --
-see `test_a_whole_paragraph_deletion_still_fails_closed`, which pins the
-boundary.
+elsewhere). At the time #686 landed, `normalize_input._normalize_paragraph`
+refused that record as malformed and failed the ENTIRE upload closed
+(`test_a_wholly_moved_away_paragraph_normalizes_...` below is the case);
+since issue #93 it instead reports the paragraph as DELETED IN FULL, which
+is a different wrong answer to the same question -- a clause the counterparty
+moved would be reported as struck from the document. Excluding `moveFrom`
+from both streams handles the case by construction either way -- see
+`test_a_whole_paragraph_deletion_leaves_the_document`, which pins the
+boundary in its post-#93 form.
 
 Nothing is made silent by this. Moves are disclosed to the attorney through
 the #685 materializer report (`accepted_revision_disclosure` names
@@ -132,11 +134,12 @@ _WHOLE_MOVE_ACCEPTED_BODY = (
 )
 
 # The boundary case this issue must NOT reclassify: an ordinary tracked
-# DELETION of a whole paragraph, with nothing inserted to replace it. That is
-# `tests/test_extraction_normalization_stage_80.py`'s documented
-# structurally-irreconcilable shape (`_malformed_deletion_p`, [G3d]) and it
-# keeps failing the document closed. A move is not a deletion: the text is
-# still in the document, at its new location.
+# DELETION of a whole paragraph, with nothing inserted to replace it. Since
+# issue #93 that shape normalizes as a DELETION rather than failing the
+# document closed (`tests/test_whole_paragraph_deletion_93.py`), but the
+# distinction is unchanged and is exactly what must not blur: a move is not a
+# deletion, because the moved text is still in the document at its new
+# location while the deleted text is gone from the operative draft.
 _WHOLE_DELETION_BODY = (
     f'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
     f"<w:r><w:t>{_HEADING}</w:t></w:r></w:p>"
@@ -311,19 +314,36 @@ def test_moved_text_appears_once_not_at_both_ends_of_the_move(failures: list) ->
             )
 
 
-def test_a_whole_paragraph_deletion_still_fails_closed(failures: list) -> None:
-    """The boundary this issue must not blur. An ordinary tracked DELETION of
-    a whole paragraph with nothing inserted stays the documented
-    structurally-irreconcilable shape that fails the document closed
-    (`tests/test_extraction_normalization_stage_80.py::
-    test_malformed_deletion_with_comment_fails_closed`, [G3d]). Teaching
-    extraction about moves must not reach that rule: the moved text is still
-    in the document, the deleted text is not."""
+def test_a_whole_paragraph_deletion_leaves_the_document(failures: list) -> None:
+    """The boundary this issue must not blur, restated after issue #93.
+
+    A whole-paragraph tracked DELETION no longer fails the document closed --
+    #93 established that `resulting_text == ""` is a determinate answer, not
+    a malformed record (`tests/test_whole_paragraph_deletion_93.py`). The
+    distinction #686 rests on is unchanged and is what this asserts: the
+    MOVED clause is still in the document, at its new location
+    (`test_moved_text_appears_once_not_at_both_ends_of_the_move`), while the
+    DELETED clause is gone from the operative draft entirely. Extraction must
+    not resolve a `w:moveFrom` through `del` mode and thereby report a moved
+    clause as deleted."""
     result = stage.extract_and_normalize(_whole_deletion_docx())
-    if result.get("status") != "unnormalizable_input":
+    if result.get("status") != "normalized":
         failures.append(
-            f"a whole-paragraph tracked deletion must still fail closed -- "
-            f"this issue changes moves, not deletions; got {result!r}"
+            f"a whole-paragraph tracked deletion must normalize as a deletion "
+            f"(issue #93), not fail closed; got {result!r}"
+        )
+        return
+    body = " ".join(p["text"] for p in result["paragraphs"])
+    if _WHOLE_MOVED_PARAGRAPH in body:
+        failures.append(
+            f"deleted text must leave the operative draft, unlike moved text; "
+            f"got {body!r}"
+        )
+    notes = result.get("normalization_notes") or ""
+    if "struck paragraph is omitted" not in notes:
+        failures.append(
+            f"the deletion must be disclosed in normalization_notes, never "
+            f"silent; got {notes!r}"
         )
 
 
@@ -425,7 +445,7 @@ TESTS = [
     test_extraction_agrees_with_the_writers_accepted_view_paragraph_for_paragraph,
     test_a_wholly_moved_away_paragraph_normalizes_instead_of_failing_the_document_closed,
     test_moved_text_appears_once_not_at_both_ends_of_the_move,
-    test_a_whole_paragraph_deletion_still_fails_closed,
+    test_a_whole_paragraph_deletion_leaves_the_document,
     test_an_edit_proven_against_the_uploaded_bytes_applies_to_the_operative_draft,
     test_the_writer_can_still_see_moved_to_text,
 ]

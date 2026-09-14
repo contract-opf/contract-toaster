@@ -282,13 +282,34 @@ def _redlined_docx_bytes() -> bytes:
 
 
 def _wholly_struck_clause_docx_bytes() -> bytes:
-    """A document `normalize_input` FAILS CLOSED on -- the clause's only
-    pending revision accepts to empty text. Production reaches it whenever a
-    counterparty strikes an entire clause. The premise is asserted, not
-    assumed, in the test that uses this."""
+    """A counterparty striking an entire clause. Until issue #93 this was a
+    document `normalize_input` FAILED CLOSED on (the clause's only pending
+    revision accepts to empty text, which the old predicate read as a
+    malformed record); it now normalizes as a whole-paragraph deletion. Kept
+    as the shape it always was -- what it is used to prove is in the test."""
     return _build_docx(
         [_heading_paragraph("Indemnity"), _struck_paragraph(_STRUCK_CLAUSE, 1)]
     )
+
+
+# U+200B ZERO WIDTH SPACE. Since issue #93 reclassified the whole-paragraph
+# deletion above, the control-character screen (issue #632) is the
+# normalization refusal an ordinary `.docx` can still reach: the extractor
+# always sets `resulting_text`, so the malformed-record branch is no longer
+# reachable from real bytes at all.
+_ZERO_WIDTH_SPACE = "\u200b"
+
+_INVISIBLE_CLAUSE = (
+    f"Supplier shall{_ZERO_WIDTH_SPACE} indemnify Customer against all claims."
+)
+
+
+def _control_character_clause_docx_bytes() -> bytes:
+    """A document `normalize_input` FAILS CLOSED on -- its text carries an
+    invisible zero-width character, which the screen refuses rather than
+    strips (issue #632). The premise is asserted, not assumed, in the test
+    that uses this."""
+    return _build_docx([_heading_paragraph("Indemnity"), _paragraph(_INVISIBLE_CLAUSE)])
 
 
 def _docx_with_unbound_prefix_sidecar(base_docx: bytes) -> bytes:
@@ -607,7 +628,7 @@ class TestStatsMeasureTheAcceptAllDocument(unittest.TestCase):
         `materialize_accept_all` is a byte-level splice with no ambiguity
         rule of its own, so routing the bytes through it does not import
         normalization's fail-closed path."""
-        docx_bytes = _wholly_struck_clause_docx_bytes()
+        docx_bytes = _control_character_clause_docx_bytes()
 
         # The premise, asserted rather than assumed -- otherwise this test
         # proves nothing about the fail-closed case.
@@ -620,8 +641,28 @@ class TestStatsMeasureTheAcceptAllDocument(unittest.TestCase):
 
         self.assertEqual(stats["title"], "Indemnity")
         self.assertEqual(stats["paragraph_count"], 1)
-        # The struck clause accepts to nothing, so only the heading counts.
+        # Heading (1) plus the refused clause's own seven words: the card
+        # describes the document even though normalization will not accept it.
+        self.assertEqual(stats["word_count"], 8)
+
+    def test_a_wholly_struck_clause_normalizes_and_is_gone_from_the_card(self):
+        """Issue #93's shape, kept exercised here rather than dropped when
+        this class's fail-closed fixture moved to the control-character
+        screen. The document now NORMALIZES (asserted, not assumed), and the
+        accept-all stats card describes the accepted document: the struck
+        clause is gone, so only the heading's own word is counted."""
+        docx_bytes = _wholly_struck_clause_docx_bytes()
+
+        self.assertEqual(
+            ens.extract_and_normalize(docx_bytes).get("status"),
+            "normalized",
+        )
+
+        stats = preflight_pass.compute_document_stats(docx_bytes)
+
+        self.assertEqual(stats["title"], "Indemnity")
         self.assertEqual(stats["word_count"], 1)
+        self.assertNotIn(_STRUCK_CLAUSE, stats["excerpt"])
 
     def test_a_genuine_extraction_failure_still_raises_document_stats_error(self):
         not_a_docx = b"PK\x03\x04 this is not a WordprocessingML package"

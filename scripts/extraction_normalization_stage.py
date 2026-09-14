@@ -335,16 +335,19 @@ def _walk_content(
     #686): `del` mode puts text in the pre-edit stream only, which
     manufactures a pending tracked-change record whose `resulting_text` is
     empty for any paragraph moved away WHOLE -- the shape Word writes when a
-    clause is dragged elsewhere -- and `normalize_input._normalize_paragraph`
-    refuses that record as malformed, failing the entire upload closed. A
-    move is not a proposal about what a clause should SAY: the text is
-    present in the document either way, at its new location, so both move
+    clause is dragged elsewhere -- and the text would then be reported as
+    DELETED (issue #93) at its old location while also appearing at its new
+    one. A move is not a proposal about what a clause should SAY: the text
+    is present in the document either way, at its new location, so both move
     halves are resolved here rather than surfaced as a pending revision.
     The disposition is not silent -- `accepted_revision_disclosure` names
     the `moveFrom`/`moveTo` counts the materializer accepted (issue #685).
-    An ordinary `w:del` covering a whole paragraph is a different shape and
-    keeps failing closed (tests/test_extraction_normalization_stage_80.py,
-    [G3d]): deleted text leaves the document, moved text does not.
+    An ordinary `w:del` covering a whole paragraph is a different shape:
+    since issue #93 it normalizes as a whole-paragraph DELETION (the
+    paragraph is dropped from the operative draft, with the disposition
+    recorded in a normalization note) rather than failing the upload closed
+    as a malformed record -- deleted text leaves the document, moved text
+    does not, and the two must not be reported the same way.
     """
     for el in elements:
         tag = el.tag
@@ -467,6 +470,22 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
         "physical_paragraphs": [{"text": "...", "revisions": [...]}, ...]},
        ...]
 
+    A record may additionally carry `"emits_block": False` (issue #93 fix
+    round 2). That marks a NOTES-ONLY group: paragraphs
+    `normalize_paragraphs` must still run `_normalize_paragraph` over -- so
+    their disposition is disclosed and a genuinely malformed one still fails
+    the document closed -- but which must NOT be assigned a `block_id`. It
+    is emitted for one shape only: paragraphs whose operative (accept-all)
+    text is empty because they were struck in full, sitting BEFORE the
+    document's first clause boundary, where there is no open group to hold
+    them. Those `<w:p>`s are empty spacers in the materialized bytes and are
+    skipped there entirely, so letting them open the implicit leading group
+    in the RAW read would make the raw block map one block longer than the
+    materialized one and shift every later `block_id` -- the Stage-1 /
+    Stage-5 desync `docs/task3_block_map_determinism_walkthrough.md`
+    records. The key is ADDITIVE and absent everywhere else; a reader that
+    does not know it (`preflight_pass.document_stats`) is unaffected.
+
     `heading_p_index` / `heading_source_text` (issue #645) are the boundary
     `<w:p>`'s own IDENTITY -- its position in the part's preorder `w:p`
     numbering, the same numbering `p_index` uses -- and the text that
@@ -528,6 +547,10 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 
     logical: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+    # Wholly struck `<w:p>`s seen BEFORE any group is open (issue #93 fix
+    # round 2). Held here rather than allowed to instantiate the implicit
+    # leading group -- see the loop below and this function's docstring.
+    leading_deleted: list[dict[str, Any]] = []
 
     def _flush() -> None:
         if current is not None:
@@ -546,11 +569,33 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 
     for p_el in _iter_body_paragraphs(body):
         record = _build_paragraph_record(p_el)
-        operative_text = record.get("resulting_text") or record["text"]
+        # The OPERATIVE text is the accept-all `resulting_text` --
+        # `_build_paragraph_record` always sets it, and it equals `text`
+        # whenever nothing is pending. NO fallback to the pre-acceptance
+        # `text` when it is empty (issue #93): `""` is the determinate
+        # operative text of a wholly struck paragraph, not a missing value,
+        # and the old `record.get("resulting_text") or record["text"]` read
+        # it as missing. That let a struck line's OLD text start a clause
+        # (a short struck lettered/numbered line is a tier-2 boundary under
+        # `clause_boundaries`) or name one (a struck Heading-style
+        # paragraph), with the deletion never normalized and never
+        # disclosed -- and it split the raw read from the materialized one,
+        # where the same paragraph is an empty spacer (issue #563's one-
+        # canonical-document invariant).
+        operative_text = record["resulting_text"]
         if not operative_text and not record["revisions"]:
             continue  # empty paragraph (spacer) -- nothing to extract
 
-        if clause_boundaries.is_boundary_paragraph_ooxml(p_el, operative_text):
+        # An empty operative text never starts a clause: there is no heading
+        # text to start it with. A wholly struck paragraph therefore falls
+        # through to the physical-paragraph branch, whatever its style, so
+        # `normalize_paragraphs` runs `_normalize_paragraph` over it and
+        # reports the deletion in full (never silent). When a group is open
+        # it joins that group as a sibling; when none is (the paragraph
+        # precedes the document's first boundary) it is HELD rather than
+        # allowed to open one -- see the `leading_deleted` branch below for
+        # why opening one would split the raw read from the materialized one.
+        if operative_text and clause_boundaries.is_boundary_paragraph_ooxml(p_el, operative_text):
             _flush()
             heading_text = clause_boundaries.clean_heading_text(operative_text)
             current = {
@@ -561,6 +606,28 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
             }
         else:
             if current is None:
+                if not operative_text:
+                    # A wholly struck `<w:p>` before the document's FIRST
+                    # clause boundary (issue #93 fix round 2). It must not
+                    # open the implicit leading group: once
+                    # `materialize_accept_all` has emptied it, the same
+                    # `<w:p>` carries no revisions and is skipped as a spacer
+                    # by the `continue` above, so no leading group exists in
+                    # the MATERIALIZED read. Opening one here would make the
+                    # raw block map one block longer and shift every later
+                    # `block_id` -- Stage 1 (review_spine, raw bytes) and
+                    # Stage 5 (redline_generate, materialized bytes) would
+                    # then disagree about which id names which paragraph.
+                    # Held instead, and emitted below as a notes-only group
+                    # so the deletion is still normalized and disclosed.
+                    leading_deleted.append(
+                        {
+                            "text": record["text"],
+                            "revisions": record["revisions"],
+                            "p_index": p_index_by_element[id(p_el)],
+                        }
+                    )
+                    continue
                 current = {
                     "heading": "<untitled>",
                     # No boundary paragraph was ever seen: this group is the
@@ -583,6 +650,25 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
             )
 
     _flush()
+    if leading_deleted:
+        # Document order: these `<w:p>`s precede every boundary, so their
+        # disposition notes belong first. `emits_block: False` keeps them out
+        # of the block numbering entirely (issue #93 fix round 2), so the ids
+        # start at p0001 on the first REAL group exactly as they do in the
+        # materialized read -- while `normalize_paragraphs` still runs
+        # `_normalize_paragraph` over each of them, so the deletion is
+        # disclosed in `normalization_notes` and never silent, and a
+        # malformed record among them still fails the document closed.
+        logical.insert(
+            0,
+            {
+                "heading": "<untitled>",
+                "heading_p_index": None,
+                "heading_source_text": "",
+                "physical_paragraphs": leading_deleted,
+                "emits_block": False,
+            },
+        )
     return logical
 
 
@@ -1109,6 +1195,16 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     un-normalizable paragraph fails the whole document closed, same
     all-or-nothing rule as `normalize_input.normalize()`.
 
+    A raw record carrying `"emits_block": False` (issue #93 fix round 2) is
+    normalized exactly like any other -- every physical paragraph goes
+    through `_normalize_paragraph`, its disposition note is collected, and a
+    malformed revision among them still fails the whole document closed --
+    but it contributes NO entry to `paragraphs` and consumes no `block_id`.
+    See `extract_document_paragraphs` for the one shape that produces it (a
+    paragraph struck in full before the document's first clause boundary,
+    which is an empty spacer in the materialized bytes Stage 5 re-extracts
+    from) and why a block there would desync the two reads' ids.
+
     Each heading's PHYSICAL paragraphs (`raw_paragraphs[i]
     ["physical_paragraphs"]`, see `extract_document_paragraphs`'s
     docstring) are normalized INDEPENDENTLY -- `_normalize_paragraph` is
@@ -1201,6 +1297,25 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
                 accept_notes.append(result["note"])
 
         if paragraph_failed:
+            continue
+
+        if not paragraph.get("emits_block", True) and not clean_texts:
+            # A NOTES-ONLY group (issue #93 fix round 2): its physical
+            # paragraphs have been normalized above -- so their accept-all
+            # disposition is in `accept_notes` and a malformed record among
+            # them has already failed the document closed -- but the group
+            # gets no `block_id`, because the same `<w:p>`s are empty spacers
+            # in the materialized bytes Stage 5 re-extracts from and produce
+            # no block there either. See `extract_document_paragraphs`.
+            #
+            # `and not clean_texts` is the safety half of that, deliberately
+            # belt-and-braces: the request only ever comes from a paragraph
+            # whose operative text is empty, so there is nothing to keep --
+            # but if any clean text DID survive normalization here, it would
+            # also survive into the materialized bytes, which would then be
+            # no spacer and would open the implicit leading group after all.
+            # Emitting the block is both the correct grouping in that case
+            # and the one that cannot silently drop clause text.
             continue
 
         text = "\n".join(clean_texts)
