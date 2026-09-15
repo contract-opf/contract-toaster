@@ -71,6 +71,24 @@ function failure(overrides: Partial<RecentFailure> = {}): RecentFailure {
   };
 }
 
+// Issue #106 review round 2. Every row `failure()` builds carries
+// `failing_stage: 'run_review'`, so the ONE stage-keyed copy any of them can
+// fall through to is `STAGE_EXPLANATIONS.run_review` in
+// `frontend/src/ReviewSubmission.tsx`. Several tests below are regression
+// guards (#442, #472, #665, #670) whose whole point is "this row must render
+// its REASON copy, not that fallback", and each expressed that as a
+// `not.toHaveTextContent(...)` naming the fallback's then-current wording.
+//
+// #106 rewrote that wording ("The model could not complete the review." /
+// "The exact cause was not identified…" became the neutral pair below), which
+// silently turned every one of those guards permanently green: a negative
+// assertion against a string that exists nowhere in the app can never fail,
+// so it stops guarding without ever turning red. Pinning the copy in these
+// two constants keeps the guards honest and gives the next rewrite a single
+// place to update — mirror any change to those two entries here.
+const RUN_REVIEW_STAGE_FALLBACK_CAUSE = /stopped inside the review pipeline/i;
+const RUN_REVIEW_STAGE_FALLBACK_FIX = /resubmitting will not usually help/i;
+
 /** Stub GET /api/admin/diagnostics/recent-failures with one canned response. */
 function stubDiagnosticsFetch(response: { status: number; body: unknown }): ReturnType<typeof vi.fn> {
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -393,7 +411,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       REASON_EXPLANATIONS.model_key_missing.fix,
     );
     expect(screen.getByTestId('failure-fix-r-key-missing')).not.toHaveTextContent(
-      /exact cause was not identified/i,
+      RUN_REVIEW_STAGE_FALLBACK_FIX,
     );
   });
 
@@ -421,7 +439,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       REASON_EXPLANATIONS.model_timeout.fix,
     );
     expect(screen.getByTestId('failure-fix-r-timeout')).not.toHaveTextContent(
-      /exact cause was not identified/i,
+      RUN_REVIEW_STAGE_FALLBACK_FIX,
     );
   });
 
@@ -449,7 +467,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       REASON_EXPLANATIONS.model_empty_content.fix,
     );
     expect(screen.getByTestId('failure-fix-r-empty-content')).not.toHaveTextContent(
-      /exact cause was not identified/i,
+      RUN_REVIEW_STAGE_FALLBACK_FIX,
     );
   });
 
@@ -477,7 +495,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       REASON_EXPLANATIONS.model_output_truncated.fix,
     );
     expect(screen.getByTestId('failure-fix-r-output-truncated')).not.toHaveTextContent(
-      /exact cause was not identified/i,
+      RUN_REVIEW_STAGE_FALLBACK_FIX,
     );
   });
 
@@ -687,7 +705,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     // THE regression: the vague stage fallback must not be what an operator
     // reads for this failure any more.
     expect(screen.getByTestId('failure-fix-r-critic')).not.toHaveTextContent(
-      /exact cause was not identified/i,
+      RUN_REVIEW_STAGE_FALLBACK_FIX,
     );
     // The stage itself is still recorded — it just no longer stands in for
     // the cause.
@@ -732,7 +750,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     // them were rendering the stage fallback. None may.
     for (const id of ['r-critic', 'r-critic-json', 'r-critic-oversize']) {
       expect(screen.getByTestId(`failure-fix-${id}`)).not.toHaveTextContent(
-        /exact cause was not identified/i,
+        RUN_REVIEW_STAGE_FALLBACK_FIX,
       );
     }
   });
@@ -842,10 +860,10 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     // differs from one that isn't. Neither may be the fallback.
     for (const id of ['r-primary-schema', 'r-primary-transcript']) {
       expect(screen.getByTestId(`failure-cause-${id}`)).not.toHaveTextContent(
-        /model could not complete the review/i,
+        RUN_REVIEW_STAGE_FALLBACK_CAUSE,
       );
       expect(screen.getByTestId(`failure-fix-${id}`)).not.toHaveTextContent(
-        /exact cause was not identified/i,
+        RUN_REVIEW_STAGE_FALLBACK_FIX,
       );
     }
     expect(screen.getByTestId('failure-cause-r-primary-schema').textContent).not.toEqual(
@@ -863,8 +881,11 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     });
     render(<AdminDiagnostics />);
 
+    // Issue #106: the run_review stage fallback's copy is now neutral —
+    // it no longer guesses "the model" for a stage that covers far more
+    // than the model call.
     expect(await screen.findByTestId('failure-fix-r-blank')).toHaveTextContent(
-      /exact cause was not identified/i,
+      /contact an admin and quote the review id/i,
     );
   });
 

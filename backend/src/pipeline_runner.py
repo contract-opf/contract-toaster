@@ -1347,6 +1347,23 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
     # the fail-closed except alike) to read `cumulative_usage` from via
     # `_actual_cents_from_client`.
     client: Any = None
+    # Issue #106: same "declared outside the try" reasoning again. `stage`
+    # stays the single opaque string "run_review" for the ENTIRE duration of
+    # the `run_review` call -- everything from normalization through the
+    # leakage scan and the OOXML round-trip happens inside it -- so an
+    # unhandled exception from any of those sub-stages was indistinguishable
+    # from a model failure to both the reviews row and the reader-facing
+    # copy keyed on it (frontend/src/ReviewSubmission.tsx's
+    # STAGE_EXPLANATIONS.run_review, which used to say "check the account,
+    # key and model"). `on_progress` below already reports the spine's real
+    # sub-stage (primary_pass -> critic_pass -> reconciliation -> redline)
+    # for the LIVE polling UI; this captures the same tokens locally so the
+    # fail-closed `except` can name the last one reached instead of the
+    # opaque "run_review" umbrella. None until the first one fires -- an
+    # exception raised before `run_review` reports anything (e.g. inside
+    # normalization) correctly leaves this None and `stage` stays the
+    # honest "run_review".
+    last_progress_stage: str | None = None
     try:
         _mark_running(review_id, dynamodb_resource)
 
@@ -1469,6 +1486,18 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # persisted via `_ANALYSIS_FIELDS` below -- see that field's own
         # comment. `policy=None` (the default) is passed implicitly by
         # omission, exactly as before this investigation.
+
+        def _on_progress(stage_token: str) -> None:
+            """Issue #106: mirror the sub-stage into the local variable the
+            fail-closed `except` reads, in addition to the existing
+            DynamoDB write below. Reassigning a closed-over local cannot
+            raise, so -- like `_write_progress_stage` itself -- this cannot
+            newly fail a review that is running perfectly well.
+            """
+            nonlocal last_progress_stage
+            last_progress_stage = stage_token
+            _write_progress_stage(review_id, stage_token, dynamodb_resource)
+
         try:
             result = review_spine.run_review(
                 docx_bytes,
@@ -1500,9 +1529,14 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
                 # say "Step 2 of 4" truthfully instead of animating a bar
                 # that carries no information. _write_progress_stage cannot
                 # throw -- see its docstring.
-                on_progress=lambda stage_token: _write_progress_stage(
-                    review_id, stage_token, dynamodb_resource
-                ),
+                #
+                # Issue #106: `_on_progress` (defined just above the call
+                # site, closing over `last_progress_stage`) also remembers
+                # the token locally so the fail-closed `except` below can
+                # name the real sub-stage an unhandled exception happened
+                # in, instead of the opaque "run_review" this whole call is
+                # one `stage =` assignment for.
+                on_progress=_on_progress,
                 # Issue #414: the only caller that wired this before was the
                 # offline eval harness -- the real pipeline itself never
                 # supplied one, so `run_review`'s default no-op silently
@@ -1615,9 +1649,35 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
             # `run_review` is the true attribution, not the `persist_result`
             # value `stage` holds by this line: the condition was detected
             # and decided inside `run_review`, and persisting is what is
-            # faithfully recording it. It is also the same token
+            # faithfully recording it.
+            #
+            # Issue #106 review round 1: this USED TO be the same token
             # `record_stage_failure` records when a run_review call raises
-            # instead, so the two paths now agree.
+            # instead, making the two paths agree -- that stopped being true
+            # the moment `recorded_stage` (below, in the `except Exception`
+            # branch) started naming the spine's last PROGRESS_* marker
+            # instead of the bare "run_review" umbrella. These four
+            # computed terminals are fail-closed STATUS DICTS, not raised
+            # exceptions, so they never reach that branch or its
+            # `last_progress_stage` tracking -- they still land here, always
+            # as the literal "run_review", regardless of which PROGRESS_*
+            # marker `run_review` had already reported before returning one
+            # of these. An operator reading the Diagnostics STAGE column for
+            # two rows that both stopped at, say, the leakage scan now sees
+            # "run_review" for one (this branch, a computed terminal) and
+            # "reconciliation" or "redline" for the other (the `except`
+            # branch, a raised exception) -- two different attributions for
+            # the same sub-stage depending only on whether it raised or
+            # returned. Each of these four DOES carry its own specific
+            # `reason` (`leakage_detected`, `quote_patches_not_applied`,
+            # `output_ooxml_scan_failed`, `round_trip_verification_failed`),
+            # so the reader-facing copy in ReviewSubmission.tsx is
+            # unaffected either way (REASON_EXPLANATIONS wins over
+            # STAGE_EXPLANATIONS) -- this is about the admin-facing STAGE
+            # attribution only. Whether these four should also carry
+            # `last_progress_stage` (when one was reported) instead of the
+            # flat "run_review" is flagged on issue #106 for an owner
+            # decision; left as "run_review" here until that is made.
             failing_stage = "run_review"
         else:
             failing_stage = None
@@ -1682,10 +1742,31 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # failed, not merely that it did. An unrecognised exception still
         # records `unhandled_exception`, so no path is worse than before.
         reason = classify_failure_reason(exc)
+        # Issue #106: `stage` is one opaque "run_review" for the entire
+        # duration of the `review_spine.run_review` call -- normalization,
+        # the primary/critic passes, the Floor judge, reconciliation, the
+        # leakage scan, block compile and the OOXML round-trip all happen
+        # inside it. Recording that umbrella as `failing_stage` told the
+        # reader-facing copy (and the Diagnostics STAGE column) nothing
+        # about where the pipeline actually stopped, and
+        # frontend/src/ReviewSubmission.tsx's STAGE_EXPLANATIONS.run_review
+        # used to fill the gap by guessing "the model" -- wrong for a defect
+        # in any of the other sub-stages. `last_progress_stage` names the
+        # real sub-stage whenever `run_review` reported at least one via
+        # `on_progress` before raising; `stage` itself is left untouched
+        # (still "run_review") for any exception before the first progress
+        # report, or from any OTHER stage this function tracks on its own
+        # (`load_playbook`, `fetch_upload`, ...), where `stage` is already
+        # the accurate, specific value.
+        recorded_stage = (
+            last_progress_stage
+            if stage == "run_review" and last_progress_stage
+            else stage
+        )
         logger.exception(
             "In-process real pipeline failed for review %s at stage %s (reason %s)",
             review_id,
-            stage,
+            recorded_stage,
             reason,
         )
         # Issue #527: stamp whatever model provenance is known at the point
@@ -1694,7 +1775,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # `model_output_truncated`) still records WHICH models were in play,
         # the same provenance a successful row gets via `_write_real_terminal`.
         reviews.record_stage_failure(
-            review_id, stage, reason, dynamodb_resource, model_ids=model_ids
+            review_id, recorded_stage, reason, dynamodb_resource, model_ids=model_ids
         )
         # Issue #415: a review that burned primary-pass (and/or critic-pass)
         # tokens before failing still spent real money -- settle at whatever

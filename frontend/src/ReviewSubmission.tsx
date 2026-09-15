@@ -869,12 +869,49 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
     cause: "Your document was uploaded, but couldn't be read back for review.",
     fix: 'This is usually temporary — try submitting it again.',
   },
+  // Issue #106: `run_review` covers normalization, OPF composition, the
+  // Floor judge, reconciliation, the leakage scan, block compile and the
+  // OOXML round-trip -- not just the model call. The old copy here ("the
+  // model could not complete the review … check the account, key and
+  // model") sent the reader chasing a provider problem for a defect
+  // anywhere else in that list (a code bug, had it raised instead of
+  // refusing, would have been reported this way too -- the #93 shape).
+  // `backend/src/pipeline_runner.py::run_real_pipeline` now records the
+  // spine's last reported PROGRESS_* marker as `failing_stage` instead of
+  // this literal "run_review" umbrella whenever one was reached before the
+  // exception, so this entry is now the true fallback: it is reached only
+  // when nothing beyond "somewhere inside run_review" is known, and its
+  // copy stays neutral about the cause rather than guessing "the model".
   run_review: {
-    cause: 'The model could not complete the review.',
-    fix:
-      'The exact cause was not identified. An admin can check the account, key and ' +
-      'model under “Models”; it is also worth re-submitting in case it was ' +
-      'a passing problem at the provider.',
+    cause: 'The review stopped inside the review pipeline before it could finish.',
+    fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
+  },
+  // Issue #106 review round 1: `recorded_stage` in
+  // `backend/src/pipeline_runner.py::run_real_pipeline`'s fail-closed
+  // `except` now records one of these three tokens (plus `redline`, below)
+  // in place of the bare "run_review" umbrella whenever `review_spine
+  // .run_review` reported that PROGRESS_* marker before raising — see
+  // `scripts/review_spine.py`'s `PROGRESS_STAGES`. That is the COMMON case
+  // (`report_progress(PROGRESS_PRIMARY_PASS)` fires before the first model
+  // call), so these three needed their own entries the moment the backend
+  // started emitting them — an unmapped token here silently falls through
+  // to the generic fallback at the bottom of this function, which is
+  // exactly the "resubmitting might help" advice the owner decision below
+  // replaced. Same neutral tone and the same fix copy as `run_review`
+  // itself (a defect this deep is not something resubmitting fixes), naming
+  // the sub-stage the pipeline actually reached instead of leaving it at
+  // the umbrella term.
+  primary_pass: {
+    cause: 'The review stopped during its first pass over your document, before it could finish.',
+    fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
+  },
+  critic_pass: {
+    cause: 'The review stopped during its second pass, which checks the first one’s work, before it could finish.',
+    fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
+  },
+  reconciliation: {
+    cause: 'The review had finished both passes over your document, but stopped while combining their results, before it could finish.',
+    fix: 'Resubmitting will not usually help. Contact an admin and quote the review id.',
   },
   persist_result: {
     cause: 'The review finished, but the result could not be saved.',
@@ -920,6 +957,20 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
       'The exact cause was not identified. It is worth submitting again; if it keeps ' +
       'happening, an admin can check the account, key and model under “Models”.',
   },
+  // Issue #106 review round 1: this key is now shared by TWO vocabularies,
+  // not one. Originally the AWS Step Functions redline stage only
+  // (`withStageErrorHandling(..., 'redline', ...)`); since `recorded_stage`
+  // landed in `run_real_pipeline`, an unhandled exception in the in-process
+  // spine after `report_progress(PROGRESS_REDLINE)`
+  // (`scripts/review_spine.py`, right before `redline_generate
+  // .generate_redline`/`generate_redline_from_blocks` is called) records
+  // this same literal "redline" token too. The copy below is accurate for
+  // both: PROGRESS_REDLINE fires immediately before the marked-up document
+  // is built, so a failure recorded under it — from either target — always
+  // means the review's findings exist but the redline object does not.
+  // Deliberately kept as one entry rather than split, since the two tokens
+  // describe the same reader-facing fact; split it only if that stops being
+  // true for one of the two targets.
   redline: {
     cause: 'The review ran, but the marked-up copy of your document could not be produced, so nothing was released.',
     fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
