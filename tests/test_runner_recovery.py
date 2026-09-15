@@ -843,11 +843,29 @@ class LifespanFixture(RecoveryFixture):
         pipeline_runner._SINGLETON = None
 
     def run_lifespan(self) -> None:
+        """Drive `_lifespan`, with the wall clock frozen to the same second
+        `seed_world` captured as `self.process_started_at`.
+
+        `_lifespan` computes its own `process_started_at = int(time.time())`
+        at boot (`backend/src/main.py:600`), independently of the second
+        `seed_world` captured before writing `LIVE_THIS_PROCESS`'s progress
+        row. Without this freeze the two calls to `time.time()` race: any
+        real time between them — setUp's deepcopy, the patchers, asyncio
+        startup, or simply a slow machine — makes the boot stamp a second
+        later than the seed stamp, so `is_orphaned`'s strict `<` (correctly,
+        by the predicate — see `runner_recovery.py`) recovers the row this
+        process itself still owns. Freezing both calls to the same instant
+        removes the race without touching that predicate.
+        """
+
         async def drive() -> None:
             async with backend_main._lifespan(None):
                 pass
 
-        asyncio.run(drive())
+        with patch.object(
+            backend_main.time, "time", return_value=float(self.process_started_at)
+        ):
+            asyncio.run(drive())
 
 
 class TestLifespanRecovery(LifespanFixture):
@@ -900,13 +918,13 @@ class TestLifespanRecovery(LifespanFixture):
 class TestLifespanShutdown(LifespanFixture):
     """The shutdown half, isolated from the boot half.
 
-    Boot recovery is patched out here on purpose. It is asserted in
-    `TestLifespanRecovery` above, and leaving it live would make these tests
-    race the clock: the seeded rows are written seconds before the lifespan
-    computes its own `process_started_at`, so the very review being held
-    in flight is (correctly) recovered on the way IN, and the cancel intent
-    on the way out is then refused by its own conditional write. That is the
-    right behaviour, and it is not what these three tests are measuring.
+    Boot recovery is patched out here for isolation, not to dodge a clock
+    race: it is asserted on its own in `TestLifespanRecovery` above, and
+    these three tests are about shutdown, not boot. `run_lifespan` (on the
+    shared `LifespanFixture`) now pins the boot stamp to the same second
+    `seed_world` captured, so a live recovery would leave `LIVE_THIS_PROCESS`
+    alone rather than raced against it — it is patched out here simply so
+    these tests measure only what they say they measure.
     """
 
     def setUp(self) -> None:
