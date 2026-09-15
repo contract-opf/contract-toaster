@@ -543,7 +543,20 @@ export interface FailureFacts {
 // FAILURE_REASON_UNCLASSIFIED). It carries no information, so it never wins
 // over the stage-keyed copy below — it is precisely the "we don't know"
 // value.
-const UNCLASSIFIED_REASON = 'unhandled_exception';
+//
+// Exported (issue #105): it is now written by a THIRD writer, the AWS Step
+// Functions Catch target in `infra/lib/nested/pipeline-stack.ts`, which
+// honestly cannot classify (it sees a Step Functions error name and a stage,
+// never the model/document facts `classify_failure_reason` reads). Every
+// reader of `reason` therefore has to know this token means "no information"
+// and fall through to the stage: `explainFailure` below, the Orbit Diner
+// projection (`orbit-diner/projection.ts`), and — as of #105 —
+// `AdminDiagnostics.detectConsecutiveIncidents`, which used to cluster on it
+// and so reported `reason "unhandled_exception"` for every AWS failure
+// instead of the stage that actually broke. One exported constant rather
+// than a fourth string literal, for the reason named at
+// `reviews.RUNNER_RESTARTED_REASON`: a literal is how copies drift.
+export const UNCLASSIFIED_REASON = 'unhandled_exception';
 
 // Human-readable failure explanations, keyed by the `reason` TOKEN the
 // backend records on the review row (issue #442).
@@ -870,6 +883,58 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
   mark_running: {
     cause: "The review couldn't be started.",
     fix: 'Please try again.',
+  },
+
+  // --- The AWS target's own stage vocabulary (issue #105) -----------------
+  //
+  // The AWS deployment does not run `run_real_pipeline`: it runs a Step
+  // Functions state machine whose stages are named separately, and whose
+  // shared Catch target (`infra/lib/nested/pipeline-stack.ts` ->
+  // `withStageErrorHandling`'s `stageName`) stamps THOSE names onto
+  // `failing_stage`. Eight of the nine had no entry here, so every AWS
+  // failure that was not `mark_running` — which is to say every failure that
+  // can happen mid-review — resolved to the generic fallback below. They are
+  // additive, not a replacement: both vocabularies are live, one per target,
+  // and a key from either must resolve.
+  //
+  // The `reason` these rows carry is always UNCLASSIFIED_REASON (a Step
+  // Functions Catch sees an error NAME and a stage, never the model or
+  // document facts `classify_failure_reason` reads), so this table is not a
+  // fallback for them — it is the only copy they will ever have. Keep the
+  // keys in step with the `withStageErrorHandling(…, '<token>', …)` calls.
+  acquire_semaphore_slot: {
+    cause: 'The review never started: the tool could not reserve one of the slots it runs reviews in.',
+    fix: 'Nothing is wrong with your document. This usually means the tool was busy — please submit again in a few minutes, and tell an admin if it keeps happening.',
+  },
+  extract: {
+    cause: 'Your document was uploaded, but its text could not be read out of the file.',
+    fix: 'Check that the file opens in Word and is not password-protected, then submit it again. If it opens fine, this is a fault in the tool — please tell an admin.',
+  },
+  retrieve: {
+    cause: 'The review could not load the playbook it was going to review your document against.',
+    fix: 'An admin can check that this contract type is still active under “Playbooks”. It is worth submitting again first, in case it was a passing problem.',
+  },
+  primary_review_mock: {
+    cause: 'The review pass itself stopped before it produced a result.',
+    fix:
+      'The exact cause was not identified. It is worth submitting again; if it keeps ' +
+      'happening, an admin can check the account, key and model under “Models”.',
+  },
+  redline: {
+    cause: 'The review ran, but the marked-up copy of your document could not be produced, so nothing was released.',
+    fix: 'This is a fault in the tool, not in your document. It has been recorded — please try again, or contact an admin if it keeps happening.',
+  },
+  persist: {
+    cause: 'The review finished, but the result could not be saved.',
+    fix: 'Please try again — the review will need to be re-run.',
+  },
+  audit: {
+    cause: 'The review reached its last record-keeping step and stopped there, so it was never marked complete.',
+    fix: 'Check History first — a review that did finish is still listed there. If it is not, please submit again and tell an admin.',
+  },
+  release_semaphore_slot: {
+    cause: 'The review reached its last clean-up step and stopped there, so it was never marked complete.',
+    fix: 'Check History first — a review that did finish is still listed there. If it is not, please submit again and tell an admin.',
   },
 };
 

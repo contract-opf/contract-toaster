@@ -85,7 +85,7 @@ import { authorizedFetch, friendlyErrorMessage } from './api';
 // the chip's own text while a local `failureStatusVariant` derived the
 // color from the same field separately — one shared source now drives both.
 import { describeOutcome } from './outcome';
-import { explainFailure } from './ReviewSubmission';
+import { explainFailure, UNCLASSIFIED_REASON } from './ReviewSubmission';
 import { CtBanner, CtButton, CtCard, CtChip, CtIconButton, CtProgress, CtTable, CtToolbar } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -223,7 +223,17 @@ export function detectConsecutiveIncidents(
 ): { type: 'reason' | 'stage'; value: string; count: number } | null {
   if (failures.length < 3) return null;
   const firstReason = failures[0].reason;
-  if (firstReason) {
+  // `unhandled_exception` is skipped here for the same reason
+  // `explainFailure` and the Orbit Diner projection skip it: it is the "we
+  // could not classify" value, so clustering on it says only "three failures
+  // in a row that nobody could classify" — which is strictly less than the
+  // stage branch below already says. Issue #105 made that concrete: the AWS
+  // Step Functions Catch target writes this token on EVERY failure row it
+  // records, so without this guard the reason branch always won and the
+  // banner read `reason "unhandled_exception"` — and "Filter to this reason"
+  // searched a token every AWS failure matches — instead of naming the stage
+  // that actually broke.
+  if (firstReason && firstReason !== UNCLASSIFIED_REASON) {
     let count = 0;
     for (const f of failures) {
       if (f.reason === firstReason) {
