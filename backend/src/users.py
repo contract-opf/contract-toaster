@@ -201,6 +201,27 @@ def _sync_status_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["SYNC_STATUS_TABLE"])
 
 
+def _scan_all_users(table: Any) -> list[dict[str, Any]]:
+    """Full-table scan of `users`, following `LastEvaluatedKey` until
+    exhausted (issue #107: a bare `table.scan()` returns only the first 1 MB
+    page, the same defect class #52 fixed for `reviews` -- a JIT-provisioned
+    SSO tenant with ~500-byte rows reaches 1 MB at roughly 2,000 users, past
+    which an admin could not see, suspend, or deprovision anyone, and the
+    last-active-admin guard in `update_user` could under- or over-count
+    depending on which page an admin's row landed on).
+
+    `users` has no secondary indexes and is small relative to `reviews`, so
+    a plain scan loop (matching `admin_dashboard.py`'s daily-spend read) is
+    the right shape here -- no query/index alternative applies."""
+    items: list[dict[str, Any]] = []
+    resp = table.scan()
+    items.extend(resp.get("Items", []))
+    while "LastEvaluatedKey" in resp:
+        resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+        items.extend(resp.get("Items", []))
+    return items
+
+
 def require_active_user(
     cognito_sub: str,
     dynamodb_resource: Any,
@@ -269,13 +290,13 @@ def list_users(
         )
 
     table = _users_table(dynamodb_resource)
-    resp = table.scan()
+    items = _scan_all_users(table)
     # Project before sorting and returning. `public_user_view` both drops
     # everything outside PUBLIC_USER_FIELDS -- a raw scanned row carries
     # `password_hash` for every password-mode user (issue #453) -- and coerces
     # Decimals, since these rows go straight into a JSONResponse and boto3
     # hands back Decimals that json.dumps rejects.
-    users = [public_user_view(item) for item in resp.get("Items", [])]
+    users = [public_user_view(item) for item in items]
     # Deterministic ordering for a stable UI: most-recently-authenticated first,
     # with never-signed-in rows at the bottom.
     #
@@ -410,7 +431,7 @@ def update_user(
     if would_strip_admin_access:
         other_active_admins = sum(
             1
-            for item in table.scan().get("Items", [])
+            for item in _scan_all_users(table)
             if item.get("cognito_sub") != target_sub
             and bool(item.get("is_admin", False))
             and item.get("status") == "active"
