@@ -478,18 +478,28 @@ def generate_presigned_download_url(
          caller supplies one — with no path traversal (raises HTTP 403
          otherwise — AC2 IDOR / path-traversal defence).
       2. (opt-in) Object-existence check — see `require_object_exists`.
-      3. Per-user daily limit check via DynamoDB conditional write (raises
-         HTTP 429 when the limit is exceeded).
-      4. Generate a presigned GetObject URL with a 60-second TTL, embedding
+      3. Generate a presigned GetObject URL with a 60-second TTL, embedding
          the per-review KMS encryption context so the key policy is satisfied.
+      4. Per-user daily limit check via DynamoDB conditional write (raises
+         HTTP 429 when the limit is exceeded) — charged only after step 3
+         has actually produced a URL (issue #115).
       5. Return the URL with Cache-Control: no-store so it is not cached.
 
-    The existence check sits between the authorization gates and the quota
-    deliberately. After the gates, because an unauthorized or mis-scoped key
-    must be refused with 403 without ever having its existence probed. Before
-    the quota, because a 410 delivers nothing and so must not be charged a
-    download slot — otherwise clicking through purged rows exhausts the very
-    limit that protects a user's still-downloadable redlines.
+    The existence check sits between the authorization gates and the presign
+    step deliberately. After the gates, because an unauthorized or mis-scoped
+    key must be refused with 403 without ever having its existence probed.
+    Before presigning, because a 410 delivers nothing and so must not be
+    charged a download slot — otherwise clicking through purged rows
+    exhausts the very limit that protects a user's still-downloadable
+    redlines.
+
+    The daily-limit charge sits AFTER the presign step, not before it
+    (issue #115): SigV4 presigning is entirely local and delivers no bytes
+    by itself, so a presign failure (e.g. a misconfigured
+    S3_PUBLIC_ENDPOINT_URL building a broken dedicated client) must not
+    already have spent one of the caller's slots for a download that never
+    happened — that turned an operator misconfiguration into a user-visible
+    quota lockout with no audit row to explain it.
 
     Args:
         review_id: the UUID v4 review identifier (non-enumerable).
@@ -589,14 +599,7 @@ def generate_presigned_download_url(
                 detail=f"Unable to check whether the document is still available: {exc!r}",
             ) from exc
 
-    # Step 3: per-user daily limit (DynamoDB conditional write with ConditionExpression).
-    _check_per_user_limits(
-        user_sub=caller_user_row["cognito_sub"],
-        env_name=env_name,
-        dynamodb_client=dynamodb_client,
-    )
-
-    # Step 4: generate presigned URL.
+    # Step 3: generate presigned URL.
     # For SSE-KMS: the S3 service performs the KMS Decrypt call server-side
     # using the outputs role (the role that signed the presigned URL).  The
     # KMS encryption context enforcement ({contract-toaster:data-class, contract-toaster:review-id})
@@ -641,7 +644,32 @@ def generate_presigned_download_url(
             detail=f"Unable to generate presigned URL: {exc!r}",
         ) from exc
 
-    # Step 4: return with Cache-Control: no-store.
+    # Step 4 (issue #115): per-user daily limit (DynamoDB conditional write
+    # with ConditionExpression), charged only now that a presigned URL has
+    # actually been produced.
+    #
+    # This used to run BEFORE the presign call above. SigV4 presigning is
+    # entirely local -- no network round trip, no bytes handed to the
+    # caller -- so a presign failure (e.g. a misconfigured
+    # S3_PUBLIC_ENDPOINT_URL on the DTS target building a broken second
+    # client just above) turned into a 503 that had ALREADY spent one of
+    # the caller's MAX_DAILY_REVIEWS slots for a download that delivered
+    # nothing. Repeated clicks against a misconfigured deployment silently
+    # exhausted a reviewer's quota for the rest of the day, with no audit
+    # row to explain why (the audit row is correctly never written on this
+    # path, so quota and audit used to disagree about how many downloads
+    # actually happened). Charging after a successful presign closes that
+    # gap without opening a free-download path: nothing downloadable exists
+    # until this point, and every request that reaches here is one this
+    # handler is about to hand a working URL for.
+    # See tests/test_download_presign_failure_uncharged_115.py.
+    _check_per_user_limits(
+        user_sub=caller_user_row["cognito_sub"],
+        env_name=env_name,
+        dynamodb_client=dynamodb_client,
+    )
+
+    # Step 5: return with Cache-Control: no-store.
     return JSONResponse(
         content={
             "url": presigned_url,
