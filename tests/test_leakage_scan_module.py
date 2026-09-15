@@ -141,6 +141,81 @@ class TestPlaybookLeakage(unittest.TestCase):
         self.assertTrue(result.blocked)
         self.assertEqual(result.category, ls.CATEGORY_PLAYBOOK)
 
+    def test_zero_width_space_inside_gram_is_still_blocked(self) -> None:
+        # Issue #103: a zero-width space (U+200B, Unicode category Cf) is
+        # invisible on screen and a model emits it routinely -- it must not
+        # let a playbook fragment slip past the scan unnoticed. Built with
+        # chr() (not a literal codepoint) so an invisible/ambiguous
+        # character does not sit in the source file itself (ruff RUF001).
+        corpus = _build_test_corpus()
+        scanner = ls.LeakageScanner(corpus)
+        zero_width_space = chr(0x200B)
+        variant = (
+            f"The{zero_width_space} Company standard liability cap "
+            "is $150,000 aggregate."
+        )
+        text = f"Summary: {variant}"
+
+        result = scanner.scan(text, field_name="verdict_summary")
+
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.category, ls.CATEGORY_PLAYBOOK)
+
+    def test_soft_hyphen_inside_gram_is_still_blocked(self) -> None:
+        # Issue #103: soft hyphen (U+00AD, category Cf) -- same reasoning.
+        corpus = _build_test_corpus()
+        scanner = ls.LeakageScanner(corpus)
+        soft_hyphen = chr(0x00AD)
+        variant = (
+            f"The Com{soft_hyphen}pany standard liability cap "
+            "is $150,000 aggregate."
+        )
+        text = f"Summary: {variant}"
+
+        result = scanner.scan(text, field_name="verdict_summary")
+
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.category, ls.CATEGORY_PLAYBOOK)
+
+    def test_fullwidth_latin_variant_is_still_blocked(self) -> None:
+        # Issue #103: fullwidth Latin letters are NFKC-equivalent to their
+        # ordinary ASCII forms and a model can emit them in ordinary prose.
+        corpus = _build_test_corpus()
+        scanner = ls.LeakageScanner(corpus)
+        fullwidth_cap = "".join(chr(cp) for cp in (0xFF43, 0xFF41, 0xFF50))
+        variant = (
+            f"The Company standard liability {fullwidth_cap} "
+            "is $150,000 aggregate."
+        )
+        text = f"Summary: {variant}"
+
+        result = scanner.scan(text, field_name="verdict_summary")
+
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.category, ls.CATEGORY_PLAYBOOK)
+
+    def test_curly_apostrophe_and_hyphen_variant_is_still_blocked(self) -> None:
+        # Issue #103: a playbook gram written with straight punctuation must
+        # still match when the model restates it with curly/typographic
+        # punctuation -- ordinary prose variation, not only an adversarial
+        # case (a curly U+2019 apostrophe, a non-ASCII U+2011 hyphen).
+        corpus = ls.ConfidentialCorpus(
+            playbook_ngrams=["a non-exclusive, company-controlled license"]
+        )
+        scanner = ls.LeakageScanner(corpus)
+        non_breaking_hyphen = chr(0x2011)
+        curly_apostrophe = chr(0x2019)
+        variant = (
+            f"This is a non{non_breaking_hyphen}exclusive, "
+            f"company{non_breaking_hyphen}controlled license."
+        )
+        text = f"Rationale: it{curly_apostrophe}s {variant}"
+
+        result = scanner.scan(text, field_name="verdict_summary")
+
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.category, ls.CATEGORY_PLAYBOOK)
+
 
 class TestCitationLeakage(unittest.TestCase):
     def test_counterparty_name_in_footnote_is_blocked(self) -> None:

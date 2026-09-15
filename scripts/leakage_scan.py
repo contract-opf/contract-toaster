@@ -187,6 +187,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -214,11 +215,43 @@ ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
 
 _NORMALIZE_WS = re.compile(r"\s+")
 
+# Visually-equivalent punctuation a model routinely emits in ordinary prose
+# (curly quotes, non-ASCII hyphen/minus variants) -- folded onto their ASCII
+# forms so a playbook gram written with straight punctuation still matches
+# when the model restates it with typographic punctuation (issue #103).
+# U+2010..U+2015 (hyphen, non-breaking hyphen, figure/en/em dash, horizontal
+# bar) and U+2212 (minus sign) all fold to "-"; U+2018/U+2019 (curly single
+# quotes) fold to "'"; U+201C/U+201D (curly double quotes) fold to '"'.
+_PUNCTUATION_VARIANTS = dict.fromkeys(range(0x2010, 0x2016), "-")
+_PUNCTUATION_VARIANTS[0x2212] = "-"
+_PUNCTUATION_VARIANTS[0x2018] = "'"
+_PUNCTUATION_VARIANTS[0x2019] = "'"
+_PUNCTUATION_VARIANTS[0x201C] = '"'
+_PUNCTUATION_VARIANTS[0x201D] = '"'
+
 
 def _normalize(text: str) -> str:
     """Case-fold and collapse whitespace for normalized n-gram matching, so
     simple case or whitespace variation does not evade the exact-match
-    check (docs/threat-model.md -> scan mechanism)."""
+    check (docs/threat-model.md -> scan mechanism).
+
+    Applied to corpus grams and scanned candidates alike, so both sides of
+    the comparison land on the same normal form. Also folds away the
+    trivial Unicode variation a model emits routinely -- and that an
+    adversarial prompt can lean on deliberately (issue #103):
+
+    - NFKC normalization collapses fullwidth/compatibility forms (e.g.
+      fullwidth Latin letters) onto their ordinary equivalents.
+    - Unicode format characters (category ``Cf`` -- zero-width space,
+      zero-width joiner/non-joiner, the soft hyphen, BOM, etc.) are
+      invisible on screen and are stripped outright; they carry no
+      information for this comparison and only exist to defeat it.
+    - Typographic hyphen/dash and curly-quote variants are folded onto
+      their plain-ASCII equivalents (see ``_PUNCTUATION_VARIANTS``).
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    text = text.translate(_PUNCTUATION_VARIANTS)
     return _NORMALIZE_WS.sub(" ", text.lower()).strip()
 
 
