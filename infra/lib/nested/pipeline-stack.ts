@@ -85,9 +85,11 @@ const MAX_CONCURRENT_EXECUTIONS = 5;
  * Every stage:
  *   - has its own timeout (`timeout` on the LambdaInvoke task) and retry
  *     policy (`.addRetry`).
- *   - is wrapped by a Catch-all (`.addCatch`) that routes to a shared
- *     "TransitionToError" task recording the failing stage name, so no
- *     review is left wedged in PENDING (issue #59 AC).
+ *   - is wrapped by a Catch-all (`.addCatch`) that routes to its own
+ *     per-stage "TransitionToError<Stage>" Task state -- one such state per
+ *     stage, each baking in that stage's real name, all backed by the same
+ *     shared `errorHandlerFn` Lambda -- recording the failing stage name so
+ *     no review is left wedged in PENDING (issue #59 AC; issue #105).
  *
  * NO SQS anywhere on the review entry path -- the API calls StartExecution
  * directly (see backend/src/reviews.py); Step Functions IS the queue.
@@ -586,6 +588,58 @@ def release(event, context):
     // Error-handling terminal state -- shared Catch target for every stage.
     // Records the failing stage on the reviews row and transitions it to
     // ERROR (issue #59 AC: "no review left wedged in PENDING").
+    //
+    // WHY THE RATIONALE IS OUT HERE AND NOT IN THE PYTHON BELOW.
+    // CloudFormation caps `AWS::Lambda::Function` `Code.ZipFile` at 4096
+    // characters, and CDK does NOT check it at synth (aws-cdk-lib's
+    // `InlineCode` validates only that the string is non-empty), so an
+    // over-long inline handler synthesizes perfectly and then fails at
+    // `cdk deploy`. Comments inside the template literal are deployed source;
+    // comments out here cost nothing. Keep the Python terse and put the
+    // reasoning here. `tests/test_transition_to_error_lambda_105.py` asserts
+    // the limit so this cannot regress silently.
+    //
+    // THE THREE THINGS THE HANDLER BELOW GETS RIGHT (issue #105):
+    //
+    //  1. It refuses to overwrite a row that already holds a terminal this
+    //     handler does not own. `DONE` is issue #446's clobber -- `AuditStage`
+    //     and `ReleaseConcurrencySlot` run their `.addCatch` AFTER
+    //     `PersistStage` wrote the successful result, so an unconditional
+    //     update turned a finished, downloadable review into an ERROR. The
+    //     in-process writer (`reviews.record_stage_failure`) has had that
+    //     guard since #446; this one did not. `CANCELLED` is the same shape
+    //     one step further out: `StopExecution` stops FURTHER states, it
+    //     cannot kill a Lambda already in flight, so this Catch can land
+    //     moments after the Stop the reviewer pressed wrote the row (the
+    //     identical refusal lives in infra/lambda/persist/handler.py). A
+    //     review the user stopped on purpose must not read like a
+    //     malfunction. The `attribute_not_exists` arm is load-bearing too:
+    //     `<>` does not match a missing attribute, so without it a row with
+    //     no `status` yet would be refused and left with no terminal at all.
+    //
+    //  2. It writes `reason` = `unhandled_exception`
+    //     (backend/src/pipeline_runner.py -> FAILURE_REASON_UNCLASSIFIED),
+    //     and that is the honest value: a Step Functions Catch sees an error
+    //     NAME and a stage, never the model/document facts
+    //     `classify_failure_reason` reads. Inventing a classified-looking
+    //     token here would be a lie AND would bury the per-stage names,
+    //     because it would be the SAME token on every AWS failure row.
+    //     Writing it is only safe because every reader of `reason` falls
+    //     through this token to `failing_stage`, which IS specific:
+    //     `explainFailure`/`STAGE_EXPLANATIONS` (frontend/src/
+    //     ReviewSubmission.tsx -- one entry per stage name below), the Orbit
+    //     Diner projection (frontend/src/orbit-diner/projection.ts), and
+    //     `AdminDiagnostics.detectConsecutiveIncidents`, which clusters on
+    //     `reason` FIRST and had no unclassified skip until #105 -- so a
+    //     constant token here made its incident banner read
+    //     `reason "unhandled_exception"` for every AWS failure instead of
+    //     naming the stage that broke. ANY NEW READER OF `reason` HAS TO
+    //     SKIP THIS TOKEN TOO.
+    //
+    //  3. It stores the Error NAME only, never Step Functions' `Cause`
+    //     payload -- that carries the Lambda's raw exception message and
+    //     stack trace, which can quote document text, and this field is read
+    //     back onto the reviews row.
     // -----------------------------------------------------------------------
     const errorHandlerFn = new lambda.Function(this, 'TransitionToErrorFunction', {
       functionName: `contract-toaster-${envName}-transition-to-error`,
@@ -596,30 +650,70 @@ def release(event, context):
 import os
 import time
 import boto3
+from botocore.exceptions import ClientError
 
 REVIEWS_TABLE = os.environ["REVIEWS_TABLE"]
+
+# Terminals this handler must never overwrite (backend/src/reviews.py ->
+# REVIEW_STATUS_SUCCESS_TERMINAL, and the Stop the reviewer pressed). See
+# point 1 of the TypeScript comment above before touching either.
+DONE_STATUS = "DONE"
+CANCELLED_STATUS = "CANCELLED"
+
+# The honest "could not classify" token (backend/src/pipeline_runner.py ->
+# FAILURE_REASON_UNCLASSIFIED). Every reader falls through it to
+# failing_stage -- point 2 of the TypeScript comment above.
+UNCLASSIFIED_REASON = "unhandled_exception"
 
 
 def handler(event, context):
     """Shared Catch target: record the failing stage, transition to ERROR."""
     table = boto3.resource("dynamodb").Table(REVIEWS_TABLE)
     review_id = event.get("review_id") or event.get("Input", {}).get("review_id")
-    error_info = event.get("error", event.get("Error", "unknown_error"))
+    error_info = event.get("error", event.get("Error", {}))
+    # The Error NAME only, never the "Cause" payload -- point 3 above.
+    if isinstance(error_info, dict):
+        error_name = error_info.get("Error") or "unknown_error"
+    else:
+        error_name = str(error_info) or "unknown_error"
     failing_stage = event.get("failing_stage", "unknown_stage")
-    table.update_item(
-        Key={"review_id": review_id},
-        UpdateExpression=(
-            "SET #status = :error, failing_stage = :stage, "
-            "error_reason = :reason, updated_at = :now"
-        ),
-        ExpressionAttributeNames={"#status": "status"},
-        ExpressionAttributeValues={
-            ":error": "ERROR",
-            ":stage": failing_stage,
-            ":reason": str(error_info),
-            ":now": str(int(time.time())),
-        },
-    )
+    now = str(int(time.time()))
+    try:
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=(
+                "SET #status = :error, failing_stage = :stage, "
+                "reason = :reason_token, error_reason = :error_name, "
+                "failed_at = :failed_at, updated_at = :now"
+            ),
+            ConditionExpression=(
+                "attribute_not_exists(#status) OR "
+                "(#status <> :done AND #status <> :cancelled)"
+            ),
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":error": "ERROR",
+                ":stage": failing_stage,
+                ":reason_token": UNCLASSIFIED_REASON,
+                ":error_name": error_name,
+                ":failed_at": now,
+                ":now": now,
+                ":done": DONE_STATUS,
+                ":cancelled": CANCELLED_STATUS,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+            raise
+        # The row already holds a terminal this handler does not own. Leave
+        # it alone and report back whichever one won the race, not DONE by
+        # assumption -- point 1 above.
+        current = table.get_item(Key={"review_id": review_id}).get("Item", {})
+        return {
+            "review_id": review_id,
+            "status": current.get("status", DONE_STATUS),
+            "failing_stage": failing_stage,
+        }
     return {"review_id": review_id, "status": "ERROR", "failing_stage": failing_stage}
 `.trim(),
       ),
@@ -636,13 +730,37 @@ def handler(event, context):
     //   - carries its own `timeout` (per-stage timeout, issue #59 AC).
     //   - calls `.addRetry(...)` (per-stage retry policy, issue #59 AC).
     //   - calls `.addCatch(errorState, { resultPath: '$.error' })` so any
-    //     unhandled failure routes to the shared error-transition Lambda
-    //     with the failing stage name attached (issue #59 AC).
+    //     unhandled failure routes to the error-transition Lambda with the
+    //     REAL failing stage name attached (issue #59 AC; issue #105: each
+    //     stage gets its own error-transition Task state -- sharing one
+    //     fixed-payload state across every `.addCatch()` is how the
+    //     `failing_stage` payload literal used to be stuck on 'pipeline'
+    //     for every stage regardless of which one actually failed).
     // -----------------------------------------------------------------------
+    const pipelineFailed = new sfn.Fail(this, 'PipelineFailed', {
+      cause: 'Pipeline execution failed; reviews row transitioned to ERROR.',
+    });
+
+    // One dedicated error-transition Task state per stage (same shared
+    // errorHandlerFn Lambda underneath), each with its OWN stage name baked
+    // into the payload -- the fix for issue #105 defect 3. `idSuffix` only
+    // needs to be a unique, stable CDK construct id; it does not need to
+    // match `stageName` character-for-character.
+    const makeErrorTransition = (stageName: string, idSuffix: string): sfn.IChainable =>
+      new tasks.LambdaInvoke(this, `TransitionToError${idSuffix}`, {
+        lambdaFunction: errorHandlerFn,
+        payload: sfn.TaskInput.fromObject({
+          'review_id.$': '$.review_id',
+          'failing_stage': stageName,
+          'error.$': '$.error',
+        }),
+        timeout: cdk.Duration.seconds(15),
+      }).next(pipelineFailed);
+
     const withStageErrorHandling = (
       taskState: sfn.TaskStateBase,
       stageName: string,
-      errorTransition: sfn.IChainable,
+      idSuffix: string,
     ): sfn.TaskStateBase => {
       taskState.addRetry({
         errors: ['States.TaskFailed', 'Lambda.ServiceException'],
@@ -650,24 +768,12 @@ def handler(event, context):
         maxAttempts: 2,
         backoffRate: 2.0,
       });
-      taskState.addCatch(errorTransition, {
+      taskState.addCatch(makeErrorTransition(stageName, idSuffix), {
         errors: ['States.ALL'],
         resultPath: '$.error',
       });
       return taskState;
     };
-
-    const errorTransition = new tasks.LambdaInvoke(this, 'TransitionToError', {
-      lambdaFunction: errorHandlerFn,
-      payload: sfn.TaskInput.fromObject({
-        'review_id.$': '$.review_id',
-        'failing_stage': 'pipeline',
-        'error.$': '$.error',
-      }),
-      timeout: cdk.Duration.seconds(15),
-    }).next(new sfn.Fail(this, 'PipelineFailed', {
-      cause: 'Pipeline execution failed; reviews row transitioned to ERROR.',
-    }));
 
     const acquireSlot = new tasks.LambdaInvoke(this, 'AcquireConcurrencySlot', {
       lambdaFunction: acquireSlotFn,
@@ -675,7 +781,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.seconds(10),
     });
-    withStageErrorHandling(acquireSlot, 'acquire_semaphore_slot', errorTransition);
+    withStageErrorHandling(acquireSlot, 'acquire_semaphore_slot', 'AcquireSemaphoreSlot');
 
     // Mark-running (issue #188): transitions the reviews row PENDING ->
     // RUNNING so the poll loop sees RUNNING during the review window (rather
@@ -692,7 +798,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.seconds(15),
     });
-    withStageErrorHandling(markReviewRunning, 'mark_running', errorTransition);
+    withStageErrorHandling(markReviewRunning, 'mark_running', 'MarkRunning');
 
     const extractStage = new tasks.LambdaInvoke(this, 'ExtractStage', {
       lambdaFunction: extractFn,
@@ -700,7 +806,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.minutes(2),
     });
-    withStageErrorHandling(extractStage, 'extract', errorTransition);
+    withStageErrorHandling(extractStage, 'extract', 'Extract');
 
     const retrieveStage = new tasks.LambdaInvoke(this, 'RetrieveStage', {
       lambdaFunction: retrieveFn,
@@ -708,7 +814,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.minutes(2),
     });
-    withStageErrorHandling(retrieveStage, 'retrieve', errorTransition);
+    withStageErrorHandling(retrieveStage, 'retrieve', 'Retrieve');
 
     const mockReviewStage = new tasks.LambdaInvoke(this, 'MockReviewStage', {
       lambdaFunction: mockReviewFn,
@@ -719,7 +825,7 @@ def handler(event, context):
       // both map to this single mock task in Phase 0).
       timeout: cdk.Duration.minutes(3),
     });
-    withStageErrorHandling(mockReviewStage, 'primary_review_mock', errorTransition);
+    withStageErrorHandling(mockReviewStage, 'primary_review_mock', 'PrimaryReviewMock');
 
     const redlineStage = new tasks.LambdaInvoke(this, 'RedlineStage', {
       lambdaFunction: redlineFn,
@@ -727,7 +833,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.minutes(2),
     });
-    withStageErrorHandling(redlineStage, 'redline', errorTransition);
+    withStageErrorHandling(redlineStage, 'redline', 'Redline');
 
     const persistStage = new tasks.LambdaInvoke(this, 'PersistStage', {
       lambdaFunction: persistFn,
@@ -735,7 +841,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.seconds(30),
     });
-    withStageErrorHandling(persistStage, 'persist', errorTransition);
+    withStageErrorHandling(persistStage, 'persist', 'Persist');
 
     const auditStage = new tasks.LambdaInvoke(this, 'AuditStage', {
       lambdaFunction: auditFn,
@@ -743,7 +849,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.seconds(30),
     });
-    withStageErrorHandling(auditStage, 'audit', errorTransition);
+    withStageErrorHandling(auditStage, 'audit', 'Audit');
 
     const releaseSlot = new tasks.LambdaInvoke(this, 'ReleaseConcurrencySlot', {
       lambdaFunction: releaseSlotFn,
@@ -751,7 +857,7 @@ def handler(event, context):
       outputPath: '$.Payload',
       timeout: cdk.Duration.seconds(10),
     });
-    withStageErrorHandling(releaseSlot, 'release_semaphore_slot', errorTransition);
+    withStageErrorHandling(releaseSlot, 'release_semaphore_slot', 'ReleaseSemaphoreSlot');
 
     const succeed = new sfn.Succeed(this, 'ReviewComplete');
 
