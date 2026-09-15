@@ -138,12 +138,16 @@ describe('a failed review explains itself', () => {
     expect(panel).not.toHaveTextContent(/api key/i);
   });
 
-  it('explains a model failure without blaming the user', async () => {
+  it('explains an unclassified run_review failure without blaming the model (issue #106)', async () => {
+    // `run_review` covers normalization, OPF composition, the Floor judge,
+    // reconciliation, the leakage scan, block compile and the OOXML
+    // round-trip — not just the model call, so the copy no longer guesses
+    // "the model could not complete the review".
     await submitAndFail('run_review');
 
-    expect(await screen.findByTestId('review-failure')).toHaveTextContent(
-      /could not complete the review/i,
-    );
+    const panel = await screen.findByTestId('review-failure');
+    expect(panel).toHaveTextContent(/stopped inside the review pipeline/i);
+    expect(panel).not.toHaveTextContent(/model/i);
   });
 
   it('still says something useful for an unrecognised stage', async () => {
@@ -171,7 +175,8 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
 
   it('names an out-of-credits model account, and who fixes it, instead of guessing', async () => {
     // The production case: run_review died on a 402. The stage copy can only
-    // say "the model could not complete the review"; the reason knows better.
+    // say the review stopped inside the pipeline (issue #106); the reason
+    // knows better.
     await submitAndFail('run_review', 'model_account_out_of_credits');
 
     const panel = await screen.findByTestId('review-failure');
@@ -179,7 +184,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
     expect(panel).toHaveTextContent(/add funds/i);
     expect(panel).toHaveTextContent(/under “Models”/i);
     // The vaguer stage-keyed fallback must NOT be what got rendered.
-    expect(panel).not.toHaveTextContent(/exact cause was not identified/i);
+    expect(panel).not.toHaveTextContent(/stopped inside the review pipeline/i);
     // It must not blame the reader's document for an operator's billing problem.
     expect(panel).toHaveTextContent(/nothing is wrong with your document/i);
     // The token stays visible for an admin to quote, alongside the stage.
@@ -212,7 +217,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
     await submitAndFail('run_review', 'a_token_from_a_newer_backend');
 
     const panel = await screen.findByTestId('review-failure');
-    expect(panel).toHaveTextContent(/could not complete the review/i);
+    expect(panel).toHaveTextContent(/stopped inside the review pipeline/i);
     expect(screen.getByTestId('review-failure-reason')).toHaveTextContent(
       'a_token_from_a_newer_backend',
     );
