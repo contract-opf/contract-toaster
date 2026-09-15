@@ -336,14 +336,29 @@ def get_cover_note_model_client(
 # on-disk playbook fixture engineered to contain one. Production default:
 # `_default_cover_note_leakage_corpus` below, keyed on the REVIEWED
 # review's own `playbook_id` (not whatever playbook the caller might name
-# today) -- best-effort, matching `_resolve_playbook_agreement_type`'s own
-# fail-open-on-lookup-error posture, because an unregistered/missing
-# playbook_id or a malformed on-disk file must degrade to an empty (never-
-# blocking) corpus rather than turning a healthy cover-note request into a
-# 502 over a catalog problem unrelated to this draft's content. This only
-# ever weakens the scan on a LOOKUP failure -- it never weakens the
-# fail-closed behavior on an actual positive detection once a corpus is in
-# hand (see post_review_cover_note's leakage-scan block).
+# today).
+#
+# Issue #104 owner decision (2026-09-14): this used to be uniformly
+# best-effort -- ANY exception out of `_load_playbook_bundle` (a registry
+# miss, a malformed on-disk file, but ALSO a DynamoDB throttle or an S3
+# outage) degraded to an empty, never-blocking corpus, so a lookup failure
+# was indistinguishable from "scanned clean" on the one channel whose whole
+# point is that a human forwards it externally (the issue #479 bug,
+# reopened for a different trigger). Two postures now apply, matching the
+# main pipeline's `run_leakage_gate`/`run_real_pipeline` posture of
+# refusing rather than guessing when it cannot resolve the bundle at all:
+#   - a registry miss or no `playbook_id`
+#     (`playbook_registry.PlaybookNotRegisteredError`, or the empty-id
+#     check just below) keeps today's fail-open empty corpus -- #479's
+#     decision stands, and `_resolve_playbook_agreement_type` matches it.
+#   - any OTHER raised exception (DynamoDB throttle, S3 outage, credential
+#     failure, a corrupted on-disk file, ...) is a failure to determine
+#     whether the draft is safe, not a "nothing to scan against" case, and
+#     is re-raised as `CoverNoteCorpusUnavailableError` -- caught in
+#     `post_review_cover_note` and turned into a 503, never a silent scan
+#     against nothing. This never weakens the fail-closed behavior on an
+#     actual positive detection once a corpus IS in hand (see
+#     post_review_cover_note's leakage-scan block).
 #
 # Issue #499 fix round 3 (review finding): this MUST resolve the corpus the
 # same way `pipeline_runner._load_playbook_bundle` does -- an activated OPF
@@ -355,6 +370,26 @@ def get_cover_note_model_client(
 # blocking corpus -- exactly the issue #479 bug, reopened here for this one
 # route. `_load_playbook_bundle` is reused (not reimplemented) so this
 # route's corpus resolution can never drift from the main pipeline's.
+# Issue #104: a stable, non-substantive marker -- never the underlying
+# exception's own text (a DynamoDB/S3 error can carry ARNs, table names,
+# or request ids) -- reused identically in the audit row's `detail` and
+# the 503's `detail` so the two can never drift into two different
+# strings for the same condition.
+COVER_NOTE_SCAN_UNAVAILABLE_TOKEN = "unavailable"  # noqa: S105 (not a secret)
+
+
+class CoverNoteCorpusUnavailableError(Exception):
+    """Issue #104: raised by `_default_cover_note_leakage_corpus` when the
+    leakage-scan corpus could not be resolved for a reason OTHER than a
+    registry miss -- a DynamoDB throttle, an S3 outage, a credential
+    failure, a corrupted on-disk playbook file. Deliberately a DIFFERENT
+    exception than `playbook_registry.PlaybookNotRegisteredError` (which
+    stays fail-open) so `post_review_cover_note` can tell "we do not know
+    if this draft is safe" apart from a routine catalog miss and answer
+    503 instead of silently scanning against nothing.
+    """
+
+
 def _default_cover_note_leakage_corpus(
     playbook_id: str | None,
     dynamodb_resource: Any,
@@ -366,14 +401,20 @@ def _default_cover_note_leakage_corpus(
         bundle = pipeline_runner._load_playbook_bundle(
             playbook_id, dynamodb_resource, s3_client
         )
-        opf_bundle_v2 = bundle.get("opf_bundle_v2")
-        if opf_bundle_v2 is not None:
-            return leakage_scan.ConfidentialCorpus.from_opf_document(
-                opf_bundle_v2.get("opf") or {}, overrides=opf_bundle_v2.get("overrides")
-            )
-        return leakage_scan.ConfidentialCorpus.from_playbook(bundle)
-    except Exception:  # noqa: BLE001 -- lookup failure degrades to an empty corpus
+    except pipeline_runner.playbook_registry.PlaybookNotRegisteredError:
+        # Registry miss -- the documented #479 fail-open case. Stays open.
         return leakage_scan.ConfidentialCorpus()
+    except Exception as exc:
+        # Issue #104: every OTHER lookup failure (throttle, outage,
+        # malformed file, ...) must not silently become an empty corpus --
+        # see the fail-closed decision in the comment block above.
+        raise CoverNoteCorpusUnavailableError(str(playbook_id)) from exc
+    opf_bundle_v2 = bundle.get("opf_bundle_v2")
+    if opf_bundle_v2 is not None:
+        return leakage_scan.ConfidentialCorpus.from_opf_document(
+            opf_bundle_v2.get("opf") or {}, overrides=opf_bundle_v2.get("overrides")
+        )
+    return leakage_scan.ConfidentialCorpus.from_playbook(bundle)
 
 
 def get_cover_note_leakage_corpus_resolver(
@@ -2350,6 +2391,33 @@ async def post_review_cover_note(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Couldn't butter this one — the redline is unaffected.",
+        ) from None
+    except CoverNoteCorpusUnavailableError:
+        # Issue #104 owner decision: a RAISED playbook lookup failure
+        # (throttle, outage, credential failure, corrupted file) is not the
+        # same as a registry miss -- we do not know whether this draft is
+        # safe to hand to the counterparty channel, so we refuse rather
+        # than scan against nothing. Caught ahead of the generic
+        # `except Exception` below so this gets its own log line, audit
+        # action, and status code rather than being folded into an
+        # undifferentiated generation failure. No raw exception text
+        # reaches the log or the audit row -- only the stable marker.
+        logger.warning(
+            "COVER_NOTE: leakage-scan corpus lookup failed for review_id=%s; "
+            "refusing rather than scan against nothing",
+            review_id,
+        )
+        _write_audit_row(
+            dynamodb_resource,
+            actor=caller_sub,
+            action="leakage_scan_corpus_unavailable",
+            target=review_id,
+            target_type="review",
+            detail={"scan_corpus": COVER_NOTE_SCAN_UNAVAILABLE_TOKEN},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=COVER_NOTE_SCAN_UNAVAILABLE_TOKEN,
         ) from None
     except Exception:  # noqa: BLE001 -- never leak a raw model/network error
         logger.warning(
