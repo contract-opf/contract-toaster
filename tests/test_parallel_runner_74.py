@@ -625,6 +625,40 @@ def test_skip_infra_still_excludes_the_same_files() -> None:
     )
 
 
+def test_skip_infra_zero_does_not_exclude_files() -> None:
+    """SKIP_INFRA=0 must behave like SKIP_INFRA unset, not like SKIP_INFRA=1
+    (issue #109). Before the fix the loop tested `[ -n "${SKIP_INFRA:-}" ]`,
+    which treats the STRING "0" as "set" and skips the infra file anyway --
+    exactly backwards for a value a shell profile or CI config exports
+    meaning "off". Same tree as test_skip_infra_still_excludes_the_same_files
+    above, SKIP_INFRA="0" instead of "1", and the opposite assertions."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        ledger = root / "ran.ledger"
+        files = {
+            "tests/test_plain_74.py": ledger_stub(ledger, "plain"),
+            "tests/test_synthy_74.py": interval_stub(
+                ledger, "synthy", hold_s=0.0, infra=True
+            ),
+        }
+        proc = run_loop(build_tree(root, files), SKIP_INFRA="0", COLLECT_JOBS="8")
+        ran = ledger.read_text().split() if ledger.exists() else []
+
+    out = proc.stdout + proc.stderr
+    _assert(proc.returncode == RC_GREEN, "SKIP_INFRA=0 run is green", out)
+    _assert(
+        "plain" in ran and "synthy" in ran,
+        "SKIP_INFRA=0 ran BOTH the plain and the infra-shaped file "
+        "(SKIP_INFRA=0 must not act like SKIP_INFRA=1)",
+        f"ran={ran!r}\n{out}",
+    )
+    _assert(
+        "NOTE: SKIP_INFRA set" not in out,
+        "no file was skipped, so the SKIP_INFRA note is not printed",
+        out,
+    )
+
+
 # ---------------------------------------------------------------------------
 # (c) scripts/check.sh --only
 # ---------------------------------------------------------------------------
@@ -884,6 +918,7 @@ TESTS = [
     test_collect_jobs_rejects_a_value_that_is_not_a_positive_integer,
     test_synth_infra_files_are_never_run_concurrently,
     test_skip_infra_still_excludes_the_same_files,
+    test_skip_infra_zero_does_not_exclude_files,
     test_check_sh_only_runs_just_the_matching_files,
     test_pytest_ini_declares_the_isolating_options,
     test_conftest_puts_the_declared_roots_on_sys_path,

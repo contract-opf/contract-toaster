@@ -146,6 +146,14 @@ a full run. `python tests/<file>.py` skips all of that.
 intermittent regression, so a human decides, not the script. Read the log
 directory the run prints before reaching for `ALLOW_FLAKY=1`.
 
+`ALLOW_FLAKY` and `SKIP_INFRA` are parsed for their **value**, not just
+whether they are set: `1`, `true`, `yes`, `on` (case-insensitive) turn the
+flag on, and everything else — including `ALLOW_FLAKY=0` or `SKIP_INFRA=0`,
+which a shell profile or CI config can export meaning "off" — is off, same as
+leaving the variable unset. `ALLOW_FLAKY=0 bash scripts/check.sh` does **not**
+wave a FLAKY file through, and `SKIP_INFRA=0 bash scripts/check.sh` does
+**not** skip the cdk-synth infra tests (issue #109).
+
 ## Speed
 
 Files run in parallel through `xargs -P`, defaulting to `nproc` (Linux) or

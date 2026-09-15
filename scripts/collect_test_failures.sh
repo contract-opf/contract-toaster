@@ -194,6 +194,21 @@ is_infra_file() {
   grep -qlE "$INFRA_MATCH" "$1"
 }
 
+# ALLOW_FLAKY / SKIP_INFRA are opt-in flags, not presence flags: `[ -n ... ]`
+# treats ALLOW_FLAKY=0 or SKIP_INFRA=0 as "set" and waves the flaky file
+# through / skips the infra tests anyway, which is backwards for a value a
+# shell profile or CI config can export as "0" meaning "off" (issue #109).
+# 1/true/yes/on, case-insensitive; everything else (including "0" and unset)
+# is false. Same convention as backend/src/purge_scheduler.py's
+# PURGE_SWEEP_ENABLED parsing, applied here as a whitelist (these two default
+# to off) rather than that helper's blocklist (it defaults to on).
+is_truthy() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1 | true | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Log/status key: the full relative path with '/' collapsed to '_'. Basenames
 # are not unique across the globs and two workers must never share a file.
 slug_for() {
@@ -280,7 +295,7 @@ for t in tests/test_*.py tests/*/test_*.py tests/lint-*.py; do
     fi
     matched=$((matched + 1))
   fi
-  if [ -n "${SKIP_INFRA:-}" ] && is_infra_file "$t"; then
+  if is_truthy "${SKIP_INFRA:-}" && is_infra_file "$t"; then
     skipped="$skipped $t"
     continue
   fi
@@ -410,7 +425,7 @@ if [ -n "$skipped" ]; then
 fi
 
 if [ -n "$flaky" ]; then
-  if [ -n "${ALLOW_FLAKY:-}" ]; then
+  if is_truthy "${ALLOW_FLAKY:-}"; then
     echo "CHECK: FLAKY-ALLOWED (ALLOW_FLAKY set — waved through by the operator, NOT by the gate):$flaky"
   else
     echo "CHECK: FLAKY-UNRESOLVED (failed, then passed alone — a human must decide):$flaky"

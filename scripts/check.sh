@@ -197,6 +197,21 @@ export TZ="${CHECK_TZ:-UTC}"
 # ---------------------------------------------------------------------------
 LOCK_HELD=0
 
+# ALLOW_FLAKY / SKIP_INFRA are opt-in flags, not presence flags: `[ -n ... ]`
+# treats ALLOW_FLAKY=0 or SKIP_INFRA=0 as "set" and waves the flaky file
+# through / skips the infra tests anyway, which is backwards for a value a
+# shell profile or CI config can export as "0" meaning "off" (issue #109).
+# Same case-insensitive 1/true/yes/on convention scripts/collect_test_failures.sh
+# uses for the same two variables; kept as a duplicate function rather than a
+# sourced file because this script invokes that one as a separate process, not
+# via `source` (see RELATION TO CI GATE A above).
+is_truthy() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1 | true | yes | on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 resolve_lock_dir() {
   if [ -n "${CHECK_LOCK_DIR:-}" ]; then
     echo "$CHECK_LOCK_DIR"
@@ -298,7 +313,7 @@ acquire_lock() {
 }
 
 LOCK_DIR="$(resolve_lock_dir)"
-if [ -z "${SKIP_INFRA:-}" ] && [ -z "${CHECK_NO_LOCK:-}" ]; then
+if ! is_truthy "${SKIP_INFRA:-}" && [ -z "${CHECK_NO_LOCK:-}" ]; then
   acquire_lock || exit 3
 fi
 

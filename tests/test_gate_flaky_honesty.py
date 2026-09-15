@@ -194,6 +194,43 @@ def check_allow_flaky_opt_in() -> list[str]:
     return failures
 
 
+def check_allow_flaky_zero_is_not_truthy() -> list[str]:
+    """Check 2b: ALLOW_FLAKY=0 must behave like ALLOW_FLAKY unset, not like
+    ALLOW_FLAKY=1 (issue #109). Before the fix the loop tested
+    `[ -n "${ALLOW_FLAKY:-}" ]`, which treats the STRING "0" as "set" and
+    waves the flaky file through anyway -- exactly backwards for a value a
+    shell profile or CI config exports meaning "off"."""
+    print("Check 2b: ALLOW_FLAKY=0 does NOT wave a flaky file through …")
+    failures = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = _tree(tmp, {"test_flaky_synth.py": FLAKY_SOURCE})
+        proc = _run_loop(root, {"ALLOW_FLAKY": "0"})
+        out = proc.stdout + proc.stderr
+
+        failures += _assert(
+            proc.returncode == RC_FLAKY,
+            f"ALLOW_FLAKY=0 still exits with the documented flaky code {RC_FLAKY} "
+            "(ALLOW_FLAKY=0 must not act like ALLOW_FLAKY=1)",
+            detail=f"returncode={proc.returncode}\nFull output:\n{out}",
+        )
+        failures += _assert(
+            "CHECK: ALL GREEN" not in out,
+            "ALLOW_FLAKY=0 does NOT print 'CHECK: ALL GREEN'",
+            detail=f"Full output:\n{out}",
+        )
+        failures += _assert(
+            "FLAKY-ALLOWED" not in out,
+            "ALLOW_FLAKY=0 does NOT print the FLAKY-ALLOWED opt-in line",
+            detail=f"Full output:\n{out}",
+        )
+        failures += _assert(
+            "CHECK: FLAKY-UNRESOLVED" in out,
+            "ALLOW_FLAKY=0 reports the flaky file as unresolved, same as unset",
+            detail=f"Full output:\n{out}",
+        )
+    return failures
+
+
 def check_all_passing_still_green() -> list[str]:
     """Check 3: the happy path is unchanged."""
     print("Check 3: an all-passing tree is still green …")
@@ -305,6 +342,56 @@ def check_check_sh_refuses_concurrent_runs() -> list[str]:
     return failures
 
 
+def check_skip_infra_zero_still_takes_the_lock() -> list[str]:
+    """Check 5b: SKIP_INFRA=0 must behave like SKIP_INFRA unset for the
+    concurrency lock too (issue #109) -- before the fix
+    `[ -z "${SKIP_INFRA:-}" ]` treated the STRING "0" as "set" and skipped
+    the lock entirely, exactly the same class of bug as check 2b's
+    ALLOW_FLAKY=0, at the OTHER call site (scripts/check.sh, not
+    scripts/collect_test_failures.sh). Same held-lock harness as check 5,
+    SKIP_INFRA="0" instead of unset: if the fix is right this still hits
+    'CHECK: LOCK BUSY' rather than silently proceeding past the lock.
+    """
+    print("Check 5b: SKIP_INFRA=0 does not skip the concurrency lock …")
+    failures = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_dir = Path(tmp) / "held.lock"
+        lock_dir.mkdir()
+        (lock_dir / "pid").write_text(str(os.getpid()))
+        (lock_dir / "owner").write_text("test_gate_flaky_honesty.py")
+
+        env = dict(os.environ)
+        env["CHECK_LOCK_DIR"] = str(lock_dir)
+        env["CHECK_LOCK_WAIT"] = "0"
+        env["PYTHON"] = sys.executable
+        env["SKIP_INFRA"] = "0"
+        env.pop("CHECK_NO_LOCK", None)
+
+        proc = subprocess.run(  # noqa: S603
+            ["bash", str(CHECK_SH)],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+            cwd=str(REPO_ROOT),
+        )
+        out = proc.stdout + proc.stderr
+
+        failures += _assert(
+            proc.returncode == RC_LOCK_BUSY,
+            f"SKIP_INFRA=0 still hits the lock and exits {RC_LOCK_BUSY} "
+            "(SKIP_INFRA=0 must not act like SKIP_INFRA=1)",
+            detail=f"returncode={proc.returncode}\nFull output:\n{out}",
+        )
+        failures += _assert(
+            "CHECK: LOCK BUSY" in out,
+            "the operator gets the exact 'CHECK: LOCK BUSY' marker",
+            detail=f"Full output:\n{out}",
+        )
+    return failures
+
+
 def check_contract_is_documented() -> list[str]:
     """Check 6: the honesty contract is written down where an operator reads
     it, not just implemented."""
@@ -343,9 +430,11 @@ def main() -> int:
     checks = [
         ("1", "FLAKY fails the gate by default", check_flaky_fails_the_gate),
         ("2", "ALLOW_FLAKY=1 is the explicit opt-in", check_allow_flaky_opt_in),
+        ("2b", "ALLOW_FLAKY=0 is not truthy", check_allow_flaky_zero_is_not_truthy),
         ("3", "All-passing tree still green", check_all_passing_still_green),
         ("4", "Persistent failure unchanged", check_persistent_failure_unchanged),
         ("5", "check.sh refuses concurrent full runs", check_check_sh_refuses_concurrent_runs),
+        ("5b", "SKIP_INFRA=0 still takes the lock", check_skip_infra_zero_still_takes_the_lock),
         ("6", "Contract is documented", check_contract_is_documented),
     ]
 
