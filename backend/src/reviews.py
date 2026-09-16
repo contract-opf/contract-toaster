@@ -3469,6 +3469,88 @@ def stop_running_execution(
     return True
 
 
+def _actual_cents_from_ledger(review_id: str, dynamodb_resource: Any) -> int:
+    """Real settled cost (cents) for `review_id`, priced from the #414
+    model-invocation ledger (`MODEL_INVOCATIONS_TABLE`) -- issue #121.
+
+    `settle_reservation_for_cancel` is called precisely when there is no
+    live client to read `cumulative_usage` from
+    (`pipeline_runner._actual_cents_from_client`): the process or execution
+    that ran the review is gone (a runner restart) or was just stopped (a
+    cancel). The ledger is the one thing that still knows what was billed --
+    each attempt is written in its own `finally` path as it happens (see
+    `backend/src/invocation_ledger.py`), independently of the pipeline's own
+    terminal write, so a row here can exist even for a run that died before
+    ever reaching persist.
+
+    Queried by `review_id`, the ledger's own partition key -- this prices
+    ONE review, never scanned across the table (contrast
+    `admin_dashboard._pass_usage_by_review`, which bounds a cross-review
+    sample by row count for exactly that reason; a single review's own
+    attempts need no such cap).
+
+    Returns 0 -- the figure this settlement always used before issue #121 --
+    whenever there is genuinely nothing to price: no `MODEL_INVOCATIONS_TABLE`
+    configured (every mock-pipeline deployment), the query itself fails, or
+    the review ledgered no rows with measured usage (the process died before
+    its first attempt's `finally` path ran, or every attempt's usage is the
+    `None` "never measured" sentinel -- see `model_client.
+    ModelInvocationRecord`). A best-effort settlement read must never raise
+    and must never fail closed to something OTHER than the historical 0.
+
+    `pass_name == "critic"` prices at the critic rate slot; every other
+    ledgered pass name (`"primary"`, `"floor"`, `"cover_note"`) prices at the
+    primary slot -- the same split `admin_dashboard._CRITIC_RATE_PASSES` uses
+    for the identical ledger, duplicated here (not imported) because
+    `admin_dashboard` itself imports this module. `"cover_note"`
+    (`review_routes.post_review_cover_note`, which writes into this same
+    table under this same `review_id` partition key and settles its own cost
+    separately through `record_cover_note_spend`) is enumerated for
+    completeness only, because such a row can never reach this settlement to
+    be double-counted by it: that route 409s unless the review is already
+    `REVIEW_STATUS_SUCCESS_TERMINAL` with findings in its persisted analysis
+    artifact, which no review priced here -- a PENDING/RUNNING orphan or a
+    cancel target -- has.
+    """
+    table_name = os.environ.get("MODEL_INVOCATIONS_TABLE")
+    if not table_name:
+        return 0
+    from boto3.dynamodb.conditions import Key
+
+    try:
+        table = dynamodb_resource.Table(table_name)
+        resp = table.query(KeyConditionExpression=Key("review_id").eq(review_id))
+        rows = list(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=Key("review_id").eq(review_id),
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            rows.extend(resp.get("Items", []))
+    except Exception:  # noqa: BLE001 - a best-effort ledger read must never fail settlement
+        return 0
+
+    primary_usage = {"input_tokens": 0, "output_tokens": 0}
+    critic_usage = {"input_tokens": 0, "output_tokens": 0}
+    measured = False
+    for row in rows:
+        actual_in = row.get("actual_input_tokens")
+        actual_out = row.get("actual_output_tokens")
+        if actual_in is None and actual_out is None:
+            continue
+        measured = True
+        bucket = critic_usage if row.get("pass_name") == "critic" else primary_usage
+        bucket["input_tokens"] += int(actual_in or 0)
+        bucket["output_tokens"] += int(actual_out or 0)
+
+    if not measured:
+        return 0
+    try:
+        return compute_actual_usd_cents_from_usage(primary_usage, critic_usage, dynamodb_resource)
+    except Exception:  # noqa: BLE001 - same best-effort contract as the read above
+        return 0
+
+
 def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> None:
     """Credit back the unspent worst-case spend reservation for a cancelled
     review.
@@ -3482,8 +3564,17 @@ def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> Non
     `reservation_released` idempotency guard so a race with persist cannot
     credit the same reservation twice.
 
-    Settles at 0 actual cents: the ledger, not this function, is the record of
-    what was really spent before the stop.
+    Settles at the review's REAL ledgered cost (issue #121), read through
+    `_actual_cents_from_ledger` -- not the flat 0 this used to settle at
+    unconditionally. `runner_recovery.recover_orphaned_reviews` calls this
+    for every review a container restart strands, and this route calls it
+    for every review a Step Functions `StopExecution` actually reaches; both
+    are cases where passes can have already been billed (a full primary pass,
+    a critic pass, a Floor judgement) with nothing left alive to report it,
+    and crediting the whole worst-case reservation back regardless silently
+    starved the day's cap of real spend. `_actual_cents_from_ledger` settles
+    at 0 -- the prior, unconditional behavior -- for exactly the cases where
+    there is truly nothing ledgered to price.
     """
     submissions = dynamodb_resource.Table(os.environ["REVIEW_SUBMISSIONS_TABLE"])
     submission = _find_submission_row_for_review(submissions, review_id)
@@ -3491,7 +3582,8 @@ def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> Non
         return
     if submission.get("reservation_released"):
         return
-    settle_spend(review_id, submission["spend_reservation_id"], 0, dynamodb_resource)
+    actual_usd_cents = _actual_cents_from_ledger(review_id, dynamodb_resource)
+    settle_spend(review_id, submission["spend_reservation_id"], actual_usd_cents, dynamodb_resource)
     submissions.update_item(
         Key={"idempotency_key": submission["idempotency_key"]},
         UpdateExpression="SET reservation_released = :true, updated_at = :now",
