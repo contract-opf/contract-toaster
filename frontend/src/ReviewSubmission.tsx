@@ -2131,6 +2131,18 @@ export default function ReviewSubmission(): React.ReactElement {
         setSubmitError('Choose a .docx file first.');
         return;
       }
+      // Issue #123: a 0-byte file (an interrupted save, a cloud-sync
+      // placeholder) is refused HERE, before it ever reaches
+      // `POST /api/reviews` — the server would refuse it too
+      // (`upload_validation.py`'s `empty_file`), but only after a real
+      // request, and with copy that names the actual problem rather than
+      // whatever generic wording a failed request renders. Named by
+      // `file.name` so the reviewer knows which of possibly several
+      // selections this was.
+      if (file.size === 0) {
+        setSubmitError(`"${file.name}" is empty (0 bytes). Choose the complete .docx file and try again.`);
+        return;
+      }
 
       // Prime + play inside the user's submit gesture so the browser's audio
       // autoplay policy is satisfied (primeAudio must run in a user gesture).

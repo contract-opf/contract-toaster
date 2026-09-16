@@ -499,6 +499,31 @@ class TestOversizedRequest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 1b. Empty (0-byte) upload — #123
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyUpload(unittest.TestCase):
+    def test_empty_upload_rejected_as_empty_file_not_magic_number_mismatch(self) -> None:
+        av = _FakeAvClient()
+        audit = _FakeAuditSink()
+        with self.assertRaises(uv.HostileFileError) as ctx:
+            uv.run_upload_gauntlet(
+                b"",
+                filename="x.docx",
+                declared_content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                av_client=av,
+                audit_write=audit,
+                review_id="rev-1b",
+            )
+        self.assertEqual(ctx.exception.reason_code, "empty_file")
+        self.assertNotEqual(ctx.exception.reason_code, "mime_magic_number_mismatch")
+        self.assertEqual(len(av.scanned_payloads), 0, "AV scan must not run on an empty file")
+        self.assertEqual(len(audit.rows), 1)
+        self.assertEqual(audit.rows[0]["reason_code"], "empty_file")
+
+
+# ---------------------------------------------------------------------------
 # 2. Zip bomb (entry count + compression ratio / decompressed-size cap)
 # ---------------------------------------------------------------------------
 
@@ -1189,6 +1214,7 @@ def _run_suite() -> bool:
     suite = unittest.TestSuite()
     for test_case in (
         TestOversizedRequest,
+        TestEmptyUpload,
         TestZipBomb,
         TestMimeMismatch,
         TestAvScan,
