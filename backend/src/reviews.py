@@ -3496,21 +3496,24 @@ def settle_reservation_for_cancel(review_id: str, dynamodb_resource: Any) -> Non
 
 
 def _find_submission_row_for_review(table: Any, review_id: str) -> dict[str, Any] | None:
-    """The submission row for `review_id`, via the review_id GSI when the
-    table has one and a scan otherwise -- same shape as
-    pipeline_runner._find_submission_by_review_id."""
-    try:
-        from boto3.dynamodb.conditions import Key
+    """The submission row for `review_id`, via the `review_id-index` GSI (see
+    infra/lib/nested/data-stack.ts) -- same shape as
+    pipeline_runner._find_submission_by_review_id.
 
-        resp = table.query(
-            IndexName="review_id-index",
-            KeyConditionExpression=Key("review_id").eq(review_id),
-        )
-    except Exception:  # noqa: BLE001 - no GSI (or a fake without query): fall back
-        resp = table.scan(
-            FilterExpression="review_id = :rid",
-            ExpressionAttributeValues={":rid": review_id},
-        )
+    Issue #119: the scan+filter fallback for a query error (including a
+    stand-in without `.query()`) is gone -- #67 already removed the same
+    fallback from pipeline_runner._find_submission_by_review_id and
+    disposition.py because a real boto3 Table always has `.query`, so it was
+    dead in production. Here it was worse than dead: it turned a GSI
+    throttle or timeout into an unpaginated `Scan` over the whole
+    review_submissions table, which also only ever sees its first page, so a
+    reservation past that page could go unsettled while looking handled."""
+    from boto3.dynamodb.conditions import Key
+
+    resp = table.query(
+        IndexName="review_id-index",
+        KeyConditionExpression=Key("review_id").eq(review_id),
+    )
     items = resp.get("Items", [])
     return items[0] if items else None
 
