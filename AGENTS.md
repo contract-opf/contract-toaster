@@ -66,8 +66,12 @@ whole config block stops applying. Lead such bullets with a word instead.
 python3 tools/docs_sync.py audit
 ```
 
-Exit 0 and no findings, or the change is not finished. Every finding names its
-file and what is wrong with it; these are the ones you will actually hit:
+Exit 0 and no findings, or the change is not finished. `audit` checks structure
+only — paths, anchors, `covers:` globs — and cannot read prose, so a green
+`audit` does not mean a doc's *description* of the code it covers is still
+correct; read the doc yourself when the change touches what it describes.
+Every finding names its file and what is wrong with it; these are the ones
+you will actually hit:
 
 | Code | What to do |
 |---|---|
