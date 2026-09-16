@@ -533,9 +533,11 @@ def create_submission_record(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Submission already exists for this idempotency key.",
             ) from exc
+        error_id = uuid.uuid4().hex
+        logger.error("SUBMISSION_RECORD_CREATE_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to create submission record: {exc!r}",
+            detail="Unable to create submission record.",
         ) from exc
     return item
 
@@ -1106,9 +1108,11 @@ def reserve_spend(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Daily spend limit reached. Try again after the cap resets (UTC midnight).",
             ) from exc
+        error_id = uuid.uuid4().hex
+        logger.error("SPEND_RESERVATION_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to reserve spend: {exc!r}",
+            detail="Unable to reserve spend.",
         ) from exc
 
     return reservation_id

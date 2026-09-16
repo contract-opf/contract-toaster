@@ -46,12 +46,15 @@ Environment variables consumed:
 """
 
 import decimal
+import logging
 import os
 import time
 import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src.authz import is_admin
@@ -249,9 +252,11 @@ def require_active_user(
     try:
         resp = table.get_item(Key={"cognito_sub": cognito_sub})
     except Exception as exc:  # fail closed on any DynamoDB error
+        error_id = uuid.uuid4().hex
+        logger.error("USER_STATUS_CHECK_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to verify user status (fail-closed): {exc!r}",
+            detail="Unable to verify user status (fail-closed).",
         ) from exc
 
     user = resp.get("Item")

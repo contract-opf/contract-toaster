@@ -80,13 +80,17 @@ tests/test_review_submission_e2e.py).
 from __future__ import annotations
 
 import io
+import logging
 import re
+import uuid
 import zipfile
 from dataclasses import dataclass, field  # noqa: F401
 from typing import Any, Callable, Protocol  # noqa: UP035
 from xml.parsers import expat
 
 from fastapi import HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Pinned config caps (mirrors the reservation-style "pinned config value"
@@ -465,9 +469,11 @@ def _parse_xml_hardened(
     try:
         parser.Parse(xml_bytes, True)
     except expat.ExpatError as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("XML_PART_PARSE_FAILED error_id=%s: %r", error_id, exc)
         raise HostileFileError(
             reason_code="xml_entity_rejected",
-            detail=f"XML part failed to parse safely: {exc}",
+            detail="XML part failed to parse safely and was rejected.",
         ) from exc
 
     if saw_doctype_or_entity["flag"]:

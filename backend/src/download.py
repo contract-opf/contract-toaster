@@ -68,9 +68,11 @@ Usage (FastAPI dependency injection):
       )
 """
 
-import os  # noqa: I001
+import logging  # noqa: I001
+import os
 import re
 import time
+import uuid
 from urllib.parse import quote
 from typing import Any
 
@@ -79,6 +81,8 @@ from botocore.config import Config  # noqa: F401
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
     from src import config  # noqa: I001
@@ -449,9 +453,11 @@ def _check_per_user_limits(
                     "per day."
                 ),
             ) from exc
+        error_id = uuid.uuid4().hex
+        logger.error("DOWNLOAD_LIMIT_CHECK_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to check per-user limits: {exc!r}",
+            detail="Unable to check per-user limits.",
         ) from exc
 
 
@@ -594,9 +600,13 @@ def generate_presigned_download_url(
                         "once their retention window has passed."
                     ),
                 ) from exc
+            error_id = uuid.uuid4().hex
+            logger.error(
+                "DOWNLOAD_AVAILABILITY_CHECK_FAILED error_id=%s: %r", error_id, exc
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Unable to check whether the document is still available: {exc!r}",
+                detail="Unable to check whether the document is still available.",
             ) from exc
 
     # Step 3: generate presigned URL.
@@ -639,9 +649,11 @@ def generate_presigned_download_url(
             ExpiresIn=PRESIGNED_URL_TTL_SECONDS,
         )
     except ClientError as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("PRESIGN_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to generate presigned URL: {exc!r}",
+            detail="Unable to generate presigned URL.",
         ) from exc
 
     # Step 4 (issue #115): per-user daily limit (DynamoDB conditional write
@@ -737,9 +749,13 @@ def generate_presigned_playbook_download_url(
                 status_code=status.HTTP_410_GONE,
                 detail="This playbook version is no longer available in storage.",
             ) from exc
+        error_id = uuid.uuid4().hex
+        logger.error(
+            "PLAYBOOK_FILE_AVAILABILITY_CHECK_FAILED error_id=%s: %r", error_id, exc
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to check whether playbook file is available: {exc!r}",
+            detail="Unable to check whether playbook file is available.",
         ) from exc
 
     presigning_client = s3_client
@@ -759,9 +775,11 @@ def generate_presigned_playbook_download_url(
             ExpiresIn=PRESIGNED_URL_TTL_SECONDS,
         )
     except ClientError as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("PRESIGN_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to generate presigned URL: {exc!r}",
+            detail="Unable to generate presigned URL.",
         ) from exc
 
     return JSONResponse(

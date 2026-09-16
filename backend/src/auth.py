@@ -30,14 +30,18 @@ need to be hard-coded.
 """
 
 import json
+import logging
 import os
 import time  # noqa: F401
+import uuid
 from functools import lru_cache
 from typing import Any
 
 import httpx
 from fastapi import Cookie, Depends, HTTPException, Security, status  # noqa: F401
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+logger = logging.getLogger(__name__)
 
 try:  # production runs `src.main` (backend/ on path); tests put backend/src on path
     from src import config, demo_auth
@@ -113,10 +117,14 @@ def _fetch_jwks(jwks_url: str) -> dict[str, Any]:
         response.raise_for_status()
         return response.json()
     except Exception as exc:
-        # Fail closed: if JWKS is unreachable we cannot verify tokens.
+        # Fail closed: if JWKS is unreachable we cannot verify tokens. The
+        # repr (region, endpoint, botocore/httpx internals) is logged
+        # server-side only -- issue #124, the client gets a fixed token.
+        error_id = uuid.uuid4().hex
+        logger.error("JWKS_FETCH_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Unable to fetch JWKS from Cognito: {exc!r}",
+            detail="Unable to fetch JWKS from Cognito.",
         ) from exc
 
 
@@ -159,9 +167,11 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
     try:
         unverified_header = jwt.get_unverified_header(token)
     except PyJWTError as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("TOKEN_HEADER_INVALID error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token header: {exc!r}",
+            detail="Invalid token header.",
         ) from exc
 
     kid = unverified_header.get("kid")
@@ -208,9 +218,11 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
     try:
         public_key = RSAAlgorithm.from_jwk(json.dumps(key_data))
     except Exception as exc:  # malformed JWK entry — fail closed
+        error_id = uuid.uuid4().hex
+        logger.error("SIGNING_KEY_UNUSABLE error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Unusable signing key for the token's kid: {exc!r}",
+            detail="Unusable signing key for the token's kid.",
         ) from exc
 
     try:
@@ -223,9 +235,11 @@ def _verify_cognito_token(token: str) -> dict[str, Any]:
             options={"verify_exp": True, "require": ["exp", "iat", "sub"]},
         )
     except PyJWTError as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("TOKEN_VERIFY_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token verification failed: {exc!r}",
+            detail="Token verification failed.",
         ) from exc
 
     # --- Layer 2: independently re-verify email domain and Google hd claim ---
