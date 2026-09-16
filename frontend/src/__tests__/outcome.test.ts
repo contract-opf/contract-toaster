@@ -53,14 +53,31 @@ describe('OUTCOME_CHIPS — total over the outcome union', () => {
 });
 
 describe('describeOutcome — label and variant never disagree', () => {
-  it('resolves REQUEST_CHANGE to the same label and variant regardless of the row it came from', () => {
-    // The two rows from the live bug report: same decision, different
-    // status/provenance shape. Both must render identically.
+  it('resolves REQUEST_CHANGE for a genuinely DONE row', () => {
     const a = describeOutcome('DONE', 'REQUEST_CHANGE');
-    const b = describeOutcome('ERROR_MANUAL_REVIEW_REQUIRED', 'REQUEST_CHANGE');
-    expect(a).toEqual(b);
     expect(a.label).toBe('Changes requested');
+    expect(a.variant).toBe('warn');
     expect(a.label).not.toContain('_');
+  });
+
+  it('issue #95: a SYSTEM status beats a stale decision, even a known one', () => {
+    // Live evidence (#95, the #666 bug reopened): `backend/src/
+    // pipeline_runner.py`'s #584 branch used to downgrade `status` to
+    // ERROR_MANUAL_REVIEW_REQUIRED while leaving the spine's original
+    // REQUEST_CHANGE `decision` in place. That row must render as the
+    // FAILURE it is, not as "Changes requested" — the outcome the row's
+    // stale decision still names.
+    const failed = describeOutcome('ERROR_MANUAL_REVIEW_REQUIRED', 'REQUEST_CHANGE');
+    const failedNoDecision = describeOutcome('ERROR_MANUAL_REVIEW_REQUIRED', null);
+    expect(failed).toEqual(failedNoDecision);
+    expect(failed.label).toBe('Failed — needs manual review');
+    expect(failed.variant).toBe('danger');
+    // And it must NOT collapse to the DONE/REQUEST_CHANGE rendering — the
+    // exact confusion #95 exists to prevent.
+    expect(failed).not.toEqual(describeOutcome('DONE', 'REQUEST_CHANGE'));
+    expect(resolveOutcome('ERROR_MANUAL_REVIEW_REQUIRED', 'REQUEST_CHANGE')).toBe(
+      'ERROR_MANUAL_REVIEW_REQUIRED',
+    );
   });
 
   it('prefers the decision over the status when both are present and known', () => {

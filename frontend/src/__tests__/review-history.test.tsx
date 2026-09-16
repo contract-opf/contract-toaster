@@ -33,6 +33,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ReviewHistory, { HistoryRow } from '../ReviewHistory';
 import { allowConsoleErrorsInThisTest } from './support/consoleErrorGuard';
+import { OUTCOME_CHIPS } from '../outcome';
 
 vi.mock('../auth', () => ({
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -269,7 +270,22 @@ describe('History — the outcome chip (issue #470)', () => {
   it('renders the SAME label and chip variant for the same outcome, regardless of document/provenance state', async () => {
     // Two REQUEST_CHANGE reviews shaped like the live bug report: same
     // decision, but everything else that must NOT drive the chip differs —
-    // status, and whether a redline/input pointer was recorded.
+    // whether a redline/input pointer was recorded.
+    //
+    // Both rows are DONE (issue #95 correction): before #95, the second row
+    // used status ERROR_MANUAL_REVIEW_REQUIRED to also vary `status` in the
+    // same fixture, on the premise that resolveOutcome only looked at
+    // decision once status was neither DONE-with-a-decision nor an overlay.
+    // #95 changes that premise — a known, non-DONE status now beats a stale
+    // decision outright (see outcome.ts), so ERROR_MANUAL_REVIEW_REQUIRED +
+    // REQUEST_CHANGE is no longer the same outcome as DONE + REQUEST_CHANGE;
+    // it is the #95 regression itself (dedicated test below). Pairing two
+    // DONE rows keeps this test's actual subject — has_output/has_input
+    // independence — valid without smuggling a status difference into it.
+    // A DONE + REQUEST_CHANGE row with no output object is still real: the
+    // AWS persist Lambda (infra/lambda/persist/handler.py:226) derives
+    // `terminal_status` from `decision` alone, so it lands DONE regardless
+    // of whether the redline object was actually written.
     const withOutput: HistoryRow = {
       ...MODERN,
       review_id: 'rev-request-change-a',
@@ -281,7 +297,7 @@ describe('History — the outcome chip (issue #470)', () => {
     const withoutOutput: HistoryRow = {
       ...MODERN,
       review_id: 'rev-request-change-b',
-      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      status: 'DONE',
       decision: 'REQUEST_CHANGE',
       has_output: false,
       has_input: false,
@@ -296,6 +312,44 @@ describe('History — the outcome chip (issue #470)', () => {
 
     expect(cellA.textContent).toBe(cellB.textContent);
     expect(chipA?.getAttribute('variant')).toBe(chipB?.getAttribute('variant'));
+  });
+
+  it('issue #95: a REQUEST_CHANGE that never persisted its redline reads as a FAILURE, not as "Changes requested"', async () => {
+    // Live bug report (#95, the #666 failure-painted-as-success bug reopened
+    // through a stale decision): `backend/src/pipeline_runner.py`'s #584
+    // branch downgraded `status` to ERROR_MANUAL_REVIEW_REQUIRED while
+    // leaving the spine's original REQUEST_CHANGE `decision` in place. This
+    // row must NOT render the same as a genuinely completed REQUEST_CHANGE
+    // review — it must read as the failure it is.
+    const succeeded: HistoryRow = {
+      ...MODERN,
+      review_id: 'rev-request-change-done',
+      status: 'DONE',
+      decision: 'REQUEST_CHANGE',
+      has_output: true,
+      has_input: true,
+    };
+    const failedWithStaleDecision: HistoryRow = {
+      ...MODERN,
+      review_id: 'rev-request-change-failed',
+      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      decision: 'REQUEST_CHANGE',
+      has_output: false,
+      has_input: false,
+    };
+    stubRoutes({ '/api/reviews': listOf(succeeded, failedWithStaleDecision) });
+    render(<ReviewHistory />);
+
+    const doneCell = await screen.findByTestId(`history-outcome-${succeeded.review_id}`);
+    const failedCell = screen.getByTestId(`history-outcome-${failedWithStaleDecision.review_id}`);
+
+    expect(doneCell.textContent).toContain(OUTCOME_CHIPS.REQUEST_CHANGE.label);
+    expect(failedCell.textContent).toContain(OUTCOME_CHIPS.ERROR_MANUAL_REVIEW_REQUIRED.label);
+    expect(failedCell.textContent).not.toBe(doneCell.textContent);
+    expect(failedCell.querySelector('ct-chip')?.getAttribute('variant')).toBe('danger');
+    expect(failedCell.querySelector('ct-chip')?.getAttribute('variant')).not.toBe(
+      doneCell.querySelector('ct-chip')?.getAttribute('variant'),
+    );
   });
 
   it('shows QUARANTINED as the outcome, not the stale ACCEPT decision the pipeline already wrote', async () => {

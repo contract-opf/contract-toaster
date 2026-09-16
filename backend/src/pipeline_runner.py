@@ -1188,7 +1188,14 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
         placeholder = f":fc{index}"
         set_clauses.append(f"{field} = {placeholder}")
         values[placeholder] = coverage_value
-    if result.get("decision") is not None:
+    # Issue #95: `decision` is only ever a legitimate fact about a `DONE` row
+    # (`scripts/review_spine.py`'s `_terminal` -- "a SYSTEM status must never
+    # carry a decision", the same invariant `frontend/src/outcome.ts` states
+    # and now enforces on its own side). This is the second, independent
+    # backstop for that invariant: even if a future caller forgets to strip
+    # `decision` the way the #584 branch above now does, a non-DONE terminal
+    # row can never leave this function carrying one.
+    if terminal == reviews.REVIEW_STATUS_SUCCESS_TERMINAL and result.get("decision") is not None:
         set_clauses.append("decision = :d")
         values[":d"] = result["decision"]
     if result.get("summary") is not None:
@@ -1629,8 +1636,16 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # test_accept_reaches_done_with_no_output_object), and a
         # REQUEST_CHANGE that DID persist an object is unaffected too.
         if result.get("decision") == "REQUEST_CHANGE" and output_s3_key is None:
+            # Issue #95: this is a SYSTEM status now (ERROR_MANUAL_REVIEW_
+            # REQUIRED), and outcome.ts's own invariant is that a SYSTEM
+            # status must never carry a decision -- the stale REQUEST_CHANGE
+            # left on `result` here is exactly what made this failed review
+            # render as "Changes requested" (warn) instead of "Failed --
+            # needs manual review" (danger) on History/console/receipt. Drop
+            # it at the same place `status`/`reason` are downgraded, not
+            # left for `_write_real_terminal` alone to catch.
             result = {**result, "status": "ERROR_MANUAL_REVIEW_REQUIRED",
-                      "reason": "redline_not_persisted"}
+                      "reason": "redline_not_persisted", "decision": None}
             failing_stage = stage
         elif result["status"] != "OK":
             # Issue #616 second finding: every fail-closed condition

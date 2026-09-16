@@ -330,6 +330,45 @@ describe('all three renderings say the same thing', () => {
 });
 
 describe('the pieces', () => {
+  // Issue #95: the Outcome line used to read `decision` directly, bypassing
+  // `resolveOutcome` -- the one place `outcome.ts` lets a SYSTEM `status`
+  // overrule a stale `decision` (History's chip and the console's status
+  // line already go through it). Every other fixture in this file seeds
+  // only DONE rows, so the non-DONE status this ticket is about had never
+  // been exercised on the receipt at all.
+  it("doesn't let a stale decision overrule the row's real outcome (#95)", () => {
+    // The exact #95 shape: the pipeline downgraded a review to a SYSTEM
+    // failure status after a decision had already been recorded. Read
+    // alone, `decision` still says REQUEST_CHANGE -- but `resolveOutcome`
+    // (and therefore History's chip and the console's status line, per
+    // outcome.test.ts's own #95 fixture) say the review failed. The receipt
+    // must say the same thing, not the contradicting word `decision` alone
+    // would print.
+    const failedRow = {
+      review_id: 'abcd1234-5678-90ab-cdef-1234567890ab',
+      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      decision: 'REQUEST_CHANGE',
+      created_at: '1000000000',
+    };
+    const outcome = receiptLines(failedRow).find((line) => line.id === 'outcome');
+    expect(outcome?.value).toBe('Failed — needs manual review');
+    expect(outcome?.value).not.toBe('CHANGES REQUESTED');
+
+    // A row where status and decision genuinely agree keeps the receipt's
+    // own ALL CAPS decision vocabulary -- this fix is a guard against the
+    // disagreeing case, not a blanket switch to outcome.ts's own labels.
+    const doneRow = { ...failedRow, status: 'DONE' };
+    expect(receiptLines(doneRow).find((line) => line.id === 'outcome')?.value).toBe(
+      'CHANGES REQUESTED',
+    );
+
+    // No decision at all: still dropped, exactly as before this fix -- a
+    // missing decision was never the bug (this module's own rule: a line
+    // whose source is absent is dropped, not filled from `status` alone).
+    const noDecisionRow = { ...doneRow, decision: null };
+    expect(receiptLines(noDecisionRow).find((line) => line.id === 'outcome')).toBeUndefined();
+  });
+
   it('formats durations without lying about them', () => {
     expect(toastedIn('100', '292')).toBe('3m 12s');
     expect(toastedIn('100', '130')).toBe('30s');

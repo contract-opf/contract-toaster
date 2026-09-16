@@ -35,6 +35,7 @@
  * indistinguishable from a fact once it has been pasted somewhere, and the
  * whole point of this artifact is that it can be trusted at a glance.
  */
+import { resolveOutcome, OUTCOME_CHIPS } from '../outcome';
 
 export interface ReceiptSource {
   review_id?: string | null;
@@ -128,6 +129,49 @@ const DECISION_WORDS: Record<string, string> = {
   ACCEPT: 'ACCEPTED AS DRAFTED',
   REQUEST_CHANGE: 'CHANGES REQUESTED',
 };
+
+/**
+ * Issue #95: the Outcome line used to read `review.decision` directly
+ * (`DECISION_WORDS[decision]`), bypassing `resolveOutcome` — the one place
+ * `outcome.ts` lets a `status` overrule a stale `decision` (see that
+ * module's own header). A row whose SYSTEM status downgraded a review after
+ * a decision was already recorded (#95's own shape:
+ * `status=ERROR_MANUAL_REVIEW_REQUIRED, decision=REQUEST_CHANGE`) printed
+ * "CHANGES REQUESTED" here while the same row's History chip and the
+ * console's status line — both already routed through `resolveOutcome` —
+ * showed the failure. Same row, contradicting itself across renderings.
+ *
+ * So this line asks `resolveOutcome` first. It takes the receipt's own
+ * decision vocabulary branch (`DECISION_WORDS`, ALL CAPS — a provenance-slip
+ * register `outcome.ts`'s chip labels don't use) ONLY when the resolved
+ * outcome IS the decision, i.e. `status` agrees a decision is the fact that
+ * won. Otherwise the resolved outcome's own label is what actually happened
+ * to the review, and that is what prints. No decision at all keeps the prior
+ * behavior — the line is dropped, not filled from `status` alone — since
+ * that was never the bug this ticket exists to fix.
+ *
+ * Note what that branch does and does NOT print. `DECISION_WORDS` has
+ * entries for `ACCEPT` and `REQUEST_CHANGE` only, so a genuine
+ * `DONE`+`ACCEPT`/`DONE`+`REQUEST_CHANGE` row gets receipt prose. The mock
+ * pipeline's `MANUAL_REVIEW_REQUIRED`+`MANUAL_REVIEW_REQUIRED` pairing
+ * (`backend/src/pipeline_runner.py::_mock_decision`, a live producer) also
+ * resolves to its own decision and so reaches this branch, but has no
+ * `DECISION_WORDS` entry: it falls through `?? decision` and prints the raw
+ * wire token `MANUAL_REVIEW_REQUIRED`. That is exactly as it behaved before
+ * #95 — this ticket neither introduces nor fixes it. Giving that pairing
+ * prose (the raw-identifier-on-screen class #470 exists to close) is a
+ * separate ticket and is deliberately not done here.
+ */
+function outcomeLine(status?: string | null, decision?: string | null): string | null {
+  if (!decision) {
+    return null;
+  }
+  const outcome = resolveOutcome(status, decision);
+  if (outcome === decision) {
+    return DECISION_WORDS[decision] ?? decision;
+  }
+  return outcome ? OUTCOME_CHIPS[outcome].label : null;
+}
 
 function count(value: unknown): number | null {
   return Array.isArray(value) ? value.length : null;
@@ -334,7 +378,7 @@ export function receiptLines(
 
   lines.push({ id: 'rule-2', ...RULE });
 
-  push('outcome', 'Outcome', review.decision ? DECISION_WORDS[review.decision] ?? review.decision : null);
+  push('outcome', 'Outcome', outcomeLine(review.status, review.decision));
   const issueCount = count(review.issues);
   push('issues', 'Changes requested', issueCount === null ? null : String(issueCount));
   const clauses = clausesTouched(review.issues);

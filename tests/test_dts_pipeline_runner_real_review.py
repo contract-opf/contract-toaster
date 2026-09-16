@@ -49,6 +49,12 @@ of a live OpenRouter call -- fully offline, no network -- and asserts:
      a `run_review` result onto the reviews row when present, and leaves the
      key ABSENT (never a null placeholder) when the result carries none --
      the same convention `decision`/`summary`/`reason` already follow.
+  7. Issue #95: the REQUEST_CHANGE-with-no-output downgrade in (2)'s writer
+     strips the now-stale `decision` as well as downgrading `status`, and
+     `_write_real_terminal` independently refuses to write a `decision`
+     beside any terminal other than `DONE` -- the two halves of "a SYSTEM
+     status must never carry a decision", each covered on its own so
+     deleting either turns a test red.
 
 Run standalone: `python3 tests/test_dts_pipeline_runner_real_review.py`
 Exit codes: 0 = pass, 1 = fail
@@ -568,6 +574,17 @@ class TestRunRealPipeline(unittest.TestCase):
         self.assertEqual(reviews_table.item.get("reason"), "redline_not_persisted")
         self.assertEqual(reviews_table.item.get("failing_stage"), "persist_result")
         self.assertNotIn("output_s3_key", reviews_table.item)
+        # Issue #95: this row must NOT keep the spine's original REQUEST_CHANGE
+        # decision now that status has been downgraded to a SYSTEM status --
+        # `frontend/src/outcome.ts`'s own invariant is that a SYSTEM status
+        # must never carry a decision, and a stale REQUEST_CHANGE here is
+        # exactly what made this failed review render as "Changes requested"
+        # (the #666 failure-painted-as-success bug, reopened through this
+        # branch). `assertIsNone`, not `assertNotIn`: a caller that decides
+        # to write `decision: None` explicitly must remain fine too, unlike
+        # `output_s3_key`/`failing_stage` above, which use the "absent, never
+        # a null placeholder" convention documented on `_write_real_terminal`.
+        self.assertIsNone(reviews_table.item.get("decision"))
         # The findings are not lost -- the analysis artifact is still
         # written, same as any other terminal outcome.
         keys = [put["Key"] for put in s3.puts]
@@ -703,6 +720,83 @@ class TestDeletedRequoteKeyIsNotPersisted628(unittest.TestCase):
         self.assertNotIn("requote", table.item)
 
 
+class TestDecisionNeverWrittenBesideANonDoneStatus95(unittest.TestCase):
+    """Issue #95: `_write_real_terminal` emits a `decision = :d` SET clause
+    for a `DONE` terminal and for no other one.
+
+    This is the ticket's SECOND, independent backstop for the invariant
+    `frontend/src/outcome.ts` states and `scripts/review_spine.py`'s
+    `_terminal` names -- "a SYSTEM status must never carry a decision" --
+    and it needs coverage of its own precisely BECAUSE it is defence in
+    depth. `run_real_pipeline`'s #584 branch now strips `decision` upstream
+    (`TestRunRealPipeline.
+    test_request_change_with_no_output_does_not_reach_done` above), so no
+    end-to-end path leaves a stale decision for this guard to catch: the
+    guard's condition is never the thing doing the work there. Without the
+    cases below, deleting the `terminal ==
+    reviews.REVIEW_STATUS_SUCCESS_TERMINAL` half of that condition leaves
+    every suite in this repo green -- a guard indistinguishable from dead
+    code, which is not an enforced invariant.
+
+    Driven through `_write_real_terminal` directly, the way the two classes
+    above drive it. The refusal cases assert with `assertNotIn`: no SET
+    clause named the field, so the key is ABSENT rather than null -- the
+    same convention `normalization_notes`/`requote` assert. The `DONE` case
+    asserts the value itself, since there the field must actually be there.
+    """
+
+    def _write(self, result: dict[str, Any]) -> FakeReviewsTable:
+        table = FakeReviewsTable(status="RUNNING")
+        pr._write_real_terminal(
+            REVIEW_ID, result, output_s3_key=None, dynamodb_resource=FakeDDB(table)
+        )
+        return table
+
+    def test_the_95_shape_never_reaches_the_row(self) -> None:
+        """A caller that downgraded `status` at the persist boundary but
+        forgot to strip the spine's original decision -- exactly what the
+        #584 branch did before this ticket. Handed in deliberately, as the
+        only way to reach this writer with the shape now stripped upstream.
+        """
+        table = self._write(
+            {
+                "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+                "decision": "REQUEST_CHANGE",
+                "reason": "redline_not_persisted",
+            }
+        )
+        self.assertEqual(table.item["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertNotIn("decision", table.item)
+        # The guard drops the one offending field; it does not fail the
+        # write or disturb the rest of the terminal row.
+        self.assertEqual(table.item.get("reason"), "redline_not_persisted")
+        self.assertIn("failed_at", table.item)
+
+    def test_every_other_non_done_terminal_is_refused_too(self) -> None:
+        """Not wired to one status string or one decision string. The guard
+        keys off "is this the success terminal", so the other non-DONE
+        terminals this writer is handed are refused the same way, whichever
+        decision rode in on the result."""
+        for status_value in ("MANUAL_REVIEW_REQUIRED", "ERROR"):
+            for decision_value in ("ACCEPT", "REQUEST_CHANGE"):
+                with self.subTest(status=status_value, decision=decision_value):
+                    table = self._write(
+                        {"status": status_value, "decision": decision_value}
+                    )
+                    self.assertEqual(table.item["status"], status_value)
+                    self.assertNotIn("decision", table.item)
+
+    def test_a_done_terminal_still_carries_its_decision(self) -> None:
+        """The other half of the guard, so it cannot be satisfied by simply
+        never writing a decision at all: `DONE` is the one status a decision
+        IS a legitimate fact about, and the whole app reads it from here."""
+        for decision_value in ("ACCEPT", "REQUEST_CHANGE"):
+            with self.subTest(decision=decision_value):
+                table = self._write({"status": "OK", "decision": decision_value})
+                self.assertEqual(table.item["status"], "DONE")
+                self.assertEqual(table.item.get("decision"), decision_value)
+
+
 def _run_tests() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
@@ -710,6 +804,7 @@ def _run_tests() -> int:
     suite.addTests(loader.loadTestsFromTestCase(TestRunRealPipeline))
     suite.addTests(loader.loadTestsFromTestCase(TestNormalizationNotesPersisted563))
     suite.addTests(loader.loadTestsFromTestCase(TestDeletedRequoteKeyIsNotPersisted628))
+    suite.addTests(loader.loadTestsFromTestCase(TestDecisionNeverWrittenBesideANonDoneStatus95))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 
