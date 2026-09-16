@@ -84,6 +84,7 @@ import logging
 import re
 import uuid
 import zipfile
+import zlib
 from dataclasses import dataclass, field  # noqa: F401
 from typing import Any, Callable, Protocol  # noqa: UP035
 from xml.parsers import expat
@@ -284,6 +285,57 @@ def _open_zip_or_reject(file_bytes: bytes) -> zipfile.ZipFile:
 
 
 # ---------------------------------------------------------------------------
+# Reading one archive part (used by every stage from 5 onwards)
+# ---------------------------------------------------------------------------
+
+# The exception family zipfile raises out of a failed entry decompression.
+#   - zipfile.BadZipFile — the decompressed bytes did not match the entry's
+#     CRC-32. Reached whenever the central directory's declared file_size
+#     understates the entry's real decompressed size (forged or corrupted
+#     central directory): zipfile stops inflating at the declared length, so
+#     the CRC it computes is over truncated output. The zip-bomb caps in
+#     stage 4 cannot catch this — they deliberately trust the declared size
+#     and never inflate anything to verify it.
+#   - RuntimeError — the entry is flagged encrypted and no password was
+#     supplied ("File %r is encrypted, password required for extraction").
+#   - zlib.error — the raw deflate stream itself is malformed (e.g. an
+#     invalid block type or code-length table after ordinary transit
+#     corruption). zlib.error inherits straight from Exception, so it is
+#     neither of the two above and must be named explicitly.
+_ZIP_ENTRY_READ_ERRORS = (zipfile.BadZipFile, RuntimeError, zlib.error)
+
+
+def _read_zip_part(zf: zipfile.ZipFile, part_name: str) -> bytes:
+    """Decompress one archive part, normalizing a failed read.
+
+    Every stage from 5 onwards reads parts through this function so that a
+    failure to decompress an entry becomes a HostileFileError with a stable
+    reason code — run_upload_gauntlet's existing `except HostileFileError`
+    then writes the `upload_rejected` audit row, per the gauntlet's contract
+    that no rejection ever reaches the route as a bare exception.
+
+    The handler is deliberately attached HERE, to the single call that can
+    raise these types, rather than to the gauntlet's body: hung on the body
+    it would also relabel an unrelated RuntimeError (an AV-scanner invoke
+    failure, say) as a corrupt archive entry and write a false rejection row
+    for a file that is not hostile.
+
+    Logs str(exc), never repr(exc): these messages name the offending part
+    but stay short, stable strings, whereas an exception repr can embed the
+    whole payload in its args (see ARCHITECTURE.md -> log redaction).
+    """
+    try:
+        return zf.read(part_name)
+    except _ZIP_ENTRY_READ_ERRORS as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("ZIP_ENTRY_READ_FAILED error_id=%s: %s", error_id, str(exc))
+        raise HostileFileError(
+            reason_code="zip_entry_corrupt",
+            detail="This archive entry could not be read, so the upload was rejected.",
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
 # Stage 5 — MIME verification ([Content_Types].xml). This is the first check
 # that decompresses a part (zf.read()), so per docs/threat-model.md it must
 # run only after the AV scan (stage 3) and the zip-bomb caps (stage 4) have
@@ -311,7 +363,7 @@ def _check_content_types_is_wordprocessingml(zf: zipfile.ZipFile) -> None:
             detail="Archive is missing [Content_Types].xml; not a valid OOXML package.",
         )
 
-    content_types_xml = zf.read(CONTENT_TYPES_PART_NAME)
+    content_types_xml = _read_zip_part(zf, CONTENT_TYPES_PART_NAME)
     declared_types = _extract_content_type_overrides(content_types_xml)
 
     if WORDPROCESSINGML_MAIN_CONTENT_TYPE in declared_types:
@@ -493,7 +545,7 @@ def _check_all_xml_parts_are_entity_safe(zf: zipfile.ZipFile) -> None:
         # Bound the amount we ever inflate for a single part while checking
         # entity-safety, independent of the earlier whole-archive ratio
         # check — defense in depth against a single oversized XML part.
-        data = zf.read(info.filename)
+        data = _read_zip_part(zf, info.filename)
         _parse_xml_hardened(data)
 
 
@@ -505,7 +557,7 @@ def _check_all_xml_parts_are_entity_safe(zf: zipfile.ZipFile) -> None:
 def _check_no_macro_enabled_parts(zf: zipfile.ZipFile) -> None:
     names = zf.namelist()
 
-    content_types_xml = zf.read(CONTENT_TYPES_PART_NAME)
+    content_types_xml = _read_zip_part(zf, CONTENT_TYPES_PART_NAME)
     declared_types = _extract_content_type_overrides(content_types_xml)
     if any(t in MACRO_ENABLED_CONTENT_TYPES for t in declared_types):
         raise HostileFileError(
@@ -532,7 +584,7 @@ def _check_relationships(zf: zipfile.ZipFile) -> None:
     """Scan every .rels part for external relationships, embedded OLE
     objects, and attached templates."""
     for rels_part in _iter_relationship_parts(zf):
-        rels_xml = zf.read(rels_part)
+        rels_xml = _read_zip_part(zf, rels_part)
         relationships = _extract_relationships(rels_xml)
 
         for rel in relationships:
@@ -741,7 +793,7 @@ def _rewrite_zip_with_replacements(file_bytes: bytes, replacements: dict[str, by
         for info in src.infolist():
             data = replacements.get(info.filename, None)  # noqa: SIM910
             if data is None:
-                data = src.read(info.filename)
+                data = _read_zip_part(src, info.filename)
             new_info = zipfile.ZipInfo(info.filename, date_time=info.date_time)
             new_info.compress_type = info.compress_type
             new_info.external_attr = info.external_attr
@@ -780,7 +832,7 @@ def _sanitize_attached_template_relationships(
     part_names = set(zf.namelist())
 
     for rels_part in _iter_relationship_parts(zf):
-        rels_xml = zf.read(rels_part)
+        rels_xml = _read_zip_part(zf, rels_part)
         attached_ids = _find_attached_template_relationship_ids(rels_xml)
         if not attached_ids:
             continue
@@ -790,7 +842,7 @@ def _sanitize_attached_template_relationships(
         owner_part = _owner_part_for_rels_part(rels_part)
         owner_xml = None
         if owner_part and owner_part in part_names:
-            owner_xml = replacements.get(owner_part, zf.read(owner_part))
+            owner_xml = replacements.get(owner_part, _read_zip_part(zf, owner_part))
 
         removed_from_owner: set[str] = set()
         if owner_xml is not None:
@@ -934,6 +986,22 @@ def run_upload_gauntlet(
         object would no longer match what was actually parsed).
     Raises HostileFileError on any OTHER failure and writes a rejection
     audit row via audit_write; never returns partially-validated bytes.
+    This includes an archive that cannot be decompressed in stages 5-8 —
+    most notably one whose central directory lies about an entry's declared
+    size (forged or corrupted), since the zip-bomb caps in stage 4 only ever
+    trust that declared size and never inflate anything to verify it. Every
+    part read in those stages goes through _read_zip_part, which turns the
+    whole read-failure family (zipfile.BadZipFile, RuntimeError, zlib.error
+    — see _ZIP_ENTRY_READ_ERRORS) into
+    HostileFileError(reason_code="zip_entry_corrupt") at the call that
+    raised it, so none of them is left as a bare exception for the route to
+    leak, and the audit row below is the same one every other rejection
+    writes.
+
+    A failure that is NOT a part read — a RuntimeError out of the AV client,
+    say — is deliberately left alone here and propagates as itself: it is an
+    infrastructure fault, not a hostile file, and must not be recorded as an
+    upload rejection.
     """
     try:
         _check_size(file_bytes)
