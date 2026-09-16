@@ -7,7 +7,9 @@ treated as hostile until it has passed a fixed sequence of checks, and the
 gauntlet runs BEFORE any extraction or OOXML parsing — never after. Per the
 threat model, the order is:
 
-  1. Size cap — hard upload-size limit, checked before anything else is read.
+  1. Size cap — hard upload-size limit, checked before anything else is
+     read. A 0-byte upload is rejected here too, with its own reason_code
+     (empty_file) distinct from a mismatched magic number — see #123.
   2. Magic-number verification — the bytes must actually be a ZIP/OOXML
      container (signature check only; this does not decompress or read any
      entry, only the local/central-directory signatures).
@@ -237,6 +239,17 @@ def _write_rejection_audit(
 
 
 def _check_size(file_bytes: bytes) -> None:
+    if len(file_bytes) == 0:
+        # Distinct from mime_magic_number_mismatch: a 0-byte upload has no
+        # bytes to be the WRONG bytes. Cloud-sync placeholder files and
+        # interrupted saves land here as ordinary empty files, not as a
+        # forged/foreign document, so they get their own reason_code and
+        # copy rather than being told they "do not have a valid ZIP/OOXML
+        # magic number" (issue #123).
+        raise HostileFileError(
+            reason_code="empty_file",
+            detail="The uploaded file is empty (0 bytes). Select the complete .docx file and try again.",
+        )
     if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
         raise HostileFileError(
             reason_code="file_too_large",
