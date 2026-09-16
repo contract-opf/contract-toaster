@@ -154,12 +154,13 @@ exits:
 | 1 | a file failed its first run *and* its isolated re-run | `CHECK: FAILURES:<list>` |
 | 2 | a file failed and then passed alone, and `ALLOW_FLAKY` was not set | `CHECK: FLAKY-UNRESOLVED:<list>` |
 | 3 | another full gate run holds the repo-wide lock; **no tests ran** | `CHECK: LOCK BUSY` |
+| 4 | nothing ran and it was not the lock: a bad argument, or an `--only` glob that matched nothing (or matched only what `SKIP_INFRA` excluded) | `CHECK: ONLY-MATCHED-NOTHING` / `CHECK: ONLY-ALL-SKIPPED` |
 
 A *pipeline* reports its last command's status, so `bash scripts/check.sh | tee
 gate.log` exits 0 whatever the gate found. Capture the code directly
 (`bash scripts/check.sh; rc=$?`) or use `set -o pipefail`. Grepping for
 `CHECK: ALL GREEN` is a safe cross-check — that line is printed on exit 0 and
-never on 1, 2, or 3.
+never on 1, 2, 3, or 4.
 
 **A flaky test fails the gate.** The loop re-runs each failing file once, alone.
 A file that then passes lands in the FLAKY bucket, and that is red (exit 2), not
