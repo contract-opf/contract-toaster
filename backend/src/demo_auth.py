@@ -383,9 +383,11 @@ def verify_demo_token(token: str) -> dict[str, Any]:
             options={"verify_aud": False, "require": ["exp", "iat", "sub"]},
         )
     except PyJWTError as exc:
+        error_id = uuid.uuid4().hex
+        logger.error("DEMO_TOKEN_VERIFY_FAILED error_id=%s: %r", error_id, exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Demo token verification failed: {exc!r}",
+            detail="Demo token verification failed.",
         ) from exc
 
 

@@ -360,6 +360,7 @@ import hashlib
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 import boto3
@@ -1632,9 +1633,28 @@ async def post_admin_playbook_create(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
     except UnicodeDecodeError as exc:
+        error_id = uuid.uuid4().hex
+        # NOT `%r` here, unlike the other #124 log sites. UnicodeDecodeError's
+        # `args` are `(encoding, object, start, end, reason)`, so its repr
+        # embeds the ENTIRE object being decoded -- the whole uploaded
+        # playbook, bounded only by MAX_UPLOAD_SIZE_BYTES (25 MiB). That would
+        # put raw document text in CloudWatch, which ARCHITECTURE.md's
+        # "Prompt / output logging policy" prohibits outright, and would open a
+        # wider leak than the HTTP-body one #124 closes. Log the named,
+        # payload-free fields that say where and why the decode failed instead;
+        # tests/test_playbook_upload_log_redaction_124.py holds this.
+        logger.error(
+            "PLAYBOOK_UPLOAD_UTF8_DECODE_FAILED error_id=%s "
+            "encoding=%s reason=%s start=%s end=%s",
+            error_id,
+            exc.encoding,
+            exc.reason,
+            exc.start,
+            exc.end,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Upload is not valid UTF-8 text: {exc}",
+            detail="Upload is not valid UTF-8 text.",
         ) from exc
 
     keys = opf_load.agreement_type_keys(doc)
