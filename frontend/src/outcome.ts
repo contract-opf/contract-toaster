@@ -163,18 +163,47 @@ function humanize(token: string | null | undefined): string {
 const OVERLAY_STATUSES = new Set<string>(['QUARANTINED', 'SUPERSEDED']);
 
 /**
+ * Issue #95 (the #666 failure-painted-as-success bug reopened through a
+ * stale decision): the module doc above states the invariant every writer
+ * is SUPPOSED to hold — `decision` is only ever written alongside a `DONE`
+ * status, except the mock pipeline's `MANUAL_REVIEW_REQUIRED` decision
+ * alongside that identical status (trivially consistent: resolving either
+ * field lands on the same outcome).
+ *
+ * `backend/src/pipeline_runner.py:1597`'s #584 branch broke that invariant
+ * for one shape: a row landed as `status=ERROR_MANUAL_REVIEW_REQUIRED,
+ * decision=REQUEST_CHANGE` — a SYSTEM status carrying a stale decision from
+ * before the pipeline downgraded it. The backend fix (#95) strips `decision`
+ * at that same branch, and a second guard in `_write_real_terminal` refuses
+ * to write one beside any non-`DONE` status. But that leaves the frontend
+ * trusting the wire to keep honoring an invariant it cannot itself verify —
+ * exactly the class of defect `outcome.ts`'s own header describes ("reachable
+ * by observed production data because nothing forced them to agree").
+ *
+ * So `resolveOutcome` no longer trusts `decision` for a non-`DONE` status:
+ * ANY known status other than `DONE` now wins over `decision` outright, not
+ * only the two overlay statuses. `QUARANTINED`/`SUPERSEDED` are the same
+ * rule applied to a status that is also non-`DONE` — kept as their own named
+ * set below because the module doc above walks through their story
+ * separately, but the check across both is identical: a non-`DONE` status is
+ * always the more specific, and more trustworthy, fact.
+ */
+const NON_DECISION_BEARING_STATUS = (status: string): boolean => status !== 'DONE';
+
+/**
  * Resolve a review's row into the single token that drives its chip, or
  * `null` when neither field is a member of the known union.
  *
- * `status` wins first when it is a post-terminal administrative overlay
- * (`QUARANTINED`/`SUPERSEDED`) — those are applied *after* the pipeline has
- * already written a terminal `decision`, and must not be masked by it.
+ * `status` wins first whenever it is known AND is not `DONE` — a `decision`
+ * is only ever a legitimate fact about a `DONE` row (see the invariant
+ * above), so a non-`DONE` status (including, but not limited to, the two
+ * post-terminal administrative overlays `QUARANTINED`/`SUPERSEDED`) must
+ * never be masked by whatever `decision` the row happens to still carry.
  * Otherwise the decision wins when it is present AND is itself a known
- * outcome (the mock pipeline's `MANUAL_REVIEW_REQUIRED` decision, or a
- * genuine `ACCEPT`/`REQUEST_CHANGE`) — that is the more specific fact about
- * what happened. Otherwise the status carries the outcome (a review that
- * never reached a decision: still running, or stopped by a system
- * condition).
+ * outcome (a genuine `ACCEPT`/`REQUEST_CHANGE` alongside `DONE`) — that is
+ * the more specific fact about what happened. Otherwise the status carries
+ * the outcome (a review that never reached a decision: still running, or a
+ * `DONE` row with no decision map entry yet).
  */
 export function resolveOutcome(
   status: string | null | undefined,
@@ -182,6 +211,9 @@ export function resolveOutcome(
 ): ReviewOutcome | null {
   if (status && OVERLAY_STATUSES.has(status)) {
     return status as ReviewOutcome;
+  }
+  if (status && isKnownOutcome(status) && NON_DECISION_BEARING_STATUS(status)) {
+    return status;
   }
   if (decision && isKnownOutcome(decision)) {
     return decision;
