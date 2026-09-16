@@ -467,6 +467,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     until the next one.
 
       [{"heading": "...", "heading_p_index": 3, "heading_source_text": "...",
+        "heading_revisions": [...],
         "physical_paragraphs": [{"text": "...", "revisions": [...]}, ...]},
        ...]
 
@@ -499,6 +500,18 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     first boundary paragraph -- which has no heading `<w:p>` at all; a writer
     must read that as "there is no heading here to be left empty" rather than
     fall back to guessing an index.
+
+    `heading_revisions` (issue #98) is that same boundary `<w:p>`'s own
+    `revisions` list, carried through unchanged -- the pending
+    `w:ins`/`w:del` markup ON the heading paragraph itself, as distinct from
+    its siblings' revisions under `physical_paragraphs`. Before this, a
+    heading's own tracked changes were folded into `heading`/`operative_text`
+    above via accept-all and then simply dropped: no disposition note, no
+    fail-closed check on a malformed record, because nothing past this
+    function ever looked at them. `normalize_paragraphs` is what actually
+    runs `_normalize_paragraph` over this list, exactly like any physical
+    sibling. Always `[]` for the implicit leading/preamble groups, which have
+    no heading `<w:p>` to carry revisions from.
 
     Each sibling under a heading is kept as its own PHYSICAL paragraph
     record here -- NOT flattened into one combined text/revisions list --
@@ -563,6 +576,17 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                     # heading paragraph at all. See this function's docstring.
                     "heading_p_index": current["heading_p_index"],
                     "heading_source_text": current["heading_source_text"],
+                    # The boundary `<w:p>`'s OWN pending revisions (issue
+                    # #98), carried through the same way `heading_source_text`
+                    # is. Empty for the implicit leading/preamble groups,
+                    # which have no heading paragraph to carry revisions
+                    # from. See `normalize_paragraphs`, which is what
+                    # actually runs `_normalize_paragraph` over this list --
+                    # a heading's own tracked changes used to be accepted
+                    # into `operative_text` above with no disclosure and no
+                    # fail-closed check anywhere, because nothing downstream
+                    # of this dict ever saw them.
+                    "heading_revisions": current["heading_revisions"],
                     "physical_paragraphs": current["physical_paragraphs"],
                 }
             )
@@ -602,6 +626,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                 "heading": heading_text or "<untitled>",
                 "heading_p_index": p_index_by_element[id(p_el)],
                 "heading_source_text": record["text"],
+                "heading_revisions": record["revisions"],
                 "physical_paragraphs": [],
             }
         else:
@@ -636,6 +661,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                     # left empty", never as an index it may guess at.
                     "heading_p_index": None,
                     "heading_source_text": "",
+                    "heading_revisions": [],
                     "physical_paragraphs": [],
                 }
             # Kept as its own physical-paragraph record -- see this
@@ -665,6 +691,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                 "heading": "<untitled>",
                 "heading_p_index": None,
                 "heading_source_text": "",
+                "heading_revisions": [],
                 "physical_paragraphs": leading_deleted,
                 "emits_block": False,
             },
@@ -1256,6 +1283,19 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     caller -- and a writer must read that as "no heading can be left empty
     here", never as an index to guess at.
 
+    When `heading_p_index` is not None, this function also runs
+    `_normalize_paragraph` over the heading `<w:p>` ITSELF -- its
+    `heading_source_text` and `heading_revisions` (issue #98) -- exactly
+    like any physical sibling: a pending tracked change on the heading
+    paragraph produces the same "accepted-all into the operative draft"
+    disposition note physical paragraphs get (added to `normalization_notes`
+    below, never silent), and a malformed revision record on the heading
+    fails the whole document closed, same as one on any sibling. The
+    resulting `clean_text` from that call is discarded -- `heading` was
+    already computed from the same accept-all text one level up, in
+    `extract_document_paragraphs` -- only the note and the fail-closed check
+    matter here.
+
     Returns:
       {"status": "normalized", "paragraphs": [...],
        "normalization_notes": "..."}   (notes key present only when one or
@@ -1273,11 +1313,41 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
         heading = paragraph.get("heading", "<untitled>")
         heading_p_index = paragraph.get("heading_p_index")
         heading_source_text = paragraph.get("heading_source_text", "")
+        heading_revisions = paragraph.get("heading_revisions", [])
         physical_paragraphs = paragraph.get("physical_paragraphs", [])
 
         clean_texts: list[str] = []
         clean_p_indexes: list[Any] = []
         paragraph_failed = False
+
+        # The boundary `<w:p>` ITSELF, run through the same accept/reject
+        # rule as every physical sibling below (issue #98). Before this, a
+        # heading's own pending `w:ins`/`w:del` was accepted into `heading`
+        # (via `extract_document_paragraphs`'s `operative_text`) with no
+        # note anywhere and no fail-closed check on a malformed revision --
+        # `heading_p_index is not None` is the guard for "there IS a real
+        # heading `<w:p>` to check"; the implicit leading/preamble groups
+        # have none (see `extract_document_paragraphs`) and always carry
+        # `heading_revisions == []`, so this is a no-op for them. The
+        # resulting `clean_text` is deliberately NOT used to override
+        # `heading` -- `clause_boundaries.clean_heading_text` already
+        # computed the accepted heading label from the same accept-all
+        # `resulting_text`; only the disclosure note and the fail-closed
+        # check matter here.
+        if heading_p_index is not None:
+            heading_result = normalize_input._normalize_paragraph(
+                {
+                    "heading": heading,
+                    "text": heading_source_text,
+                    "revisions": heading_revisions,
+                }
+            )
+            if not heading_result["normalizable"]:
+                fail_notes.append(heading_result["note"])
+                paragraph_failed = True
+            elif heading_result.get("note"):
+                accept_notes.append(heading_result["note"])
+
         for physical in physical_paragraphs:
             result = normalize_input._normalize_paragraph(
                 {
