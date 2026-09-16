@@ -117,7 +117,7 @@ jobs:
         # Without node_modules/TypeScript installed the synth step fails to
         # compile, so GATE A must provision the same Node/CDK toolchain the
         # dedicated structural-gate workflows use.
-        run: npm install
+        run: npm ci
         working-directory: infra
 
       - name: Run full test suite (GATE A)
