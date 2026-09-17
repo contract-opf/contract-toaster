@@ -3108,6 +3108,23 @@ def get_review_detail(
         # here, same faithful-projection convention as every other field.
         "normalization_notes": item.get("normalization_notes"),
         "reason": reason,
+        # Issue #100: a structured sub-classification of `reason` --
+        # currently only "suspicious_control_characters", the one branch of
+        # `reason == "unnormalizable_input"` that is NOT about a tracked
+        # change and so must not get the tracked-change copy. Read off the
+        # persisted analysis artifact's `analysis_report` the SAME way
+        # `issues`/`critic_delta` above are (`normalize_input.
+        # build_unnormalizable_report` is the only writer, via
+        # `pipeline_runner._ANALYSIS_FIELDS`'s `analysis_report` entry --
+        # never a second DynamoDB column) -- absent (never a null
+        # placeholder) whenever there is no artifact, no `analysis_report`
+        # on it, or the refusal has no sub-classification, all of which the
+        # frontend's default `unnormalizable_input` copy already fits.
+        "reason_detail": (
+            (analysis.get("analysis_report") or {}).get("reason_detail")
+            if analysis is not None
+            else None
+        ),
         # Target-agnostic stage-failure taxonomy (issue #258): the specific
         # pipeline stage a failure occurred in, when
         # `record_stage_failure` has written one.

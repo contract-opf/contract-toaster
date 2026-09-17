@@ -282,6 +282,21 @@ BOM = "﻿"
 # never document text (module docstring, "Control-character screen").
 CONTROL_CHARACTER_NOTE_PREFIX = "Suspicious control characters in extracted"
 
+# Structured sub-reason for the control-character screen (issue #100). Every
+# other fail-closed branch in `_normalize_paragraph` folds into the SAME
+# top-level `reason="unnormalizable_input"` (docs/output-contract.md), which
+# is why the frontend used to explain a control-character refusal with copy
+# written for a malformed TRACKED CHANGE -- the one branch this token is
+# not. This constant is the token's single source of truth; carried on the
+# fail-closed result as `reason_detail` (see `_screen_control_characters`,
+# `normalize`, `build_unnormalizable_report`) rather than re-derived by
+# matching `CONTROL_CHARACTER_NOTE_PREFIX` as a substring of the note text
+# the way `tools/document_spine_smoke.py` still does -- that string match is
+# a legitimate way to classify a note after the fact for a smoke-test
+# histogram, but it is not something a fail-closed RESULT should have to do
+# to explain itself to the reader.
+REASON_DETAIL_SUSPICIOUS_CONTROL_CHARACTERS = "suspicious_control_characters"
+
 
 def find_suspicious_control_characters(text: str) -> list[int]:
     """
@@ -319,6 +334,7 @@ def _screen_control_characters(heading: str, clean_text: str) -> dict | None:
             continue
         return {
             "normalizable": False,
+            "reason_detail": REASON_DETAIL_SUSPICIOUS_CONTROL_CHARACTERS,
             "note": (
                 f"{CONTROL_CHARACTER_NOTE_PREFIX} {scope}: {len(offsets)} "
                 f"zero-width or bidirectional control character(s) detected "
@@ -593,6 +609,8 @@ def normalize(document: dict) -> dict:
          "normalization_notes": "<joined accept-all disposition notes>"}
       Un-normalizable (fails closed -- genuinely ambiguous structures only):
         {"normalizable": False, "normalization_notes": "<joined notes>"}
+        (plus "reason_detail": "<token>" when the FIRST failing paragraph's
+        disposition carries one -- see below)
 
     A document normalizes iff every paragraph normalizes -- one
     un-normalizable paragraph fails the whole document closed.
@@ -602,10 +620,23 @@ def normalize(document: dict) -> dict:
     returns `deleted_in_full`) contributes NO line to `clean_body`; its
     disposition note is still recorded in `normalization_notes`, so the
     omission is disclosed rather than silent.
+
+    `reason_detail` (issue #100): a structured sub-reason for WHY the
+    document failed to normalize, distinct from the free-text `note` --
+    e.g. `REASON_DETAIL_SUSPICIOUS_CONTROL_CHARACTERS` when
+    `_screen_control_characters` is what refused. Most fail-closed branches
+    set no `reason_detail` at all (an ordinary malformed-tracked-change
+    refusal has none), which this function reads as "no sub-classification
+    -- the default `unnormalizable_input` copy already fits." When more than
+    one paragraph fails with a reason_detail set, the FIRST one found wins
+    (same "first offset wins" convention `find_suspicious_control_characters`
+    already uses within a single paragraph) -- a document-level result names
+    ONE reason, not a set of them.
     """
     paragraphs = document.get("paragraphs", [])
 
     fail_notes = []
+    fail_reason_detail = None
     accept_notes = []
     clean_lines = []
 
@@ -613,6 +644,8 @@ def normalize(document: dict) -> dict:
         result = _normalize_paragraph(paragraph)
         if not result["normalizable"]:
             fail_notes.append(result["note"])
+            if fail_reason_detail is None and result.get("reason_detail"):
+                fail_reason_detail = result["reason_detail"]
         else:
             heading = paragraph.get("heading", "<untitled>")
             if not result.get("deleted_in_full"):
@@ -628,10 +661,13 @@ def normalize(document: dict) -> dict:
                 accept_notes.append(result["note"])
 
     if fail_notes:
-        return {
+        failed: dict = {
             "normalizable": False,
             "normalization_notes": " ".join(fail_notes),
         }
+        if fail_reason_detail:
+            failed["reason_detail"] = fail_reason_detail
+        return failed
 
     normalized = {
         "normalizable": True,
@@ -652,8 +688,21 @@ def build_unnormalizable_report(normalize_result: dict) -> dict:
     This artifact NEVER carries a `decision` field: the fail-closed outcome
     is a SYSTEM status (`status=MANUAL_REVIEW_REQUIRED`), never a legal
     decision.
+
+    `reason_detail` (issue #100): present, alongside the fixed
+    `reason="unnormalizable_input"` above, ONLY when `normalize_result`
+    carries one -- i.e. `normalize()` found a sub-classified fail-closed
+    branch (currently just the control-character screen). ABSENT, never a
+    null placeholder, for every other un-normalizable refusal (a malformed
+    tracked-change record, an unknown revision status, ...), matching the
+    "absent, never null" convention `normalization_notes` itself would use
+    if it had nothing to say. `reason` itself is UNCHANGED either way --
+    every un-normalizable path still keys off it the same as before this
+    issue; `reason_detail` only narrows what it means, for the one
+    consumer (the frontend copy map) that needs to say something more
+    specific than "a tracked change" when there is no tracked change.
     """
-    return {
+    report: dict = {
         "report_type": "analysis_report",
         "reason": "unnormalizable_input",
         "fail_closed_path": (
@@ -664,6 +713,10 @@ def build_unnormalizable_report(normalize_result: dict) -> dict:
         "normalization_notes": normalize_result.get("normalization_notes", ""),
         "status": "MANUAL_REVIEW_REQUIRED",
     }
+    reason_detail = normalize_result.get("reason_detail")
+    if reason_detail:
+        report["reason_detail"] = reason_detail
+    return report
 
 
 def main() -> None:  # pragma: no cover - manual/CLI smoke entry point

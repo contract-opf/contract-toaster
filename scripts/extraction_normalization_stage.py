@@ -1306,6 +1306,13 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
        "analysis_report": <issue #38 artifact, docs/output-contract.md>}
     """
     fail_notes: list[str] = []
+    # Structured sub-reason for the fail-closed path (issue #100), same
+    # first-wins convention as `normalize_input.normalize`: the FIRST
+    # failing paragraph (heading or physical) whose `_normalize_paragraph`
+    # result carries a `reason_detail` sets it for the whole document; most
+    # fail-closed branches set none, which is read below as "no
+    # sub-classification beyond `reason='unnormalizable_input'`".
+    fail_reason_detail: str | None = None
     accept_notes: list[str] = []
     clean_paragraphs: list[dict[str, Any]] = []
 
@@ -1344,6 +1351,8 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
             )
             if not heading_result["normalizable"]:
                 fail_notes.append(heading_result["note"])
+                if fail_reason_detail is None and heading_result.get("reason_detail"):
+                    fail_reason_detail = heading_result["reason_detail"]
                 paragraph_failed = True
             elif heading_result.get("note"):
                 accept_notes.append(heading_result["note"])
@@ -1358,6 +1367,8 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
             )
             if not result["normalizable"]:
                 fail_notes.append(result["note"])
+                if fail_reason_detail is None and result.get("reason_detail"):
+                    fail_reason_detail = result["reason_detail"]
                 paragraph_failed = True
                 continue
             if result["clean_text"]:
@@ -1428,10 +1439,12 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
         )
 
     if fail_notes:
-        normalize_result = {
+        normalize_result: dict[str, Any] = {
             "normalizable": False,
             "normalization_notes": " ".join(fail_notes),
         }
+        if fail_reason_detail:
+            normalize_result["reason_detail"] = fail_reason_detail
         return {
             "status": "unnormalizable_input",
             "analysis_report": normalize_input.build_unnormalizable_report(normalize_result),
