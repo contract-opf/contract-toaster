@@ -17,8 +17,9 @@ One `<transform_name>.SYNTHETIC.docx` per named transform in
 class the private client corpus has discovered (a reserved namespace
 prefix, tracked changes from two authors, curly punctuation, a clause split
 across sibling paragraphs, heading styles stripped, a nested
-insertion-then-deletion, a pending tracked change inside a field code) —
-plus one `baseline-<flavor>.SYNTHETIC.docx` per
+insertion-then-deletion, a pending tracked change inside a field code, a
+first-page header/footer pair whose auto-described logo trips the pinned
+docx-editor's own re-serialization) — plus one `baseline-<flavor>.SYNTHETIC.docx` per
 generated base-contract flavor, untransformed, so
 `tools/document_spine_smoke.py` has a fuller, more realistic corpus to
 report aggregate ratios over when pointed at this directory.
@@ -31,7 +32,7 @@ full model-free spine (extract → normalize → locate → apply) — see
 assertions, including several transform-specific properties beyond the
 uniform "normalizes, locates, and applies" check.
 
-**Not proved here:** that these six failure classes are the only ones that
+**Not proved here:** that these failure classes are the only ones that
 exist. This corpus only regression-tests failure classes someone has
 already found (against real, private, never-committed documents) and
 turned into a `churn_docx.py` transform. See

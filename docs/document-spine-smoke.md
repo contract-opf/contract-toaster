@@ -60,7 +60,7 @@ This is enforced in two places, both load-bearing:
 - **`refused` count went up.** Check the reason-code histogram first. `unclassified_unnormalizable` appearing at all means `normalize_input.py` grew a new failure branch this harness's classifier does not know about yet — add the new branch's stable message substring to `_KNOWN_UNNORMALIZABLE_PATTERNS` in `tools/document_spine_smoke.py` (never widen what gets printed; only widen what gets *classified*).
 - **`spans_physical_paragraph` is nonzero and expected.** This is not automatically a bug: a logical paragraph made of several physical `<w:p>` siblings (very common — a table's cells routinely get pulled into the preceding heading's body by `clause_boundaries.py`'s fallback detector, and a genuinely multi-sentence clause typed as several short paragraphs does the same) will report `spans_physical_paragraph` for the harness's own whole-block `delete`, by design (issue #564). The harness deliberately derives the *widest possible* edit, so this count is an upper bound on the hazard, not a measurement of it: a real model edits a span inside one sentence far more often than a whole multi-paragraph block. The aggregate ratio is a prompt to go look, not a verdict on its own.
 
-## `tools/churn_docx.py`: the six known failure classes
+## `tools/churn_docx.py`: the eight known failure classes
 
 Every transform below is deterministic (same input bytes + same seed → byte-identical output) and independently toggleable. See the module docstring for full detail; summarized here:
 
@@ -72,6 +72,8 @@ Every transform below is deterministic (same input bytes + same seed → byte-id
 | `strip_heading_styles` | Every `Heading*`-style `<w:pStyle>` removed | `clause_boundaries.py`'s document-signals fallback (numbered/lettered lead-ins, ALL-CAPS, bold) |
 | `reserved_ns_prefix` | `xmlns:ns0="..."` declared on the document root | Issues #560/#561 — `ET.register_namespace` refuses any `ns<digits>` prefix; measured at 65% of a real 31-document corpus before the fix |
 | `nested_ins_del` | An insertion (`<w:ins>`) later itself deleted (`<w:del>` nested inside it) | A net-zero edit real negotiation history routinely contains; proves nesting depth does not confuse extraction |
+| `pending_change_inside_field_code` | A `<w:fldSimple>` cross-reference field whose cached-result region carries a pending `<w:del>`/`<w:ins>` | Issue #530 follow-up — a pending change `inside_field_code` no longer fails closed on its own |
+| `first_page_header_footer` | A "different first page" header/footer pair, the first-page header carrying an image with a multi-line auto-alt-text description | Issue #145 — the pinned `docx-editor`'s save folds the alt text's escaped line breaks to spaces, a canonical change to a header/footer part outside `redline_projections.DECLARED_REDLINE_PARTS` |
 
 `tools/churn_docx.py --list-bases` / `--list-transforms` enumerate what is available; `--base <name> --transform <name> [--transform <name> ...] --seed N --out <path>` writes one churned `.docx`.
 
