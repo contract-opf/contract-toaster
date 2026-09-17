@@ -69,7 +69,7 @@ import document_spine_smoke as dss  # noqa: E402
 import extraction_normalization_stage as ens  # noqa: E402
 import redline_block_apply as rba  # noqa: E402
 
-# One base contract flavor is enough for the six required shapes (every
+# One base contract flavor is enough for every required shape (every
 # flavor shares the same five clause bodies -- see churn_docx.py); the
 # other three flavors are generated too, UNTRANSFORMED, purely to give
 # tools/document_spine_smoke.py a fuller, more realistic corpus to report
@@ -376,6 +376,68 @@ def test_nested_ins_del_survives(failures: list) -> None:
         )
 
 
+def test_first_page_header_footer_survives(failures: list) -> None:
+    """Issue #145: a document whose section wires a first-page header/footer
+    pair alongside its default one -- the first-page header carrying an
+    image with Word's own multi-line auto-alt-text shape -- must compile a
+    REAL replacement edit, not only a pure insertion.
+
+    `_assert_survives_full_spine`'s own transcript (below) is a pure
+    insertion, and a pure insertion never reaches `docx_editor`'s pass 1 at
+    all: `redline_block_apply.apply_block_transcript` only opens the
+    document through `docx_editor` when a block has a `replace`/`delete`
+    edit (see its `replacement_work` gate) -- so that property alone would
+    NOT have caught this regression. A `delete`+`insert` pair does, because
+    a replacement is what drives pass 1's open/save, which is the step that
+    re-serializes `word/header2.xml` (the first-page header, outside
+    `redline_projections.DECLARED_REDLINE_PARTS`) and folds its alt text's
+    escaped line breaks to literal spaces -- issue #145's exact mechanism.
+    """
+    name = "first_page_header_footer"
+    docx_bytes = _shape_fixture(name)
+    norm = _assert_survives_full_spine(name, docx_bytes, failures)
+    if norm is None:
+        return
+
+    paragraphs = norm["paragraphs"]
+    found = _block_carrying(paragraphs, cd.ANCHOR_QUOTE)
+    if found is None:
+        failures.append(f"[{name}] no addressed block carries the anchor clause")
+        return
+    block_id, block = found
+    text = block["text"]
+    target = "the State of Delaware"
+    if target not in text:
+        failures.append(f"[{name}] fixture is wrong -- {target!r} is not in the anchor clause")
+        return
+    head, _, tail = text.partition(target)
+    replaced = _prove(
+        paragraphs,
+        block_id,
+        [
+            {"op": "keep", "text": head},
+            {"op": "delete", "text": target, "issue_key": "I2"},
+            {"op": "insert", "text": "the State of New York", "issue_key": "I2"},
+            {"op": "keep", "text": tail},
+        ],
+    )
+    if replaced["status"] != "proven":
+        failures.append(
+            f"[{name}] a replacement edit on the anchor clause did not prove: "
+            f"{[f.get('reason') for f in replaced['failures']]}"
+        )
+        return
+    result = rba.apply_block_transcript(
+        docx_bytes, replaced, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP
+    )
+    if result["docx_bytes"] is None or len(result["applied"]) != 1 or result["failures"]:
+        failures.append(
+            f"[{name}] a replacement edit -- which drives docx_editor's pass 1, unlike "
+            f"the pure-insertion property above -- did not compile: "
+            f"applied={len(result['applied'])} failures={result['failures']}"
+        )
+
+
 def test_pending_change_inside_field_code_survives(failures: list) -> None:
     """Issue #530 follow-up: a pending tracked change living inside a
     `<w:fldSimple>` field's cached-result region must accept-all, not fail
@@ -451,6 +513,7 @@ def test_every_transform_has_a_shape_test(failures: list) -> None:
         "reserved_ns_prefix",
         "nested_ins_del",
         "pending_change_inside_field_code",
+        "first_page_header_footer",
     }
     missing = set(cd.TRANSFORMS) - exercised
     if missing:
@@ -538,6 +601,7 @@ TESTS = [
     test_reserved_ns_prefix_survives,
     test_nested_ins_del_survives,
     test_pending_change_inside_field_code_survives,
+    test_first_page_header_footer_survives,
     test_baseline_flavors_also_normalize,
     test_every_transform_has_a_shape_test,
     test_the_smoke_tool_never_echoes_a_sentinel_party_name,

@@ -60,7 +60,19 @@ package, all three of which must hold before a document is delivered:
    rule of its own (issue #647): a redline may APPEND the two footnote
    styles a footnote number needs to render as superscript, and may create
    the part outright for a package that has none, but may not rewrite or
-   drop a single style the document already defines.
+   drop a single style the document already defines. Every `word/header*.xml`
+   / `word/footer*.xml` part OTHER than `header1.xml`/`footer1.xml` (the
+   marker's own, allowed to change wholesale) gets a narrower rule too
+   (issue #145): the pinned `docx-editor` folds a literal tab/CR/LF inside
+   ANY attribute value of ANY part it re-serializes down to a single space
+   -- invisible everywhere else because no other allowlisted or exempted
+   part's schema puts a line break inside an attribute, but real on a
+   first-page or even-page header/footer's auto-described logo image
+   (`<wp:docPr descr="...">`, which Word writes with `&#xA;` for a
+   multi-line description). The fold is tolerated and nothing else is: the
+   part's element structure, text content, and every other character of
+   every attribute must still come back canonically identical, so a real
+   header or footer edit still fails this proof.
 
 ## What "our" tracked changes means, and why proof 1 is scoped to them
 
@@ -117,6 +129,7 @@ Usage:
 from __future__ import annotations
 
 import io
+import re
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
@@ -197,6 +210,19 @@ PROOFS = (PROOF_REJECT_ALL, PROOF_ACCEPT_ALL, PROOF_PART_ALLOWLIST)
 # `docx_parts.FOOTNOTE_STYLE_XML` the writer emits from, so the proof
 # and the writer cannot drift into agreeing about a definition neither states.
 #
+# Every OTHER `word/header*.xml` / `word/footer*.xml` part -- header2.xml,
+# footer3.xml, whatever a section's first-page or even-page layout wired --
+# is likewise NOT in this list, and gets its own narrow rule for the same
+# reason (issue #145): `redline_generate.inject_export_marker_and_footnotes`
+# only ever writes `header1.xml`/`footer1.xml`, but pass 1's `docx-editor`
+# save re-serializes EVERY part it reads, and a header or footer carrying an
+# image with a multi-line alt-text description (Word writes one for every
+# auto-described logo, in `<wp:docPr descr="...">` with `&#xA;` line breaks)
+# comes back with those line breaks folded to plain spaces -- an artifact of
+# the editor's own writer, not a content change. `_canonical_header_footer_part`
+# permits exactly that fold and nothing else: a real edit to a header or
+# footer document text does not survive it.
+#
 # Everything else in the package -- numbering, theme, media, custom XML,
 # docProps -- must come back unchanged.
 # ---------------------------------------------------------------------------
@@ -227,6 +253,20 @@ _VAL_ATTR = _w("val")
 STYLES_PART = docx_parts.STYLES_PART
 _STYLE_TAG = _w("style")
 _STYLE_ID_ATTR = _w("styleId")
+
+#: The other narrow-rule parts (issue #145): every `word/header*.xml` /
+#: `word/footer*.xml` part OTHER than `header1.xml`/`footer1.xml`, which stay
+#: in `ALLOWED_CHANGED_PARTS` (they are the marker's own). Matched by index
+#: rather than enumerated: a section's first-page or even-page layout can
+#: wire header2.xml, header3.xml, footer2.xml, ... and the compiler never
+#: knows in advance which ones a given document carries -- see
+#: `redline_generate.py`'s own `have_header`/`have_footer` check, which is
+#: blind to any index but 1 for the same reason. A part matching this AND
+#: present in `ALLOWED_CHANGED_PARTS` (i.e. header1.xml/footer1.xml) is
+#: handled by the membership check ahead of it in `_verify_part_allowlist`,
+#: never by the narrow rule below.
+_OTHER_HEADER_FOOTER_PART_RE = re.compile(r"^word/(?:header|footer)\d+\.xml$")
+_ATTR_WHITESPACE_RE = re.compile(r"[\t\r\n]")
 
 #: How many per-block mismatches a `reject_all` failure spells out before it
 #: truncates. A whole-document divergence would otherwise paste the entire
@@ -825,6 +865,51 @@ def _canonical_part(data: bytes) -> Any:
         return data
 
 
+def _fold_attribute_whitespace(root: ET.Element) -> None:
+    """Replace every literal tab/CR/LF character in every attribute value
+    under ``root`` with a single space, in place.
+
+    Word escapes a line break inside an attribute value as a character
+    reference (`&#xA;`) -- the only way to carry one, since a LITERAL line
+    break in an attribute is folded to a space the moment any XML processor
+    parses it (XML 1.0 S3.3.3). The pinned `docx-editor` does not preserve
+    that distinction when it re-serializes a part it read: `ET.fromstring`
+    already resolved `&#xA;` to an actual newline character by the time this
+    runs (issue #145), and the editor's own writer folds that newline to a
+    space on the way back out, one for one. Folding both sides the same way
+    before comparison restores the equivalence a stricter XML processor
+    would already grant here, and nothing more.
+    """
+    for element in root.iter():
+        for key, value in list(element.attrib.items()):
+            if _ATTR_WHITESPACE_RE.search(value):
+                element.set(key, _ATTR_WHITESPACE_RE.sub(" ", value))
+
+
+def _canonical_header_footer_part(data: bytes) -> Any:
+    """Canonical form of a `word/header*.xml` / `word/footer*.xml` part held
+    to proof 3's narrower rule (see the allowlist comment, issue #145): the
+    ONLY difference permitted is the docx-editor attribute-whitespace fold
+    `_fold_attribute_whitespace` performs; everything else -- element
+    structure, text content, every other character of every attribute --
+    must still come back canonically identical, so a real header or footer
+    edit still fails this proof.
+
+    Falls back to `_canonical_part` (raw bytes if the part is not XML, or
+    plain `ET.canonicalize` if it is) when the fold cannot be applied, so an
+    unparseable part is flagged as a mismatch the same way `_canonical_part`
+    would flag it rather than silently passing.
+    """
+    try:
+        root = ET.fromstring(data.decode("utf-8"))  # noqa: S314
+    except Exception:  # noqa: BLE001 - not XML (or not decodable): fall back
+        return _canonical_part(data)
+    _fold_attribute_whitespace(root)
+    return ET.canonicalize(
+        xml_data=ET.tostring(root, encoding="unicode"), strip_text=True
+    )
+
+
 def _settings_without_rsids(data: bytes) -> tuple[str, list[str]]:
     """`word/settings.xml` split into (everything else, the `<w:rsid>` values).
 
@@ -1082,6 +1167,21 @@ def _verify_part_allowlist(
         if name in ALLOWED_CHANGED_PARTS:
             continue
         if source_parts[name] == output_parts[name]:
+            continue
+        if _OTHER_HEADER_FOOTER_PART_RE.match(name):
+            if _canonical_header_footer_part(
+                source_parts[name]
+            ) == _canonical_header_footer_part(output_parts[name]):
+                continue
+            failures.append(
+                _failure(
+                    PROOF_PART_ALLOWLIST,
+                    f"package part {name!r} changed beyond the docx-editor "
+                    "attribute-whitespace fold this proof tolerates, and it is not "
+                    "a part a redline may touch",
+                    part=name,
+                )
+            )
             continue
         if _canonical_part(source_parts[name]) == _canonical_part(output_parts[name]):
             continue

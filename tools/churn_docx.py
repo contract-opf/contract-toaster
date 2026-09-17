@@ -48,7 +48,8 @@ pairs (`tracked_changes_multi_author`, `nested_ins_del`) -- it exists so a
 caller can vary WHICH fabricated names appear without losing reproducibility,
 not to introduce randomness.
 
-## The seven transforms (one per issue #565 Scope, plus #530's follow-up)
+## The eight transforms (one per issue #565 Scope, plus #530's and #145's
+## follow-ups)
 
   - `tracked_changes_multi_author` -- two different authors' `<w:ins>`/
     `<w:del>` clusters, back-to-back with no intervening plain text, on the
@@ -85,6 +86,14 @@ not to introduce randomness.
     pending_tracked_changes.py`'s `pending_change_inside_field_code.json`
     for that unit-level half, which this generated shape complements rather
     than replaces).
+  - `first_page_header_footer` (issue #145 follow-up) -- a "different first
+    page" header/footer pair, the first-page header carrying an image whose
+    alt text embeds an escaped line break the way Word auto-describes a
+    logo. Exercises `redline_projections`' part-allowlist proof 3: the
+    pinned `docx-editor`'s pass-1 save folds that escaped line break to a
+    literal space when it re-serializes the non-default header part, and
+    the proof's narrow header/footer rule is what tolerates exactly that
+    fold and nothing else.
 
 ## What this is NOT
 
@@ -103,6 +112,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
@@ -600,6 +610,99 @@ def pending_change_inside_field_code(docx_bytes: bytes, *, seed: int = 0) -> byt
     return _rewrite_document_xml(docx_bytes, mutate)
 
 
+def first_page_header_footer(docx_bytes: bytes, *, seed: int = 0) -> bytes:
+    """Wires a "different first page" header/footer pair onto the base
+    contract -- python-docx's `different_first_page_header_footer`, the
+    same mechanism Word uses for a title-page layout -- and stamps the
+    first-page header with Word's own auto-generated-alt-text shape: an
+    image whose `<wp:docPr descr="...">` carries an escaped line break
+    (`&#xA;`), the way Word writes a multi-line image description.
+
+    Exercises issue #145: the pinned `docx-editor`'s pass-1 open/save
+    re-serializes that attribute with each escaped line break folded to a
+    literal space -- a CANONICAL change to a part (`word/header2.xml` or
+    `word/footer2.xml`, whichever python-docx names the "first" type
+    reference; never `header1.xml`/`footer1.xml`, the DEFAULT reference)
+    outside `redline_projections.DECLARED_REDLINE_PARTS`. Every real
+    document whose section wires a first-page, even-page, or any other
+    non-default header/footer failed proof 3 this way, regardless of
+    whether the requested edit ever touched the header or footer at all.
+
+    No real image is embedded -- the pinned editor re-serializes the XML
+    around a `<w:drawing>` without ever resolving its `r:embed` relationship
+    or reading the referenced media, so a dangling one reproduces the
+    defect identically and keeps this fixture text-only.
+
+    Unlike every other transform here, this one is NOT built through
+    `_rewrite_document_xml`: wiring a second header/footer pair touches
+    `word/_rels/document.xml.rels`, `[Content_Types].xml`, and two new
+    parts, not just `word/document.xml`'s `<w:sectPr>` -- exactly the
+    package-wide surgery python-docx's own section API already does
+    correctly, so it is reused here rather than hand-rolled.
+    """
+    if Document is None:  # pragma: no cover
+        raise RuntimeError(f"python-docx is required to build base documents: {_DOCX_IMPORT_ERROR}")
+
+    doc = Document(io.BytesIO(docx_bytes))
+    section = doc.sections[0]
+    # The DEFAULT header/footer must be touched first: python-docx names
+    # whichever header/footer part it creates first "header1.xml" /
+    # "footer1.xml" regardless of its `w:type`, and the base document has
+    # none yet. Touching `.header`/`.footer` before `.first_page_header`/
+    # `.first_page_footer` is what makes the reproduction faithful --
+    # `header1.xml` the DEFAULT reference (inside
+    # `redline_projections.DECLARED_REDLINE_PARTS`, allowed to change
+    # wholesale) and `header2.xml` the FIRST-page one (outside it, and
+    # this transform's actual target).
+    section.header.paragraphs[0].add_run("SYNTHETIC default header")
+    section.footer.paragraphs[0].add_run("SYNTHETIC default footer")
+    section.different_first_page_header_footer = True
+    section.first_page_header.paragraphs[0].add_run("SYNTHETIC first-page header")
+    section.first_page_footer.paragraphs[0].add_run("SYNTHETIC first-page footer")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    wired_bytes = buf.getvalue()
+
+    with zipfile.ZipFile(io.BytesIO(wired_bytes)) as zf:
+        infos = zf.infolist()
+        parts = {info.filename: zf.read(info.filename) for info in infos}
+
+    doc_xml = parts[ou.DOCUMENT_PART].decode("utf-8")
+    header_ref = re.search(r'<w:headerReference\s+w:type="first"\s+r:id="(rId\d+)"\s*/>', doc_xml)
+    if header_ref is None:
+        raise ValueError("python-docx did not wire a first-type <w:headerReference>")
+    header_rid = header_ref.group(1)
+
+    rels_xml = parts["word/_rels/document.xml.rels"].decode("utf-8")
+    rel_target = re.search(rf'<Relationship\s+Id="{header_rid}"[^>]*\bTarget="([^"]+)"', rels_xml)
+    if rel_target is None:
+        raise ValueError(f"no relationship target for header id {header_rid!r}")
+    header_part = f"word/{rel_target.group(1)}"
+
+    # Word's own shape for a multi-line auto-generated alt-text description
+    # -- the ONLY part of this drawing issue #145's mechanism depends on.
+    drawing_paragraph = (
+        "<w:p><w:r><w:drawing>"
+        '<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+        '<wp:extent cx="1308824" cy="404813"/>'
+        '<wp:effectExtent b="0" l="0" r="0" t="0"/>'
+        '<wp:docPr descr="Icon&#xA;&#xA;Description automatically generated" id="5" name="image1.png"/>'
+        "<wp:cNvGraphicFramePr/>"
+        "</wp:inline></w:drawing></w:r></w:p>"
+    )
+    header_xml = parts[header_part].decode("utf-8")
+    if "</w:hdr>" not in header_xml:
+        raise ValueError(f"{header_part!r} is not a <w:hdr> part")
+    parts[header_part] = header_xml.replace("</w:hdr>", drawing_paragraph + "</w:hdr>", 1).encode("utf-8")
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf_out:
+        for info in infos:
+            zf_out.writestr(info, parts[info.filename])
+    return out.getvalue()
+
+
 TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "tracked_changes_multi_author": tracked_changes_multi_author,
     "curly_punctuation": curly_punctuation,
@@ -608,6 +711,7 @@ TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "reserved_ns_prefix": reserved_ns_prefix,
     "nested_ins_del": nested_ins_del,
     "pending_change_inside_field_code": pending_change_inside_field_code,
+    "first_page_header_footer": first_page_header_footer,
 }
 
 
