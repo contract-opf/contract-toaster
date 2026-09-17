@@ -246,6 +246,15 @@ interface ReviewDetail {
   // playbook, or their document. Null on a review that didn't fail.
   failing_stage?: string | null;
   reason?: string | null;
+  // Issue #100: a structured sub-classification of `reason`, read off the
+  // fail-closed `analysis_report` the same "absent, never a null
+  // placeholder" way every other optional field here is — currently only
+  // `"suspicious_control_characters"`, the one `reason ===
+  // "unnormalizable_input"` branch that is NOT a tracked change. `reason`
+  // itself is unaffected; this only lets `explainFailure` say something
+  // more specific than the tracked-change copy every other unnormalizable
+  // refusal still gets.
+  reason_detail?: string | null;
   // Live progress (issue #447): which of the review spine's four sub-stages
   // (primary_pass / critic_pass / reconciliation / redline) is running RIGHT
   // NOW, written as each one starts and projected by get_review_detail. Null
@@ -535,6 +544,11 @@ export interface FailureExplanation {
  */
 export interface FailureFacts {
   reason?: string | null;
+  // Issue #100: optional, and read ONLY when `reason ===
+  // "unnormalizable_input"` (see `explainFailure`) — the admin Diagnostics
+  // tab's five-field rows are free to leave this unset and fall through to
+  // the plain `reason` copy exactly as before this field existed.
+  reason_detail?: string | null;
   failing_stage?: string | null;
 }
 
@@ -693,6 +707,14 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   // paragraph and what the tool found (detail.normalization_notes, the
   // SAME per-paragraph disclosure the accepted-changes receipt line uses
   // on a successful review) is rendered alongside this copy, below.
+  //
+  // This is the DEFAULT copy for `reason === 'unnormalizable_input'` —
+  // still correct for the branch it was written for (a malformed pending
+  // or accepted tracked-change record). `explainFailure` below prefers
+  // `REASON_DETAIL_EXPLANATIONS[detail.reason_detail]` first, when the
+  // backend sub-classified the refusal as something that is NOT a tracked
+  // change (issue #100) — this entry stays the fallback for every
+  // unnormalizable refusal that carries no `reason_detail` at all.
   unnormalizable_input: {
     cause: 'A paragraph in your document has a tracked change the tool could not safely read.',
     fix: 'See the paragraph named below. In Word, review that tracked change directly — accept or reject it so it carries real text — then upload the document again. If the paragraph looks fine to you, contact an admin.',
@@ -847,6 +869,31 @@ export const REASON_EXPLANATIONS: Record<string, FailureExplanation> = {
   },
 };
 
+// Issue #100: sub-classifications of `reason === 'unnormalizable_input'`,
+// keyed by the `reason_detail` token `get_review_detail` projects off the
+// fail-closed `analysis_report` (`normalize_input.build_unnormalizable_
+// report`). `unnormalizable_input` folds every un-normalizable refusal into
+// one token, and `REASON_EXPLANATIONS.unnormalizable_input` above was
+// written for the one branch that is actually a tracked change (a
+// malformed pending/accepted revision record) — so a control-character
+// refusal (issue #632's screen: ZWNJ, LRM/RLM, ZWSP and the like, ordinary
+// in real paper from Persian/Urdu/Hebrew/Arabic orthography or a browser
+// paste) used to be told to find and resolve a tracked change that does not
+// exist, in a paragraph named nowhere.
+//
+// Checked FIRST in `explainFailure`, before the plain `reason` lookup — a
+// `reason_detail` the backend does not yet classify anything as (or that
+// this table has no entry for) falls through to the `reason` copy exactly
+// as before this map existed, so adding a new token here can only ADD
+// specificity, never remove the existing fallback.
+export const REASON_DETAIL_EXPLANATIONS: Record<string, FailureExplanation> = {
+  suspicious_control_characters: {
+    cause:
+      'The document contains invisible control characters the tool refuses to review.',
+    fix: 'Paste the text into a fresh document, or ask an admin to allow this character class.',
+  },
+};
+
 // Human-readable failure explanations, keyed by the `failing_stage` that
 // backend/src/pipeline_runner.py's run_real_pipeline records. A bare "ERROR"
 // is useless to the person who has to fix it: every entry here says what
@@ -992,25 +1039,38 @@ const STAGE_EXPLANATIONS: Record<string, FailureExplanation> = {
 /**
  * Explain a failed review, preferring the specific over the vague.
  *
- * Order is load-bearing (issue #442):
- *   1. the `reason` token, when the backend classified one — it names the
+ * Order is load-bearing (issue #442, narrowed further by issue #100):
+ *   1. the `reason_detail` token, when the backend sub-classified the
+ *      `reason` further — currently only a control-character refusal, which
+ *      needs copy that says nothing about a tracked change;
+ *   2. the `reason` token, when the backend classified one — it names the
  *      actual cause (out of credits, key rejected, document too long);
- *   2. the `failing_stage`, which only says where the pipeline stopped;
- *   3. a generic "try again", for a stage this build has never heard of.
+ *   3. the `failing_stage`, which only says where the pipeline stopped;
+ *   4. a generic "try again", for a stage this build has never heard of.
  *
- * `unhandled_exception` is skipped at step 1 by design: it is the backend's
+ * `unhandled_exception` is skipped at step 2 by design: it is the backend's
  * "could not classify" value, so falling through to the stage copy is
  * strictly more informative — and is exactly today's behavior, which is why
- * no existing failure path regresses.
+ * no existing failure path regresses. `reason_detail` is only ever looked at
+ * once a classified `reason` has already been confirmed present — it
+ * narrows what a `reason` means, never a substitute for one.
  *
  * Exported (issue #443): the admin Diagnostics tab resolves each of its rows
  * through this very function, so the two surfaces cannot disagree about what
  * a token means. It takes `FailureFacts`, not `ReviewDetail`, because the
- * diagnostics row deliberately carries nothing else.
+ * diagnostics row deliberately carries nothing else — Diagnostics rows that
+ * carry no `reason_detail` simply skip straight to the `reason` copy below,
+ * exactly as they did before this field existed.
  */
 export function explainFailure(detail: FailureFacts): FailureExplanation | null {
   const reason = detail.reason;
   if (reason && reason !== UNCLASSIFIED_REASON) {
+    if (detail.reason_detail) {
+      const byDetail = REASON_DETAIL_EXPLANATIONS[detail.reason_detail];
+      if (byDetail) {
+        return byDetail;
+      }
+    }
     const byReason = REASON_EXPLANATIONS[reason];
     if (byReason) {
       return byReason;

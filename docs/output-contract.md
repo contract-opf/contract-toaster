@@ -627,6 +627,15 @@ redline `.docx`. It contains:
   needed to apply the change manually.
 - `normalization_notes` (un-normalizable path only): the analysis note from the normalization pass
   describing what could not be resolved.
+- `reason_detail` (un-normalizable path only, issue #100; **absent, never a null placeholder, on
+  most un-normalizable reports**): a structured sub-classification of `reason =
+  "unnormalizable_input"`, set only when the normalization pass itself identified WHICH
+  fail-closed branch fired — today, only the control-character screen (issue #632) sets it, to
+  `"suspicious_control_characters"`. `reason` stays the token every other reader keys off;
+  `reason_detail` exists because the frontend's default `unnormalizable_input` copy is written for
+  a malformed tracked-change record and is actively wrong for the control-character screen (there
+  is no tracked change, and no paragraph is named) — see
+  `frontend/src/ReviewSubmission.tsx`'s `REASON_DETAIL_EXPLANATIONS`.
 
 The report is **Confidential** (it contains counterparty-derived substance — the proposed replacement
 text and rationale are model-generated from the counterparty draft). See
