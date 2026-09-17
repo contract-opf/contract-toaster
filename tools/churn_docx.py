@@ -48,7 +48,7 @@ pairs (`tracked_changes_multi_author`, `nested_ins_del`) -- it exists so a
 caller can vary WHICH fabricated names appear without losing reproducibility,
 not to introduce randomness.
 
-## The eight transforms (one per issue #565 Scope, plus #530's and #145's
+## The transforms (one per issue #565 Scope, plus #530's, #145's, and #94's
 ## follow-ups)
 
   - `tracked_changes_multi_author` -- two different authors' `<w:ins>`/
@@ -94,6 +94,17 @@ not to introduce randomness.
     literal space when it re-serializes the non-default header part, and
     the proof's narrow header/footer rule is what tolerates exactly that
     fold and nothing else.
+  - `content_control_wrapped_text` (issue #94 follow-up) -- a filled-in
+    content control (`<w:sdt>`, no `w:sdtPr/w:showingPlcHdr`) wrapping part
+    of the Confidentiality clause inline, a `<w:smartTag>` wrapping another
+    part of it inline, and a second filled-in `<w:sdt>` wrapping the ENTIRE
+    Indemnification clause paragraph (a template's "controlled clause").
+    Exercises both walkers' transparent-wrapper treatment of `w:sdt`/
+    `w:sdtContent`/`w:smartTag`: only a GENUINE placeholder
+    (`w:sdtPr/w:showingPlcHdr`) is excluded from extraction, and
+    `redline_block_apply._accepted_text_runs` must agree with the
+    extractor at both the inline and block-level wrap, or the patch-time
+    anchor+hash check fails the edit closed.
 
 ## What this is NOT
 
@@ -703,6 +714,57 @@ def first_page_header_footer(docx_bytes: bytes, *, seed: int = 0) -> bytes:
     return out.getvalue()
 
 
+def content_control_wrapped_text(docx_bytes: bytes, *, seed: int = 0) -> bytes:
+    """Issue #94: a content control (`w:sdt`) or smart tag (`w:smartTag`)
+    Word or a document-assembly tool FILLED IN is a transparent wrapper
+    around ordinary visible text, same as `w:hyperlink` (issue #663) and a
+    tracked `w:moveTo` (issue #686). Exercises both shapes this issue's
+    Evidence section names explicitly:
+
+    - INLINE: part of the Confidentiality clause wrapped in a filled-in
+      `w:sdt` (no `w:sdtPr/w:showingPlcHdr`), part wrapped in a
+      `w:smartTag` -- both must still reach extraction.
+    - BLOCK-LEVEL: the ENTIRE Indemnification clause paragraph wrapped in a
+      filled-in `w:sdt` (a template's "controlled clause") -- the clause
+      must not be dropped from the review.
+
+    Neither wrapper carries a placeholder flag, so both stay in scope for
+    the shape test's block-map/writer round trip (`redline_block_apply.
+    _accepted_text_runs` must agree, or the anchor+hash check at patch
+    time fails the edit closed)."""
+
+    def mutate(root: ET.Element) -> None:
+        # --- Inline: content control + smart tag inside one paragraph ---
+        p_el = _find_paragraph_by_text(root, CONFIDENTIALITY_BODY)
+        _clear_runs(p_el)
+        prefix, _, rest = CONFIDENTIALITY_BODY.partition("reasonable efforts")
+        middle, _, suffix = rest.partition("prior written consent")
+        _append_run(p_el, prefix)
+        sdt_el = ET.SubElement(p_el, _w("sdt"))
+        ET.SubElement(sdt_el, _w("sdtPr"))
+        sdt_content = ET.SubElement(sdt_el, _w("sdtContent"))
+        _append_run(sdt_content, "reasonable efforts")
+        _append_run(p_el, middle)
+        smart_tag_el = ET.SubElement(p_el, _w("smartTag"))
+        smart_tag_el.set(_w("uri"), "urn:schemas-microsoft-com:office:smarttags")
+        smart_tag_el.set(_w("element"), "PersonName")
+        _append_run(smart_tag_el, "prior written consent")
+        _append_run(p_el, suffix)
+
+        # --- Block-level: the whole Indemnification paragraph wrapped ---
+        indemnification_p = _find_paragraph_by_text(root, INDEMNIFICATION_BODY)
+        parent = _parent_of(root, indemnification_p)
+        index = list(parent).index(indemnification_p)
+        parent.remove(indemnification_p)
+        wrapper = ET.Element(_w("sdt"))
+        ET.SubElement(wrapper, _w("sdtPr"))
+        wrapper_content = ET.SubElement(wrapper, _w("sdtContent"))
+        wrapper_content.append(indemnification_p)
+        parent.insert(index, wrapper)
+
+    return _rewrite_document_xml(docx_bytes, mutate)
+
+
 TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "tracked_changes_multi_author": tracked_changes_multi_author,
     "curly_punctuation": curly_punctuation,
@@ -712,6 +774,7 @@ TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "nested_ins_del": nested_ins_del,
     "pending_change_inside_field_code": pending_change_inside_field_code,
     "first_page_header_footer": first_page_header_footer,
+    "content_control_wrapped_text": content_control_wrapped_text,
 }
 
 
