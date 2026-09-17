@@ -19,7 +19,9 @@ prefix, tracked changes from two authors, curly punctuation, a clause split
 across sibling paragraphs, heading styles stripped, a nested
 insertion-then-deletion, a pending tracked change inside a field code, a
 first-page header/footer pair whose auto-described logo trips the pinned
-docx-editor's own re-serialization) — plus one `baseline-<flavor>.SYNTHETIC.docx` per
+docx-editor's own re-serialization, a filled-in content control or smart tag
+wrapping ordinary text inline or a whole clause) — plus one
+`baseline-<flavor>.SYNTHETIC.docx` per
 generated base-contract flavor, untransformed, so
 `tools/document_spine_smoke.py` has a fuller, more realistic corpus to
 report aggregate ratios over when pointed at this directory.

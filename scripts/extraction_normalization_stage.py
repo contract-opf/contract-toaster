@@ -28,18 +28,25 @@ This module therefore has two halves:
      ... content"), any drawing/chart/diagram part -- is never opened at
      all, so payload text planted there cannot structurally reach this
      function's output. Within `word/document.xml` itself, textbox body
-     text (`w:txbxContent`) and content-control placeholder bodies
-     (`w:sdt`/`w:sdtContent`) are excluded by construction too: the walker
+     text (`w:txbxContent`) stays excluded by construction: the walker
      below only recurses into a fixed, explicit set of tags (`w:p`, `w:tbl`/
-     `w:tr`/`w:tc`, `w:r`, `w:ins`, `w:del`, `w:fldSimple`, `w:hyperlink`)
-     -- it is not a generic "recurse into every child" walk, so an
-     unrecognized wrapper tag (`w:drawing`, `w:sdt`,
+     `w:tr`/`w:tc`, `w:r`, `w:ins`, `w:del`, `w:fldSimple`, `w:hyperlink`,
+     `w:moveTo`, `w:sdt`, `w:smartTag`) -- it is not a generic "recurse into
+     every child" walk, so an unrecognized wrapper tag (`w:drawing`,
      `mc:AlternateContent`, ...) is simply never descended into.
      `w:hyperlink` joined that set in issue #663: it is a transparent
      wrapper around ordinary runs whose text a reader sees inline (a
      cross-reference, a defined-term link, a URL), so excluding it was not
      a security boundary but silent content loss -- the model reviewed a
-     clause with words missing from the middle of it.
+     clause with words missing from the middle of it. `w:sdt`/`w:sdtContent`
+     and `w:smartTag` joined it in issue #94, same reason: a content control
+     a template or the counterparty actually FILLED IN (a party name, a
+     date, sometimes a whole controlled clause) and a smart tag (Word's own
+     auto-detected date/address/name markup) are both transparent wrappers
+     around ordinary visible text, not payload containers -- see
+     `_walk_content`'s docstring for the one shape that still stays
+     excluded (a content control genuinely showing its DISPLAY-ONLY
+     placeholder text, `w:sdtPr/w:showingPlcHdr`) and why.
 
      Image alt text (`wp:docPr/@descr`, `@title`) is an XML
      ATTRIBUTE, not run text, and this module never reads attributes other
@@ -128,6 +135,32 @@ def _w(tag: str) -> str:
 # ---------------------------------------------------------------------------
 # Low-level OOXML paragraph walking
 # ---------------------------------------------------------------------------
+
+
+def sdt_is_placeholder(sdt_el: ET.Element) -> bool:
+    """True iff `sdt_el` (a `<w:sdt>`) is currently showing its DISPLAY-ONLY
+    placeholder text -- `<w:sdtPr><w:showingPlcHdr/></w:sdtPr>`, Word's own
+    marker that this content control has not been filled in. This is the
+    ONE shape ARCHITECTURE.md's OOXML part allowlist documents as excluded
+    ("`w:sdt` with display-only content"); every other `w:sdt` -- which in
+    practice is every FILLED-IN content control -- is a transparent wrapper,
+    same as `w:hyperlink`/`w:moveTo` (issue #94).
+
+    This carve-out is EXTRACTION-ONLY and must stay that way.
+    `redline_block_apply._accepted_text_runs` deliberately does NOT apply
+    it, because that walk mirrors `docx_editor.xml_editor.build_text_map`,
+    which collects a placeholder's runs like any others -- and it is that
+    mirror, not agreement with this module, that makes an offset mean the
+    same span to the library that actually writes the tracked change. The
+    consequence is recorded there and in ARCHITECTURE.md: a paragraph that
+    carries an unfilled control does not resolve, so edits touching it fail
+    closed per-edit (`paragraph_not_resolved`) instead of landing on the
+    wrong span. Public (no leading underscore) so that reader can find the
+    one definition of the flag from either side."""
+    sdt_pr = sdt_el.find(_w("sdtPr"))
+    if sdt_pr is None:
+        return False
+    return sdt_pr.find(_w("showingPlcHdr")) is not None
 
 
 def _run_is_hidden(run_el: ET.Element) -> bool:
@@ -293,11 +326,11 @@ def _walk_content(
     inside_field_code: bool,
 ) -> None:
     """Walks a fixed, explicit set of OOXML content tags. Any tag not
-    explicitly handled (`w:drawing`, `w:sdt`, `mc:AlternateContent`,
-    `w:pict`, `w:smartTag`, bookmarks, proofing marks, ...) is skipped
-    WITHOUT recursion -- this is what keeps textbox bodies, content-control
-    placeholder bodies, and any other non-allowlisted nested content out of
-    the output by construction rather than by an after-the-fact filter.
+    explicitly handled (`w:drawing`, `mc:AlternateContent`, `w:pict`,
+    bookmarks, proofing marks, ...) is skipped WITHOUT recursion -- this is
+    what keeps textbox bodies and any other non-allowlisted nested content
+    out of the output by construction rather than by an after-the-fact
+    filter.
 
     `w:hyperlink` IS on that allowlist (issue #663). It is a transparent
     wrapper around ordinary `w:r`/`w:ins`/`w:del` children that a reader
@@ -348,13 +381,66 @@ def _walk_content(
     recorded in a normalization note) rather than failing the upload closed
     as a malformed record -- deleted text leaves the document, moved text
     does not, and the two must not be reported the same way.
+
+    `w:sdt` (an inline content control) and `w:smartTag` are on the
+    allowlist for issue #94, and for the same reason as `w:hyperlink`: both
+    are transparent wrappers Word renders as ordinary visible text -- a
+    content control around a filled-in party name, date, or address; a
+    smart tag around auto-detected text like a date or address -- not a
+    security boundary. Dropping them silently produced exactly the
+    `w:hyperlink` bug again: "This Agreement is between  and Buyer." with
+    the party name gone from the middle of the sentence, or "Pay ." with a
+    date gone entirely. `w:smartTag`'s children are ordinary paragraph
+    content directly (no separate content wrapper), so it recurses on
+    `list(el)` the same way `w:hyperlink` does.
+
+    `w:sdt` is different: its actual content lives one level down, in a
+    `<w:sdtContent>` child (`<w:sdtPr>`, the sibling that carries the
+    control's properties, holds no reader-visible text and is never
+    descended into). And unlike `w:hyperlink`, `w:sdt` has a genuine
+    excluded shape: a content control currently showing its DISPLAY-ONLY
+    placeholder text -- `<w:sdtPr><w:showingPlcHdr/></w:sdtPr>`, Word's own
+    marker that nobody has filled this control in -- is guidance copy
+    ("Click here to enter a date"), never text a reader would take as part
+    of the agreement, and ARCHITECTURE.md's OOXML part allowlist has always
+    scoped the exclusion to exactly that shape ("`w:sdt` with display-only
+    content"). `sdt_is_placeholder` above is the one place that flag is
+    read; every other `w:sdt` -- which in practice is every FILLED-IN
+    content control, the overwhelming majority in a real negotiated
+    document -- recurses into its `w:sdtContent` like any other transparent
+    wrapper.
+
+    For a FILLED-IN control that makes this walk and
+    `redline_block_apply._accepted_text_runs` (the writer's "what does a
+    reader see" walk, which has always recursed into `w:sdtContent`) agree
+    where before only the writer saw the text -- which is the whole point:
+    an edit anchored against clean text the writer cannot find is dropped
+    to `paragraph_not_resolved`. For a PLACEHOLDER the two deliberately
+    disagree, and `_accepted_text_runs`'s docstring holds the reason: it
+    mirrors `docx_editor.xml_editor.build_text_map`, which keeps a
+    placeholder's runs, and that mirror is what makes an offset mean the
+    same span to the library that writes. So a paragraph carrying an
+    unfilled control resolves nowhere and its edits fail closed one at a
+    time -- a narrow, recorded limitation (ARCHITECTURE.md's OOXML part
+    allowlist) rather than a tracked change written into an empty control.
     """
     for el in elements:
         tag = el.tag
         if tag == _w("r"):
             _process_run(el, builder, mode, author, inside_field_code)
-        elif tag in (_w("hyperlink"), _w("moveTo")):
+        elif tag in (_w("hyperlink"), _w("moveTo"), _w("smartTag")):
             _walk_content(list(el), builder, mode=mode, author=author, inside_field_code=inside_field_code)
+        elif tag == _w("sdt"):
+            if not sdt_is_placeholder(el):
+                content_el = el.find(_w("sdtContent"))
+                if content_el is not None:
+                    _walk_content(
+                        list(content_el), builder, mode=mode, author=author, inside_field_code=inside_field_code
+                    )
+            # A true placeholder (`w:sdtPr/w:showingPlcHdr`) is
+            # display-only guidance text -- excluded, matching
+            # ARCHITECTURE.md's OOXML part allowlist. Falls through to
+            # nothing further to do; the loop moves to the next element.
         elif tag == _w("ins"):
             ins_author = el.get(_w("author")) or author
             _walk_content(list(el), builder, mode="ins", author=ins_author, inside_field_code=inside_field_code)
@@ -419,24 +505,68 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
     }
 
 
+def _iter_sdt_transparent_children(container: ET.Element, tag: str):
+    """Yields every direct `tag` child of `container`, descending
+    transparently through a non-placeholder `<w:sdt>` wrapper in between
+    (issue #94).
+
+    Word puts content controls at the ROW and CELL levels of a table too,
+    not only around runs and paragraphs: a repeating-section control emits
+    `<w:tbl><w:sdt><w:sdtContent><w:tr>`, and a table/cell control emits
+    `<w:tr><w:sdt><w:sdtContent><w:tc>`. A walk that reads only direct
+    `w:tr`/`w:tc` children drops every paragraph inside such a control,
+    silently -- the same "a controlled clause never reaches the model"
+    failure this issue closed at the inline and block levels, one container
+    up. A TRUE placeholder (`sdt_is_placeholder`) is skipped WITHOUT
+    recursion here exactly as it is everywhere else, and any other wrapper
+    tag is still skipped without recursion, so this stays the explicit
+    allowlist `_walk_content`'s docstring describes rather than a generic
+    "recurse into everything" walk."""
+    for child in container:
+        if child.tag == tag:
+            yield child
+        elif child.tag == _w("sdt") and not sdt_is_placeholder(child):
+            content_el = child.find(_w("sdtContent"))
+            if content_el is not None:
+                yield from _iter_sdt_transparent_children(content_el, tag)
+
+
 def _iter_table_paragraphs(tbl_el: ET.Element):
-    for tr in tbl_el.findall(_w("tr")):
-        for tc in tr.findall(_w("tc")):
+    """Yields every `<w:p>` inside table `tbl_el` in document order, row by
+    row and cell by cell -- through row- and cell-level content controls
+    transparently, see `_iter_sdt_transparent_children`."""
+    for tr in _iter_sdt_transparent_children(tbl_el, _w("tr")):
+        for tc in _iter_sdt_transparent_children(tr, _w("tc")):
             yield from _iter_body_paragraphs(tc)
 
 
 def _iter_body_paragraphs(container: ET.Element):
     """Yields `<w:p>` elements in document order, descending into tables
     (and tables nested within tables) -- both explicitly "Allowed" per the
-    ARCHITECTURE.md OOXML part-allowlist table. Any other container tag
-    (`w:sdt`, `w:drawing`, `mc:AlternateContent`, `w:sectPr`, bookmarks, ...)
-    is skipped without recursion -- see `_walk_content`'s docstring for the
-    same construction-not-filter allowlist rationale."""
+    ARCHITECTURE.md OOXML part-allowlist table -- and into a BLOCK-LEVEL
+    `w:sdt` (a content control wrapping whole paragraphs, e.g. a "controlled
+    clause"), transparently, unless it is a true placeholder
+    (`sdt_is_placeholder`, issue #94 -- see `_walk_content`'s docstring for
+    the full rationale, which applies identically here one level up: a
+    block-level control the counterparty or a template actually filled in
+    is ordinary visible clause text, not a payload container, and dropping
+    it removed the controlled paragraph from the review entirely). A
+    content control at a table's ROW or CELL level is handled one level
+    down, in `_iter_table_paragraphs`/`_iter_sdt_transparent_children`, so
+    `w:sdt` is transparent at every level this walker reaches. Any other
+    container tag (`w:drawing`, `mc:AlternateContent`, `w:sectPr`,
+    bookmarks, ...) is skipped without recursion -- see `_walk_content`'s
+    docstring for the same construction-not-filter allowlist rationale."""
     for child in container:
         if child.tag == _w("p"):
             yield child
         elif child.tag == _w("tbl"):
             yield from _iter_table_paragraphs(child)
+        elif child.tag == _w("sdt"):
+            if not sdt_is_placeholder(child):
+                content_el = child.find(_w("sdtContent"))
+                if content_el is not None:
+                    yield from _iter_body_paragraphs(content_el)
         else:
             continue
 

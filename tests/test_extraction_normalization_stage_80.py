@@ -327,10 +327,15 @@ def _textbox_hyperlink_payload_p(payload: str) -> str:
 
 
 def _sdt_hyperlink_payload_p(payload: str) -> str:
-    """A `<w:hyperlink>` inside a content-control placeholder body -- still
-    excluded, same reason."""
+    """A `<w:hyperlink>` inside a content control GENUINELY showing its
+    display-only placeholder text (`w:sdtPr/w:showingPlcHdr`, issue #94) --
+    still excluded, same reason as `_sdt_payload_p` below. (A content
+    control the counterparty or a template actually filled in is NOT this
+    shape -- see `tests/test_content_control_extraction_94.py`, which pins
+    that a filled-in `w:sdt`/`w:sdtContent` is a transparent wrapper, same
+    as `w:hyperlink` itself.)"""
     return (
-        "<w:p><w:sdt><w:sdtContent><w:p>"
+        "<w:p><w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:p>"
         + _hyperlink(_HYPERLINK_RUNS.format(text=f"{payload}_SDT_LINK"), anchor="y")
         + "</w:p></w:sdtContent></w:sdt></w:p>"
     )
@@ -351,8 +356,15 @@ def _textbox_payload_p(payload: str) -> str:
 
 
 def _sdt_payload_p(payload: str) -> str:
-    """Content-control placeholder (w:sdt/w:sdtContent) -- excluded."""
-    return f"<w:p><w:sdt><w:sdtContent><w:p><w:r><w:t>{payload}</w:t></w:r></w:p></w:sdtContent></w:sdt></w:p>"
+    """A content control GENUINELY showing its display-only placeholder
+    text (`w:sdtPr/w:showingPlcHdr`) -- excluded (issue #94 narrowed this
+    from "every `w:sdt`" to exactly this shape; a FILLED-IN content control
+    -- no `showingPlcHdr` -- is a transparent wrapper instead, see
+    `tests/test_content_control_extraction_94.py`)."""
+    return (
+        f"<w:p><w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr>"
+        f"<w:sdtContent><w:p><w:r><w:t>{payload}</w:t></w:r></w:p></w:sdtContent></w:sdt></w:p>"
+    )
 
 
 def _table_p(rows: list[list[str]]) -> str:
@@ -1016,9 +1028,17 @@ def test_tracked_change_inside_hyperlink_splits_original_and_resulting(failures:
 def test_hyperlink_inside_an_excluded_container_stays_excluded(failures: list[str]) -> None:
     """AC4 (issue #663 Scope: "this adds ONE tag"): descending into
     `<w:hyperlink>` must not become a general "recurse into every child"
-    walk. A hyperlink nested in a textbox body or a content-control
-    placeholder is still unreachable, because the walk never enters
-    `<w:drawing>` / `<w:sdt>` in the first place."""
+    walk. A hyperlink nested in a textbox body is still unreachable, because
+    the walk never enters `<w:drawing>` in the first place. A hyperlink
+    nested in a content control that is GENUINELY showing its display-only
+    placeholder text (issue #94's `w:sdtPr/w:showingPlcHdr` carve-out) is
+    unreachable for the same reason `<w:sdt>` itself is: the walk skips a
+    true placeholder's `w:sdtContent` without recursing into it at all.
+    (A hyperlink nested in a FILLED-IN content control is a different shape
+    entirely, and IS reachable -- see
+    `tests/test_content_control_extraction_94.py`, which is where that
+    positive case is pinned, matching this file's convention of pinning
+    only the negative/excluded shape.)"""
     body = (
         _heading_p("Indemnity")
         + _linked_cross_reference_p(

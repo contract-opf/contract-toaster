@@ -363,6 +363,45 @@ def _accepted_text_runs(p: ET.Element) -> list[dict[str, Any]]:
     `occurrence=`, and what makes the run walk in `_apply_pure_insertion`
     agree with the offsets pass 1 used.
 
+    ## Why issue #94's placeholder carve-out is deliberately NOT repeated here
+
+    Issue #94 taught the EXTRACTOR to treat `w:sdt`/`w:sdtContent` as a
+    transparent wrapper except for one shape: a control genuinely showing
+    its display-only placeholder copy
+    (`extraction_normalization_stage.sdt_is_placeholder`, i.e.
+    `w:sdtPr/w:showingPlcHdr`). This walk does not copy that exclusion,
+    because it is not free to. `docx_editor` collects EVERY `<w:t>` outside
+    a `<w:del>`, a placeholder `w:sdt`'s runs included, and the mirror
+    above is the only reason an offset computed here means the same span
+    over there. The `w:del`/`w:moveFrom` exclusions are not a precedent for
+    adding a third: `docx_editor` excludes `w:del` too, and `w:moveFrom`
+    holds `<w:delText>`, not `<w:t>`, so neither one breaks the mirror.
+
+    Skipping a placeholder's runs here would make this walk and the
+    extractor agree about a paragraph's TEXT while disagreeing with
+    `docx_editor` about its COORDINATES -- the worse of the two failures.
+    `_resolve_physical_paragraphs` would then resolve a placeholder-bearing
+    paragraph, and the `occurrence=` pass 1 computes from that text would
+    be counted over text `docx_editor` does not have. For a placeholder
+    whose display copy repeats a word from the operative sentence
+    ("The " + [placeholder "Term"] + "Term is 12 months."), occurrence 0 is
+    the PLACEHOLDER's "Term": the tracked change is written inside an
+    unfilled content control, and the batch's projection check then voids
+    every other edit along with it.
+
+    Mirroring `docx_editor` instead leaves the placeholder's display copy
+    in this walk's text where the extractor's clean text has nothing, so
+    the text guard in `_resolve_physical_paragraphs` -- which exists for
+    exactly this, "anything that makes the live accepted view differ from
+    the text the transcript was proven against" -- leaves that one
+    paragraph unresolved, and only the edits touching it fail closed, one
+    at a time, as `paragraph_not_resolved`. Every other edit in the batch
+    still lands. The cost is real and is recorded in ARCHITECTURE.md's
+    OOXML part allowlist: an edit inside a paragraph that also carries an
+    UNFILLED content control cannot be written today. That is the
+    fail-closed half of the trade; the alternative is the wrong-span write
+    above.
+
     Each entry is `{"t", "run", "container", "text"}`: the `<w:t>` element,
     its parent `<w:r>`, the run's own parent (the `<w:p>` itself for a plain
     run, or a `<w:ins>`/`<w:moveTo>` wrapper for one inside a pending
@@ -535,12 +574,14 @@ def _resolve_physical_paragraphs(
     The text equality that remains is a GUARD, not a search: the identified
     `<w:p>`'s accepted-view text, compared on the SAME derivation the
     normalizer used (`.strip()`ed), must equal the span's clean text. If it
-    does not -- hidden text, a field-code result, anything that makes the
-    live accepted view differ from the text the transcript was proven
-    against -- the offsets could not be trusted anyway, so the span is left
-    OUT of the mapping and the caller turns that into a
-    `paragraph_not_resolved` failure for whichever edits needed it, and only
-    those.
+    does not -- hidden text, a field-code result, an UNFILLED content
+    control's display-only placeholder copy (which `_accepted_text_runs`
+    mirrors `docx_editor` in keeping and the extractor drops, issue #94),
+    anything that makes the live accepted view differ from the text the
+    transcript was proven against -- the offsets could not be trusted
+    anyway, so the span is left OUT of the mapping and the caller turns
+    that into a `paragraph_not_resolved` failure for whichever edits needed
+    it, and only those.
 
     `text` is the live paragraph's accepted-view text UNSTRIPPED, and `lead`
     is how many characters `.strip()` would remove from its front -- block

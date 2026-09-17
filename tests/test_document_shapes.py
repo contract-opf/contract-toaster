@@ -475,6 +475,76 @@ def test_pending_change_inside_field_code_survives(failures: list) -> None:
         failures.append(f"[{name}] expected a field-code disclosure naming the resolved text, got: {notes!r}")
 
 
+def test_content_control_wrapped_text_survives(failures: list) -> None:
+    """Issue #94: a filled-in content control (`w:sdt`) or smart tag
+    (`w:smartTag`) must be a transparent wrapper, inline AND at block
+    level -- not silent content loss the way it was before this issue,
+    and not the placeholder-exclusion shape either (nothing here carries
+    `w:sdtPr/w:showingPlcHdr`)."""
+    name = "content_control_wrapped_text"
+    docx_bytes = _shape_fixture(name)
+    norm = _assert_survives_full_spine(name, docx_bytes, failures)
+    if norm is None:
+        return
+    paragraphs = norm["paragraphs"]
+
+    # THE inline property: text inside a filled-in w:sdt and inside a
+    # w:smartTag must both reach the operative paragraph text.
+    confidentiality = next(
+        (p for p in paragraphs if "shall not disclose it to any third party" in p["text"]),
+        None,
+    )
+    if confidentiality is None:
+        failures.append(f"[{name}] could not find the Confidentiality paragraph")
+    else:
+        if "reasonable efforts" not in confidentiality["text"]:
+            failures.append(
+                f"[{name}] a filled-in inline content control must be transparent -- "
+                f"'reasonable efforts' missing from: {confidentiality['text']!r}"
+            )
+        if "prior written consent" not in confidentiality["text"]:
+            failures.append(
+                f"[{name}] a smart tag must be transparent -- 'prior written consent' "
+                f"missing from: {confidentiality['text']!r}"
+            )
+
+    # THE block-level property: a whole clause wrapped in a filled-in
+    # w:sdt must not be dropped from the review, and must still compile
+    # an edit against it (proving extractor/writer parity for real, not
+    # only for the untouched anchor clause).
+    found = _block_carrying(paragraphs, cd.INDEMNIFICATION_BODY)
+    if found is None:
+        failures.append(f"[{name}] the block-level-content-control-wrapped Indemnification clause is not addressable")
+        return
+    block_id, block = found
+    if block["text"] != cd.INDEMNIFICATION_BODY:
+        failures.append(
+            f"[{name}] a block-level content control must be transparent -- "
+            f"expected {cd.INDEMNIFICATION_BODY!r}, got {block['text']!r}"
+        )
+    proven = _prove(
+        paragraphs,
+        block_id,
+        [
+            {"op": "keep", "text": block["text"]},
+            {"op": "insert", "text": _PATCH_SUFFIX, "issue_key": "I1"},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(
+            f"[{name}] the block-level-content-control clause did not prove: "
+            f"{[f.get('reason') for f in proven['failures']]}"
+        )
+        return
+    result = rba.apply_block_transcript(docx_bytes, proven, author=_APPLY_AUTHOR, timestamp_iso=_APPLY_TIMESTAMP)
+    if result["docx_bytes"] is None or len(result["applied"]) != 1 or result["failures"]:
+        failures.append(
+            f"[{name}] an edit against the block-level-content-control clause did not "
+            f"compile -- extractor/writer parity broke for this shape: "
+            f"applied={len(result['applied'])} failures={result['failures']}"
+        )
+
+
 def _unzip_document_xml(docx_bytes: bytes) -> bytes:
     import io
     import zipfile
@@ -514,6 +584,7 @@ def test_every_transform_has_a_shape_test(failures: list) -> None:
         "nested_ins_del",
         "pending_change_inside_field_code",
         "first_page_header_footer",
+        "content_control_wrapped_text",
     }
     missing = set(cd.TRANSFORMS) - exercised
     if missing:
@@ -602,6 +673,7 @@ TESTS = [
     test_nested_ins_del_survives,
     test_pending_change_inside_field_code_survives,
     test_first_page_header_footer_survives,
+    test_content_control_wrapped_text_survives,
     test_baseline_flavors_also_normalize,
     test_every_transform_has_a_shape_test,
     test_the_smoke_tool_never_echoes_a_sentinel_party_name,
