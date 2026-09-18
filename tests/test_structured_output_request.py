@@ -112,15 +112,24 @@ OPENROUTER_CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
 # the PROPERTY "an id the policy artifact accepts but declares no capability
 # for", which is what makes the fail-closed assertions below mean anything.
 # This used to be anthropic/claude-opus-4.8 (declared nothing, was selectable).
-# Issue #604 moved the primary pin to anthropic/claude-opus-5, which DOES
-# declare `structured_outputs: true`, and the owner then deleted 4.8 from
-# `selectable` entirely -- so sonnet-4.6 is now the ONLY id in that file that
-# is both allowed by enforce_openrouter_policy_model_id and capability-False.
-# It coincides with OPENROUTER_CRITIC_MODEL_ID today; that is the artifact's
-# doing, not this test's intent, hence the separate name.
+# Issue #604 moved the primary pin to anthropic/claude-opus-5, which USED TO
+# declare `structured_outputs: true` -- issue #142 then corrected that id (its
+# ZDR endpoint 404s a response_format request) to `false` too, so opus-5 is
+# now capability-False for the SAME reason as this constant, not a different
+# one; it is deliberately not folded into this constant so a future capable
+# id landing here still exercises "declares nothing" specifically. The owner
+# deleted 4.8 from `selectable` entirely, so sonnet-4.6 is now the ONLY id in
+# that file that is both allowed by enforce_openrouter_policy_model_id and
+# capability-False. It coincides with OPENROUTER_CRITIC_MODEL_ID today; that
+# is the artifact's doing, not this test's intent, hence the separate name.
 OPENROUTER_NO_CAPABILITY_MODEL_ID = OPENROUTER_CRITIC_MODEL_ID
-# model-policy/openrouter.json `selectable`: structured_outputs true.
-OPENROUTER_SELECTABLE_MODEL_ID = "anthropic/claude-opus-5"
+# model-policy/openrouter.json `selectable`: structured_outputs true. NOT an
+# Anthropic id on purpose: issue #142 corrected every Anthropic id this
+# deployment pins (Opus 5, Sonnet 5) to `structured_outputs: false` (their ZDR
+# endpoint rejects response_format), so a capability-True selectable id today
+# is necessarily one of the non-Anthropic entries, which #142's live probe did
+# not touch (it covered only the ids this deployment actually pins).
+OPENROUTER_SELECTABLE_MODEL_ID = "openai/gpt-5.6-sol"
 
 _PRIMARY_VALID_FIXTURE = "primary_request_change_valid.json"
 

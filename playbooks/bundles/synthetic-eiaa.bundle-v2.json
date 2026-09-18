@@ -13,7 +13,7 @@
     }
   },
   "model_policy": {
-    "hash": "sha256:1f1f79de987f711f46caaa3d4d7753c2f9c00ef2482ec146e74f3dce98281306",
+    "hash": "sha256:802e5810e7ad145196a710ed010bfe0e3fcdeb0dd587501720ec0e0de6f00980",
     "path": "model-policy/openrouter.json"
   },
   "opf": {

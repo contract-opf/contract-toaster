@@ -737,8 +737,14 @@ class TestStreamedRequestPayload(unittest.TestCase):
         self.assertEqual(payload["stream_options"], {"include_usage": True})
 
         # Everything else, spelled out -- the ZDR routing block (issue #444,
-        # which fails closed by design), the pin, the budget, and both
-        # structured-output request shapes.
+        # which fails closed by design), the pin, the budget, and the
+        # forced-tool structured-output shape. `output_schema` is passed
+        # above too, but PRIMARY_MODEL_ID's `structured_outputs` was
+        # corrected to `false` by issue #142 (its ZDR endpoint 404s a
+        # response_format request), so `response_format` correctly does NOT
+        # appear below -- proving that correction actually reaches the
+        # streamed-request payload, not just the non-streamed shape
+        # tests/test_openrouter_capability_matches_zdr.py already covers.
         # Issue #677: the policy now pins a reasoning allowance for the primary
         # model, and this assertion's own note said what to do when that
         # changed -- max_tokens is budget + allowance, and the request carries
@@ -772,14 +778,6 @@ class TestStreamedRequestPayload(unittest.TestCase):
                 "tool_choice": {
                     "type": "function",
                     "function": {"name": mc.STRUCTURED_OUTPUT_TOOL_NAME},
-                },
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": mc.STRUCTURED_OUTPUT_SCHEMA_NAME,
-                        "strict": True,
-                        "schema": output_schema,
-                    },
                 },
             },
         )
