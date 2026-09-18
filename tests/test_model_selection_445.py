@@ -314,14 +314,24 @@ class TestShippedDefaults(ModelSelectionTestBase):
             with self.assertRaises(model_client.OpenRouterModelPolicyViolation):
                 model_client.enforce_openrouter_policy_model_id(OPUS_48)
 
-    def test_the_new_default_still_declares_structured_outputs(self):
-        """`openrouter_model_capabilities` resolves the ROLE PIN before the
-        `selectable` entry for the same id, so a pin that declares nothing
-        fails the SHIPPED DEFAULT closed even though the identical selectable
-        entry declares `structured_outputs: true`. Every default review would
-        then quietly drop `output_schema`."""
+    def test_the_new_default_no_longer_declares_structured_outputs(self):
+        """Issue #142 reversed what this test used to assert. History,
+        because the reversal is the point: `openrouter_model_capabilities`
+        resolves the ROLE PIN before the `selectable` entry for the same id,
+        so before #142 the pin declaring `structured_outputs: true` (mirrored
+        by the identical selectable entry) made every default review send
+        `response_format` -- which then 404'd on Opus 5's zero-data-retention
+        endpoint before the first token, because that specific endpoint does
+        not accept it even though the model advertises the capability
+        elsewhere in OpenRouter's catalogue. The pin (and its selectable
+        twin) were corrected to `structured_outputs: false`, so the default
+        now resolves all-False here. This does NOT mean the default review
+        loses schema enforcement: the independent forced-tool path
+        (OPENROUTER_STRUCTURED_OUTPUT=1, still the default) is unaffected and
+        is what actually carries it for this id -- see
+        tests/test_openrouter_capability_matches_zdr.py."""
         caps = model_client.openrouter_model_capabilities(OPUS_5)
-        self.assertTrue(caps["structured_outputs"], caps)
+        self.assertFalse(caps["structured_outputs"], caps)
 
     def test_no_operator_facing_string_editorialises_about_nationality(self):
         """The Kimi K3 entry read "Strongest Chinese open-weight model." The
@@ -336,6 +346,57 @@ class TestShippedDefaults(ModelSelectionTestBase):
             if e["model_id"] == "moonshotai/kimi-k3"
         )
         self.assertIn("open-weight", kimi["note"])
+
+    def test_every_selectable_note_stays_short_operator_copy(self):
+        """`note` is not a comment field. `openrouter_selectable_models`
+        returns the WHOLE entry, `get_model_selection_settings` serialises it
+        straight into GET /api/admin/model-selection, and AdminModel.tsx
+        renders `note` inline inside each non-wrapping `<option>` label and
+        again as the field hint -- so anything parked here becomes a paragraph
+        of prose in the admin model picker. Issue #142's first attempt grew
+        four of these notes to 300-700 characters of engineering rationale
+        (routing-funnel mechanism, re-probe procedure, source file paths,
+        Python identifiers); the rationale belongs in the policy file's
+        `_comment`, in a role pin's `structured_outputs_note`, or in
+        docs/design-notes.md, all of which are internal and none of which is
+        serialised to this route.
+
+        No frontend gate can catch this: vitest runs jsdom with css: false and
+        the admin-picker tests use their own fixtures, never the shipped
+        artifact. This is that gate."""
+        # Path- and code-shaped fragments. A repo path always carries a
+        # separator, so "/" is the strongest single signal -- and no legitimate
+        # one-line operator sentence needs one.
+        forbidden = ("/", "\\", ".py", ".tsx", ".json", "()", "::", "=`", "_=")
+        for entry in model_client.openrouter_selectable_models():
+            note = entry["note"]
+            with self.subTest(model_id=entry["model_id"]):
+                self.assertNotIn("\n", note, note)
+                self.assertLessEqual(
+                    len(note),
+                    160,
+                    f"{entry['model_id']}'s note is {len(note)} chars of picker "
+                    f"copy; put the rationale in the policy _comment or "
+                    f"docs/design-notes.md instead: {note!r}",
+                )
+                for fragment in forbidden:
+                    self.assertNotIn(fragment, note, f"{entry['model_id']}: {note!r}")
+
+    def test_the_two_corrected_entries_keep_a_terse_probe_stamp(self):
+        """The counterweight to the length cap above: cutting the notes back
+        must not delete the operator-visible fact that these two ids get their
+        schema enforcement from a forced tool call rather than from
+        `response_format`. An admin comparing options sees the stamp; the
+        mechanism behind it lives in the policy file's `_comment`."""
+        entries = {e["model_id"]: e for e in model_client.openrouter_selectable_models()}
+        for model_id in (OPUS_5, "anthropic/claude-sonnet-5"):
+            with self.subTest(model_id=model_id):
+                self.assertFalse(
+                    model_client.openrouter_model_capabilities(model_id)["structured_outputs"],
+                    model_id,
+                )
+                self.assertIn("2026-09-16", entries[model_id]["note"])
+                self.assertIn("forced tool call", entries[model_id]["note"])
 
 
 class TestLiveClientHonorsTheAllowlist(unittest.TestCase):

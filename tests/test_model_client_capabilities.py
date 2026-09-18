@@ -19,10 +19,14 @@ exposes.
      `structured_outputs: true` there per the file's own verification
      note), all-False for the policy-pinned CRITIC id (that file declares
      neither field for it), and all-False -- never a KeyError -- for a
-     model_id the policy does not mention at all. The pinned PRIMARY is the
-     exception and is asserted separately: issue #604 repinned it to
-     anthropic/claude-opus-5, which the artifact DOES declare
-     `structured_outputs: true` for.
+     model_id the policy does not mention at all. The pinned PRIMARY is
+     ALSO all-False, per issue #142: anthropic/claude-opus-5's ZDR endpoint
+     404s a `response_format` request even though the model advertises the
+     capability elsewhere in OpenRouter's catalogue, so the policy's
+     `structured_outputs` field -- which means "safe to send
+     `response_format` on THIS deployment's ZDR-only routing," not "the
+     model supports it somewhere" -- was corrected to `false` for it (see
+     model-policy/openrouter.json's ZDR-ENDPOINT CORRECTION note).
   3. A policy entry that omits a capability field defaults that field to
      False -- explicit "absent -> False" fail-closed coverage, independent
      of any specific model_id already in the shipped policy files.
@@ -66,12 +70,15 @@ _BEDROCK_CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 _BEDROCK_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 _BEDROCK_UNKNOWN_MODEL_ID = "anthropic.claude-haiku-4-1"
 
-# The pinned primary since issue #604. It DECLARES `structured_outputs: true`
-# -- unlike the critic pin, which declares nothing. This constant was
-# anthropic/claude-opus-4.8 (which declared nothing and was selectable) until
-# the owner removed that id from `selectable`; leaving it here would have kept
-# the assertion below GREEN for the wrong reason -- as an unlisted id, not as
-# a pin whose capability fields are absent.
+# The pinned primary since issue #604. It DECLARED `structured_outputs: true`
+# until issue #142 corrected that: the id's ZDR endpoint 404s a
+# `response_format` request, so it is now all-False -- the same shape as the
+# critic pin, for a different reason (measured-and-rejected vs.
+# never-measured). This constant was anthropic/claude-opus-4.8 (which
+# declared nothing and was selectable) until the owner removed that id from
+# `selectable`; leaving it here would have kept the assertion below GREEN for
+# the wrong reason -- as an unlisted id, not as a pin whose capability fields
+# are absent/corrected.
 _OPENROUTER_PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 _OPENROUTER_CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
 # Must be an id that is ONLY in `selectable` -- not also a role pin -- or
@@ -182,21 +189,29 @@ class TestOpenRouterCapabilities(unittest.TestCase):
         # guess. This is the fail-closed half of the pair, and after the owner
         # deleted anthropic/claude-opus-4.8 from `selectable` it is the only id
         # in that artifact that is BOTH allowed by the runtime guard AND
-        # capability-False, which is why several other test files now stand on
-        # it (see tests/test_structured_output_request.py).
+        # capability-False FOR THAT REASON (never measured), which is why
+        # several other test files still stand on it (see
+        # tests/test_structured_output_request.py) even though the primary
+        # pin is now also capability-False, for the different reason below.
         self.assertEqual(
             mc.openrouter_model_capabilities(_OPENROUTER_CRITIC_MODEL_ID), _ALL_FALSE
         )
 
-    def test_pinned_primary_declares_structured_outputs(self) -> None:
-        # The other half, and the reason the two pins must not be asserted
-        # together any more: issue #604 repinned the primary to
-        # anthropic/claude-opus-5, an id the 2026-08-02 verification pass DID
-        # confirm, so the pin declares the field. Absence would silently drop
-        # `output_schema` from every default review.
+    def test_pinned_primary_is_capability_false_after_the_zdr_correction(self) -> None:
+        # Issue #142: anthropic/claude-opus-5's ZDR endpoint (the only kind
+        # this deployment's provider block -- zdr: true, data_collection:
+        # deny, require_parameters: true -- is allowed to route to) 404s a
+        # response_format request, even though the 2026-08-02 pass confirmed
+        # the model advertises the capability elsewhere in OpenRouter's
+        # catalogue. So the pin is now all-False too -- NOT because nothing
+        # was measured (the critic pin's reason, above) but because what was
+        # measured came back rejected. Schema enforcement for this id still
+        # runs, via the independent forced-tool path
+        # (OPENROUTER_STRUCTURED_OUTPUT=1, the default) -- see
+        # tests/test_openrouter_capability_matches_zdr.py.
         self.assertEqual(
             mc.openrouter_model_capabilities(_OPENROUTER_PRIMARY_MODEL_ID),
-            {"structured_outputs": True, "prompt_caching": False},
+            _ALL_FALSE,
         )
 
     def test_selectable_model_reads_structured_outputs_true(self) -> None:

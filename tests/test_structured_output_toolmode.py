@@ -88,14 +88,17 @@ from openrouter_sse_double import sse_stream_adapter  # noqa: E402
 # (enforce_openrouter_policy_model_id) does not fire ahead of the tool-mode
 # behaviour under test; the primary was anthropic/claude-opus-4.8 until the
 # owner removed that id from `selectable`, after which the guard refuses it.
-# opus-5 (the primary pin since issue #604) is the right stand-in EVEN THOUGH
-# it declares `structured_outputs: true` and tool mode is the fallback for
-# models that do not: nothing in this file ever passes the `output_schema=`
+# opus-5 (the primary pin since issue #604) is the right stand-in regardless
+# of what it declares for `structured_outputs` (issue #142 corrected that
+# field to `false` -- its ZDR endpoint 404s a response_format request; before
+# that it was `true`): nothing in this file ever passes the `output_schema=`
 # kwarg (every schema below is handed over as `tool_spec`), and `invoke` adds
 # `response_format` only when `output_schema is not None` AND the capability
-# is True -- so the capability descriptor cannot reach any assertion here.
-# The file where the id DOES carry that meaning is
-# tests/test_structured_output_request.py (OPENROUTER_NO_CAPABILITY_MODEL_ID).
+# is True -- so the capability descriptor cannot reach any assertion here
+# either way. The file where the id DOES carry that meaning is
+# tests/test_structured_output_request.py (OPENROUTER_NO_CAPABILITY_MODEL_ID)
+# and tests/test_openrouter_capability_matches_zdr.py (issue #142's own
+# regression coverage).
 PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
 
