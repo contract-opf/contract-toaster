@@ -37,8 +37,13 @@ Checks:
          branch is otherwise never taken — and never-taken means never known
          to work.
   1. scripts/check-frontend.sh exists, is executable, fails closed
-     (`set -euo pipefail`), and actually runs the typecheck+build, the vitest
-     suite and the three CTDS audits.
+     (`set -euo pipefail`), and actually runs the pinned-npm lockfile
+     validation (issue #112), the typecheck+build, the vitest suite and the
+     three CTDS audits — and, for the lockfile validation, that it sits
+     BEFORE the `if [ ! -d node_modules ]` install guard. Presence alone is
+     not the property #112 is about: inside that block the validation runs
+     only when node_modules is absent, i.e. never on a dev machine, which is
+     the hole itself.
   2. Some .github/workflows/*.yml job invokes scripts/check-frontend.sh.
   3. That workflow runs on pull_request AND on push to main, and does not
      path-filter the frontend gate out of existence (a `paths:` filter is
@@ -55,11 +60,16 @@ Checks:
      the triage loop already watches.
   6. The gate blocks the image pipeline: build-sign-push `needs` it, so an
      unbuildable / test-red SPA cannot be signed and pushed.
+  7. frontend/package-lock.json's root entry mirrors frontend/package.json's
+     `engines` block (issue #112) — the one drift class check 1's `npm ci
+     --dry-run` step is blind to, so the two files cannot disagree in the
+     very metadata engine-strict enforces.
 
 Run with: python3 tests/test_frontend_gate_wired_634.py
 Exit 0 = all checks pass; non-zero = one or more invariants not met.
 """
 
+import json
 import re
 import stat
 import sys
@@ -69,9 +79,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATE_SCRIPT = REPO_ROOT / "scripts" / "check-frontend.sh"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+PACKAGE_JSON = REPO_ROOT / "frontend" / "package.json"
+PACKAGE_LOCK = REPO_ROOT / "frontend" / "package-lock.json"
 
 # The relative path a workflow step must invoke.
 GATE_INVOCATION = "scripts/check-frontend.sh"
+
+# The pinned-npm lockfile validation added by issue #112. Its POSITION inside
+# the gate script is load-bearing, not only its presence — see the tail of
+# check_gate_script().
+LOCKFILE_VALIDATION = "npm@10.8.2 ci"
 
 
 def _read(path: Path) -> str:
@@ -153,6 +170,7 @@ def check_gate_script() -> list[str]:
         "gate would print ALL GREEN over a red suite.",
     )
     for label, needle in (
+        ("lockfile validation (pinned npm ci --dry-run)", LOCKFILE_VALIDATION),
         ("typecheck + production build (build:ci)", "npm run build:ci"),
         ("vitest component suite (npm test)", "npm test"),
         ("contrast audit", "npm run audit:contrast"),
@@ -164,6 +182,35 @@ def check_gate_script() -> list[str]:
             f"scripts/check-frontend.sh runs the {label}",
             f"Expected to find `{needle}` in the gate script.",
         )
+
+    # Placement, not merely presence (issue #112). Every check above is a
+    # substring test, which can only answer "does this step exist" — and for
+    # the lockfile validation the defect #112 fixed was never absence, it was
+    # POSITION. The install step is `if [ ! -d node_modules ]; then npm ci;
+    # fi`, so anything inside that block runs on CI's first, empty checkout
+    # and never again on a dev machine that already has node_modules. A
+    # lockfile rewritten by a newer local npm therefore passed the local gate
+    # green and killed CI at install (the September incident, ef1a0fc: 27
+    # esbuild entries dropped, "the frontend job died at install and never
+    # reached a test"). Assert the validation precedes that guard, so moving
+    # it back inside — the exact regression — turns GATE A red. Offsets are
+    # taken over the comment-stripped script so that a comment *mentioning*
+    # the validation cannot stand in for running it.
+    commands = _strip_comments(text)
+    install_guard = "if [ ! -d node_modules ]"
+    validation_at = commands.find(LOCKFILE_VALIDATION)
+    guard_at = commands.find(install_guard)
+    failures += _assert(
+        validation_at != -1 and guard_at != -1 and validation_at < guard_at,
+        "scripts/check-frontend.sh runs the lockfile validation "
+        f"UNCONDITIONALLY — before the `{install_guard}` install guard",
+        "Issue #112: a lockfile check that only runs when node_modules is "
+        "absent never runs on a dev machine, which is the whole defect. "
+        f"Found `{LOCKFILE_VALIDATION}` at offset {validation_at} and "
+        f"`{install_guard}` at offset {guard_at} (-1 = not found; if the "
+        "install guard was deliberately removed, re-derive this invariant "
+        "here rather than deleting it).",
+    )
     return failures
 
 
@@ -406,6 +453,70 @@ def check_blocks_image_pipeline(path: Path | None, job_id: str | None) -> list[s
     )
 
 
+def check_lockfile_mirrors_engines() -> list[str]:
+    """Check 7: the lockfile's root entry carries package.json's `engines`.
+
+    The blind spot inside check 1's own fix. `npx npm@10.8.2 ci … --dry-run`
+    answers "does package-lock.json still RESOLVE package.json's dependency
+    graph"; it does not look at the root entry's metadata, so a hand-edited
+    `engines` block in package.json and a lockfile written before it both pass
+    that step while the two files disagree — the exact drift found on this
+    ticket (#112), where the `engines` block was added without the
+    `npm install --package-lock-only` regeneration
+    docs/frontend-design-system.md §3.3 requires. That matters here and not
+    only cosmetically: frontend/.npmrc sets `engine-strict=true`, so the
+    `engines` floor is a hard `npm ci` error, and the lockfile is what the
+    shipping Docker build installs from.
+
+    Both sides are written by npm itself — any `npm install` copies
+    package.json's `engines` into `packages[""]` — so this compares two
+    production-produced values rather than a fixture. It is static and
+    offline, which is why it can live in GATE A at all: the regeneration it
+    stands in for needs the network and rewrites a tracked file.
+    """
+    print("Check 7: frontend/package-lock.json mirrors package.json's `engines` …")
+    failures = []
+    for path in (PACKAGE_JSON, PACKAGE_LOCK):
+        failures += _assert(path.exists(), f"{path.relative_to(REPO_ROOT)} exists")
+    if failures:
+        print("  (skipping content checks — a file is missing)")
+        return failures
+
+    try:
+        pkg = json.loads(_read(PACKAGE_JSON))
+        lock = json.loads(_read(PACKAGE_LOCK))
+    except json.JSONDecodeError as exc:  # pragma: no cover - a red gate either way
+        return _assert(False, "frontend package manifests parse as JSON", str(exc))
+
+    root = lock.get("packages", {}).get("")
+    failures += _assert(
+        isinstance(root, dict),
+        'frontend/package-lock.json has a root entry (`packages[""]`)',
+        "lockfileVersion 2+ mirrors the manifest there; without it nothing "
+        "records which engines the installed tree was locked for.",
+    )
+    if not isinstance(root, dict):
+        return failures
+
+    declared = pkg.get("engines")
+    locked = root.get("engines")
+    failures += _assert(
+        declared is not None,
+        "frontend/package.json declares an `engines` block",
+        "Issue #112: frontend/.npmrc's engine-strict=true has nothing to "
+        "enforce without it.",
+    )
+    failures += _assert(
+        declared == locked,
+        "frontend/package-lock.json's root entry repeats that `engines` block verbatim",
+        f"package.json says {declared!r}; the lockfile root entry says "
+        f"{locked!r}. Regenerate with `cd frontend && npx npm@10.8.2 install "
+        "--package-lock-only` and commit the resulting diff — the gate's "
+        "`npm ci --dry-run` step cannot see this disagreement.",
+    )
+    return failures
+
+
 def main() -> int:
     print("=" * 60)
     print("Frontend gate wiring (issue #634)")
@@ -428,6 +539,8 @@ def main() -> int:
     all_failures += check_main_red_reporting(path, job_id)
     print()
     all_failures += check_blocks_image_pipeline(path, job_id)
+    print()
+    all_failures += check_lockfile_mirrors_engines()
     print()
 
     print("=" * 60)
