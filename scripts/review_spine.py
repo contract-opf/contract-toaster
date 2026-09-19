@@ -1429,11 +1429,8 @@ def run_review(
     # carries the field that leaked -- never surface it as "findings" on
     # that path (docs/output-contract.md: a leakage block produces no
     # human-surfaced output at all, not a redacted one).
-    findings = (
-        reconciled.get("issues", [])
-        if redline_result["status"] != STATUS_ERROR_MANUAL_REVIEW_REQUIRED
-        else []
-    )
+    leakage_blocked = redline_result["status"] == STATUS_ERROR_MANUAL_REVIEW_REQUIRED
+    findings = [] if leakage_blocked else reconciled.get("issues", [])
 
     result: dict[str, Any] = {
         "status": redline_result["status"],
@@ -1441,6 +1438,44 @@ def run_review(
         "redline_bytes": redline_result.get("docx_bytes"),
         "summary": redline_result.get("verdict_summary"),
         "findings": findings,
+        # Issue #96 (owner decision, Option B): `reconcile()` already
+        # computes both of these (`scripts/reconciliation.py`'s merged
+        # `confidence_band`/`critic_delta`, straight off `reconciled`) but
+        # nothing below this line ever read them off `reconciled`, so
+        # neither reached `pipeline_runner._ANALYSIS_FIELDS` and the
+        # pre-download trust-calibration surfaces (the download gate, the
+        # confidence band, the receipt's critic line) never fired on a real
+        # review. Carried through verbatim -- `reconciled["confidence_band"]`
+        # is already None when `confidence_state == "OK"`, so this needs no
+        # extra null-handling here.
+        #
+        # OPTION B, load-bearing: neither key feeds `redline_result["status"]`
+        # above, and nothing here derives a status from them either. A
+        # review that reaches this point completed with a legal decision, so
+        # `status` is `redline_result["status"]` regardless of how degraded
+        # `confidence_band` is -- see ARCHITECTURE.md's rewritten
+        # "status vs confidence_state" section for the retired projection
+        # this replaces.
+        #
+        # `critic_delta` is suppressed on EXACTLY the condition `findings` is
+        # suppressed on, for exactly the same reason: it is a carrier of
+        # model prose, not of metadata. `contested_replacements[]
+        # .critic_objection` and `.critic_suggested_replacement` are
+        # themselves scanned, blockable fields (`scripts/leakage_scan.py::
+        # _scan_critic_delta_fields`), as is `rationale_objections[]
+        # .objection` (issue #517) -- so the very text a leakage block
+        # exists to withhold can live in this key, and carrying it through
+        # would put it in `analysis.json` (`pipeline_runner
+        # ._write_real_analysis` runs on terminal MANUAL_REVIEW_REQUIRED
+        # results too), out of `get_review_detail`, and into the console's
+        # contested-replacement badge. A leakage block produces no
+        # human-surfaced output at all, not a redacted one.
+        #
+        # `confidence_band` is NOT suppressed: it is a bare enum token off a
+        # fixed four-value ladder, carries no model text, and is the one
+        # signal an operator looking at a blocked review can still read.
+        "confidence_band": reconciled.get("confidence_band"),
+        "critic_delta": None if leakage_blocked else reconciled.get("critic_delta"),
         "reason": redline_result.get("reason"),
         "analysis_report": redline_result.get("analysis_report"),
         # Issue #616: the leakage gate's OWN diagnosis, carried onward

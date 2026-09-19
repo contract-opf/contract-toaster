@@ -369,12 +369,24 @@ The ACCEPT result view promises **"a summary of what changed and why each change
 ## The decision is binary; uncertainty is a system status
 
 The external legal decision is **binary**: `ACCEPT | REQUEST_CHANGE`, carried in the `decision` field.
-There is no third legal category. Pipeline uncertainty and manual-review needs are carried by the
-**internal `confidence_state`** (`OK | LOW_CONFIDENCE | MANUAL_REVIEW_REQUIRED |
-ERROR_MANUAL_REVIEW_REQUIRED`), which is a *system status*, never a legal verdict. The
-`status ↔ confidence_state` mapping (e.g. low confidence with no concrete issue → `MANUAL_REVIEW_REQUIRED`
-system status; schema-invalid-after-retry or a leakage hit → `ERROR_MANUAL_REVIEW_REQUIRED`) is owned by
-[ARCHITECTURE.md → review statuses](../ARCHITECTURE.md#storage).
+There is no third legal category. Pipeline uncertainty is carried by the **internal
+`confidence_state`** (`OK | LOW_CONFIDENCE | MANUAL_REVIEW_REQUIRED | ERROR_MANUAL_REVIEW_REQUIRED`)
+and its reviewer-facing mirror `confidence_band`, both *system status* fields, never a legal verdict —
+see [Confidence band](#confidence-band) below.
+
+**`confidence_band` does not gate `status`.** Owner decision (issue #96, Option B, 2026-09-16)
+retired an earlier, never-implemented mapping from `confidence_state` onto the review's terminal
+`status` (a `LOW_CONFIDENCE`-with-no-concrete-issue review projecting to a
+`MANUAL_REVIEW_REQUIRED` status). The rule instead: **a review that completes is `DONE`; only a run
+that does not complete is a failure.** A completed review keeps `status = DONE` regardless of how
+degraded its `confidence_band` is — the band is trust-calibration metadata shown to the attorney
+pre-download (see [Confidence band](#confidence-band) and
+[Critic-delta confidence merge rule](#critic-delta-confidence-merge-rule)), never a downgrade of the
+result itself. `status = MANUAL_REVIEW_REQUIRED` / `ERROR_MANUAL_REVIEW_REQUIRED` remain the outcome
+only when the pipeline genuinely did not reach a legal decision at all — schema-invalid-after-retry,
+a leakage hit, an oversized document, or an unprovable edit. The full, current list of what does and
+does not produce each status is owned by
+[ARCHITECTURE.md → `status` vs `confidence_state`/`confidence_band`](../ARCHITECTURE.md#storage).
 
 ## Per-issue provenance and confidence band
 
@@ -416,7 +428,14 @@ in the result view, pre-download**. It is null when `confidence_state` is `OK`. 
 `confidence_state` as a UI-surface label and must be rendered as a distinct **system status** —
 visually separate from the legal decision (`ACCEPT | REQUEST_CHANGE`) and clearly labeled as a
 pipeline / system signal, not a legal opinion. This is consistent with the tool-recommendation framing
-rule that `MANUAL_REVIEW_REQUIRED` is a system status, never a third legal category.
+rule that `MANUAL_REVIEW_REQUIRED` is a system status, never a third legal category. **It carries no
+status consequence** (see [The decision is binary; uncertainty is a system status](#the-decision-is-binary-uncertainty-is-a-system-status)
+above, issue #96 Option B): a review with a non-null band is still `status = DONE` when the pipeline
+completed it, and downloads normally once the pre-download indicators above have rendered.
+
+The receipt (`frontend/src/toaster/receipt.ts`) prints a brief, counts-only mirror of this field
+alongside the critic-delta counts — see [Critic-delta presentation](#critic-delta-presentation)
+below — never the objection prose or derived clause text those indicators carry.
 
 ### Critic-delta confidence merge rule
 
@@ -469,6 +488,35 @@ replacement text drifts from the playbook position) and **critic-added issues** 
 missed an issue that the critic caught). Both types are surfaced in the result view as a
 **mandatory pre-download indicator** — the download affordance must not be presented without
 the delta indicator visible.
+
+**The receipt's own mirror (issue #96) is counts-only, never these badges' prose.** The provenance
+slip (`frontend/src/toaster/receipt.ts`, `criticLine`) prints at most one brief line — e.g. "Critic:
+2 replacements contested, 1 issue added, 1 rationale objection · confidence LOW" — built ONLY from
+the lengths of **all three** `critic_delta` arrays (`contested_replacements`, `added_issues`,
+`rationale_objections`) and the `confidence_band` wire token. It never includes `critic_objection`,
+`rationale_objections[].objection`, `critic_suggested_replacement`, or any other field carrying
+model prose or derived clause text — those stay on the badges below, which render only in the app,
+never on a slip someone can paste into a deal thread. A count is omitted from the line when its
+array is empty, so the line names only what the critic actually did.
+
+All three arrays are counted, not just the two that move the band: the
+[merge rule](#critic-delta-confidence-merge-rule) deliberately does **not** degrade
+`confidence_state` for a rationale objection alone, so a critic that only objected to the primary's
+rationale produces a non-empty `critic_delta` with a **null** band — a state the line must still
+disclose. The line is absent entirely only when there is nothing to disclose at all: all three
+arrays empty (or `critic_delta` null) **and** an OK/null band, matching every other receipt line's
+"absent, never invented" rule.
+
+**A leakage-blocked review reaches the receipt with no delta to print.** `critic_delta` is a carrier
+of scannable model prose — `contested_replacements[].critic_objection`,
+`.critic_suggested_replacement` and `rationale_objections[].objection` are all fields
+`scripts/leakage_scan.py` scans and can block on — so
+`scripts/review_spine.py::run_review` suppresses the whole key on exactly the condition it
+suppresses `findings` on: a terminal `ERROR_MANUAL_REVIEW_REQUIRED` from the leakage gate. A leakage
+block produces no human-surfaced output at all, not a redacted one, and that includes the analysis
+artifact, `get_review_detail`'s projection, the console's badges and this receipt line.
+`confidence_band` is *not* suppressed on that path: it is a bare enum token off a fixed four-value
+ladder and carries no model text.
 
 ### Contested-replacement badge
 

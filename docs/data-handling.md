@@ -48,7 +48,7 @@ This table is the **canonical `reviews` field dictionary** for the whole project
 
 | Field | Carries document substance? | Classification | Retention |
 |-------|-----------------------------|----------------|-----------|
-| `review_id`, `created_at`, `status`, `confidence_state` | No | Internal | Indefinite (audit) |
+| `review_id`, `created_at`, `status`, `confidence_state`, `confidence_band` (issue #96 — the non-`OK` mirror of `confidence_state`, written onto the row by `pipeline_runner._write_real_terminal` and projected by `get_review_detail` as the pre-download trust-calibration label; a bare enum token, absent rather than null on an `OK` review, and per Option B never an input to `status`) | No | Internal | Indefinite (audit) |
 | `quarantine_reason`, `quarantine_bundle_hash`, `superseded_by` — **post-terminal administrative overlay fields** written by rollback sweeps or manual GC actions when `status` is promoted to `QUARANTINED` or `SUPERSEDED` (see [ARCHITECTURE.md](../ARCHITECTURE.md) — QUARANTINED/SUPERSEDED are *not* pipeline-derived from `confidence_state`; they are administrative overlays applied after the pipeline has already settled a terminal status) | No | Internal | Indefinite (audit) |
 | `owner_sub`, `access_scope`, `idempotency_key`, `submission_status`, `execution_arn` | No | Internal | Indefinite (audit) |
 | `playbook_id` (which playbook this review ran against; defaults to `eiaa`; required for multi-playbook retrieval filtering and rollback scoping) | No | Internal | Indefinite (audit) |

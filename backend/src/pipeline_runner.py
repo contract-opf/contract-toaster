@@ -1229,6 +1229,22 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     if result.get("critic_attempts") is not None:
         set_clauses.append("critic_attempts = :ca")
         values[":ca"] = result["critic_attempts"]
+    # Issue #96 (Option B): the merged confidence band
+    # (scripts/reconciliation.py's critic-delta merge rule), written onto
+    # the ROW because `backend/src/reviews.py::get_review_detail` projects
+    # `confidence_band` straight off `item.get("confidence_band")` -- unlike
+    # `critic_delta`/`findings`, which live only in the analysis artifact
+    # (see that function's own docstring), `confidence_band` has always been
+    # read off the row, so a row this function never wrote was the reason
+    # the field was always None on a real review. Same "absent, never a
+    # null placeholder" convention as `critic_attempts` above: `run_review`
+    # sets this key to a real string only when the merged `confidence_state`
+    # is not `OK`. Writing it changes nothing about `terminal`/`status`
+    # above -- Option B is that a completed review is DONE regardless of its
+    # confidence band; this SET clause is purely informational.
+    if result.get("confidence_band") is not None:
+        set_clauses.append("confidence_band = :cb")
+        values[":cb"] = result["confidence_band"]
     # Issue #616: which leakage detector blocked this review. Written onto
     # the ROW (not just the analysis artifact) because the admin Diagnostics
     # route reads the row and nothing else -- `backend/src/reviews.py::
