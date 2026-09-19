@@ -58,6 +58,9 @@ For each revision attached to a paragraph:
   |                    |                          | see "Comments never gate" below                    |
   | hidden_text        | n/a                      | STRIP -- never reaches the clean body              |
   | field               | n/a                     | RESOLVE -- replaced by its literal `field_result`  |
+  | paragraph_mark     | unresolved               | DISCLOSE ONLY -- the proposed paragraph merge or  |
+  |                    | (`operation` is          | split is recorded in a normalization note and      |
+  |                    | `deleted` or `inserted`) | applied NOWHERE; no text changes (issue #113)      |
 
 A pending tracked change is "AMBIGUOUS" (still fails closed) when the
 following remains true. Issue #563 narrowed this from four conditions to
@@ -117,6 +120,40 @@ this: it already drops a physical paragraph whose clean text is empty from
 `text`/`physical_spans`/`physical_p_indexes` (see its docstring, "A physical
 paragraph whose own clean text is empty"), which is the structured-path
 equivalent of the `clean_body` omission above.
+
+### Tracked paragraph marks (issue #113)
+
+Word records "merge this paragraph with the next one" as a DELETED paragraph
+mark and "split this paragraph in two" as an INSERTED one --
+`<w:pPr><w:rPr><w:del/></w:rPr></w:pPr>` and its `<w:ins/>` twin. The marker
+wraps no run, so it changes neither text stream the extractor builds, and
+before issue #113 it produced no revision record here at all: the proposal
+was accepted in complete silence -- stripped from the materialized bytes by
+`extraction_normalization_stage._splice_accept_all` without the `<w:p>`
+siblings ever being merged or split, and mentioned nowhere the attorney
+could see it. That is precisely the "never silent" guarantee ARCHITECTURE.md
+attaches to the accept-all path.
+
+`extraction_normalization_stage._paragraph_mark_revisions` now emits a
+`paragraph_mark` record for each one, and the disposition here is DISCLOSE
+ONLY: a note naming the proposal and stating that it is not applied.
+`clean_text` is untouched, `deleted_in_full` is unaffected, and no paragraph
+is joined or divided -- so this changes what the attorney is TOLD, never
+what the model reads or what the delivered redline contains. The note is
+appended AFTER whatever note the paragraph's own content revisions produced
+and, like the `accepted`-status branch, deliberately does NOT end with the
+`accepted-all into the operative draft.` tail: nothing was accepted into the
+operative text, and `frontend/src/toaster/receipt.ts`'s
+`acceptedChangesSummary` counts that tail to decide whether its structured
+parse saw every accepted edit -- a sentence carrying the tail but not its
+`Paragraph 'X': ...` shape would make that check fail and drop the
+attorney's whole pending-edit summary line.
+
+An `operation` that is neither `deleted` nor `inserted` fails the document
+closed, exactly like an unknown tracked_change `status` above and for the
+same reason: there is no documented disposition to apply. Like that branch,
+it is unreachable from the OOXML extractor (which only ever writes the two
+known values) and exists for the hand-built `normalize()` entry point.
 
 ### Multi-cluster / multi-author acceptance (issue #563)
 
@@ -317,6 +354,19 @@ CONTROL_CHARACTER_NOTE_PREFIX = "Suspicious control characters in extracted"
 # to explain itself to the reader.
 REASON_DETAIL_SUSPICIOUS_CONTROL_CHARACTERS = "suspicious_control_characters"
 
+# Issue #113. The two documented `operation` values a `paragraph_mark`
+# revision can carry (`extraction_normalization_stage.
+# _PARAGRAPH_MARK_OPERATIONS` is the only producer), and the prose each one
+# turns into. Split in two so the note names BOTH what the markup is
+# (a deletion / an insertion of the paragraph mark) and what it PROPOSES
+# (a merge / a split) -- a reader who knows neither Word's representation
+# nor the jargon can still tell what the counterparty asked for.
+_PARAGRAPH_MARK_OPERATION_WORDS = {"deleted": "deletion", "inserted": "insertion"}
+_PARAGRAPH_MARK_PROPOSALS = {
+    "deleted": "merging this paragraph with the one that follows it",
+    "inserted": "splitting this paragraph into two",
+}
+
 
 def find_suspicious_control_characters(text: str) -> list[int]:
     """
@@ -391,6 +441,12 @@ def _normalize_paragraph(paragraph: dict) -> dict:
     clean_text = paragraph.get("text", "")
 
     pending_tracked_changes = []  # unresolved/rejected tracked_change revisions
+    # Issue #113. Disclosure-only records (see the module docstring,
+    # "Tracked paragraph marks"): each produces one sentence appended to
+    # whatever note this paragraph otherwise carries, and influences no
+    # text, no `deleted_in_full`, and no fail-closed decision except its own
+    # unknown-`operation` guard below.
+    paragraph_mark_notes: list[str] = []
     # Set by the `accepted` branch below when the accepted revision's
     # resulting_text is present-and-empty (issue #93). Deliberately NOT
     # conflated with "clean_text happens to be empty": a paragraph that was
@@ -447,6 +503,27 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             # its content. It is not surfaced as if it were visible text.
             continue
 
+        elif rev_type == "paragraph_mark":
+            # Issue #113. DISCLOSE ONLY -- see the module docstring.
+            operation = rev.get("operation")
+            if operation not in _PARAGRAPH_MARK_PROPOSALS:
+                return {
+                    "normalizable": False,
+                    "note": (
+                        f"Paragraph '{heading}': tracked paragraph mark has "
+                        f"unknown operation '{operation}' -- no documented "
+                        f"disposition; cannot safely normalize."
+                    ),
+                }
+            paragraph_mark_notes.append(
+                f"Paragraph '{heading}': a pending tracked paragraph-mark "
+                f"{_PARAGRAPH_MARK_OPERATION_WORDS[operation]} "
+                f"(author: {rev.get('author', 'unknown')}) proposes "
+                f"{_PARAGRAPH_MARK_PROPOSALS[operation]}; it is disclosed but "
+                f"not applied -- the paragraph structure of the operative "
+                f"draft and of the delivered redline is unchanged."
+            )
+
         elif rev_type == "field":
             # RESOLVE: a field's literal result is folded into clause text
             # (the field CODE itself -- e.g. "{ REF ... }" -- is discarded;
@@ -465,6 +542,22 @@ def _normalize_paragraph(paragraph: dict) -> dict:
                 ),
             }
 
+    def _disclose_paragraph_marks(result: dict) -> dict:
+        """Appends issue #113's disclosure sentence(s) to a NORMALIZABLE
+        result's note, creating the note when the paragraph had none.
+        Applied to every normalizable return below and to none of the
+        fail-closed ones: a document that fails closed already reports the
+        failure, and a paragraph-mark sentence cannot be read as a
+        disposition for a paragraph that got none. Appended LAST so the
+        accept-all sentence keeps first position -- it is the one
+        `frontend/src/toaster/receipt.ts::acceptedChangesSummary` parses."""
+        if not paragraph_mark_notes:
+            return result
+        appended = " ".join(paragraph_mark_notes)
+        existing = result.get("note")
+        result["note"] = f"{existing} {appended}" if existing else appended
+        return result
+
     if not pending_tracked_changes:
         # Control-character screen on the operative text (issue #632) --
         # every fail-closed branch in this module documents itself; this one
@@ -480,17 +573,19 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             # that ends up with text is not a deleted one. No accept-all tail
             # here -- this is not an accept-all disposition, and
             # `acceptedChangesSummary` must not count it as a pending edit.
-            return {
-                "normalizable": True,
-                "clean_text": "",
-                "deleted_in_full": True,
-                "note": (
-                    f"Paragraph '{heading}': tracked change marked "
-                    f"'accepted' strikes the paragraph in full; the "
-                    f"struck paragraph is omitted from the operative draft."
-                ),
-            }
-        return {"normalizable": True, "clean_text": clean_text}
+            return _disclose_paragraph_marks(
+                {
+                    "normalizable": True,
+                    "clean_text": "",
+                    "deleted_in_full": True,
+                    "note": (
+                        f"Paragraph '{heading}': tracked change marked "
+                        f"'accepted' strikes the paragraph in full; the "
+                        f"struck paragraph is omitted from the operative draft."
+                    ),
+                }
+            )
+        return _disclose_paragraph_marks({"normalizable": True, "clean_text": clean_text})
 
     # --- Pending tracked change(s): accept-all unless genuinely ambiguous ---
     #
@@ -644,14 +739,18 @@ def _normalize_paragraph(paragraph: dict) -> dict:
         # `clean_body` omission -- not this note's wording -- is what makes
         # the clause-level claim there.)
         note += " The struck paragraph is omitted from the operative draft."
-        return {
-            "normalizable": True,
-            "clean_text": "",
-            "deleted_in_full": True,
-            "note": note,
-        }
+        return _disclose_paragraph_marks(
+            {
+                "normalizable": True,
+                "clean_text": "",
+                "deleted_in_full": True,
+                "note": note,
+            }
+        )
 
-    return {"normalizable": True, "clean_text": clean_text, "note": note}
+    return _disclose_paragraph_marks(
+        {"normalizable": True, "clean_text": clean_text, "note": note}
+    )
 
 
 def normalize(document: dict) -> dict:
