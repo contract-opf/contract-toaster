@@ -294,7 +294,17 @@ def _process_fld_simple(fld_el: ET.Element, builder: _ParaBuilder) -> None:
     counterparty is live-editing the field's displayed text), that is the
     documented `inside_field_code` ambiguity -- no `field` revision is
     emitted (there is no static result to resolve); the pending change
-    bubbles up as an ordinary cluster with `inside_field_code=True`."""
+    bubbles up as an ordinary cluster with `inside_field_code=True`, plus
+    `field_resulting_text` -- THIS field's own accept-all display text
+    (issue #99), which is what the disposition note names.
+
+    `field_resulting_text` exists because the paragraph-level
+    `resulting_text` `_build_paragraph_record` stamps on every cluster is
+    the WHOLE paragraph's accept-all text: the right value to fold into the
+    operative draft, but a false answer to "what does the field now
+    resolve to" for any field that sits inside a longer sentence. The two
+    coincide only when the field IS the entire paragraph, which is why the
+    difference stayed invisible for so long."""
     instr = (fld_el.get(_w("instr")) or "").strip()
 
     field_builder = _ParaBuilder()
@@ -305,6 +315,23 @@ def _process_fld_simple(fld_el: ET.Element, builder: _ParaBuilder) -> None:
     builder.has_comment = builder.has_comment or field_builder.has_comment
 
     if field_builder.clusters:
+        # Issue #99. `.strip()`ped to match the paragraph-level
+        # `resulting_text` convention -- the field's DISPLAYED result is its
+        # own literal text, and whatever spacing separates it from the
+        # surrounding sentence is not part of it. Stamped on every cluster
+        # the field's result region produced (two authors editing one
+        # field's text back-to-back are two clusters, one field), so
+        # `normalize_input._normalize_paragraph` can read it off whichever
+        # cluster it is looking at.
+        #
+        # Text-space output is deliberately UNCHANGED here: only this new
+        # key is added. `original_parts` / `resulting_parts` -- and so the
+        # paragraph `text` that `clause_boundaries.is_boundary_paragraph`
+        # segments on and `redline_block_apply._resolve_physical_paragraphs`
+        # matches against -- are extended exactly as before.
+        field_resulting_text = "".join(field_builder.resulting_parts).strip()
+        for cluster in field_builder.clusters:
+            cluster["field_resulting_text"] = field_resulting_text
         builder.clusters.extend(field_builder.clusters)
         builder.original_parts.extend(field_builder.original_parts)
         builder.resulting_parts.extend(field_builder.resulting_parts)
@@ -489,6 +516,15 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
         }
         if cluster.get("inside_field_code"):
             entry["inside_field_code"] = True
+            # Issue #99. THIS field's own resolved display text, as distinct
+            # from the paragraph-level `resulting_text` stamped above. Every
+            # `inside_field_code` cluster originates in `_process_fld_simple`
+            # (the `inside_field_code=True` walk happens nowhere else), so in
+            # practice the key is always present here; the membership test
+            # keeps the record shape honest rather than inventing an empty
+            # field result for a cluster that never carried one.
+            if "field_resulting_text" in cluster:
+                entry["field_resulting_text"] = cluster["field_resulting_text"]
         revisions.append(entry)
 
     if builder.has_comment:

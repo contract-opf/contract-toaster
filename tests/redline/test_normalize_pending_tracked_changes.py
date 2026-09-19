@@ -234,10 +234,26 @@ def main():
             "be recorded in normalization_notes, never silent. Got no "
             f"notes. Full result: {field_code_result}"
         )
-    if field_code_notes and "New York" not in field_code_notes:
+    if field_code_notes and "resolves to 'New York'" not in field_code_notes:
         failures.append(
             f"[FIELD-CODE MUST-NORMALIZE 5] normalization_notes must name "
-            f"what the field resolved to. Got: {field_code_notes!r}"
+            f"what the FIELD resolved to. Got: {field_code_notes!r}"
+        )
+    # Issue #99. MUST-NORMALIZE 5 used to read `"New York" not in notes`,
+    # which a note quoting the WHOLE PARAGRAPH satisfies just as well --
+    # "New York" is a substring of the paragraph's accept-all text. It could
+    # not have caught this bug anyway on the old fixture, whose record set
+    # `resulting_text` to the bare field text: the paragraph WAS the field,
+    # so the right and wrong values were the same string. The fixture now
+    # carries the real extractor's shape (a field inside a longer sentence),
+    # 5 pins the closing quote immediately after the field's own text, and
+    # this names the failure directly -- the surrounding clause prose must
+    # never be quoted back as though it were the field's value.
+    if "governed by the laws of" in field_code_notes:
+        failures.append(
+            f"[FIELD-CODE MUST-NORMALIZE 6] normalization_notes quoted the "
+            f"whole paragraph's clause text as if it were the field's "
+            f"resolved value. Got: {field_code_notes!r}"
         )
 
     # =========================================================================

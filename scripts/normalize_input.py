@@ -159,15 +159,35 @@ reasoning did not survive contact with how the extractor actually resolves
 one: `extraction_normalization_stage._process_fld_simple` bubbles a pending
 change inside a field's result region up as an ORDINARY pending-revision
 cluster (`inside_field_code=True` is a flag on that cluster, not a
-different revision shape), and that cluster's `resulting_text` is already
-the field's own resolved display text -- exactly the value accept-all
-already knows how to fold into the operative draft for any other pending
-revision. There is no separate "which field result wins" decision left to
-make; the field code case resolves the SAME way an ordinary pending change
-does, and is disclosed explicitly (naming the field's resolved text, not
-folded silently into the generic accept-all note) because "which field
-result is operative" was the exact question this branch used to refuse to
-answer.
+different revision shape), whose `resulting_text` is the same
+whole-paragraph accept-all text every other cluster on that paragraph
+carries -- exactly the value accept-all already knows how to fold into the
+operative draft for any other pending revision. There is no separate
+"which field result wins" decision left to make; the field code case
+resolves the SAME way an ordinary pending change does, and is disclosed
+explicitly (naming the field's resolved text, not folded silently into the
+generic accept-all note) because "which field result is operative" was the
+exact question this branch used to refuse to answer.
+
+Issue #99 corrected what that disclosure quotes. This section used to say
+the cluster's `resulting_text` "is already the field's own resolved display
+text", and the note quoted it on that basis. It is not: `resulting_text` is
+the WHOLE PARAGRAPH's accept-all text, and the two coincide only when the
+field is the entire paragraph -- the shape every fixture written for #530
+happened to use. A DATE field resolving to `Feb 1` in the middle of a
+sentence was therefore reported as resolving to that whole sentence. The
+extractor now stamps the field's OWN accept-all display text on each such
+cluster as `field_resulting_text`, and the note quotes that:
+
+  | Key                    | Scope                                        |
+  |------------------------|----------------------------------------------|
+  | `resulting_text`       | the whole paragraph -- the operative text     |
+  | `field_resulting_text` | this field alone -- what the note quotes      |
+
+A record whose `field_resulting_text` is absent (a hand-built dict reaching
+the `normalize()` entry point; the OOXML extractor always stamps one) or
+empty gets the disposition sentence with no quoted value, rather than a
+quoted value that is not the field's.
 
 The one condition this does NOT touch is a malformed record with NO
 `resulting_text` KEY -- there being no text at all is a different problem than
@@ -543,11 +563,51 @@ def _normalize_paragraph(paragraph: dict) -> dict:
             f"Paragraph '{heading}': pending tracked change inside a field "
             f"code accepted-all into the operative draft."
         )
-        if not deleted_in_full:
-            # The deleted-in-full sentence below replaces this one: "the
-            # field now resolves to ''" reads as a parse failure, when what
-            # actually happened is that the whole paragraph was struck.
-            note += f" The field now resolves to '{resulting_text}'."
+        # ISSUE #99. That second sentence quotes the FIELD's own resolved
+        # display text (`field_resulting_text`) and never `resulting_text`,
+        # which is the WHOLE PARAGRAPH's accept-all text -- the same
+        # paragraph-level value
+        # `extraction_normalization_stage._build_paragraph_record` stamps on
+        # every cluster the paragraph carries. A DATE field resolving to
+        # "Feb 1" inside a longer sentence was reported as resolving to that
+        # entire sentence: a false statement about the one question this
+        # branch exists to answer. The two values coincide only when the
+        # field IS the whole paragraph, which is why every fixture written
+        # for issue #530 stayed green over the bug.
+        #
+        # Distinct values, in document order: ONE paragraph can carry
+        # pending edits in MORE THAN ONE field (two `<w:fldSimple>`s, each
+        # under its own live edit), and each field's cluster carries that
+        # field's own text. Deduplicated because several clusters inside a
+        # SINGLE field (two authors editing its result back-to-back) all
+        # carry that one field's text, and repeating it would claim more
+        # fields than the paragraph has.
+        field_texts: list[str] = []
+        for field_rev in inside_field_code:
+            field_text = field_rev.get("field_resulting_text")
+            # Empty and absent are both dropped rather than quoted, and for
+            # the same reason issue #93 gave for a struck paragraph: "the
+            # field now resolves to ''" reads as a parse failure rather than
+            # as the struck field result it is. Absent means a hand-built
+            # record from the `normalize()` entry point that never said what
+            # the field resolved to (the OOXML extractor always stamps one)
+            # -- so this says nothing rather than something false. The FIRST
+            # sentence still discloses the disposition either way; a
+            # field-code accept-all is never silent.
+            if isinstance(field_text, str) and field_text and field_text not in field_texts:
+                field_texts.append(field_text)
+        if field_texts and not deleted_in_full:
+            # The deleted-in-full sentence below replaces this one: naming
+            # what a field resolves to contradicts "the struck paragraph is
+            # omitted from the operative draft" in the very next sentence.
+            quoted = [f"'{text}'" for text in field_texts]
+            if len(quoted) == 1:
+                note += f" The field now resolves to {quoted[0]}."
+            else:
+                note += (
+                    f" The fields now resolve to "
+                    f"{', '.join(quoted[:-1])} and {quoted[-1]}."
+                )
     elif len(pending_tracked_changes) > 1:
         authors = {rev.get("author") for rev in pending_tracked_changes}
         note = (
