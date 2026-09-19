@@ -259,9 +259,12 @@ jobs:
         working-directory: frontend
 
       - name: Run the frontend gate (GATE E)
-        # tsc + production vite build + the vitest component suite + the three
-        # CTDS audits (contrast, focus/reduced-motion, layout). Fully offline
-        # once node_modules is installed: jsdom, no AWS, no network.
+        # A pinned-npm lockfile validation (issue #112), then tsc + production
+        # vite build + the vitest component suite + the three CTDS audits
+        # (contrast, focus/reduced-motion, layout). No AWS, no Cognito. Not
+        # fully offline: the lockfile-validation step fetches `npm@10.8.2`
+        # via `npx`, the same npm registry reachability the `npm ci` step
+        # above already required.
         run: bash scripts/check-frontend.sh
 
   # ---------------------------------------------------------------------------

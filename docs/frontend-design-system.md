@@ -126,6 +126,28 @@ node:20-slim npm install --package-lock-only` is equivalent.) Either way
 the result is a small additive diff. A 500-line lockfile diff means you
 did it wrong.
 
+**The gate checks this for you now (issue #112) — this section is no longer
+the only guard.** `scripts/check-frontend.sh` starts with the third command
+above plus `--dry-run`, run *unconditionally* — above the script's
+`if [ ! -d node_modules ]` install step, so it runs on a dev machine that
+already has `node_modules` too. Until #112 it did not, which is how an
+npm-11 lockfile rewrite passed locally and killed the CI frontend job at
+install (2026-09, `ef1a0fc`). `--dry-run` resolves and validates without
+writing `node_modules`, so it costs seconds. Two limits: it validates for
+the platform it runs on, so an entry missing only for another platform
+(that incident's `@esbuild/linux-x64`) still needs CI's own linux `npm ci`
+to catch; and it is the one part of that gate that needs the network (§10).
+`frontend/.npmrc` sets `engine-strict=true`, making `package.json`'s
+`engines` floor (`node ^20.19.0 || ^22.13.0 || >=24.0.0` — the intersection
+the non-optional tree actually requires, read off `package-lock.json`, not a
+round `>=20`: `jsdom` states exactly that range and is the binding one,
+`eslint-visitor-keys` matches it, and `vitest`, `@csstools/*` and
+`whatwg-url` are looser; `npm >=10.8.2`) an error on a local
+or CI `npm ci` rather than a warning. It is NOT enforced on the Docker build
+in §3.3's own header: `deploy/dts/frontend.Dockerfile` copies only
+`package.json` and `package-lock.json` before its `npm ci`, so `.npmrc` —
+and engine-strict with it — never reaches that build.
+
 ### 3.4 Behavioral invariants locked by tests
 - **All tabpanels stay mounted**, toggled via the `hidden` attribute —
   never conditionally unmount (`security-posture.test.tsx` +
@@ -524,10 +546,14 @@ first time someone re-added a static import at the top of `App.tsx`.
   cases when extracted).
 - Migration issues run the **existing** suite untouched as their
   regression gate — that is the point of preserving testids/roles.
-- Gates: `bash scripts/check-frontend.sh` (tsc + vite build, the shipped-JS
-  bundle budget of §9, vitest, and the contrast/focus/layout audits) and
+- Gates: `bash scripts/check-frontend.sh` (the pinned-npm lockfile
+  validation of §3.3, then tsc + vite build, the shipped-JS bundle budget of
+  §9, vitest, and the contrast/focus/layout audits) and
   `.venv/bin/python tests/test_frontend_xss_posture.py` (source-posture
-  greps). Both offline.
+  greps). The second is offline. The first no longer is, as of issue #112:
+  its opening step runs `npx npm@10.8.2 ci … --dry-run`, which needs the npm
+  registry to fetch that pinned npm on a cold `npx` cache. Every step after
+  it is offline — no AWS, no Cognito, jsdom only.
 - The first of those runs automatically as **CI GATE E** in
   `.github/workflows/ci-pipeline.yml` on every PR and every push to `main`
   (issue #634). Before that job existed nothing ran the frontend suite at

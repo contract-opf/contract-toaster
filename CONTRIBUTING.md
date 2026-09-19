@@ -43,7 +43,15 @@ refuses a direct push to `main`. It is deliberately opt-in — no gate and no
 npm lifecycle script installs it, so a clean checkout keeps git's default
 hooks. Undo with `bash scripts/setup-hooks.sh --uninstall`.
 
-Verified on Node 26.7 / npm 11.19; nothing here pins a Node version yet.
+Verified on Node 26.7 / npm 11.19. `frontend/package.json`'s `engines` block
+(`node ^20.19.0 || ^22.13.0 || >=24.0.0` — the intersection the dependency
+tree itself requires, not a round `>=20`; `npm >=10.8.2`) plus
+`frontend/.npmrc`'s `engine-strict=true` make that floor a hard error on a
+local or CI `npm ci`, not a warning (issue #112). The shipping Docker build
+(`deploy/dts/frontend.Dockerfile`) copies only `package.json` and
+`package-lock.json` before its `npm ci`, so `.npmrc` — and engine-strict —
+does not apply there; that build's `node:20-slim` floor is enforced only by
+whatever Node patch the image resolves to, not by this mechanism.
 
 ## The gates
 
