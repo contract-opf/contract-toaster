@@ -457,17 +457,55 @@ export function pollIntervalFor(ageMs: number): number {
 }
 
 /**
+ * A review row's `created_at` as epoch milliseconds, or `NaN` when it is
+ * neither shape this accepts.
+ *
+ * The shape production sends is a STRING OF EPOCH SECONDS, and only that:
+ * `_create_review_row` writes `str(int(time.time()))`
+ * (backend/src/reviews.py), `get_review_detail` projects it verbatim and
+ * `get_review` returns it unchanged, so a real poll receives e.g.
+ * `"1789052400"` — on which `Date.parse` returns NaN. Handing that to the
+ * date parser is what made the server anchor dead code on this route
+ * (issue #122): it silently lost every time and the cadence and give-up
+ * windows were in fact always measured from first sight. The rest of this
+ * frontend already reads the field as epoch seconds — `formatFailureTime`
+ * (AdminDiagnostics.tsx), `toastedIn` (toaster/receipt.ts),
+ * AdminRetention's `Number(b.created_at ?? 0)` sort.
+ *
+ * ISO-8601 still parses, for any caller that hands this an actual date
+ * string; it is not a shape this route produces.
+ */
+function createdAtMs(createdAt: string | null | undefined): number {
+  if (!createdAt) {
+    return Number.NaN;
+  }
+  // An all-digits value is the epoch-seconds shape and is never handed to
+  // `Date.parse` afterwards: that parser's answer for a bare number string
+  // is implementation-defined junk either way ("1789052400" is NaN, "0" is
+  // a date in 1996). The regex, rather than a bare `Number()`, is what
+  // keeps a blank-ish or partly numeric value out of this branch — such a
+  // value falls through to the date parser and then to the first-sight
+  // fallback, instead of becoming a 1970 anchor that would read as an
+  // infinitely old review and make the very first 404 terminal.
+  if (/^\d+$/.test(createdAt)) {
+    return Number(createdAt) * 1000;
+  }
+  return Date.parse(createdAt);
+}
+
+/**
  * How old the review is, for cadence purposes. The server's `created_at`
  * is the anchor whenever it parses and is not in the future (a skewed
  * client clock must not stretch the fast phase); otherwise the moment this
- * client first started polling the review.
+ * client first started polling the review. See `createdAtMs` for the shape
+ * the server actually sends.
  */
 export function reviewAgeMs(
   createdAt: string | null | undefined,
   firstSeenAt: number,
   now: number,
 ): number {
-  const created = createdAt ? Date.parse(createdAt) : Number.NaN;
+  const created = createdAtMs(createdAt);
   if (Number.isFinite(created) && now >= created) {
     return now - created;
   }
@@ -488,7 +526,110 @@ export function nextPollDelayMs(ageMs: number, attempt: number): number {
   return Math.min(Math.max(cadence, POLL_INTERVAL_MS * 2 ** (attempt - 1)), POLL_BACKOFF_MAX_MS);
 }
 
+// Issue #122. Not every non-2xx poll response is a network blip that clears
+// on its own, but which ones are terminal, and when, differs per status.
+//
+// The rule below is the OWNER'S DECISION from the issue's un-parking
+// comments (2026-09-16, as amended 2026-09-17 — the amendment supersedes
+// the earlier comment where the two differ), not a guess. Verbatim: "404
+// persisting past the grace window and 410 are terminal; 403 stays
+// transient with backoff … 429 backs off, never terminates."
+//
+// 404 gets a GRACE WINDOW, not instant termination. `get_review_detail`
+// (backend/src/reviews.py) does a bare `table.get_item` with no
+// `ConsistentRead` and 404s when the item is absent — and the row is
+// written by the SAME POST that hands this client the id
+// (`_create_review_row`'s `put_item`, `post_review` returning immediately
+// after). The first poll fires with zero delay, so a 404 milliseconds after
+// submit is DynamoDB's ordinary eventual-consistency window, not a review
+// that is actually gone. `POLL_404_GRACE_MS` is a wide margin over that
+// window (single-digit seconds in practice) measured against the review's
+// own age (`reviewAgeMs` — the server's `created_at` once a poll has
+// returned one, otherwise the moment this client started polling, which is
+// within one HTTP round trip of the real write). That anchor is load-
+// bearing here in a way it was not for cadence alone, because it decides a
+// TERMINAL outcome: it is why `createdAtMs` parses the epoch-seconds string
+// the reviews row actually stores rather than assuming an ISO date, and why
+// `poll-gives-up-122.test.tsx` serves that exact shape. Only a 404 seen
+// AFTER the grace window has elapsed is terminal — every earlier one stays
+// on the existing transient path
+// (`STILL_CHECKING_COPY`, capped backoff), so a healthy review mid-write
+// never gets killed by its own poll.
+//
+// A flat 60 s window was chosen over counting N consecutive 404s: this
+// route's own backoff ladder (`nextPollDelayMs`) already stretches the gap
+// between polls as failures accumulate, so a fixed attempt count would mean
+// a wildly different real-world grace period depending on when the 404s
+// started (a few seconds' worth in the fast phase, a couple of minutes'
+// worth once backoff has capped) — an artifact of the retry schedule, not
+// of DynamoDB's actual consistency window. Anchoring on age instead keeps
+// the grace period meaning the same thing regardless of how the backoff
+// ladder happened to space out the polls that hit it, and it reuses
+// `ageNow()`, which this effect already computes for every poll rather than
+// adding a second, parallel counter.
+export const POLL_404_GRACE_MS = 60_000;
+
+// 410 is terminal AT ONCE — no grace window — per the owner's un-parking
+// decision. It has no producer on THIS route today (`get_review_detail`
+// never raises it — see that function's own docstring; the `/output` and
+// `/input` routes' retention-purge 410 is a different endpoint entirely),
+// so the branch stands ready for the day a row-retention path is added
+// here.
+//
+// 403 is NOT terminal — it "stays transient with backoff", per the
+// 2026-09-17 amendment to that decision. The 2026-09-16 comment had said
+// "403 and 410 are terminal at once"; the amendment replaces the 403 half
+// after the reviewer checked the evidence below and accepted it, so this is
+// the owner's ruling and not a ticket exempting itself from one. The
+// superseded clause's premise — the issue body's "403 (ownership changed
+// / session lost)" — is false on this route. `get_review_detail`'s own
+// docstring says a non-owner, non-admin caller gets "the SAME HTTP 404 as a
+// review_id that does not exist at all -- never a 403"
+// (backend/src/reviews.py), and every 403 in `backend/src` belongs to
+// `/output`, `/input`, `/disposition` or an admin route. The ONLY producer
+// of a 403 on GET /api/reviews/{id} is WAF rule `RateLimitPollingEndpoint`
+// (infra/lib/nested/waf-stack.ts: `action: { block: {} }` with no
+// `customResponse`, so the browser sees WAFv2's default block response,
+// HTTP 403), and that block lifts on its own once the rule's 5-minute
+// window rolls over — the WAF rule's own comment notes only "about five
+// concurrent reviews behind one egress IP fit", so one firm behind a NAT
+// trips it routinely. That is precisely the case the issue body names as
+// "a 429 from the WAF GET budget (#88)", which the same decision rules
+// "429 backs off, never terminates". Terminating would stop polling a
+// review that is still running and still billing, wipe its resume key so a
+// reload cannot reattach, and invite a duplicate submit and a second spend
+// — which is why the amendment lands 403 on the transient side. If a
+// permanent 403 producer is ever added to this route, that is a new owner
+// decision on #122, not a change to make here unilaterally.
+//
+// 429 likewise gets no branch at all and stays on the generic transient
+// path forever (same as any unclassified status): nothing outside tests can
+// produce one on this GET — every 429 in `backend/src` belongs to a POST
+// path — and the owner's decision says explicitly it must never terminate.
+export type PollFailureOutcome =
+  | { readonly kind: 'transient' }
+  | { readonly kind: 'terminal' };
+
+export function classifyPollFailure(status: number, ageMs: number): PollFailureOutcome {
+  if (status === 404) {
+    return ageMs > POLL_404_GRACE_MS ? { kind: 'terminal' } : { kind: 'transient' };
+  }
+  if (status === 410) {
+    return { kind: 'terminal' };
+  }
+  return { kind: 'transient' };
+}
+
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
+
+// Issue #122. Deliberately generic: the two statuses that reach it — a 404
+// still 404ing past the grace window (the row is purged, or was never this
+// caller's) and a 410 — do not mean the same thing, and neither is safe to
+// spell out without either leaking a raw HTTP status (the rule at
+// frontend/src/api.ts's `friendlyErrorMessage`) or asserting a specific
+// cause that is not always true.
+const POLL_GAVE_UP_COPY =
+  "This review's status can no longer be checked here. Reload to start a new review, or check History.";
 
 // Completion-handoff announcements (issue #448). Rendered into a persistent
 // polite live region, so assistive tech is already watching it when the review
@@ -1196,6 +1337,17 @@ export default function ReviewSubmission(): React.ReactElement {
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
+  /**
+   * Issue #122. The TERMINAL poll state, kept apart from `pollError` on
+   * purpose: `pollError` is the transient channel — the console renders it
+   * under "Still checking" with a "Check now" key because the poller is
+   * still retrying behind it. None of that is true once the poll has given
+   * up for good (`classifyPollFailure` returned `terminal`), so a give-up
+   * gets its own message identity (`poll-stopped`) rather than borrowing a
+   * headline that promises a check that is no longer happening. The two are
+   * mutually exclusive — the give-up clears `pollError` as it sets this.
+   */
+  const [pollStopped, setPollStopped] = useState<string | null>(null);
   /**
    * "Check now" (issue #726). The poller already retries on capped
    * exponential backoff, so this is not a second polling implementation — it
@@ -2118,6 +2270,10 @@ export default function ReviewSubmission(): React.ReactElement {
     if (!reviewId) {
       return undefined;
     }
+    // Issue #122: starting a poll loop at all means we are checking again,
+    // so any previous give-up belongs to a review this effect has moved on
+    // from (a new reviewId, or a fresh mount) and must not linger on screen.
+    setPollStopped(null);
 
     let cancelled = false;
     let attempt = 0;
@@ -2131,6 +2287,30 @@ export default function ReviewSubmission(): React.ReactElement {
       try {
         const response = await authorizedFetch(`/api/reviews/${reviewId}`);
         if (!response.ok) {
+          // Issue #122: some non-2xx statuses on this route will never
+          // resolve on a later attempt (see `classifyPollFailure`'s own
+          // comment for exactly which, and why). Those give up here instead
+          // of falling into the generic catch below, which would reschedule
+          // under the misleading "reconnecting" copy forever. Everything
+          // else — 403 and 429 included — falls straight through to the
+          // throw and stays on the existing transient path, unchanged.
+          if (classifyPollFailure(response.status, ageNow()).kind === 'terminal') {
+            if (cancelled) {
+              return;
+            }
+            setPollError(null);
+            setPollStopped(
+              friendlyErrorMessage(
+                new Error(`GET /api/reviews/${reviewId} returned HTTP ${response.status}`),
+                POLL_GAVE_UP_COPY,
+              ),
+            );
+            // Issue #58's reasoning applies here too: nothing about this id
+            // can be resumed once polling has given up on it for good, so a
+            // reload must not try to reattach to it.
+            clearInflightReviewId();
+            return;
+          }
           throw new Error(`GET /api/reviews/${reviewId} returned HTTP ${response.status}`);
         }
         const data = (await response.json()) as ReviewDetail;
@@ -3307,6 +3487,7 @@ export default function ReviewSubmission(): React.ReactElement {
     cancelPending,
     submitError,
     pollError,
+    pollStopped,
     downloadError,
     catalogError,
     notesModeSaveError,

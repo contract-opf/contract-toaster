@@ -231,7 +231,17 @@ export interface ReviewProjectionState {
 
   // --- already-classified copy --------------------------------------------
   submitError?: string | null;
+  /** `pollError` — the TRANSIENT poll channel; the poller is still retrying. */
   pollError?: string | null;
+  /**
+   * `pollStopped` (issue #122) — the poll loop gave up on this review for
+   * good (a 404 still 404ing past its grace window, or a 410 — whatever
+   * `classifyPollFailure` in ReviewSubmission.tsx ruled terminal). A
+   * separate field from `pollError` because the two make opposite promises
+   * to the reader, and one string with two meanings would inevitably be
+   * rendered under one headline. `ReviewSubmission` never sets both at once.
+   */
+  pollStopped?: string | null;
   downloadError?: string | null;
   catalogError?: string | null;
   notesModeSaveError?: string | null;
@@ -577,6 +587,26 @@ function projectMessages(
       detail: state.pollError,
       action: 'poll-retry',
       actionLabel: 'Check now',
+    });
+  }
+  if (state.pollStopped) {
+    push({
+      id: 'poll-stopped',
+      scope: 'poll',
+      // Issue #122. Deliberately NOT `poll-error`'s shape: that message's
+      // whole contract — the "Still checking" headline, the "Check now"
+      // key, and the `status` (not `alert`) role OrbitDiner gives it — is
+      // justified by the poller retrying behind it on its own backoff. Here
+      // it has stopped for good, so the headline names the outcome instead
+      // of promising a check that is not happening, there is no retry key
+      // to offer (this id will not resolve on a later attempt either), and
+      // OrbitDiner's `messageRole` gives it `alert` precisely because it
+      // does not heal itself. `projectStatus` never reads this field: the
+      // review's last-known state stays on screen exactly as it does for
+      // `pollError`.
+      tone: 'error',
+      title: 'Review unavailable',
+      detail: state.pollStopped,
     });
   }
   if (state.catalogError) {

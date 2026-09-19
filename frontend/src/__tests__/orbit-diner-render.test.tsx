@@ -282,10 +282,21 @@ const LONG_LABEL =
   'Mutual Non-Disclosure & Confidentiality Agreement <script>alert(1)</script> ' +
   '(2026 counterparty paper, long-form)';
 
+// The row these cases poll belongs to a review THIS FILE just submitted, so
+// its `created_at` has to be one a just-submitted review could have. It used
+// to be a fixed 2001 epoch, which was invisible only while `reviewAgeMs`
+// (ReviewSubmission.tsx) fed `created_at` to `Date.parse` and got NaN for
+// every row — issue #122 made that anchor read the epoch-seconds string the
+// backend actually writes, so a 2001 timestamp now means a 25-year-old review
+// and puts the poll loop on the 10 s slow cadence, past the `waitFor` budget
+// in `openReceipt` below. Anchored on the run's own clock instead: young
+// enough for the fast phase, and still exactly 192 s from start to finish, so
+// the receipt's "Toasted in" line reads the same as before.
+const DONE_CREATED_AT = Math.floor(Date.now() / 1000);
 const DONE_LINEAGE = {
   decision: 'REQUEST_CHANGE',
-  created_at: '1000000000',
-  updated_at: '1000000192',
+  created_at: String(DONE_CREATED_AT),
+  updated_at: String(DONE_CREATED_AT + 192),
   playbook_id: 'nda',
   playbook_version: '1.0.0',
   instructions_version: 3,

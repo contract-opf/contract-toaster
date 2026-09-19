@@ -51,6 +51,10 @@ import "./orbit.css";
 const MESSAGE_TEST_IDS: Record<string, string | undefined> = {
   "submit-error": "review-submit-error",
   "poll-error": "review-poll-error",
+  // Issue #122. Its own id, not `poll-error`'s: a poll that has GIVEN UP is
+  // not a poll that is still retrying, and the suite has to be able to tell
+  // them apart.
+  "poll-stopped": "review-poll-stopped",
   "catalog-error": "review-catalog-error",
   "preference-error": "review-notes-mode-save-error",
   "cancel-error": "review-cancel-error",
@@ -300,8 +304,13 @@ export function OrbitDiner({
   // tick is the behaviour the ticket forbids. Every other channel keeps the
   // kit's rule — an error, or anything offering a key, is worth interrupting
   // for.
+  //
+  // Keyed on the MESSAGE, not the scope (issue #122): `poll-stopped` shares
+  // the "poll" scope with `poll-error` but is the poller having given up for
+  // good, so #726's whole justification — "heals itself on the next tick" —
+  // is false for it, and it takes the kit's ordinary alert rule instead.
   const messageRole = (message: Message): "alert" | "status" =>
-    message.scope === "poll"
+    message.id === "poll-error"
       ? "status"
       : message.tone === "error" || message.action
         ? "alert"
