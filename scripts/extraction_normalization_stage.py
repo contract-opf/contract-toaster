@@ -177,6 +177,69 @@ def _run_is_hidden(run_el: ET.Element) -> bool:
     return val.lower() not in ("0", "false", "off")
 
 
+#: The two tracked PARAGRAPH-MARK revisions (issue #113), keyed by the tag
+#: Word writes inside `<w:pPr><w:rPr>`, mapped to the `operation` value
+#: `scripts/normalize_input.py::_normalize_paragraph` dispatches on. A
+#: `<w:ins>`/`<w:del>` there does NOT wrap run content -- it marks the
+#: paragraph MARK (the pilcrow) itself as inserted or deleted, which is how
+#: Word records "split this paragraph in two" / "merge this paragraph with
+#: the next one".
+_PARAGRAPH_MARK_OPERATIONS = {_w("del"): "deleted", _w("ins"): "inserted"}
+
+
+def _paragraph_mark_revisions(p_el: ET.Element) -> list[dict[str, Any]]:
+    """Every pending tracked PARAGRAPH-MARK revision on `p_el`, as
+    `{"type": "paragraph_mark", "status", "operation", "author"}` records
+    (issue #113).
+
+    Word records a proposed paragraph MERGE as `<w:pPr><w:rPr><w:del/>
+    </w:rPr></w:pPr>` (the paragraph mark is struck, so this `<w:p>` runs
+    on into the next one) and a proposed SPLIT as the same shape with
+    `<w:ins/>`. Neither wraps any run, so `_walk_content` -- which walks
+    only `list(p_el)`'s run-level content and never descends into `w:pPr`
+    at all -- produces no cluster for it and neither text stream changes.
+    Before this issue that meant the proposal reached the attorney NOWHERE:
+    no cluster, no note, and `_splice_accept_all` stripped the marker in
+    byte space (tallied indistinguishably as a plain `del`/`ins`) without
+    ever merging or splitting the `<w:p>` siblings it named. A revision
+    accepted with no disclosure at all is exactly what ARCHITECTURE.md's
+    accept-all contract ("never silent") forbids.
+
+    These records are therefore DISCLOSURE-ONLY: `_normalize_paragraph`
+    turns each into a normalization note and changes no text, because the
+    semantics still are not applied on either side (see
+    `_splice_accept_all`'s and `materialize_accept_all_with_report`'s KNOWN
+    LIMITATION sections). Status is always `"unresolved"` for the same
+    reason every other revision this extractor emits is: markup still
+    present in a real `.docx` is by definition pending.
+
+    Only DIRECT `<w:ins>`/`<w:del>` children of the paragraph mark's own
+    `<w:rPr>` count. A `w:rPrChange` sitting beside them is an ordinary
+    tracked FORMATTING change to the pilcrow, already accepted and disclosed
+    by `PROPERTY_CHANGE_TAGS`, and is deliberately not re-reported here.
+    """
+    ppr = p_el.find(_w("pPr"))
+    if ppr is None:
+        return []
+    rpr = ppr.find(_w("rPr"))
+    if rpr is None:
+        return []
+    records: list[dict[str, Any]] = []
+    for child in rpr:
+        operation = _PARAGRAPH_MARK_OPERATIONS.get(child.tag)
+        if operation is None:
+            continue
+        records.append(
+            {
+                "type": "paragraph_mark",
+                "status": "unresolved",
+                "operation": operation,
+                "author": child.get(_w("author")) or "unknown",
+            }
+        )
+    return records
+
+
 class _ParaBuilder:
     """Accumulates a single logical paragraph's dual text streams (pre-edit
     "original" vs. accept-all "resulting"), pending-tracked-change clusters,
@@ -533,6 +596,12 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
         revisions.append({"type": "hidden_text", "status": "n/a"})
     for field in builder.fields:
         revisions.append({"type": "field", "status": "n/a", **field})
+    # Issue #113. A tracked paragraph-mark insertion/deletion lives in
+    # `<w:pPr><w:rPr>`, which `_walk_content` never visits, so it
+    # contributes to NEITHER text stream above -- only to this list, and
+    # only so `_normalize_paragraph` can disclose it. See
+    # `_paragraph_mark_revisions`.
+    revisions.extend(_paragraph_mark_revisions(p_el))
 
     return {
         "text": original_text,
@@ -958,6 +1027,20 @@ _OTHER_REVISION_TAGS = frozenset({"ins", "del", "cellIns", "cellDel", "cellMerge
 
 _WORD_TAG_PREFIX = f"{{{WORD_NS}}}"
 
+#: Issue #113. The tally key `_count_accepted` uses for an accepted
+#: `<w:ins>`/`<w:del>` that sits inside the PARAGRAPH MARK's own
+#: `<w:pPr><w:rPr>` rather than around run content. Deliberately NOT
+#: WordprocessingML local names (there are no such tags), so these keys can
+#: never collide with a name `_unapplied_revision_markup` reports.
+_PARAGRAPH_MARK_TALLY_KEYS = {"del": "paragraphMarkDel", "ins": "paragraphMarkIns"}
+
+#: How `accepted_revision_disclosure` names each of those keys in prose,
+#: singular. Pluralized by appending `"s"` at the call site.
+_PARAGRAPH_MARK_DISCLOSURE_NAMES = {
+    "paragraphMarkDel": "deleted paragraph mark",
+    "paragraphMarkIns": "inserted paragraph mark",
+}
+
 
 def _revision_markup_local_name(tag: str) -> str | None:
     """The WordprocessingML local name of `tag` when it is revision-tracking
@@ -995,7 +1078,9 @@ def _unapplied_revision_markup(root: ET.Element) -> dict[str, int]:
     return counts
 
 
-def _splice_accept_all(el: ET.Element, tally: dict[str, int] | None = None) -> None:
+def _splice_accept_all(
+    el: ET.Element, tally: dict[str, int] | None = None, *, in_paragraph_mark: bool = False
+) -> None:
     """Mutates `el`'s children in place, accepting every pending tracked
     change anywhere under them: each `<w:del>` child is removed ENTIRELY
     (including its own subtree -- a rejected/superseded span never existed
@@ -1059,6 +1144,15 @@ def _splice_accept_all(el: ET.Element, tally: dict[str, int] | None = None) -> N
     surface as a spurious paragraph split in the delivered redline, and
     `tests/test_accept_all_materializer.py` for the fixture pinning this as
     current behavior.
+
+    Since issue #113 that limitation is DISCLOSED rather than silent: the
+    two markers are tallied under their own keys (`_count_accepted`'s
+    `in_paragraph_mark`), which `accepted_revision_disclosure` turns into
+    its own "accepted as markup only" sentence, and the extractor emits a
+    matching per-paragraph `paragraph_mark` revision record
+    (`_paragraph_mark_revisions`) so `normalize_input._normalize_paragraph`
+    names the proposal the counterparty actually made. Nothing about the
+    disposition above changed -- only that it is now reported.
     """
     original_children = list(el)
     for child in original_children:
@@ -1069,25 +1163,55 @@ def _splice_accept_all(el: ET.Element, tally: dict[str, int] | None = None) -> N
             # or moved-from span never existed once accepted, and a
             # `*PrChange`'s subtree is the PREVIOUS properties, which
             # accepting discards.
-            _count_accepted(tally, child.tag)
+            _count_accepted(tally, child.tag, in_paragraph_mark=in_paragraph_mark)
             continue
         if child.tag in _ACCEPT_BY_UNWRAP:
-            _count_accepted(tally, child.tag)
+            _count_accepted(tally, child.tag, in_paragraph_mark=in_paragraph_mark)
+            # A paragraph-mark `<w:ins>` is an EMPTY element, so this
+            # recursion finds nothing there; its default `in_paragraph_mark=
+            # False` is correct regardless, since anything a `<w:ins>` does
+            # wrap is run content, never another paragraph mark.
             _splice_accept_all(child, tally)  # accept nested content FIRST
             for grandchild in list(child):
                 el.append(grandchild)
             continue
-        _splice_accept_all(child, tally)
+        _splice_accept_all(
+            child,
+            tally,
+            # The paragraph mark's OWN run properties (issue #113): a
+            # `<w:ins>`/`<w:del>` one level down is the pilcrow marker, not
+            # a content revision, and must be tallied under its own name so
+            # `accepted_revision_disclosure` can report it.
+            in_paragraph_mark=(el.tag == _w("pPr") and child.tag == _w("rPr")),
+        )
         el.append(child)
 
 
-def _count_accepted(tally: dict[str, int] | None, tag: str) -> None:
+def _count_accepted(
+    tally: dict[str, int] | None, tag: str, *, in_paragraph_mark: bool = False
+) -> None:
     """Records one accepted revision element in `tally`, keyed by local tag
     name (`"rPrChange"`, `"ins"`, ...). A None tally counts nothing -- the
-    disposition itself is identical either way."""
+    disposition itself is identical either way.
+
+    `in_paragraph_mark` (issue #113) retags the two revision kinds whose
+    meaning changes completely inside `<w:pPr><w:rPr>`: a `<w:del>` there
+    is a proposed paragraph MERGE and a `<w:ins>` a proposed SPLIT, not a
+    text deletion or insertion. They are counted under their own keys so
+    `accepted_revision_disclosure` can report them -- as plain `"del"`/
+    `"ins"` they were filtered out of that disclosure as "already covered
+    by the per-paragraph accept-all notes", which for a paragraph mark was
+    false: `_walk_content` never produces a cluster for one, so no
+    per-paragraph note covered it and it was accepted in complete silence.
+    Nothing else about the splice's disposition changes."""
     if tally is None:
         return
     local = tag[len(_WORD_TAG_PREFIX) :] if tag.startswith(_WORD_TAG_PREFIX) else tag
+    if in_paragraph_mark:
+        # Only `ins`/`del` change meaning here. A `w:rPrChange` beside them
+        # is an ordinary formatting change to the pilcrow and keeps its own
+        # name, so it stays in the formatting sentence where it belongs.
+        local = _PARAGRAPH_MARK_TALLY_KEYS.get(local, local)
     tally[local] = tally.get(local, 0) + 1
 
 
@@ -1103,26 +1227,36 @@ def accepted_revision_disclosure(report: dict[str, Any]) -> str | None:
     `materialize_accept_all_with_report` report, or None when there is
     nothing to disclose (issue #685).
 
-    Two independent sentences, either of which may be absent:
+    Three independent sentences, any of which may be absent:
 
       * what was accepted in MARKUP space beyond the `w:ins`/`w:del` text
         revisions `normalize_input`'s own per-paragraph notes already
         disclose -- formatting/property changes and tracked moves, named by
-        kind and count; and
+        kind and count;
+      * what tracked PARAGRAPH-MARK revisions (issue #113) were stripped
+        from the bytes WITHOUT their merge/split semantics being applied --
+        the documented known limitation, now stated rather than left for
+        the attorney to discover by diffing; and
       * what was LEFT IN PLACE because this module has no accept rule for
         it, named the same way. Reported, never silent.
 
-    Neither sentence ends with the literal `"accepted-all into the operative
+    No sentence ends with the literal `"accepted-all into the operative
     draft."` tail: `frontend/src/toaster/receipt.ts::acceptedChangesSummary`
     COUNTS that exact tail and drops its whole summary line when it parses
     fewer sentences than it counted, so borrowing the tail here would
     silently suppress the per-edit summary the attorney already gets. These
     sentences are additive disclosure alongside it, not part of its count.
     """
+    raw_accepted = (report.get("accepted") or {}).items()
     accepted = {
         name: count
-        for name, count in (report.get("accepted") or {}).items()
-        if name not in ("ins", "del")
+        for name, count in raw_accepted
+        if name not in ("ins", "del") and name not in _PARAGRAPH_MARK_DISCLOSURE_NAMES
+    }
+    paragraph_marks = {
+        name: count
+        for name, count in raw_accepted
+        if name in _PARAGRAPH_MARK_DISCLOSURE_NAMES
     }
     unapplied = report.get("unapplied") or {}
     sentences: list[str] = []
@@ -1131,6 +1265,22 @@ def accepted_revision_disclosure(report: dict[str, Any]) -> str | None:
             "Pending formatting and move revisions ("
             + ", ".join(f"{count} {name}" for name, count in sorted(accepted.items()))
             + ") were accepted into the operative draft before review."
+        )
+    if paragraph_marks:
+        # Markup-only, deliberately: `_splice_accept_all` removes the
+        # marker but never merges or splits the `<w:p>` siblings it named
+        # (its own KNOWN LIMITATION section). Saying "accepted" without
+        # that qualifier would claim a paragraph restructure the delivered
+        # redline does not contain.
+        named = ", ".join(
+            f"{count} {_PARAGRAPH_MARK_DISCLOSURE_NAMES[name]}" + ("" if count == 1 else "s")
+            for name, count in sorted(paragraph_marks.items())
+        )
+        sentences.append(
+            f"Pending tracked paragraph-mark revisions ({named}) were accepted "
+            f"as markup only: the proposed paragraph merge or split is not "
+            f"applied, so the operative draft and the delivered redline keep "
+            f"the original paragraph structure."
         )
     if unapplied:
         sentences.append(
@@ -1201,7 +1351,11 @@ def materialize_accept_all_with_report(docx_bytes: bytes) -> tuple[bytes, dict[s
     their original will show this one paragraph as a spurious split rather
     than a clean merge. See `_splice_accept_all`'s own docstring for the
     mechanism and `tests/test_accept_all_materializer.py` for the fixture
-    pinning this as current behavior.
+    pinning this as current behavior. The limitation is no longer SILENT,
+    though (issue #113): the report's `accepted` tally names the paragraph
+    marks under their own keys and `accepted_revision_disclosure` states,
+    in the same `normalization_notes` the attorney reads, that the merge or
+    split was not applied.
 
     Round-trips through `redline_generate.verify_docx_round_trip` before
     returning -- raises `ValueError` (that function's own exception) rather
