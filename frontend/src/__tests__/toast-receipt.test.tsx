@@ -61,7 +61,18 @@ const FULL = {
     { clause_id: 'c-1', source_quote: 'two' },
     { clause_id: 'c-2', source_quote: 'three' },
   ],
-  critic_delta: { contested_issue_ids: ['i-1'], added_issues: [{ id: 'i-9' }] },
+  // Issue #96: real field names AND the real merged item shape
+  // (`get_review_detail`'s actual projection, produced by
+  // `scripts/reconciliation.py`'s `critic_delta_record` — a list of dicts,
+  // never bare ids), not the `contested_issue_ids` key this fixture carried
+  // before #96, which no writer has ever produced.
+  critic_delta: {
+    contested_replacements: [
+      { section_ref: '8', critic_objection: 'Drifts from the playbook position.' },
+    ],
+    added_issues: [{ section_ref: '12', playbook_topic_id: 'indemnity-mutual' }],
+  },
+  confidence_band: 'LOW_CONFIDENCE',
 };
 
 // The same review as recorded by a deployment that predates the lineage
@@ -144,6 +155,11 @@ describe('the receipt prints only what the review actually recorded', () => {
     // distinct-anchor count, which is why it is not simply the issue count.
     expect(paper.querySelector('[data-receipt-line="issues"]')?.textContent).toContain('3');
     expect(paper.querySelector('[data-receipt-line="clauses"]')?.textContent).toContain('2');
+    // Issue #96: the critic-delta/confidence-band line — counts only, no
+    // objection prose.
+    expect(paper.querySelector('[data-receipt-line="critic-delta"]')?.textContent).toBe(
+      'Critic: 1 replacement contested, 1 issue added · confidence LOW',
+    );
   });
 
   it('DROPS the lines a sparse row cannot source, and invents nothing', () => {

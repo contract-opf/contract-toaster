@@ -50,7 +50,26 @@ export interface ReceiptSource {
   critic_model_id?: string | null;
   toaster_guidance?: string | null;
   issues?: unknown;
-  critic_delta?: { contested_issue_ids?: unknown; added_issues?: unknown } | null;
+  // Issue #96: field names match `get_review_detail`'s real projection --
+  // `critic_delta.contested_replacements` / `.added_issues` /
+  // `.rationale_objections` (`scripts/reconciliation.py`'s merged shape,
+  // whose `_CRITIC_DELTA_KEYS` are exactly these three), not the
+  // `contested_issue_ids` key this interface carried before #96, which no
+  // writer has ever produced (`scripts/review_spine.py::run_review` never
+  // set `critic_delta` on its result at all until #96 wired it through).
+  critic_delta?: {
+    contested_replacements?: unknown;
+    added_issues?: unknown;
+    rationale_objections?: unknown;
+  } | null;
+  // Issue #96: the merged confidence band (system metadata, never a legal
+  // category -- see docs/output-contract.md -> "Confidence band"). Absent
+  // (never a null placeholder) on a review whose confidence_state was OK,
+  // same convention as every other optional field here. Does NOT affect
+  // `status`/`decision` rendering elsewhere on this receipt -- Option B
+  // (issue #96) retired the status projection; a completed review's
+  // receipt still reads DONE regardless of this field.
+  confidence_band?: string | null;
   // Issue #563: the free-text disclosure that stage 1 accepted one or more
   // of the counterparty's own pending tracked changes into the operative
   // draft before review ever ran. Absent (never null) on a review with
@@ -200,6 +219,65 @@ function clausesTouched(issues: unknown): number | null {
  *  agree with it. */
 function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Issue #96 (Option B, owner decision 2026-09-16): one brief, counts-only
+ * line surfacing the adversarial critic's delta and the merged confidence
+ * band on the printed receipt -- e.g. "Critic: 2 replacements contested, 1
+ * issue added · confidence LOW". Renders whenever there is something to
+ * disclose: `critic_delta` carries a contested replacement, an added issue
+ * or a rationale objection, OR `confidenceBand` is non-null (never-OK, per
+ * docs/output-contract.md -> "Confidence band" -- absent/null IS the OK
+ * case, same convention every other field on this row follows).
+ *
+ * ALL THREE `_CRITIC_DELTA_KEYS` are counted, not just the two that degrade
+ * the band. `scripts/reconciliation.py` sets `has_critic_delta` (and so
+ * emits a non-null `critic_delta`) from any of the three, but excludes
+ * `rationale_objections` from `critic_contests_output` -- so a critic that
+ * only objects to the primary's RATIONALE produces a non-empty delta with a
+ * null band, and counting only the other two would print nothing at all
+ * about a critic that did in fact object.
+ *
+ * ESCAPED TEXT ONLY (CLAUDE.md's "no document excerpt in a message" hard
+ * rule, applied here). This line prints ONLY: a count, one of the literal
+ * nouns "replacement"/"issue"/"rationale objection", and the literal
+ * `confidence_band` wire token (with its `_CONFIDENCE`
+ * suffix trimmed for brevity, e.g. `LOW_CONFIDENCE` -> `LOW`) -- never
+ * `critic_objection` (the critic's own prose), never
+ * `rationale_objections[].objection`, never
+ * `critic_suggested_replacement` (derived clause text), and never
+ * `verdict_summary`. Those stay exactly where docs/output-contract.md's
+ * "Critic-delta presentation" already puts them: the in-app result view's
+ * contested-replacement badges, never a printed slip someone pastes into a
+ * deal thread.
+ */
+function criticLine(
+  criticDelta: ReceiptSource['critic_delta'],
+  confidenceBand?: string | null,
+): string | null {
+  const contested = count(criticDelta?.contested_replacements) ?? 0;
+  const added = count(criticDelta?.added_issues) ?? 0;
+  const objected = count(criticDelta?.rationale_objections) ?? 0;
+  const parts: string[] = [];
+  if (contested > 0) {
+    parts.push(`${plural(contested, 'replacement')} contested`);
+  }
+  if (added > 0) {
+    parts.push(`${plural(added, 'issue')} added`);
+  }
+  if (objected > 0) {
+    parts.push(plural(objected, 'rationale objection'));
+  }
+  if (parts.length === 0 && !confidenceBand) {
+    return null;
+  }
+  const countsPart = parts.length > 0 ? parts.join(', ') : null;
+  const bandWord = confidenceBand ? confidenceBand.replace(/_CONFIDENCE$/, '') : null;
+  if (countsPart && bandWord) {
+    return `Critic: ${countsPart} · confidence ${bandWord}`;
+  }
+  return countsPart ? `Critic: ${countsPart}` : `Critic: confidence ${bandWord as string}`;
 }
 
 /**
@@ -383,10 +461,7 @@ export function receiptLines(
   push('issues', 'Changes requested', issueCount === null ? null : String(issueCount));
   const clauses = clausesTouched(review.issues);
   push('clauses', 'Clauses touched', clauses === null ? null : String(clauses));
-  const contested = count(review.critic_delta?.contested_issue_ids);
-  push('contested', 'Contested by the critic', contested === null ? null : String(contested));
-  const added = count(review.critic_delta?.added_issues);
-  push('added', 'Added by the critic', added === null ? null : String(added));
+  pushWrap('critic-delta', criticLine(review.critic_delta, review.confidence_band));
 
   lines.push({ id: 'rule-3', ...RULE });
 
