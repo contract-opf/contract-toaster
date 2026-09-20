@@ -489,6 +489,16 @@ missed an issue that the critic caught). Both types are surfaced in the result v
 **mandatory pre-download indicator** — the download affordance must not be presented without
 the delta indicator visible.
 
+> **Under [ADR 0001](adr/0001-critic-has-the-last-word.md) the delta records *overrides*, not
+> contests.** The critic is the senior reviewer and has the last word: its replacement text is the
+> text that ships. What the attorney must see before acting is therefore not a disagreement left
+> unresolved in the document, but the override itself — the reviewer's version, the critic's
+> version, and the critic's stated reason for each issue the critic changed. Read "contested
+> replacement" as "override" throughout this document. **The schema is deliberately unchanged
+> here**: `critic_delta` still carries the `contested_replacements` shape from the add-only design,
+> and every normative rule in this document keyed to that shape still applies byte for byte.
+> Re-shaping the wire contract is a later ticket in epic #134, not this one.
+
 **The receipt's own mirror (issue #96) is counts-only, never these badges' prose.** The provenance
 slip (`frontend/src/toaster/receipt.ts`, `criticLine`) prints at most one brief line — e.g. "Critic:
 2 replacements contested, 1 issue added, 1 rationale objection · confidence LOW" — built ONLY from
