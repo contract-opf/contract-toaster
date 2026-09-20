@@ -86,7 +86,7 @@
  * time, and `poll-budget-waf.test.tsx` already establishes that pattern for
  * this exact poll loop.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import ReviewSubmission, {
@@ -143,7 +143,7 @@ function docxFile(): File {
 function stubPollStatus(
   answer: (callNumber: number) => number,
   reviewAgeAtSubmitMs = 0,
-): { polls: () => number } {
+): { polls: () => number; calls: () => string[] } {
   let polls = 0;
   // A real 200 always carries the server's `created_at`, so the fixture
   // does too — as a string of epoch seconds, which is the only shape a
@@ -194,7 +194,18 @@ function stubPollStatus(
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);
-  return { polls: () => polls };
+  return {
+    polls: () => polls,
+    // Issue #151 diagnostic: which requests the component actually made, so a
+    // CI-only 'saw 0' names the last request that fired instead of leaving
+    // the next reader to guess whether the POST ever happened.
+    calls: () =>
+      fetchMock.mock.calls.map(
+        ([input, init]) =>
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string
+          `${(init?.method ?? 'GET').toUpperCase()} ${typeof input === 'string' ? input : input.toString()}`,
+      ),
+  };
 }
 
 /**
@@ -219,14 +230,10 @@ async function advance(ms: number): Promise<void> {
   }
 }
 
-/**
- * How long the first status GET gets to arrive, in REAL time. Matches the
- * suite's `asyncUtilTimeout`: a runner slow enough to need longer than this
- * is failing for a reason no amount of extra waiting would fix.
- */
-const FIRST_POLL_TIMEOUT_MS = 5_000;
-
-async function submitAndSettleFirstPoll(harness: { polls: () => number }): Promise<void> {
+async function submitAndSettleFirstPoll(harness: {
+  polls: () => number;
+  calls?: () => string[];
+}): Promise<void> {
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), {
     target: { files: [docxFile()] },
@@ -255,11 +262,83 @@ async function submitAndSettleFirstPoll(harness: { polls: () => number }): Promi
   // be 5'. At 0 the fake clock does not move here at all; only real
   // event-loop turns pass, which is all the first poll needs, because the
   // poll effect calls `void poll()` directly rather than through a timer.
+  //
+  // The callback is ASYNC and drains the fake clock by ZERO before it reads
+  // (issue #151 reopened, required change 3). It is belt and braces, NOT the
+  // mechanism that moves the CI symptom — a distinction worth the lines
+  // because this ticket has now been misdiagnosed twice. Read out of the
+  // vitest this repo vendors (4.1.10, frontend/node_modules):
+  //
+  //   - `vi.waitFor` ALREADY calls `vi.advanceTimersByTime(interval)` at the
+  //     top of every retry (vitest/dist/chunks/test.DNmyFkvJ.js:3380), and
+  //     `advanceTimersByTime(0)` DOES fire a `setTimeout(fn, 0)` whose
+  //     `callAt === clock.now` (`inRange`, same file:1326). So the previous
+  //     SYNC callback already reached every zero-delay fake timer a wait of
+  //     this shape can reach; there was no starvation for the async form to
+  //     lift.
+  //   - And a `setTimeout(fn, 0)` created DURING a tick gets
+  //     `callAt = clock.now + 1` (`clock.now + (parseInt(timer.delay) ||
+  //     (clock.duringTick ? 1 : 0))`, same file:1611-1613), so NO number of
+  //     zero advances — sync or async — reaches that one either.
+  //
+  // What the async form does buy is smaller and real: while the callback's
+  // promise is pending waitFor skips its own retry, and
+  // `advanceTimersByTimeAsync` awaits between the timers it runs, so each
+  // pass hands the submit chain event-loop turns instead of spinning on a
+  // 1 ms real interval. Zero, not 1: the clock must not move here, because
+  // every exact count below is measured from the instant the first 404's
+  // reschedule was registered.
+  //
+  // Nothing on the fake clock stands between the click and the first poll
+  // anyway: `handleSubmit` awaits `authorizedFetch` (api.ts — `getToken`,
+  // then `fetch`, no timer), sets `reviewId`, and the poll effect calls
+  // `void poll()` DIRECTLY (ReviewSubmission.tsx:2353) rather than through a
+  // timer. The whole chain is promise hops plus React's scheduler. That is
+  // why the budget that decides this wait is REAL time.
+  //
+  // The 12_000 budget is REAL time, never the fake clock: `vi.waitFor` takes
+  // its own `setTimeout`/`setInterval` from vitest's `getSafeTimers()`, so
+  // unlike every other duration in this file — simulated milliseconds, exact
+  // — it is a guess about hardware. It is not an assertion window: no failing
+  // assertion can be made to pass by enlarging it, because `polls()` is
+  // either 1 or it is not. Together with the warm-up render in the
+  // `beforeAll` below it is the OPERATIVE half of this round's fix, and the
+  // zero-advance above is the belt-and-braces half.
+  //
+  // What it replaces: 5_000, borrowed from the suite's `asyncUtilTimeout`
+  // (setupTests.ts:44), a budget sized for one `findBy*` on a dev box. CI is
+  // the machine it was not sized for — Node 20, a shared runner, 121 files
+  // at `maxWorkers: '50%'`. What the CI log does NOT settle is where those
+  // five seconds went: the failing landing (run 35488418593, e519148) times
+  // the case at 5108 ms, i.e. a 5000 ms wait and ~108 ms of prologue, and
+  // the wait spends real time whether the worker is running or descheduled.
+  // Nothing in that log tells "the poll arrived at 6 s" apart from "the poll
+  // never arrived". So this window is recorded as HEADROOM for a runner
+  // 5-10x slower than a dev box, not as a proven diagnosis; if CI comes back
+  // red at 12_000 with the same `expected +0 to be 1`, the cause is not
+  // slowness and the next attempt should look elsewhere rather than widen
+  // anything (it cannot be widened anyway — see below).
+  //
+  // 12_000, not the 15_000 the reopening comment asked for (required change
+  // 2), and not behind a named constant. 12_000 is the widest window this
+  // repo can honour: `test-budget-coherence-634.test.ts:131-137` requires
+  // `testTimeout >= widest declared window + POLL_INTERVAL_MS`, i.e.
+  // 15_000 − 3000. A window past that ceiling is a dead letter whatever the
+  // gate says, because vitest kills the test at 15 s first and CI then
+  // reports a bare `Test timed out in 15000ms` instead of `expected +0 to
+  // be 1` — the one line that says `polls()` was 0, and the line that
+  // diagnosed this ticket twice. The LITERAL is what makes the ceiling
+  // enforced rather than merely observed: that gate's scanner is
+  // `/\btimeout:\s*(\d[\d_]*)\b/`, which cannot resolve an identifier, so a
+  // named `FIRST_POLL_TIMEOUT_MS` would hide this window from the only check
+  // that polices it — which is why the constant the previous round added is
+  // gone again rather than merely re-pointed.
   await vi.waitFor(
-    () => {
-      expect(harness.polls()).toBe(1);
+    async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.polls(), `requests so far: ${JSON.stringify(harness.calls?.() ?? [])}`).toBe(1);
     },
-    { interval: 0, timeout: FIRST_POLL_TIMEOUT_MS },
+    { interval: 0, timeout: 12_000 },
   );
 }
 
@@ -357,6 +436,59 @@ describe('reviewAgeMs anchors on the `created_at` shape production sends (issue 
 });
 
 describe('issue #122 — the rendered poll loop honours classifyPollFailure', () => {
+  /**
+   * Pay the first mount ONCE, outside any test's deadline (issue #151
+   * reopened, required change 1).
+   *
+   * MEASURED, on this machine, `--reporter=verbose`, only this file running:
+   * the first rendered case takes 801 / 822 / 846 ms without this hook and
+   * 114 / 116 / 123 ms with it. ~700 ms of one-time cost stops being charged
+   * to the first case's wait. Scale that by the 5-10x a shared CI runner is
+   * slower by and it is the same order as the 5_000 ms budget that expired.
+   *
+   * What it moves, and what it does not. It does NOT move Vite's transform
+   * of `ReviewSubmission` and the Orbit Diner tree: every import in that
+   * module is static — no `React.lazy`, no dynamic `import()` — so the
+   * transform is paid while THIS file's own imports resolve, before any hook
+   * runs, and vitest bills it to `transform`/`import`, never to a test. What
+   * it does move is everything a FIRST render pays and a second does not:
+   * the custom-element registrations the vendored console performs on first
+   * use, React's first mount of that tree, and jsdom's first pass over it.
+   *
+   * Honest caveat, because this ticket has been misdiagnosed twice. The CI
+   * log for the failing landing (run 35488418593, e519148) times the case at
+   * 5108 ms against a 5000 ms wait, which leaves only ~108 ms of prologue —
+   * an order of magnitude LESS than the ~800 ms the same prologue costs here
+   * cold. Either that arithmetic hides something (a warm worker, a
+   * descheduled wait) or the cold-start diagnosis is wrong. This hook is
+   * cheap, measurably removes real first-mount cost, and is what the owner
+   * asked for; it is not evidence that cold start was the cause. If CI
+   * returns red with `expected +0 to be 1` despite this hook and the wider
+   * window below, that pairing is the signal to stop widening and look for a
+   * poll that never fires at all.
+   *
+   * It installs its OWN fetch stub and fake timers instead of leaning on the
+   * `beforeEach` below, which has not run at this point. A bare render here
+   * would put the component's mount probes on the REAL `fetch` with relative
+   * URLs — `TypeError: Failed to parse URL from /api/playbooks`, which is
+   * exactly the stderr the CI log carries — and would leave rejected
+   * promises in flight across the first test. Everything it installs is torn
+   * down again here, and the suite's own `beforeEach` re-clears Web Storage
+   * and the playbook catalog, so the first test opens on the same state as
+   * the second.
+   */
+  beforeAll(async () => {
+    vi.useFakeTimers();
+    window.sessionStorage.clear();
+    stubPollStatus(() => 200);
+    render(<ReviewSubmission />);
+    await vi.runAllTimersAsync();
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    window.sessionStorage.clear();
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     window.sessionStorage.clear();
@@ -369,8 +501,9 @@ describe('issue #122 — the rendered poll loop honours classifyPollFailure', ()
   });
 
   it('a 404 milliseconds after submit is the read-after-write window, not a give-up', async () => {
-    const { polls } = stubPollStatus(() => 404);
-    await submitAndSettleFirstPoll({ polls });
+    const harness = stubPollStatus(() => 404);
+    const { polls } = harness;
+    await submitAndSettleFirstPoll(harness);
 
     expect(polls()).toBe(1);
     expect(screen.getByTestId('review-poll-error').textContent).toContain('Still checking');
@@ -378,10 +511,11 @@ describe('issue #122 — the rendered poll loop honours classifyPollFailure', ()
   });
 
   it('gives up on a 404 only once it has persisted past the 60 s grace window, and stops for good', async () => {
-    const { polls } = stubPollStatus(() => 404);
+    const harness = stubPollStatus(() => 404);
+    const { polls } = harness;
     const { pollsBeforeGiveUp, giveUpAtMs } = simulateGiveUp();
 
-    await submitAndSettleFirstPoll({ polls });
+    await submitAndSettleFirstPoll(harness);
     expect(polls()).toBe(1);
     // The resume key is written by the SUBMIT itself
     // (`writeInflightReviewId(data.review_id)` in ReviewSubmission.tsx) —
@@ -430,8 +564,9 @@ describe('issue #122 — the rendered poll loop honours classifyPollFailure', ()
   });
 
   it('a 404 followed by a 200 inside the grace window keeps polling normally', async () => {
-    const { polls } = stubPollStatus((call) => (call === 1 ? 404 : 200));
-    await submitAndSettleFirstPoll({ polls });
+    const harness = stubPollStatus((call) => (call === 1 ? 404 : 200));
+    const { polls } = harness;
+    await submitAndSettleFirstPoll(harness);
 
     expect(polls()).toBe(1);
     expect(screen.getByTestId('review-poll-error').textContent).toContain('Still checking');
@@ -456,10 +591,11 @@ describe('issue #122 — the rendered poll loop honours classifyPollFailure', ()
     // (#489) or the mount probe landing on a row that has since been purged
     // is exactly this shape. Poll 1 succeeds and hands over the server
     // timestamp; poll 2 is the 404.
-    const { polls } = stubPollStatus((call) => (call === 1 ? 200 : 404), AGED_MS);
+    const harness = stubPollStatus((call) => (call === 1 ? 200 : 404), AGED_MS);
+    const { polls } = harness;
     const secondPollAtMs = nextPollDelayMs(AGED_MS, 0);
 
-    await submitAndSettleFirstPoll({ polls });
+    await submitAndSettleFirstPoll(harness);
     expect(polls()).toBe(1);
     expect(window.sessionStorage.getItem(INFLIGHT_REVIEW_STORAGE_KEY)).toBe(REVIEW_ID);
     expect(screen.queryByTestId('review-poll-stopped')).toBeNull();
@@ -492,9 +628,10 @@ describe('issue #122 — the rendered poll loop honours classifyPollFailure', ()
   it('keeps polling through a 403 — the WAF poll-budget block (#88) clears itself, and the review behind it is still running', async () => {
     // Three blocked polls, then the window rolls over and the endpoint
     // answers normally again.
-    const { polls } = stubPollStatus((call) => (call <= 3 ? 403 : 200));
+    const harness = stubPollStatus((call) => (call <= 3 ? 403 : 200));
+    const { polls } = harness;
 
-    await submitAndSettleFirstPoll({ polls });
+    await submitAndSettleFirstPoll(harness);
     expect(polls()).toBe(1);
 
     // Transient channel, not the give-up one: the poller is still retrying
