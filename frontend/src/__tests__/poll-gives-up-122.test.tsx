@@ -219,6 +219,13 @@ async function advance(ms: number): Promise<void> {
   }
 }
 
+/**
+ * How long the first status GET gets to arrive, in REAL time. Matches the
+ * suite's `asyncUtilTimeout`: a runner slow enough to need longer than this
+ * is failing for a reason no amount of extra waiting would fix.
+ */
+const FIRST_POLL_TIMEOUT_MS = 5_000;
+
 async function submitAndSettleFirstPoll(harness: { polls: () => number }): Promise<void> {
   render(<ReviewSubmission />);
   fireEvent.change(screen.getByTestId('review-file-input'), {
@@ -227,15 +234,33 @@ async function submitAndSettleFirstPoll(harness: { polls: () => number }): Promi
   // Land the playbook catalog before the submit, same as poll-budget-waf.
   await vi.runAllTimersAsync();
   fireEvent.click(screen.getByTestId('review-submit-button'));
-  // Let the POST and the first status GET (fired with zero delay) settle —
-  // waiting for the poll itself rather than for a fixed number of flushes,
-  // so every case below can assert an exact count from a known start.
-  for (let i = 0; i < 20 && harness.polls() < 1; i += 1) {
-    await advance(0);
-  }
-  if (harness.polls() !== 1) {
-    throw new Error(`expected exactly one status poll after submit, saw ${harness.polls()}`);
-  }
+
+  // Issue #151. Wait for the first status GET by AWAITED STATE against a
+  // real-time deadline, never by a count of flushes. The previous version
+  // bounded this with `for (let i = 0; i < 20 …)`, which is a wall-clock
+  // sample wearing a loop: the POST's chain crosses several promise hops
+  // and then React's scheduler, which is NOT on the fake clock, so a runner
+  // slow enough to need a 21st turn saw the helper throw 'saw 0'. Every
+  // local run stayed green and CI stayed red on exactly that.
+  //
+  // `interval: 0` IS LOAD-BEARING — do not let it fall back to the default.
+  // `vi.waitFor` drives its own polling on REAL timers, but it calls
+  // `vi.advanceTimersByTime(interval)` before each check, so the default 50
+  // would march the FAKE clock ~50 ms past the moment the first 404's
+  // reschedule was registered. Every exact count below is measured relative
+  // to that moment, and the give-up case deliberately stops 1 ms short of
+  // the final poll (`giveUpAtMs - 1`), so it would then sit 49 ms PAST that
+  // poll and read `pollsBeforeGiveUp` instead of one less — measured, not
+  // theorised: with the default interval that case fails 'expected 6 to
+  // be 5'. At 0 the fake clock does not move here at all; only real
+  // event-loop turns pass, which is all the first poll needs, because the
+  // poll effect calls `void poll()` directly rather than through a timer.
+  await vi.waitFor(
+    () => {
+      expect(harness.polls()).toBe(1);
+    },
+    { interval: 0, timeout: FIRST_POLL_TIMEOUT_MS },
+  );
 }
 
 /**
