@@ -65,6 +65,7 @@ the shipped index will name paths that are not in it.
 
 ## docs/adr/
 - `docs/adr/0000-template.md` — The template every architecture decision record copies: status, context, decision, consequences, date. anchors: status, context, decision, consequences, date
+- `docs/adr/0001-critic-has-the-last-word.md` — The accepted owner decision (2026-09-16) that the critic pass produces the final review under validated later-in-time authority, the three deterministic guards that survive it, and the 2026-09-17 amendment on hard-rejection recall, explicit dispositions and the shared prompt prefix. anchors: status, context, decision, consequences, date, amendment-2026-09-17-owner-accepted-external-review
 
 ## docs/plans/
 - `docs/plans/2026-07-22-long-range-plan.md` — The canonical roadmap from July 2026: four framing decisions, every open item placed into a phase, and the dependency-ordered first phase. anchors: framing-decisions, phases--issue-disposition-every-open-item-placed, phase-1-grind-queue-label-afk-dependency-ordered
