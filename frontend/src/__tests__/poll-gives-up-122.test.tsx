@@ -240,6 +240,21 @@ async function submitAndSettleFirstPoll(harness: {
   });
   // Land the playbook catalog before the submit, same as poll-budget-waf.
   await vi.runAllTimersAsync();
+  // Issue #151, the actual CI cause: the lever's click handler is a no-op
+  // until `canSubmit(m)` holds — playbooks fetched, preferences landed, an
+  // active playbook selected — and that chain is promise hops, not fake
+  // timers, so `runAllTimersAsync` above does not guarantee it has finished.
+  // On a slow runner the click fired first and was swallowed; the request
+  // list CI printed showed exactly that (preflight and the catalog's
+  // follow-up GETs, no POST /api/reviews). Wait for the control to be
+  // enabled by AWAITED STATE, in real time, before clicking.
+  await vi.waitFor(
+    async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByTestId('review-submit-button').getAttribute('aria-disabled')).toBe('false');
+    },
+    { interval: 0, timeout: 12_000 },
+  );
   fireEvent.click(screen.getByTestId('review-submit-button'));
 
   // Issue #151. Wait for the first status GET by AWAITED STATE against a
