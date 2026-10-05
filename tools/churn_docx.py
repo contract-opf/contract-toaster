@@ -48,8 +48,8 @@ pairs (`tracked_changes_multi_author`, `nested_ins_del`) -- it exists so a
 caller can vary WHICH fabricated names appear without losing reproducibility,
 not to introduce randomness.
 
-## The transforms (one per issue #565 Scope, plus #530's, #145's, and #94's
-## follow-ups)
+## The transforms (one per issue #565 Scope, plus #530's, #145's, #94's, and
+## #97's follow-ups)
 
   - `tracked_changes_multi_author` -- two different authors' `<w:ins>`/
     `<w:del>` clusters, back-to-back with no intervening plain text, on the
@@ -105,6 +105,21 @@ not to introduce randomness.
     `redline_block_apply._accepted_text_runs` must agree with the
     extractor at both the inline and block-level wrap, or the patch-time
     anchor+hash check fails the edit closed.
+  - `mixed_run_children` (issue #97 follow-up) -- the Indemnification
+    clause rewritten as ONE run whose children interleave `w:tab`, a
+    `w:noBreakHyphen`-joined defined term, a `w:softHyphen`, a `w:br`, and
+    a `w:sym`, in that document order, FOLLOWED by three short
+    `(a)<w:tab/>...` sub-clause paragraphs with no heading style -- Word's
+    routine shape for a manually-numbered lead-in, a mid-sentence line
+    break, or a hyphenated defined term, none of which is a bare `w:t`
+    run. Exercises `extraction_normalization_stage._process_run`'s
+    document-order walk (issue #97: before this fix, every `w:tab` in a run
+    was moved to the run's END and every `w:br`/`w:cr`/`w:noBreakHyphen`/
+    `w:sym` was silently dropped) AND the segmentation that walk feeds
+    (`clause_boundaries.py`'s lead-in signals must not start firing on the
+    sub-clauses now that their tab is in place) against a real generated
+    `.docx`, complementing the hand-built OOXML fixtures in
+    `tests/test_extraction_normalization_stage_80.py`.
 
 ## What this is NOT
 
@@ -765,6 +780,89 @@ def content_control_wrapped_text(docx_bytes: bytes, *, seed: int = 0) -> bytes:
     return _rewrite_document_xml(docx_bytes, mutate)
 
 
+# The manually-lettered sub-clause list `mixed_run_children` appends under
+# the Indemnification clause. Each is SHORT (well under
+# `clause_boundaries.MAX_FALLBACK_HEADING_CHARS`) and separated from its
+# marker by a `w:tab`, which is the everyday shape issue #97 names -- and
+# the one the fix must leave segmenting exactly as it did: three BODY
+# paragraphs of one clause, not three new heading boundaries with empty
+# bodies.
+MIXED_RUN_SUB_CLAUSES: list[tuple[str, str]] = [
+    ("a", "Provider shall pay all defence costs within 30 days."),
+    ("b", "Recipient shall notify Provider of any claim promptly."),
+    ("c", "Neither party settles a claim without written consent."),
+]
+
+
+def mixed_run_children(docx_bytes: bytes, *, seed: int = 0) -> bytes:
+    """Rewrites the Indemnification clause into the two shapes issue #97
+    found broken, both of which Word writes routinely.
+
+    1. Its BODY becomes ONE run whose children interleave every
+       run-content element #97 found dropped or reordered, in document
+       order: a `w:tab` mid-sentence (pre-fix, every `w:tab` in the run was
+       moved to the run's END), a `w:noBreakHyphen` inside a defined term
+       (pre-fix, dropped -- "Non-Disclosure" fused into "NonDisclosure"), a
+       `w:softHyphen` (an optional break point that must stay dropped --
+       never a visible character), a `w:br` (pre-fix, dropped -- the two
+       words either side fused into one), and a `w:sym` (pre-fix, dropped).
+
+    2. Three short `(a)<w:tab/>...` sub-clause paragraphs follow it, with
+       NO heading style -- the everyday manually-numbered lead-in the
+       issue's Problem section names. This is the half that has to stay
+       BODY text: putting the tab back in place makes `clause_boundaries.
+       LETTERED_LEAD_IN_RE` (`^\\([a-z]\\)\\s+`) start matching text it
+       never matched before, which would lift each sentence out of the
+       block's `text` and into a `heading` of its own -- four blocks, every
+       one of them empty, nothing left for the model to read or the writer
+       to redline. `extract_document_paragraphs` decides boundaries on the
+       pre-#97 `boundary_text`, where these read '(a)Provider shall ...'
+       and match no lead-in, for exactly this, and the corpus
+       has to carry the shape rather than route around it, or the
+       document-spine smoke stays green while the everyday case is broken.
+    """
+
+    def mutate(root: ET.Element) -> None:
+        p_el = _find_paragraph_by_text(root, INDEMNIFICATION_BODY)
+        _clear_runs(p_el)
+        r = ET.SubElement(p_el, _w("r"))
+
+        def txt(s: str) -> None:
+            t = ET.SubElement(r, _w("t"))
+            t.set(f"{{{_XML_NS}}}space", "preserve")
+            t.text = s
+
+        txt("The Provider shall indemnify the Recipient against")
+        ET.SubElement(r, _w("tab"))
+        txt("all Non")
+        ET.SubElement(r, _w("noBreakHyphen"))
+        txt("Disclosure")
+        ET.SubElement(r, _w("softHyphen"))
+        txt(" claims")
+        ET.SubElement(r, _w("br"))
+        txt("whatsoever")
+        sym_el = ET.SubElement(r, _w("sym"))
+        sym_el.set(_w("font"), "Symbol")
+        sym_el.set(_w("char"), "F0E0")
+        txt(".")
+
+        parent = _parent_of(root, p_el)
+        index = list(parent).index(p_el)
+        for offset, (letter, sentence) in enumerate(MIXED_RUN_SUB_CLAUSES):
+            sub_p = ET.Element(_w("p"))
+            sub_r = ET.SubElement(sub_p, _w("r"))
+            marker = ET.SubElement(sub_r, _w("t"))
+            marker.set(f"{{{_XML_NS}}}space", "preserve")
+            marker.text = f"({letter})"
+            ET.SubElement(sub_r, _w("tab"))
+            body = ET.SubElement(sub_r, _w("t"))
+            body.set(f"{{{_XML_NS}}}space", "preserve")
+            body.text = sentence
+            parent.insert(index + 1 + offset, sub_p)
+
+    return _rewrite_document_xml(docx_bytes, mutate)
+
+
 TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "tracked_changes_multi_author": tracked_changes_multi_author,
     "curly_punctuation": curly_punctuation,
@@ -775,6 +873,7 @@ TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "pending_change_inside_field_code": pending_change_inside_field_code,
     "first_page_header_footer": first_page_header_footer,
     "content_control_wrapped_text": content_control_wrapped_text,
+    "mixed_run_children": mixed_run_children,
 }
 
 

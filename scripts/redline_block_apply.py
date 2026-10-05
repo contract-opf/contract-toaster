@@ -49,7 +49,9 @@ edits the SECOND of two identical spans" expressible at all.
 anchor-text-addressed `insert_after`/`insert_before`, which would reintroduce
 the very quote-uniqueness burden block addressing exists to remove (and
 cannot express an insertion at offset 0 at all). `_apply_pure_insertion`
-walks the paragraph's runs accumulating ACCEPTED-view text length, splits the
+walks the paragraph's run children accumulating accepted-view text length in
+the EXTRACTOR's coordinates (`_extractor_view_runs` -- the ones the
+transcript was proven in), splits the
 run containing the offset, and writes a `<w:ins>` holding a new run that
 carries the split run's own `<w:rPr>` so the inserted text keeps the
 surrounding formatting. This pass also rewrites `w:date` on exactly pass 1's
@@ -429,6 +431,313 @@ def _accepted_text(p: ET.Element) -> str:
     return "".join(entry["text"] for entry in _accepted_text_runs(p))
 
 
+def _extractor_view_runs(p: ET.Element) -> list[dict[str, Any]]:
+    """Paragraph `p`'s accepted-view text the way the EXTRACTOR builds it,
+    as one entry per text-bearing run CHILD, in document order.
+
+    This is the second of the two texts this module has to hold at once,
+    and issue #97 is what separated them:
+
+      - `_accepted_text_runs` above is `docx_editor`'s text -- every `<w:t>`
+        outside a `<w:del>`, and nothing else. It is the coordinate system
+        an `occurrence=` is counted in and the run list a pure insertion is
+        placed against, so it is not free to diverge (see its docstring).
+      - THIS walk is `extraction_normalization_stage._process_run`'s text:
+        the same `<w:t>` content, plus the run's own `<w:tab/>` as "\\t",
+        `<w:br/>`/`<w:cr/>` as "\\n", `<w:noBreakHyphen/>` as U+2011 and
+        `<w:sym/>` as its character (`extraction_normalization_stage.
+        sym_char`, shared rather than re-implemented), each IN DOCUMENT
+        ORDER -- and `<w:softHyphen/>` dropped, an optional break point
+        being no visible character. It is the text the block transcript was
+        proven against, and therefore the text the resolution GUARD in
+        `_resolve_physical_paragraphs` must compare and the text block
+        offsets index.
+
+    Before #97 the two were the same string: a `w:tab` was moved to the end
+    of its run and a `w:br` was dropped, so the extractor's text held none
+    of these characters either. Keeping BOTH -- rather than letting one
+    follow the other -- is what lets `_editor_offsets` translate an offset
+    in the proven text into the offset `docx_editor` means by it, so a
+    paragraph carrying one of these characters still RESOLVES instead of
+    every edit on it failing closed; what then happens to one edit depends
+    on its span (`_split_edit_at_separators`). Tabs are in nearly every
+    real contract paragraph (manual numbering, signature and notice
+    blocks); fail-closed there would silently disable redlining across much
+    of the corpus.
+
+    Each entry is `{"el", "t", "run", "container", "text"}`: the child
+    element itself, that element again when it is a `<w:t>` and `None` when
+    it is one of the structural children above (i.e. "does this text exist
+    in `docx_editor`'s coordinates?"), its parent `<w:r>`, the run's own
+    parent (the `<w:p>` for a plain run, or a `<w:ins>`/`<w:moveTo>`
+    wrapper for one inside a pending revision), and the text.
+    """
+    out: list[dict[str, Any]] = []
+
+    def walk(node: ET.Element) -> None:
+        for child in list(node):
+            if child.tag in (_w("del"), _w("moveFrom")):
+                continue
+            if child.tag == _w("r"):
+                for sub in child:
+                    tag = sub.tag
+                    if tag == _w("t"):
+                        text = sub.text or ""
+                    elif tag == _w("tab"):
+                        text = "\t"
+                    elif tag in (_w("br"), _w("cr")):
+                        text = "\n"
+                    elif tag == _w("noBreakHyphen"):
+                        text = "\u2011"
+                    elif tag == _w("sym"):
+                        text = extraction_normalization_stage.sym_char(sub.get(_w("char")))
+                    else:
+                        continue
+                    out.append(
+                        {
+                            "el": sub,
+                            "t": sub if tag == _w("t") else None,
+                            "run": child,
+                            "container": node,
+                            "text": text,
+                        }
+                    )
+                continue
+            walk(child)
+
+    walk(p)
+    return out
+
+
+def _extractor_text(p: ET.Element) -> str:
+    return "".join(entry["text"] for entry in _extractor_view_runs(p))
+
+
+def _editor_offsets(entries: list[dict[str, Any]]) -> list[int]:
+    """For every offset into the extractor-view text of `entries` (0 to its
+    length INCLUSIVE), the offset `docx_editor` means by it -- i.e. how many
+    `<w:t>` characters precede it.
+
+    Monotonic and non-decreasing: the structural characters exist only in
+    the extractor's text, so each one maps its own position and the position
+    after it onto the SAME editor offset. That is exactly right for the two
+    consumers -- a span's start and end are both real `<w:t>` positions
+    whenever the span itself is writable, and an insertion point beside a
+    tab is placed by `_apply_pure_insertion`, which walks THESE entries and
+    never sees an editor offset at all.
+    """
+    offsets: list[int] = []
+    editor = 0
+    for entry in entries:
+        for _ in entry["text"]:
+            offsets.append(editor)
+            if entry["t"] is not None:
+                editor += 1
+    offsets.append(editor)
+    return offsets
+
+
+# Why `_split_edit_at_separators` refused an edit. Each is one short line,
+# for the `edit_not_applied` failure detail.
+_SPLIT_ONLY_SEPARATORS = (
+    "the span is only tabs, line breaks, non-breaking hyphens or symbols, which "
+    "docx_editor has no text to address"
+)
+_SPLIT_SEPARATORS_UNMATCHED = (
+    "the span crosses a tab, line break, non-breaking hyphen or symbol that the "
+    "replacement does not reproduce exactly once, in the same order, so it cannot "
+    "be written without duplicating or misplacing that character"
+)
+_SPLIT_NOTHING_BESIDE_SEPARATOR = (
+    "the replacement adds text beside a tab, line break, non-breaking hyphen or "
+    "symbol where the span has no text of its own to replace"
+)
+_SPLIT_NO_CHANGE = "the replacement leaves every piece of the span unchanged"
+
+
+def _align_replacement(replacement: str, separators: list[str]) -> Optional[list[str]]:  # noqa: UP045
+    """Cut `replacement` around `separators`, in order, into the
+    `len(separators) + 1` pieces that stand between them -- or `None` when
+    that cut is not determined by the text alone.
+
+    The cut is accepted only when it is UNIQUE: the leftmost placement of
+    every separator (each searched for after the previous one) and the
+    rightmost (each searched for before the next one) must coincide. Any
+    other placement lies between those two, so when they agree there is no
+    other; when they disagree -- a replacement carrying two tabs where the
+    span crossed one -- which tab is the kept one is a guess, and this
+    module does not write guesses (the caller fails the edit closed)."""
+    leftmost: list[int] = []
+    cursor = 0
+    for separator in separators:
+        found = replacement.find(separator, cursor)
+        if found < 0:
+            return None
+        leftmost.append(found)
+        cursor = found + len(separator)
+    rightmost: list[int] = []
+    cursor = len(replacement)
+    for separator in reversed(separators):
+        found = replacement.rfind(separator, 0, cursor)
+        if found < 0:  # pragma: no cover - leftmost already found one
+            return None
+        rightmost.append(found)
+        cursor = found
+    rightmost.reverse()
+    if leftmost != rightmost:
+        return None
+    pieces: list[str] = []
+    cursor = 0
+    for found, separator in zip(leftmost, separators, strict=True):
+        pieces.append(replacement[cursor:found])
+        cursor = found + len(separator)
+    pieces.append(replacement[cursor:])
+    return pieces
+
+
+def _split_edit_at_separators(
+    edit: dict[str, Any],
+) -> tuple[list[dict[str, Any]], Optional[str]]:  # noqa: UP045
+    """The writable units of one replace/delete span edit, in document
+    order, and -- when there are none it is safe to write -- why not.
+
+    `docx_editor` searches `<w:t>` text only, so a span that CROSSES one of
+    the characters the extractor renders from a run child (issue #97) -- a
+    tab, a line break (`w:br`/`w:cr`), a non-breaking hyphen (U+2011) or a
+    `w:sym` symbol; the model quoting "amounts.\\tSigned" off the text it was
+    shown -- is a string it can never find. Rather than refuse the edit, cut
+    it at every such character into ordered sub-edits that each lie wholly
+    within `<w:t>` text. The source span reads
+    `w0 s0 w1 s1 ... wk`, each `s` a run of those characters and each `w`
+    the `<w:t>` text between them (`w0`/`wk` empty when the span starts or
+    ends on one):
+
+      - the structural character itself is never written over: `docx_editor`
+        has no way to address it, so it STAYS in the document, exactly where
+        the attorney sees it;
+      - a REPLACEMENT must reproduce every crossed `s`, in order, and only
+        once each -- `_align_replacement` cuts it into `r0 s0 r1 s1 ... rk`
+        and each `wi` is replaced by its own `ri` (a piece left unchanged is
+        not written at all, an emptied one is a deletion). The accepted text
+        is then the replacement exactly as the model approved it, which is
+        what the projection gate is told to check. A replacement that drops,
+        doubles or reorders a crossed character cannot be written without
+        leaving it beside text that no longer belongs there, so it fails
+        closed (`_SPLIT_SEPARATORS_UNMATCHED`) -- as does one that adds text
+        beside a character where the span has no `<w:t>` text of its own to
+        replace (`_SPLIT_NOTHING_BESIDE_SEPARATOR`);
+      - a pure DELETION deletes every `wi` and keeps every `s`, the way the
+        pre-#97 writer left a run's tab and line break behind -- a deletion
+        cannot duplicate one. The pieces are what the projection gate is
+        told landed, so it checks the document as written;
+      - every unit keeps the parent's `issue_key`, so the footnote and the
+        revision group stay one per original edit.
+
+    A span with no structural character comes back as `([edit], None)`, the
+    very same object, so the common case is byte-for-byte what it was. Any
+    refusal comes back as `([], reason)` and the caller fails the edit
+    closed as `edit_not_applied` with that reason; a span made of NOTHING
+    writable (just a tab, or just a U+2011) is one.
+    """
+    offsets = edit["offsets"]
+    start, end = edit["local_start"], edit["local_end"]
+    source = edit["source_text"]
+    if len(source) != end - start:  # pragma: no cover - defensive
+        return [edit], None
+    # A structural character is one whose position and the position after it
+    # map to the SAME `docx_editor` offset (see `_editor_offsets`).
+    pieces: list[tuple[int, int]] = []
+    separators: list[str] = []
+    piece_start = position = start
+    while position < end:
+        if offsets[position + 1] != offsets[position]:
+            position += 1
+            continue
+        separator_start = position
+        while position < end and offsets[position + 1] == offsets[position]:
+            position += 1
+        pieces.append((piece_start, separator_start))
+        separators.append(source[separator_start - start : position - start])
+        piece_start = position
+    pieces.append((piece_start, end))
+
+    if not separators:
+        return [edit], None
+    if all(piece_from == piece_to for piece_from, piece_to in pieces):
+        return [], _SPLIT_ONLY_SEPARATORS
+    if edit["insert_text"]:
+        replacements = _align_replacement(edit["insert_text"], separators)
+        if replacements is None:
+            return [], _SPLIT_SEPARATORS_UNMATCHED
+    else:
+        replacements = [""] * len(pieces)
+
+    units: list[dict[str, Any]] = []
+    for (piece_from, piece_to), new_text in zip(pieces, replacements, strict=True):
+        old_text = source[piece_from - start : piece_to - start]
+        if old_text == new_text:
+            continue
+        if not old_text:
+            return [], _SPLIT_NOTHING_BESIDE_SEPARATOR
+        units.append(
+            dict(
+                edit,
+                kind="replace" if new_text else "delete",
+                start=edit["start"] + (piece_from - start),
+                end=edit["start"] + (piece_to - start),
+                local_start=piece_from,
+                local_end=piece_to,
+                source_text=old_text,
+                insert_text=new_text,
+                _parent=edit,
+            )
+        )
+    if not units:
+        return [], _SPLIT_NO_CHANGE
+    return units, None
+
+
+def _run_content_children(run: ET.Element) -> list[ET.Element]:
+    """A run's children that carry content -- everything but its `<w:rPr>`."""
+    return [child for child in run if child.tag != _w("rPr")]
+
+
+def _split_run_at_child(p: ET.Element, run: ET.Element, el: ET.Element, *, after: bool) -> int:
+    """Make the point just after (or just before) run child `el` a RUN
+    boundary in `p`, and return the index in `p` a `<w:ins>` written at that
+    point belongs at.
+
+    A `<w:ins>` is a paragraph-level sibling of `<w:r>`, so an insertion
+    point that falls between two children of one run has nowhere to go until
+    the run is split there. Word writes exactly that shape routinely --
+    `<w:r><w:t>(a)</w:t><w:tab/><w:t>Buyer...</w:t></w:r>`, whose children
+    the extractor now reads in place (issue #97) -- so without this the
+    `<w:ins>` would land at the run's outer edge, past the tab or past the
+    rest of the sentence.
+
+    Only the CHILDREN move: the trailing ones are re-parented, in order, into
+    a new run carrying a copy of the original's `<w:rPr>`, so the rendered
+    text and its formatting are unchanged and no text is re-flowed. A point
+    already at the run's own edge splits nothing.
+    """
+    children = _run_content_children(run)
+    boundary = children.index(el) + (1 if after else 0)
+    run_index = list(p).index(run)
+    if boundary == 0:
+        return run_index
+    if boundary == len(children):
+        return run_index + 1
+    tail = ET.Element(_w("r"))
+    tail_rpr = _copy_rpr(run)
+    if tail_rpr is not None:
+        tail.append(tail_rpr)
+    for child in children[boundary:]:
+        run.remove(child)
+        tail.append(child)
+    p.insert(run_index + 1, tail)
+    return run_index + 1
+
+
 def _body_paragraph_elements(root: ET.Element) -> list[ET.Element]:
     """Every `<w:p>` in the part, in the SAME document order
     `docx_editor` numbers its `P{n}#{hash}` refs by (minidom's
@@ -583,11 +892,26 @@ def _resolve_physical_paragraphs(
     that into a `paragraph_not_resolved` failure for whichever edits needed
     it, and only those.
 
-    `text` is the live paragraph's accepted-view text UNSTRIPPED, and `lead`
-    is how many characters `.strip()` would remove from its front -- block
-    offsets are relative to the stripped text, `docx_editor`'s occurrence
-    counting and `_apply_pure_insertion`'s run walk are both relative to the
-    unstripped text, and `lead` is exactly the translation between them.
+    Issue #97 deliberately does NOT widen that set. The extractor now
+    renders a run's own `<w:tab>`/`<w:br>`/`<w:cr>`/`<w:noBreakHyphen>`/
+    `<w:sym>` as text in document order, which `docx_editor` -- whose
+    `build_text_map` collects `<w:t>` node data and nothing else -- has no
+    character for; comparing the proven text against
+    `_accepted_text` would therefore refuse an edit on nearly every real
+    contract paragraph (manual numbering, signature and notice blocks all
+    carry tabs). So the two texts are held side by side instead:
+    `_extractor_view_runs` rebuilds the text the transcript was proven
+    against, and `offsets` translates a position in it into the position
+    `docx_editor` means -- see `_extractor_view_runs` and `_editor_offsets`.
+    The mirror stays exact, and nothing is written at a coordinate the
+    writer cannot mean.
+
+    `text` is the live paragraph's `docx_editor`-view text UNSTRIPPED (what
+    an `occurrence=` is counted over), `offsets` translates extractor-view
+    offsets into it, and `lead` is how many characters `.strip()` would
+    remove from the front of the EXTRACTOR view -- block offsets are
+    relative to the stripped text and `lead` is the translation back to the
+    unstripped one.
     """
     paragraphs = _body_paragraph_elements(root)
 
@@ -609,12 +933,24 @@ def _resolve_physical_paragraphs(
                 continue
             if not 0 <= p_index < len(paragraphs):
                 continue
-            live_text = _accepted_text(paragraphs[p_index])
+            entries = _extractor_view_runs(paragraphs[p_index])
+            editor_text = "".join(e["text"] for e in entries if e["t"] is not None)
+            if editor_text != _accepted_text(paragraphs[p_index]):
+                # The two walks disagree about which `<w:t>`s exist at all:
+                # this one reads a run's DIRECT children, `_accepted_text_runs`
+                # mirrors `docx_editor` and collects every `<w:t>` DESCENDANT
+                # of a run (a drawing's or text box's own text nested inside
+                # one). Neither side can be trusted to mean the same span as
+                # the other there, so fail closed rather than translate an
+                # offset across a disagreement.
+                continue
+            live_text = "".join(e["text"] for e in entries)
             if live_text.strip() != block_text[span[0] : span[1]]:
                 continue
             resolved[(block_id, span_index)] = {
                 "index": p_index + 1,  # docx_editor refs are 1-based
-                "text": live_text,
+                "text": editor_text,
+                "offsets": _editor_offsets(entries),
                 "lead": len(live_text) - len(live_text.lstrip()),
             }
     return resolved
@@ -719,7 +1055,7 @@ def _plan_omitted_clause_placeholders(
             continue
         if not 0 <= heading_p_index < len(paragraphs):  # pragma: no cover - defensive
             continue
-        if _accepted_text(paragraphs[heading_p_index]).strip() != source_text.strip():
+        if _extractor_text(paragraphs[heading_p_index]).strip() != source_text.strip():
             # The live paragraph is not the heading this record was extracted
             # from any more, so this record is not evidence about what the
             # accepted document will show under it. Leave the clause to be
@@ -797,15 +1133,18 @@ def _is_simple_text_run(run: ET.Element) -> bool:
 def _apply_pure_insertion(
     p: ET.Element, offset: int, text: str, revision_id: int, author: str, timestamp_iso: str
 ) -> Optional[str]:  # noqa: UP045
-    """Write `text` into paragraph `p` at ACCEPTED-view character `offset` as
-    a `<w:ins>` -- no `<w:del>`, no anchor text, no re-matching.
+    """Write `text` into paragraph `p` at EXTRACTOR-view character `offset`
+    as a `<w:ins>` -- no `<w:del>`, no anchor text, no re-matching.
 
-    Walks the paragraph's runs accumulating accepted-view text length to find
-    the run that owns the offset. When the offset falls strictly INSIDE a
-    run, that run is split and the `<w:ins>` goes between the halves, with
-    the run's own `<w:rPr>` copied onto both halves and onto the inserted run
-    so formatting continues across the insertion. When it falls on a run
-    BOUNDARY nothing needs splitting: the `<w:ins>` is placed after the run
+    Walks the paragraph's run children (`_extractor_view_runs`, i.e. the
+    same coordinates the block transcript was proven in, tabs and soft line
+    breaks included -- NOT `docx_editor`'s `<w:t>`-only coordinates, which
+    cannot express "after the tab") accumulating text length to find the
+    child that owns the offset. When the offset falls strictly INSIDE a run,
+    that run is split and the `<w:ins>` goes between the halves, with the
+    run's own `<w:rPr>` copied onto both halves and onto the inserted run so
+    formatting continues across the insertion. When it falls on a CHILD
+    boundary nothing needs splitting: the `<w:ins>` is placed after the run
     on its left (whose formatting the inserted text then continues), or
     before the run on its right if the left neighbour is not a plain
     paragraph-level run.
@@ -815,8 +1154,16 @@ def _apply_pure_insertion(
     only by a run inside somebody else's pending revision, or by a run
     carrying markup beyond a single `<w:t>`, is refused
     (`insert_anchor_unsplittable`) instead of being rebuilt by guesswork.
+
+    A CHILD boundary inside one run (issue #97: `(a)<w:tab/>Buyer` is a
+    single run whose children the extractor now reads in place) is not
+    guesswork and is not refused: `_split_run_at_child` re-parents the
+    trailing children into a second run so the `<w:ins>` can sit between
+    them, because a `<w:ins>` is a paragraph-level sibling of `<w:r>` and
+    writing one beside the run would silently move the inserted text to that
+    run's outer edge -- past the tab, or past the rest of the sentence.
     """
-    entries = [entry for entry in _accepted_text_runs(p) if entry["text"]]
+    entries = [entry for entry in _extractor_view_runs(p) if entry["text"]]
 
     if not entries:
         if offset != 0:
@@ -842,6 +1189,10 @@ def _apply_pure_insertion(
     if inside is not None:
         entry, offset_in_run = inside
         run = entry["run"]
+        if entry["t"] is None:  # pragma: no cover - defensive
+            # Every structural child this walk emits is exactly ONE
+            # character, so no offset can fall strictly inside one.
+            return REASON_INSERT_ANCHOR_UNSPLITTABLE
         if entry["container"] is not p:
             # The offset lands inside a pending revision somebody else
             # authored. Splicing our own insertion into it would merge two
@@ -861,9 +1212,15 @@ def _apply_pure_insertion(
         if entry is None or entry["container"] is not p:
             continue
         run = entry["run"]
-        run_index = list(p).index(run)
-        ins = _build_ins(revision_id, author, timestamp_iso, _copy_rpr(run), text)
-        p.insert(run_index + 1 if after else run_index, ins)
+        rpr = _copy_rpr(run)
+        # The point may fall BETWEEN two children of this run -- after the
+        # `<w:tab/>` in `<w:r><w:t>(a)</w:t><w:tab/><w:t>Buyer...</w:t></w:r>`
+        # -- in which case the run is split there first, so the `<w:ins>`
+        # lands where the offset actually points instead of at the run's
+        # outer edge (issue #97).
+        insert_index = _split_run_at_child(p, run, entry["el"], after=after)
+        ins = _build_ins(revision_id, author, timestamp_iso, rpr, text)
+        p.insert(insert_index, ins)
         return None
 
     return REASON_INSERT_ANCHOR_UNSPLITTABLE
@@ -887,8 +1244,62 @@ def _build_ins(
 ) -> ET.Element:
     ins = ET.Element(_w("ins"))
     _stamp_revision(ins, revision_id, author, timestamp_iso)
-    ins.append(_make_text_run(rpr, text))
+    run = _make_text_run(rpr, text)
+    _write_tabs_and_breaks_as_elements(run)
+    ins.append(run)
     return ins
+
+
+# What an inserted "\t" / "\n" is written as (issue #97). OOXML's tab and
+# line break are run CHILDREN, not characters: a literal TAB or LF inside a
+# `<w:t>` is not one, so Word does not lay it out as one. python-docx's own
+# `_RunContentAppender` makes the same translation. The extractor reads both
+# elements back as exactly these characters (`_process_run`), so the accepted
+# text the projection gate checks is unchanged by it. "\r" is deliberately
+# NOT translated: the extractor reads a `<w:br/>` as "\n", so a "\r" written
+# as one would no longer be the text the model approved.
+_INSERTED_CONTROL_ELEMENTS = {"\t": _w("tab"), "\n": _w("br")}
+
+
+def _write_tabs_and_breaks_as_elements(run: ET.Element) -> None:
+    """Rewrite every `<w:t>` child of `run` that carries a literal "\\t" or
+    "\\n" into the equivalent sequence of `<w:t>`, `<w:tab/>` and `<w:br/>`
+    children, in place and in order, so no `<w:t>` this module writes holds
+    either character (issue #97).
+
+    Called on runs THIS call inserted only -- the owned `<w:ins>` writer
+    (`_build_ins`) and, in pass 2, the runs inside `docx_editor`'s own
+    `<w:ins>` revisions from pass 1, which write the replacement text into a
+    single `<w:t>` verbatim. Never on a counterparty's run."""
+    for t_el in [child for child in run if child.tag == _w("t")]:
+        text = t_el.text or ""
+        if "\t" not in text and "\n" not in text:
+            continue
+        replacement: list[ET.Element] = []
+        chunk = ""
+        for char in text:
+            element_tag = _INSERTED_CONTROL_ELEMENTS.get(char)
+            if element_tag is None:
+                chunk += char
+                continue
+            if chunk:
+                replacement.append(_text_element(chunk))
+                chunk = ""
+            replacement.append(ET.Element(element_tag))
+        if chunk:
+            replacement.append(_text_element(chunk))
+        replacement[-1].tail = t_el.tail
+        position = list(run).index(t_el)
+        run.remove(t_el)
+        for offset, element in enumerate(replacement):
+            run.insert(position + offset, element)
+
+
+def _text_element(text: str) -> ET.Element:
+    t_el = ET.Element(_w("t"))
+    t_el.set(f"{{{XML_NS}}}space", "preserve")
+    t_el.text = text
+    return t_el
 
 
 # ---------------------------------------------------------------------------
@@ -1681,17 +2092,37 @@ def apply_block_transcript(
                 continue
             paragraph_index = location["index"]
             # Block offsets are relative to the STRIPPED clean text; both
-            # writers work on the live paragraph's own accepted-view text.
+            # writers work on the live paragraph's own UNSTRIPPED text.
             # `lead` is the whole difference between the two (see
-            # `_resolve_physical_paragraphs`).
+            # `_resolve_physical_paragraphs`). `local_*` stay in the
+            # EXTRACTOR's coordinates -- the ones the transcript was proven
+            # in -- and `offsets` translates them into `docx_editor`'s
+            # wherever one is actually handed over (issue #97).
             span_start = spans[span_index][0] - location["lead"]
+            local_start = edit["start"] - span_start
+            local_end = edit["end"] - span_start
+            offsets = location["offsets"]
+            if not 0 <= local_start <= local_end < len(offsets):  # pragma: no cover - defensive
+                failures.append(
+                    _failure(
+                        edit,
+                        block_id,
+                        REASON_PARAGRAPH_NOT_RESOLVED,
+                        (
+                            f"offsets [{local_start}, {local_end}) fall outside physical "
+                            f"paragraph {span_index} of block {block_id!r}"
+                        ),
+                    )
+                )
+                continue
             planned.setdefault(paragraph_index, []).append(
                 dict(
                     edit,
                     block_id=block_id,
                     paragraph_index=paragraph_index,
-                    local_start=edit["start"] - span_start,
-                    local_end=edit["end"] - span_start,
+                    local_start=local_start,
+                    local_end=local_end,
+                    offsets=offsets,
                     paragraph_text=location["text"],
                 )
             )
@@ -1879,8 +2310,13 @@ def apply_block_transcript(
     revision_ids_by_issue: dict[str, list[int]] = {}
     phase_one_ids: set[int] = set()
 
-    def record(edit: dict[str, Any], revision_ids) -> None:
-        applied_edit_specs.append(dict(edit))
+    def record(
+        edit: dict[str, Any], revision_ids, specs: Optional[list[dict[str, Any]]] = None  # noqa: UP045
+    ) -> None:
+        # `specs` is what actually LANDED in the document, for the projection
+        # gate. It is the edit itself unless issue #97 cut the edit at a tab,
+        # line break, non-breaking hyphen or symbol, when it is the sub-edits.
+        applied_edit_specs.extend(dict(spec) for spec in (specs or [edit]))
         bucket = revision_ids_by_issue.setdefault(edit["issue_key"], [])
         for revision_id in revision_ids:
             if revision_id not in bucket:
@@ -1897,11 +2333,29 @@ def apply_block_transcript(
         )
 
     # ---- Pass 1: replacements and pure deletions, via docx_editor.
-    replacement_work = {
-        index: [e for e in edits if e["kind"] in ("replace", "delete")]
-        for index, edits in planned.items()
+    #
+    # A span that crosses a rendered tab, line break, non-breaking hyphen or
+    # symbol (issue #97) is cut into writable units here
+    # (`_split_edit_at_separators`); `units_of` maps such an edit's id to its
+    # units, and `replacement_work` holds the UNITS, which is what the loop
+    # below and pass 2's offset shift both read.
+    replacement_work: dict[int, list[dict[str, Any]]] = {}
+    units_of: dict[int, list[dict[str, Any]]] = {}
+    for index, edits in planned.items():
+        for e in edits:
+            if e["kind"] not in ("replace", "delete"):
+                continue
+            units, refusal = _split_edit_at_separators(e)
+            if refusal is not None:
+                failures.append(_failure(e, e["block_id"], REASON_EDIT_NOT_APPLIED, refusal))
+                continue
+            if units[0] is not e:
+                units_of[id(e)] = units
+            replacement_work.setdefault(index, []).extend(units)
+    split_state: dict[int, dict[str, Any]] = {
+        parent_id: {"total": len(units), "landed": [], "revision_ids": [], "failed": False}
+        for parent_id, units in units_of.items()
     }
-    replacement_work = {index: edits for index, edits in replacement_work.items() if edits}
 
     working_bytes = docx_bytes
     if replacement_work:
@@ -1923,8 +2377,21 @@ def apply_block_transcript(
                         key=lambda e: e["local_start"],
                         reverse=True,
                     ):
+                        # `paragraph_text` is `docx_editor`'s own view, so
+                        # the offset counted into it has to be too (issue
+                        # #97: `local_start` is an extractor-view offset,
+                        # which includes characters -- a tab, a soft line
+                        # break -- that `docx_editor` has no position for).
+                        # An edit cut at a tab (issue #97) is all-or-nothing as
+                        # far as it can be: once one of its units has been
+                        # refused, its remaining units are not written.
+                        group = split_state.get(id(edit.get("_parent")))
+                        if group is not None and group["failed"]:
+                            continue
                         occurrence = _occurrence_before(
-                            edit["paragraph_text"], edit["source_text"], edit["local_start"]
+                            edit["paragraph_text"],
+                            edit["source_text"],
+                            edit["offsets"][edit["local_start"]],
                         )
                         try:
                             if edit["kind"] == "replace":
@@ -1943,19 +2410,52 @@ def apply_block_transcript(
                             docx_editor.AmbiguousTextError,
                             docx_editor.HashMismatchError,
                         ) as exc:
+                            detail = f"docx_editor refused the edit: {type(exc).__name__}"
+                            if group is not None:
+                                group["failed"] = True
+                                if group["landed"]:  # pragma: no cover - defensive
+                                    detail += (
+                                        f"; {len(group['landed'])} of {group['total']} "
+                                        "pieces of it, cut at a tab, line break, non-breaking "
+                                        "hyphen or symbol, were already written and are "
+                                        "reported as applied"
+                                    )
+                                    for landed in group["landed"]:
+                                        record(landed, landed["_revision_ids"])
+                                failure_edit = edit["_parent"]
+                            else:
+                                failure_edit = edit
                             failures.append(
                                 _failure(
-                                    edit,
-                                    edit["block_id"],
+                                    failure_edit,
+                                    failure_edit["block_id"],
                                     REASON_EDIT_NOT_APPLIED,
-                                    f"docx_editor refused the edit: {type(exc).__name__}",
+                                    detail,
                                 )
                             )
                             continue
                         ref = str(result)
                         edit["_applied"] = True
                         phase_one_ids.update(int(rid) for rid in result.revision_ids)
-                        record(edit, result.revision_ids)
+                        if group is None:
+                            record(edit, result.revision_ids)
+                            continue
+                        edit["_revision_ids"] = [int(rid) for rid in result.revision_ids]
+                        group["landed"].append(edit)
+                        group["revision_ids"].extend(edit["_revision_ids"])
+                        if len(group["landed"]) == group["total"]:
+                            # One `applied` entry per ORIGINAL edit. The gate
+                            # is told what was written: for a replacement, the
+                            # original edit itself -- its pieces were aligned
+                            # to reproduce exactly the approved text, and the
+                            # gate checks that they did -- and for a deletion,
+                            # the pieces, the crossed characters left standing.
+                            parent = edit["_parent"]
+                            record(
+                                parent,
+                                group["revision_ids"],
+                                specs=[parent] if parent["insert_text"] else group["landed"],
+                            )
                 doc.save()
             finally:
                 doc.close()
@@ -1981,6 +2481,20 @@ def apply_block_transcript(
         # id a human-edited upload (or pass 1) already carries.
         next_revision_id = ooxml_util.max_existing_id(root) + 1
         paragraphs = _body_paragraph_elements(root)
+
+        # `docx_editor` writes a replacement's text into one `<w:t>`
+        # verbatim, so a "\t" or "\n" in it -- which issue #97 now teaches
+        # the model means a tab or a soft line break -- would sit in the
+        # document as a literal control character. Rewrite exactly the runs
+        # pass 1's own insertions created as `<w:tab/>`/`<w:br/>`, the same
+        # translation `_build_ins` makes for this module's own insertions.
+        if phase_one_ids:
+            for ins_el in root.iter(_w("ins")):
+                raw_id = ins_el.get(_w("id"))
+                if raw_id is None or not raw_id.isdigit() or int(raw_id) not in phase_one_ids:
+                    continue
+                for run in ins_el.iter(_w("r")):
+                    _write_tabs_and_breaks_as_elements(run)
 
         for paragraph_index in sorted(insertion_work):
             if paragraph_index > len(paragraphs):  # pragma: no cover - defensive

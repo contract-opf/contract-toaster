@@ -1151,6 +1151,570 @@ def test_boundary_paragraph_detection_evaluates_operative_text(failures: list[st
         )
 
 
+def test_run_children_extract_in_document_order(failures: list[str]) -> None:
+    """Issue #97: `w:tab`, `w:br`/`w:cr`, `w:noBreakHyphen`, `w:softHyphen`,
+    and `w:sym` inside one run must be walked IN DOCUMENT ORDER alongside
+    the run's `w:t` text -- not have every `w:tab` moved to the run's end
+    (fusing the words on either side of it) with every other element
+    silently dropped (fusing words across a `w:br`, dropping a defined
+    term's non-breaking hyphen). `w:cr` is pinned on its own, not left to
+    ride on the `w:br` branch it shares: a walk that matched only `w:br`
+    would stay green on every other case here. This body paragraph is
+    deliberately long and does not start with a numbered/lettered marker, so
+    it stays ordinary body text under 'Fees' on the length cap alone."""
+    body_p = (
+        "<w:p><w:r>"
+        '<w:t xml:space="preserve">Payments under this Agreement</w:t>'
+        "<w:tab/>"
+        '<w:t xml:space="preserve">shall be made by wire transfer</w:t>'
+        "<w:br/>"
+        '<w:t xml:space="preserve">to the account for any Non</w:t>'
+        "<w:noBreakHyphen/>"
+        '<w:t xml:space="preserve">Disclosure</w:t>'
+        "<w:softHyphen/>"
+        '<w:t xml:space="preserve"> fees and</w:t>'
+        '<w:sym w:font="Symbol" w:char="F0E0"/>'
+        '<w:t xml:space="preserve"> related</w:t>'
+        "<w:cr/>"
+        '<w:t xml:space="preserve">charges.</w:t>'
+        "</w:r></w:p>"
+    )
+    result = stage.extract_and_normalize(_build_docx_bytes(_heading_p("Fees") + body_p))
+    if result.get("status") != "normalized":
+        failures.append(f"[G8a] Expected normalized document, got {result}")
+        return
+    text = result["paragraphs"][0]["text"]
+    expected = (
+        "Payments under this Agreement\tshall be made by wire transfer\n"
+        "to the account for any Non\u2011Disclosure fees and\uf0e0 related\ncharges."
+    )
+    if text != expected:
+        failures.append(f"[G8b] Expected {expected!r}, got {text!r}")
+    if "transfer\nto" not in text:
+        failures.append(f"[G8c] w:br must become a newline in place, not vanish. Got: {text!r}")
+    if "related\ncharges." not in text:
+        failures.append(f"[G8d] w:cr must become a newline in place, not vanish. Got: {text!r}")
+
+
+def test_lettered_lead_in_tab_is_no_longer_relocated(failures: list[str]) -> None:
+    """The exact everyday case issue #97 names: a manually-lettered lead-in
+    like '(a)<tab>...' must keep its tab immediately after '(a)', not have
+    it moved to the run's end (which pre-fix produced '(a)Buyer
+    paysSeller.' -- the tab gone AND the words fused). This is the issue's
+    own Required-verification fixture.
+
+    It also pins the segmentation half of the fix. A SHORT paragraph
+    starting '(a)\\t' matches `clause_boundaries.LETTERED_LEAD_IN_RE`
+    (`^\\([a-z]\\)\\s+`), so handing the boundary tier the corrected text
+    would have promoted this body paragraph to a clause boundary and moved
+    its text out of `text` into `heading_source_text`, leaving the block
+    with no reviewable text at all. The tier is handed the record's
+    `boundary_text` instead -- the same accept-all text read as before #97,
+    '(a)Buyer paysSeller.', which matches no lead-in -- so the paragraph
+    stays exactly where it was: ordinary body text under 'Fees'.
+    """
+    body_p = (
+        "<w:p><w:r>"
+        '<w:t xml:space="preserve">(a)</w:t>'
+        "<w:tab/>"
+        '<w:t xml:space="preserve">Buyer pays</w:t>'
+        "<w:br/>"
+        '<w:t xml:space="preserve">Seller.</w:t>'
+        "</w:r></w:p>"
+    )
+    result = stage.extract_and_normalize(_build_docx_bytes(_heading_p("Fees") + body_p))
+    if result.get("status") != "normalized":
+        failures.append(f"[G9a] Expected normalized document, got {result}")
+        return
+    paragraphs = result["paragraphs"]
+    if len(paragraphs) != 1:
+        failures.append(
+            f"[G9b] The lettered lead-in carries its own w:br, so it stays BODY text "
+            f"under 'Fees' -- expected 1 logical paragraph, got {len(paragraphs)}: "
+            f"{[p.get('heading') for p in paragraphs]!r}"
+        )
+        return
+    text = paragraphs[0]["text"]
+    if "paysSeller" in text or not text.startswith("(a)\t"):
+        failures.append(
+            f"[G9c] Expected the tab preserved right after '(a)' and the words not "
+            f"fused across w:br, got: {text!r}"
+        )
+    if text != "(a)\tBuyer pays\nSeller.":
+        failures.append(f"[G9d] Expected '(a)\\tBuyer pays\\nSeller.', got {text!r}")
+
+
+def test_short_tab_separated_sub_clauses_stay_body_text(failures: list[str]) -> None:
+    """The everyday case, and the one thing #97 must NOT change: a clause
+    whose body is three ordinary manually-lettered sub-clauses, each SHORT
+    enough to clear `clause_boundaries.MAX_FALLBACK_HEADING_CHARS` and each
+    one single line, still segments exactly as it did before the fix -- ONE
+    block under 'Payment Terms' whose `text` carries all three sentences.
+
+    This is the regression `boundary_text` exists for.
+    `LETTERED_LEAD_IN_RE` is `^\\([a-z]\\)\\s+`: before #97 the extracted
+    text was '(a)Buyer shall pay...' -- the `w:tab` relocated to the run's
+    end and stripped -- so it did not match and the paragraph was body
+    text. Decide boundaries on the corrected text instead and all three
+    paragraphs become clause BOUNDARIES: four blocks, every one of them
+    with an EMPTY `text`, each sentence lifted into a `heading`. The
+    document would then have no reviewable text and no addressable span
+    anywhere -- strictly worse than the fused words #97 set out to fix,
+    because the model reads nothing and the writer has nothing to redline.
+    The length cap cannot separate the two (each sentence here is well
+    under 80 characters).
+    """
+    sentences = (
+        ("a", "Buyer shall pay all fees within 30 days."),
+        ("b", "Seller shall issue invoices monthly."),
+        ("c", "Late amounts accrue interest at 1% per month."),
+    )
+    body = "".join(
+        "<w:p><w:r>"
+        f'<w:t xml:space="preserve">({letter})</w:t>'
+        "<w:tab/>"
+        f'<w:t xml:space="preserve">{sentence}</w:t>'
+        "</w:r></w:p>"
+        for letter, sentence in sentences
+    )
+    result = stage.extract_and_normalize(
+        _build_docx_bytes(_heading_p("Payment Terms") + body)
+    )
+    if result.get("status") != "normalized":
+        failures.append(f"[G9e] Expected normalized document, got {result}")
+        return
+    paragraphs = result["paragraphs"]
+    if len(paragraphs) != 1:
+        failures.append(
+            f"[G9f] Three short '(x)\\t...' sub-clauses are BODY text under one "
+            f"heading: expected 1 logical paragraph, got {len(paragraphs)} -- "
+            f"headings {[p.get('heading') for p in paragraphs]!r}, texts "
+            f"{[p.get('text') for p in paragraphs]!r}"
+        )
+        return
+    block = paragraphs[0]
+    if block.get("heading") != "Payment Terms":
+        failures.append(f"[G9g] Expected the 'Payment Terms' heading, got {block!r}")
+    text = block["text"]
+    if not text.strip():
+        failures.append("[G9h] The block's own text is empty -- nothing left to review")
+        return
+    for letter, sentence in sentences:
+        if sentence not in text:
+            failures.append(f"[G9i] Sub-clause ({letter})'s sentence is missing from {text!r}")
+        if f"({letter})\t" not in text:
+            failures.append(f"[G9j] Sub-clause ({letter})'s lead-in tab is missing from {text!r}")
+
+
+def test_marker_then_tab_then_title_in_the_next_run_is_still_a_boundary(
+    failures: list[str],
+) -> None:
+    """Issue #97 un-parking (1), and the review of its first fix round:
+    Word's routine "marker + tab in one run, title in the NEXT run" shape --
+    `<w:r><w:t>1.</w:t><w:tab/></w:r><w:r><w:t>Title</w:t></w:r>` -- is a
+    clause boundary on HEAD (the tab sat at the end of its own run, right
+    after the marker, so the lead-in pattern matched) and must stay one,
+    WHATEVER the title ends with. Two earlier cuts of #97 broke it: one
+    folded the tab out of the lead-in check, and one ruled a tab-led title
+    ending in '.' or ':' a body sentence. Each collapsed a style-stripped
+    draft of two such headings into ONE '<untitled>' block with both
+    headings folded into the body -- 'Definitions.' and 'Definitions:' are
+    how a great many real drafts title a section.
+
+    Pinned at both levels, because each can regress alone:
+
+      - STRING level. `clause_boundaries.is_boundary_paragraph` is unchanged
+        by #97 and a string carries no record of which run its tab sat in,
+        so a tab after a marker is the whitespace it always was.
+      - DOCUMENT level. The decision is made on the record's
+        `boundary_text`, which for this shape is the very string HEAD
+        decided on. The previous two tests hold the shape it must stay
+        separable from: `(a)<tab>Buyer shall pay ...` in ONE run is body
+        text, because its `boundary_text` has no tab after the marker.
+
+    NOT the churn corpus: it writes its headings as literal "N. Title" with
+    a SPACE, so the document-spine smoke cannot see a tab-led heading."""
+    import clause_boundaries  # type: ignore  # noqa: PLC0415
+
+    for text in (
+        "1.\tTerm and Termination",
+        "1.\tDefinitions.",
+        "1.\tDefinitions:",
+        "2.1\tScope of Services.",
+        "(a)\tDefinitions",
+    ):
+        if clause_boundaries.is_boundary_paragraph(text) is not True:
+            failures.append(f"[G14a] is_boundary_paragraph({text!r}) must be True, as on HEAD")
+
+    def two_run(marker: str, title: str) -> str:
+        return (
+            "<w:p>"
+            f'<w:r><w:t xml:space="preserve">{marker}</w:t><w:tab/></w:r>'
+            f'<w:r><w:t xml:space="preserve">{title}</w:t></w:r>'
+            "</w:p>"
+        )
+
+    def body(sentence: str) -> str:
+        return f'<w:p><w:r><w:t xml:space="preserve">{sentence}</w:t></w:r></w:p>'
+
+    first_body = "This Agreement runs for one year and renews annually thereafter by consent."
+    second_body = "Each party shall hold the other's information in confidence indefinitely."
+    # No Heading style anywhere: this is the fallback tier's own territory.
+    for (m1, t1), (m2, t2) in (
+        (("1.", "Term and Termination"), ("2.", "Confidentiality")),
+        (("1.", "Definitions."), ("2.", "Confidentiality.")),
+        (("1.", "Definitions:"), ("2.", "Confidentiality:")),
+        (("2.1", "Scope of Services."), ("2.2", "Fees.")),
+    ):
+        doc = two_run(m1, t1) + body(first_body) + two_run(m2, t2) + body(second_body)
+        result = stage.extract_and_normalize(_build_docx_bytes(doc))
+        if result.get("status") != "normalized":
+            failures.append(f"[G14b] {t1!r}: expected normalized document, got {result}")
+            continue
+        headings = [p.get("heading") for p in result["paragraphs"]]
+        texts = [p.get("text") for p in result["paragraphs"]]
+        if headings != [t1, t2] or texts != [first_body, second_body]:
+            failures.append(
+                f"[G14c] Both tab-led headings ({t1!r}, {t2!r}) must open a clause, as on "
+                f"HEAD; got headings {headings!r} with texts {texts!r}"
+            )
+
+
+def test_multi_line_all_caps_and_bold_headings_are_still_boundaries(
+    failures: list[str],
+) -> None:
+    """The other half of "#97 must not change segmentation": a
+    style-stripped heading that Word split across two lines with a `w:br`
+    is still a heading. Before #97 the break was dropped and the lines
+    arrived fused ('GOVERNING LAWAND JURISDICTION'), which is ALL-CAPS and
+    short, so `clause_boundaries.py`'s fallback tier opened a clause there.
+    Its `boundary_text` is still that fused line, so it still does -- and
+    the bold case is the one that would otherwise be LOST outright, because
+    the bold signal requires a single line and the corrected text now has
+    two. Either way the heading the clause carries is the corrected text,
+    line break included.
+
+    Bold and ALL-CAPS are exactly the pair `strip_heading_styles` exists to
+    exercise (docs/document-spine-smoke.md), so both are pinned here."""
+    cases = (
+        (
+            "all-caps",
+            "<w:p><w:r>"
+            '<w:t xml:space="preserve">GOVERNING LAW</w:t>'
+            "<w:br/>"
+            '<w:t xml:space="preserve">AND JURISDICTION</w:t>'
+            "</w:r></w:p>",
+            "GOVERNING LAW\nAND JURISDICTION",
+        ),
+        (
+            "whole-paragraph bold",
+            "<w:p><w:r><w:rPr><w:b/></w:rPr>"
+            '<w:t xml:space="preserve">Governing Law</w:t>'
+            "<w:br/>"
+            '<w:t xml:space="preserve">and Jurisdiction</w:t>'
+            "</w:r></w:p>",
+            "Governing Law\nand Jurisdiction",
+        ),
+    )
+    body_sentence = "This Agreement is governed by the laws of the State."
+    for label, heading_p, expected_heading in cases:
+        result = stage.extract_and_normalize(
+            _build_docx_bytes(
+                heading_p + f'<w:p><w:r><w:t xml:space="preserve">{body_sentence}</w:t></w:r></w:p>'
+            )
+        )
+        if result.get("status") != "normalized":
+            failures.append(f"[G13a] {label}: expected normalized document, got {result}")
+            continue
+        paragraphs = result["paragraphs"]
+        if len(paragraphs) != 1:
+            failures.append(
+                f"[G13b] {label}: expected the heading to open exactly one clause, got "
+                f"{[p.get('heading') for p in paragraphs]!r}"
+            )
+            continue
+        block = paragraphs[0]
+        if block.get("heading_source_text") != expected_heading:
+            failures.append(
+                f"[G13c] {label}: expected the w:br-split heading "
+                f"{expected_heading!r}, got {block.get('heading_source_text')!r}"
+            )
+        if block["text"] != body_sentence:
+            failures.append(
+                f"[G13d] {label}: the heading must not fold into the body -- expected "
+                f"{body_sentence!r}, got {block['text']!r}"
+            )
+
+
+def test_line_break_split_numbered_heading_is_still_a_boundary(
+    failures: list[str],
+) -> None:
+    """A style-stripped NUMBERED heading Word wrapped with a soft line break
+    -- `1. Term<w:br/>and Termination`, or the same with `<w:cr/>` -- was a
+    boundary on HEAD: the break was dropped, the line arrived as
+    '1. Termand Termination', and the numbered lead-in matched. An earlier
+    cut of #97 ruled any multi-line paragraph out of the two lead-in
+    signals and collapsed such a draft into ONE '<untitled>' block. Its
+    `boundary_text` is still the line HEAD decided on, so it opens its
+    clause exactly as before, and the heading it carries is the corrected
+    text with the break in place.
+
+    Text alone cannot tell this heading from a `w:br`-separated notices
+    block that happens to start with a street number ('1 Main Street /
+    Suite 200 / ...'), which HEAD promoted for the same reason. #97 changes
+    neither -- it corrects the text, not the segmentation -- so that block
+    is promoted exactly as it was before; making it body text is a
+    segmentation change of its own, not this issue's."""
+    first_body = "This Agreement runs for one year and renews annually thereafter by consent."
+    second_body = "Each party shall hold the other's information in confidence indefinitely."
+    for separator in ("<w:br/>", "<w:cr/>"):
+        doc = (
+            "<w:p><w:r>"
+            f'<w:t xml:space="preserve">1. Term</w:t>{separator}'
+            '<w:t xml:space="preserve">and Termination</w:t>'
+            "</w:r></w:p>"
+            f'<w:p><w:r><w:t xml:space="preserve">{first_body}</w:t></w:r></w:p>'
+            "<w:p><w:r>"
+            f'<w:t xml:space="preserve">2. Confidential</w:t>{separator}'
+            '<w:t xml:space="preserve">Information</w:t>'
+            "</w:r></w:p>"
+            f'<w:p><w:r><w:t xml:space="preserve">{second_body}</w:t></w:r></w:p>'
+        )
+        result = stage.extract_and_normalize(_build_docx_bytes(doc))
+        if result.get("status") != "normalized":
+            failures.append(f"[G11a] {separator}: expected normalized document, got {result}")
+            continue
+        headings = [p.get("heading") for p in result["paragraphs"]]
+        texts = [p.get("text") for p in result["paragraphs"]]
+        if headings != ["Term\nand Termination", "Confidential\nInformation"]:
+            failures.append(
+                f"[G11b] {separator}: both line-break-split numbered headings must open a "
+                f"clause, as on HEAD; got headings {headings!r} with texts {texts!r}"
+            )
+        elif texts != [first_body, second_body]:
+            failures.append(f"[G11c] {separator}: the headings must not fold into the body: {texts!r}")
+
+
+def test_boundary_text_reads_only_the_accept_all_view(failures: list[str]) -> None:
+    """`boundary_text` is built beside `resulting_text`, from the same
+    `add_plain`/`add_ins` calls, so it is the ACCEPT-ALL view by
+    construction: a deleted run is not in it, an inserted one is. That is
+    load-bearing, not tidy -- Stage 1 extracts the raw upload and Stage 5
+    the `materialize_accept_all` bytes, where the deletion is gone, and a
+    boundary decided on text only one of them can see moves every later
+    block id (see `extract_document_paragraphs`).
+
+    (1) The record itself, for the issue's own run and for a tracked pair.
+    (2) A DELETED `1.<w:tab/>` ahead of a short body sentence must not make
+        that sentence a heading -- the accept-all paragraph has no marker.
+    (3) An INSERTED title after a plain `1.<w:tab/>` run is a heading, as on
+        HEAD."""
+    import xml.etree.ElementTree as ET  # noqa: PLC0415
+
+    def record(paragraph_xml: str) -> dict[str, Any]:
+        root = ET.fromstring(  # noqa: S314 - fixture XML this file builds itself
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+            f"<w:body>{paragraph_xml}</w:body></w:document>"
+        )
+        return stage._build_paragraph_record(root[0][0])
+
+    deleted_marker = (
+        '<w:del w:id="1" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
+        '<w:r><w:delText xml:space="preserve">1.</w:delText><w:tab/></w:r></w:del>'
+    )
+    inserted_title = (
+        '<w:ins w:id="2" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
+        '<w:r><w:t xml:space="preserve">Definitions.</w:t></w:r></w:ins>'
+    )
+    for paragraph_xml, expected_text, expected_boundary in (
+        (
+            "<w:p><w:r>"
+            '<w:t xml:space="preserve">(a)</w:t><w:tab/>'
+            '<w:t xml:space="preserve">Buyer pays</w:t><w:br/>'
+            '<w:t xml:space="preserve">Seller.</w:t>'
+            "</w:r></w:p>",
+            "(a)\tBuyer pays\nSeller.",
+            "(a)Buyer paysSeller.",
+        ),
+        (
+            f"<w:p>{deleted_marker}"
+            '<w:r><w:t xml:space="preserve">Buyer shall pay.</w:t></w:r></w:p>',
+            "Buyer shall pay.",
+            "Buyer shall pay.",
+        ),
+        (
+            '<w:p><w:r><w:t xml:space="preserve">1.</w:t><w:tab/></w:r>'
+            f"{inserted_title}</w:p>",
+            "1.\tDefinitions.",
+            "1.\tDefinitions.",
+        ),
+    ):
+        got = record(paragraph_xml)
+        if (got["resulting_text"], got["boundary_text"]) != (expected_text, expected_boundary):
+            failures.append(
+                f"[G15a] expected resulting/boundary text "
+                f"{(expected_text, expected_boundary)!r}, got "
+                f"{(got['resulting_text'], got['boundary_text'])!r}"
+            )
+
+    body_sentence = "Buyer shall pay."
+    result = stage.extract_and_normalize(
+        _build_docx_bytes(
+            _heading_p("Fees")
+            + f"<w:p>{deleted_marker}"
+            + f'<w:r><w:t xml:space="preserve">{body_sentence}</w:t></w:r></w:p>'
+        )
+    )
+    if result.get("status") != "normalized":
+        failures.append(f"[G15b] Expected normalized document, got {result.get('status')!r}")
+    elif [p.get("heading") for p in result["paragraphs"]] != ["Fees"]:
+        failures.append(
+            f"[G15c] a struck '1.<tab>' must not make the accepted sentence a heading; got "
+            f"{[(p.get('heading'), p.get('text')) for p in result['paragraphs']]!r}"
+        )
+
+    result = stage.extract_and_normalize(
+        _build_docx_bytes(
+            '<w:p><w:r><w:t xml:space="preserve">1.</w:t><w:tab/></w:r>'
+            f"{inserted_title}</w:p>"
+            '<w:p><w:r><w:t xml:space="preserve">Terms used here have these meanings.</w:t></w:r></w:p>'
+        )
+    )
+    if result.get("status") != "normalized":
+        failures.append(f"[G15d] Expected normalized document, got {result.get('status')!r}")
+    elif [p.get("heading") for p in result["paragraphs"]] != ["Definitions."]:
+        failures.append(
+            f"[G15e] an inserted title after '1.<tab>' must open its clause, as on HEAD; got "
+            f"{[(p.get('heading'), p.get('text')) for p in result['paragraphs']]!r}"
+        )
+
+
+def test_hostile_or_malformed_sym_char_degrades_to_a_space(failures: list[str]) -> None:
+    """`<w:sym w:char="...">` is the one channel through which an arbitrary
+    codepoint can reach the extracted text -- `w:t` content is parsed XML,
+    so the parser has already rejected control characters and lone
+    surrogates there. `sym_char` must therefore never raise and never emit
+    a character the rest of the pipeline cannot carry: a lone surrogate
+    would make the UTF-8 encode of any downstream payload raise (a bare
+    500), and a `w:char="000A"` would inject a newline no `w:br` put there,
+    which is load-bearing for the paragraph-boundary rule. Each of these
+    degrades to ONE space -- the run's neighbours must still not fuse."""
+    cases = [
+        ("<w:sym/>", "no w:char attribute at all"),
+        ('<w:sym w:font="Symbol" w:char=""/>', "empty w:char"),
+        ('<w:sym w:font="Symbol" w:char="ZZZZ"/>', "non-hex w:char"),
+        ('<w:sym w:font="Symbol" w:char="-1"/>', "negative w:char"),
+        ('<w:sym w:font="Symbol" w:char="110000"/>', "out-of-range w:char"),
+        ('<w:sym w:font="Symbol" w:char="D800"/>', "lone surrogate"),
+        ('<w:sym w:font="Symbol" w:char="000A"/>', "control character (LF)"),
+        ('<w:sym w:font="Symbol" w:char="0000"/>', "control character (NUL)"),
+    ]
+    for sym_xml, label in cases:
+        body_p = (
+            "<w:p><w:r>"
+            '<w:t xml:space="preserve">Alpha</w:t>'
+            f"{sym_xml}"
+            '<w:t xml:space="preserve">Beta</w:t>'
+            "</w:r></w:p>"
+        )
+        try:
+            raw = stage.extract_document_paragraphs(
+                _build_docx_bytes(_heading_p("Fees") + body_p)
+            )
+        except Exception as exc:  # noqa: BLE001 - the point is that nothing escapes
+            failures.append(f"[G12a] {label}: extraction raised {exc!r}")
+            continue
+        text = raw[0]["physical_paragraphs"][0]["text"]
+        if text != "Alpha Beta":
+            failures.append(f"[G12b] {label}: expected 'Alpha Beta', got {text!r}")
+            continue
+        try:
+            text.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            failures.append(f"[G12c] {label}: extracted text is not UTF-8 encodable: {exc!r}")
+
+    # The happy variant of the same branch: a REAL Symbol-font codepoint is
+    # kept verbatim, so the guard above cannot be widened into "every
+    # w:sym becomes a space" and stay green.
+    body_p = (
+        "<w:p><w:r>"
+        '<w:t xml:space="preserve">Alpha</w:t>'
+        '<w:sym w:font="Symbol" w:char="F0E0"/>'
+        '<w:t xml:space="preserve">Beta</w:t>'
+        "</w:r></w:p>"
+    )
+    raw = stage.extract_document_paragraphs(_build_docx_bytes(_heading_p("Fees") + body_p))
+    text = raw[0]["physical_paragraphs"][0]["text"]
+    if text != "Alpha\uf0e0Beta":
+        failures.append(f"[G12d] Expected the F0E0 symbol kept verbatim, got {text!r}")
+
+    # The other half of "kept verbatim": a `w:sym` is a NEW way to put an
+    # arbitrary codepoint into the extracted text, so the document-wide
+    # zero-width/bidi screen (ARCHITECTURE.md -> "Input normalization") must
+    # see it exactly as it sees one typed into a `w:t`. These two are NOT
+    # degraded to a space -- silently repairing a planted RLO/ZWSP is the one
+    # thing that screen exists to refuse -- the whole document fails closed.
+    for label, hex_char in (("RLO", "202E"), ("ZWSP", "200B")):
+        body_p = (
+            "<w:p><w:r>"
+            '<w:t xml:space="preserve">Alpha</w:t>'
+            f'<w:sym w:font="Symbol" w:char="{hex_char}"/>'
+            '<w:t xml:space="preserve">Beta</w:t>'
+            "</w:r></w:p>"
+        )
+        result = stage.extract_and_normalize(_build_docx_bytes(_heading_p("Fees") + body_p))
+        if result.get("status") != "unnormalizable_input":
+            failures.append(
+                f"[G12e] a {label} smuggled in through w:sym must fail the document "
+                f"closed, got status={result.get('status')!r}"
+            )
+
+
+def test_mixed_run_children_inside_a_pending_tracked_change(failures: list[str]) -> None:
+    """`w:tab`/`w:br`/`w:noBreakHyphen` must be walked in document order in
+    BOTH streams of a pending tracked change -- the deleted (`mode="del"`,
+    `w:delText`) run and the inserted (`mode="ins"`, `w:t`) run -- not just
+    the plain-run path, since `_process_run`'s child walk is shared across
+    all three modes."""
+    body_p = (
+        "<w:p>"
+        '<w:del w:id="1" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
+        "<w:r>"
+        '<w:delText xml:space="preserve">Old term</w:delText>'
+        "<w:tab/>"
+        '<w:delText xml:space="preserve">unbounded.</w:delText>'
+        "</w:r></w:del>"
+        '<w:ins w:id="2" w:author="counterparty" w:date="2026-01-01T00:00:00Z">'
+        "<w:r>"
+        '<w:t xml:space="preserve">New Non</w:t>'
+        "<w:noBreakHyphen/>"
+        '<w:t xml:space="preserve">Disclosure term</w:t>'
+        "<w:br/>"
+        '<w:t xml:space="preserve">capped at $1.</w:t>'
+        "</w:r></w:ins>"
+        "</w:p>"
+    )
+    raw = stage.extract_document_paragraphs(_build_docx_bytes(_heading_p("Term") + body_p))
+    record = raw[0]["physical_paragraphs"][0]
+    tracked = [rev for rev in record["revisions"] if rev.get("type") == "tracked_change"]
+    if len(tracked) != 1:
+        failures.append(f"[G10a] Expected exactly one tracked-change cluster. Got: {record['revisions']!r}")
+        return
+    revision = tracked[0]
+    expected_original = "Old term\tunbounded."
+    expected_resulting = "New Non\u2011Disclosure term\ncapped at $1."
+    if revision.get("original_text") != expected_original:
+        failures.append(
+            f"[G10b] Deleted-stream w:tab must land in place. Expected "
+            f"{expected_original!r}, got {revision.get('original_text')!r}"
+        )
+    if revision.get("resulting_text") != expected_resulting:
+        failures.append(
+            f"[G10c] Inserted-stream w:noBreakHyphen/w:br must survive. Expected "
+            f"{expected_resulting!r}, got {revision.get('resulting_text')!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -1174,6 +1738,15 @@ TESTS = [
     test_hyperlink_inside_an_excluded_container_stays_excluded,
     test_real_word_processor_document_extracts_its_hyperlink_text,
     test_boundary_paragraph_detection_evaluates_operative_text,
+    test_run_children_extract_in_document_order,
+    test_lettered_lead_in_tab_is_no_longer_relocated,
+    test_short_tab_separated_sub_clauses_stay_body_text,
+    test_marker_then_tab_then_title_in_the_next_run_is_still_a_boundary,
+    test_multi_line_all_caps_and_bold_headings_are_still_boundaries,
+    test_line_break_split_numbered_heading_is_still_a_boundary,
+    test_boundary_text_reads_only_the_accept_all_view,
+    test_mixed_run_children_inside_a_pending_tracked_change,
+    test_hostile_or_malformed_sym_char_degrades_to_a_space,
 ]
 
 

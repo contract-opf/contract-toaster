@@ -62,6 +62,30 @@ file FAILS on import until it does.
      `inject_issue_footnotes` documents (revision ids are RECORDED in
      descending-offset order, which is not document order).
 
+## Issue #97 (the extractor's in-place tab / soft line break)
+
+ 12. A paragraph carrying its own `<w:tab/>` or `<w:br/>` still resolves
+     and still applies. The extractor renders both in place now and
+     `docx_editor` has a position for neither, so the module holds the two
+     texts side by side and translates between them -- it does NOT widen
+     the fail-closed set to every paragraph with a tab in it, which is
+     most real contract paragraphs. A pure insertion anchored immediately
+     after a tab lands there, not at the run's outer edge.
+     An edit whose span CROSSES a tab or soft line break is cut there into
+     sub-edits that each lie within `<w:t>` text and applies, the separator
+     staying in place: a replacement that reproduces the separator is
+     aligned around it and accepts as EXACTLY the approved text (the
+     notices-address rewrite included), a deletion leaves it standing, and
+     a replacement that drops, doubles or reorders it fails closed as
+     `edit_not_applied`, as does a span that is only a separator. An
+     inserted "\\t"/"\\n" is written as `<w:tab/>`/`<w:br/>`, never as a
+     literal control character inside `<w:t>`, on both writer paths.
+ 13. The same holds for the other three: `<w:noBreakHyphen/>`, `<w:sym>`
+     and `<w:cr/>` each resolve, an edit beyond or across each applies,
+     the crossed character survives the accept, a replacement dropping it
+     fails closed, and a bare U+2011 span fails closed with a detail that
+     names it.
+
 Uses python-docx (test-only dependency, matching
 the repo's other OOXML fixture builders and `tests/redline/test_inplace_patcher_
 core.py`) to build small SYNTHETIC fixtures -- never a real document.
@@ -1156,6 +1180,699 @@ def test_footnote_anchors_on_the_first_ins_in_document_order(failures: list) -> 
         )
 
 
+def _tab_and_break_fixture(shape: str) -> bytes:
+    """A one-clause fixture whose body paragraph carries a run-structural
+    child issue #97 now renders in place. `shape` is "break" (a `<w:br/>`
+    mid-sentence, Word's notices/address and wrapped-sentence shape) or
+    "tab" (a second run opening with a `<w:tab/>`, Word's signature-block
+    and manual-numbering shape)."""
+    import docx  # local import: python-docx is a test-only dependency
+
+    document = docx.Document()
+    document.add_paragraph("Section 1. Term", style="Heading 1")
+    paragraph = document.add_paragraph()
+    if shape == "break":
+        run = paragraph.add_run("Buyer shall pay all undisputed invoiced amounts")
+        run.add_break()
+        run.add_text("within 30 days of receipt of an invoice.")
+    else:
+        paragraph.add_run("Buyer shall pay all undisputed invoiced amounts.")
+        signature = paragraph.add_run()
+        signature.add_tab()
+        signature.add_text("Signed.")
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+def _accepted_block_text(docx_bytes: bytes) -> str:
+    """The first block's text as the EXTRACTOR reads it after an accept-all
+    -- i.e. what the attorney is left with. Read through the extractor, not
+    by joining `<w:t>`s, because the whole point of issue #97 is the
+    characters a `<w:t>` join does not have (a tab, a soft line break)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        doc, path = _reopen(docx_bytes, Path(tmp), "accept")
+        try:
+            doc.accept_all()
+            doc.save()
+        finally:
+            doc.close()
+        accepted_bytes = path.read_bytes()
+    norm = extraction_normalization_stage.extract_and_normalize(accepted_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    return block_map[next(iter(block_map))]["text"]
+
+
+def test_edit_on_a_tab_or_soft_break_paragraph_still_applies(failures: list) -> None:
+    """Issue #97 taught the EXTRACTOR to render a run's own `<w:tab/>` as a
+    tab and its `<w:br/>` as a newline IN PLACE (they used to be relocated
+    and dropped, fusing the words on either side). `docx_editor` has no
+    character for either -- `xml_editor.build_text_map` collects `<w:t>`
+    node data and nothing else -- and `_accepted_text_runs` must keep
+    mirroring it exactly, because that mirror is what makes an offset
+    computed here mean the same span over there.
+
+    The answer is NOT to let the text guard in `_resolve_physical_
+    paragraphs` refuse every such paragraph. Tabs and soft breaks are in
+    nearly every real contract paragraph (manual numbering, notices,
+    signature blocks), so refusing them would silently disable redlining
+    across a large fraction of the corpus -- and the whole point of #97 is
+    that the model finally reads what the attorney sees. Instead the two
+    texts are held side by side (`_extractor_view_runs`) and `_editor_
+    offsets` translates a proven offset into the one `docx_editor` means.
+
+    Both shapes are pinned here, each on an edit that APPLIED on the
+    pre-#97 tree, so a future diff cannot quietly turn either back into a
+    `paragraph_not_resolved`.
+    """
+    for shape, needle, replacement in (("break", "30", "45"), ("tab", "undisputed", "invoiced")):
+        docx_bytes = _tab_and_break_fixture(shape)
+        norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+        if norm["status"] != "normalized":
+            failures.append(f"[{shape}] fixture must normalize, got {norm['status']!r}")
+            continue
+        block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+        block_id = next(iter(block_map))
+        block_text = block_map[block_id]["text"]
+        expected_char = "\n" if shape == "break" else "\t"
+        if expected_char not in block_text:
+            failures.append(
+                f"[{shape}] the extractor must render the structural child in place; "
+                f"got {block_text!r}"
+            )
+            continue
+
+        target = block_text.index(needle)
+        proven, _ = _prove(
+            docx_bytes,
+            [
+                {"op": "keep", "text": block_text[:target]},
+                {"op": "delete", "text": needle, "issue_key": "I1"},
+                {"op": "insert", "text": replacement, "issue_key": "I1"},
+                {"op": "keep", "text": block_text[target + len(needle) :]},
+            ],
+        )
+        if proven["status"] != "proven":
+            failures.append(
+                f"[{shape}] the transcript must prove against the corrected text; got "
+                f"{proven['status']!r}: {proven.get('failures')!r}"
+            )
+            continue
+
+        result = redline_block_apply.apply_block_transcript(
+            docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+        )
+        reasons = [f.get("reason") for f in result["failures"]]
+        if reasons or len(result["applied"]) != 1:
+            failures.append(
+                f"[{shape}] the edit must still apply -- a tab or soft line break is "
+                f"not a reason to refuse one. Got failures={reasons!r} "
+                f"applied={result['applied']!r}"
+            )
+            continue
+        # The tracked change has to land on the RIGHT span, not merely land:
+        # accepting it must give back the proven text with the replacement
+        # made, structural characters still in place.
+        accepted = _accepted_block_text(result["docx_bytes"])
+        expected = block_text.replace(needle, replacement, 1)
+        if accepted != expected:
+            failures.append(
+                f"[{shape}] accepting the redline must yield {expected!r}; got {accepted!r}"
+            )
+
+
+def test_pure_insertion_beside_a_tab_lands_where_the_offset_points(failures: list) -> None:
+    """A pure insertion whose anchor offset sits immediately AFTER a
+    `<w:tab/>` is the one place where the extractor's coordinates and
+    `docx_editor`'s cannot be told apart by an offset alone: the position
+    before the tab and the position after it are the same `<w:t>` character
+    count. `_apply_pure_insertion` therefore works in the EXTRACTOR's
+    coordinates and splits the run at the child boundary
+    (`_split_run_at_child`), because a `<w:ins>` is a paragraph-level
+    sibling of `<w:r>` and writing one beside the run would move the
+    inserted text to that run's outer edge -- here, to the far side of
+    'Signed.'.
+    """
+    docx_bytes = _tab_and_break_fixture("tab")
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_id = next(iter(block_map))
+    block_text = block_map[block_id]["text"]
+    at = block_text.index("\tSigned.") + 1
+
+    proven, _ = _prove(
+        docx_bytes,
+        [
+            {"op": "keep", "text": block_text[:at]},
+            {"op": "insert", "text": "Duly ", "issue_key": "I1"},
+            {"op": "keep", "text": block_text[at:]},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(f"insertion transcript must prove; got {proven['status']!r}")
+        return
+
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+    )
+    reasons = [f.get("reason") for f in result["failures"]]
+    if reasons or len(result["applied"]) != 1:
+        failures.append(
+            f"an insertion beside a tab must apply; got failures={reasons!r} "
+            f"applied={result['applied']!r}"
+        )
+        return
+    accepted = _accepted_block_text(result["docx_bytes"])
+    expected = block_text[:at] + "Duly " + block_text[at:]
+    if accepted != expected:
+        failures.append(
+            f"the insertion must land immediately after the tab: expected "
+            f"{expected!r} in the accepted view, got {accepted!r}"
+        )
+
+
+def _prove_one_edit(docx_bytes: bytes, source: str, replacement: str) -> tuple[dict, str]:
+    """Prove a single `source` -> `replacement` (or deletion, when
+    `replacement` is empty) over the fixture's one body block. Returns the
+    proven transcript and the block text it was proven against."""
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_text = block_map[next(iter(block_map))]["text"]
+    target = block_text.index(source)
+    ops = [
+        {"op": "keep", "text": block_text[:target]},
+        {"op": "delete", "text": source, "issue_key": "I1"},
+    ]
+    if replacement:
+        ops.append({"op": "insert", "text": replacement, "issue_key": "I1"})
+    ops.append({"op": "keep", "text": block_text[target + len(source) :]})
+    proven, _ = _prove(docx_bytes, ops)
+    return proven, block_text
+
+
+def _raw_control_chars_in_w_t(docx_bytes: bytes) -> list[str]:
+    """Every `<w:t>` in the output's document part that holds a literal TAB
+    or LF. OOXML's tab and line break are run children (`<w:tab/>`,
+    `<w:br/>`); a control character inside `<w:t>` is not one, and Word does
+    not lay it out as one. Read from the unzipped part, not through the
+    extractor, which reads both forms as the same character and so cannot
+    tell them apart."""
+    root = _document_root(docx_bytes)
+    return [
+        t_el.text
+        for t_el in root.iter(_qn("t"))
+        if t_el.text and ("\t" in t_el.text or "\n" in t_el.text)
+    ]
+
+
+def test_edit_crossing_a_tab_or_soft_break_is_cut_there_and_applies(failures: list) -> None:
+    """Issue #97 un-parkings (2026-09-18 (2), 2026-10-05 (1)): an edit whose
+    span CROSSES a rendered tab or soft line break must apply, not fail
+    closed, and must give back EXACTLY the text the model approved.
+
+    `docx_editor` searches `<w:t>` text only, so the span as the model quoted
+    it ("amounts.<tab>Signed") is a string it cannot find. HEAD applied this
+    redline because the text the model read carried no tab at all; refusing
+    it now would be a capability loss on the exact shape the ticket names
+    (`(a)<tab>Buyer pays ...`). The compiler therefore cuts the span at the
+    separator into ordered sub-edits that each lie within `<w:t>` text.
+
+    The separator itself is never written over, so it STAYS:
+
+      - a REPLACEMENT that reproduces the crossed separator is aligned to it
+        piece by piece -- "amounts.<tab>Signed" -> "sums.<tab>Signed" writes
+        "amounts." -> "sums." and leaves the tab and "Signed" alone -- so the
+        accepted text EQUALS the approved text, with no separator doubled
+        (the defect the 2026-10-05 reviewer reproduced: the whole
+        replacement used to ride on the first piece, giving
+        "sums.<tab>Signed<tab>.");
+      - a pure DELETION deletes every writable piece and leaves the
+        separator in place (the 2026-09-18 reviewer's own case: deleting
+        "amounts.<tab>Signed" must apply).
+
+    Each is ONE `applied` entry, one issue group, and no output `<w:t>`
+    carries a literal TAB or LF.
+    """
+    cases = (
+        # shape, source span (crosses the separator), replacement, accepted text from block text
+        ("tab", "amounts.\tSigned", "", lambda t: t.replace("amounts.\tSigned", "\t")),
+        ("break", "amounts\nwithin", "", lambda t: t.replace("amounts\nwithin", "\n")),
+        (
+            "tab",
+            "amounts.\tSigned",
+            "sums.\tSigned",
+            lambda t: t.replace("amounts.\tSigned", "sums.\tSigned"),
+        ),
+        (
+            "tab",
+            "amounts.\tSigned",
+            "sums.\tAttested",
+            lambda t: t.replace("amounts.\tSigned", "sums.\tAttested"),
+        ),
+        (
+            "break",
+            "amounts\nwithin",
+            "sums\nwithin",
+            lambda t: t.replace("amounts\nwithin", "sums\nwithin"),
+        ),
+    )
+    for shape, source, replacement, expect in cases:
+        label = f"[{shape}: {source!r} -> {replacement!r}]"
+        docx_bytes = _tab_and_break_fixture(shape)
+        proven, block_text = _prove_one_edit(docx_bytes, source, replacement)
+        if proven["status"] != "proven":
+            failures.append(f"{label} must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+            continue
+        result = redline_block_apply.apply_block_transcript(
+            docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+        )
+        reasons = [f.get("reason") for f in result["failures"]]
+        if reasons or len(result["applied"]) != 1:
+            failures.append(
+                f"{label} an edit crossing a separator must apply as ONE edit; got "
+                f"failures={reasons!r} {result['failures']!r} applied={result['applied']!r}"
+            )
+            continue
+        entry = result["applied"][0]
+        if entry["source_text"] != source or entry["insert_text"] != replacement:
+            failures.append(f"{label} the applied entry must describe the ORIGINAL edit: {entry!r}")
+        if not replacement and len(entry["revision_ids"]) < 2:
+            failures.append(f"{label} two deleted pieces must each leave a revision: {entry!r}")
+        if sorted(result["revision_ids_by_issue"]) != ["I1"]:
+            failures.append(f"{label} one issue group expected: {result['revision_ids_by_issue']!r}")
+        accepted = _accepted_block_text(result["docx_bytes"])
+        if accepted != expect(block_text):
+            failures.append(
+                f"{label} accepting must give {expect(block_text)!r}; got {accepted!r}"
+            )
+        if replacement and accepted != block_text.replace(source, replacement, 1):
+            failures.append(f"{label} accepted text must EQUAL the approved text; got {accepted!r}")
+        raw = _raw_control_chars_in_w_t(result["docx_bytes"])
+        if raw:
+            failures.append(f"{label} no <w:t> may hold a literal TAB or LF; got {raw!r}")
+
+
+def _notices_address_fixture() -> bytes:
+    """Word's notices/address shape: ONE run whose address lines are
+    separated by `<w:br/>` soft line breaks (python-docx `add_break()`, which
+    writes exactly that), after an ordinary lead-in run."""
+    import docx  # local import: python-docx is a test-only dependency
+
+    document = docx.Document()
+    document.add_paragraph("Section 9. Notices", style="Heading 1")
+    paragraph = document.add_paragraph()
+    paragraph.add_run("Notices to Seller go to: ")
+    run = paragraph.add_run("100 Example Road")
+    run.add_break()
+    run.add_text("Suite 200")
+    run.add_break()
+    run.add_text("Sampletown, ST 00000")
+    paragraph.add_run(", Attention: Legal.")
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+def test_notices_address_rewrite_accepts_as_exactly_the_approved_address(failures: list) -> None:
+    """The 2026-10-05 reviewer's notices case: rewriting a three-line
+    address the model read as "100 Example Road\\nSuite 200\\nSampletown,
+    ST 00000" into three new lines. It used to write the whole new address into
+    ONE `<w:t>` with literal LFs, followed by the two original `<w:br/>`s
+    orphaned after it. Aligned, each line replaces its own line, both breaks
+    stay where they were, and the accepted text is the approved address --
+    character for character -- with no LF inside any `<w:t>`."""
+    docx_bytes = _notices_address_fixture()
+    source = "100 Example Road\nSuite 200\nSampletown, ST 00000"
+    replacement = "1 Sample Plaza\nFloor 3\nExampleville, EX 11111"
+    proven, block_text = _prove_one_edit(docx_bytes, source, replacement)
+    if proven["status"] != "proven":
+        failures.append(f"must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        return
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+    )
+    if result["failures"] or len(result["applied"]) != 1:
+        failures.append(
+            f"the address rewrite must apply as ONE edit; got {result['failures']!r} "
+            f"{result['applied']!r}"
+        )
+        return
+    accepted = _accepted_block_text(result["docx_bytes"])
+    approved = block_text.replace(source, replacement, 1)
+    if accepted != approved:
+        failures.append(f"accepted text must EQUAL the approved {approved!r}; got {accepted!r}")
+    raw = _raw_control_chars_in_w_t(result["docx_bytes"])
+    if raw:
+        failures.append(f"no <w:t> may hold a literal TAB or LF; got {raw!r}")
+    breaks = list(_body_paragraph(result["docx_bytes"], 1).iter(_qn("br")))
+    if len(breaks) != 2:
+        failures.append(f"the address keeps exactly its two line breaks; got {len(breaks)}")
+
+
+def test_replacement_not_reproducing_the_crossed_separator_fails_closed(failures: list) -> None:
+    """The other side of the alignment. A replacement that drops, doubles,
+    swaps or reorders the separator its span crosses cannot be written: the
+    separator stays in the document whatever the compiler does, so writing
+    the replacement beside it would leave text the model never approved --
+    "sums" over "amounts.<tab>Signed" accepts as "sums<tab>.", and a doubled
+    tab cannot be placed at all without guessing which one is the kept one.
+    The same goes for a replacement that adds text on the far side of a
+    separator the span starts or ends on: there is no `<w:t>` text of the
+    span's own there for `docx_editor` to replace.
+    Each fails closed, per edit, as `edit_not_applied` with a detail that
+    says why, and nothing is written."""
+    unmatched = "does not reproduce"
+    beside = "no text of its own"
+    cases = (
+        ("tab", "amounts.\tSigned", "sums", unmatched),
+        ("tab", "amounts.\tSigned", "sums. Signed", unmatched),
+        ("tab", "amounts.\tSigned", "sums.\t\tSigned", unmatched),
+        ("break", "amounts\nwithin", "sums\twithin", unmatched),
+        ("tab", "\tSigned", "Duly\tSigned", beside),
+    )
+    for shape, source, replacement, why in cases:
+        label = f"[{shape}: {source!r} -> {replacement!r}]"
+        docx_bytes = _tab_and_break_fixture(shape)
+        proven, _ = _prove_one_edit(docx_bytes, source, replacement)
+        if proven["status"] != "proven":
+            failures.append(f"{label} must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+            continue
+        result = redline_block_apply.apply_block_transcript(
+            docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+        )
+        got = [(f.get("reason"), f.get("issue_key")) for f in result["failures"]]
+        if got != [(redline_block_apply.REASON_EDIT_NOT_APPLIED, "I1")]:
+            failures.append(f"{label} must fail closed as edit_not_applied; got {result['failures']!r}")
+            continue
+        detail = result["failures"][0].get("detail") or ""
+        if why not in detail:
+            failures.append(f"{label} the detail must say why ({why!r}); got {detail!r}")
+        if result["applied"]:
+            failures.append(f"{label} nothing may be written; got {result['applied']!r}")
+
+
+def test_inserted_tab_and_break_are_written_as_run_children(failures: list) -> None:
+    """Issue #97 un-parking 2026-10-05 (2). The model now reads a tab as
+    "\\t" and a soft line break as "\\n", so it will write them too. Both
+    writers must emit them as `<w:tab/>`/`<w:br/>` run children (python-
+    docx's `_RunContentAppender` convention), never as a literal control
+    character inside `<w:t>` -- which the extractor reads identically, so
+    neither the projection gate nor an accepted-text comparison can see it.
+
+    Covers both paths: a pure insertion (this module's own `<w:ins>`,
+    `_build_ins`) and a replacement (`docx_editor`'s `<w:ins>`, rewritten in
+    pass 2). The output is unzipped and every `<w:t>` checked."""
+    docx_bytes = _tab_and_break_fixture("break")
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_text = block_map[next(iter(block_map))]["text"]
+    at = block_text.index(" of receipt")
+    word = "undisputed"
+    word_at = block_text.index(word)
+    replacement = "undisputed\tnet"
+    proven, _ = _prove(
+        docx_bytes,
+        [
+            {"op": "keep", "text": block_text[:word_at]},
+            {"op": "delete", "text": word, "issue_key": "I1"},
+            {"op": "insert", "text": replacement, "issue_key": "I1"},
+            {"op": "keep", "text": block_text[word_at + len(word) : at]},
+            {"op": "insert", "text": "\nby wire", "issue_key": "I2"},
+            {"op": "keep", "text": block_text[at:]},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(f"must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        return
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+    )
+    if result["failures"] or len(result["applied"]) != 2:
+        failures.append(f"both edits must apply; got {result['failures']!r} {result['applied']!r}")
+        return
+    raw = _raw_control_chars_in_w_t(result["docx_bytes"])
+    if raw:
+        failures.append(f"no <w:t> may hold a literal TAB or LF; got {raw!r}")
+    inserted = [
+        el.tag
+        for ins in _body_paragraph(result["docx_bytes"], 1).iter(_qn("ins"))
+        for el in ins.iter()
+        if el.tag in (_qn("tab"), _qn("br"))
+    ]
+    if sorted(inserted) != sorted([_qn("tab"), _qn("br")]):
+        failures.append(f"one <w:tab/> and one <w:br/> must be inserted; got {inserted!r}")
+    expected = (
+        block_text[:word_at] + replacement + block_text[word_at + len(word) : at]
+        + "\nby wire" + block_text[at:]
+    )
+    accepted = _accepted_block_text(result["docx_bytes"])
+    if accepted != expected:
+        failures.append(f"accepting must give {expected!r}; got {accepted!r}")
+
+
+def test_cut_edit_and_a_later_pure_insertion_share_one_paragraph(failures: list) -> None:
+    """Pass 2 places a pure insertion by translating its offset across what
+    pass 1 already wrote into the paragraph. An edit cut at a tab (issue #97)
+    is several writes, so the translation has to sum the pieces -- not the
+    original span, which includes a tab nobody removed. An insertion AFTER the
+    cut edit is the case that would land off target if it did not."""
+    docx_bytes = _tab_and_break_fixture("tab")
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_text = block_map[next(iter(block_map))]["text"]
+    source = "amounts.\tSigned"
+    replacement = "sums.\tAttested"
+    start = block_text.index(source)
+    end = start + len(source)
+    proven, _ = _prove(
+        docx_bytes,
+        [
+            {"op": "keep", "text": block_text[:start]},
+            {"op": "delete", "text": source, "issue_key": "I1"},
+            {"op": "insert", "text": replacement, "issue_key": "I1"},
+            {"op": "keep", "text": block_text[end:]},
+            {"op": "insert", "text": " Witnessed.", "issue_key": "I2"},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(f"must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        return
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+    )
+    if result["failures"] or len(result["applied"]) != 2:
+        failures.append(f"both edits must apply; got {result['failures']!r} {result['applied']!r}")
+        return
+    expected = block_text[:start] + replacement + block_text[end:] + " Witnessed."
+    accepted = _accepted_block_text(result["docx_bytes"])
+    if accepted != expected:
+        failures.append(f"accepting must give {expected!r}; got {accepted!r}")
+
+
+def test_edit_that_is_only_a_separator_fails_closed_as_edit_not_applied(failures: list) -> None:
+    """The other half of the cut: a span with NOTHING writable in it -- just
+    the tab -- has no `<w:t>` text to hand `docx_editor`. It fails closed as
+    `edit_not_applied`, per edit, and the sibling edit in the same batch
+    still lands. Pins the reason code so it cannot change silently."""
+    docx_bytes = _tab_and_break_fixture("tab")
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_text = block_map[next(iter(block_map))]["text"]
+    tab_at = block_text.index("\t")
+    word_at = block_text.index("undisputed")
+    proven, _ = _prove(
+        docx_bytes,
+        [
+            {"op": "keep", "text": block_text[:word_at]},
+            {"op": "delete", "text": "undisputed", "issue_key": "I2"},
+            {"op": "keep", "text": block_text[word_at + len("undisputed") : tab_at]},
+            {"op": "delete", "text": "\t", "issue_key": "I1"},
+            {"op": "keep", "text": block_text[tab_at + 1 :]},
+        ],
+    )
+    if proven["status"] != "proven":
+        failures.append(f"must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        return
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+    )
+    reasons = [(f.get("reason"), f.get("issue_key")) for f in result["failures"]]
+    if reasons != [(redline_block_apply.REASON_EDIT_NOT_APPLIED, "I1")]:
+        failures.append(f"a bare tab span must fail closed as edit_not_applied; got {reasons!r}")
+    if [a["issue_key"] for a in result["applied"]] != ["I2"]:
+        failures.append(f"the sibling edit must still land; got {result['applied']!r}")
+
+
+def _hyphen_symbol_cr_fixture() -> bytes:
+    """A one-clause fixture whose body paragraph is ONE run carrying the
+    other three run children issue #97 renders in place -- a
+    `<w:noBreakHyphen/>` inside a defined term, a `<w:cr/>`, and a
+    `<w:sym>` (Symbol-font F0E0, the arrow Word inserts from Insert >
+    Symbol) -- between ordinary `<w:t>` text. python-docx has no API for any
+    of the three, so they are appended to the run's own XML."""
+    import docx  # local import: python-docx is a test-only dependency
+    from docx.oxml import OxmlElement  # noqa: PLC0415
+    from docx.oxml.ns import qn  # noqa: PLC0415
+
+    document = docx.Document()
+    document.add_paragraph("Section 1. Term", style="Heading 1")
+    run = document.add_paragraph().add_run()
+    r = run._r  # noqa: SLF001 - python-docx exposes no API for these children
+
+    def text(value: str) -> None:
+        t = OxmlElement("w:t")
+        t.set(qn("xml:space"), "preserve")
+        t.text = value
+        r.append(t)
+
+    text("This Non")
+    r.append(OxmlElement("w:noBreakHyphen"))
+    text("Disclosure Agreement binds the parties")
+    r.append(OxmlElement("w:cr"))
+    text("and their successors")
+    sym = OxmlElement("w:sym")
+    sym.set(qn("w:font"), "Symbol")
+    sym.set(qn("w:char"), "F0E0")
+    r.append(sym)
+    text(" for five years.")
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+def test_edit_on_a_hyphen_symbol_or_cr_paragraph_applies(failures: list) -> None:
+    """The three run children the tab/`w:br` tests above do not reach.
+    `_extractor_view_runs` has its own branch for each of `w:noBreakHyphen`,
+    `w:sym` and `w:cr`, and each must agree with the extractor's
+    `_process_run` character for character -- if either walk drifted on
+    one, every paragraph carrying it would fail closed as
+    `paragraph_not_resolved` and every other test here would stay green.
+
+    Each case proves one edit against the corrected text and checks that it
+    APPLIES as one entry and that accepting it gives back exactly the
+    proven text with the edit made:
+
+      - an edit AFTER all three characters, which only lands on the right
+        span if `_editor_offsets` translated across each of them;
+      - an edit CROSSING each one, which `_split_edit_at_separators` cuts
+        there. The crossed character is never written over, so a
+        replacement that reproduces it is aligned around it and accepts as
+        exactly the approved text, and a deletion leaves it standing;
+      - a replacement that DROPS the crossed character -- 'Non<U+2011>
+        Disclosure Agreement' -> 'Confidentiality Agreement' -- fails closed
+        as `edit_not_applied` instead: the hyphen cannot be deleted, so
+        writing the replacement would accept as 'Confidentiality
+        Agreement<U+2011>', which nobody approved.
+    """
+    docx_bytes = _hyphen_symbol_cr_fixture()
+    norm = extraction_normalization_stage.extract_and_normalize(docx_bytes)
+    block_map = extraction_normalization_stage.build_block_map(norm["paragraphs"])
+    block_text = block_map[next(iter(block_map))]["text"]
+    expected_text = (
+        "This Non\u2011Disclosure Agreement binds the parties\n"
+        "and their successors\uf0e0 for five years."
+    )
+    if block_text != expected_text:
+        failures.append(f"fixture must extract as {expected_text!r}; got {block_text!r}")
+        return
+
+    cases = (
+        # label, source span, replacement, the accepted text it must give
+        ("after all three", "five", "ten", expected_text.replace("five", "ten")),
+        (
+            "crossing U+2011",
+            "Non\u2011Disclosure Agreement",
+            "Non\u2011Solicitation Agreement",
+            expected_text.replace(
+                "Non\u2011Disclosure Agreement", "Non\u2011Solicitation Agreement"
+            ),
+        ),
+        (
+            "crossing w:cr",
+            "parties\nand",
+            "",
+            expected_text.replace("parties\nand", "\n"),
+        ),
+        (
+            "crossing w:cr, replaced",
+            "parties\nand",
+            "Parties\nand",
+            expected_text.replace("parties\nand", "Parties\nand"),
+        ),
+        (
+            "crossing w:sym",
+            "successors\uf0e0 for",
+            "assigns\uf0e0 during",
+            expected_text.replace("successors\uf0e0 for", "assigns\uf0e0 during"),
+        ),
+        (
+            "dropping U+2011",
+            "Non\u2011Disclosure Agreement",
+            "Confidentiality Agreement",
+            None,
+        ),
+        (
+            "dropping w:sym",
+            "successors\uf0e0 for",
+            "assigns",
+            None,
+        ),
+    )
+    for label, source, replacement, expected in cases:
+        proven, _ = _prove_one_edit(docx_bytes, source, replacement)
+        if proven["status"] != "proven":
+            failures.append(
+                f"[{label}] must prove; got {proven['status']!r}: {proven.get('failures')!r}"
+            )
+            continue
+        result = redline_block_apply.apply_block_transcript(
+            docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+        )
+        reasons = [(f.get("reason"), f.get("detail")) for f in result["failures"]]
+        if expected is None:
+            if [r for r, _ in reasons] != [redline_block_apply.REASON_EDIT_NOT_APPLIED] or (
+                result["applied"]
+            ):
+                failures.append(
+                    f"[{label}] must fail closed as edit_not_applied with nothing written; "
+                    f"got failures={reasons!r} applied={result['applied']!r}"
+                )
+            continue
+        if reasons or len(result["applied"]) != 1:
+            failures.append(
+                f"[{label}] the edit must apply as ONE edit; got failures={reasons!r} "
+                f"applied={result['applied']!r}"
+            )
+            continue
+        accepted = _accepted_block_text(result["docx_bytes"])
+        if accepted != expected:
+            failures.append(f"[{label}] accepting must give {expected!r}; got {accepted!r}")
+
+
+def test_edit_that_is_only_a_non_breaking_hyphen_names_what_it_is(failures: list) -> None:
+    """A span that is nothing but a U+2011 has no `<w:t>` text either, so it
+    fails closed as `edit_not_applied` exactly like a bare tab -- and the
+    failure detail must not call it a tab or a soft line break, which it
+    is not."""
+    docx_bytes = _hyphen_symbol_cr_fixture()
+    proven, _ = _prove_one_edit(docx_bytes, "\u2011", "")
+    if proven["status"] != "proven":
+        failures.append(f"must prove; got {proven['status']!r}: {proven.get('failures')!r}")
+        return
+    result = redline_block_apply.apply_block_transcript(
+        docx_bytes, proven, author=AUTHOR, timestamp_iso=TIMESTAMP
+    )
+    got = [(f.get("reason"), f.get("detail")) for f in result["failures"]]
+    if len(got) != 1 or got[0][0] != redline_block_apply.REASON_EDIT_NOT_APPLIED:
+        failures.append(f"a bare U+2011 span must fail closed as edit_not_applied; got {got!r}")
+        return
+    detail = got[0][1] or ""
+    if "non-breaking hyphen" not in detail or "soft line break" in detail:
+        failures.append(f"the failure detail must name what the span is; got {detail!r}")
+    if result["applied"]:
+        failures.append(f"nothing may be written for it; got {result['applied']!r}")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -1174,6 +1891,16 @@ TESTS = [
     test_edit_never_slides_onto_a_later_equal_paragraph,
     test_whitespace_padded_paragraph_still_applies,
     test_footnote_anchors_on_the_first_ins_in_document_order,
+    test_edit_on_a_tab_or_soft_break_paragraph_still_applies,
+    test_pure_insertion_beside_a_tab_lands_where_the_offset_points,
+    test_edit_crossing_a_tab_or_soft_break_is_cut_there_and_applies,
+    test_notices_address_rewrite_accepts_as_exactly_the_approved_address,
+    test_replacement_not_reproducing_the_crossed_separator_fails_closed,
+    test_inserted_tab_and_break_are_written_as_run_children,
+    test_cut_edit_and_a_later_pure_insertion_share_one_paragraph,
+    test_edit_that_is_only_a_separator_fails_closed_as_edit_not_applied,
+    test_edit_on_a_hyphen_symbol_or_cr_paragraph_applies,
+    test_edit_that_is_only_a_non_breaking_hyphen_names_what_it_is,
 ]
 
 
