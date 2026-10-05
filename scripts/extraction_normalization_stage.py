@@ -105,6 +105,7 @@ from __future__ import annotations
 
 import io
 import sys
+import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import OrderedDict
@@ -249,6 +250,12 @@ class _ParaBuilder:
     def __init__(self) -> None:
         self.original_parts: list[str] = []
         self.resulting_parts: list[str] = []
+        # The accept-all text again, but each run read as it was before issue
+        # #97: its `w:t` text, then one `\t` per `w:tab`, and nothing for a
+        # `w:br`/`w:cr`/`w:noBreakHyphen`/`w:sym`. Appended exactly where
+        # `resulting_parts` is, so it is the same accept-all view run for run.
+        # Only `clause_boundaries` reads it -- see `_build_paragraph_record`.
+        self.boundary_parts: list[str] = []
         self.clusters: list[dict[str, Any]] = []
         self._current_cluster: dict[str, Any] | None = None
         self.has_hidden_text = False
@@ -290,14 +297,18 @@ class _ParaBuilder:
             if inside_field_code:
                 self._current_cluster["inside_field_code"] = True
 
-    def add_plain(self, text: str) -> None:
+    def add_plain(self, text: str, boundary_text: str) -> None:
         self._close_cluster()
         self.original_parts.append(text)
         self.resulting_parts.append(text)
+        self.boundary_parts.append(boundary_text)
 
-    def add_ins(self, text: str, author: str | None, inside_field_code: bool) -> None:
+    def add_ins(
+        self, text: str, boundary_text: str, author: str | None, inside_field_code: bool
+    ) -> None:
         self._ensure_cluster(author, inside_field_code)
         self.resulting_parts.append(text)
+        self.boundary_parts.append(boundary_text)
 
     def add_del(self, text: str, author: str | None, inside_field_code: bool) -> None:
         self._ensure_cluster(author, inside_field_code)
@@ -311,6 +322,52 @@ class _ParaBuilder:
         self._close_cluster()
 
 
+def sym_char(char_attr: str | None) -> str:
+    """`<w:sym w:char="F0E0"/>` -- the literal character at that hex
+    codepoint, best-effort. Anything this cannot turn into one ordinary
+    character falls back to a single space (issue #97's documented
+    fallback) rather than vanishing the way the element did before this
+    fix, so the run's neighbours never fuse.
+
+    `w:char` is the ONLY channel by which an arbitrary codepoint can reach
+    the extracted text: `w:t`/`w:delText` content is parsed XML, so the
+    parser has already refused C0 control characters and lone surrogates
+    there. This attribute has had no such filter, so the fallback below is
+    a fail-closed one, not decoration -- a malformed or hostile value must
+    not raise here, and must not hand downstream (JSON payloads, the
+    prompt, the block transcript, the stored review row) a string that
+    cannot be UTF-8 encoded or that smuggles in a `\\n`/NUL. Hence:
+
+      - a missing, non-hex, negative or out-of-range `w:char` -> a space;
+      - a surrogate (category `Cs`) -> a space; `"\\ud800".encode()` raises
+        `UnicodeEncodeError`, which downstream would surface as a bare 500;
+      - a control character (category `Cc`) -> a space; a `w:char="000A"`
+        would otherwise inject a line break that no `w:br` put there, and
+        newlines are load-bearing (the paragraph-boundary rule).
+
+    Everything else is kept verbatim, Word's Symbol-font private-use range
+    (F020-F0FF, e.g. F0E0) included: it is what the document actually
+    carries, and the extractor's job is to report the document.
+
+    PUBLIC because `redline_block_apply._extractor_view_runs` rebuilds this
+    same accepted-view text over the live `<w:p>` it is about to write
+    into, and the two must not be free to disagree about one character (see
+    that module's `_resolve_physical_paragraphs`)."""
+    if not char_attr:
+        return " "
+    try:
+        code = int(char_attr, 16)
+    except ValueError:
+        return " "
+    try:
+        char = chr(code)
+    except (ValueError, OverflowError):
+        return " "
+    if unicodedata.category(char) in ("Cc", "Cs"):
+        return " "
+    return char
+
+
 def _process_run(
     run_el: ET.Element,
     builder: _ParaBuilder,
@@ -321,9 +378,10 @@ def _process_run(
     if _run_is_hidden(run_el):
         # STRIP: hidden text never reaches either stream, regardless of
         # content (ARCHITECTURE.md -> "Input normalization (before
-        # review)"). Direct children only (findall with a bare tag name),
-        # never `.//`, so a run's own nested drawing/textbox content (if any
-        # were hostilely nested inside a run) cannot leak in via this path.
+        # review)"). Direct children only (the child walk below iterates
+        # `run_el` itself), never `.//`, so a run's own nested
+        # drawing/textbox content (if any were hostilely nested inside a
+        # run) cannot leak in via this path.
         builder.add_hidden()
         return
 
@@ -332,19 +390,54 @@ def _process_run(
         # a part this module never opens. See module docstring.
         builder.has_comment = True
 
-    if mode == "del":
-        text = "".join(t.text or "" for t in run_el.findall(_w("delText")))
-    else:
-        text = "".join(t.text or "" for t in run_el.findall(_w("t")))
-    text += "".join("\t" for _ in run_el.findall(_w("tab")))
+    # Issue #97: walk this run's direct children IN DOCUMENT ORDER, exactly
+    # once, so `(a)<w:tab/>Buyer pays<w:br/>Seller.` comes out
+    # `"(a)\tBuyer pays\nSeller."` -- not the pre-fix `"(a)Buyer paysSeller."`
+    # (every `w:tab` moved to the end of the run, `w:br`/`w:cr` dropped
+    # entirely, and words on either side fused). The text-bearing tag
+    # selected by `mode` (`w:delText` for a rejected/deleted run, `w:t`
+    # otherwise) interleaves with the mode-independent structural children
+    # below -- a `w:tab`/`w:br`/`w:cr`/`w:noBreakHyphen`/`w:softHyphen`/
+    # `w:sym` inside a `<w:del>` run is still part of the ORIGINAL text a
+    # rejection restores, and inside a `<w:ins>` run is still part of the
+    # RESULTING text an acceptance keeps, same as the `w:t`/`w:delText`
+    # content it sits beside.
+    #
+    # `boundary_text` is the same run read the pre-#97 way -- its text
+    # children joined, then one "\t" per `w:tab` -- for `clause_boundaries`
+    # alone (see `_build_paragraph_record`). Every character it carries is
+    # one `text` carries too, so whenever `text` is empty so is this, and
+    # the `if not text` return below never drops any of it.
+    text_tag = _w("delText") if mode == "del" else _w("t")
+    parts: list[str] = []
+    boundary_parts: list[str] = []
+    tab_count = 0
+    for child in run_el:
+        tag = child.tag
+        if tag == text_tag:
+            parts.append(child.text or "")
+            boundary_parts.append(child.text or "")
+        elif tag == _w("tab"):
+            parts.append("\t")
+            tab_count += 1
+        elif tag == _w("br") or tag == _w("cr"):
+            parts.append("\n")
+        elif tag == _w("noBreakHyphen"):
+            parts.append("\u2011")
+        elif tag == _w("softHyphen"):
+            pass  # DROP -- an optional break point, not a visible character
+        elif tag == _w("sym"):
+            parts.append(sym_char(child.get(_w("char"))))
+    text = "".join(parts)
+    boundary_text = "".join(boundary_parts) + "\t" * tab_count
 
     if not text:
         return
 
     if mode == "plain":
-        builder.add_plain(text)
+        builder.add_plain(text, boundary_text)
     elif mode == "ins":
-        builder.add_ins(text, author, inside_field_code)
+        builder.add_ins(text, boundary_text, author, inside_field_code)
     elif mode == "del":
         builder.add_del(text, author, inside_field_code)
 
@@ -398,11 +491,15 @@ def _process_fld_simple(fld_el: ET.Element, builder: _ParaBuilder) -> None:
         builder.clusters.extend(field_builder.clusters)
         builder.original_parts.extend(field_builder.original_parts)
         builder.resulting_parts.extend(field_builder.resulting_parts)
+        builder.boundary_parts.extend(field_builder.boundary_parts)
         return
 
+    # No cluster means every run in the result region was plain, so its
+    # original and accept-all text are the same string, and
+    # `boundary_parts` is that string's pre-#97 reading.
     result_text = "".join(field_builder.original_parts)
     if result_text:
-        builder.add_plain(result_text)
+        builder.add_plain(result_text, "".join(field_builder.boundary_parts))
     if instr:
         builder.fields.append({"field_code": f"{{ {instr} }}", "field_result": result_text})
 
@@ -606,6 +703,15 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
     return {
         "text": original_text,
         "resulting_text": resulting_text,
+        # Issue #97. `resulting_text` read run by run as it was before #97
+        # put a run's `w:tab` in place and stopped dropping its
+        # `w:br`/`w:cr`/`w:noBreakHyphen`/`w:sym`. It is what
+        # `extract_document_paragraphs` hands `clause_boundaries`, so
+        # correcting the text the model reads moves no clause boundary --
+        # `clause_boundaries`' module docstring lists what judging the
+        # corrected text would have gained and lost. It is an internal key:
+        # it reaches no block, prompt, note or review row.
+        "boundary_text": "".join(builder.boundary_parts).strip(),
         "revisions": revisions,
     }
 
@@ -854,7 +960,15 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
         # precedes the document's first boundary) it is HELD rather than
         # allowed to open one -- see the `leading_deleted` branch below for
         # why opening one would split the raw read from the materialized one.
-        if operative_text and clause_boundaries.is_boundary_paragraph_ooxml(p_el, operative_text):
+        #
+        # The DECISION is made on `boundary_text` (issue #97: the same
+        # accept-all text, read run by run as before #97 corrected it), so
+        # correcting the text moves no boundary; the heading LABEL is cut
+        # from the corrected `operative_text`. See `clause_boundaries`'
+        # module docstring.
+        if operative_text and clause_boundaries.is_boundary_paragraph_ooxml(
+            p_el, record["boundary_text"]
+        ):
             _flush()
             heading_text = clause_boundaries.clean_heading_text(operative_text)
             current = {

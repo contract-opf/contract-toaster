@@ -48,6 +48,32 @@ present, else a deterministic document-signals fallback.
      indemnification shall survive termination of this Agreement...") --
      real section headings are short; real sub-clause body text is not.
 
+## Which text the draft loader decides on (issue #97)
+
+Issue #97 corrected the extractor's TEXT -- a run's `w:tab` now lands in
+place instead of at the run's end, and `w:br`/`w:cr`/`w:noBreakHyphen`/
+`w:sym` are no longer dropped -- and deliberately changed NONE of this
+module's rules. Those rules, unchanged, would have moved boundaries both
+ways had they been handed the corrected text. GAINED: a lead-in pattern
+accepts any whitespace after the marker, so a one-run
+`(a)<w:tab/>Buyer shall pay ...` body sentence -- which read
+"(a)Buyer shall pay ..." before, matching no lead-in -- would be lifted
+out of its block into a `heading`, and so would a marker followed by an
+in-place `w:br`. LOST: a whole-paragraph-bold heading Word split with a
+`w:br` (the bold signal requires a single line), any heading the new
+characters push past `MAX_FALLBACK_HEADING_CHARS`, and a marker that
+matched only because its run's tab used to be carried to the run's end,
+right after it. So
+`extraction_normalization_stage.extract_document_paragraphs` hands
+`is_boundary_paragraph_ooxml()` the paragraph's `boundary_text` -- its
+accept-all text read run by run exactly as before #97 -- and every
+paragraph the extractor read before #97 gets the boundary decision it got
+then. (A paragraph whose ONLY content is one of the newly read characters,
+skipped as empty before, now reaches this tier with an empty
+`boundary_text`, so only its Heading style can make it a boundary.) Only
+the heading LABEL, `clean_heading_text()` over the corrected accept-all
+text, changed (`"1.\\tTerm"` still normalizes to `"Term"`).
+
 ## No python-docx dependency
 
 `ooxml_paragraph_signals()` reads a raw `<w:p>` `xml.etree.ElementTree`

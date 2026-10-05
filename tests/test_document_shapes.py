@@ -545,6 +545,53 @@ def test_content_control_wrapped_text_survives(failures: list) -> None:
         )
 
 
+def test_mixed_run_children_survives(failures: list) -> None:
+    """Issue #97, both halves of the transform.
+
+    (1) A single run whose children interleave `w:tab`, `w:noBreakHyphen`,
+    `w:softHyphen`, `w:br`, and `w:sym` must extract in DOCUMENT ORDER --
+    not every `w:tab` moved to the run's end with the
+    line-break/hyphen/symbol elements silently dropped, which used to fuse
+    words together and lose a defined term's non-breaking hyphen.
+
+    (2) The three short `(a)<w:tab/>...` sub-clauses that follow it are
+    still BODY text of the SAME logical block. Their tab is only in place
+    because of (1), and `clause_boundaries.LETTERED_LEAD_IN_RE` matches
+    `"(a)\\t"`; if the lead-in signals read it, each sentence would become
+    its own heading boundary with an empty body, leaving this clause with
+    nothing to review and nothing to redline."""
+    name = "mixed_run_children"
+    docx_bytes = _shape_fixture(name)
+    norm = _assert_survives_full_spine(name, docx_bytes, failures)
+    if norm is None:
+        return
+    found = _block_carrying(norm["paragraphs"], "Provider shall indemnify")
+    if found is None:
+        failures.append(f"[{name}] could not find the Indemnification block")
+        return
+    _, block = found
+    expected = "\n".join(
+        [
+            "The Provider shall indemnify the Recipient against\tall Non\u2011Disclosure "
+            "claims\nwhatsoever\uf0e0.",
+            *(f"({letter})\t{sentence}" for letter, sentence in cd.MIXED_RUN_SUB_CLAUSES),
+        ]
+    )
+    if block["text"] != expected:
+        failures.append(f"[{name}] expected {expected!r}, got {block['text']!r}")
+    # Belt and braces on (2): the sub-clauses must not have become blocks of
+    # their own, empty or otherwise.
+    stray = [
+        p.get("heading")
+        for p in norm["paragraphs"]
+        if any(p.get("heading") == sentence for _, sentence in cd.MIXED_RUN_SUB_CLAUSES)
+    ]
+    if stray:
+        failures.append(
+            f"[{name}] a `(x)<tab>` sub-clause was promoted to a heading boundary: {stray!r}"
+        )
+
+
 def _unzip_document_xml(docx_bytes: bytes) -> bytes:
     import io
     import zipfile
@@ -585,6 +632,7 @@ def test_every_transform_has_a_shape_test(failures: list) -> None:
         "pending_change_inside_field_code",
         "first_page_header_footer",
         "content_control_wrapped_text",
+        "mixed_run_children",
     }
     missing = set(cd.TRANSFORMS) - exercised
     if missing:
@@ -674,6 +722,7 @@ TESTS = [
     test_pending_change_inside_field_code_survives,
     test_first_page_header_footer_survives,
     test_content_control_wrapped_text_survives,
+    test_mixed_run_children_survives,
     test_baseline_flavors_also_normalize,
     test_every_transform_has_a_shape_test,
     test_the_smoke_tool_never_echoes_a_sentinel_party_name,
