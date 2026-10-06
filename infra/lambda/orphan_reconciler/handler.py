@@ -63,8 +63,15 @@ STALE_PENDING_THRESHOLD_SECONDS = int(
 # outline mode was deleted -- one full-quality review up to the cap, a
 # loud `document_too_large` failure above it. Reservations scale with this
 # constant automatically (the formula below), and rise with it.
+#
+# Issue #144 (owner decision 2026-10-05, taken by the orchestrator): raised
+# 100_000 -> 170_000 to PRESERVE document capacity when the gate moved onto
+# the calibrated input estimate (2.5 chars/token + the ~9,300-token tool
+# schema, ~1.6x the old 4-chars/token system+user figure). A document the
+# old gate estimated at just under 100,000 now estimates ~169,300, so 170_000
+# admits it; the cap now prices real billed tokens (estimate ~7% high).
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 100_000
+MAX_INPUT_TOKENS = 170_000
 # Issue #658: the worst-case per-attempt OUTPUT budget. reviews.py derives
 # this from `model_client.output_budget_for_document(MAX_INPUT_TOKENS,
 # model_client.DEFAULT_MAX_OUTPUT_TOKENS)` -- the sizing function both review
@@ -160,10 +167,11 @@ def _release_reservation(review_id: str, submission: dict[str, Any]) -> None:
 
     Issue #189 fix: this previously only set a `reservation_released` flag
     on the submission row and never touched daily_spend.reserved_usd_cents,
-    so a dead execution's worst-case reservation ($6.86 today -- 3 attempts
-    x 100K in + 3 attempts x 32K out per pass, since issue #658 raised the
-    output budget and gave truncation its own attempt; $2.46 before that,
-    $2.11 before issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model
+    so a dead execution's worst-case reservation ($8.71 today -- 3 attempts
+    x 170K in + 3 attempts x 32K out per pass, since issue #144 raised
+    MAX_INPUT_TOKENS to 170_000; $6.86 after issue #658 raised the output
+    budget and gave truncation its own attempt; $2.46 before that, $2.11
+    before issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model
     rates, see the module constants above) held its slice of the daily cap
     PERMANENTLY,
     accumulating until UTC midnight regardless of how many reviews actually

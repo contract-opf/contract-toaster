@@ -289,8 +289,15 @@ _RETIRED_ISSUE_KEYS = tuple(
 # full-document -- so the cap is the whole size policy: at or under it the
 # document is reviewed in full, over it the review fails loudly as
 # `document_too_large`. Nothing degrades quietly in between.
+#
+# Issue #144 (owner decision 2026-10-05, taken by the orchestrator): raised
+# 100_000 -> 170_000 to PRESERVE document capacity when the gate moved onto
+# the calibrated input estimate (2.5 chars/token + the ~9,300-token tool
+# schema, ~1.6x the old 4-chars/token system+user figure). A document the
+# old gate estimated at just under 100,000 now estimates ~169,300, so 170_000
+# admits it; the cap now prices real billed tokens (estimate ~7% high).
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 100_000
+MAX_INPUT_TOKENS = 170_000
 MAX_RETRIES_PER_PASS = 1
 
 # Issue #658: there is no flat output budget any more. `MAX_OUTPUT_TOKENS`
@@ -340,31 +347,29 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 # from a table of contents. A model must never redline text it did not
 # receive, which is exactly what an outline review invited.
 #
-# Headroom math (why 100k is the cap and what it leaves room for):
+# Headroom math (why 170k is the cap and what it leaves room for):
 #   the document + the system blocks (guidance + overlay + playbook + any
-#   toaster-guidance/standing-instructions/Floor blocks -- MEASURED via
-#   assemble_system_blocks/assembled_prompt_tokens against the synthetic-
-#   generic playbook: ~10,399 tokens with toaster_guidance and
-#   instructions_text both empty, ~14,696 tokens with a modest 2k-token
-#   toaster-guidance block plus 2k-token standing instructions) must fit
-#   under MAX_INPUT_TOKENS=100_000 -- the step-14 pre-call gate below. So a
-#   ~85k-token document still reviews in full even carrying a heavy
-#   playbook and guidance payload; a bigger one fails closed instead of
-#   degrading. [Issue #144: the token figures in this paragraph were
-#   measured at the old 4-chars/token rate with no tool schema counted. The
-#   gate now estimates at INPUT_CHARS_PER_TOKEN_ESTIMATE (2.5) and counts
-#   the ~23,000-character forced-tool schema, so the same payload estimates
-#   ~1.6x higher plus ~9,300 tokens of schema, and the document headroom
-#   under the unchanged 100k cap is correspondingly smaller -- by design:
-#   the measured primary billed 68,460 real tokens for a payload the old
-#   gate called 39,846, so the old cap admitted ~170k real tokens, not
-#   100k.] MAX_INPUT_TOKENS=100_000 is now an upper-bound estimate of REAL
-#   provider tokens on every measured row (see the calibration comment
-#   below), comfortably inside the pinned models' 200k real context
-#   window. The provider-side `ModelContextLengthExceededError` fail-closed
-#   path (model_client.py, mapped to the same `document_too_large` outcome
-#   in `run_primary_pass` below) remains the backstop for an estimate miss
-#   this margin doesn't cover.
+#   toaster-guidance/standing-instructions/Floor blocks) + the ~23,000-
+#   character forced-tool schema must fit under MAX_INPUT_TOKENS=170_000 --
+#   the step-14 pre-call gate below -- as estimated by
+#   `request_input_tokens_est` (INPUT_CHARS_PER_TOKEN_ESTIMATE = 2.5).
+#   Issue #625 set the cap at 100_000 against the old 4-chars/token
+#   system+user figure, under which a ~85k-token document still reviewed in
+#   full carrying a heavy playbook and guidance payload. Issue #144 moved the
+#   gate onto the calibrated estimate (~1.6x the old figure, plus ~9,300
+#   tokens of schema), and the owner decision recorded with it (2026-10-05)
+#   was to PRESERVE that capacity rather than shrink it: a payload the old
+#   gate estimated at just under 100,000 now estimates ~169,300, so the cap
+#   rose to 170_000 (tests/test_document_size_policy_625.py pins exactly
+#   that case). The old gate's 100k admitted ~170k REAL tokens (the measured
+#   primary billed 68,460 for a payload it called 39,846); the cap now
+#   states that honestly, as an upper-bound estimate of real provider
+#   tokens on every measured row (see the calibration comment below), inside
+#   the pinned models' 200k real context window. The provider-side
+#   `ModelContextLengthExceededError` fail-closed path (model_client.py,
+#   mapped to the same `document_too_large` outcome in `run_primary_pass`
+#   below) remains the backstop for an estimate miss this margin doesn't
+#   cover.
 
 # ---------------------------------------------------------------------------
 # Offline token-count heuristic. No live tokenizer is available offline (no
