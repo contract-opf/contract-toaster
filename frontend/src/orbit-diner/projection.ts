@@ -231,6 +231,14 @@ export interface ReviewProjectionState {
 
   // --- already-classified copy --------------------------------------------
   submitError?: string | null;
+  /**
+   * Issue #120. `submitError` is the stalled upload's UPLOAD_STALLED_COPY:
+   * the submit budget ran out and the follow-up listing check found no
+   * review, so whether one was created is UNKNOWN. Not a failure — it must
+   * not be headlined as one, nor offered a one-press resubmit that could
+   * start a second paid review. Read only alongside `submitError`.
+   */
+  submitOutcomeUnknown?: boolean;
   /** `pollError` — the TRANSIENT poll channel; the poller is still retrying. */
   pollError?: string | null;
   /**
@@ -560,7 +568,26 @@ function projectMessages(
   // its own retry key (#726). The ACTION is the only thing that differs — the
   // wording is the app's, and the handler on the other side of each is the
   // one `ReviewSubmission` already guards.
-  if (state.submitError) {
+  if (state.submitError && state.submitOutcomeUnknown) {
+    push({
+      // Issue #120. Same channel and id as any other submit message (one
+      // submit concern, one test contract), but the outcome is unknown, so
+      // nothing here may claim it failed: the headline says only that it is
+      // not confirmed, the tone is not `error`, and the key is History — what
+      // the copy beneath tells the reviewer to check first — rather than
+      // "Try again". OrbitDiner's `messageRole` still makes it an alert,
+      // because it carries a key. The lever stays armed for a deliberate
+      // resubmit once History has been checked.
+      id: 'submit-error',
+      scope: 'submit',
+      tone: 'info',
+      title: 'Upload not confirmed',
+      detail: state.submitError,
+      // The existing hash-route handler (`openHistory`), not a new path.
+      action: 'history',
+      actionLabel: 'Check History',
+    });
+  } else if (state.submitError) {
     push({
       id: 'submit-error',
       scope: 'submit',
