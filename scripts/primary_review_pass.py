@@ -296,8 +296,15 @@ _RETIRED_ISSUE_KEYS = tuple(
 # schema, ~1.6x the old 4-chars/token system+user figure). A document the
 # old gate estimated at just under 100,000 now estimates ~169,300, so 170_000
 # admits it; the cap now prices real billed tokens (estimate ~7% high).
+#
+# Issue #137: raised 170_000 -> 175_000. One model-facing tool schema now
+# serves both passes, so the counted schema grew 9,318 -> 11,057 tokens and
+# that same document estimates 171,055. 175_000 is the smallest round cap
+# that admits it with >= 3,000 tokens (3,945) of headroom for future schema
+# growth. Schema growth adds 1:1 to that document's estimate -- raise this
+# cap by the same amount (tests/test_document_size_policy_625.py [8c]).
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 170_000
+MAX_INPUT_TOKENS = 175_000
 MAX_RETRIES_PER_PASS = 1
 
 # Issue #658: there is no flat output budget any more. `MAX_OUTPUT_TOKENS`
@@ -347,10 +354,10 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 # from a table of contents. A model must never redline text it did not
 # receive, which is exactly what an outline review invited.
 #
-# Headroom math (why 170k is the cap and what it leaves room for):
+# Headroom math (why 175k is the cap and what it leaves room for):
 #   the document + the system blocks (guidance + overlay + playbook + any
-#   toaster-guidance/standing-instructions/Floor blocks) + the ~23,000-
-#   character forced-tool schema must fit under MAX_INPUT_TOKENS=170_000 --
+#   toaster-guidance/standing-instructions/Floor blocks) + the ~27,600-
+#   character forced-tool schema must fit under MAX_INPUT_TOKENS=175_000 --
 #   the step-14 pre-call gate below -- as estimated by
 #   `request_input_tokens_est` (INPUT_CHARS_PER_TOKEN_ESTIMATE = 2.5).
 #   Issue #625 set the cap at 100_000 against the old 4-chars/token
@@ -361,7 +368,8 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 #   was to PRESERVE that capacity rather than shrink it: a payload the old
 #   gate estimated at just under 100,000 now estimates ~169,300, so the cap
 #   rose to 170_000 (tests/test_document_size_policy_625.py pins exactly
-#   that case). The old gate's 100k admitted ~170k REAL tokens (the measured
+#   that case). Issue #137 grew the schema to ~11,100 tokens (one schema for
+#   both passes), that payload to 171,055, and the cap to 175_000. The old gate's 100k admitted ~170k REAL tokens (the measured
 #   primary billed 68,460 for a payload it called 39,846); the cap now
 #   states that honestly, as an upper-bound estimate of real provider
 #   tokens on every measured row (see the calibration comment below), inside
@@ -4008,7 +4016,8 @@ def run_primary_pass(
     )
 
     # Issue #144: the gate counts the schemas this call will carry, not just
-    # the prompt text -- `tool_spec` alone is ~23,000 characters of input.
+    # the prompt text -- `tool_spec` alone is ~27,600 characters of input
+    # (~23,300 before issue #137 made one schema serve both passes).
     assembled_tokens = assembled_prompt_tokens(
         system_blocks, user_content, tool_spec=tool_spec, output_schema=output_schema
     )

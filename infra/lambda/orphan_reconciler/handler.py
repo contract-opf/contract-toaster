@@ -70,8 +70,15 @@ STALE_PENDING_THRESHOLD_SECONDS = int(
 # schema, ~1.6x the old 4-chars/token system+user figure). A document the
 # old gate estimated at just under 100,000 now estimates ~169,300, so 170_000
 # admits it; the cap now prices real billed tokens (estimate ~7% high).
+#
+# Issue #137: raised 170_000 -> 175_000. One model-facing tool schema now
+# serves both passes, so the counted schema grew 9,318 -> 11,057 tokens and
+# that same document estimates 171,055. 175_000 is the smallest round cap
+# that admits it with >= 3,000 tokens (3,945) of headroom for future schema
+# growth. Schema growth adds 1:1 to that document's estimate -- raise this
+# cap by the same amount (tests/test_document_size_policy_625.py [8c]).
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 170_000
+MAX_INPUT_TOKENS = 175_000
 # Issue #658: the worst-case per-attempt OUTPUT budget. reviews.py derives
 # this from `model_client.output_budget_for_document(MAX_INPUT_TOKENS,
 # model_client.DEFAULT_MAX_OUTPUT_TOKENS)` -- the sizing function both review
@@ -167,9 +174,9 @@ def _release_reservation(review_id: str, submission: dict[str, Any]) -> None:
 
     Issue #189 fix: this previously only set a `reservation_released` flag
     on the submission row and never touched daily_spend.reserved_usd_cents,
-    so a dead execution's worst-case reservation ($8.71 today -- 3 attempts
-    x 170K in + 3 attempts x 32K out per pass, since issue #144 raised
-    MAX_INPUT_TOKENS to 170_000; $6.86 after issue #658 raised the output
+    so a dead execution's worst-case reservation ($8.84 today -- 3 attempts
+    x 175K in + 3 attempts x 32K out per pass, since issue #137 raised
+    MAX_INPUT_TOKENS to 175_000; $8.71 at issue #144's 170_000; $6.86 after issue #658 raised the output
     budget and gave truncation its own attempt; $2.46 before that, $2.11
     before issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model
     rates, see the module constants above) held its slice of the daily cap

@@ -22,9 +22,10 @@ This test proves:
      reservation from `model-policy/openrouter.json`'s
      `cost_per_million_{input,output}_usd` rates; the Bedrock path (default /
      any other value) is byte-for-byte unchanged (still the documented
-     Bedrock worst case -- $8.71 / 871 cents since issue #144 raised
-     MAX_INPUT_TOKENS to 170_000, per ARCHITECTURE.md -> Cost shape, the
-     authority for every cost figure in this repo; it was $6.86 / 686 cents
+     Bedrock worst case -- $8.84 / 884 cents since issue #137 raised
+     MAX_INPUT_TOKENS to 175_000, per ARCHITECTURE.md -> Cost shape, the
+     authority for every cost figure in this repo; it was $8.71 / 871 cents
+     at issue #144's 170_000, $6.86 / 686 cents
      at 100_000 after issue #658 raised the worst-case output budget to
      32_000, $2.46 / 246 cents between issue #625 raising MAX_INPUT_TOKENS
      to 100_000 and #658, and $2.11 / 211 cents before #625).
@@ -266,11 +267,11 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
     def test_bedrock_path_unchanged_by_default(self):
         """No MODEL_PROVIDER (or any value other than 'openrouter') must
         still reserve the documented Bedrock worst case (ARCHITECTURE.md ->
-        Cost shape: $8.71 / 871 cents at MAX_INPUT_TOKENS=170_000 and the
+        Cost shape: $8.84 / 884 cents at MAX_INPUT_TOKENS=175_000 and the
         issue-#658 worst-case output budget of 32_000, over three attempts
         per pass) -- this branch must not disturb the AWS target."""
         _clear_model_provider()
-        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 871)
+        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 884)
 
     def test_openrouter_reservation_uses_openrouter_json_rates(self):
         """MODEL_PROVIDER=openrouter must price the reservation from
@@ -301,7 +302,7 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
         actual_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(actual_cents, expected_cents)
         self.assertNotEqual(
-            actual_cents, 871,
+            actual_cents, 884,
             "Must diverge from the Bedrock worst case, not silently reuse it.",
         )
 

@@ -154,8 +154,15 @@ BUCKET_WIDTH_MINUTES = 10
 # schema, ~1.6x the old 4-chars/token system+user figure). A document the
 # old gate estimated at just under 100,000 now estimates ~169,300, so 170_000
 # admits it; the cap now prices real billed tokens (estimate ~7% high).
+#
+# Issue #137: raised 170_000 -> 175_000. One model-facing tool schema now
+# serves both passes, so the counted schema grew 9,318 -> 11,057 tokens and
+# that same document estimates 171,055. 175_000 is the smallest round cap
+# that admits it with >= 3,000 tokens (3,945) of headroom for future schema
+# growth. Schema growth adds 1:1 to that document's estimate -- raise this
+# cap by the same amount (tests/test_document_size_policy_625.py [8c]).
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 170_000
+MAX_INPUT_TOKENS = 175_000
 MAX_RETRIES_PER_PASS = 1
 # Issue #658: truncation has its own retry allowance in both review passes
 # (scripts/primary_review_pass.py::MAX_TRUNCATION_RETRIES_PER_PASS), spendable
@@ -174,9 +181,9 @@ MAX_TRUNCATION_RETRIES_PER_PASS = 1
 # reservation is taken at SUBMISSION time, before the document has been
 # extracted -- there is no document to size against, so this is a
 # worst-case figure exactly like MAX_INPUT_TOKENS above. Pricing every review
-# at an Anthropic model's declared 128,000-token cap would reserve ~$19.44
-# (at the OpenRouter rates this file prices with; ~$21.38 at the Bedrock
-# rates ARCHITECTURE.md tabulates; both at issue #144's 170_000-token
+# at an Anthropic model's declared 128,000-token cap would reserve ~$19.56
+# (at the OpenRouter rates this file prices with; ~$21.52 at the Bedrock
+# rates ARCHITECTURE.md tabulates; both at issue #137's 175_000-token
 # MAX_INPUT_TOKENS) against the $20/day default ceiling and
 # refuse the second concurrent review of the day, for a budget almost no
 # review asks for. That is the trade issue #658's own note names: "the real
@@ -189,11 +196,11 @@ MAX_TRUNCATION_RETRIES_PER_PASS = 1
 # = 96,000, while any document over ~44,800 estimated tokens -- the ~80-page
 # agreement this issue exists to enable -- rides the shipped policy's
 # declared 128,000 on all three attempts = 384,000. In dollars that is
-# ~$7.92 reserved against ~$19.44 actual at the OpenRouter pins (~$8.71 vs
-# ~$21.38 at the Bedrock rates), i.e. 2.45x, ALWAYS in the direction of
+# ~$8.04 reserved against ~$19.56 actual at the OpenRouter pins (~$8.84 vs
+# ~$21.52 at the Bedrock rates), i.e. 2.43x, ALWAYS in the direction of
 # reserving less (2.85x at the pre-#144 100_000-token input cap). Two
-# concurrent submissions therefore reserve ~$17.42, are both admitted under
-# a $20/day ceiling, and can settle at ~$42.77.
+# concurrent submissions therefore reserve ~$17.69, are both admitted under
+# a $20/day ceiling, and can settle at ~$43.03.
 # `settle_spend` reconciles each reservation against real ledgered usage the
 # moment its review ends -- so the counter converges on actual spend and the
 # excess cannot compound beyond the reviews in flight -- but the ceiling
@@ -214,8 +221,9 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # review vs the then-documented $2.11 (ARCHITECTURE.md -> Cost shape;
 # $2.46 after issue #625 raised MAX_INPUT_TOKENS to 100_000, $6.86
 # after issue #658 raised the output budget and added a truncation
-# attempt, and $8.71 since issue #144 raised MAX_INPUT_TOKENS to 170_000
-# -- $8.71 is the current figure), which
+# attempt, $8.71 after issue #144 raised MAX_INPUT_TOKENS to 170_000, and
+# $8.84 since issue #137 raised it to 175_000 -- $8.84 is the current
+# figure), which
 # 429'd the third review of any day against the $20/day default cap.
 #
 # These figures mirror model-policy/bedrock-us-east-1.json's
@@ -224,9 +232,10 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # regional-endpoint surcharge documented in docs/design-notes.md -> Model
 # selection & governance applied ($5.50/$27.50 Opus, $3.30/$16.50 Sonnet) --
 # the SAME regional rates ARCHITECTURE.md's Cost shape unit-economics table
-# cites for its $8.71 worst-case/review arithmetic -- 3 attempts x 170K in +
-# 3 attempts x 32K out, per pass (issues #658, #144). That table lists $6.86
-# (pre-#144), $2.46 (pre-#658) and $2.11 (pre-#625) as history only. They cannot be loaded
+# cites for its $8.84 worst-case/review arithmetic -- 3 attempts x 175K in +
+# 3 attempts x 32K out, per pass (issues #658, #144, #137). That table
+# lists $8.71 (pre-#137), $6.86 (pre-#144), $2.46 (pre-#658) and $2.11
+# (pre-#625) as history only. They cannot be loaded
 # directly from model-policy/*.json at runtime: this module ships inside the
 # backend container (backend/Dockerfile COPYs only src/, built from the
 # backend/ directory as its Docker context) and infra/lambda/persist/
@@ -597,11 +606,12 @@ def _active_provider_rates(
     see that file's own `_comment`). Any other value (including unset, the
     AWS/Bedrock target's default) returns the existing hardcoded Bedrock
     regional-rate constants, UNCHANGED -- this branch must never perturb
-    the Bedrock path's documented $8.71 worst case (issue #189; the
-    figure is $8.71 since issue #144 raised MAX_INPUT_TOKENS to 170_000 --
-    it was $6.86 after issue #658 raised the output budget from a flat
-    8_000 and gave truncation its own attempt, $2.46 before that, and $2.11
-    before issue #625 raised MAX_INPUT_TOKENS to 100_000).
+    the Bedrock path's documented $8.84 worst case (issue #189; the
+    figure is $8.84 since issue #137 raised MAX_INPUT_TOKENS to 175_000 --
+    it was $8.71 at issue #144's 170_000, $6.86 after issue #658 raised
+    the output budget from a flat 8_000 and gave truncation its own
+    attempt, $2.46 before that, and $2.11 before issue #625 raised
+    MAX_INPUT_TOKENS to 100_000).
     ARCHITECTURE.md -> Cost shape is the authority for all three.
 
     ADMIN SELECTION (issue #445). On the OpenRouter path the rates are those
@@ -674,7 +684,7 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     BUDGET still can: this prices `MAX_OUTPUT_TOKENS` (the fail-closed
     32,000-token ceiling) while a big document on a model declaring 128,000
     asks for that — see the KNOWN RESIDUAL on the constant above for the
-    measured 2.45x. Settlement (ledgered after every model attempt,
+    measured 2.43x. Settlement (ledgered after every model attempt,
     including failures) is therefore a reconciliation in BOTH directions,
     not a correction that can only come in under.
 

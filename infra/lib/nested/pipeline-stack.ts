@@ -44,7 +44,9 @@ export interface PipelineStackProps extends cdk.NestedStackProps {
 // ---------------------------------------------------------------------------
 // Issue #144: raised 100_000 -> 170_000 to preserve document capacity once the
 // gate counts the tool schema at 2.5 chars/token (ARCHITECTURE.md -> caps table).
-const MAX_INPUT_TOKENS = 170_000; // per pass (system + user prompt + tool schema) -- issues #625, #144
+// Issue #137: raised 170_000 -> 175_000 when one tool schema began serving both
+// passes and grew the counted schema by 1,739 tokens.
+const MAX_INPUT_TOKENS = 175_000; // per pass (system + user prompt + tool schema) -- issues #625, #144, #137
 const MAX_OUTPUT_TOKENS = 32_000; // per pass, worst case (issue #658: the per-review
 // budget is sized from the document by model_client.output_budget_for_document and
 // clamped by the selected model's own declared cap; this is the fail-closed ceiling
