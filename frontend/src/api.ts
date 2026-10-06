@@ -174,6 +174,29 @@ export function friendlyDownloadError(technicalDetail: unknown): string {
 }
 
 /**
+ * HTTP 429 from a download route is the per-user DAILY limit
+ * (`MAX_DAILY_REVIEWS`, backend/src/download.py), which is a true and
+ * actionable cause — unlike the configuration failure above — so it gets its
+ * own fixed copy rather than the "check the storage settings" one (issue
+ * #102: a quota refusal was being reported as a deployment fault). Fixed text,
+ * never the server's `detail`.
+ */
+export const DOWNLOAD_QUOTA_COPY =
+  "You've reached today's download limit. The review itself finished and is safe — " +
+  'downloads reset at midnight UTC, so you can save it again then.';
+
+/**
+ * The message for a non-2xx answer from a download route: the daily-limit
+ * copy for a 429, otherwise the shared `friendlyDownloadError`.
+ */
+export function downloadFailureMessage(status: number, technicalDetail: unknown): string {
+  if (status === 429) {
+    return DOWNLOAD_QUOTA_COPY;
+  }
+  return friendlyDownloadError(technicalDetail);
+}
+
+/**
  * Hand a same-tab-safe URL to the browser for download via a temporary
  * anchor, instead of `window.location.assign` (which navigates the SPA
  * away and loses in-memory app state — issue #271 item 5). The anchor is

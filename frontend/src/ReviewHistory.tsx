@@ -63,6 +63,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import {
   authorizedFetch,
   DOCUMENT_PURGED_COPY,
+  downloadFailureMessage,
   friendlyDownloadError,
   friendlyErrorMessage,
   readErrorDetail,
@@ -680,7 +681,8 @@ export default function ReviewHistory(): React.ReactElement {
         // false for exactly this shape of failure.
         const errorDetail = await readErrorDetail(response);
         throw new Error(
-          friendlyDownloadError(
+          downloadFailureMessage(
+            response.status,
             errorDetail ??
               `GET /api/reviews/${reviewId}/${kind} returned HTTP ${response.status}`,
           ),
