@@ -65,12 +65,16 @@ state or logs.
 
 from __future__ import annotations
 
+import base64
+import copy
+import hashlib
 import json
 import logging
 import os
 import sys
 import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable  # noqa: UP035
@@ -620,6 +624,115 @@ def _fail_review(review_id: str, dynamodb_resource: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Issue #127: validated OPF documents, keyed on what the ACTIVE row says was
+#: activated -- `(playbook_id, version, storage_key)`. The stored artifact is
+#: content-addressed (`playbook_upload.storage_key_for`:
+#: `playbooks/{playbook_id}/{sha256 of the stored bytes}.json`), so the key
+#: names the exact bytes. Bounded LRU: one entry per active version a runner
+#: has served. A new activation or a rollback changes the active row and
+#: therefore the key, so invalidation needs no hook into `playbook_versions`;
+#: an entry for a version no longer active is never asked for again and ages
+#: out.
+_OPF_CACHE_MAX_ENTRIES = 8
+_opf_cache: OrderedDict[tuple[str, str, str], dict[str, Any]] = OrderedDict()
+_opf_cache_lock = threading.Lock()
+
+
+def _clear_opf_cache() -> None:
+    """Empty the validated-OPF cache (tests; never needed at runtime)."""
+    with _opf_cache_lock:
+        _opf_cache.clear()
+
+
+def _storage_key_digest(storage_key: str) -> str:
+    """The sha256 hex a content-addressed storage key names, or "" when the
+    key is not in `storage_key_for`'s shape (such a row is never cached)."""
+    stem = storage_key.rsplit("/", 1)[-1]
+    if not stem.endswith(".json"):
+        return ""
+    digest = stem[: -len(".json")]
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        return ""
+    return digest
+
+
+def _stored_object_still_matches(s3_client: Any, bucket: str, storage_key: str) -> bool:
+    """HEAD the activated object. Raises what the store raises for a missing
+    object (the uncached read would have raised too); returns False when the
+    store reports a whole-object SHA-256 that is not the digest the key names,
+    so the caller drops the entry and takes the full, fail-closed path."""
+    head = s3_client.head_object(Bucket=bucket, Key=storage_key, ChecksumMode="ENABLED")
+    reported = head.get("ChecksumSHA256") or ""
+    if not reported or "-" in reported:  # absent, or a multipart composite
+        return True
+    try:
+        return base64.b64decode(reported).hex() == _storage_key_digest(storage_key)
+    except (ValueError, TypeError):
+        return False
+
+
+def _load_validated_opf(active_item: dict[str, Any], s3_client: Any) -> dict[str, Any]:
+    """The validated OPF document for `active_item`, from cache when the
+    same active version was validated before in this process, otherwise
+    fetched and re-validated through `playbook_upload._load_opf_from_bytes`
+    exactly as before.
+
+    Fail-closed is unchanged: a miss runs the full path, and a document is
+    cached ONLY after it validated AND the fetched bytes hashed to the digest
+    its content-addressed `storage_key` names. So a hit is always a document
+    that passed the full validation for exactly the bytes that were
+    activated; a key whose bytes do not match it is re-validated on every
+    review, never cached. Callers get a deep copy, so nothing downstream can
+    mutate the cached document.
+
+    A hit still asks the object store, with one HEAD, whether the activated
+    object is there (and, when the store reports a whole-object SHA-256, that
+    it is still the bytes the key names) -- so an artifact deleted or replaced
+    after activation fails the review or skips the playbook exactly as an
+    uncached read would, rather than being masked by this process's memory.
+    The HEAD is what a hit costs; the fetch, parse, hash and scan are what it
+    saves.
+    """
+    storage_key = str(active_item["storage_key"])
+    key = (
+        str(active_item.get("playbook_id", "")),
+        str(active_item.get("version", "")),
+        storage_key,
+    )
+    started = time.monotonic()
+    with _opf_cache_lock:
+        cached = _opf_cache.get(key)
+        if cached is not None:
+            _opf_cache.move_to_end(key)
+    bucket = os.environ["UPLOADS_BUCKET"]
+    if cached is not None and not _stored_object_still_matches(s3_client, bucket, storage_key):
+        with _opf_cache_lock:
+            _opf_cache.pop(key, None)
+        cached = None
+    if cached is not None:
+        opf_doc = copy.deepcopy(cached)
+        cache_hit = True
+    else:
+        raw_bytes = s3_client.get_object(Bucket=bucket, Key=storage_key)["Body"].read()
+        opf_doc = playbook_upload._load_opf_from_bytes(raw_bytes, suffix=".json")
+        cache_hit = False
+        expected = _storage_key_digest(storage_key)
+        if expected and hashlib.sha256(raw_bytes).hexdigest() == expected:
+            with _opf_cache_lock:
+                _opf_cache[key] = copy.deepcopy(opf_doc)
+                _opf_cache.move_to_end(key)
+                while len(_opf_cache) > _OPF_CACHE_MAX_ENTRIES:
+                    _opf_cache.popitem(last=False)
+    logger.info(
+        "opf_load playbook_id=%s version=%s cache_hit=%s opf_load_ms=%d",
+        key[0],
+        key[1],
+        cache_hit,
+        int((time.monotonic() - started) * 1000),
+    )
+    return opf_doc
+
+
 def _load_opf_bundle_if_active(
     playbook_id: str, dynamodb_resource: Any, s3_client: Any
 ) -> dict[str, Any] | None:
@@ -643,7 +756,10 @@ def _load_opf_bundle_if_active(
     the injection scan, sibling-id uniqueness) -- reused rather than
     re-implemented, so a byte later corrupted in object storage is caught
     here exactly as it would be on re-upload, not trusted blindly at
-    review-run time.
+    review-run time. Issue #127 caches the validated result per active
+    version in-process (`_load_validated_opf`): the same document is not
+    re-validated on every review, and a hit is only ever a document that
+    passed this full path for the bytes the row says were activated.
 
     Issue #676 rides on that same reuse: `_load_opf_from_bytes` also
     enforces the spec-normative minimums
@@ -693,10 +809,7 @@ def _load_opf_bundle_if_active(
     artifact_kind = active_item.get("artifact_kind") or ""
     if not artifact_kind.startswith("opf-"):
         return None
-    storage_key = active_item["storage_key"]
-    bucket = os.environ["UPLOADS_BUCKET"]
-    raw_bytes = s3_client.get_object(Bucket=bucket, Key=storage_key)["Body"].read()
-    opf_doc = playbook_upload._load_opf_from_bytes(raw_bytes, suffix=".json")
+    opf_doc = _load_validated_opf(active_item, s3_client)
     return {
         "opf_bundle_v2": {
             "opf": opf_doc,
