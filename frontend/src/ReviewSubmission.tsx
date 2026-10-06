@@ -90,6 +90,7 @@ import {
   authorizedFetch,
   DOCUMENT_PURGED_COPY,
   DOWNLOAD_ERROR_COPY,
+  downloadFailureMessage,
   friendlyDownloadError,
   friendlyErrorMessage,
   readErrorDetail,
@@ -324,6 +325,9 @@ interface ReviewDetail {
   // the button; the draft itself is fetched by actually clicking it.
   has_cover_note_draft?: boolean;
 }
+
+/** The server refused a second completion-time auto-save (issue #102). */
+class AutoSaveAlreadyUsedError extends Error {}
 
 interface OutputResponse {
   url: string;
@@ -2741,8 +2745,22 @@ export default function ReviewSubmission(): React.ReactElement {
   // Mint a short-lived presigned URL for this review's output. Shared by the
   // button the attorney clicks and by the automatic save on completion, so the
   // two can never drift on which endpoint they call or how they read a failure.
-  const fetchOutputUrl = useCallback(async (): Promise<string> => {
-    const response = await authorizedFetch(`/api/reviews/${reviewId}/output`);
+  //
+  // `autosave` (issue #102) marks the completion-time save, which the server
+  // presigns without spending a daily download slot or writing a download
+  // audit row (a browser may suppress its anchor click, so nothing is known to
+  // have downloaded) and allows once per review. Only the reviewer's own click
+  // — the default — is charged and audited.
+  const fetchOutputUrl = useCallback(async (autosave = false): Promise<string> => {
+    const response = await authorizedFetch(
+      `/api/reviews/${reviewId}/output${autosave ? '?autosave=1' : ''}`,
+    );
+    if (autosave && response.status === 409) {
+      // The review's single auto-save was already used (a reload re-reaching
+      // DONE). Not a failure: the redline was offered once, and the Save
+      // button is still there.
+      throw new AutoSaveAlreadyUsedError();
+    }
     if (!response.ok) {
       // A 503 here carries a `detail` naming the unset storage env var
       // (#465's own failure mode) — server configuration, never something a
@@ -2751,7 +2769,8 @@ export default function ReviewSubmission(): React.ReactElement {
       // the raw detail still reaches the console.
       const errorDetail = await readErrorDetail(response);
       throw new Error(
-        friendlyDownloadError(
+        downloadFailureMessage(
+          response.status,
           errorDetail ?? `GET /api/reviews/${reviewId}/output returned HTTP ${response.status}`,
         ),
       );
@@ -2802,7 +2821,8 @@ export default function ReviewSubmission(): React.ReactElement {
       if (!response.ok) {
         const errorDetail = await readErrorDetail(response);
         throw new Error(
-          friendlyDownloadError(
+          downloadFailureMessage(
+            response.status,
             errorDetail ?? `GET /api/reviews/${reviewId}/input returned HTTP ${response.status}`,
           ),
         );
@@ -3006,7 +3026,7 @@ export default function ReviewSubmission(): React.ReactElement {
     // setter runs, so a save for review A can never paint review B's screen.
     const savingReviewId = reviewId;
     try {
-      triggerBrowserDownload(await fetchOutputUrl());
+      triggerBrowserDownload(await fetchOutputUrl(true));
       if (handedOffReviewRef.current === savingReviewId) {
         setReadyAnnouncement(READY_SAVED_COPY);
         // Issue #492: the ONE fact allowed to turn on the visible
@@ -3015,7 +3035,10 @@ export default function ReviewSubmission(): React.ReactElement {
         // promise that a save is under way (the #466 discipline).
         setAutoSaved(true);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof AutoSaveAlreadyUsedError) {
+        return;
+      }
       // fetchOutputUrl already logged the real technical detail to the
       // console via friendlyDownloadError — nothing further to log here.
       if (handedOffReviewRef.current === savingReviewId) {

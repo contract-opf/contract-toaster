@@ -1906,9 +1906,49 @@ async def post_review_disposition(
 # ---------------------------------------------------------------------------
 
 
+def _claim_autosave(table: Any, review_id: str) -> None:
+    """Spend the review's single uncharged auto-save presign (issue #102).
+
+    An atomic conditional write on the review row, so two concurrent
+    auto-saves cannot both win. HTTP 409 when it was already used: the
+    reviewer's own Save button is the (charged, audited) way to fetch the
+    redline again.
+    """
+    try:
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET autosave_presigned_at = :now",
+            ConditionExpression="attribute_not_exists(autosave_presigned_at)",
+            ExpressionAttributeValues={":now": str(int(time.time()))},
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The automatic save was already used for this review.",
+            ) from exc
+        logger.error("AUTOSAVE_CLAIM_FAILED review_id=%s: %r", review_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to prepare the download.",
+        ) from exc
+
+
+def _release_autosave(table: Any, review_id: str) -> None:
+    """Best-effort undo of `_claim_autosave` when no URL was handed out."""
+    try:
+        table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="REMOVE autosave_presigned_at",
+        )
+    except ClientError as exc:
+        logger.error("AUTOSAVE_RELEASE_FAILED review_id=%s: %r", review_id, exc)
+
+
 @router.get("/api/reviews/{review_id}/output", include_in_schema=True)
 async def get_review_output(
     review_id: str = Path(...),
+    autosave: bool = Query(False),
     caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
     dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
     dynamodb_client: Any = Depends(get_dynamodb_client),  # noqa: B008
@@ -1923,6 +1963,16 @@ async def get_review_output(
     row here, never taken from client input (download.py's own docstring
     invariant): a client cannot request an arbitrary key by crafting the
     request.
+
+    Issue #102 (owner decision 2026-09-14): ``?autosave=1`` marks the
+    completion-time auto-save, which the browser may silently suppress. That
+    one request presigns WITHOUT spending a daily download slot and WITHOUT
+    writing ``review_output_downloaded`` -- nothing is known to have been
+    downloaded. It is usable at most ONCE per review, enforced here by an
+    atomic conditional write of ``autosave_presigned_at`` on the review row
+    (a second attempt is HTTP 409), so it cannot be a free unlimited
+    download. Every request without the flag is a user click: charged and
+    audited exactly as before.
     """
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
     resp = table.get_item(Key={"review_id": review_id})
@@ -1969,38 +2019,53 @@ async def get_review_output(
             ),
         )
 
-    response = download.generate_presigned_download_url(
-        review_id,
-        owner_sub,
-        output_s3_key,
-        caller_row,
-        env_name,
-        s3_client,
-        dynamodb_client,
-        # Issue #449: a retention purge deletes the OBJECT and leaves the row's
-        # pointer in place, so `output_s3_key` alone stopped being proof that
-        # anything is still downloadable. Without this the History tab would
-        # hand out a valid-looking URL that 404s on click.
-        require_object_exists=True,
-        # Issue #518: name the deliverable after the document it came from.
-        # `original_filename` is absent on every review created before that
-        # field existed, and after a retention purge clears it -- both resolve
-        # to the review-id fallback rather than failing.
-        download_filename=download.content_disposition_for(
-            item.get("original_filename"), review_id
-        ),
-    )
+    if autosave:
+        _claim_autosave(table, review_id)
+    try:
+        response = download.generate_presigned_download_url(
+            review_id,
+            owner_sub,
+            output_s3_key,
+            caller_row,
+            env_name,
+            s3_client,
+            dynamodb_client,
+            # Issue #449: a retention purge deletes the OBJECT and leaves the row's
+            # pointer in place, so `output_s3_key` alone stopped being proof that
+            # anything is still downloadable. Without this the History tab would
+            # hand out a valid-looking URL that 404s on click.
+            require_object_exists=True,
+            # Issue #518: name the deliverable after the document it came from.
+            # `original_filename` is absent on every review created before that
+            # field existed, and after a retention purge clears it -- both resolve
+            # to the review-id fallback rather than failing.
+            download_filename=download.content_disposition_for(
+                item.get("original_filename"), review_id
+            ),
+            # Issue #102: the auto-save spends no slot (see the docstring).
+            charge_quota=not autosave,
+        )
+    except HTTPException:
+        # Nothing was handed out (410 purged, 503, ...): give the single
+        # auto-save back so a failed attempt does not forfeit it.
+        if autosave:
+            _release_autosave(table, review_id)
+        raise
 
     # Audit only a SUCCESSFUL download-URL issuance (generate_presigned_download_url
     # already raised for an unauthorized/over-limit caller before reaching here).
-    _write_audit_row(
-        dynamodb_resource,
-        actor=caller_row.get("cognito_sub", ""),
-        action="review_output_downloaded",
-        target=review_id,
-        target_type="review",
-        detail={"s3_key": output_s3_key},
-    )
+    # Issue #102: ...and only a user-initiated request. The auto-save writes no
+    # row, because a suppressed anchor click would leave a false record of a
+    # download that never happened (docs/audit-queries.md).
+    if not autosave:
+        _write_audit_row(
+            dynamodb_resource,
+            actor=caller_row.get("cognito_sub", ""),
+            action="review_output_downloaded",
+            target=review_id,
+            target_type="review",
+            detail={"s3_key": output_s3_key},
+        )
 
     return response
 

@@ -115,6 +115,16 @@ all-clear:
   under the current pipeline records clause IDs, and no writer in this repo's history ever
   recorded them (#27 landed as a docs-only CI gate), so there is no pre-retirement
   population either. The entry stands as the standing filter should retrieval be revived.
+- `document_access` rows (`review_output_downloaded`) are written only for a
+  **user-initiated** request (#102, owner decision 2026-09-14). The completion-time
+  auto-save (`GET /api/reviews/{id}/output?autosave=1`) presigns through an uncharged,
+  unaudited path, because a browser may suppress its anchor click, so a row there would
+  assert a download that may never have happened. Consequence: a review the reviewer
+  never clicked Save on has **no** `review_output_downloaded` row even if the redline
+  reached their disk through the auto-save, so absence of a row is not proof the
+  redline was not fetched. The auto-save is bounded server-side to one use per review
+  (`autosave_presigned_at` on the review row, conditional write, 409 on reuse), and the
+  daily download quota (`MAX_DAILY_REVIEWS`) is spent only by user-initiated requests.
 - `document_access` returns `denials_recorded: false`. The download routes audit only a
   *successful* presigned-URL issuance, so no `access_denied` row exists yet.
 - `break_glass` and `model_recertification` return `producers_wired: false`. No

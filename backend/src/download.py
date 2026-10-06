@@ -474,6 +474,7 @@ def generate_presigned_download_url(
     bucket_name: str | None = None,
     require_object_exists: bool = False,
     download_filename: str | None = None,
+    charge_quota: bool = True,
 ) -> JSONResponse:
     """Generate a short-lived presigned URL for an output file download.
 
@@ -535,6 +536,11 @@ def generate_presigned_download_url(
             that still carry their pointers (issue #449).  Without it, a purged
             review hands the browser a valid-looking URL that 404s on click; a
             dead link is a worse answer than "no longer available".
+
+        charge_quota: when False, step 4 is skipped and no daily slot is spent
+            (issue #102).  ONLY the completion-time auto-save may pass False,
+            and its route bounds it to one use per review server-side; every
+            user-initiated download keeps the default.
 
     Returns:
         JSONResponse with {"url": "<presigned-url>", "expires_in": 60} and
@@ -675,11 +681,15 @@ def generate_presigned_download_url(
     # until this point, and every request that reaches here is one this
     # handler is about to hand a working URL for.
     # See tests/test_download_presign_failure_uncharged_115.py.
-    _check_per_user_limits(
-        user_sub=caller_user_row["cognito_sub"],
-        env_name=env_name,
-        dynamodb_client=dynamodb_client,
-    )
+    # Issue #102: the completion-time auto-save is exempt (owner decision
+    # 2026-09-14) -- the browser may suppress its anchor click, so charging
+    # for it spent a slot for a download that might never happen.
+    if charge_quota:
+        _check_per_user_limits(
+            user_sub=caller_user_row["cognito_sub"],
+            env_name=env_name,
+            dynamodb_client=dynamodb_client,
+        )
 
     # Step 5: return with Cache-Control: no-store.
     return JSONResponse(
