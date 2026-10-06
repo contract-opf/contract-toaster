@@ -424,14 +424,14 @@ class TestFailedAtStamped(unittest.TestCase):
         ddb = FakeDDB(table)
         pr._write_real_terminal(
             REVIEW_ID,
-            {"status": "MANUAL_REVIEW_REQUIRED", "decision": "REQUEST_CHANGE"},
+            {"status": "ERROR", "decision": "REQUEST_CHANGE"},
             output_s3_key=None,
             dynamodb_resource=ddb,
         )
         self.assertIn("failed_at", table.item)
         self.assertTrue(str(table.item["failed_at"]).isdigit())
         self.assertEqual(table.item["failed_at"], table.item["updated_at"])
-        self.assertEqual(table.item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(table.item["status"], "ERROR")
 
     def test_write_real_terminal_stamps_no_failed_at_on_a_success(self) -> None:
         """A genuinely successful review must not be told it failed."""

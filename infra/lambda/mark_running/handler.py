@@ -2,7 +2,7 @@
 Mark-running stage Lambda — issue #188 (status lifecycle: PENDING -> RUNNING).
 
 The mock pipeline (and the real pipeline behind #80-#83) transitions a review
-through PENDING -> RUNNING -> DONE/MANUAL_REVIEW_REQUIRED/ERROR. Submission
+through PENDING -> RUNNING -> DONE/ERROR. Submission
 writes PENDING (backend/src/reviews.py::_create_review_row); the shared error
 handler writes ERROR (pipeline-stack.ts TransitionToError); the persist stage
 writes the terminal success state (infra/lambda/persist/handler.py). This
@@ -19,7 +19,7 @@ Idempotency / race-safety: the update is conditional on the row currently
 being PENDING. A retry of this stage, or a race with the orphan reconciler
 having already moved the row to ERROR, hits ConditionalCheckFailedException,
 which is swallowed as a no-op -- this stage must never clobber a terminal
-(DONE/ERROR/MANUAL_REVIEW_REQUIRED) or already-RUNNING status.
+(DONE/ERROR/CANCELLED) or already-RUNNING status.
 
 POINTER-ONLY PAYLOAD RULE (issue #19): passes the event through unchanged
 (plus the status side effect), same contract as every other Phase-0 stage
@@ -60,7 +60,7 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
             Key={"review_id": review_id},
             UpdateExpression="SET #status = :running, updated_at = :now",
             # Only PENDING -> RUNNING. A row already RUNNING or in any terminal
-            # state (DONE/ERROR/MANUAL_REVIEW_REQUIRED/QUARANTINED) must not be
+            # state (DONE/ERROR/CANCELLED/QUARANTINED) must not be
             # touched -- this stage is not allowed to resurrect a finished or
             # failed review.
             ConditionExpression="#status = :pending",

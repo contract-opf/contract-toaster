@@ -1276,9 +1276,9 @@ class ModelContextLengthExceededError(ModelInvocationError):
     """Raised when the provider itself rejects a request as exceeding the
     model's context length (issue #270), instead of a generic
     `ModelInvocationError` -- so a caller can map it to the SAME fail-closed
-    `MANUAL_REVIEW_REQUIRED` / `document_too_large` outcome the step-14
-    assembled-size cap produces (`scripts/primary_review_pass.py`), rather
-    than a generic pipeline `ERROR`. The sole pre-call oversize gate is a
+    `ERROR` / `document_too_large` outcome the step-14 assembled-size cap
+    produces (`scripts/primary_review_pass.py`), rather than an unclassified
+    pipeline failure. The sole pre-call oversize gate is a
     character-count estimate (`INPUT_CHARS_PER_TOKEN_ESTIMATE` in
     `scripts/primary_review_pass.py`, calibrated by issue #144) with no live tokenizer available
     offline, so a provider-side length rejection is a real -- if rare --
@@ -2112,9 +2112,9 @@ class OpenRouterModelClient:
             if self._is_context_length_rejection(status, response):
                 # Deterministic rejection -- never retried, never carries the
                 # response body (issue #270 AC: context-length rejection ->
-                # documented oversize status, not generic ERROR; the caller
+                # documented oversize reason, not an unclassified failure; the caller
                 # (primary_review_pass.py) maps this to the same
-                # MANUAL_REVIEW_REQUIRED / document_too_large outcome as the
+                # ERROR / document_too_large outcome as the
                 # step-14 pre-call estimate).
                 raise ModelContextLengthExceededError(
                     "OpenRouter rejected the request as exceeding the model's "

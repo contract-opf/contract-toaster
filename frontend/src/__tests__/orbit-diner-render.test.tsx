@@ -531,37 +531,48 @@ describe('issue #722 — console sound routes through the one audio owner', () =
 });
 
 // ---------------------------------------------------------------------------
-// Issue #733 — a MANUAL_REVIEW_REQUIRED outcome, which is the one terminal
-// state that is neither a redline nor a failure. It has two properties the
-// console got wrong: the polite handoff region went silent, and the result
-// panel rendered twice once "Review details" was open.
+// Issue #733 — found on a MANUAL_REVIEW_REQUIRED outcome, then the one
+// terminal state that was neither a redline nor a failure. It had two
+// properties the console got wrong: the polite handoff region went silent,
+// and the result panel rendered twice once "Review details" was open. Issue
+// #133 retired that status (a review never concludes as "manual review
+// required"); a row stored with it is now read as ERROR, and both properties
+// are pinned on that legacy row, which is the shape that can still arrive.
 // ---------------------------------------------------------------------------
 
-/** Run to MANUAL_REVIEW_REQUIRED and settle on it. */
+/** Run to a legacy MANUAL_REVIEW_REQUIRED row and settle on it. */
 async function manualReview(): Promise<HTMLElement> {
   stubDialogMethods();
   await loaded();
   fireEvent.click(screen.getByTestId('review-submit-button'));
   await waitFor(() => expect(posts).toHaveLength(1));
   pollStatus = 'MANUAL_REVIEW_REQUIRED';
+  // Every pre-#133 manual-review row was written with a reason token; this is
+  // the step-14 gate's.
+  pollExtra = { reason: 'document_too_large' };
   await waitFor(
     () =>
-      expect(console_()).toHaveAttribute('data-status', 'manual_review_required'),
+      expect(console_()).toHaveAttribute('data-status', 'error'),
     { timeout: 8000 },
   );
   return console_();
 }
 
-describe('issue #733 — the manual-review outcome', () => {
-  it('says something in the polite handoff region', async () => {
-    // The host only ever composes `readyAnnouncement` on the DONE path and
-    // leaves it as an empty string otherwise, so the console's own fallback
-    // has to trigger on emptiness. `??` let the empty string through and the
-    // region announced nothing at all.
+describe('issue #733 — a legacy manual-review row (read as ERROR, #133)', () => {
+  it('is announced — once, as the failure it is, never as a human handoff', async () => {
+    // #733 found the manual outcome announcing nothing: the host composes
+    // `readyAnnouncement` only on the DONE path, and `??` let the empty
+    // string through. Read as ERROR (#133), the row is announced the way
+    // every failure is (issue #510): the result panel's single assertive
+    // alert, carrying the cause-and-fix prose. The polite region must not
+    // also speak, and must never say the retired "needs a human".
     await manualReview();
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].textContent?.trim()).not.toBe('');
+    expect(screen.getByTestId('review-result')).toContainElement(alerts[0]);
     const announcement = screen.getByTestId('review-ready-announcement');
-    await waitFor(() => expect(announcement.textContent?.trim()).not.toBe(''));
-    expect(announcement.textContent).toContain('needs a human');
+    expect(announcement.textContent?.toLowerCase()).not.toContain('needs a human');
   });
 
   it('keeps exactly one result panel when "Review details" is open', async () => {

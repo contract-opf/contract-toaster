@@ -553,7 +553,7 @@ def test_end_to_end_run_stage_does_not_fail_closed(failures: list[str]) -> None:
         fetch_docx_bytes=lambda _key: _struck_document_bytes(),
         store_json=lambda key, obj: stored.__setitem__(key, obj),
     )
-    if output.get("status") == "MANUAL_REVIEW_REQUIRED":
+    if output.get("status") == "ERROR":
         failures.append(
             f"[E7] The stage must not fail the review closed on a whole-paragraph "
             f"deletion. Got: {output!r}"

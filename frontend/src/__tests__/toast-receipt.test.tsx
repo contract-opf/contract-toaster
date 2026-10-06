@@ -362,12 +362,12 @@ describe('the pieces', () => {
     // would print.
     const failedRow = {
       review_id: 'abcd1234-5678-90ab-cdef-1234567890ab',
-      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      status: 'ERROR',
       decision: 'REQUEST_CHANGE',
       created_at: '1000000000',
     };
     const outcome = receiptLines(failedRow).find((line) => line.id === 'outcome');
-    expect(outcome?.value).toBe('Failed — needs manual review');
+    expect(outcome?.value).toBe('Failed');
     expect(outcome?.value).not.toBe('CHANGES REQUESTED');
 
     // A row where status and decision genuinely agree keeps the receipt's

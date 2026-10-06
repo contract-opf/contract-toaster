@@ -674,7 +674,7 @@ def _extract_relationships(rels_xml: bytes) -> list[dict[str, str]]:
 # OOXML scan (generated redlines) intentionally does NOT share this
 # sanitizer — a generated .docx containing an attached-template reference
 # would be a genuine defect in our own output pipeline, not a drafter's
-# template, and must keep routing to ERROR_MANUAL_REVIEW_REQUIRED.
+# template, and must keep failing the review (ERROR, output_ooxml_scan_failed).
 # ---------------------------------------------------------------------------
 
 _RELS_MARKER = "/_rels/"

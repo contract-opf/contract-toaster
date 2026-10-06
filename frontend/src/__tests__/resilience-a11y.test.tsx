@@ -171,8 +171,10 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
   // Issue #470: this screen's status line used to render the raw enum
   // verbatim (`<strong>{detail?.status}</strong>`) — MANUAL_REVIEW_REQUIRED,
   // observed live, is the terminal status that actually leaked. Pinned
-  // separately from the DONE/ACCEPT happy path above.
-  it('shows a friendly outcome for a MANUAL_REVIEW_REQUIRED review, never the raw token', async () => {
+  // separately from the DONE/ACCEPT happy path above. Issue #133 retired that
+  // status; a row stored with it still reads back, and must read as the
+  // failure it was.
+  it('shows a friendly outcome for a legacy MANUAL_REVIEW_REQUIRED review, never the raw token', async () => {
     vi.useFakeTimers();
 
     // eslint-disable-next-line @typescript-eslint/require-await
@@ -226,9 +228,9 @@ describe('polling resilience — ReviewSubmission.tsx', () => {
     await vi.runAllTimersAsync();
 
     const result = screen.getByTestId('review-result');
-    expect(result.textContent).toContain('Needs manual review');
+    expect(result.textContent).toContain('Failed');
     expect(result.textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
-    expect(screen.getByTestId('review-outcome').textContent).toBe('Needs manual review');
+    expect(screen.getByTestId('review-outcome').textContent).toBe('Failed');
     // Whatever the lamp says, it never says the raw enum.
     expect(screen.getByTestId('review-status').textContent).not.toContain(
       'MANUAL_REVIEW_REQUIRED',

@@ -14,10 +14,14 @@ review would also exercise) and returns a canned result:
   playbook_id == "eiaa"  -> REQUEST_CHANGE, pointing at a pre-baked
                             tracked-changes redline object already staged
                             in the outputs bucket (S3 pointer only).
-  playbook_id == "nda"   -> MANUAL_REVIEW_REQUIRED, reason="playbook_coming_soon",
+  playbook_id == "nda"   -> no decision, reason="playbook_coming_soon",
                             with user-facing copy "playbook coming soon —
                             separate playbook later."
-  any other playbook_id  -> MANUAL_REVIEW_REQUIRED, reason="unknown_playbook".
+  any other playbook_id  -> no decision, reason="unknown_playbook".
+
+  Issue #133: the last two used to carry a MANUAL_REVIEW_REQUIRED decision
+  and land on that status. A review that does not complete is now ERROR with
+  its `reason` token (the persist stage derives it), and carries no decision.
 
 POINTER-ONLY PAYLOAD RULE (issue #19): the input and output of this Lambda
 carry S3 keys, review_id, and playbook_id only -- never document text,
@@ -36,7 +40,7 @@ Input event shape (from the state machine, pointer-only):
 Output shape (pointer-only):
   {
     "review_id": "...",
-    "decision": "REQUEST_CHANGE" | "MANUAL_REVIEW_REQUIRED",
+    "decision": "REQUEST_CHANGE" | null,
     "reason": null | "playbook_coming_soon" | "unknown_playbook",
     "output_s3_key": null | "outputs/<review_id>/out.docx",
     "summary": "<short non-substantive summary string>",
@@ -96,10 +100,10 @@ def _mock_eiaa_result(review_id: str) -> dict[str, Any]:
 
 
 def _mock_nda_result(review_id: str) -> dict[str, Any]:
-    """playbook_id == 'nda' -> MANUAL_REVIEW_REQUIRED, 'coming soon'."""
+    """playbook_id == 'nda' -> no decision, 'coming soon' (ERROR row)."""
     return {
         "review_id": review_id,
-        "decision": "MANUAL_REVIEW_REQUIRED",
+        "decision": None,
         "reason": "playbook_coming_soon",
         "output_s3_key": None,
         "summary": "playbook coming soon - separate playbook later.",
@@ -109,7 +113,7 @@ def _mock_nda_result(review_id: str) -> dict[str, Any]:
 def _mock_unknown_playbook_result(review_id: str, playbook_id: str) -> dict[str, Any]:
     return {
         "review_id": review_id,
-        "decision": "MANUAL_REVIEW_REQUIRED",
+        "decision": None,
         "reason": "unknown_playbook",
         "output_s3_key": None,
         "summary": f"Unknown playbook_id '{playbook_id}'.",

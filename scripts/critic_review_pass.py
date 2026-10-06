@@ -14,7 +14,7 @@ the standard-form diff and left the critic reasoning over the primary's JSON
 alone), and the primary reviewer's output. Every attempt is ledgered in
 a finally path, exactly like the primary pass. On schema failure, exactly
 ONE bounded structured-output retry; if the retry also fails,
-`status=ERROR_MANUAL_REVIEW_REQUIRED` -- ARCHITECTURE.md -> Two-pass review:
+`status=ERROR` -- ARCHITECTURE.md -> Two-pass review:
 "Critic-pass failure is terminal -- never a silent single-pass DONE."
 
 This module deliberately reuses #81's `primary_review_pass.py` for the
@@ -261,7 +261,7 @@ def run_critic_pass(
     argument and neither derives it from the other.
 
     Returns one of:
-      {"status": "MANUAL_REVIEW_REQUIRED", "reason": "document_too_large", ...}
+      {"status": "ERROR", "reason": "document_too_large", ...}
         -- issue #618: the assembled critic prompt exceeded
         `max_input_tokens`. The critic's own mirror of the primary pass's
         step-14 gate (`primary_review_pass.run_primary_pass`), and like it
@@ -271,7 +271,7 @@ def run_critic_pass(
         document AND the primary's full structured output on top of it.
       {"status": "OK", "response": {...}, "attempts": N}
         -- schema-valid critic response obtained within the retry budget.
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "reason": <token>,
+      {"status": "ERROR", "reason": <token>,
        "attempts": N, "last_error": ...}
         -- still schema-invalid after the one bounded retry. Per
         ARCHITECTURE.md -> Two-pass review, this is terminal: the caller
@@ -455,7 +455,7 @@ def run_critic_pass(
     )
     if assembled_tokens > max_input_tokens:
         return {
-            "status": "MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "reason": "document_too_large",
             "assembled_tokens": assembled_tokens,
             "max_input_tokens": max_input_tokens,
@@ -718,7 +718,7 @@ def run_critic_pass(
     # a pipeline ERROR (ARCHITECTURE.md step 17) and, critically, never a
     # silent single-pass DONE (ARCHITECTURE.md -> Two-pass review).
     return {
-        "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+        "status": "ERROR",
         # Issue #670: the pass names its own diagnosis here rather than
         # returning a reason-less terminal and relying on the composition to
         # classify it downstream. `reconciliation.run_two_pass_review`

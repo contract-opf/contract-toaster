@@ -29,7 +29,7 @@ Issue #199 (audit finding): a counterparty markup of the standard form -- the
 flagship use case -- IS a document full of PENDING tracked changes; that is
 what a redline is. The original rule below fail-closed on ANY unresolved
 tracked change, which routes every realistic counterparty redline to
-MANUAL_REVIEW_REQUIRED and defeats the product's core scenario. It also
+ERROR and defeats the product's core scenario. It also
 relied on an 'accepted' status that does not exist in real OOXML: accepting
 a change strips the <w:ins>/<w:del> markup entirely, so any revision still
 present in a real file is by definition pending.
@@ -287,7 +287,7 @@ Known cost, stated rather than discovered later: this screen is not free
 against real paper. A scan of real counterparty documents found U+200B
 inside ordinary `<w:t>` runs in a substantial fraction of them (a handful of
 occurrences per document), so this screen WILL route such documents to
-MANUAL_REVIEW_REQUIRED rather than reviewing them. That is the disposition
+ERROR rather than reviewing them. That is the disposition
 issue #632 chose deliberately -- an invisible character in the model's input
 is not something this pipeline is willing to guess about -- but it is a
 refusal rate, not a free win.
@@ -299,7 +299,7 @@ unknown) is not a safe input to diff or review.
 
 ## Fail-closed status mapping (docs/output-contract.md, normative)
 
-  status = MANUAL_REVIEW_REQUIRED
+  status = ERROR
   reason = "unnormalizable_input"
 
 This is a SYSTEM status, never a legal decision.
@@ -845,7 +845,7 @@ def build_unnormalizable_report(normalize_result: dict) -> dict:
     analysis report" -> "Format" (normative field shape).
 
     This artifact NEVER carries a `decision` field: the fail-closed outcome
-    is a SYSTEM status (`status=MANUAL_REVIEW_REQUIRED`), never a legal
+    is a SYSTEM status (`status=ERROR`), never a legal
     decision.
 
     `reason_detail` (issue #100): present, alongside the fixed
@@ -870,7 +870,7 @@ def build_unnormalizable_report(normalize_result: dict) -> dict:
         ),
         "changes_not_applied": [],
         "normalization_notes": normalize_result.get("normalization_notes", ""),
-        "status": "MANUAL_REVIEW_REQUIRED",
+        "status": "ERROR",
     }
     reason_detail = normalize_result.get("reason_detail")
     if reason_detail:

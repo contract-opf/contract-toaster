@@ -956,7 +956,7 @@ def test_a_transcript_that_never_proves_is_terminal_not_silently_accepted(
         doc_text="ignored",
         block_map=block_map,
     )
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(f"[7a] expected a terminal pass result; got {result.get('status')!r}")
     if not str(result.get("last_error", "")).startswith(pp.BLOCK_TRANSCRIPT_ERROR_TOKEN):
         failures.append(f"[7b] the terminal result must name the transcript fault; got {result!r}")

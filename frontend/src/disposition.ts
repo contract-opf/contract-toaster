@@ -53,6 +53,10 @@ export type AttorneyDisposition = 'ACCEPTED' | 'EDITED' | 'REJECTED';
 
 export const DISPOSITIONABLE_STATUSES = new Set([
   'DONE',
+  // Issue #133 retired these two: no new review reaches them (a failure is
+  // ERROR and has no output to dispose of). They stay so a row stored with one
+  // before that change keeps the control the backend still accepts for it
+  // (`backend/src/disposition.py::DISPOSITIONABLE_REVIEW_STATUSES`).
   'MANUAL_REVIEW_REQUIRED',
   'ERROR_MANUAL_REVIEW_REQUIRED',
 ]);

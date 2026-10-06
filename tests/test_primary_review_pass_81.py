@@ -545,8 +545,8 @@ def test_two_schema_invalid_responses_terminal_error_manual_review(failures: lis
         doc_text="Section 8 text.",
     )
 
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[2d] Expected terminal ERROR_MANUAL_REVIEW_REQUIRED after 2 schema-invalid responses; got {result!r}")
+    if result.get("status") != "ERROR":
+        failures.append(f"[2d] Expected terminal ERROR after 2 schema-invalid responses; got {result!r}")
     if result.get("attempts") != 2:
         failures.append(f"[2e] Expected exactly 2 attempts (bounded retry budget = 1); got {result.get('attempts')!r}")
     if len(client.calls) != 2:
@@ -985,8 +985,8 @@ def test_cap_exceeded_input_never_calls_model(failures: list[str]) -> None:
         max_input_tokens=100,  # tiny cap, guaranteed to be exceeded
     )
 
-    if result.get("status") != "MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[4a] Expected status=MANUAL_REVIEW_REQUIRED for an oversized assembled prompt; got {result!r}")
+    if result.get("status") != "ERROR":
+        failures.append(f"[4a] Expected status=ERROR for an oversized assembled prompt; got {result!r}")
     if result.get("reason") != "document_too_large":
         failures.append(f"[4b] Expected reason=document_too_large; got {result.get('reason')!r}")
     if client.calls:

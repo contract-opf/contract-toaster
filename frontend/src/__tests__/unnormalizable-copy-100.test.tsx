@@ -46,7 +46,7 @@ function docx(): File {
   });
 }
 
-/** Stub the catalog + submit + a terminal MANUAL_REVIEW_REQUIRED poll,
+/** Stub the catalog + submit + a terminal ERROR poll (issue #133),
  * carrying whatever `reason_detail` (and `normalization_notes`) the caller
  * passes — the exact shape `get_review_detail` returns. */
 function stubUnnormalizableReview(
@@ -86,7 +86,7 @@ function stubUnnormalizableReview(
           // eslint-disable-next-line @typescript-eslint/require-await
           json: async () => ({
             review_id: REVIEW_ID,
-            status: 'MANUAL_REVIEW_REQUIRED',
+            status: 'ERROR',
             decision: null,
             message: null,
             has_output: false,

@@ -353,7 +353,7 @@ class TestContextLengthFailClosed(unittest.TestCase):
     def test_primary_pass_maps_context_length_error_to_document_too_large(self) -> None:
         # Integration: run_primary_pass (scripts/primary_review_pass.py)
         # catches ModelContextLengthExceededError and returns the SAME
-        # {"status": "MANUAL_REVIEW_REQUIRED", "reason": "document_too_large"}
+        # {"status": "ERROR", "reason": "document_too_large"}
         # shape the step-14 pre-call estimate produces -- never a generic
         # ERROR (no exception escapes to the caller).
         class _RejectingClient:
@@ -377,7 +377,7 @@ class TestContextLengthFailClosed(unittest.TestCase):
             ledger_write=ledger.append,
             doc_text="short doc",
         )
-        self.assertEqual(result.get("status"), "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(result.get("status"), "ERROR")
         self.assertEqual(result.get("reason"), "document_too_large")
         self.assertEqual(client.calls, 1, "A context-length rejection must not be retried at the pass level either.")
         self.assertEqual(len(ledger), 1, "Exactly one ledger row -- the rejected attempt -- must still be written.")

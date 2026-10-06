@@ -264,7 +264,7 @@ def _real_critic_diagnostics(review_id: str, critic_response: str) -> list[dict[
         ledger_write=lambda record: None,
         attempt_diagnostic_write=captured.append,
     )
-    assert result["status"] == "ERROR_MANUAL_REVIEW_REQUIRED", result["status"]
+    assert result["status"] == "ERROR", result["status"]
     assert len(captured) == 2, captured
     return captured
 
@@ -334,7 +334,7 @@ class TestRealPipelineWiresAttemptDiagnosticWrite(unittest.TestCase):
         # the artifact. If the raw message ever starts appearing on the row
         # (which the Diagnostics tab projects), that is the decision this
         # issue made being reversed by accident.
-        self.assertEqual(reviews_table.item["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(reviews_table.item["status"], "ERROR")
         self.assertEqual(reviews_table.item["reason"], "critic_schema_invalid")
         row_text = " ".join(str(v) for v in reviews_table.item.values())
         self.assertNotIn("schema_invalid:", row_text)

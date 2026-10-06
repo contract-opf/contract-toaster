@@ -27,9 +27,9 @@ runtime seam:
     an invalid response, then that invariant fails closed.
   - `FloorJudgment.fail_closed` is the deterministic coverage gate: True
     whenever ANY invariant has no valid verdict after its retry
-    (`unjudged` non-empty). This maps to the `MANUAL_REVIEW_REQUIRED`
+    (`unjudged` non-empty). This maps to the `ERROR`
     SYSTEM STATUS (docs/output-contract.md -> "The decision is binary;
-    uncertainty is a system status") -- never a silent pass, and never
+    a run that does not complete is a failure") -- never a silent pass, and never
     itself a legal decision.
   - `floor_fires()` converts each violated verdict into the exact
     detector-fire shape `reconciliation.reconcile()` already consumes
@@ -62,7 +62,7 @@ once per review as stage 3.5, between the critic pass and reconciliation, so
 every `opf.floor.invariants` entry is judged exactly once. Every judge attempt
 is ledgered through the `ledger_write` seam with `pass_name="floor"`, alongside
 the primary and critic records. A `judgment.fail_closed` result terminates the
-review MANUAL_REVIEW_REQUIRED / `floor_invariant_unjudged` rather than letting
+review ERROR / `floor_invariant_unjudged` rather than letting
 an unevaluated invariant pass silently, and a `violation` verdict becomes a
 monotonic `detector_fires` entry that `reconcile()` cannot downgrade.
 
@@ -298,7 +298,7 @@ class FloorJudgment:
     def fail_closed(self) -> bool:
         """True whenever ANY invariant could not be judged. This is the
         deterministic coverage gate (issue #285 AC): the caller must treat
-        the review as fail-closed (maps to the MANUAL_REVIEW_REQUIRED
+        the review as fail-closed (maps to the ERROR
         system status, never silently passing an unjudged invariant)."""
         return bool(self.unjudged)
 

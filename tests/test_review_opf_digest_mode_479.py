@@ -641,7 +641,7 @@ class TestFloorCoverage(unittest.TestCase):
 
         result = review_spine.run_review(docx_bytes, bundle, fake_client, review_id="opf-479-5")
 
-        self.assertEqual(result["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(result["status"], "ERROR")
         self.assertEqual(result["reason"], "floor_invariant_unjudged")
         self.assertIsNone(result["decision"])
         self.assertIsNone(result.get("redline_bytes"))
@@ -781,7 +781,7 @@ class TestOpfPenRulesEnforcement(unittest.TestCase):
         # quote path already gives a REQUEST_CHANGE whose every patch failed.
         # The attorney still sees the finding and its reason; what changed is
         # that the run no longer reports itself DONE.
-        self.assertEqual(result["status"], "MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result.get("reason"), "block_edits_not_applied")
         self.assertEqual(len(result["findings"]), 1, result["findings"])
         self.assertIsNone(result.get("redline_bytes"))
@@ -829,7 +829,7 @@ class TestOpfLeakageCorpus(unittest.TestCase):
 
         result = review_spine.run_review(docx_bytes, bundle, fake_client, review_id="opf-479-14")
 
-        self.assertEqual(result["status"], "ERROR_MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "leakage_detected")
         self.assertIsNone(result["decision"])
         self.assertEqual(result["findings"], [])
@@ -871,7 +871,7 @@ class TestOpfLeakageCorpus(unittest.TestCase):
 
         result = review_spine.run_review(docx_bytes, bundle, fake_client, review_id="opf-479-16")
 
-        self.assertEqual(result["status"], "ERROR_MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "leakage_detected")
         self.assertIsNone(result["decision"])
         self.assertEqual(result["findings"], [])
@@ -916,7 +916,7 @@ class TestOpfLeakageCorpus(unittest.TestCase):
 
         result = review_spine.run_review(docx_bytes, bundle, fake_client, review_id="opf-479-19")
 
-        self.assertEqual(result["status"], "ERROR_MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "leakage_detected")
         self.assertIsNone(result["decision"])
         self.assertEqual(result["findings"], [])
@@ -1244,7 +1244,7 @@ class TestActivatedStubBasisAcceptanceThreadsIntoReview(RealActivationTestCase):
             docx_bytes, bundle, fake_client, review_id="opf-479-stub-unaccepted",
         )
 
-        self.assertEqual(result["status"], "MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "opf_knowledge_refused")
         self.assertIsNone(result["decision"])
         self.assertIsNone(result.get("redline_bytes"))
@@ -1373,7 +1373,7 @@ class TestFloorCoverageForResult(unittest.TestCase):
 
     def test_unjudged_ids_are_kept_for_the_quarantine_path(self):
         result = {
-            "status": "MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "reason": "floor_invariant_unjudged",
             "floor_judgment": {"verdicts": [], "unjudged": ["no-uncapped-liability"]},
         }
@@ -1439,7 +1439,7 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
 
     def test_floor_invariant_unjudged_quarantine_persists_which_invariant(self):
         result = {
-            "status": "MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "decision": None,
             "summary": None,
             "reason": "floor_invariant_unjudged",
@@ -1453,7 +1453,7 @@ class TestWriteRealTerminalFloorCoverage(unittest.TestCase):
         )
 
         item = self.table.get_item(Key={"review_id": "opf-479-review-floor-unjudged"})["Item"]
-        self.assertEqual(item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(item["status"], "ERROR")
         self.assertEqual(item["reason"], "floor_invariant_unjudged")
         self.assertEqual(item["floor_unjudged_invariant_ids"], ["no-uncapped-liability"])
         self.assertNotIn("floor_judged_invariant_ids", item)

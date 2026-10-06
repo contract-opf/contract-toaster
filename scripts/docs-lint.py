@@ -370,12 +370,15 @@ REQUIRED_REVIEWS_FIELDS = [
 CANONICAL_POINTER = "docs/data-handling.md"
 
 # The canonical terminal states (from ARCHITECTURE.md Storage and data-handling.md).
-# The "Purge only terminal reviews" Storage bullet must list all six.
+# The "Purge only terminal reviews" Storage bullet must list all six. Issue #133
+# retired the two "manual review" statuses as anything a writer produces, but
+# rows already stored with them are still terminal and still purged, so the
+# bullet keeps naming them as legacy states.
 CANONICAL_TERMINAL_STATES = {
     "DONE",
     "ERROR",
-    "MANUAL_REVIEW_REQUIRED",
-    "ERROR_MANUAL_REVIEW_REQUIRED",
+    "MANUAL_REVIEW_REQUIRED",  # legacy read: pre-#133 rows still purge
+    "ERROR_MANUAL_REVIEW_REQUIRED",  # legacy read: pre-#133 rows still purge
     "QUARANTINED",
     "SUPERSEDED",
 }

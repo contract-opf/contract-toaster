@@ -21,7 +21,7 @@ leaked by hard-killed distributed executions -- a crashed single process
 releases everything by dying).
 
 PHASE 1 SCOPE: `run_mock_pipeline` reproduces the *mock* pipeline's observable
-contract (PENDING -> RUNNING -> DONE / MANUAL_REVIEW_REQUIRED, with a
+contract (PENDING -> RUNNING -> DONE / ERROR, with a
 downloadable output for the eiaa playbook copied from the seeded fixture), so
 the deployment abstraction can be proven end-to-end against known-good
 behavior. It is UNCHANGED by Phase 2 below and remains directly callable --
@@ -347,20 +347,24 @@ def _mock_decision(review_id: str, playbook_id: str) -> dict[str, Any]:
       - registered, with a `mock_output_key` on its registry entry (e.g.
         eiaa) -> the DONE path, copying that pre-baked fixture.
       - registered, with no `mock_output_key` yet (e.g. synthetic-
-        knowledge) -> the "playbook coming soon" MANUAL_REVIEW_REQUIRED
-        copy.
+        knowledge) -> no decision, reason "playbook_coming_soon".
       - unregistered (playbook_registry.PlaybookNotRegisteredError, a
-        KeyError subclass) -> MANUAL_REVIEW_REQUIRED with the generic
-        unknown-playbook copy -- caught HERE, deliberately, rather than
-        left to propagate: run_mock_pipeline's own broad except-Exception
-        would otherwise turn it into status ERROR, not
-        MANUAL_REVIEW_REQUIRED (issue #289 AC).
+        KeyError subclass) -> no decision, reason "unknown_playbook" --
+        caught HERE, deliberately, rather than left to propagate:
+        run_mock_pipeline's own broad except-Exception would otherwise
+        record the generic `unhandled_exception` reason instead of the
+        token its copy is keyed on (issue #289 AC).
+
+    Issue #133: neither of the last two is a decision. They used to carry
+    a `MANUAL_REVIEW_REQUIRED` decision and land on that status; a review
+    that does not complete is now `ERROR` with its `reason`, and
+    `_write_terminal` writes no decision for it.
     """
     try:
         entry = playbook_registry.resolve_playbook(playbook_id)
     except playbook_registry.PlaybookNotRegisteredError:
         return {
-            "decision": "MANUAL_REVIEW_REQUIRED",
+            "decision": None,
             "reason": "unknown_playbook",
             "output_s3_key": None,
             "summary": f"Unknown playbook_id '{playbook_id}'.",
@@ -376,7 +380,7 @@ def _mock_decision(review_id: str, playbook_id: str) -> dict[str, Any]:
         }
 
     return {
-        "decision": "MANUAL_REVIEW_REQUIRED",
+        "decision": None,
         "reason": "playbook_coming_soon",
         "output_s3_key": None,
         "summary": "playbook coming soon - separate playbook later.",
@@ -411,10 +415,17 @@ def _write_terminal(review_id: str, result: dict[str, Any], object_written: bool
     a deployment's estimate toward zero. Carrying no stamp is what keeps
     these rows out of that sample -- an omission with a job, not a gap."""
     decision = result["decision"]
-    terminal = "DONE" if decision in ("REQUEST_CHANGE", "ACCEPT") else "MANUAL_REVIEW_REQUIRED"
-    set_clauses = ["#s = :s", "decision = :d", "updated_at = :now"]
-    values: dict[str, Any] = {":s": terminal, ":d": decision, ":now": str(int(time.time())),
+    # Issue #133: a mock run that reached no decision is a failure (`ERROR`,
+    # with its `reason`), never a "manual review" terminal, and -- like every
+    # other non-DONE row -- carries no decision.
+    completed = decision in ("REQUEST_CHANGE", "ACCEPT")
+    terminal = "DONE" if completed else "ERROR"
+    set_clauses = ["#s = :s", "updated_at = :now"]
+    values: dict[str, Any] = {":s": terminal, ":now": str(int(time.time())),
                               ":error": "ERROR"}
+    if completed:
+        set_clauses.append("decision = :d")
+        values[":d"] = decision
     if result.get("summary") is not None:
         set_clauses.append("summary = :sum")
         values[":sum"] = result["summary"]
@@ -897,10 +908,9 @@ def _build_openrouter_client(
 def _write_real_output(review_id: str, result: dict[str, Any], s3_client: Any) -> str | None:
     """PUT the spine's computed redline bytes to the same outputs/{review_id}/
     out.docx key convention the mock path uses. Returns the key when an
-    object was written (REQUEST_CHANGE, or a partial-delivery
-    MANUAL_REVIEW_REQUIRED per redline_generate's #203 "partial delivery,
-    never instead of" contract), or None on ACCEPT / a fully fail-closed
-    result (no redline_bytes)."""
+    object was written (REQUEST_CHANGE, including a partial delivery per
+    redline_generate's #203 "partial delivery, never instead of" contract),
+    or None on ACCEPT / a fail-closed `ERROR` result (no redline_bytes)."""
     redline_bytes = result.get("redline_bytes")
     if not redline_bytes:
         return None
@@ -985,7 +995,7 @@ def _write_real_analysis(review_id: str, result: dict[str, Any], s3_client: Any)
     curly-punctuation locate failure both had to be diagnosed by re-running
     the pipeline by hand against real models.
 
-    Written for terminal MANUAL_REVIEW_REQUIRED results too. Those are
+    Written for terminal ERROR results too. Those are
     precisely the reviews someone needs to investigate, so writing it only on
     success would miss the case the artifact exists for.
 
@@ -1089,8 +1099,9 @@ def _write_real_terminal(review_id: str, result: dict[str, Any], output_s3_key: 
     (scripts/review_spine.py::run_review's return contract). Unlike
     reviews.record_stage_failure (used only for an actual raised
     exception), the spine's own `status` is ALREADY the correct terminal
-    status for every expected fail-closed condition (MANUAL_REVIEW_REQUIRED /
-    ERROR_MANUAL_REVIEW_REQUIRED / OK) -- this just persists it verbatim,
+    status for every expected condition (`OK`, or `ERROR` with a `reason`
+    token -- issue #133 retired the "manual review" statuses) -- this just
+    persists it verbatim,
     same "never clobbers a terminal/ERROR row" guard as the mock path's
     _write_terminal.
 
@@ -1323,7 +1334,7 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
     via the SHARED reviews.record_stage_failure (issue #258), tagged with
     the actual stage that failed, and the reservation is still settled --
     never left wedged in PENDING/RUNNING. An EXPECTED fail-closed result
-    from run_review itself (e.g. MANUAL_REVIEW_REQUIRED) is not an
+    from run_review itself (`ERROR` with a reason token) is not an
     exception -- it is persisted directly via _write_real_terminal using
     the status run_review already computed.
 
@@ -1652,15 +1663,15 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         # test_accept_reaches_done_with_no_output_object), and a
         # REQUEST_CHANGE that DID persist an object is unaffected too.
         if result.get("decision") == "REQUEST_CHANGE" and output_s3_key is None:
-            # Issue #95: this is a SYSTEM status now (ERROR_MANUAL_REVIEW_
-            # REQUIRED), and outcome.ts's own invariant is that a SYSTEM
-            # status must never carry a decision -- the stale REQUEST_CHANGE
-            # left on `result` here is exactly what made this failed review
-            # render as "Changes requested" (warn) instead of "Failed --
-            # needs manual review" (danger) on History/console/receipt. Drop
-            # it at the same place `status`/`reason` are downgraded, not
-            # left for `_write_real_terminal` alone to catch.
-            result = {**result, "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+            # Issue #95: this is a failure now (`ERROR` since issue #133),
+            # and outcome.ts's own invariant is that a non-DONE status must
+            # never carry a decision -- the stale REQUEST_CHANGE left on
+            # `result` here is exactly what made this failed review render as
+            # "Changes requested" (warn) instead of a failure (danger) on
+            # History/console/receipt. Drop it at the same place
+            # `status`/`reason` are downgraded, not left for
+            # `_write_real_terminal` alone to catch.
+            result = {**result, "status": "ERROR",
                       "reason": "redline_not_persisted", "decision": None}
             failing_stage = stage
         elif result["status"] != "OK":

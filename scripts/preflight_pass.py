@@ -205,7 +205,7 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
     (`normalize_input`'s documented rule), which has nothing to do with this
     function's job of reporting how long the document is and what it looks
     like. A preflight stats card should still render for a document whose
-    full review will later route to MANUAL_REVIEW_REQUIRED on normalization
+    full review will later route to ERROR on normalization
     grounds. `materialize_accept_all` keeps that property: it is a
     byte-level splice of `<w:ins>`/`<w:del>` with no ambiguity rule and no
     fail-closed path of its own.

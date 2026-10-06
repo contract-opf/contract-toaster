@@ -18,7 +18,7 @@ Three gates are asserted:
       (a) The artifact format (what it contains).
       (b) Where it appears (surface — recommend: result view + outputs bucket,
           owner-or-admin).
-      (c) Which status carries it (MANUAL_REVIEW_REQUIRED with a named reason).
+      (c) Which status carries it (ERROR (issue #133) with a named reason).
       (d) Reviewer-facing copy explaining that edits could not be applied and
           the analysis is for manual application.
 
@@ -32,7 +32,7 @@ Three gates are asserted:
   GATE 3 — ARCHITECTURE.md fail-closed paths reference the defined artifact
     ARCHITECTURE.md must assert that both fail-closed paths (un-normalizable input
     and anchor/hash mismatch) produce the artifact and that the artifact routes
-    to a named status (MANUAL_REVIEW_REQUIRED with reason).  Both paths must be
+    to a named status (ERROR (issue #133) with reason).  Both paths must be
     covered — not just one.
 
 Exit codes: 0 = pass, 1 = fail
@@ -75,10 +75,10 @@ OC_SURFACE_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# (c) Status: MANUAL_REVIEW_REQUIRED with a named reason.
+# (c) Status: ERROR (issue #133) with a named reason.
 OC_STATUS_PATTERN = re.compile(
     r"(?:analysis.report|internal.analysis.report).{0,800}"
-    r"MANUAL_REVIEW_REQUIRED",
+    r"status\W{0,10}ERROR\b",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -121,7 +121,7 @@ DH_RETENTION_PATTERN = re.compile(
 ARCH_UNNORM_PATTERN = re.compile(
     r"(?:cannot.be.normaliz|un-?normaliz|normalization.pass.{0,200}fail"
     r"|document.cannot.be.normaliz).{0,400}"
-    r"(?:analysis.report|internal.analysis.report|MANUAL_REVIEW_REQUIRED)",
+    r"(?:analysis.report|internal.analysis.report|status\W{0,10}ERROR\b)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -129,15 +129,15 @@ ARCH_UNNORM_PATTERN = re.compile(
 ARCH_HASH_MISMATCH_PATTERN = re.compile(
     r"(?:hash.no.longer.matches?|target.text.no.longer.matches?|anchor.stale"
     r"|mismatch.{0,30}patch|patch.{0,30}mismatch|hash.mismatch).{0,400}"
-    r"(?:analysis.report|internal.analysis.report|MANUAL_REVIEW_REQUIRED)",
+    r"(?:analysis.report|internal.analysis.report|status\W{0,10}ERROR\b)",
     re.IGNORECASE | re.DOTALL,
 )
 
-# Both paths must name MANUAL_REVIEW_REQUIRED as the status (or the report routes
-# to MANUAL_REVIEW_REQUIRED — covered by finding the report in context of the paths).
+# Both paths must name ERROR (issue #133) as the status (or the report routes
+# to ERROR (issue #133) — covered by finding the report in context of the paths).
 ARCH_STATUS_FOR_REPORT_PATTERN = re.compile(
     r"(?:analysis.report|internal.analysis.report).{0,600}"
-    r"MANUAL_REVIEW_REQUIRED",
+    r"status\W{0,10}ERROR\b",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -165,10 +165,10 @@ def gate_1_output_contract(oc_text: str) -> list[str]:
 
     if not OC_STATUS_PATTERN.search(oc_text):
         failures.append(
-            "  Gate 1c: output-contract.md does not name MANUAL_REVIEW_REQUIRED "
+            "  Gate 1c: output-contract.md does not name ERROR (issue #133) "
             "as the status that carries the internal analysis report.\n"
             "  Required: output-contract.md must state which pipeline status is set "
-            "when the report is produced (MANUAL_REVIEW_REQUIRED with a named reason).\n"
+            "when the report is produced (ERROR (issue #133) with a named reason).\n"
             f"  Missing pattern: {OC_STATUS_PATTERN.pattern!r}"
         )
 
@@ -226,10 +226,10 @@ def gate_3_architecture(arch_text: str) -> list[str]:
         failures.append(
             "  Gate 3a: ARCHITECTURE.md does not assert that the un-normalizable-input "
             "fail-closed path produces the internal analysis report and routes to "
-            "MANUAL_REVIEW_REQUIRED.\n"
+            "ERROR (issue #133).\n"
             "  Required: the normalization section must state that if the document "
             "cannot be normalized, the pipeline fails closed to the analysis report "
-            "at MANUAL_REVIEW_REQUIRED.\n"
+            "at ERROR (issue #133).\n"
             f"  Missing pattern: {ARCH_UNNORM_PATTERN.pattern!r}"
         )
 
@@ -237,19 +237,19 @@ def gate_3_architecture(arch_text: str) -> list[str]:
         failures.append(
             "  Gate 3b: ARCHITECTURE.md does not assert that the anchor/hash-mismatch "
             "fail-closed path at patch time produces the internal analysis report and "
-            "routes to MANUAL_REVIEW_REQUIRED.\n"
+            "routes to ERROR (issue #133).\n"
             "  Required: the redlining section must state that a hash mismatch at "
             "patch time causes the pipeline to fail closed to the analysis report "
-            "at MANUAL_REVIEW_REQUIRED.\n"
+            "at ERROR (issue #133).\n"
             f"  Missing pattern: {ARCH_HASH_MISMATCH_PATTERN.pattern!r}"
         )
 
     if not ARCH_STATUS_FOR_REPORT_PATTERN.search(arch_text):
         failures.append(
-            "  Gate 3c: ARCHITECTURE.md does not name MANUAL_REVIEW_REQUIRED as the "
+            "  Gate 3c: ARCHITECTURE.md does not name ERROR (issue #133) as the "
             "status when the internal analysis report is emitted.\n"
             "  Required: ARCHITECTURE.md must state the status that the review lands "
-            "in when the analysis report is produced (MANUAL_REVIEW_REQUIRED with "
+            "in when the analysis report is produced (ERROR (issue #133) with "
             "a named reason).\n"
             f"  Missing pattern: {ARCH_STATUS_FOR_REPORT_PATTERN.pattern!r}"
         )
@@ -308,7 +308,7 @@ def main() -> int:
     print()
     print(
         "Gate 3: ARCHITECTURE.md both fail-closed paths reference the "
-        "analysis report and MANUAL_REVIEW_REQUIRED status"
+        "analysis report and ERROR (issue #133) status"
     )
     if g3:
         for f in g3:

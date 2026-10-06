@@ -120,8 +120,6 @@ describe('status', () => {
     'RUNNING',
     'DONE',
     'ERROR',
-    'MANUAL_REVIEW_REQUIRED',
-    'ERROR_MANUAL_REVIEW_REQUIRED',
     'CANCELLED',
   ])('preserves %s exactly', (status) => {
     const model = toReviewModel(
@@ -130,13 +128,20 @@ describe('status', () => {
     expect(model.status).toBe(status);
   });
 
-  it('never routes either manual spelling through the generic error phase', () => {
+  it('issue #133: reads either retired manual spelling as the failure it was', () => {
+    // No writer produces these any more; a row stored before the change still
+    // can. It is projected as ERROR -- never the kit's manual state -- and,
+    // unlike an administrative overlay, it gets no extra "real outcome"
+    // message: ERROR IS its real outcome.
     for (const status of ['MANUAL_REVIEW_REQUIRED', 'ERROR_MANUAL_REVIEW_REQUIRED']) {
       const model = toReviewModel(
         baseState({ reviewId: 'r-1', detail: detailOf({ status, decision: null }) }),
       );
-      expect(model.status).toBe(status);
-      expect(model.status).not.toBe('ERROR');
+      expect(model.status).toBe('ERROR');
+      expect(model.result?.outcome).toBe('Failed');
+      expect((model.messages ?? []).map((message) => message.id)).not.toContain(
+        'outcome-overlay',
+      );
     }
   });
 

@@ -179,7 +179,7 @@ class TestGenuineLeakageStillBlocked(unittest.TestCase):
         outcome = ls.scan_model_output(model_output, corpus)
 
         self.assertTrue(outcome.blocked)
-        self.assertEqual(outcome.confidence_state, ls.ERROR_MANUAL_REVIEW_REQUIRED)
+        self.assertEqual(outcome.confidence_state, ls.CONFIDENCE_STATE_BLOCKED)
 
 
 # ---------------------------------------------------------------------------

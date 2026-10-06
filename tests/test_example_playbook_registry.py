@@ -247,13 +247,17 @@ class TestDtsMockPipelineCompletesAgainstDefault(unittest.TestCase):
                 s3_client=s3,
             )
         settle.assert_called_once()
-        # Terminal, not wedged in PENDING/RUNNING, and never ERROR. The
-        # bundled sample has no `mock_output_key` (it is a knowledge-profile
-        # entry, no pre-baked mock redline), so the mock pipeline's
-        # registry-driven decision correctly lands on MANUAL_REVIEW_REQUIRED
-        # ("playbook coming soon") rather than DONE -- never ERROR, never
-        # wedged, which is what this check actually guards.
-        self.assertIn(reviews_table.item["status"], ("DONE", "MANUAL_REVIEW_REQUIRED"))
+        # Terminal, not wedged in PENDING/RUNNING. The bundled sample has no
+        # `mock_output_key` (it is a knowledge-profile entry, no pre-baked
+        # mock redline), so the mock pipeline's registry-driven result is the
+        # "playbook coming soon" one -- since issue #133 an ERROR carrying
+        # reason `playbook_coming_soon`, never the unclassified
+        # `unhandled_exception` a crash would record, which is what this
+        # check actually guards.
+        item = reviews_table.item
+        self.assertIn(item["status"], ("DONE", "ERROR"))
+        if item["status"] == "ERROR":
+            self.assertEqual(item.get("reason"), "playbook_coming_soon")
 
 
 def main() -> int:

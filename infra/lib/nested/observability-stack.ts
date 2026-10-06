@@ -504,9 +504,9 @@ export class ObservabilityStack extends cdk.NestedStack {
           '**Pending custom backend metrics (out of scope for #57):**\n' +
           '- Stale `PENDING`/`RUNNING` reviews — see RUNBOOK.md -> Incident ' +
           'response -> "Reviews are stuck in PENDING / RUNNING".\n' +
-          '- `MANUAL_REVIEW_REQUIRED` / `ERROR_MANUAL_REVIEW_REQUIRED` counts ' +
-          '— owner + daily SLA in RUNBOOK.md -> Observability -> ' +
-          '"Manual-review filter: owner and SLA" (#37).\n' +
+          '- `ERROR` counts by `reason` (#133 retired the manual-review ' +
+          'statuses) — owner + daily SLA in RUNBOOK.md -> Observability -> ' +
+          '"Failures queue: owner and SLA" (#37).\n' +
           '- Abandoned spend reservations; release-bundle activation/rollback ' +
           'audit events.\n' +
           '- Audit-archive DynamoDB Stream lag.\n\n' +

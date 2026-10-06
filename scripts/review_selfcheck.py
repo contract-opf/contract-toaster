@@ -46,8 +46,8 @@ produces a complete-LOOKING transcript attesting to a re-read that did not
 happen for the one rule that mattered. So an UNJUDGED rule (invalid response
 after its one bounded retry) never becomes silence -- it lands in `unjudged`,
 `fail_closed` goes True, and `terminal_status_for` maps that to the
-`MANUAL_REVIEW_REQUIRED` system status (docs/output-contract.md: "The
-decision is binary; uncertainty is a system status"). Identical shape to
+`ERROR` status with `reason="self_check_unjudged"` (issue #133: a run that
+does not complete is a failure, never a third "manual review" outcome). Identical shape to
 `scripts/floor_judge.py`'s per-invariant coverage gate, which this module
 otherwise clones: fixed system prompt, strict JSON, one bounded re-invoke,
 fail closed.
@@ -110,11 +110,11 @@ VERDICTS = frozenset({VERDICT_COMPLIANT, VERDICT_TENSION_FLAGGED})
 KIND_MUST_RULE = "must_rule"
 KIND_REPLACEMENT_BOUND = "replacement_bound"
 
-#: docs/output-contract.md's system status for uncertainty. Mirrors
-#: `review_spine.STATUS_MANUAL_REVIEW_REQUIRED`; owned here too so
+#: The terminal status a fail-closed self-check lands on (issue #133: the only
+#: non-success terminal). Mirrors `review_spine.STATUS_ERROR`; owned here too so
 #: `terminal_status_for` is a complete, testable statement of the mapping
 #: rather than a convention each caller re-implements (and one day forgets).
-STATUS_MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+STATUS_ERROR = "ERROR"
 
 #: The reason code a caller surfaces with that status.
 REASON_SELF_CHECK_UNJUDGED = "self_check_unjudged"
@@ -250,7 +250,7 @@ class SelfCheckTranscript:
 
 
 def terminal_status_for(transcript: SelfCheckTranscript) -> Optional[str]:  # noqa: UP045
-    """`MANUAL_REVIEW_REQUIRED` when the transcript is fail-closed, else None.
+    """`ERROR` when the transcript is fail-closed, else None.
 
     The mapping lives here, next to the gate it interprets, so a caller cannot
     hold a fail-closed transcript and quietly continue -- and so the mapping
@@ -258,7 +258,7 @@ def terminal_status_for(transcript: SelfCheckTranscript) -> Optional[str]:  # no
     A flagged tension is NOT terminal: it is a fact for an attorney to read,
     and blocking on it would make the reviewer's own judgement unappealable.
     """
-    return STATUS_MANUAL_REVIEW_REQUIRED if transcript.fail_closed else None
+    return STATUS_ERROR if transcript.fail_closed else None
 
 
 # ---------------------------------------------------------------------------

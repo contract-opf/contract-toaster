@@ -238,7 +238,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
   });
 
   it('tells the reader it is their document that is too long, and what to do', async () => {
-    await submitAndFail('run_review', 'model_context_length_exceeded', 'MANUAL_REVIEW_REQUIRED');
+    await submitAndFail('run_review', 'model_context_length_exceeded', 'ERROR');
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/longer than the model can read/i);
@@ -246,7 +246,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
   });
 
   it('explains an OPF playbook the tool could not honestly compose (#479)', async () => {
-    await submitAndFail(null, 'opf_knowledge_refused', 'MANUAL_REVIEW_REQUIRED');
+    await submitAndFail(null, 'opf_knowledge_refused', 'ERROR');
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/cannot honestly turn into review instructions/i);
@@ -257,7 +257,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
   });
 
   it('explains a playbook missing its digest, distinctly from a refusal (#479)', async () => {
-    await submitAndFail(null, 'opf_digest_missing', 'MANUAL_REVIEW_REQUIRED');
+    await submitAndFail(null, 'opf_digest_missing', 'ERROR');
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/missing the reference material/i);
@@ -266,7 +266,7 @@ describe('the classified reason beats the stage guess (issue #442)', () => {
   });
 
   it('explains an unjudged Floor invariant as a fail-closed stop, not a document problem (#479)', async () => {
-    await submitAndFail('run_review', 'floor_invariant_unjudged', 'MANUAL_REVIEW_REQUIRED');
+    await submitAndFail('run_review', 'floor_invariant_unjudged', 'ERROR');
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/required rules could not be checked/i);
@@ -310,7 +310,7 @@ describe('unnormalizable_input no longer sends the reader to re-save a .docx (#5
     const note =
       "Paragraph 'Indemnification': pending tracked change has no resulting_text " +
       '-- malformed revision record; cannot determine the operative text to accept.';
-    await submitAndFail(null, 'unnormalizable_input', 'MANUAL_REVIEW_REQUIRED', note);
+    await submitAndFail(null, 'unnormalizable_input', 'ERROR', note);
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(
@@ -325,7 +325,7 @@ describe('unnormalizable_input no longer sends the reader to re-save a .docx (#5
   });
 
   it('omits the per-paragraph note paragraph when the backend sent none', async () => {
-    await submitAndFail(null, 'unnormalizable_input', 'MANUAL_REVIEW_REQUIRED');
+    await submitAndFail(null, 'unnormalizable_input', 'ERROR');
 
     const panel = await screen.findByTestId('review-failure');
     expect(panel).toHaveTextContent(/a tracked change the tool could not safely read/i);

@@ -138,7 +138,7 @@ def structured_output_enabled() -> bool:
     variable, run through `scripts/live_smoke_eval.py --structured-output
     both` against real OpenRouter traffic. With the flag OFF the critic
     pass failed schema validation on two consecutive attempts and the
-    review terminated `ERROR_MANUAL_REVIEW_REQUIRED` (`reason: "critic"` --
+    review terminated as a critic failure (`reason: "critic"` --
     the same token production recorded); with it ON both passes validated
     on their FIRST attempt, at 60.9s / $0.55 against 128.5s / $0.74. The
     OFF-path critic invented a `grounding` property that appears nowhere in

@@ -82,7 +82,7 @@ _OK_RESULT = {
 }
 
 _MANUAL_RESULT = {
-    "status": "MANUAL_REVIEW_REQUIRED",
+    "status": "ERROR",
     "decision": None,
     "summary": None,
     # The shapes `redline_generate.generate_redline_from_blocks` actually

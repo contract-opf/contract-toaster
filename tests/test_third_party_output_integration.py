@@ -924,7 +924,7 @@ def test_drifted_clause_is_never_patched_and_is_labelled(failures, mod, clauses)
     drifted = _build_drifted_docx()
     result = _generate(mod, playbook, findings, clauses, drifted)
 
-    if result.get("status") != mod.MANUAL_REVIEW_REQUIRED:
+    if result.get("status") != mod.STATUS_ERROR:
         failures.append(
             f"[3c] the only wanted edit was suppressed for an untrustworthy "
             f"anchor, so the run must fail closed, not report success; got "
@@ -1016,7 +1016,7 @@ def test_ambiguous_clause_id_is_dropped_from_the_mapping(failures, mod, clauses)
     # clause, so nothing was delivered and nobody may be told it succeeded.
     playbook, findings = _reject_scenario_findings(clauses)
     result = _generate(mod, playbook, findings, clauses, twin_docx)
-    if result.get("status") != mod.MANUAL_REVIEW_REQUIRED:
+    if result.get("status") != mod.STATUS_ERROR:
         failures.append(
             f"[3d] an ambiguous anchor must fail the run closed, got "
             f"status={result.get('status')!r}"
@@ -1053,7 +1053,7 @@ def test_leakage_scan_applied_to_human_surfaced_fields(failures, mod, clauses):
 
     # A clean scenario must not be blocked.
     clean_result = _generate(mod, playbook, findings, clauses, uploaded)
-    if clean_result.get("status") == "ERROR_MANUAL_REVIEW_REQUIRED":
+    if clean_result.get("status") == "ERROR":
         failures.append(f"[4] clean scenario should not be leakage-blocked, got {clean_result!r}")
 
     # A leaky rationale (external_rationale_for_footnote source) must be
@@ -1069,7 +1069,7 @@ def test_leakage_scan_applied_to_human_surfaced_fields(failures, mod, clauses):
                 "the counterparty."
             )
     leaky_result = _generate(mod, playbook, leaky_findings, clauses, uploaded)
-    if leaky_result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if leaky_result.get("status") != "ERROR":
         failures.append(
             f"[4] a rationale containing an internal-only strategy phrase must "
             f"be leakage-blocked before redline generation, got {leaky_result!r}"
@@ -1093,7 +1093,7 @@ def test_leakage_scan_applied_to_human_surfaced_fields(failures, mod, clauses):
         "This is an internal-only clause that must never reach the counterparty."
     )
     leaky_text_result = _generate(mod, leaky_playbook, findings, clauses, uploaded)
-    if leaky_text_result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if leaky_text_result.get("status") != "ERROR":
         failures.append(
             f"[4] a leaky governed fixed_text must stop the run, got "
             f"{leaky_text_result!r}"

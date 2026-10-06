@@ -265,8 +265,12 @@ REVIEW_STATUSES_NON_TERMINAL = {"PENDING", "RUNNING"}
 REVIEW_STATUSES_TERMINAL = {
     "DONE",
     "ERROR",
-    "ERROR_MANUAL_REVIEW_REQUIRED",
-    "MANUAL_REVIEW_REQUIRED",
+    # Issue #133 (owner decision 2026-09-16): no writer produces these two any
+    # more -- a review that does not complete is ERROR with its `reason` token.
+    # They stay in the vocabulary ONLY so a row stored before that change is
+    # still read as terminal (purged, listed, shown as a failure); no migration.
+    "ERROR_MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
+    "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
     "QUARANTINED",
     "SUPERSEDED",
     # The reviewer asked for this run to stop. Deliberately its OWN terminal
@@ -304,33 +308,32 @@ RUNNER_RESTARTED_REASON = "runner_restarted"
 # Docker Compose wiring ticket for pipeline_runner.py) -- this only establishes the single
 # shared mechanism + taxonomy both wirings will call.
 #
-# `reason` -> reachable terminal status for the two DOCUMENTED manual-review
-# outcomes. A `reason` not listed here still records the real failing stage,
-# but resolves to the generic `ERROR` status (the same terminal status the
-# AWS errorTransition Lambda and the Docker Compose runner's `_fail_review` already use
-# for an unmapped/unexpected failure) -- this taxonomy only carves out the
-# two statuses that must be specifically reachable, it does not replace the
-# generic failure path.
+# `reason` -> terminal status. Issue #133 (owner decision 2026-09-16): a review
+# never concludes as "manual review required". A run that completes is DONE; a
+# run that does not is ERROR, whatever stopped it. So EVERY token below maps to
+# `ERROR` -- including the ones that used to land on the retired
+# `MANUAL_REVIEW_REQUIRED` / `ERROR_MANUAL_REVIEW_REQUIRED` statuses
+# (`structured_output_retry_exhausted`, `document_too_large`,
+# `model_context_length_exceeded`, `redline_not_persisted`). The `reason`
+# token is unchanged, and it is what the attorney-facing copy
+# (`REASON_EXPLANATIONS` in the frontend) is keyed on, so what a reader is
+# told to do is unchanged too; only the status stops implying a third legal
+# category. A `reason` not listed here also resolves to `ERROR`.
 #
-# Issue #442 extends this with the model-provider tokens
-# `backend/src/pipeline_runner.py::classify_failure_reason` produces. Each
-# terminal status below is chosen DELIBERATELY, and every entry is listed
-# explicitly -- including the ones that resolve to the generic `ERROR` --
-# so "which status does this token land on?" is answered by reading this
-# table rather than by inferring it from an absence.
+# The table stays explicit, one row per token, so "which status does this
+# token land on?" is still answered by reading it rather than by inferring it
+# from an absence -- and so tests/test_terminal_reason_completeness_670.py
+# has a vocabulary to check the reader-facing copy against.
 STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # Structured-output retry exhausted (a model stage that never produced
     # parseable structured output after its retry budget).
-    "structured_output_retry_exhausted": "ERROR_MANUAL_REVIEW_REQUIRED",
+    "structured_output_retry_exhausted": "ERROR",
     # Document exceeds the size cap enforced ahead of the model stages.
-    "document_too_large": "MANUAL_REVIEW_REQUIRED",
+    "document_too_large": "ERROR",
     # --- Model-provider conditions (issue #442) ----------------------------
     # OPERATOR problems, not document problems: the document was fine and
-    # would review cleanly the moment the account/key/model is fixed. They
-    # stay on the generic `ERROR` status precisely so they are NOT filed
-    # alongside the documented manual-review outcomes above -- there is no
-    # attorney work to queue here, only an admin fix. The `reason` token is
-    # what makes them distinguishable, not the status.
+    # would review cleanly the moment the account/key/model is fixed. The
+    # `reason` token is what makes them distinguishable, not the status.
     "model_account_out_of_credits": "ERROR",
     "model_key_rejected": "ERROR",
     "model_rate_limited": "ERROR",
@@ -353,14 +356,15 @@ STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # A DOCUMENT problem: the provider itself rejected the assembled prompt
     # as over the model's context window. This is the same condition the
     # step-14 pre-call estimate catches, and it is deliberately given the
-    # SAME `MANUAL_REVIEW_REQUIRED` terminal status as `document_too_large`
-    # (the reasoning is `model_client.ModelContextLengthExceededError`'s own
-    # docstring: a provider-side length rejection is a real occurrence, not a
-    # misconfiguration, and must not degrade to a generic pipeline ERROR).
+    # SAME terminal status as `document_too_large` (the reasoning is
+    # `model_client.ModelContextLengthExceededError`'s own docstring: a
+    # provider-side length rejection is a real occurrence, not a
+    # misconfiguration, so it carries its own document-size reason rather than
+    # the generic `unhandled_exception`).
     # It keeps its own token rather than reusing `document_too_large` so the
     # two remain telling-apart-able in the row: one was estimated ahead of
     # the call, the other was measured by the provider.
-    "model_context_length_exceeded": "MANUAL_REVIEW_REQUIRED",
+    "model_context_length_exceeded": "ERROR",
     # Issue #584: a REQUEST_CHANGE decision that persisted no output object
     # (`redline_generate.generate_redline`'s "every issue flag-only, nothing
     # to attempt" branch, and any other path that reaches the persist
@@ -372,7 +376,7 @@ STAGE_FAILURE_REASON_STATUS: dict[str, str] = {
     # caller rather than through `record_stage_failure` -- there is no raised
     # exception to catch, only a "success" result with nothing to show for
     # it.
-    "redline_not_persisted": "ERROR_MANUAL_REVIEW_REQUIRED",
+    "redline_not_persisted": "ERROR",
     # Issue #62: the process running an in-process review went away (a
     # Coolify redeploy, a container restart, an OOM kill) before the review
     # could reach any terminal of its own. Nothing is wrong with the
@@ -2813,11 +2817,10 @@ def record_stage_failure(
     running.
 
     `reason` is looked up in `STAGE_FAILURE_REASON_STATUS` to resolve the
-    terminal `status` written to the reviews row: the two documented
-    manual-review outcomes (`ERROR_MANUAL_REVIEW_REQUIRED`,
-    `MANUAL_REVIEW_REQUIRED`) are reachable this way; any other `reason`
-    falls back to the generic `ERROR` status, same as today's unmapped
-    failure behavior -- only `failing_stage` becomes accurate.
+    terminal `status` written to the reviews row -- `ERROR` for every token
+    since issue #133, which retired the two "manual review" statuses; an
+    unlisted `reason` falls back to `ERROR` too. The `reason` itself is
+    written verbatim and is what the reader-facing copy is keyed on.
 
     NEVER DOWNGRADES A SUCCEEDED REVIEW (issue #446). The write is guarded by
     a ConditionExpression so it cannot overwrite a row that already holds
@@ -2831,8 +2834,8 @@ def record_stage_failure(
     finished must stay finished, so `ConditionalCheckFailedException` is
     swallowed as a deliberate no-op.
 
-    Only the SUCCESS terminal is protected -- `ERROR` /
-    `MANUAL_REVIEW_REQUIRED` / `QUARANTINED` rows stay writable, so
+    Only the SUCCESS terminal is protected -- `ERROR` / `QUARANTINED` rows
+    (and legacy pre-#133 manual-review rows) stay writable, so
     reclassifying an already-failed review is unaffected.
 
     Also stamps `failed_at` (issue #472) -- the moment THIS failure was
@@ -2924,25 +2927,12 @@ def get_review_status(review_id: str, dynamodb_resource: Any) -> dict[str, Any]:
 # detail with the full result payload) — issue #84.
 # ---------------------------------------------------------------------------
 
-# Manual-review-state user-facing copy (docs/output-contract.md -> "Manual-
-# review states: user-facing next-step copy"). One fixed sentence per
-# status, keyed off the pipeline's terminal `status` -- never the specific
-# internal `reason` code (e.g. the #18 form-match short-circuit, the #65
-# hash-mismatch-at-patch fail-closed path, etc. all surface through the SAME
-# MANUAL_REVIEW_REQUIRED copy; `reason` is carried separately as system
-# metadata, not rendered as its own message). Both messages are system-
-# status copy only -- never a legal verdict -- per that doc section.
+# Status-keyed user-facing copy. Issue #133 removed the two "manual review"
+# entries along with the statuses: a failed review is explained by its
+# `reason` token (the frontend's `REASON_EXPLANATIONS`), never by a status
+# sentence promising a human follow-up, so a legacy row still stored with one
+# of those statuses gets no `message` and renders as the failure it was.
 STATUS_USER_MESSAGES: dict[str, str] = {
-    "MANUAL_REVIEW_REQUIRED": (
-        "Your document could not be automatically reviewed — a legal "
-        "admin will review it and follow up with you. No action is needed "
-        "on your part right now."
-    ),
-    "ERROR_MANUAL_REVIEW_REQUIRED": (
-        "A pipeline error prevented automatic review of your document — "
-        "a legal admin will review it and follow up with you. No action is "
-        "needed on your part right now."
-    ),
     # Says what happened and what is true now, with no apology and no
     # troubleshooting: the reviewer chose this, so treating it as an incident
     # to explain away would be both wrong and patronising. It does say there

@@ -43,6 +43,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { canonicalStatus } from '../outcome';
 import ReviewSubmission from '../ReviewSubmission';
 
 vi.mock('aws-amplify/auth', () => ({
@@ -129,8 +130,14 @@ async function submitAndSettle(next: Scenario): Promise<ReturnType<typeof vi.fn>
   });
   await waitFor(() => expect(consoleNode()).toHaveAttribute('data-status', 'loaded'));
   fireEvent.click(screen.getByTestId('review-submit-button'));
+  // Issue #133: a stored row with a retired manual-review status is read
+  // as ERROR, so that is the phase the console settles on.
   await waitFor(
-    () => expect(consoleNode()).toHaveAttribute('data-status', next.status.toLowerCase()),
+    () =>
+      expect(consoleNode()).toHaveAttribute(
+        'data-status',
+        canonicalStatus(next.status).toLowerCase(),
+      ),
     { timeout: 8000 },
   );
   return fetchMock;
@@ -216,8 +223,9 @@ describe('issue #734 — a failed review still reaches its own record', () => {
       await submitAndSettle({ status, has_input: true });
 
       // The duplicate-control regression: the result card owns the key on a
-      // manual handoff, so the base rail must yield rather than render a
-      // second control with the same name.
+      // failure (here a legacy manual-review row, read as ERROR since #133),
+      // so the base rail must yield rather than render a second control with
+      // the same name.
       const keys = await screen.findAllByRole('button', { name: 'Review details' });
       expect(keys).toHaveLength(1);
       expect(screen.getByTestId('review-result')).toContainElement(keys[0]);

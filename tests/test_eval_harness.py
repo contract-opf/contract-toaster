@@ -333,7 +333,7 @@ def check_deliberately_broken_fixture_fails_quote_locate() -> list[str]:
     # and never reaches the document.
     broken = _case(
         "I2",
-        {"status": "MANUAL_REVIEW_REQUIRED", "reason": "block_transcript_rejected"},
+        {"status": "ERROR", "reason": "block_transcript_rejected"},
     )
     result = eval_harness.score_case(_make_case(broken), playbook)
     if result.passed:
@@ -502,14 +502,14 @@ def check_expected_reason_mismatch_is_caught() -> list[str]:
         "schema": "llm-native-v1",
         "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
         "model_responses": {"primary": [], "critic": []},
-        "expected": {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "reason": "leakage_detected"},
+        "expected": {"status": "ERROR", "reason": "leakage_detected"},
     }
 
     original_run_review = eval_harness.review_spine.run_review
 
     def _fake_run_review(*args, **kwargs):
         return {
-            "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "decision": None,
             "redline_bytes": None,
             "summary": None,

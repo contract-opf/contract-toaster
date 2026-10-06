@@ -137,10 +137,10 @@ def test_every_screened_class_fails_closed(failures: list) -> None:
                 f"U+{codepoint:04X} ({name}): expected reason=unnormalizable_input, "
                 f"got {report.get('reason')!r}"
             )
-        if report.get("status") != "MANUAL_REVIEW_REQUIRED":
+        if report.get("status") != "ERROR":
             failures.append(
                 f"U+{codepoint:04X} ({name}): expected "
-                f"status=MANUAL_REVIEW_REQUIRED, got {report.get('status')!r}"
+                f"status=ERROR, got {report.get('status')!r}"
             )
 
         reason = dss.classify_unnormalizable_reason(report)

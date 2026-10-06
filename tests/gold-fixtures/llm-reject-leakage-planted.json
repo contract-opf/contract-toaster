@@ -1,7 +1,7 @@
 {
   "case_id": "llm-reject-leakage-planted",
   "schema": "llm-native-v1",
-  "description": "Issue #400: the canned primary response's external_rationale_for_footnote verbatim-quotes a hard_rejections[].description string -- confidential internal-strategy reasoning that must never reach a counterparty. review_spine.run_review's own leakage gate (scripts/leakage_scan.py) must block this to ERROR_MANUAL_REVIEW_REQUIRED before any redline is generated. Issue #138: the canned critic response restates the primary's (planted text included), because under ADR 0001 the critic's result is the one the leakage gate scans and the redline ships.",
+  "description": "Issue #400: the canned primary response's external_rationale_for_footnote verbatim-quotes a hard_rejections[].description string -- confidential internal-strategy reasoning that must never reach a counterparty. review_spine.run_review's own leakage gate (scripts/leakage_scan.py) must fail this as ERROR / leakage_detected before any redline is generated (issue #133 retired ERROR_MANUAL_REVIEW_REQUIRED). Issue #138: the canned critic response restates the primary's (planted text included), because under ADR 0001 the critic's result is the one the leakage gate scans and the redline ships.",
   "document": {
     "clauses": [
       {
@@ -104,7 +104,7 @@
     ]
   },
   "expected": {
-    "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+    "status": "ERROR",
     "reason": "leakage_detected",
     "max_issues": 0
   }

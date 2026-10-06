@@ -213,8 +213,8 @@ def test_round_trip_failure_fails_closed(failures: list) -> None:
         )
         return
 
-    if result.get("status") != "MANUAL_REVIEW_REQUIRED":
-        failures.append(f"expected MANUAL_REVIEW_REQUIRED, got {result.get('status')!r}")
+    if result.get("status") != "ERROR":
+        failures.append(f"expected ERROR, got {result.get('status')!r}")
     if result.get("reason") != redline_generate.REASON_BLOCK_EDITS_NOT_APPLIED:
         failures.append(
             f"expected reason=block_edits_not_applied, got {result.get('reason')!r}"
@@ -292,9 +292,9 @@ def test_the_outer_gate_catches_a_caller_that_skipped_the_inner_one(failures: li
     finally:
         redline_block_apply.apply_block_transcript = original_apply
 
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(
-            f"outer gate: expected ERROR_MANUAL_REVIEW_REQUIRED, got {result.get('status')!r}"
+            f"outer gate: expected ERROR, got {result.get('status')!r}"
         )
     if result.get("reason") != "round_trip_verification_failed":
         failures.append(

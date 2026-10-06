@@ -601,31 +601,55 @@ def _sentinel_markers() -> list[str]:
 
 
 class ManualReviewQueueTests(AdminDashboardTestBase):
+    """The failures queue (issue #133). The route keeps its path, but a
+    review never concludes as "manual review required" any more: it lists
+    every ERROR row by reason, and reads a legacy pre-#133 manual-review row
+    as the ERROR it was."""
+
     def _seed_queue(self) -> None:
         now = int(time.time())
+        # Shapes the real writers produce since #133:
+        # `reviews.record_stage_failure` / `pipeline_runner._write_real_terminal`
+        # write ERROR with the reason token. An ERROR row never carries a
+        # disposition: `disposition.record_disposition` refuses (409) any
+        # status outside DISPOSITIONABLE_REVIEW_STATUSES, and ERROR is not one.
         self._put_review(
-            "r-manual",
-            status="MANUAL_REVIEW_REQUIRED",
+            "r-too-large",
+            status="ERROR",
             created_at=str(now - 2 * DAY),
             updated_at=str(now - 2 * DAY),
             failed_at=str(now - 2 * DAY),
             failing_stage="preflight",
             reason="document_too_large",
-            legal_triage_status="PENDING_TRIAGE",
-            attorney_disposition="EDITED",
             **SENSITIVE_FIELDS,
         )
         self._put_review(
-            "r-error-manual",
-            status="ERROR_MANUAL_REVIEW_REQUIRED",
+            "r-retry-exhausted",
+            status="ERROR",
             created_at=str(now - HOUR),
             updated_at=str(now - HOUR),
             failed_at=str(now - HOUR),
             failing_stage="primary_review",
             reason="structured_output_retry_exhausted",
         )
+        # Rows stored BEFORE #133 with a retired status: still read, no
+        # migration, reported as ERROR. These are the only failed rows
+        # `record_disposition` accepts, so they are the only failed rows that
+        # can carry a disposition -- and it is the only writer of
+        # PENDING_TRIAGE (an EDITED or REJECTED outcome sets it).
         self._put_review(
-            "r-triaged",
+            "r-legacy-pending",
+            status="ERROR_MANUAL_REVIEW_REQUIRED",
+            created_at=str(now - 2 * HOUR),
+            updated_at=str(now - 2 * HOUR),
+            failed_at=str(now - 2 * HOUR),
+            failing_stage="primary_review",
+            reason="structured_output_retry_exhausted",
+            legal_triage_status="PENDING_TRIAGE",
+            attorney_disposition="EDITED",
+        )
+        self._put_review(
+            "r-legacy-triaged",
             status="MANUAL_REVIEW_REQUIRED",
             created_at=str(now - 3 * HOUR),
             updated_at=str(now - 3 * HOUR),
@@ -634,29 +658,65 @@ class ManualReviewQueueTests(AdminDashboardTestBase):
             legal_triage_status="TRIAGED",
             attorney_disposition="REJECTED",
         )
-        # Negative controls: neither is a manual-review state.
+        self._put_review(
+            "r-timeout",
+            status="ERROR",
+            created_at=str(now - 4 * HOUR),
+            reason="model_timeout",
+        )
+        # Negative controls: neither failed.
         self._put_review("r-done", status="DONE", created_at=str(now))
-        self._put_review("r-error", status="ERROR", created_at=str(now), reason="model_timeout")
+        self._put_review("r-cancelled", status="CANCELLED", created_at=str(now))
 
-    def test_only_the_two_manual_review_states_are_queued(self) -> None:
+    def test_every_failed_review_is_queued_including_legacy_rows(self) -> None:
         self._seed_queue()
         body = self.client.get(MANUAL_REVIEW_ROUTE).json()
         ids = [r["review_id"] for r in body["reviews"]]
-        self.assertEqual(ids, ["r-error-manual", "r-triaged", "r-manual"])  # newest first
+        self.assertEqual(
+            ids,
+            [
+                "r-retry-exhausted",
+                "r-legacy-pending",
+                "r-legacy-triaged",
+                "r-timeout",
+                "r-too-large",
+            ],
+        )  # newest first
         self.assertNotIn("r-done", ids)
-        self.assertNotIn("r-error", ids)
+        self.assertNotIn("r-cancelled", ids)
+
+    def test_a_legacy_row_is_reported_as_error_with_its_reason(self) -> None:
+        self._seed_queue()
+        entry = next(
+            r
+            for r in self.client.get(MANUAL_REVIEW_ROUTE).json()["reviews"]
+            if r["review_id"] == "r-legacy-triaged"
+        )
+        self.assertEqual(entry["status"], "ERROR")
+        self.assertEqual(entry["reason"], "model_context_length_exceeded")
 
     def test_entry_shape_is_exactly_the_documented_key_set(self) -> None:
         self._seed_queue()
         entry = next(
             r
             for r in self.client.get(MANUAL_REVIEW_ROUTE).json()["reviews"]
-            if r["review_id"] == "r-manual"
+            if r["review_id"] == "r-too-large"
         )
         self.assertEqual(set(entry), EXPECTED_QUEUE_KEYS)
         self.assertEqual(entry["reason"], "document_too_large")
         self.assertEqual(entry["failing_stage"], "preflight")
-        self.assertEqual(entry["legal_triage_status"], "PENDING_TRIAGE")
+        self.assertIsNone(entry["legal_triage_status"])
+        self.assertIsNone(entry["attorney_disposition"])
+
+        pending = next(
+            r
+            for r in self.client.get(MANUAL_REVIEW_ROUTE).json()["reviews"]
+            if r["review_id"] == "r-legacy-pending"
+        )
+        self.assertEqual(set(pending), EXPECTED_QUEUE_KEYS)
+        self.assertEqual(pending["status"], "ERROR")
+        self.assertEqual(pending["legal_triage_status"], "PENDING_TRIAGE")
+        self.assertEqual(pending["attorney_disposition"], "EDITED")
 
     def test_quarantine_reason_is_coalesced_like_every_other_surface(self) -> None:
         """A row whose cause is stored under `quarantine_reason` must still
@@ -664,7 +724,7 @@ class ManualReviewQueueTests(AdminDashboardTestBase):
         to prevent."""
         now = int(time.time())
         self._put_review(
-            "r-quarantined-manual",
+            "r-quarantined-legacy",
             status="MANUAL_REVIEW_REQUIRED",
             created_at=str(now),
             quarantine_reason="submission_time_bundle_retired",
@@ -677,25 +737,40 @@ class ManualReviewQueueTests(AdminDashboardTestBase):
         body = self.client.get(MANUAL_REVIEW_ROUTE).json()
         self.assertEqual(body["sla_seconds"], 24 * HOUR)
         by_id = {r["review_id"]: r for r in body["reviews"]}
-        self.assertTrue(by_id["r-manual"]["sla_breached"])  # waiting 2 days
-        self.assertFalse(by_id["r-error-manual"]["sla_breached"])  # waiting 1 hour
-        self.assertGreaterEqual(by_id["r-manual"]["waiting_seconds"], 2 * DAY)
+        self.assertTrue(by_id["r-too-large"]["sla_breached"])  # waiting 2 days
+        self.assertFalse(by_id["r-retry-exhausted"]["sla_breached"])  # waiting 1 hour
+        self.assertGreaterEqual(by_id["r-too-large"]["waiting_seconds"], 2 * DAY)
 
     def test_counts_are_the_tile_figure_and_ignore_the_filter(self) -> None:
         self._seed_queue()
         unfiltered = self.client.get(MANUAL_REVIEW_ROUTE).json()["counts"]
-        self.assertEqual(unfiltered["total"], 3)
-        self.assertEqual(unfiltered["MANUAL_REVIEW_REQUIRED"], 2)
-        self.assertEqual(unfiltered["ERROR_MANUAL_REVIEW_REQUIRED"], 1)
+        self.assertEqual(unfiltered["total"], 5)
+        self.assertEqual(
+            unfiltered["by_reason"],
+            {
+                "document_too_large": 1,
+                "model_context_length_exceeded": 1,
+                "model_timeout": 1,
+                "structured_output_retry_exhausted": 2,
+            },
+        )
+        self.assertNotIn("MANUAL_REVIEW_REQUIRED", unfiltered)
+        self.assertNotIn("ERROR_MANUAL_REVIEW_REQUIRED", unfiltered)
         self.assertEqual(unfiltered["pending_triage"], 1)
         self.assertEqual(unfiltered["triaged"], 1)
         self.assertEqual(unfiltered["sla_breached"], 1)
 
         filtered = self.client.get(
-            MANUAL_REVIEW_ROUTE, params={"status_filter": "ERROR_MANUAL_REVIEW_REQUIRED"}
+            MANUAL_REVIEW_ROUTE, params={"reason": "structured_output_retry_exhausted"}
         ).json()
-        self.assertEqual([r["review_id"] for r in filtered["reviews"]], ["r-error-manual"])
+        self.assertEqual(
+            [r["review_id"] for r in filtered["reviews"]],
+            ["r-retry-exhausted", "r-legacy-pending"],
+        )
         self.assertEqual(filtered["counts"], unfiltered)
+
+        by_status = self.client.get(MANUAL_REVIEW_ROUTE, params={"status_filter": "ERROR"}).json()
+        self.assertEqual(len(by_status["reviews"]), 5)
 
     def test_triage_filter_selects_the_owner_workflow_subsets(self) -> None:
         self._seed_queue()
@@ -706,19 +781,29 @@ class ManualReviewQueueTests(AdminDashboardTestBase):
                 for r in self.client.get(MANUAL_REVIEW_ROUTE, params=params).json()["reviews"]
             ]
 
-        self.assertEqual(ids(triage="pending"), ["r-manual"])
-        self.assertEqual(ids(triage="triaged"), ["r-triaged"])
-        self.assertEqual(ids(triage="none"), ["r-error-manual"])
-        self.assertEqual(len(ids(triage="all")), 3)
+        self.assertEqual(ids(triage="pending"), ["r-legacy-pending"])
+        self.assertEqual(ids(triage="triaged"), ["r-legacy-triaged"])
+        self.assertEqual(ids(triage="none"), ["r-retry-exhausted", "r-timeout", "r-too-large"])
+        self.assertEqual(len(ids(triage="all")), 5)
 
     def test_an_unrecognised_filter_is_refused_not_ignored(self) -> None:
+        """Including a retired status: a caller still asking for
+        MANUAL_REVIEW_REQUIRED is told no, never handed every failure."""
         self._seed_queue()
-        for params in ({"status_filter": "DONE"}, {"triage": "maybe"}, {"status_filter": "'; --"}):
+        for params in (
+            {"status_filter": "DONE"},
+            {"status_filter": "MANUAL_REVIEW_REQUIRED"},
+            {"status_filter": "ERROR_MANUAL_REVIEW_REQUIRED"},
+            {"triage": "maybe"},
+            {"status_filter": "'; --"},
+            {"reason": "'; --"},
+            {"reason": "Not A Token"},
+        ):
             with self.subTest(params=params):
                 resp = self.client.get(MANUAL_REVIEW_ROUTE, params=params)
                 self.assertEqual(resp.status_code, 400, resp.text)
                 # A refused filter must not hand back the unfiltered queue.
-                self.assertNotIn("r-manual", resp.text)
+                self.assertNotIn("r-too-large", resp.text)
 
     def test_limit_is_bounded(self) -> None:
         """Seeded ABOVE the cap deliberately: with a fixture smaller than
@@ -730,7 +815,7 @@ class ManualReviewQueueTests(AdminDashboardTestBase):
         seeded = admin_dashboard.MANUAL_REVIEW_MAX_LIMIT + 5
         for i in range(seeded):
             self._put_review(
-                f"r-q-{i:03d}", status="MANUAL_REVIEW_REQUIRED", created_at=str(now - i)
+                f"r-q-{i:03d}", status="ERROR", reason="document_too_large", created_at=str(now - i)
             )
         self.assertEqual(len(self.client.get(MANUAL_REVIEW_ROUTE, params={"limit": 3}).json()["reviews"]), 3)
         hostile = self.client.get(MANUAL_REVIEW_ROUTE, params={"limit": 100000}).json()

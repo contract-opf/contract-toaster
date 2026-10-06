@@ -521,7 +521,7 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
             _build_docx_bytes(), bundle, client, review_id="opf-679-3"
         )
 
-        self.assertEqual(result["status"], "MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "floor_invariant_unjudged")
         self.assertIsNone(result["decision"])
         self.assertEqual(result["floor_judgment"]["unjudged"], [FIXTURE_INVARIANT_ID])

@@ -569,7 +569,7 @@ class TestRunRealPipeline(unittest.TestCase):
             reviews_table.item["status"], "DONE",
             "A REQUEST_CHANGE with no output object must not report DONE.",
         )
-        self.assertEqual(reviews_table.item["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(reviews_table.item["status"], "ERROR")
         self.assertEqual(reviews_table.item.get("reason"), "redline_not_persisted")
         self.assertEqual(reviews_table.item.get("failing_stage"), "persist_result")
         self.assertNotIn("output_s3_key", reviews_table.item)
@@ -759,12 +759,12 @@ class TestDecisionNeverWrittenBesideANonDoneStatus95(unittest.TestCase):
         """
         table = self._write(
             {
-                "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+                "status": "ERROR",
                 "decision": "REQUEST_CHANGE",
                 "reason": "redline_not_persisted",
             }
         )
-        self.assertEqual(table.item["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(table.item["status"], "ERROR")
         self.assertNotIn("decision", table.item)
         # The guard drops the one offending field; it does not fail the
         # write or disturb the rest of the terminal row.
@@ -776,7 +776,7 @@ class TestDecisionNeverWrittenBesideANonDoneStatus95(unittest.TestCase):
         keys off "is this the success terminal", so the other non-DONE
         terminals this writer is handed are refused the same way, whichever
         decision rode in on the result."""
-        for status_value in ("MANUAL_REVIEW_REQUIRED", "ERROR"):
+        for status_value in ("ERROR", "CANCELLED"):
             for decision_value in ("ACCEPT", "REQUEST_CHANGE"):
                 with self.subTest(status=status_value, decision=decision_value):
                     table = self._write(

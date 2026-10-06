@@ -172,9 +172,8 @@ limitation)".
 ## Positive-detection routing (issue #73 AC)
 
 A positive detection blocks document generation / UI rendering and routes
-the review to `ERROR_MANUAL_REVIEW_REQUIRED` -- a SYSTEM status, never a
-legal decision (docs/output-contract.md -> "The decision is binary;
-uncertainty is a system status"). `run_leakage_gate` raises
+the review to `ERROR` with `reason="leakage_detected"` -- a failure, never a
+legal decision (issue #133: a run that does not complete is ERROR). `run_leakage_gate` raises
 `LeakageDetectedError` rather than returning a degraded/sanitized result,
 matching the "fail closed, do not guess" convention used by
 the retired anchor/hash-mismatch path and
@@ -209,6 +208,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import model_output_schema  # noqa: E402
 import opf_prompt  # noqa: E402
 import review_knowledge  # noqa: E402
 
@@ -223,7 +223,12 @@ CATEGORY_CITATION = "citation_leakage"
 CATEGORY_PRECEDENT_QUOTATION = "excessive_precedent_quotation"
 CATEGORY_CONFIDENTIAL_RATIONALE = "confidential_rationale"
 
-ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
+# The `confidence_state` a blocked scan reports: the worst rung of the governed
+# confidence ladder (`model_output_schema.confidence_state_levels`). A
+# confidence BAND value (#96, informational), not a review status -- issue #133
+# retired the "manual review" statuses; the review a leak blocks is `ERROR`
+# with `reason="leakage_detected"`.
+CONFIDENCE_STATE_BLOCKED = model_output_schema.confidence_state_levels()[-1]
 
 _NORMALIZE_WS = re.compile(r"\s+")
 
@@ -275,7 +280,7 @@ def _contains_token(text: str, token: str) -> bool:
     `no-cap`, or a short prose fragment) can be a raw substring of an
     unrelated, longer word (`no-capital-expenditure`) without being a
     genuine occurrence of that gram. That false match previously
-    fail-closed the entire review to ERROR_MANUAL_REVIEW_REQUIRED even
+    fail-closed the entire review to ERROR (leakage_detected) even
     though nothing confidential was actually disclosed.
 
     This checks that `token` occurs in `text` with a non-word character
@@ -1270,7 +1275,7 @@ def scan_model_output(
                 field_name="verdict_summary",
                 category=result.category,
                 rule_id=result.rule_id,
-                confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                confidence_state=CONFIDENCE_STATE_BLOCKED,
             )
 
     for issue in model_output.get("issues", []) or []:
@@ -1360,7 +1365,7 @@ def _scan_issue_fields(
                 field_name=field_name,
                 category=result.category,
                 rule_id=result.rule_id,
-                confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                confidence_state=CONFIDENCE_STATE_BLOCKED,
             )
     return None
 
@@ -1407,7 +1412,7 @@ def _scan_block_edit_fields(
                     field_name=BLOCK_SEGMENT_INSERT_FIELD,
                     category=result.category,
                     rule_id=result.rule_id,
-                    confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                    confidence_state=CONFIDENCE_STATE_BLOCKED,
                 )
 
     for block_op in model_output.get("block_ops") or []:
@@ -1429,7 +1434,7 @@ def _scan_block_edit_fields(
                 field_name=BLOCK_OP_NEW_TEXT_FIELD,
                 category=result.category,
                 rule_id=result.rule_id,
-                confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                confidence_state=CONFIDENCE_STATE_BLOCKED,
             )
 
     return None
@@ -1484,7 +1489,7 @@ def _scan_critic_delta_fields(
                     field_name=f"critic_delta.{field_name}",
                     category=result.category,
                     rule_id=result.rule_id,
-                    confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                    confidence_state=CONFIDENCE_STATE_BLOCKED,
                 )
 
     # Issue #517: `rationale_objections[].objection` is model-generated prose
@@ -1517,7 +1522,7 @@ def _scan_critic_delta_fields(
                 field_name="critic_delta.rationale_objections.objection",
                 category=result.category,
                 rule_id=result.rule_id,
-                confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                confidence_state=CONFIDENCE_STATE_BLOCKED,
             )
 
     for added_issue in critic_delta.get("added_issues", []) or []:
@@ -1559,7 +1564,7 @@ def _scan_critic_delta_fields(
                     field_name=scanned_name,
                     category=result.category,
                     rule_id=result.rule_id,
-                    confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                    confidence_state=CONFIDENCE_STATE_BLOCKED,
                 )
 
     # Issue #138: the reconciler's audit record, after every field above so a
@@ -1713,8 +1718,8 @@ class LeakageDetectedError(Exception):
 
     Carries only non-substantive facts (field name, category, rule id,
     confidence_state) -- never the matched text. `confidence_state` is
-    always ERROR_MANUAL_REVIEW_REQUIRED: a SYSTEM status, never a legal
-    decision (docs/output-contract.md). Callers must not attach a `decision`
+    always `CONFIDENCE_STATE_BLOCKED` (a confidence band value); the review
+    itself fails as `ERROR` / `leakage_detected`, never a legal decision. Callers must not attach a `decision`
     (ACCEPT/REQUEST_CHANGE) to the routed review; `decision` is deliberately
     not a field on this exception.
     """
@@ -1722,7 +1727,7 @@ class LeakageDetectedError(Exception):
     field_name: str
     category: str
     rule_id: str | None
-    confidence_state: str = ERROR_MANUAL_REVIEW_REQUIRED
+    confidence_state: str = CONFIDENCE_STATE_BLOCKED
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return (
@@ -1779,7 +1784,7 @@ def run_leakage_gate(
     fail closed, same posture as the retired anchor/hash
     mismatch path. The caller (pipeline persist/status stage) is
     responsible for catching LeakageDetectedError and writing
-    status=MANUAL_REVIEW_REQUIRED / confidence_state=ERROR_MANUAL_REVIEW_REQUIRED
+    status=ERROR / reason=leakage_detected
     on the review row -- this module has no DynamoDB/review-status
     dependency of its own, matching the rest of this codebase's
     separation between pure logic and I/O.

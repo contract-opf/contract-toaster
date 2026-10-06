@@ -65,8 +65,10 @@ applied.
 a binary decision, tool-recommendation framing, citation and footnote rules.
 Never a legal verdict.
 
-**MANUAL_REVIEW_REQUIRED** — the terminal status when the system cannot stand
-behind an answer. A system status, never presented as a legal outcome.
+**ERROR** — the terminal status of a run that did not complete, whatever
+stopped it; its `reason` token says what happened and what to do next. Never
+presented as a legal outcome. (Issue #133 retired `MANUAL_REVIEW_REQUIRED`: a
+review never concludes as "manual review required".)
 
 **Gold set** — the curated known-answer drafts, signed off by Legal, that gate
 every model, prompt, and playbook change. The real one is tenant data; the

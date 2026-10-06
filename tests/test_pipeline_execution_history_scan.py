@@ -227,7 +227,6 @@ _POINTER_LIKE_PREFIXES = ("s3://", "uploads/", "outputs/", "mock-fixtures/", "ar
 
 _KNOWN_SHORT_FIXED_STRINGS = {
     "REQUEST_CHANGE",
-    "MANUAL_REVIEW_REQUIRED",
     "ACCEPT",
     "playbook_coming_soon",
     "unknown_playbook",

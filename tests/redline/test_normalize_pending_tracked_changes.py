@@ -283,7 +283,7 @@ def main():
                 f"[STILL-FAIL-CLOSED 5:{label}] report_type must be "
                 f"'analysis_report'. Got: {report}"
             )
-        if report.get("status") != "MANUAL_REVIEW_REQUIRED":
+        if report.get("status") != "ERROR":
             failures.append(
                 f"[STILL-FAIL-CLOSED 6:{label}] status must be "
                 f"MANUAL_REVIEW_REQUIRED. Got: {report.get('status')!r}"

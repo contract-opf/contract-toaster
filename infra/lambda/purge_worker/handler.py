@@ -76,8 +76,10 @@ RETENTION_WINDOW_FOREVER = "forever"
 TERMINAL_REVIEW_STATUSES = {
     "DONE",
     "ERROR",
-    "ERROR_MANUAL_REVIEW_REQUIRED",
-    "MANUAL_REVIEW_REQUIRED",
+    # Issue #133 retired these two as anything a writer produces; rows stored
+    # with them before that change are still terminal and still purgeable.
+    "ERROR_MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
+    "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
     "QUARANTINED",
     "SUPERSEDED",
     # Mirrors backend/src/reviews.py's REVIEW_STATUSES_TERMINAL. A cancelled

@@ -183,14 +183,14 @@ class TestPersistTerminalWrite(unittest.TestCase):
         reviews = FakeReviewsTable({"review_id": REVIEW_ID, "status": "RUNNING"})
         event = {
             "review_id": REVIEW_ID,
-            "decision": "MANUAL_REVIEW_REQUIRED",
+            "decision": None,
             "reason": "playbook_coming_soon",
             "summary": "playbook coming soon - separate playbook later.",
             "output_s3_key": None,
         }
         self._run(reviews, event)
         row = reviews.items[REVIEW_ID]
-        self.assertEqual(row["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(row["status"], "ERROR")
         self.assertEqual(row["reason"], "playbook_coming_soon")
         self.assertNotIn("output_s3_key", row)
 
