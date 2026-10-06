@@ -473,7 +473,7 @@ The merge rule:
 independent degrade whenever the primary pass had reviewed a section outline rather than the full
 counterparty document text, plus a fixed sentence appended to `verdict_summary` saying so. Owner
 decision (issue #625) deleted that review mode outright: a document either fits
-`primary_review_pass.MAX_INPUT_TOKENS` (100,000) and is reviewed in full, or the review terminates
+`primary_review_pass.MAX_INPUT_TOKENS` (170,000 since issue #144) and is reviewed in full, or the review terminates
 as `MANUAL_REVIEW_REQUIRED` / `document_too_large` before any model call and never reaches
 `reconcile()` at all. There is no longer a reduced review quality for a confidence degrade or a
 summary notice to warn about, and the pipeline-derived `input_mode` field that carried the

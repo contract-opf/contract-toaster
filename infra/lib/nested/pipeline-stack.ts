@@ -42,7 +42,9 @@ export interface PipelineStackProps extends cdk.NestedStackProps {
 // not justify million-token reviews -- these are hard per-review ceilings.
 // Values match ARCHITECTURE.md -> Cost shape -> "Per-review token caps".
 // ---------------------------------------------------------------------------
-const MAX_INPUT_TOKENS = 100_000; // per pass (system + user prompt combined) -- issue #625
+// Issue #144: raised 100_000 -> 170_000 to preserve document capacity once the
+// gate counts the tool schema at 2.5 chars/token (ARCHITECTURE.md -> caps table).
+const MAX_INPUT_TOKENS = 170_000; // per pass (system + user prompt + tool schema) -- issues #625, #144
 const MAX_OUTPUT_TOKENS = 32_000; // per pass, worst case (issue #658: the per-review
 // budget is sized from the document by model_client.output_budget_for_document and
 // clamped by the selected model's own declared cap; this is the fail-closed ceiling

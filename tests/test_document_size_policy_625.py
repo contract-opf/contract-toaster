@@ -3,7 +3,8 @@
 Gate for issue #625: ONE review quality, or a loud failure.
 
 Owner decision (2026-08-25): there is no quality tiering by document size.
-Every document whose assembled prompt fits `MAX_INPUT_TOKENS` (100,000) gets
+Every document whose assembled prompt fits `MAX_INPUT_TOKENS` (170,000 since
+issue #144; 100,000 when #625 set it) gets
 the full-quality, full-document review; anything over it fails loudly as
 `MANUAL_REVIEW_REQUIRED` / `document_too_large` before any model call. Issue
 #419's section-outline fallback -- the primary was shown a heading +
@@ -16,9 +17,13 @@ the behaviour being removed (and pinned `MAX_INPUT_TOKENS` at 80_000).
 
 ## What this proves
 
-  1. The cap is 100_000, and every self-contained mirror of it agrees
+  1. The cap is 170_000, and every self-contained mirror of it agrees
      (scripts/primary_review_pass.py, backend/src/reviews.py, and the two
      Lambda deployables). The offline 4-chars/token estimate is unchanged.
+     Issue #144 moved the gate onto the calibrated input estimate and raised
+     the cap 100_000 -> 170_000 to PRESERVE capacity (owner decision
+     2026-10-05): group 8 proves a document the old gate admitted with the
+     least room to spare is still admitted.
   2. The outline-mode API surface is GONE from both modules -- not just
      unused. A deletion ticket that leaves the functions importable leaves
      the next caller free to revive the degrade.
@@ -77,7 +82,12 @@ import reconciliation as recon  # noqa: E402
 import review_spine as rs  # noqa: E402
 import reviews as _reviews_module  # noqa: E402
 
-EXPECTED_MAX_INPUT_TOKENS = 100_000
+EXPECTED_MAX_INPUT_TOKENS = 170_000
+
+# Issue #144: the cap the OLD gate enforced, and the units it enforced it
+# in -- system + user text only, at `pp.CHARS_PER_TOKEN_ESTIMATE` (4)
+# characters/token, no tool schema. Group 8 sizes a document against these.
+OLD_MAX_INPUT_TOKENS = 100_000
 
 # The threshold issue #419 used, and the one this issue deletes. Kept as a
 # literal rather than imported (the constant is gone) so the fixtures below
@@ -180,7 +190,7 @@ def _single_paragraph_docx(heading: str, text: str) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def test_max_input_tokens_is_100000_in_every_mirror(failures: list[str]) -> None:
+def test_max_input_tokens_is_170000_in_every_mirror(failures: list[str]) -> None:
     mirrors = {
         "scripts/primary_review_pass.py": pp.MAX_INPUT_TOKENS,
         "backend/src/reviews.py": _reviews_module.MAX_INPUT_TOKENS,
@@ -195,16 +205,16 @@ def test_max_input_tokens_is_100000_in_every_mirror(failures: list[str]) -> None
         if value != EXPECTED_MAX_INPUT_TOKENS:
             failures.append(
                 f"[1a] {where}: MAX_INPUT_TOKENS must be {EXPECTED_MAX_INPUT_TOKENS} "
-                f"(issue #625), got {value!r} -- the cap IS the size policy now, and a "
+                f"(issues #625, #144), got {value!r} -- the cap IS the size policy now, and a "
                 f"mirror left behind under-reserves spend or under-admits documents."
             )
 
     ts_source = (REPO_ROOT / "infra" / "lib" / "nested" / "pipeline-stack.ts").read_text(
         encoding="utf-8"
     )
-    if "const MAX_INPUT_TOKENS = 100_000;" not in ts_source:
+    if "const MAX_INPUT_TOKENS = 170_000;" not in ts_source:
         failures.append(
-            "[1b] infra/lib/nested/pipeline-stack.ts must wire MAX_INPUT_TOKENS = 100_000 -- "
+            "[1b] infra/lib/nested/pipeline-stack.ts must wire MAX_INPUT_TOKENS = 170_000 -- "
             "it is the deployed env value the Python copies mirror."
         )
 
@@ -331,11 +341,10 @@ def test_run_primary_pass_reports_no_input_mode(failures: list[str]) -> None:
         {primary_id: [_load_fixture_text("primary_accept_valid.json")]}
     )
     ledger: list[Any] = []
-    # Above the deleted 60,000-token threshold, under the 100,000-token cap:
+    # Above the deleted 60,000-token threshold, under the 170,000-token cap:
     # the case that used to degrade and now must not. Issue #144: sized in
     # the units the cap is now judged in (the calibrated input estimate,
-    # which also counts the ~9,300-token tool schema) -- at the old 4
-    # chars/token this document would no longer fit under the cap.
+    # which also counts the ~9,300-token tool schema).
     doc_text = _text_of_length(_ABOVE_OLD_THRESHOLD_UNDER_CAP_CHARS)
 
     result = pp.run_primary_pass(
@@ -373,7 +382,17 @@ def test_over_cap_document_fails_loudly_before_any_model_call(failures: list[str
         {primary_id: [_load_fixture_text("primary_accept_valid.json")]}
     )
     ledger: list[Any] = []
-    oversized = _text_of_length(EXPECTED_MAX_INPUT_TOKENS * 4 + 40_000)
+    # Issue #144: sized in the units the cap is judged in (the calibrated
+    # input estimate) -- the document ALONE exceeds the 170,000-token cap by
+    # 16,000 tokens, before the system blocks and tool schema are added.
+    oversized = _text_of_length(
+        int(EXPECTED_MAX_INPUT_TOKENS * pp.INPUT_CHARS_PER_TOKEN_ESTIMATE) + 40_000
+    )
+    if pp.estimate_input_tokens(oversized) <= EXPECTED_MAX_INPUT_TOKENS:
+        failures.append(
+            "[5h] Test fixture bug: the oversized document must exceed the cap on its own."
+        )
+        return
 
     result = pp.run_primary_pass(
         review_id="size-policy-625-oversize",
@@ -517,8 +536,101 @@ def test_shipped_prompts_never_describe_outline_mode(failures: list[str]) -> Non
                 )
 
 
+# ---------------------------------------------------------------------------
+# 8. Capacity is preserved across issue #144's recalibration
+#
+# Issue #144 moved the step-14 gate from "system + user at 4 chars/token"
+# onto `request_input_tokens_est` (2.5 chars/token, tool schema counted) --
+# ~1.6x the old figure plus ~9,300 tokens. Under the old 100,000 cap that
+# would have refused documents that review fine today. The owner decision
+# (2026-10-05) was to keep the honest estimate and raise the cap so the SAME
+# documents are admitted. This pins the hardest case: a document whose OLD
+# estimate sits just under the OLD cap must still be admitted by the new
+# gate. The old estimate is computed from the exact system blocks and user
+# content the gate saw (captured, not re-assembled), so a prompt that grows
+# later re-sizes the fixture rather than silently weakening the check.
+# ---------------------------------------------------------------------------
+
+
+def _old_gate_estimate(system_blocks: list[dict[str, Any]], user_content: Any) -> int:
+    """What the pre-#144 step-14 gate measured: system + user only, at the
+    4-chars/token heuristic, no schema."""
+    return pp.estimate_tokens(pp.render_system_prompt(system_blocks)) + (
+        pp.estimate_user_content_tokens(user_content)
+    )
+
+
+def _run_capturing_gate_inputs(
+    doc_text: str, bundle: dict[str, Any], primary_id: str, **kwargs: Any
+) -> tuple[dict[str, Any], dict[str, Any], Any]:
+    seen: dict[str, Any] = {}
+    real = pp.assembled_prompt_tokens
+
+    def _spy(system_blocks: Any, user_content: Any, **kw: Any) -> int:
+        seen["old"] = _old_gate_estimate(system_blocks, user_content)
+        return real(system_blocks, user_content, **kw)
+
+    client = model_client.FakeBedrockClient(
+        {primary_id: [_load_fixture_text("primary_accept_valid.json")]}
+    )
+    setattr(pp, "assembled_prompt_tokens", _spy)  # noqa: B010 -- typed spy swap
+    try:
+        result = pp.run_primary_pass(
+            review_id="size-policy-144-capacity",
+            retrieved_precedent=[],
+            playbook=bundle,
+            model_client=client,
+            model_id=primary_id,
+            ledger_write=lambda _row: None,
+            doc_text=doc_text,
+            **kwargs,
+        )
+    finally:
+        setattr(pp, "assembled_prompt_tokens", real)  # noqa: B010
+    return result, seen, client
+
+
+def test_old_gate_capacity_is_preserved(failures: list[str]) -> None:
+    bundle = _load_bundle()
+    primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
+
+    # Measure the fixed overhead (system blocks + user framing) the old gate
+    # counted around the document, with a cap of 1 so no model is called.
+    probe_doc = _text_of_length(4_000)
+    _, probe, _ = _run_capturing_gate_inputs(probe_doc, bundle, primary_id, max_input_tokens=1)
+    overhead_tokens = probe["old"] - pp.estimate_tokens(probe_doc)
+    doc_text = _text_of_length(
+        (OLD_MAX_INPUT_TOKENS - 1 - overhead_tokens) * pp.CHARS_PER_TOKEN_ESTIMATE
+    )
+
+    result, seen, client = _run_capturing_gate_inputs(doc_text, bundle, primary_id)
+    old = seen.get("old")
+    if not isinstance(old, int) or not (OLD_MAX_INPUT_TOKENS - 10 <= old <= OLD_MAX_INPUT_TOKENS):
+        failures.append(
+            f"[8a] Test fixture bug: the document must estimate JUST under the old "
+            f"{OLD_MAX_INPUT_TOKENS}-token cap in the old gate's units; got {old!r}."
+        )
+        return
+    assembled = result.get("assembled_tokens")
+    if not isinstance(assembled, int) or assembled <= OLD_MAX_INPUT_TOKENS:
+        failures.append(
+            f"[8b] The calibrated estimate must exceed the old cap for this document (that is "
+            f"the regression this guards against); got {assembled!r}."
+        )
+    if result.get("status") != "OK":
+        failures.append(
+            f"[8c] A document the old gate admitted (old estimate {old}) must still be "
+            f"admitted -- issue #144 preserves capacity; got status={result.get('status')!r}, "
+            f"reason={result.get('reason')!r}, assembled_tokens={assembled!r} against "
+            f"max_input_tokens={pp.MAX_INPUT_TOKENS}."
+        )
+        return
+    if len(client.calls) != 1:
+        failures.append(f"[8d] Expected exactly one model call; got {len(client.calls)}.")
+
+
 TESTS = [
-    test_max_input_tokens_is_100000_in_every_mirror,
+    test_max_input_tokens_is_170000_in_every_mirror,
     test_outline_mode_symbols_are_deleted,
     test_reconcile_rejects_an_input_mode_argument,
     test_a_document_over_the_old_threshold_is_still_sent_in_full,
@@ -526,6 +638,7 @@ TESTS = [
     test_over_cap_document_fails_loudly_before_any_model_call,
     test_run_review_end_to_end_reviews_a_large_document_in_full,
     test_shipped_prompts_never_describe_outline_mode,
+    test_old_gate_capacity_is_preserved,
 ]
 
 

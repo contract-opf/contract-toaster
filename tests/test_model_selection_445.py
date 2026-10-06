@@ -918,14 +918,14 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
 
     def test_the_bedrock_target_ignores_the_selection_entirely(self):
         """MODEL_PROVIDER unset is the AWS target, which has no admin-selection
-        concept at all -- its documented $6.86 worst case (ARCHITECTURE.md ->
-        Cost shape, at MAX_INPUT_TOKENS=100_000 and the issue-#658 worst-case
+        concept at all -- its documented $8.71 worst case (ARCHITECTURE.md ->
+        Cost shape, at MAX_INPUT_TOKENS=170_000 and the issue-#658 worst-case
         output budget of 32_000 over three attempts per pass) must not move."""
         model_settings.set_model_selection(DEAREST_ID, DEAREST_ID, ADMIN, self.ddb)
         os.environ.pop("MODEL_PROVIDER", None)
         with _no_env_overrides():
             self.assertEqual(
-                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 686
+                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 871
             )
 
 

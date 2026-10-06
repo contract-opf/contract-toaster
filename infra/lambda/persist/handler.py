@@ -95,8 +95,15 @@ _DONE_DECISIONS = frozenset({"REQUEST_CHANGE", "ACCEPT"})
 # outline mode was deleted -- one full-quality review up to the cap, a
 # loud `document_too_large` failure above it. Reservations scale with this
 # constant automatically (the formula below), and rise with it.
+#
+# Issue #144 (owner decision 2026-10-05, taken by the orchestrator): raised
+# 100_000 -> 170_000 to PRESERVE document capacity when the gate moved onto
+# the calibrated input estimate (2.5 chars/token + the ~9,300-token tool
+# schema, ~1.6x the old 4-chars/token system+user figure). A document the
+# old gate estimated at just under 100,000 now estimates ~169,300, so 170_000
+# admits it; the cap now prices real billed tokens (estimate ~7% high).
 # ---------------------------------------------------------------------------
-MAX_INPUT_TOKENS = 100_000
+MAX_INPUT_TOKENS = 170_000
 # Issue #658: the worst-case per-attempt OUTPUT budget. reviews.py derives
 # this from `model_client.output_budget_for_document(MAX_INPUT_TOKENS,
 # model_client.DEFAULT_MAX_OUTPUT_TOKENS)` -- the sizing function both review

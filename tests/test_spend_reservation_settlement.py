@@ -11,8 +11,9 @@ proves the fix:
       its OWN model's rate (per-model input/output rates mirroring
       model-policy/bedrock-us-east-1.json's base rates + the ~10% regional
       premium documented in docs/design-notes.md) and must match
-      ARCHITECTURE.md's documented $2.46 worst-case/review (issue #625
-      raised MAX_INPUT_TOKENS to 100_000; it was $2.11 at 80_000) -- NOT the
+      ARCHITECTURE.md's documented $8.71 worst-case/review (issue #144
+      raised MAX_INPUT_TOKENS to 170_000; it was $6.86 at 100_000 after
+      issue #658, $2.46 before #658, $2.11 at 80_000) -- NOT the
       pre-fix $9.68 (a single blended "Opus output" rate applied to every
       token of every pass, backend/src/reviews.py:70-81,273-295 as filed).
       Also cross-checks that the per-model rate constants are numerically
@@ -317,16 +318,17 @@ class MotoSubmissionsMixin:
 # ---------------------------------------------------------------------------
 
 class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
-    def test_reservation_is_686_cents_not_the_blended_rate_figure(self):
+    def test_reservation_is_871_cents_not_the_blended_rate_figure(self):
         """Issue #189: the pre-fix formula applied a single blended 'Opus
         output' rate to ALL tokens, reserving 4.6x the documented worst case
         and 429'ing the third review of any day against the $20/day cap.
-        ARCHITECTURE.md -> Cost shape now documents $6.86 (686 cents) at
-        MAX_INPUT_TOKENS=100_000 (issue #625) and the issue-#658 worst-case
-        output budget of 32_000 over three attempts per pass (it was $2.46
-        at a flat 8_000 output over two attempts)."""
+        ARCHITECTURE.md -> Cost shape now documents $8.71 (871 cents) at
+        MAX_INPUT_TOKENS=170_000 (issue #144) and the issue-#658 worst-case
+        output budget of 32_000 over three attempts per pass (it was $6.86
+        at 100_000 input, and $2.46 at a flat 8_000 output over two
+        attempts)."""
         cents = _reviews_module.compute_worst_case_reservation_usd_cents()
-        self.assertEqual(cents, 686, "Must match ARCHITECTURE.md's $6.86 worst-case/review.")
+        self.assertEqual(cents, 871, "Must match ARCHITECTURE.md's $8.71 worst-case/review.")
         blended = int(round(  # noqa: RUF046
             (1 + _reviews_module.MAX_RETRIES_PER_PASS
              + _reviews_module.MAX_TRUNCATION_RETRIES_PER_PASS)
@@ -358,7 +360,7 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
         leave a live-looking switch wired to nothing.
         """
         baseline_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
-        self.assertEqual(baseline_cents, 686, "Flag-off baseline is the documented $6.86.")
+        self.assertEqual(baseline_cents, 871, "Flag-off baseline is the documented $8.71.")
 
         with patch.dict(os.environ, {"REQUOTE_ENABLED": "1"}):
             cents_with_flag_set = _reviews_module.compute_worst_case_reservation_usd_cents()
@@ -435,8 +437,8 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
                 f"orphan_reconciler/handler.py={reconciler_value!r}",
             )
 
-        self.assertEqual(_persist_module.compute_worst_case_reservation_usd_cents(), 686)
-        self.assertEqual(_reconciler_module.compute_worst_case_reservation_usd_cents(), 686)
+        self.assertEqual(_persist_module.compute_worst_case_reservation_usd_cents(), 871)
+        self.assertEqual(_reconciler_module.compute_worst_case_reservation_usd_cents(), 871)
 
     def test_reservation_parity_across_all_three_copies(self):
         """Issue #569 fix round 2, finding 2: the parity test above only
@@ -460,9 +462,9 @@ class TestReservationFormulaMatchesDocumentedWorstCase(unittest.TestCase):
         reviews_off = _reviews_module.compute_worst_case_reservation_usd_cents()
         persist_off = _persist_module.compute_worst_case_reservation_usd_cents()
         reconciler_off = _reconciler_module.compute_worst_case_reservation_usd_cents()
-        self.assertEqual(reviews_off, 686)
-        self.assertEqual(persist_off, 686)
-        self.assertEqual(reconciler_off, 686)
+        self.assertEqual(reviews_off, 871)
+        self.assertEqual(persist_off, 871)
+        self.assertEqual(reconciler_off, 871)
 
         with patch.dict(os.environ, {"REQUOTE_ENABLED": "1"}):
             reviews_on = _reviews_module.compute_worst_case_reservation_usd_cents()
