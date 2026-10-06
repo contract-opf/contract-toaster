@@ -48,6 +48,16 @@ This module therefore has two halves:
      excluded (a content control genuinely showing its DISPLAY-ONLY
      placeholder text, `w:sdtPr/w:showingPlcHdr`) and why.
 
+     COMPLEX fields -- `<w:fldChar>`/`<w:instrText>` run sequences rather
+     than a self-contained `<w:fldSimple>` -- are modelled by
+     `_partition_field_result_paragraphs` (issue #114). Their cached result
+     is ordinary `<w:t>` run text and stays inline for every field code
+     but two: a `TOC`/`INDEX` field's result is a GENERATED block of
+     body-shaped paragraphs (Word's own copy of the headings further down),
+     which is dropped before grouping -- with one disclosure line -- rather
+     than allowed to open one empty, heading-named logical paragraph per
+     entry.
+
      Image alt text (`wp:docPr/@descr`, `@title`) is an XML
      ATTRIBUTE, not run text, and this module never reads attributes other
      than the few named ones it explicitly looks up (`w:author`, `w:val`,
@@ -104,11 +114,13 @@ internal analysis report".
 from __future__ import annotations
 
 import io
+import re
 import sys
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import OrderedDict
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, Callable  # noqa: UP035
 
@@ -783,6 +795,425 @@ def _iter_body_paragraphs(container: ET.Element):
 
 
 # ---------------------------------------------------------------------------
+# Complex fields (issue #114)
+#
+# `<w:fldSimple>` -- handled above by `_process_fld_simple` -- is only ONE of
+# the two ways OOXML writes a field. The other is the COMPLEX field: a run
+# carrying `<w:fldChar w:fldCharType="begin"/>`, then one or more
+# `<w:instrText>` runs holding the field CODE, then `separate`, then the
+# cached RESULT, then `end`. Unlike `w:fldSimple` the whole construction is
+# flat sibling runs, so a complex field routinely spans many `<w:p>`s.
+#
+# For most field codes (`REF`, `PAGEREF`, `PAGE`, `DATE`, `STYLEREF`, ...)
+# the cached result is a word or two inside a sentence, and it is already
+# handled correctly by doing nothing special: the result region is ordinary
+# `<w:t>` runs, so `_walk_content` folds it into the visible stream inline
+# exactly as `_process_fld_simple` resolves a simple field's result, while
+# `<w:instrText>` (a different tag from `<w:t>`) never reaches either stream.
+#
+# A `TOC`/`INDEX` field is the shape that needs a rule. Its cached result is
+# not a phrase inside a clause -- it is a BLOCK of body-shaped paragraphs,
+# one per heading, each of which is Word's own generated copy of a heading
+# the document already contains further down ("1. Definitions<tab>2"). Read
+# as body, every one of those lines is a clause boundary by
+# `clause_boundaries`' own rules, so each opened an empty logical paragraph
+# named like the real clause and consumed a `block_id` ahead of it: the model
+# was shown N empty "clauses", the block map's count was wrong for any
+# long-form agreement, and `delete_block` on one of those ids would have
+# written `[Intentionally omitted.]` into the table of contents.
+# ---------------------------------------------------------------------------
+
+
+#: Complex-field codes whose cached RESULT is a generated block of
+#: body-shaped paragraphs rather than clause text, and is therefore omitted
+#: from extraction entirely (issue #114). Deliberately a tiny, explicit set,
+#: in the same narrow-by-construction spirit as `_walk_content`'s tag
+#: allowlist: every OTHER field code keeps its result inline, which is both
+#: the pre-existing behavior and the one that cannot silently drop clause
+#: text.
+OMITTED_FIELD_RESULT_CODES = frozenset({"TOC", "INDEX"})
+
+#: Transparent wrappers `_iter_field_events` descends through to find field
+#: characters and visible text -- the set `_walk_content` descends into the
+#: ACCEPT-ALL (`resulting_text`) stream through. `w:del` and `w:moveFrom`
+#: are deliberately NOT in it: their content never reaches the accept-all
+#: stream, and `materialize_accept_all` deletes both subtrees outright, so
+#: a field character inside either exists in the raw upload but not in the
+#: materialized bytes (see `_partition_field_result_paragraphs`, "Read the
+#: ACCEPT-ALL view only"). `w:sdt` is handled separately because its
+#: content sits one level down in `<w:sdtContent>`. Keeping the two walks in
+#: agreement is what makes "this paragraph's visible text is entirely field
+#: result" mean the same thing here as "this paragraph's operative text"
+#: means there.
+_FIELD_EVENT_TRANSPARENT_TAGS = frozenset(
+    {_w("hyperlink"), _w("moveTo"), _w("smartTag"), _w("ins"), _w("fldSimple")}
+)
+
+
+def _field_code_name(instr: str) -> str:
+    """The field CODE word of an accumulated `<w:instrText>` string, upper-
+    cased -- `' TOC \\o "1-3" \\h \\z \\u '` -> `'TOC'`. Empty when the field
+    carries no instruction text at all (a field whose code was never
+    written, which then matches no entry in `OMITTED_FIELD_RESULT_CODES`
+    and so keeps its result inline)."""
+    stripped = instr.strip()
+    if not stripped:
+        return ""
+    return stripped.split()[0].upper()
+
+
+def _field_code_target(instr: str) -> str:
+    """The first ARGUMENT of a field code -- `' PAGEREF _Toc1 \\h '` ->
+    `'_Toc1'` -- or `""` when there is none. Used only for `PAGEREF`, whose
+    argument is the bookmark a generated TOC entry's page number points at."""
+    parts = instr.split()
+    return parts[1] if len(parts) > 1 else ""
+
+
+#: A generated listing's page-number tail: a tab (a TOC entry,
+#: "1. Definitions<tab>2") or a comma (an INDEX entry, "Confidentiality, 4")
+#: followed by page numbers. One of the `_paragraph_is_entry_shaped` signals.
+_PAGE_NUMBER_TAIL_RE = re.compile(r"(?:\t|,[ \t]*)[\d \t,\-\u2013]*\d\s*$")
+
+#: Paragraph style ids Word gives a generated listing's own lines (`TOC1`
+#: .. `TOC9`, `TOCHeading`, `Index1` .. `Index9`, `IndexHeading`),
+#: compared case-insensitively by prefix.
+_GENERATED_LISTING_STYLE_PREFIXES = ("toc", "index")
+
+
+def _paragraph_style_id(p_el: ET.Element) -> str:
+    ppr = p_el.find(_w("pPr"))
+    if ppr is None:
+        return ""
+    pstyle = ppr.find(_w("pStyle"))
+    if pstyle is None:
+        return ""
+    return (pstyle.get(_w("val")) or "").strip().lower()
+
+
+def _paragraph_is_real_heading(p_el: ET.Element) -> bool:
+    """A Heading-styled paragraph, or one carrying an assigned outline level
+    -- `clause_boundaries`' tier-1 / outline signals, the ones Word's own
+    TOC is GENERATED FROM. A generated entry is styled `TOC1`..`TOC9` and
+    carries neither, so one of these inside an omitted region proves the
+    region ran past the listing into the agreement itself."""
+    signals = clause_boundaries.ooxml_paragraph_signals(p_el)
+    style = (signals.get("style_name") or "").strip().lower()
+    if style.startswith("heading"):
+        return True
+    outline = signals.get("outline_level")
+    return outline is not None and 0 <= outline < 9
+
+
+def _iter_field_events(elements: list[ET.Element]) -> Iterator[tuple[str, str]]:
+    """Yields `(kind, payload)` for one paragraph's run-level content in
+    document order, ACCEPT-ALL view only, where `kind` is `"begin"` /
+    `"separate"` / `"end"` (a `<w:fldChar>`), `"instr"` (an
+    `<w:instrText>`'s text), or `"text"` (a run's VISIBLE text -- `<w:t>`
+    or a `<w:tab/>`).
+
+    Descends through exactly the transparent wrappers `_walk_content`
+    descends for the accept-all (`resulting_text`) stream
+    (`_FIELD_EVENT_TRANSPARENT_TAGS` plus a non-placeholder `<w:sdt>`), and
+    skips hidden runs the way `_process_run` strips them, so the
+    visible-text events here are the same text `_build_paragraph_record`
+    puts in `resulting_text` -- the OPERATIVE text
+    `extract_document_paragraphs` groups on.
+
+    `w:del` and `w:moveFrom` are skipped without recursion, and
+    `<w:delInstrText>`/`<w:delText>` are ignored wherever they sit: every
+    one of them is content `materialize_accept_all` removes, so reading any
+    of it here would let the raw upload (Stage 1) and the materialized bytes
+    (Stage 5) disagree about where a field begins or ends -- and therefore
+    about which paragraphs are field result and which `block_id` names which
+    clause. See `_partition_field_result_paragraphs`, "Read the ACCEPT-ALL
+    view only".
+
+    `<w:instrText>` deliberately does NOT yield a `"text"` event: a field's
+    CODE is markup, never text a reader sees, and `_process_run` (which
+    reads `<w:t>`/`<w:delText>` only) has always ignored it.
+
+    Two structural kinds feed `_partition_field_result_paragraphs`' region
+    guard rather than the field state machine: `"anchor"` (a
+    `<w:hyperlink w:anchor="...">` the walk descends into -- the link a
+    generated TOC entry carries to its heading) and `"bookmark"` (a
+    `<w:bookmarkStart w:name="...">` -- the target such a link points at,
+    which Word places on the REAL heading). Both are read over the same
+    accept-all view as everything else here."""
+    for el in elements:
+        tag = el.tag
+        if tag == _w("bookmarkStart"):
+            name = el.get(_w("name"))
+            if name:
+                yield ("bookmark", name)
+            continue
+        if tag == _w("hyperlink"):
+            anchor = el.get(_w("anchor"))
+            if anchor:
+                yield ("anchor", anchor)
+        if tag == _w("r"):
+            if _run_is_hidden(el):
+                continue
+            for child in el:
+                child_tag = child.tag
+                if child_tag == _w("fldChar"):
+                    char_type = child.get(_w("fldCharType"))
+                    if char_type in ("begin", "separate", "end"):
+                        yield (char_type, "")
+                elif child_tag == _w("instrText"):
+                    yield ("instr", child.text or "")
+                elif child_tag == _w("t"):
+                    if child.text:
+                        yield ("text", child.text)
+                elif child_tag == _w("tab"):
+                    yield ("text", "\t")
+                # `<w:delInstrText>`/`<w:delText>` fall through: struck
+                # field code and struck text are not in the accept-all view.
+        elif tag in (_w("del"), _w("moveFrom")):
+            # EXPLICIT, not left to the generic skip below: both subtrees
+            # are deleted by `materialize_accept_all`, so a field character
+            # inside one must not exist for this walk either.
+            continue
+        elif tag in _FIELD_EVENT_TRANSPARENT_TAGS:
+            yield from _iter_field_events(list(el))
+        elif tag == _w("sdt"):
+            if not sdt_is_placeholder(el):
+                content_el = el.find(_w("sdtContent"))
+                if content_el is not None:
+                    yield from _iter_field_events(list(content_el))
+        else:
+            continue
+
+
+def _paragraph_is_entry_shaped(
+    p_el: ET.Element, visible_text: str, *, has_anchor: bool, has_pageref: bool
+) -> bool:
+    """True when a paragraph inside an omitted field's result region looks
+    like a line of a GENERATED listing (issue #114 region guard, see
+    `_partition_field_result_paragraphs`): a `TOC*`/`Index*` paragraph
+    style, a `w:hyperlink` anchor (Word's `\\h` switch), a nested `PAGEREF`
+    field, or a tab/comma page-number tail ("Definitions<tab>2",
+    "Confidentiality, 4"). Any ONE is enough; a body sentence carries none
+    of them, and a region holding one is kept whole."""
+    if _paragraph_style_id(p_el).startswith(_GENERATED_LISTING_STYLE_PREFIXES):
+        return True
+    if has_anchor or has_pageref:
+        return True
+    return bool(_PAGE_NUMBER_TAIL_RE.search(visible_text))
+
+
+def _partition_field_result_paragraphs(
+    p_elements: Iterable[ET.Element],
+) -> tuple[list[ET.Element], list[str]]:
+    """Splits a document-order `<w:p>` stream into `(body_paragraphs,
+    omitted_codes)` (issue #114), carrying complex-field state ACROSS
+    paragraph boundaries -- which is the whole point: a `TOC` field's
+    `begin`/`separate` sit in one `<w:p>` and its `end` many paragraphs
+    later.
+
+    A paragraph is omitted iff it carries visible text and ALL of that
+    visible text lies inside an `OMITTED_FIELD_RESULT_CODES` field's result
+    region (between that field's `separate` and its `end`). Stated that way
+    rather than as "every paragraph between separate and end" on purpose: a
+    paragraph that carries visible text OUTSIDE the region -- the field's
+    `end` followed by real clause text in the same `<w:p>` -- is kept whole,
+    so this can never drop a sentence of the agreement. A paragraph with no
+    visible text at all is likewise kept and falls through to the ordinary
+    spacer/struck-paragraph handling in `extract_document_paragraphs`, which
+    already knows what to do with it.
+
+    `omitted_codes` is one field-code name per OMITTED paragraph, so the
+    caller can disclose both how many paragraphs were dropped and which
+    field codes produced them (`_field_result_omission_note`). The omission
+    is never silent.
+
+    Field nesting is tracked as a STACK of begin/separate/end frames, never
+    a single "inside a TOC" flag: a TOC's own entries contain nested
+    `PAGEREF`/`HYPERLINK` fields, and an `end` closes only the INNERMOST
+    open frame, so the OUTER `TOC` frame stays open across them (which is
+    what `_open_omitted_frame` reads). An unbalanced `end` (no frame open)
+    is ignored rather than raising -- this is an extraction walk over a
+    counterparty's file, not a validator, and the conservative reading of
+    malformed field markup is "not inside an omitted field", which keeps
+    text.
+
+    ## An omitted region must actually CLOSE -- and must not swallow body
+
+    A paragraph is only dropped once its field's frame has been closed by an
+    `end`: the decision is buffered per frame and committed only after the
+    whole stream has been seen. A `TOC` whose frame is never closed
+    therefore drops NOTHING, and every one of its paragraphs is extracted
+    exactly as it was before this issue.
+
+    Closing is not enough on its own. In the accept-all view a stack cannot
+    tell a TOC's own `end` from a LATER field's `end` whose `begin` is not
+    in that view: a TOC whose `end` the counterparty struck, followed by the
+    agreement and then a second field whose `begin`/code/`separate` were
+    struck (or sit in a hidden `w:vanish` run), pops the TOC's frame at that
+    second field's `end` -- and every clause in between would be read as
+    "TOC field result". So a closed region is committed only when every
+    paragraph buffered in it looks like a line of a generated listing, and
+    is kept WHOLE (the pre-#114 behavior, bad but bounded) when any one of
+    them:
+
+      - is not entry-shaped (`_paragraph_is_entry_shaped`: a `TOC*`/`Index*`
+        paragraph style, a `w:hyperlink` anchor, a nested `PAGEREF` field,
+        or a tab/comma page-number tail) -- a body sentence is none of
+        those;
+      - is a real heading (`_paragraph_is_real_heading`: Heading-styled or
+        an assigned outline level -- what a TOC is generated FROM, never
+        what it is made of); or
+      - carries a `w:bookmarkStart` named by one of the region's own
+        hyperlink anchors or `PAGEREF` targets -- the region reached the
+        very heading one of its entries points at.
+
+    That fails toward KEEPING paragraphs: no region can drop anything past
+    the agreement's next real block boundary. The worst case is the
+    pre-existing "the TOC lines are extracted as clauses" behavior, never a
+    clause silently missing from the model's view.
+
+    ## Read the ACCEPT-ALL view only
+
+    Stage 1 (`review_spine`) extracts the RAW upload and Stage 5
+    (`redline_generate`) extracts the `materialize_accept_all`'d bytes, and
+    `delete_block` finds its clause by `block_id` alone -- so any paragraph
+    one read drops and the other keeps shifts every later id, and a proven
+    edit lands silently on the WRONG clause. `materialize_accept_all`
+    deletes every `<w:del>` and `<w:moveFrom>` subtree, so a field character
+    or `<w:delInstrText>` inside one exists in the raw read only: a struck
+    `end` would close the TOC on the raw side and leave it open on the
+    materialized one, dropping the TOC lines in Stage 1 and keeping them as
+    clauses in Stage 5. `_iter_field_events` therefore reads exactly the
+    accept-all view -- the same view the materializer produces -- and both
+    reads see the same field structure, the same omitted paragraphs and the
+    same block map, whatever the counterparty struck.
+    """
+    field_stack: list[dict[str, Any]] = []
+    # One entry per input paragraph, in document order:
+    # `(p_el, omitted_code_or_None, frame_key_or_None)`. Resolved into the
+    # two output lists only after the whole stream has been seen -- see "An
+    # omitted region must actually CLOSE" above.
+    decisions: list[tuple[ET.Element, str | None, int | None]] = []
+    closed_frames: set[int] = set()
+    # Per omitted frame key: what the region-guard needs to know about the
+    # paragraphs buffered in it.
+    region_entry_shaped: dict[int, bool] = {}
+    region_has_heading: dict[int, bool] = {}
+    region_anchors: dict[int, set[str]] = {}
+    region_bookmarks: dict[int, set[str]] = {}
+    next_frame_key = 0
+
+    def _open_omitted_frame() -> dict[str, Any] | None:
+        for frame in reversed(field_stack):
+            if frame["in_result"] and frame["code"] in OMITTED_FIELD_RESULT_CODES:
+                return frame
+        return None
+
+    for p_el in p_elements:
+        # Set by the first VISIBLE-text event that lands inside an omitted
+        # field's result region -- `field_stack` persists across paragraphs,
+        # so a paragraph wholly inside a TOC result is recognized here even
+        # though it carries no field character of its own.
+        text_inside: dict[str, Any] | None = None
+        text_outside = False
+        visible_text: list[str] = []
+        anchors: set[str] = set()
+        bookmarks: set[str] = set()
+        # Every frame BEGUN in this paragraph, kept by reference so its code
+        # can be read once the paragraph is done, even after it was popped.
+        begun_here: list[dict[str, Any]] = []
+        for kind, payload in _iter_field_events(list(p_el)):
+            if kind == "text":
+                visible_text.append(payload)
+                open_frame = _open_omitted_frame()
+                if open_frame is None:
+                    text_outside = True
+                elif text_inside is None:
+                    text_inside = open_frame
+            elif kind == "anchor":
+                anchors.add(payload)
+            elif kind == "bookmark":
+                bookmarks.add(payload)
+            elif kind == "begin":
+                frame = {"key": next_frame_key, "code": "", "instr": "", "in_result": False}
+                field_stack.append(frame)
+                begun_here.append(frame)
+                next_frame_key += 1
+            elif kind == "instr":
+                if field_stack:
+                    field_stack[-1]["instr"] += payload
+                    field_stack[-1]["code"] = _field_code_name(field_stack[-1]["instr"])
+            elif kind == "separate":
+                if field_stack:
+                    field_stack[-1]["in_result"] = True
+            elif kind == "end":
+                # Closes the INNERMOST open frame only.
+                if field_stack:
+                    closed_frames.add(int(field_stack.pop()["key"]))
+
+        if text_inside is not None and not text_outside:
+            key = int(text_inside["key"])
+            has_pageref = False
+            for frame in begun_here:
+                if frame["code"] == "PAGEREF":
+                    has_pageref = True
+                    target = _field_code_target(str(frame["instr"]))
+                    if target:
+                        anchors.add(target)
+            entry_shaped = _paragraph_is_entry_shaped(
+                p_el, "".join(visible_text), has_anchor=bool(anchors), has_pageref=has_pageref
+            )
+            region_entry_shaped[key] = region_entry_shaped.get(key, True) and entry_shaped
+            region_has_heading[key] = region_has_heading.get(key, False) or _paragraph_is_real_heading(p_el)
+            region_anchors.setdefault(key, set()).update(anchors)
+            region_bookmarks.setdefault(key, set()).update(bookmarks)
+            decisions.append((p_el, str(text_inside["code"]), key))
+        else:
+            decisions.append((p_el, None, None))
+
+    committed_frames = {
+        key
+        for key in closed_frames
+        if region_entry_shaped.get(key, False)
+        and not region_has_heading.get(key, False)
+        and not (region_anchors.get(key, set()) & region_bookmarks.get(key, set()))
+    }
+
+    body_paragraphs: list[ET.Element] = []
+    omitted_codes: list[str] = []
+    for p_el, code, frame_key in decisions:
+        if code is not None and frame_key in committed_frames:
+            omitted_codes.append(code)
+        else:
+            body_paragraphs.append(p_el)
+
+    return body_paragraphs, omitted_codes
+
+
+def _field_result_omission_note(omitted_codes: list[str]) -> str:
+    """The ONE disclosure sentence for every paragraph
+    `_partition_field_result_paragraphs` dropped (issue #114) -- one line per
+    document, not per entry, because a table of contents in a long-form
+    agreement is routinely dozens of lines and the attorney needs the fact,
+    not a list.
+
+    Names only the field-code words, which come from the fixed
+    `OMITTED_FIELD_RESULT_CODES` set -- never the raw `<w:instrText>`, which
+    is counterparty-controlled markup, and never a dropped line's text.
+    Deliberately does NOT end in the accept-all tail
+    (`frontend/src/toaster/receipt.ts::acceptedChangesSummary` counts those
+    to report "N pending edits accepted before review"): nothing was
+    accepted here, and this sentence must not be miscounted as an edit."""
+    codes = " and ".join(sorted(set(omitted_codes)))
+    count = len(omitted_codes)
+    return (
+        f"Generated field result omitted: {count} paragraph(s) of {codes} field result "
+        f"(Word's own generated listing of the document, not clause text) are omitted "
+        f"from the operative draft and are assigned no block id."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Document-level extraction (heading/body grouping)
 # ---------------------------------------------------------------------------
 
@@ -817,16 +1248,37 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     `normalize_paragraphs` must still run `_normalize_paragraph` over -- so
     their disposition is disclosed and a genuinely malformed one still fails
     the document closed -- but which must NOT be assigned a `block_id`. It
-    is emitted for one shape only: paragraphs whose operative (accept-all)
-    text is empty because they were struck in full, sitting BEFORE the
-    document's first clause boundary, where there is no open group to hold
+    holds one shape of PARAGRAPH only (see `"extraction_notes"` below for
+    the other reason the record itself can exist): paragraphs whose
+    operative (accept-all) text is empty because they were struck in full,
+    sitting BEFORE the document's first clause boundary, where there is no
+    open group to hold
     them. Those `<w:p>`s are empty spacers in the materialized bytes and are
     skipped there entirely, so letting them open the implicit leading group
     in the RAW read would make the raw block map one block longer than the
     materialized one and shift every later `block_id` -- the Stage-1 /
     Stage-5 desync `docs/task3_block_map_determinism_walkthrough.md`
-    records. The key is ADDITIVE and absent everywhere else; a reader that
-    does not know it (`preflight_pass.document_stats`) is unaffected.
+    records. The key is ADDITIVE and absent everywhere else. A reader that
+    COUNTS groups must skip such a record, because it is not a clause:
+    `preflight_pass.compute_document_stats` leaves it out of
+    `paragraph_count` (issue #114, which is what makes the record appear in
+    the materialized read too -- see `"extraction_notes"` below).
+
+    That same notes-only record additionally carries `"extraction_notes"`
+    (issue #114) -- disclosure sentences about `<w:p>`s this function
+    DROPPED, which therefore belong to no returned record: today exactly one
+    sentence, naming how many paragraphs of a `TOC`/`INDEX` field's
+    generated result were omitted. See `_partition_field_result_paragraphs`
+    for what is dropped and why, and `normalize_paragraphs`, which folds
+    these into `normalization_notes` so the omission reaches the attorney.
+    The key is additive and the list is empty whenever nothing was dropped;
+    the record itself only exists when there is something to say. Unlike a
+    `leading_deleted` paragraph -- which `materialize_accept_all` empties,
+    so it exists in the raw read only -- a dropped TOC exists in BOTH
+    reads, so this notes-only record appears in the materialized read as
+    well. It still emits no block (`normalize_paragraphs` skips it), and
+    `preflight_pass.compute_document_stats` does not count it as a
+    paragraph.
 
     `heading_p_index` / `heading_source_text` (issue #645) are the boundary
     `<w:p>`'s own IDENTITY -- its position in the part's preorder `w:p`
@@ -899,6 +1351,19 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     # moment a paragraph fails to match itself).
     p_index_by_element = {id(el): index for index, el in enumerate(root.iter(_w("p")))}
 
+    # Issue #114. A `TOC`/`INDEX` complex field's cached RESULT is a block of
+    # generated, body-shaped paragraphs -- Word's own copy of the headings
+    # further down -- not clause text, so it is dropped here before grouping
+    # rather than allowed to open one empty logical paragraph (and consume
+    # one `block_id`) per entry. `p_index` numbering above is preorder over
+    # the WHOLE part and is deliberately computed BEFORE this filter, so a
+    # dropped paragraph leaves the surviving paragraphs' identities exactly
+    # where the writer side (`docx_editor`) numbers them. The omission is
+    # disclosed below, never silent.
+    body_paragraphs, omitted_field_codes = _partition_field_result_paragraphs(
+        _iter_body_paragraphs(body)
+    )
+
     logical: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     # Wholly struck `<w:p>`s seen BEFORE any group is open (issue #93 fix
@@ -932,7 +1397,7 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                 }
             )
 
-    for p_el in _iter_body_paragraphs(body):
+    for p_el in body_paragraphs:
         record = _build_paragraph_record(p_el)
         # The OPERATIVE text is the accept-all `resulting_text` --
         # `_build_paragraph_record` always sets it, and it equals `text`
@@ -1025,7 +1490,14 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
             )
 
     _flush()
-    if leading_deleted:
+    extraction_notes: list[str] = []
+    if omitted_field_codes:
+        # Issue #114. ONE line for the whole document, carried on the same
+        # notes-only group `leading_deleted` uses so the disclosure needs no
+        # second channel out of this function. `normalize_paragraphs` folds
+        # `extraction_notes` into `normalization_notes` verbatim.
+        extraction_notes.append(_field_result_omission_note(omitted_field_codes))
+    if leading_deleted or extraction_notes:
         # Document order: these `<w:p>`s precede every boundary, so their
         # disposition notes belong first. `emits_block: False` keeps them out
         # of the block numbering entirely (issue #93 fix round 2), so the ids
@@ -1043,6 +1515,15 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                 "heading_revisions": [],
                 "physical_paragraphs": leading_deleted,
                 "emits_block": False,
+                # Issue #114. Extraction-level disclosure sentences that
+                # belong to no `<w:p>` this function returned, because the
+                # `<w:p>`s they are ABOUT were dropped. Empty whenever
+                # nothing was dropped. A dropped TOC exists in the
+                # MATERIALIZED read too, so unlike `leading_deleted` this
+                # record can appear there; `preflight_pass.
+                # compute_document_stats` therefore skips `emits_block:
+                # False` records when it counts paragraphs.
+                "extraction_notes": extraction_notes,
             },
         )
     return logical
@@ -1666,6 +2147,15 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     which is an empty spacer in the materialized bytes Stage 5 re-extracts
     from) and why a block there would desync the two reads' ids.
 
+    A raw record's `"extraction_notes"` (issue #114) are disclosure
+    sentences about `<w:p>`s `extract_document_paragraphs` DROPPED before
+    grouping -- a `TOC`/`INDEX` field's generated result -- so there is no
+    physical paragraph left to run `_normalize_paragraph` over and produce
+    them. They are folded into `normalization_notes` verbatim, and are
+    collected BEFORE the notes-only `continue` below so a group that emits
+    no block still discloses them. Additive: absent for every group a caller
+    hand-built without them.
+
     Each heading's PHYSICAL paragraphs (`raw_paragraphs[i]
     ["physical_paragraphs"]`, see `extract_document_paragraphs`'s
     docstring) are normalized INDEPENDENTLY -- `_normalize_paragraph` is
@@ -1751,6 +2241,15 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     clean_paragraphs: list[dict[str, Any]] = []
 
     for paragraph in raw_paragraphs:
+        # Issue #114. Extraction-level disclosure that belongs to no
+        # physical `<w:p>` here, because the `<w:p>`s it is about were
+        # dropped by `extract_document_paragraphs` before grouping (a
+        # `TOC`/`INDEX` field's generated result). Collected FIRST so it is
+        # still disclosed for a notes-only group, which `continue`s below
+        # before any block is emitted. Absent for every other group and for
+        # any caller that hand-built raw paragraphs.
+        accept_notes.extend(paragraph.get("extraction_notes", []))
+
         heading = paragraph.get("heading", "<untitled>")
         heading_p_index = paragraph.get("heading_p_index")
         heading_source_text = paragraph.get("heading_source_text", "")
