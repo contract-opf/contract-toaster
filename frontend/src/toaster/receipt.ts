@@ -472,7 +472,7 @@ export function receiptLines(
   lines.push({ id: 'rule-4', ...RULE });
 
   push('duration', 'Toasted in', toastedIn(review.created_at, review.updated_at));
-  push('primary-model', 'Primary', review.primary_model_id);
+  push('primary-model', 'Reviewer', review.primary_model_id);
   push('critic-model', 'Critic', review.critic_model_id);
   // Issue #492: no raw review id anywhere in visible DOM, including this
   // slip -- the id reaches the user only via "Copy review ID"

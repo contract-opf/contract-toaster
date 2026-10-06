@@ -25,7 +25,15 @@
     "Bedrock support structured outputs and prompt caching); models.embedding",
     "(Titan, not a chat model) deliberately declares neither, so it fails",
     "closed to false for both -- absence, not a guess, is the correct answer",
-    "for a model outside the Claude chat matrix."
+    "for a model outside the Claude chat matrix.",
+    "",
+    "ROLE ORDER (issue #136, ADR 0001): the critic has the last word, so the stronger",
+    "model (Opus 4.8) is the critic and the cheaper one (Sonnet 4.6) is the reviewer.",
+    "The review_throughput_ceiling / max_eval_parallelism derivations below were",
+    "written when Opus was the primary and still key their figures on 'primary';",
+    "the 40K-TPM Opus figures now bind the CRITIC call. Re-derive them, and re-check",
+    "the Opus quota against the critic's larger token reservation, at the next",
+    "recertification."
   ],
   "schema_version": "1",
   "region": "us-east-1",
@@ -43,6 +51,30 @@
   "models": {
     "primary": {
       "role": "primary_reviewer",
+      "model_id": "anthropic.claude-sonnet-4-6",
+      "inference_type": "single-region-native",
+      "granted_tpm": 100000,
+      "granted_rpm": 200,
+      "_quota_note": [
+        "AWS default on-demand quota for Claude Sonnet 4.6 (anthropic.claude-sonnet-4-6)",
+        "in us-east-1 as of 2026-06-13: 100,000 TPM / 200 RPM (Standard tier).",
+        "Sonnet 4.6 has a higher default quota than Opus 4.8 and is the reviewer",
+        "(issue #136, ADR 0001): the cheaper first pass the critic reads.",
+        "Verify via: AWS Console → Service Quotas → Amazon Bedrock."
+      ],
+      "approx_tokens_per_review_input": 60000,
+      "approx_tokens_per_review_output": 8000,
+      "cost_per_million_input_usd": 3.00,
+      "cost_per_million_output_usd": 15.00,
+      "structured_outputs": true,
+      "prompt_caching": true,
+      "request_contract": {
+        "omit_sampling_params": ["temperature", "top_p", "top_k"],
+        "extended_thinking": "adaptive-only"
+      }
+    },
+    "critic": {
+      "role": "adversarial_critic",
       "model_id": "anthropic.claude-opus-4-8",
       "inference_type": "single-region-native",
       "granted_tpm": 40000,
@@ -54,37 +86,14 @@
         "  'Tokens per minute for claude-opus-4-8 on-demand throughput' and",
         "  'Requests per minute for claude-opus-4-8 on-demand throughput'.",
         "A quota increase request is on file for the eval harness workload.",
-        "If granted_tpm changes, re-derive review_throughput_ceiling and",
+        "Opus 4.8 is the critic (issue #136, ADR 0001): the senior reviewer with the",
+        "last word. If granted_tpm changes, re-derive review_throughput_ceiling and",
         "max_eval_parallelism below."
-      ],
-      "approx_tokens_per_review_input": 60000,
-      "approx_tokens_per_review_output": 8000,
-      "cost_per_million_input_usd": 5.00,
-      "cost_per_million_output_usd": 25.00,
-      "structured_outputs": true,
-      "prompt_caching": true,
-      "request_contract": {
-        "omit_sampling_params": ["temperature", "top_p", "top_k"],
-        "extended_thinking": "adaptive-only"
-      }
-    },
-    "critic": {
-      "role": "adversarial_critic",
-      "model_id": "anthropic.claude-sonnet-4-6",
-      "inference_type": "single-region-native",
-      "granted_tpm": 100000,
-      "granted_rpm": 200,
-      "_quota_note": [
-        "AWS default on-demand quota for Claude Sonnet 4.6 (anthropic.claude-sonnet-4-6)",
-        "in us-east-1 as of 2026-06-13: 100,000 TPM / 200 RPM (Standard tier).",
-        "Sonnet 4.6 has a higher default quota than Opus 4.8 — the critic pass is",
-        "cheaper AND less quota-constrained, reinforcing the two-model architecture.",
-        "Verify via: AWS Console → Service Quotas → Amazon Bedrock."
       ],
       "approx_tokens_per_review_input": 70000,
       "approx_tokens_per_review_output": 5000,
-      "cost_per_million_input_usd": 3.00,
-      "cost_per_million_output_usd": 15.00,
+      "cost_per_million_input_usd": 5.00,
+      "cost_per_million_output_usd": 25.00,
       "structured_outputs": true,
       "prompt_caching": true,
       "request_contract": {
@@ -108,7 +117,7 @@
   },
   "review_throughput_ceiling": {
     "_derivation": [
-      "Bottleneck: Opus 4.8 primary pass (40,000 TPM, 50 RPM).",
+      "Bottleneck: Opus 4.8 critic pass (40,000 TPM, 50 RPM; issue #136 made Opus the critic).",
       "Per-review primary-pass token consumption (worst case, uncached):",
       "  input:  60,000 tokens (playbook ~30K + diff ~15K + retrieved context ~15K)",
       "  output:  8,000 tokens",

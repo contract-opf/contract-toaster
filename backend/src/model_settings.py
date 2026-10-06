@@ -591,6 +591,35 @@ def _pricing_basis(policy: dict[str, Any], role: str) -> dict[str, int]:
     }
 
 
+# Relative capability ranking of the catalogue's `tier` labels (issue #136).
+# The label is our own judgement, not a benchmark, so a missing or unknown
+# label ranks nothing and suppresses the warning rather than guessing.
+_TIER_RANK = {"budget": 0, "good": 1, "high": 2, "highest": 3}
+
+CRITIC_BELOW_REVIEWER_TIER_WARNING = "critic_below_reviewer_tier"
+
+
+def _tier_rank(policy: dict[str, Any], model_id: str) -> int | None:
+    for entry in model_client.openrouter_selectable_models(policy):
+        if entry.get("model_id") == model_id:
+            return _TIER_RANK.get(str(entry.get("tier", "")).strip().lower())
+    return None
+
+
+def _selection_warnings(policy: dict[str, Any], effective: dict[str, str]) -> list[str]:
+    """Non-blocking advisories about the resolved pair (issue #136, ADR 0001).
+
+    The critic has the last word, so one ranked BELOW the reviewer is worth
+    flagging -- but an admin may have a reason, so this never blocks a save.
+    Only fires when both resolved ids carry a known tier.
+    """
+    reviewer = _tier_rank(policy, effective["primary"])
+    critic = _tier_rank(policy, effective["critic"])
+    if reviewer is not None and critic is not None and critic < reviewer:
+        return [CRITIC_BELOW_REVIEWER_TIER_WARNING]
+    return []
+
+
 def _selection_source(role: str, stored_id: str, effective_id: str) -> str:
     """Where the effective id for a role actually came from: "admin" (an
     in-force stored selection), "env" (a break-glass
@@ -644,6 +673,7 @@ def get_model_selection_settings(
         "selectable": model_client.openrouter_selectable_models(policy),
         "updated_at": str(row.get("models_updated_at", "")),
         "updated_by": str(row.get("models_updated_by", "")),
+        "warnings": _selection_warnings(policy, effective),
     }
     for role in MODEL_SELECTION_ROLES:
         result[f"default_{role}"] = _default_entry(policy, role)

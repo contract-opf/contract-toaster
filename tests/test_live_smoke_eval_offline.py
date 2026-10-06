@@ -432,16 +432,16 @@ def _part_1_matrix_report(lse, tmp_path: Path, failures: list[str]) -> None:
         )
 
     expected_primary_cost = (
-        _PRIMARY_USAGE["input_tokens"] * 5.0 + _PRIMARY_USAGE["output_tokens"] * 25.0
+        _PRIMARY_USAGE["input_tokens"] * 3.0 + _PRIMARY_USAGE["output_tokens"] * 15.0
     ) / 1_000_000
     expected_critic_cost = (
-        _CRITIC_USAGE["input_tokens"] * 3.0 + _CRITIC_USAGE["output_tokens"] * 15.0
+        _CRITIC_USAGE["input_tokens"] * 5.0 + _CRITIC_USAGE["output_tokens"] * 25.0
     ) / 1_000_000
     # Issue #420 fix round 2, finding 3: `cost_usd` is now FULL precision
     # (live_smoke_eval.compute_actual_usd_from_usage), not quantized to
-    # whole cents -- this fixture's own cost is $0.014650 exactly (primary
-    # 1000 x $5/M + 200 x $25/M = $0.010; critic 800 x $3/M + 150 x $15/M =
-    # $0.004650), which the pre-fix rounded `cost_usd` reported as $0.01 (a
+    # whole cents -- this fixture's own cost is $0.013750 exactly (primary
+    # 1000 x $3/M + 200 x $15/M = $0.006; critic 800 x $5/M + 150 x $25/M =
+    # $0.007750; the roles' rates swapped with issue #136), which the pre-fix rounded `cost_usd` reported as $0.01 (a
     # 31.7% understatement). `expected_cost_cents` is kept too -- it is what
     # the SEPARATE `cost_usd_cents` field (the settlement-equivalent
     # whole-cent figure) must still equal.

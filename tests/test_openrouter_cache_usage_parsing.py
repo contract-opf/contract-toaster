@@ -169,7 +169,14 @@ class TestPolicyDeclaresCaching(unittest.TestCase):
 
     def test_the_declaration_records_its_probe_date(self) -> None:
         policy = mc.load_openrouter_policy()
-        note = policy["models"]["primary"].get("prompt_caching_note", "")
+        # The note travels with the model id, not the role: issue #136 moved
+        # opus-5 from models.primary to models.critic.
+        (pin,) = [
+            e
+            for e in policy["models"].values()
+            if isinstance(e, dict) and e.get("model_id") == OPUS_5
+        ]
+        note = pin.get("prompt_caching_note", "")
         self.assertIn("2026-09-16", note)
 
     def test_no_unprobed_id_declares_it(self) -> None:

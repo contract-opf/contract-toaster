@@ -267,9 +267,11 @@ class TestShippedDefaults(ModelSelectionTestBase):
     the code reads would restate the fixture rather than check the behaviour.
     """
 
-    def test_the_primary_default_resolves_to_opus_5(self):
+    def test_the_primary_default_resolves_to_sonnet_4_6(self):
+        """Issue #136 (ADR 0001) swapped the pair: the cheaper model is the
+        reviewer default, because the critic has the last word."""
         with _no_env_overrides():
-            self.assertEqual(model_client.openrouter_primary_model_id(), OPUS_5)
+            self.assertEqual(model_client.openrouter_primary_model_id(), SONNET_46)
 
     def test_the_primary_default_reaches_the_pipeline_resolver(self):
         """The id an actual review would run on, through the same entry point
@@ -277,15 +279,15 @@ class TestShippedDefaults(ModelSelectionTestBase):
         touched the picker) rather than no DynamoDB handle at all."""
         with _no_env_overrides():
             resolved = model_settings.resolve_openrouter_model_ids(self.ddb)
-        self.assertEqual(resolved["primary"], OPUS_5)
+        self.assertEqual(resolved["primary"], SONNET_46)
+        self.assertEqual(resolved["critic"], OPUS_5)
 
-    def test_the_critic_default_deliberately_did_not_move(self):
-        """#604 named only the Opus case. Moving the critic to Sonnet 5 as
-        well would have been an undiscussed second matrix change, so it was
-        left alone -- pinned here so a later drift is a decision, not a slip.
-        """
+    def test_the_critic_default_is_the_stronger_model(self):
+        """Issue #136 (ADR 0001): the critic has the last word, so the stronger
+        model (Opus 5) is its default. Pinned here so a later drift is a
+        decision, not a slip."""
         with _no_env_overrides():
-            self.assertEqual(model_client.openrouter_critic_model_id(), SONNET_46)
+            self.assertEqual(model_client.openrouter_critic_model_id(), OPUS_5)
 
     def test_opus_4_8_is_neither_the_default_nor_pickable(self):
         """OWNER DECISION, reversing what this test used to assert.
@@ -1043,7 +1045,7 @@ class TestConsistencyLintScope(unittest.TestCase):
         """Scoping the gate to the pins must not have made it toothless."""
         lint = self._lint_module()
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
-        openrouter["models"]["primary"]["model_id"] = "anthropic/claude-sonnet-4.6"
+        openrouter["models"]["primary"]["model_id"] = "anthropic/claude-opus-5"
         failures = lint.check_consistency(
             lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
         )
@@ -1051,15 +1053,15 @@ class TestConsistencyLintScope(unittest.TestCase):
 
     def test_lint_accepts_the_declared_forward_pin_the_real_policy_carries(self):
         """(issue #604) openrouter.json pins Opus 5 while bedrock-us-east-1.json
-        still pins Opus 4.8. That is allowed only because models.primary
-        declares `matrix_divergence_note` -- the on-disk artifacts, unmodified.
+        still pins Opus 4.8. That is allowed only because models.critic
+        declares (it moved from primary to critic with issue #136) `matrix_divergence_note` -- the on-disk artifacts, unmodified.
         """
         lint = self._lint_module()
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
         bedrock = lint.load_json(lint.BEDROCK_POLICY_PATH)
         self.assertNotEqual(
-            lint.parse_model_id(openrouter["models"]["primary"]["model_id"])[1],
-            lint.parse_model_id(bedrock["models"]["primary"]["model_id"])[1],
+            lint.parse_model_id(openrouter["models"]["critic"]["model_id"])[1],
+            lint.parse_model_id(bedrock["models"]["critic"]["model_id"])[1],
             "this test is only meaningful while the two artifacts actually differ",
         )
         self.assertEqual(lint.check_consistency(bedrock, openrouter), [])
@@ -1070,7 +1072,7 @@ class TestConsistencyLintScope(unittest.TestCase):
         and forgetting the other."""
         lint = self._lint_module()
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
-        openrouter["models"]["primary"].pop(lint.MATRIX_DIVERGENCE_FIELD, None)
+        openrouter["models"]["critic"].pop(lint.MATRIX_DIVERGENCE_FIELD, None)
         failures = lint.check_consistency(
             lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
         )
@@ -1083,8 +1085,8 @@ class TestConsistencyLintScope(unittest.TestCase):
         unconditional failure. No note excuses it."""
         lint = self._lint_module()
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
-        openrouter["models"]["primary"]["model_id"] = "anthropic/claude-opus-4"
-        openrouter["models"]["primary"][lint.MATRIX_DIVERGENCE_FIELD] = "we meant it, honest"
+        openrouter["models"]["critic"]["model_id"] = "anthropic/claude-opus-4"
+        openrouter["models"]["critic"][lint.MATRIX_DIVERGENCE_FIELD] = "we meant it, honest"
         failures = lint.check_consistency(
             lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
         )

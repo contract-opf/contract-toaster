@@ -147,13 +147,36 @@ export interface ModelSelectionSettings {
   critic_source: ModelSource;
   updated_at: string;
   updated_by: string;
+  /** Non-blocking advisories about the resolved pair (issue #136). Absent on
+   * an older server. Only codes in `SELECTION_WARNING_COPY` are rendered. */
+  warnings?: string[];
 }
 
 type Role = 'primary' | 'critic';
 
+// Issue #136 (ADR 0001, docs/adr/0001-critic-has-the-last-word.md): the two
+// passes are the Reviewer (the initial review) and the Critic (the senior
+// reviewer, who has the last word). The wire keeps `primary`/`critic`.
 const ROLE_LABEL: Record<Role, string> = {
-  primary: 'Primary reviewer',
-  critic: 'Adversarial critic',
+  primary: 'Reviewer',
+  critic: 'Critic',
+};
+
+const ROLE_DESCRIPTION: Record<Role, string> = {
+  primary:
+    'the initial review: reads the contract and the playbook and proposes the markup',
+  critic:
+    "the senior reviewer: reads the contract, the playbook and the reviewer's proposed changes, and has the last word on what goes into the redline",
+};
+
+/**
+ * Fixed copy per server warning code. The code is looked up, never
+ * interpolated, so nothing the server sends reaches the screen as text, and
+ * an unrecognised code renders nothing.
+ */
+const SELECTION_WARNING_COPY: Record<string, string> = {
+  critic_below_reviewer_tier:
+    "The critic is a lower tier than the reviewer. Your choice is saved, but the critic has the last word and reads the reviewer's work, so it should be at least as capable.",
 };
 
 /**
@@ -676,10 +699,18 @@ export default function AdminModel({
           {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form onSubmit={handleSaveModels} className="ct-stack">
             <p>
-              Every review runs twice: a primary reviewer marks the document up, then a second
-              model argues with that result before anything is decided. Pick each one
-              separately — a cheap critic over a strong reviewer is a perfectly reasonable
-              trade.
+              Every review runs twice, on two models you pick separately.
+            </p>
+            <p data-testid="admin-model-role-primary-description">
+              <strong>{ROLE_LABEL.primary}</strong> — {ROLE_DESCRIPTION.primary}
+            </p>
+            <p data-testid="admin-model-role-critic-description">
+              <strong>{ROLE_LABEL.critic}</strong> — {ROLE_DESCRIPTION.critic}
+            </p>
+            <p>
+              The critic should be at least as capable as the reviewer: it reads the
+              reviewer&apos;s work and has the final say, so a weaker critic limits the
+              quality of the redline.
             </p>
 
             <CtBanner variant="muted" data-testid="admin-model-tier-caveat">
@@ -725,6 +756,14 @@ export default function AdminModel({
                 />
               ))}
             </CtColumns>
+
+            {(selection.warnings ?? [])
+              .filter((code) => Object.prototype.hasOwnProperty.call(SELECTION_WARNING_COPY, code))
+              .map((code) => (
+                <CtBanner key={code} variant="warn" data-testid="admin-model-selection-warning">
+                  {SELECTION_WARNING_COPY[code]}
+                </CtBanner>
+              ))}
 
             <div className="ct-row">
               <CtButton
