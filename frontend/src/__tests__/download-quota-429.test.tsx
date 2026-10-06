@@ -16,7 +16,7 @@
  * which poll until a real-time deadline) — never a bounded iteration count.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ReviewSubmission from '../ReviewSubmission';
 import { DOWNLOAD_ERROR_COPY, DOWNLOAD_QUOTA_COPY } from '../api';
@@ -168,8 +168,19 @@ describe('completion-time auto-save — the uncharged path (issue #102)', () => 
 
     await submitAndReachResult();
     await waitFor(() => expect(outputCalls(fetchMock)).toHaveLength(1));
-    // Let the rejected save settle before asserting an absence.
-    await screen.findByTestId('review-download-button');
+    // Positive signal before asserting an absence: the auto-save's own fetch
+    // has resolved, and one real macrotask inside act() lets every promise
+    // hop after it (the json read and friendly-error path the 409 branch
+    // short-circuits, and the resulting state update) run and commit. This
+    // waits on awaited state, not on a count of flushes, so a slow runner
+    // cannot make it pass vacuously.
+    const autosaveIndex = fetchMock.mock.calls.findIndex(([input]) =>
+      new URL(String(input), 'http://localhost').searchParams.get('autosave') === '1',
+    );
+    await fetchMock.mock.results[autosaveIndex].value;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     expect(screen.queryByTestId('review-download-error')).toBeNull();
   });

@@ -303,7 +303,14 @@ def _field_code_counts(zf: zipfile.ZipFile) -> dict[tuple[str, str], int]:
         for ins in root.iter(f"{{{WORD_NS}}}ins"):
             inserted.update(id(el) for el in ins.iter())
         for tag in _FIELD_CODE_TAGS:
-            for el in root.iter(f"{{{WORD_NS}}}{tag}"):
+            # A struck field instruction is renamed `w:delInstrText` by the
+            # writer (redline_block_apply delete path). It shares
+            # `instrText`'s budget, or striking a source field would free a
+            # slot a newly added instruction could take.
+            elements = list(root.iter(f"{{{WORD_NS}}}{tag}"))
+            if tag == "instrText":
+                elements += list(root.iter(f"{{{WORD_NS}}}delInstrText"))
+            for el in elements:
                 # Elements inside a tracked insertion are counted
                 # separately, so a field the redline inserts can never be
                 # offset against one the source document already carried.
