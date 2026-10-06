@@ -180,13 +180,14 @@ class TestPolicyDeclaresCaching(unittest.TestCase):
         self.assertIn("2026-09-16", note)
 
     def test_no_unprobed_id_declares_it(self) -> None:
-        # Only Opus 5 was measured on the ZDR route. A sweep that marked every
-        # Anthropic id would be an unverified-capability claim.
+        # Only Opus 5 (2026-09-16) and the Haiku 4.5 test tier (2026-10-06)
+        # were measured on the ZDR route. A sweep that marked every Anthropic
+        # id would be an unverified-capability claim.
         policy = mc.load_openrouter_policy()
         ids = {e["model_id"] for e in policy["selectable"]}
         ids |= {e["model_id"] for e in policy["models"].values() if isinstance(e, dict)}
         declared = {i for i in ids if mc.openrouter_model_capabilities(i, policy)["prompt_caching"]}
-        self.assertEqual(declared, {OPUS_5})
+        self.assertEqual(declared, {OPUS_5, "anthropic/claude-haiku-4.5"})
 
 
 class TestRequestCarriesCacheBlocksAndUsageInclude(unittest.TestCase):
