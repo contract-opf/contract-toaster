@@ -174,7 +174,7 @@ describe('the receipt prints only what the review actually recorded', () => {
     // would break, and it is the whole reason the receipt is trustworthy.
     expect(text).not.toContain('Playbook version');
     expect(text).not.toContain('Standing instructions');
-    expect(text).not.toContain('Primary');
+    expect(text).not.toContain('Reviewer');
     expect(text).not.toContain('Critic');
     expect(text).not.toContain('Clauses touched');
     // Issue #570: neither assumption line claims anything a sparse row
@@ -768,7 +768,7 @@ describe('issue #740 — the Review route prints the receipt', () => {
     // the facts, which is the drift `toaster/receipt.ts` exists to prevent.
     expect(sheet).toContain('CONTRACT TOASTER');
     expect(sheet).not.toContain('Playbook version');
-    expect(sheet).not.toContain('Primary');
+    expect(sheet).not.toContain('Reviewer');
     expect(sheet).not.toContain('Critic');
     expect(sheet.split('\n').length).toBeLessThan(
       printedRows(FULL, 'Synthetic NDA Sample').length,

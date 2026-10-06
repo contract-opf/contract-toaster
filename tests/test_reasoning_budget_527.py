@@ -154,6 +154,7 @@ class TestReasoningAllowanceLookup(unittest.TestCase):
             KIMI_MODEL_ID,
             GEMINI_MODEL_ID,
             PRIMARY_MODEL_ID,
+            policy["models"]["primary"]["model_id"],
             policy["models"]["critic"]["model_id"],
         }
         non_reasoning_ids = [

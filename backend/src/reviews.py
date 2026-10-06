@@ -247,10 +247,10 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # mirrored copy, so a policy change that isn't mirrored here fails CI rather
 # than silently drifting.
 REGIONAL_PRICING_PREMIUM = 1.10  # ~10% regional-endpoint surcharge (docs/design-notes.md)
-PRIMARY_INPUT_RATE_USD_PER_MILLION = 5.50  # Opus 4.8 input, regional rate
-PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 27.50  # Opus 4.8 output, regional rate
-CRITIC_INPUT_RATE_USD_PER_MILLION = 3.30  # Sonnet 4.6 input, regional rate
-CRITIC_OUTPUT_RATE_USD_PER_MILLION = 16.50  # Sonnet 4.6 output, regional rate
+PRIMARY_INPUT_RATE_USD_PER_MILLION = 3.30  # Sonnet 4.6 input, regional rate (reviewer, issue #136)
+PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 16.50  # Sonnet 4.6 output, regional rate
+CRITIC_INPUT_RATE_USD_PER_MILLION = 5.50  # Opus 4.8 input, regional rate (critic, issue #136)
+CRITIC_OUTPUT_RATE_USD_PER_MILLION = 27.50  # Opus 4.8 output, regional rate
 
 # $20.00/day default ceiling. ONE definition, aliased here: since issue #653
 # the cap is an admin-settable value living in the settings store, so the

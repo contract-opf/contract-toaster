@@ -489,7 +489,7 @@ Operationally this means: if a user reports "I submitted twice," expect to find 
 
 ### Model recertification (quarterly)
 
-The model is governed by an explicit **model-policy matrix** ([ARCHITECTURE.md](ARCHITECTURE.md) → Model selection), not an automatic "newest/best" choice. The pinned matrix (today Opus 4.8 primary, Sonnet 4.6 critic, in `us-east-1`, with any fallback separately approved) is re-examined **every quarter**, and unconditionally whenever AWS announces a model change affecting our pin.
+The model is governed by an explicit **model-policy matrix** ([ARCHITECTURE.md](ARCHITECTURE.md) → Model selection), not an automatic "newest/best" choice. The pinned matrix (today Sonnet 4.6 reviewer, Opus 4.8 critic, in `us-east-1`, with any fallback separately approved) is re-examined **every quarter**, and unconditionally whenever AWS announces a model change affecting our pin.
 
 > **The embedding model is NOT part of this recurring obligation today.** Retrieval is dormant by decision and nothing is embedded, so there is no embedding model to recertify and no GC approval owed for one. The obligation **re-activates the moment retrieval is revived** — at which point a change to the embedding model (or any re-embedding) requires admin (GC) approval and a new corpus snapshot version, because it changes retrieval and therefore legal output. See [docs/rag-dormant.md](docs/rag-dormant.md) §5.4 and [ARCHITECTURE.md](ARCHITECTURE.md) → Retrieval status.
 

@@ -7,8 +7,8 @@ Problem this guards against: the two model-policy artifacts pin the model
 matrix for two different deployment targets (Bedrock native ids vs
 OpenRouter provider/model ids) but are meant to describe the SAME
 pinned matrix -- same role structure (primary_reviewer / adversarial_critic)
-and same model family/generation per role (Opus-class primary, Sonnet-class
-critic -- see README.md's pinned matrix), allowing only provider-specific
+and same model family/generation per role (Sonnet-class reviewer, Opus-class
+critic since issue #136 -- see README.md's pinned matrix), allowing only provider-specific
 ID syntax to differ (dots vs dashes, "anthropic.claude-opus-4-8" vs
 "anthropic/claude-opus-4.8").
 

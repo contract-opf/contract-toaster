@@ -67,7 +67,7 @@ import primary_review_pass as pp  # noqa: E402
 import critic_review_pass as cp  # noqa: E402
 import reconciliation as recon  # noqa: E402
 
-_CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
+_CRITIC_MODEL_ID = "anthropic.claude-opus-4-8"  # issue #136: the stronger model is the critic
 
 
 def _load_fixture(name: str) -> dict[str, Any]:
