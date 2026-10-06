@@ -444,7 +444,7 @@ def test_a_failed_critic_fails_the_review(failures: list[str]) -> None:
     invalid = json.loads(_response([], []))
     invalid["confidence_state"] = "medium"  # the real-model enum miss (#673)
     result = _run(docx_bytes, primary, [json.dumps(invalid)] * 6)
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(f"[4a] a failed critic must fail the review; got {result.get('status')!r}")
     if result.get("reason") != review_spine.REASON_CRITIC_SCHEMA_INVALID:
         failures.append(f"[4b] the status must carry the critic's reason; got {result.get('reason')!r}")
@@ -462,7 +462,7 @@ def test_a_missing_disposition_fails_closed_at_the_merger(failures: list[str]) -
         primary_pass_result={"status": "OK", "response": primary, "attempts": 1},
         critic_pass_result={"status": "OK", "response": critic, "attempts": 1},
     )
-    if composed.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED" or "result" in composed:
+    if composed.get("status") != "ERROR" or "result" in composed:
         failures.append(f"[4d] an undisposed primary issue must fail closed: {composed!r}")
     if review_spine.critic_failure_reason(composed) != review_spine.REASON_CRITIC_SCHEMA_INVALID:
         failures.append(
@@ -481,7 +481,7 @@ def test_a_missing_disposition_fails_closed_at_the_merger(failures: list[str]) -
         primary_pass_result={"status": "OK", "response": primary, "attempts": 1},
         critic_pass_result=None,
     )
-    if missing.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED" or "result" in missing:
+    if missing.get("status") != "ERROR" or "result" in missing:
         failures.append(f"[4h] no critic result must fail the review: {missing!r}")
 
 
@@ -500,7 +500,7 @@ def test_a_planted_gram_in_a_critic_replacement_is_blocked(failures: list[str]) 
         critic_delta=_delta([("I1", "REVISE")]),
     )
     result = _run(docx_bytes, primary, [critic])
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED" or result.get("reason") != "leakage_detected":
+    if result.get("status") != "ERROR" or result.get("reason") != "leakage_detected":
         failures.append(
             "[5a] a playbook gram in the CRITIC's replacement must be blocked; got "
             f"status={result.get('status')!r} reason={result.get('reason')!r}"
@@ -539,7 +539,7 @@ def test_overlapping_spans_are_rejected_not_merged(failures: list[str]) -> None:
     )
     primary_wire = _response([_sec8_issue()], [_replace_sec8(block_id, TEXT_A)])
     run = _run(docx_bytes, primary_wire, [overlapping] * 6)
-    if run.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED" or run.get("redline_bytes") is not None:
+    if run.get("status") != "ERROR" or run.get("redline_bytes") is not None:
         failures.append(
             "[6b] an overlapping critic transcript must fail the review, not merge; got "
             f"status={run.get('status')!r} reason={run.get('reason')!r}"
@@ -632,7 +632,7 @@ def test_a_keep_whose_issue_is_absent_fails_closed_at_the_merger(failures: list[
             primary_pass_result={"status": "OK", "response": primary, "attempts": 1},
             critic_pass_result={"status": "OK", "response": critic, "attempts": 1},
         )
-        if composed.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED" or "result" in composed:
+        if composed.get("status") != "ERROR" or "result" in composed:
             failures.append(
                 f"[9a] a {disposition} over an absent issue must fail closed: {composed!r}"
             )
@@ -668,7 +668,7 @@ def test_a_keep_whose_issue_is_absent_never_ships_end_to_end(failures: list[str]
     )
     result = _run(docx_bytes, primary, [keep_over_nothing] * 6)
     if (
-        result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED"
+        result.get("status") != "ERROR"
         or result.get("reason") != review_spine.REASON_CRITIC_SCHEMA_INVALID
     ):
         failures.append(
@@ -904,7 +904,7 @@ def test_a_planted_audit_record_gram_never_reaches_the_analysis_artifact(
     for label, primary, critic in cases:
         result = _run(docx_bytes, primary, [critic])
         if (
-            result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED"
+            result.get("status") != "ERROR"
             or result.get("reason") != "leakage_detected"
         ):
             failures.append(

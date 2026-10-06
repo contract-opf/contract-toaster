@@ -91,6 +91,7 @@ import reviews  # noqa: E402
 # fakes -- the convention tests/test_leakage_diagnosis_616.py and
 # tests/test_terminal_reason_completeness_670.py already follow.
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
+from critic_final_result import critic_keeps  # noqa: E402
 from ddb_fixtures import create_reviews_table  # noqa: E402
 from test_block_mode_e2e import (  # noqa: E402
     SECTIONS,
@@ -144,6 +145,16 @@ def _flag_only_primary_response() -> str:
     return json.dumps(payload)
 
 
+def _critic_responses(primary_responses: list[str]) -> list[str]:
+    """Issue #138 (ADR 0001): the critic's result is the one that ships, so the
+    leak or the flag-only shape a case plants must be in the CRITIC's text --
+    the canned critic restates the primary's last response with a KEEP for
+    each issue. A case that never reaches a model gets the no-delta critic."""
+    if not primary_responses:
+        return [dts._critic_no_delta_response()]
+    return [critic_keeps(primary_responses[-1])]
+
+
 # ---------------------------------------------------------------------------
 # 1. The spine
 # ---------------------------------------------------------------------------
@@ -154,7 +165,7 @@ def _spine(docx_bytes: bytes, primary_responses: list[str], review_id: str) -> d
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     client = model_client.FakeBedrockClient(
-        {primary_id: list(primary_responses), critic_id: [dts._critic_no_delta_response()]}
+        {primary_id: list(primary_responses), critic_id: _critic_responses(primary_responses)}
     )
     return review_spine.run_review(docx_bytes, bundle, client, review_id=review_id)
 
@@ -204,7 +215,7 @@ def _run_pipeline(docx_bytes: bytes, primary_responses: list[str]) -> dict[str, 
     primary_id = model_client.openrouter_primary_model_id()
     critic_id = model_client.openrouter_critic_model_id()
     client = model_client.FakeBedrockClient(
-        {primary_id: list(primary_responses), critic_id: [dts._critic_no_delta_response()]}
+        {primary_id: list(primary_responses), critic_id: _critic_responses(primary_responses)}
     )
     reviews_table = dts.FakeReviewsTable()
     s3 = dts.FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
