@@ -7,6 +7,14 @@
   "block_patches": [],
   "block_ops": [],
   "critic_delta": {
+    "dispositions": [
+      {
+        "issue_id": "I1",
+        "disposition": "KEEP",
+        "reason": "Same issue and the same edit; compliant with the playbook position."
+      }
+    ],
+    "overrides": [],
     "added_issues": [
       {
         "issue_key": "I9",

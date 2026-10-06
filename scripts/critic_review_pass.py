@@ -118,6 +118,90 @@ def retry_exhausted_reason(last_error: Any) -> str:
     return LAST_ERROR_REASONS.get(pp._error_token(last_error), REASON_CRITIC_RETRY_EXHAUSTED)
 
 
+def _issue_key_sort(key: str) -> tuple[int, str]:
+    """Numeric-ish order for `I2` before `I10`, so a message naming several
+    keys reads in the order the first reviewer numbered them."""
+    return (len(key), key)
+
+
+def critic_delta_rejection(
+    primary_output: dict[str, Any],
+    response: dict[str, Any],
+    schema: dict[str, Any],
+) -> str | None:
+    """`"schema_invalid: <detail>"` when the critic's `critic_delta` does not
+    account for the first reviewer's issues, else `None` (issue #137, ADR 0001
+    amendment 2026-09-17).
+
+    THE CROSS-RESPONSE HALF OF THE DISPOSITION CONTRACT. The artifact types a
+    disposition (`issue_id`, `disposition`, `reason`) and an override, but
+    "every first-reviewer issue has exactly one disposition" is a statement
+    about TWO responses, which a response-local JSON Schema cannot express --
+    the same reason `primary_review_pass._duplicate_issue_key_error` exists. So
+    it is enforced here, where the first reviewer's output is in hand, and
+    reported under the SAME `schema_invalid` token as the validator's own
+    rejections: the ADR calls a missing disposition a schema failure, and one
+    vocabulary keeps `LAST_ERROR_REASONS` / `critic_schema_invalid` and the
+    informed retry working unchanged.
+
+    Two rejections:
+
+      * a first-reviewer issue with NO disposition (the silent-ratification
+        hole: a critic that never mentions an issue has neither kept nor
+        dropped it, and the reconcile step cannot tell which);
+      * a first-reviewer issue disposed of TWICE (two verdicts on one issue,
+        which the reconcile step would have to arbitrate).
+
+    Deliberately NOT rejected: a disposition or an override naming an
+    `issue_id` the first reviewer never raised. Such an entry is noise, not a
+    gap -- it leaves every first-reviewer issue accounted for -- and a
+    rejection here spends a paid retry, and on a repeat kills the review, over
+    a field the reconciler can simply ignore.
+
+    Only ever the controlled `I<digits>` keys are interpolated into the
+    message -- both artifacts constrain `issue_key`/`issue_id` to that pattern,
+    and a key that failed it was rejected by the schema before this ran -- so
+    the message carries no document or model prose (the #425/#443 rule for
+    anything that becomes a retry correction or an error token's detail).
+
+    A no-op on an artifact whose `CriticDelta` defines no `dispositions` (the
+    superseded v1/v2 contracts), and when the first reviewer raised no issue
+    (an ACCEPT: nothing to dispose of, and a `null` critic_delta is fine).
+    """
+    critic_delta_def = (schema.get("definitions") or {}).get("CriticDelta") or {}
+    if "dispositions" not in (critic_delta_def.get("properties") or {}):
+        return None
+    reviewer_keys = {
+        issue["issue_key"]
+        for issue in primary_output.get("issues") or []
+        if isinstance(issue, dict) and isinstance(issue.get("issue_key"), str)
+    }
+    delta = response.get("critic_delta") or {}
+    dispositions = [d for d in delta.get("dispositions") or [] if isinstance(d, dict)]
+    disposed = [d.get("issue_id") for d in dispositions]
+
+    problems: list[str] = []
+    missing = sorted(reviewer_keys - set(disposed), key=_issue_key_sort)
+    if missing:
+        problems.append(
+            "critic_delta.dispositions has no disposition for first-reviewer "
+            f"issue(s) {', '.join(missing)} -- every first-reviewer issue needs "
+            "exactly one (KEEP, REVISE or DROP)"
+        )
+    repeated = sorted(
+        {key for key in disposed if key in reviewer_keys and disposed.count(key) > 1},
+        key=_issue_key_sort,
+    )
+    if repeated:
+        problems.append(
+            "critic_delta.dispositions disposes of issue_id(s) "
+            f"{', '.join(repeated)} more than once"
+        )
+    if not problems:
+        return None
+    return "schema_invalid: " + "; ".join(problems)
+
+
 def run_critic_pass(
     *,
     review_id: str,
@@ -137,6 +221,7 @@ def run_critic_pass(
     system_blocks_override: list[dict[str, Any]] | None = None,
     playbook_hash_override: str | None = None,
     output_schema_path: Path = pp.OUTPUT_SCHEMA_PATH,
+    block_map: dict[str, Any] | None = None,
     cancel_checkpoint: Callable[[], None] | None = None,
     attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
@@ -229,6 +314,24 @@ def run_critic_pass(
     for the same reason both take `ledger_write`: a live run that cannot say
     what the critic sent is as undiagnosable as one that cannot say what the
     primary sent.
+
+    `block_map` (issue #137, default `None`): the addressing view over the
+    SAME normalized paragraphs the primary pass was given
+    (`primary_review_pass.run_primary_pass`'s own argument of this name;
+    `review_spine.run_review` passes the one object to both). Under ADR 0001
+    the critic authors its own `block_patches`/`block_ops`, so its transcript
+    is proven against this map INSIDE the pass's bounded retry exactly as the
+    primary's is -- a critic edit that does not prove costs it the one informed
+    retry rather than surviving to stage 5. The critic's block ids therefore
+    cannot be anything but the primary's: one map, two passes. Omitted, the
+    proof is skipped, as in the primary pass.
+
+    The critic's response is also held to its disposition contract against
+    `primary_output` -- see `critic_delta_rejection`. Both post-validation
+    rejections spend the SAME retry budget and surface through the unchanged
+    failure classification (`critic_schema_invalid` for a missing
+    disposition; the residual `critic_retry_exhausted` for a transcript that
+    never proved).
 
     `system_blocks_override` / `playbook_hash_override` (issue #479,
     default `None`): the OPF digest-mode seam, mirroring
@@ -411,6 +514,24 @@ def run_critic_pass(
                     None if attempt_diagnostic_write is None else schema_errors.append
                 ),
             )
+            if is_valid:
+                # Issue #137: two cross-response checks the JSON Schema cannot
+                # make. Each failure is treated exactly like a validator
+                # rejection -- same `last_error` -> `correction` -> retry path
+                # below -- so the critic gets one informed retry and the
+                # terminal classification is unchanged.
+                post_validation_rejection = critic_delta_rejection(
+                    primary_output,
+                    parsed_or_error,
+                    pp.load_output_schema(output_schema_path),
+                )
+                if post_validation_rejection is None:
+                    post_validation_rejection = pp._reject_block_transcript(
+                        parsed_or_error, block_map
+                    )
+                if post_validation_rejection is not None:
+                    is_valid = False
+                    parsed_or_error = post_validation_rejection
             if is_valid:
                 # Issue #293 scope item 6: same post-validation
                 # replacement-text enforcement as the primary pass, reusing

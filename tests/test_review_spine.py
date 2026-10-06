@@ -335,6 +335,25 @@ def _primary_request_change_response_with_transcript(docx_bytes: bytes) -> str:
     )
 
 
+def _keep_i1_critic_delta() -> dict:
+    """The disposition every critic owes the primary's one issue (`I1`) under
+    ADR 0001 / issue #137: KEEP, no overrides. A critic that has nothing to
+    change still has to SAY it kept the issue -- silence is a schema failure
+    (`critic_review_pass.critic_delta_rejection`). Lenient on an ACCEPT
+    primary, which has no `I1`: a disposition for an issue nobody raised is
+    ignored, not rejected."""
+    return {
+        "dispositions": [
+            {
+                "issue_id": "I1",
+                "disposition": "KEEP",
+                "reason": "Same issue and the same edit; compliant with the playbook position.",
+            }
+        ],
+        "overrides": [],
+    }
+
+
 def _critic_no_delta_response() -> str:
     return json.dumps(
         {
@@ -345,7 +364,7 @@ def _critic_no_delta_response() -> str:
             "issues": [],
             "block_patches": [],
             "block_ops": [],
-            "critic_delta": None,
+            "critic_delta": _keep_i1_critic_delta(),
             "verdict_summary": None,
         }
     )
@@ -446,7 +465,15 @@ def _critic_no_delta_response_schema_enforced() -> str:
             "issues": [],
             "block_patches": [],
             "block_ops": [],
-            "critic_delta": None,
+            # A strict-mode provider must emit EVERY property of an object it
+            # emits at all (`_force_all_properties_required_in_place`), so the
+            # three deprecated arrays ride along empty.
+            "critic_delta": {
+                **_keep_i1_critic_delta(),
+                "added_issues": [],
+                "contested_replacements": [],
+                "rationale_objections": [],
+            },
             "verdict_summary": None,
         }
     )

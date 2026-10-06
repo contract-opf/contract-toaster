@@ -846,6 +846,8 @@ _CONTESTED_POINTER = "/definitions/CriticDelta/properties/contested_replacements
 _RATIONALE_OBJECTION_POINTER = (
     "/definitions/CriticDelta/properties/rationale_objections/items/properties"
 )
+_DISPOSITION_POINTER = "/definitions/CriticDelta/properties/dispositions/items/properties"
+_OVERRIDE_POINTER = "/definitions/CriticDelta/properties/overrides/items/properties"
 
 # Field label -> JSON pointer, for the budgets stated in the OUTPUT CONTRACT
 # block both passes are sent. Order is the order they are rendered in.
@@ -879,6 +881,12 @@ _CRITIC_LENGTH_BUDGETS: tuple[tuple[str, str], ...] = (
     ("primary_replacement_text", f"{_CONTESTED_POINTER}/primary_replacement_text"),
     ("section_ref", f"{_CONTESTED_POINTER}/section_ref"),
     ("section_ref", f"{_RATIONALE_OBJECTION_POINTER}/section_ref"),
+    # Issue #137: the critic's own audit fields. The two `reason`s carry the
+    # same cap, so `_render_budget_lines` states it once.
+    ("reason", f"{_DISPOSITION_POINTER}/reason"),
+    ("reason", f"{_OVERRIDE_POINTER}/reason"),
+    ("primary_value", f"{_OVERRIDE_POINTER}/primary_value"),
+    ("critic_value", f"{_OVERRIDE_POINTER}/critic_value"),
 )
 
 # Pointer -> why this cap is deliberately NOT stated to the model.
@@ -1001,9 +1009,9 @@ def render_critic_length_budget_block(schema: dict[str, Any] | None = None) -> s
         "LENGTH BUDGETS FOR YOUR OWN FIELDS -- every one of these is "
         "enforced:\n"
         + _render_budget_lines(_CRITIC_LENGTH_BUDGETS, active)
-        + "Any issue you add in \"critic_delta\".\"added_issues\" carries the "
-        "SAME per-field budgets the OUTPUT CONTRACT block states for an "
-        "issue.\n"
+        + "Any issue you add in \"critic_delta\".\"added_issues\", and every "
+        "issue in your own \"issues\", carries the SAME per-field budgets "
+        "the OUTPUT CONTRACT block states for an issue.\n"
         + _LENGTH_BUDGET_CEILING_RULE
     )
 
@@ -1198,7 +1206,18 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
 
 
 # ---------------------------------------------------------------------------
-# Critic tasking (issue #618; contract-gated since issue #637).
+# Critic tasking (issue #618; contract-gated since issue #637; reframed by
+# issue #137).
+#
+# ISSUE #137 / ADR 0001 REFRAMED THE ROLE. The critic is no longer the
+# "adversarial second reader" whose output is a sidecar of objections: it is
+# the SENIOR reviewer with the last word, and its response is the final
+# review. The prose below this note still describes the #618 problem
+# (a critic with no document and no tasking) and the #637 contract gating,
+# both of which stand; where it says "adversarial second reader" read "senior
+# reviewer, whose re-review is adversarial". The four duties survive as the
+# re-review's checklist and still name the deprecated `critic_delta` arrays
+# the reconciler reads for one more release.
 #
 # THE OTHER HALF OF THE OUTPUT CONTRACT. This text is a USER-prompt block,
 # so the v3 cutover's anti-drift assertion -- which reads the assembled
@@ -1251,20 +1270,52 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
 # into the assembled prompt; only a live paid review shows the behavior.
 # ---------------------------------------------------------------------------
 _CRITIC_TASKING_ROLE_WITH_DOCUMENT = (
-    "YOUR ROLE ON THIS REVIEW: you are the adversarial second reader. "
-    "Another reviewer has already reviewed the counterparty document shown "
-    "to you below and produced the structured output shown to you below. "
-    "You are not repeating that review. Your job is to test it."
+    "YOUR ROLE ON THIS REVIEW: you are the SENIOR reviewer, and you have the "
+    "last word. Another reviewer has already reviewed the counterparty "
+    "document shown to you below and produced the structured output shown to "
+    "you below. Your response is the FINAL review of this document: what you "
+    "emit, not what the first reviewer emitted, is what the attorney "
+    "receives. You are neither repeating the first review nor polishing it. "
+    "Your job is an adversarial, sceptical re-review of it."
 )
 
 _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT = (
-    "YOUR ROLE ON THIS REVIEW: you are the adversarial second reader. "
-    "Another reviewer has already reviewed a counterparty document and "
-    "produced the structured output shown to you below. THE DOCUMENT "
+    "YOUR ROLE ON THIS REVIEW: you are the SENIOR reviewer, and you have the "
+    "last word. Another reviewer has already reviewed a counterparty document "
+    "and produced the structured output shown to you below. THE DOCUMENT "
     "ITSELF IS NOT SHOWN TO YOU ON THIS REVIEW: this prompt was composed "
     "without it, so the document text is not among the material you have. "
-    "You are not repeating that review. Your job is to test it on the "
-    "material you do have."
+    "You are neither repeating the first review nor polishing it. Your job is "
+    "an adversarial, sceptical re-review of it on the material you do have."
+)
+
+# The sceptical-review instruction (issue #137, ADR 0001). The critic is the
+# pass with the most information and, under the ADR, the last word -- which
+# makes ANCHORING the failure to design against: a critic shown the first
+# reviewer's answer first will tend to ratify it. So the instruction fixes an
+# ORDER (derive, then compare) and a BAR (override a wrong, weak or
+# non-compliant position, never reword a sound one). `tests/
+# test_critic_prompt_senior_reviewer.py` pins the phrase below by name.
+#
+# Two spellings, because the document is not always in the prompt (see the
+# note above the role paragraphs): the no-document variant re-derives from the
+# material the critic actually has rather than from a document it was not
+# shown. The playbook half, the order and the bar are identical.
+CRITIC_SCEPTICAL_INSTRUCTION = (
+    "SCEPTICAL RE-REVIEW. Do not start from the first reviewer's answer. "
+    "FIRST re-derive every issue yourself from the document and the "
+    "playbook, clause by clause, as though no one had reviewed it. ONLY THEN "
+    "compare your issues with the first reviewer's, and override wherever "
+    "the first reviewer is wrong, weak, or non-compliant with the playbook "
+    "or the pen rules. Override to correct, not to polish: rewording an "
+    "issue or an edit without changing what the clause says or asks is not "
+    "an override. Where the first reviewer is right, keep its issue and its "
+    "edit exactly as they are."
+)
+
+CRITIC_SCEPTICAL_INSTRUCTION_NO_DOCUMENT = CRITIC_SCEPTICAL_INSTRUCTION.replace(
+    "from the document and the playbook",
+    "from the material shown to you and the playbook",
 )
 
 # Duties 1-3 do not depend on the output contract: they are about the first
@@ -1327,12 +1378,39 @@ _CRITIC_TASKING_DUTY_4_V3 = (
     "\"critic_delta\".\"contested_replacements\", naming that issue's "
     "\"section_ref\" and putting the wording you are contesting -- read off "
     "the \"insert\" segments and inserted blocks carrying its \"issue_key\" "
-    "-- in \"primary_replacement_text\". Never silently rewrite the first "
-    "reviewer's edit; contest it and let the reconciler decide."
+    "-- in \"primary_replacement_text\". Then write the wording you would "
+    "put in its place as your own edit in YOUR \"block_patches\" / "
+    "\"block_ops\", and record the change in \"critic_delta\".\"overrides\" "
+    "-- never swap the first reviewer's edit out without leaving that "
+    "record."
 )
 
 
-def _critic_tasking_duties() -> str:
+# Issue #137 independent review: duty 4's last sentence tells the critic to
+# author its own edit in "block_patches" / "block_ops". Without the document
+# it cannot see a block id, and the no-document final-result variant tells it
+# to leave both arrays EMPTY -- so the no-document prompt must not carry that
+# sentence. Same assert-and-replace discipline as the final-result variant.
+_CRITIC_DUTY_4_EDIT_SENTENCE = (
+    "Then write the wording you would "
+    "put in its place as your own edit in YOUR \"block_patches\" / "
+    "\"block_ops\", and record the change in \"critic_delta\".\"overrides\" "
+    "-- never swap the first reviewer's edit out without leaving that "
+    "record."
+)
+if _CRITIC_DUTY_4_EDIT_SENTENCE not in _CRITIC_TASKING_DUTY_4_V3:
+    raise RuntimeError(
+        "duty 4's no-document variant replaces a sentence that is no longer in "
+        "the document-bearing text; update both together"
+    )
+_CRITIC_TASKING_DUTY_4_V3_NO_DOCUMENT = _CRITIC_TASKING_DUTY_4_V3.replace(
+    _CRITIC_DUTY_4_EDIT_SENTENCE,
+    "Then put the wording you would use in its place in "
+    "\"critic_delta\".\"overrides\".",
+)
+
+
+def _critic_tasking_duties(*, with_document: bool = True) -> str:
     """The critic's four duties, worded for the ACTIVE output contract.
 
     Gated on `authors_block_transcripts(load_output_schema())` -- the SAME
@@ -1346,12 +1424,117 @@ def _critic_tasking_duties() -> str:
     at IMPORT time, before `authors_block_transcripts` further down this file
     is bound. Both names are the same implementation.
     """
-    duty_4 = (
-        _CRITIC_TASKING_DUTY_4_V3
-        if _mos.authors_block_transcripts(load_output_schema())
-        else _CRITIC_TASKING_DUTY_4_V2
-    )
+    if _mos.authors_block_transcripts(load_output_schema()):
+        duty_4 = (
+            _CRITIC_TASKING_DUTY_4_V3
+            if with_document
+            else _CRITIC_TASKING_DUTY_4_V3_NO_DOCUMENT
+        )
+    else:
+        duty_4 = _CRITIC_TASKING_DUTY_4_V2
     return _CRITIC_TASKING_DUTIES_1_TO_3 + duty_4
+
+# What the four duties are FOR, under the v3 contract (issue #137). They used
+# to be the critic's whole output; they are now the checklist for the
+# re-review, and each finding still goes in the DEPRECATED `critic_delta`
+# array the duty names because `reconciliation.reconcile` reads those arrays
+# until the reconcile ticket makes the critic's own result the final one.
+#
+# Recording a missed issue twice (once in the critic's own `issues`, once in
+# `added_issues`) is exactly the shape `_duplicate_issue_key_error` rejects
+# when the two copies share a key -- that check spans BOTH arrays -- so the
+# critic is told up front, rather than learning it from a paid retry.
+_CRITIC_TASKING_DUTIES_INTRO_V3 = (
+    "WHAT THE RE-REVIEW MUST CATCH. The four things below are the ways a "
+    "first review goes wrong. Fix each one in YOUR OWN final result, and ALSO "
+    "record it in the deprecated \"critic_delta\" array each names (the "
+    "reconciler still reads those arrays for this release). Every issue_key "
+    "is unique across your WHOLE response: an issue you list in "
+    "\"critic_delta\".\"added_issues\" takes a key that none of your own "
+    "\"issues\" uses, even when it is the same finding, and a repeated key "
+    "is rejected:"
+)
+
+_CRITIC_INTRO_FIX_CLAUSE = "Fix each one in YOUR OWN final result, and ALSO record it"
+if _CRITIC_INTRO_FIX_CLAUSE not in _CRITIC_TASKING_DUTIES_INTRO_V3:
+    raise RuntimeError(
+        "the duties intro's no-document variant replaces a clause that is no "
+        "longer in the document-bearing text; update both together"
+    )
+_CRITIC_TASKING_DUTIES_INTRO_V3_NO_DOCUMENT = _CRITIC_TASKING_DUTIES_INTRO_V3.replace(
+    _CRITIC_INTRO_FIX_CLAUSE, "Record each one"
+)
+
+# The final-result contract (issue #137, ADR 0001). v3 only: it speaks in
+# block transcripts, and a v1/v2 artifact has none.
+#
+# Three things it must say, because the shared OUTPUT CONTRACT block says the
+# opposite and cannot be changed (it is byte-identical across both passes, and
+# naming a critic-only key there would invite the PRIMARY pass to emit it --
+# see `_CRITIC_LENGTH_BUDGETS`): that the critic's response carries ONE more
+# top-level key than that block lists; that its edits are anchored to the
+# SAME block ids the document shows; and that `issue_id` in `critic_delta`
+# always names the FIRST REVIEWER's key, never one of the critic's own.
+_CRITIC_TASKING_FINAL_RESULT_V3 = (
+    "YOUR RESPONSE IS THE FINAL RESULT. It carries everything the first "
+    "reviewer's did, written the same way the OUTPUT CONTRACT above "
+    "describes: your own \"decision\", \"confidence_state\", \"issues\" "
+    "(your final list, numbered from \"I1\" in YOUR response), "
+    "\"block_patches\", \"block_ops\" and \"verdict_summary\". Your edits "
+    "are anchored to the SAME block ids the document shows and are checked "
+    "against the document's real characters exactly as the first reviewer's "
+    "were. Every edit names the issue_key of one of YOUR issues. Write out "
+    "each edit you stand behind yourself, including one you agree with: "
+    "never leave an edit to be inferred from the first reviewer's output.\n\n"
+    "Your response carries ONE top-level key beyond the ones the OUTPUT "
+    "CONTRACT lists: \"critic_delta\", an object that is yours alone. It "
+    "records how your result differs from the first reviewer's. In it, "
+    "\"issue_id\" ALWAYS names the FIRST REVIEWER's issue_key as it appears "
+    "in the first reviewer's output, never a key from your own issues.\n"
+    "- \"dispositions\": one entry for EVERY issue the first reviewer "
+    "raised, with no exceptions: {\"issue_id\", \"disposition\", "
+    "\"reason\"}. \"disposition\" is \"KEEP\" (you reach the same issue "
+    "and the same edit), \"REVISE\" (the same issue, but you changed its "
+    "replacement text, rationale or decision) or \"DROP\" (you do not stand "
+    "behind it). \"reason\" is one line. A response that leaves any first-"
+    "reviewer issue without a disposition is rejected.\n"
+    "- \"overrides\": one entry for each respect in which you changed a "
+    "first-reviewer issue: {\"issue_id\", \"field\", \"primary_value\", "
+    "\"critic_value\", \"reason\"}. \"field\" is exactly one of "
+    "\"replacement_text\" (the wording its edit produces), \"rationale\" "
+    "or \"decision\" (record a DROP as a change of decision). "
+    "\"primary_value\" is what the first reviewer had, read off its output; "
+    "\"critic_value\" is yours. Every REVISE and every DROP needs one. "
+    "An empty array means you changed nothing."
+)
+
+
+# Without the document the critic cannot see a single block id, so it cannot
+# author an edit the transcript proof would accept: it is told to say so in
+# its overrides instead of inventing addresses. Derived from the document-
+# bearing text by replacing exactly the one edit-authoring passage, with an
+# assertion that the passage was found -- so a rewording of the parent cannot
+# leave this variant quietly telling the critic to author edits it cannot
+# address.
+_CRITIC_FINAL_RESULT_EDIT_PASSAGE = (
+    "Your edits are anchored to the SAME block ids the document shows and are "
+    "checked against the document's real characters exactly as the first "
+    "reviewer's were. Every edit names the issue_key of one of YOUR issues. "
+    "Write out each edit you stand behind yourself, including one you agree "
+    "with: never leave an edit to be inferred from the first reviewer's "
+    "output."
+)
+if _CRITIC_FINAL_RESULT_EDIT_PASSAGE not in _CRITIC_TASKING_FINAL_RESULT_V3:
+    raise RuntimeError(
+        "the critic's no-document final-result variant replaces a passage that is "
+        "no longer in the document-bearing text; update both together"
+    )
+_CRITIC_TASKING_FINAL_RESULT_V3_NO_DOCUMENT = _CRITIC_TASKING_FINAL_RESULT_V3.replace(
+    _CRITIC_FINAL_RESULT_EDIT_PASSAGE,
+    "You were not shown the document, so you cannot see its block ids: leave "
+    "\"block_patches\" and \"block_ops\" empty, and put the wording you "
+    "would change in \"critic_delta\".\"overrides\" instead.",
+)
 
 _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT = (
     "EVIDENCE BEFORE CONCLUSION. For every objection you raise, quote the "
@@ -1438,9 +1621,11 @@ def _critic_tasking_evidence_without_document() -> str:
 _CRITIC_TASKING_NO_MINIMUM = (
     "THERE IS NO MINIMUM NUMBER OF FINDINGS. Zero is a legitimate result. "
     "If the first reviewer's work is sound, say so and return an empty "
-    "critique -- that is the CORRECT output, not a failure to do your job. "
-    "Do not invent an objection, split one objection into several, or "
-    "downgrade a sound issue in order to have something to report."
+    "critique -- that is the CORRECT output, not a failure to do your job: "
+    "keep its issues and edits, give each a KEEP disposition, and report no "
+    "overrides. Do not invent an objection, split one objection into "
+    "several, or downgrade a sound issue in order to have something to "
+    "report."
 )
 
 def render_critic_tasking_block(*, with_document: bool) -> str:
@@ -1467,12 +1652,34 @@ def render_critic_tasking_block(*, with_document: bool) -> str:
     Read off the active artifact by the same seam duty 4 uses, so a schema
     edit moves the number in both halves of this prompt at once.
     """
-    return "\n\n".join(
-        (
-            _CRITIC_TASKING_ROLE_WITH_DOCUMENT
+    # Issue #137: the senior-reviewer framing, the sceptical-review
+    # instruction and (v3 only) the final-result contract. The v1/v2 spelling
+    # keeps the original four-duties-and-no-minimum shape, with the new role
+    # and instruction in front of it, because a v1/v2 artifact has no
+    # transcript carriers and no `critic_delta.dispositions`/`overrides`.
+    block_transcripts = _mos.authors_block_transcripts(load_output_schema())
+    parts = [
+        _CRITIC_TASKING_ROLE_WITH_DOCUMENT
+        if with_document
+        else _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT,
+        CRITIC_SCEPTICAL_INSTRUCTION
+        if with_document
+        else CRITIC_SCEPTICAL_INSTRUCTION_NO_DOCUMENT,
+    ]
+    if block_transcripts:
+        parts.append(
+            _CRITIC_TASKING_FINAL_RESULT_V3
             if with_document
-            else _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT,
-            _critic_tasking_duties(),
+            else _CRITIC_TASKING_FINAL_RESULT_V3_NO_DOCUMENT
+        )
+        parts.append(
+            _CRITIC_TASKING_DUTIES_INTRO_V3
+            if with_document
+            else _CRITIC_TASKING_DUTIES_INTRO_V3_NO_DOCUMENT
+        )
+    parts.extend(
+        (
+            _critic_tasking_duties(with_document=with_document),
             _CRITIC_TASKING_EVIDENCE_WITH_DOCUMENT
             if with_document
             else _critic_tasking_evidence_without_document(),
@@ -1480,6 +1687,7 @@ def render_critic_tasking_block(*, with_document: bool) -> str:
             render_critic_length_budget_block(),
         )
     )
+    return "\n\n".join(parts)
 
 
 # Emitted when the critic prompt carries a `COUNTERPARTY_DOCUMENT` block.

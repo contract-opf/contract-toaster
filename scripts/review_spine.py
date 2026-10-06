@@ -1260,6 +1260,9 @@ def run_review(
         markup_intensity=markup_intensity,
         review_id=review_id,
         doc_text=doc_text,
+        # Issue #137: the SAME block map the primary was proven against, so
+        # the critic's own transcript is anchored to identical block ids.
+        block_map=block_map,
         primary_output=primary_result["response"],
         playbook=playbook,
         model_client=model_client,

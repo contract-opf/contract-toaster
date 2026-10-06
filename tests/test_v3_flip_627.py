@@ -476,8 +476,11 @@ def test_no_v2_field_instruction_survives_in_the_critic_user_prompt(
                 "the output channel a contested edit is reported in, kept from v2",
             ),
             (
-                "Never silently rewrite",
-                "the rule that keeps the critic from overwriting the primary's edit",
+                "overrides",
+                "the record the critic leaves when it replaces the first reviewer's edit "
+                "(ADR 0001 reversed v2's 'never silently rewrite': the critic now has "
+                "the last word, and the rule that survives is that it never changes an "
+                "edit without recording the change)",
             ),
         ):
             if needle not in tasking:
@@ -1079,7 +1082,19 @@ def _critic_accept() -> str:
             "issues": [],
             "block_patches": [],
             "block_ops": [],
-            "critic_delta": None,
+            "critic_delta": {
+                "dispositions": [
+                    {
+                        "issue_id": key,
+                        "disposition": "KEEP",
+                        "reason": "Same issue and the same edit.",
+                    }
+                    # Issue #137: the primary raised I1-I3, and a critic owes
+                    # a disposition for every one of them.
+                    for key in ("I1", "I2", "I3")
+                ],
+                "overrides": [],
+            },
         }
     )
 
@@ -1332,6 +1347,17 @@ def _critic_adds_colliding_issue() -> str:
             "block_patches": [],
             "block_ops": [],
             "critic_delta": {
+                "dispositions": [
+                    {
+                        "issue_id": key,
+                        "disposition": "KEEP",
+                        "reason": "Same issue and the same edit.",
+                    }
+                    # Issue #137: the primary raised I1-I3, and a critic owes
+                    # a disposition for every one of them.
+                    for key in ("I1", "I2", "I3")
+                ],
+                "overrides": [],
                 "added_issues": [
                     {
                         "issue_key": "I1",

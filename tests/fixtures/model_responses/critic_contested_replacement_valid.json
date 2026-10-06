@@ -7,6 +7,22 @@
   "block_patches": [],
   "block_ops": [],
   "critic_delta": {
+    "dispositions": [
+      {
+        "issue_id": "I1",
+        "disposition": "REVISE",
+        "reason": "Same issue; the replacement drops the gross-negligence carve-out the playbook requires."
+      }
+    ],
+    "overrides": [
+      {
+        "issue_id": "I1",
+        "field": "replacement_text",
+        "primary_value": "Each party's aggregate liability under this Agreement shall not exceed $150,000.",
+        "critic_value": "Each party's aggregate liability under this Agreement shall not exceed $150,000, except in cases of gross negligence or willful misconduct.",
+        "reason": "The cap must carry the mutual gross-negligence carve-out."
+      }
+    ],
     "added_issues": [],
     "contested_replacements": [
       {

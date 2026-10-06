@@ -330,7 +330,7 @@ class TestOwnWordsRuleReachesTheModel(unittest.TestCase):
         against the same corpus. It reads the same assembled system blocks, so
         the rule must arrive there too."""
         client = model_client.FakeBedrockClient(
-            {CRITIC_MODEL_ID: [_load_fixture_text("critic_no_delta_accept_valid.json")]}
+            {CRITIC_MODEL_ID: [_load_fixture_text("critic_keep_i1_accept_valid.json")]}
         )
         ledger: list[model_client.ModelInvocationRecord] = []
         critic_review_pass.run_critic_pass(

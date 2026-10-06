@@ -167,7 +167,7 @@ def _schema_invalid_primary_body() -> str:
 
 
 def _schema_invalid_critic_body() -> str:
-    body = json.loads(_fixture("critic_no_delta_accept_valid.json"))
+    body = json.loads(_fixture("critic_keep_i1_accept_valid.json"))
     body["confidence_state"] = "medium"
     return json.dumps(body)
 
