@@ -8,7 +8,8 @@ a ```json fence, and `floor_judge._validate_judge_response` handed the raw
 text straight to `json.loads`. The review passes already unwrap a fence or a
 prose preamble with `primary_review_pass._extract_json_object`; the judge now
 does too. Unwrapping is not repair: a malformed body inside the fence, or a
-response with no object at all, is still refused.
+response with no object at all, is still refused, and so is
+anything after the object other than its closing fence.
 
 Run with: python3 tests/test_floor_judge_fenced_verdict.py
 Exit codes: 0 = pass, 1 = fail
@@ -49,6 +50,10 @@ def main() -> int:
     check(failures, "malformed body inside a fence", '```json\n{"invariant_id": "inv-synthetic-1", "violated": tru}\n```', False)
     check(failures, "fenced verdict for the wrong invariant", "```json\n" + VERDICT.replace(INV, "other") + "\n```", False)
     check(failures, "no object at all", "I cannot judge this.", False)
+    # A judge that retracts its verdict must not pass as its first answer.
+    retracted = VERDICT.replace("true", "false")
+    check(failures, "verdict then a correcting object", f"{retracted} Correction: {VERDICT}", False)
+    check(failures, "fenced verdict then retracting prose", f"```json\n{retracted}\n```\nOn reflection this IS violated.", False)
     check(failures, "non-string response", None, False)
     if failures:
         print("\n".join(failures))
