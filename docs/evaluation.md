@@ -67,8 +67,12 @@ The estimate assumes about 135K input and 15K output tokens across both passes. 
 OPENROUTER_API_KEY="$(security find-generic-password -s openrouter-api-key -w)" \
 OPENROUTER_PRIMARY_MODEL_ID=anthropic/claude-haiku-4.5 \
 OPENROUTER_CRITIC_MODEL_ID=anthropic/claude-haiku-4.5 \
-python3 scripts/live_smoke_eval.py DOCS_DIR --out report.json --yes
+python3 scripts/live_smoke_eval.py DOCS_DIR --structured-output on --out report.json --yes
 ```
+
+`--structured-output on` is required. The script defaults to the A/B `off` arm, and both test-tier models declare `structured_outputs: false`, so with the flag off they would run the unconstrained prose-JSON path rather than the forced tool call production sends.
+
+Haiku 4.5's 200K window leaves almost no headroom over what the size gate admits: about 163K real input tokens at the 175,000-token cap, plus a 36,000-token request ceiling (32,000 output and 4,000 reasoning). A document near the cap can fail on Haiku with `model_context_length_exceeded` where the production models would not. Keep test-tier documents well under the cap, or use Luna (1M window) for a large one.
 
 Check the account's remaining credit first (`GET https://openrouter.ai/api/v1/credits`). The report holds status, attempts, tokens and cost only, never document text.
 
