@@ -124,10 +124,21 @@ def _issue_key_sort(key: str) -> tuple[int, str]:
     return (len(key), key)
 
 
+#: `ModelInvocationRecord.schema_error_location` tokens for
+#: `critic_delta_rejection`'s three cross-response checks (issue #157). They
+#: are not jsonschema failures, so there is no schema path to record; each is
+#: a fixed name for the check that fired, never the issue keys it found.
+CRITIC_DELTA_DISPOSITION_MISSING = "critic_delta_disposition_missing"
+CRITIC_DELTA_DISPOSITION_REPEATED = "critic_delta_disposition_repeated"
+CRITIC_DELTA_KEPT_WITHOUT_COUNTERPART = "critic_delta_kept_without_counterpart"
+
+
 def critic_delta_rejection(
     primary_output: dict[str, Any],
     response: dict[str, Any],
     schema: dict[str, Any],
+    *,
+    location_sink: Callable[[str], None] | None = None,
 ) -> str | None:
     """`"schema_invalid: <detail>"` when the critic's `critic_delta` does not
     account for the first reviewer's issues, else `None` (issue #137, ADR 0001
@@ -172,6 +183,11 @@ def critic_delta_rejection(
     A no-op on an artifact whose `CriticDelta` defines no `dispositions` (the
     superseded v1/v2 contracts), and when the first reviewer raised no issue
     (an ACCEPT: nothing to dispose of, and a `null` critic_delta is fine).
+
+    `location_sink` (issue #157, default `None`): on a rejection, called once
+    with the fixed `CRITIC_DELTA_*` token(s) of the check(s) that fired,
+    joined with ";" in the same order as the message -- the ledger's
+    `schema_error_location` for this attempt. Never an interpolated key.
     """
     critic_delta_def = (schema.get("definitions") or {}).get("CriticDelta") or {}
     if "dispositions" not in (critic_delta_def.get("properties") or {}):
@@ -186,6 +202,7 @@ def critic_delta_rejection(
     disposed = [d.get("issue_id") for d in dispositions]
 
     problems: list[str] = []
+    checks: list[str] = []
     missing = sorted(reviewer_keys - set(disposed), key=_issue_key_sort)
     if missing:
         problems.append(
@@ -193,6 +210,7 @@ def critic_delta_rejection(
             f"issue(s) {', '.join(missing)} -- every first-reviewer issue needs "
             "exactly one (KEEP, REVISE or DROP)"
         )
+        checks.append(CRITIC_DELTA_DISPOSITION_MISSING)
     repeated = sorted(
         {key for key in disposed if key in reviewer_keys and disposed.count(key) > 1},
         key=_issue_key_sort,
@@ -202,6 +220,7 @@ def critic_delta_rejection(
             "critic_delta.dispositions disposes of issue_id(s) "
             f"{', '.join(repeated)} more than once"
         )
+        checks.append(CRITIC_DELTA_DISPOSITION_REPEATED)
     # Issue #138: a KEEP or REVISE says the critic stands behind the issue,
     # and its own `issues` ARE the final review -- so an issue kept there but
     # absent here would be silently dropped under a "same issue" reason. The
@@ -219,8 +238,11 @@ def critic_delta_rejection(
             "your issues with the same playbook_topic_id; one you do not stand "
             "behind is a DROP"
         )
+        checks.append(CRITIC_DELTA_KEPT_WITHOUT_COUNTERPART)
     if not problems:
         return None
+    if location_sink is not None:
+        location_sink(";".join(checks))
     return "schema_invalid: " + "; ".join(problems)
 
 
@@ -497,6 +519,10 @@ def run_critic_pass(
         # Issue #643: same per-attempt schema-rejection box as
         # run_primary_pass -- see that function's identical comment.
         schema_errors: list[dict[str, Any]] = []
+        # Issue #157: same per-attempt schema-LOCATION box as
+        # run_primary_pass, fed by both the validator and this pass's own
+        # `critic_delta_rejection` -- see that function's identical comment.
+        schema_locations: list[str] = []
         # Issue #414: same timing seam as run_primary_pass -- see that
         # function's identical comment.
         attempt_started_monotonic = time.monotonic()
@@ -535,6 +561,7 @@ def run_critic_pass(
                 schema_error_sink=(
                     None if attempt_diagnostic_write is None else schema_errors.append
                 ),
+                schema_location_sink=schema_locations.append,
             )
             if is_valid:
                 # Issue #137: two cross-response checks the JSON Schema cannot
@@ -546,6 +573,7 @@ def run_critic_pass(
                     primary_output,
                     parsed_or_error,
                     pp.load_output_schema(output_schema_path),
+                    location_sink=schema_locations.append,
                 )
                 if post_validation_rejection is None:
                     post_validation_rejection = pp._reject_block_transcript(
@@ -696,6 +724,11 @@ def run_critic_pass(
                     # attempt's own error, never a stale earlier one" guard
                     # as run_primary_pass.
                     error_token=("" if outcome == "success" else pp._error_token(last_error)),
+                    # Issue #157: same seam as run_primary_pass.
+                    retry_reason=pp.attempt_retry_reason(outcome, last_error),
+                    schema_error_location=pp.ledgered_schema_error_location(
+                        outcome, last_error, schema_locations
+                    ),
                 )
             )
             # Issue #643: same DEBUG-ONLY companion to the ledger write as

@@ -796,6 +796,31 @@ class ModelInvocationRecord:
     # elsewhere in this chain (#81/#82/#204/#414/#514/#567/#568/#573) is
     # unaffected.
     reasoning_tokens: int | None = None
+    # Issue #157 -- WHY this attempt was retried, as the same closed-
+    # vocabulary token `error_token` carries: equal to `error_token` when
+    # `outcome == "retry"`, and "" otherwise -- on a success (nothing failed)
+    # and on a terminal "failure" row (which already carries `error_token`
+    # and was, by definition, not retried). A reader summing a pass's retry
+    # causes filters on this one field instead of re-deriving "was this row a
+    # retry" from `outcome`. Same METADATA-ONLY standing as `error_token`.
+    retry_reason: str = ""
+    # Issue #157 -- WHERE in the output contract a `schema_invalid` attempt
+    # failed, built PURELY from the SCHEMA side of the rejection: the
+    # jsonschema error's `absolute_schema_path` joined with "/" (which ends
+    # in the rejecting validator keyword), e.g.
+    # "properties/issues/items/properties/disposition/enum". That path is a
+    # walk through the schema DOCUMENT, so it can never echo model output --
+    # unlike the INSTANCE path (`exc.absolute_path`), which can carry a
+    # model-chosen key and is therefore deliberately never used here. A
+    # schema_invalid rejection that is not a jsonschema failure records a
+    # fixed token naming the check instead ("issue_key_uniqueness", or the
+    # critic's `critic_delta_*` cross-response checks), never interpolated
+    # values. "" on every attempt whose `error_token` is not
+    # "schema_invalid". Before this, a live run (2026-10-06) ledgered the
+    # reviewer's first attempt as `schema_invalid` and nothing else, so the
+    # retry could not be diagnosed without the opt-in diagnostic dump
+    # (#643/#669), which carries instance values and so never reaches here.
+    schema_error_location: str = ""
 
 
 # ---------------------------------------------------------------------------

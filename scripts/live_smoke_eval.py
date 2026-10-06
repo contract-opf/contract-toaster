@@ -85,6 +85,17 @@ model SUBSTANCE, and therefore live under `--dump-dir` and NOWHERE else --
 per-attempt list stays OUT of the default report, same as every other
 substance the dump captures.
 
+Issue #157 adds the one per-attempt view that IS shareable: each report row
+carries `attempt_accounting` -- pass, attempt number, ledgered outcome,
+`retry_reason` and `schema_error_location` for every reviewer/critic attempt
+(`attempt_accounting`, below) -- and each mode's aggregate carries
+`retry_reason_counts`. Both fields are METADATA-ONLY by construction on
+`model_client.ModelInvocationRecord` (a closed-vocabulary token, and a path
+through the SCHEMA document or a fixed check name), so a live run's default
+report now says why a pass retried and where its schema failed, without
+`--dump-dir`. The 2026-10-06 run that motivated it retried both passes and
+could name neither cause from its report.
+
 ## How the pieces are wired
 
   - Client: `backend/src/pipeline_runner.py::_build_openrouter_client` --
@@ -281,6 +292,31 @@ def pass_attempt_counts(records: list[Any]) -> dict[str, int]:
     return counts
 
 
+def attempt_accounting(records: list[Any]) -> list[dict[str, Any]]:
+    """Per-attempt accounting for the DEFAULT report (issue #157): one entry
+    per reviewer/critic attempt, in ledger order, carrying only fields that
+    are METADATA-ONLY on `ModelInvocationRecord` -- `outcome`,
+    `retry_reason` (a closed-vocabulary token, "" unless the attempt was
+    retried) and `schema_error_location` (a schema-document path or a fixed
+    check name, "" unless the attempt was `schema_invalid`). Deliberately
+    NOT the attempt's error message or the #643 `schema_error` diagnostic
+    (instance path and offending value) -- those stay in `--dump-dir`, as
+    does `error_token`, which Part 9 of the offline test keeps out of the
+    default report. `floor` records
+    are skipped, matching `pass_attempt_counts`."""
+    return [
+        {
+            "pass_name": record.pass_name,
+            "attempt_number": record.attempt_number,
+            "outcome": record.outcome,
+            "retry_reason": record.retry_reason,
+            "schema_error_location": record.schema_error_location,
+        }
+        for record in records
+        if record.pass_name in ("primary", "critic")
+    ]
+
+
 def compute_actual_usd_from_usage(
     primary_usage: dict[str, int], critic_usage: dict[str, int]
 ) -> float:
@@ -444,6 +480,9 @@ def run_one(
         "summary": result.get("summary"),
         "primary_attempts": attempts["primary"],
         "critic_attempts": attempts["critic"],
+        # Issue #157: why each attempt retried and where its schema failed --
+        # metadata-only, see `attempt_accounting`.
+        "attempt_accounting": attempt_accounting(records),
         "primary_input_tokens": primary_usage["input_tokens"],
         "primary_output_tokens": primary_usage["output_tokens"],
         "critic_input_tokens": critic_usage["input_tokens"],
@@ -508,6 +547,16 @@ def aggregate_rows(rows: list[dict[str, Any]], modes: tuple[str, ...]) -> dict[s
             ),
             "validation_outcome_counts": dict(
                 Counter(r["validation_outcome"] for r in mode_rows)
+            ),
+            # Issue #157: "{pass}:{retry_reason}" -> how many attempts of
+            # this mode retried for that reason, across every run.
+            "retry_reason_counts": dict(
+                Counter(
+                    f"{a['pass_name']}:{a['retry_reason']}"
+                    for r in mode_rows
+                    for a in r.get("attempt_accounting", [])
+                    if a["retry_reason"]
+                )
             ),
             "total_tokens": _stats([float(r["total_tokens"]) for r in mode_rows]),
             "cost_usd": _stats([r["cost_usd"] for r in mode_rows]),
@@ -776,6 +825,8 @@ def main(
                                 "attempt_number": record.attempt_number,
                                 "outcome": record.outcome,
                                 "error_token": record.error_token,
+                                "retry_reason": record.retry_reason,
+                                "schema_error_location": record.schema_error_location,
                                 "replacement_text_failures": record.replacement_text_failures,
                             }
                             diagnostic = diagnostic_by_attempt.get(
