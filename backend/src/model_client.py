@@ -808,7 +808,10 @@ class ModelInvocationRecord:
     # failed, built PURELY from the SCHEMA side of the rejection: the
     # jsonschema error's `absolute_schema_path` joined with "/" (which ends
     # in the rejecting validator keyword), e.g.
-    # "properties/issues/items/properties/disposition/enum". That path is a
+    # "properties/issues/items/properties/disposition/enum". A `required`
+    # rejection alone appends the missing name(s) from the schema's own
+    # `required` list after a ":" (e.g. "properties/issues/items/
+    # required:disposition", several joined with ","). That path is a
     # walk through the schema DOCUMENT, so it can never echo model output --
     # unlike the INSTANCE path (`exc.absolute_path`), which can carry a
     # model-chosen key and is therefore deliberately never used here. A

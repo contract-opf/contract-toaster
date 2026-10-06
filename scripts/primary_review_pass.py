@@ -3672,12 +3672,30 @@ def schema_error_location(exc: "jsonschema.ValidationError") -> str:  # noqa: UP
     keyword is appended only when the path does not already end in it
     (jsonschema's paths do, but a hand-built error might not), and the
     result is the bare keyword when the path is empty.
+
+    ONE keyword carries more: a `required` rejection appends the missing
+    property name(s) after a ":" (several joined with ","), e.g.
+    "properties/issues/items/required:disposition". Every name is drawn from
+    the SCHEMA's own `required` list (`exc.validator_value`) -- the instance
+    is consulted only to test membership, never read for a name -- so this
+    stays schema-side. Nothing comparable is done for any other keyword:
+    an `additionalProperties` offender is a model-chosen key, and an
+    `enum`/`const` offender is model output.
     """
     parts = [str(part) for part in exc.absolute_schema_path]
     validator = str(exc.validator)
     if not parts or parts[-1] != validator:
         parts.append(validator)
-    return "/".join(parts)
+    location = "/".join(parts)
+    if validator == "required" and isinstance(exc.validator_value, list):
+        missing = [
+            str(k)
+            for k in exc.validator_value
+            if isinstance(exc.instance, dict) and k not in exc.instance
+        ]
+        if missing:
+            location += ":" + ",".join(missing)
+    return location
 
 
 def attempt_retry_reason(outcome: str, last_error: Any) -> str:

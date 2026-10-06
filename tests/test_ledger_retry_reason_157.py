@@ -140,6 +140,19 @@ def _extra_key_with_sentinel() -> str:
     return json.dumps(response)
 
 
+def _missing_required_with_sentinel() -> str:
+    """A v3 REQUEST_CHANGE response whose issue omits two REQUIRED fields
+    (`section_title`, `playbook_topic_id`) while every field it does carry is sentinel-bearing model text -- a
+    nested `required` rejection over a sentinel-laden instance."""
+    response = _fixture_json("primary_request_change_valid.json")
+    issue = response["issues"][0]
+    del issue["playbook_topic_id"]
+    del issue["section_title"]
+    for key in ("counterparty_change_summary", "external_rationale_for_footnote", "section_ref"):
+        issue[key] = f"{SENTINEL} {key}"
+    return json.dumps(response)
+
+
 def _assert_no_sentinel(ledger: list[Any]) -> None:
     assert ledger, "expected at least one ledger row"
     for record in ledger:
@@ -166,7 +179,7 @@ def test_primary_schema_invalid_then_valid() -> None:
     assert first.error_token == "schema_invalid", first
     assert first.retry_reason == "schema_invalid", first
     # Missing top-level `issues`: the root `required` keyword.
-    assert first.schema_error_location == "required", first
+    assert first.schema_error_location == "required:issues", first
     assert second.outcome == "success", second
     assert second.retry_reason == "", second
     assert second.schema_error_location == "", second
@@ -182,6 +195,19 @@ def test_primary_enum_rejection_records_the_schema_path() -> None:
     assert ledger[0].retry_reason == "schema_invalid", ledger[0]
 
 
+def test_primary_required_rejection_names_the_missing_properties() -> None:
+    """A nested `required` failure appends the missing names, in the
+    schema's own `required` order, joined with ","."""
+    _result, ledger = _run_primary(
+        [_missing_required_with_sentinel(), _fixture("primary_request_change_valid.json")]
+    )
+    assert (
+        ledger[0].schema_error_location
+        == "properties/issues/items/required:section_title,playbook_topic_id"
+    ), ledger[0]
+    assert ledger[1].schema_error_location == "", ledger[1]
+
+
 def test_primary_terminal_failure_row_has_no_retry_reason() -> None:
     result, ledger = _run_primary(
         [
@@ -194,7 +220,7 @@ def test_primary_terminal_failure_row_has_no_retry_reason() -> None:
     assert ledger[0].retry_reason == "schema_invalid", ledger[0]
     assert ledger[1].retry_reason == "", ledger[1]
     assert ledger[1].error_token == "schema_invalid", ledger[1]
-    assert ledger[1].schema_error_location == "required", ledger[1]
+    assert ledger[1].schema_error_location == "required:issues", ledger[1]
 
 
 def test_primary_issue_key_uniqueness_records_the_fixed_token() -> None:
@@ -233,7 +259,7 @@ def test_critic_schema_invalid_then_valid() -> None:
     first, second = ledger
     assert first.outcome == "retry", first
     assert first.retry_reason == "schema_invalid", first
-    assert first.schema_error_location == "required", first
+    assert first.schema_error_location == "required:issues", first
     assert second.outcome == "success", second
     assert second.retry_reason == "", second
     assert second.schema_error_location == "", second
@@ -308,6 +334,25 @@ def test_primary_extra_key_never_reaches_the_ledger() -> None:
     _assert_no_sentinel(ledger)
 
 
+def test_required_rejection_over_a_sentinel_instance_never_leaks() -> None:
+    """The `required` suffix reads names from the schema, so a
+    sentinel-laden instance contributes nothing to the ledger -- on either
+    pass, retry and terminal rows alike."""
+    _result, primary_ledger = _run_primary(
+        [_missing_required_with_sentinel(), _missing_required_with_sentinel()]
+    )
+    _result, critic_ledger = _run_critic(
+        [_missing_required_with_sentinel(), _missing_required_with_sentinel()]
+    )
+    for ledger in (primary_ledger, critic_ledger):
+        assert [r.error_token for r in ledger] == ["schema_invalid"] * 2, ledger
+        assert all(
+            r.schema_error_location.endswith("required:section_title,playbook_topic_id")
+            for r in ledger
+        ), ledger
+        _assert_no_sentinel(ledger)
+
+
 def test_critic_offending_value_and_extra_key_never_reach_the_ledger() -> None:
     _result, ledger = _run_critic([_bad_enum_with_sentinel(), _extra_key_with_sentinel()])
     assert [r.error_token for r in ledger] == ["schema_invalid"] * 2, ledger
@@ -338,6 +383,25 @@ def test_pattern_properties_instance_key_is_never_read() -> None:
     assert SENTINEL not in location
 
 
+def test_required_suffix_names_come_from_the_schema_only() -> None:
+    schema = {"type": "object", "required": ["alpha", "beta", "gamma"]}
+    exc = _validation_error(schema, {"beta": 1, SENTINEL: f"{SENTINEL}_value"})
+    location = pp.schema_error_location(exc)
+    assert location == "required:alpha,gamma", location
+    assert SENTINEL not in location
+
+
+def test_no_suffix_for_additional_properties_enum_or_const() -> None:
+    cases = [
+        ({"type": "object", "additionalProperties": False}, {SENTINEL: 1}, "additionalProperties"),
+        ({"enum": ["A", "B"]}, SENTINEL, "enum"),
+        ({"const": "A"}, SENTINEL, "const"),
+    ]
+    for schema, instance, expected in cases:
+        location = pp.schema_error_location(_validation_error(schema, instance))
+        assert location == expected, (expected, location)
+
+
 def test_validator_keyword_is_appended_when_the_path_lacks_it() -> None:
     exc = jsonschema.ValidationError("msg", validator="enum", schema_path=[])
     assert pp.schema_error_location(exc) == "enum"
@@ -346,6 +410,7 @@ def test_validator_keyword_is_appended_when_the_path_lacks_it() -> None:
 TESTS = [
     test_primary_schema_invalid_then_valid,
     test_primary_enum_rejection_records_the_schema_path,
+    test_primary_required_rejection_names_the_missing_properties,
     test_primary_terminal_failure_row_has_no_retry_reason,
     test_primary_issue_key_uniqueness_records_the_fixed_token,
     test_primary_non_schema_retry_records_no_location,
@@ -355,8 +420,11 @@ TESTS = [
     test_the_sentinel_really_was_in_the_rejection,
     test_primary_offending_value_never_reaches_the_ledger,
     test_primary_extra_key_never_reaches_the_ledger,
+    test_required_rejection_over_a_sentinel_instance_never_leaks,
     test_critic_offending_value_and_extra_key_never_reach_the_ledger,
     test_pattern_properties_instance_key_is_never_read,
+    test_required_suffix_names_come_from_the_schema_only,
+    test_no_suffix_for_additional_properties_enum_or_const,
     test_validator_keyword_is_appended_when_the_path_lacks_it,
 ]
 

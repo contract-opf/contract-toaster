@@ -1168,14 +1168,15 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
     # closed token) and where its schema failed (`schema_error_location`, a
     # path through the schema document). Attempt 1's response is missing the
     # root `confidence_state`, so the rejecting keyword is the root
-    # `required`.
+    # `required`, followed by the missing name (drawn from the schema's own
+    # `required` list, never from the instance).
     expected_accounting = [
         {
             "pass_name": "primary",
             "attempt_number": 1,
             "outcome": "retry",
             "retry_reason": "schema_invalid",
-            "schema_error_location": "required",
+            "schema_error_location": "required:confidence_state",
         },
         {
             "pass_name": "primary",
@@ -1209,7 +1210,7 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
         first, second = primary_attempts
         if (first.get("retry_reason"), first.get("schema_error_location")) != (
             "schema_invalid",
-            "required",
+            "required:confidence_state",
         ):
             failures.append(f"[9o] Expected dump attempt 1 to carry retry_reason/schema_error_location, got {first}")
         if (second.get("retry_reason"), second.get("schema_error_location")) != ("", ""):
