@@ -1598,7 +1598,7 @@ def _scan_text_field(
         field_name=field_name,
         category=result.category,
         rule_id=result.rule_id,
-        confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+        confidence_state=CONFIDENCE_STATE_BLOCKED,
     )
 
 
