@@ -35,8 +35,18 @@ Scanned fields (per the output-contract.md scope table):
   - counterparty_change_summary       (per issue, reviewer UI)
   - proposed_replacement_text         (per issue, generated .docx redline)
   - critic_delta contested-replacement critic_objection / suggested text
+  - critic_delta contested-replacement primary_replacement_text (issue #132)
   - critic_delta rationale_objections[].objection   (issue #517)
   - critic_delta added_issues (each scanned the same as a primary issue)
+  - critic_delta locators: contested_replacements[].section_ref,
+    rationale_objections[].section_ref, added_issues[].section_ref and
+    added_issues[].section_title (issue #132)
+
+  Issue #132 writes every critic disagreement into an internal footnote of
+  the delivered `.docx` (`redline_generate._critic_delta_internal_notes`),
+  so each critic-delta field that renderer reads is scanned here, before
+  anything compiles. `primary_replacement_text` and the locators were never
+  in a document before that, and were never scanned.
 
 NOT scanned (deliberately, per output-contract.md: "n/a (stripped)"):
   - internal_precedent_citation -- retained only in confidential,
@@ -44,9 +54,6 @@ NOT scanned (deliberately, per output-contract.md: "n/a (stripped)"):
     legitimately carries an internal precedent id, so scanning it as a
     human-surfaced field would produce a false positive on data the field
     is expressly permitted to hold.
-  - critic_delta rationale_objections[].section_ref -- a locator ("Section
-    8"), not prose. Scanning it would false-positive on any playbook whose
-    topic ids or rule descriptions happen to contain a section number.
 
 ## Two rulesets: external-bound vs internal-bound (issue #521, epic #519 item C)
 
@@ -400,7 +407,23 @@ _FIELD_CHANNELS: dict[str, str] = {
     BLOCK_OP_NEW_TEXT_FIELD: CHANNEL_EXTERNAL,
     "critic_delta.critic_objection": CHANNEL_EXTERNAL,
     "critic_delta.critic_suggested_replacement": CHANNEL_EXTERNAL,
+    # Issue #132: the critic's restatement of the wording it contests
+    # (`primary_review_pass._CRITIC_TASKING_DUTY_4_V3` tells it to put that
+    # wording here), 8000-char model prose that the internal footnotes of
+    # the delivered `.docx` now quote. Replacement-text class like its
+    # sibling suggestion (`_REPLACEMENT_TEXT_FIELDS`).
+    "critic_delta.primary_replacement_text": CHANNEL_EXTERNAL,
     "critic_delta.rationale_objections.objection": CHANNEL_EXTERNAL,
+    # Issue #132: the critic delta's locators, which name the section in
+    # each internal footnote note. Model-authored and, from #132, document
+    # text. An added issue's two are keyed by their prefixed names, not the
+    # bare per-issue ones: they are scanned for a critic-added issue only,
+    # because only the critic's are rendered, so a bare `section_ref` key
+    # here would wrongly suggest a primary issue's is scanned too.
+    "critic_delta.contested_replacements.section_ref": CHANNEL_EXTERNAL,
+    "critic_delta.rationale_objections.section_ref": CHANNEL_EXTERNAL,
+    "critic_delta.added_issues.section_ref": CHANNEL_EXTERNAL,
+    "critic_delta.added_issues.section_title": CHANNEL_EXTERNAL,
     # Scanned outside `scan_model_output`, by its own pass:
     # `backend/src/review_routes.py` calls `LeakageScanner.scan` directly on
     # the cover-note draft. Enumerated here anyway -- this table is the
@@ -1159,7 +1182,13 @@ def scan_model_output(
         see module docstring
       - critic_delta: contested_replacements[].critic_objection,
         contested_replacements[].critic_suggested_replacement,
-        added_issues[] (each scanned the same as a primary issue)
+        contested_replacements[].primary_replacement_text (issue #132),
+        rationale_objections[].objection (issue #517),
+        added_issues[] (each scanned the same as a primary issue), and the
+        locators contested_replacements[].section_ref,
+        rationale_objections[].section_ref, added_issues[].section_ref and
+        added_issues[].section_title (issue #132) -- every critic-delta
+        field `redline_generate._critic_delta_internal_notes` renders
       - block_patches[].segments[] with op="insert", and block_ops[] with
         op="insert_block_after" (their `new_text`) -- issue #626, v3-only.
         These are the texts the block-mode redline WRITES into the
@@ -1248,10 +1277,16 @@ _ISSUE_SCANNED_FIELDS = (
 # `proposed_replacement_text`. Everything else the scanner blocks --
 # precedent counterparty names, system-prompt leakage, excessive verbatim
 # precedent quotation -- still applies to them unchanged.
+#
+# Issue #132 adds the critic delta's `primary_replacement_text` on the same
+# grounds again: it is the critic's restatement of the first reviewer's edit
+# -- the insert segments above, read back -- so when that edit faithfully
+# restores the standard clause, quoting it must not self-block either.
 _REPLACEMENT_TEXT_FIELDS = frozenset(
     {
         "proposed_replacement_text",
         "critic_suggested_replacement",
+        "primary_replacement_text",
         BLOCK_SEGMENT_INSERT_FIELD,
         BLOCK_OP_NEW_TEXT_FIELD,
     }
@@ -1355,13 +1390,39 @@ def _scan_block_edit_fields(
     return None
 
 
+#: Issue #132: `(critic_delta array, key in each entry, scanned field name)`
+#: for every critic-delta locator the internal footnote notes render. Each
+#: scanned name has its own `_FIELD_CHANNELS` entry.
+_CRITIC_DELTA_LOCATOR_FIELDS = (
+    (
+        "contested_replacements",
+        "section_ref",
+        "critic_delta.contested_replacements.section_ref",
+    ),
+    (
+        "rationale_objections",
+        "section_ref",
+        "critic_delta.rationale_objections.section_ref",
+    ),
+    ("added_issues", "section_ref", "critic_delta.added_issues.section_ref"),
+    ("added_issues", "section_title", "critic_delta.added_issues.section_title"),
+)
+
+
 def _scan_critic_delta_fields(
     critic_delta: dict[str, Any],
     scanner: LeakageScanner,
     current_counterparty_name: str | None = None,
 ) -> ScanOutcome | None:
     for contested in critic_delta.get("contested_replacements", []) or []:
-        for field_name in ("critic_objection", "critic_suggested_replacement"):
+        # `primary_replacement_text` (issue #132) is scanned last so a
+        # review that already blocked on one of the other two still reports
+        # the same field it always did.
+        for field_name in (
+            "critic_objection",
+            "critic_suggested_replacement",
+            "primary_replacement_text",
+        ):
             text = contested.get(field_name)
             if not text:
                 continue
@@ -1393,9 +1454,8 @@ def _scan_critic_delta_fields(
     # only prose output reached a human with nothing else in the delta to
     # catch a leak by accident.
     #
-    # `section_ref` is deliberately not scanned: it is a locator ("Section 8"),
-    # not prose, and scanning it would false-positive on any playbook whose
-    # topic ids or rule descriptions happen to contain a section number.
+    # Its `section_ref` is scanned too since issue #132, with the other
+    # locators below.
     for objection_entry in critic_delta.get("rationale_objections", []) or []:
         text = objection_entry.get("objection")
         if not text:
@@ -1422,6 +1482,40 @@ def _scan_critic_delta_fields(
             # critic-added issue rather than the primary issues[] list.
             outcome.field_name = f"critic_delta.added_issues.{outcome.field_name}"
             return outcome
+
+    # Issue #132: the locators. Issue #517 left `section_ref` unscanned as a
+    # locator that only reached the reviewer's own views; #132 writes each
+    # one into the delivered `.docx`, where an internal footnote note names
+    # the section it is about (`redline_generate._critic_delta_internal_notes`),
+    # and every critic-delta field in that document passes this gate first.
+    # External channel, like the rest of the delta. A gram blocks only when
+    # it occurs WHOLE inside the locator (`_contains_token`), so a rule
+    # description or standard clause longer than the locator cannot match
+    # it; a short corpus gram that a locator really does contain fails the
+    # review closed, which is this gate's posture everywhere.
+    # Scanned after every prose field, so a review that already blocked on
+    # one of those still reports the same field it always did.
+    for array_name, field_name, scanned_name in _CRITIC_DELTA_LOCATOR_FIELDS:
+        for entry in critic_delta.get(array_name, []) or []:
+            if not isinstance(entry, dict):
+                continue
+            text = entry.get(field_name)
+            if not text:
+                continue
+            result = scanner.scan(
+                text,
+                field_name=scanned_name,
+                current_counterparty_name=current_counterparty_name,
+                channel=channel_for_field(scanned_name),
+            )
+            if result.blocked:
+                return ScanOutcome(
+                    blocked=True,
+                    field_name=scanned_name,
+                    category=result.category,
+                    rule_id=result.rule_id,
+                    confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+                )
 
     return None
 

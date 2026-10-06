@@ -1282,7 +1282,199 @@ def _build_analysis_report(
     return report
 
 
-def _joined_footnote_text(issue, notes_mode: str) -> str:
+def _critic_delta_internal_notes(critic_delta: Any) -> list[dict[str, Any]]:
+    """Every critic disagreement in `critic_delta`, explained in full, as
+    `{"section_ref", "text"}` entries -- the fulsome half of the
+    owner's 2026-09-16 decision on #96 (issue #132; the receipt's counts-only
+    line is the brief half).
+
+    One entry per disagreement, in a fixed order -- every contested
+    replacement, then every rationale objection, then every critic-added
+    issue, each in its array's own order:
+
+      - a contested replacement names its section, the reviewer's text, the
+        critic's objection and, when the critic offered one, the critic's
+        suggested text;
+      - a rationale objection names its section and the objection;
+      - a critic-added issue names its section and why the critic added it
+        (its `external_rationale_for_footnote`, then its
+        `internal_rationale_for_footnote` when it carries one).
+
+    Every text names its own section, because the entry may be HOSTED on a
+    footnote that belongs to a different section (see `_host_critic_notes`)
+    and must never read as a statement about the clause it hangs on.
+
+    The wording is neutral about whose text shipped ("the reviewer's text",
+    "the critic's suggested text") rather than calling one of them the
+    proposal: ADR 0001 hands the critic the last word, and these entries
+    must stay true on both sides of that cutover.
+
+    The texts are UNMARKED here; `_joined_footnote_text` wraps each one in
+    `footnote_audience.mark_internal_footnote`, the one place an internal
+    note is ever built. An entry with nothing to say -- a blank objection, a
+    critic-added issue with no rationale -- contributes nothing, never a
+    bracket with no explanation in it.
+
+    Rendered, never generated: the critic delta exists on every two-pass
+    review regardless of notes mode, so nothing here asks a model for
+    content. Whether it reaches a document is the caller's notes-mode
+    decision (`_notes_mode_includes_internal_content`).
+
+    Every field read here passes the leakage gate before anything compiles
+    (`leakage_scan._scan_critic_delta_fields`, run by
+    `generate_redline_from_blocks` over the whole reconciled result), each
+    on the channel `leakage_scan._FIELD_CHANNELS` declares for it:
+
+      - EXTERNAL: `contested_replacements[]`' `section_ref`,
+        `primary_replacement_text`, `critic_objection` and
+        `critic_suggested_replacement`; `rationale_objections[]`'
+        `section_ref` and `objection`; `added_issues[]`' `section_ref`,
+        `section_title` and `external_rationale_for_footnote`.
+      - INTERNAL: `added_issues[]`' `internal_rationale_for_footnote`, the
+        one internal-bound field, which the never-acceptable checks
+        (system-prompt leakage, excessive precedent quotation) still block.
+
+    A field added to these texts must be added to that walk and that table
+    first: `primary_replacement_text` and the locators had only ever reached
+    the result payload, and were unscanned until this renderer needed them.
+    """
+    if not isinstance(critic_delta, dict):
+        return []
+
+    def clean(value: Any) -> str:
+        return value.strip() if isinstance(value, str) else ""
+
+    notes: list[dict[str, Any]] = []
+
+    for entry in critic_delta.get("contested_replacements") or []:
+        objection = clean(entry.get("critic_objection"))
+        if not objection:
+            continue
+        section = clean(entry.get("section_ref"))
+        parts = [
+            f"Critic disagreement on the replacement text for "
+            f"{section or 'an unnamed section'}."
+        ]
+        reviewer_text = clean(entry.get("primary_replacement_text"))
+        if reviewer_text:
+            parts.append(f"Reviewer's text: “{reviewer_text}”")
+        parts.append(f"Critic's objection: {objection}")
+        suggested = clean(entry.get("critic_suggested_replacement"))
+        if suggested:
+            parts.append(f"Critic's suggested text: “{suggested}”")
+        notes.append({"section_ref": section, "text": " ".join(parts)})
+
+    for entry in critic_delta.get("rationale_objections") or []:
+        objection = clean(entry.get("objection"))
+        if not objection:
+            continue
+        section = clean(entry.get("section_ref"))
+        notes.append(
+            {
+                "section_ref": section,
+                "text": (
+                    f"Critic objection to the rationale for "
+                    f"{section or 'an unnamed section'}: {objection}"
+                ),
+            }
+        )
+
+    for issue in critic_delta.get("added_issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        reasons = [
+            text
+            for text in (
+                clean(issue.get("external_rationale_for_footnote")),
+                clean(issue.get(INTERNAL_RATIONALE_FIELD)),
+            )
+            if text
+        ]
+        if not reasons:
+            continue
+        section = clean(issue.get("section_ref"))
+        title = clean(issue.get("section_title"))
+        where = section or "an unnamed section"
+        if title and title != section:
+            where = f"{where} ({title})"
+        notes.append(
+            {
+                "section_ref": section,
+                "text": (
+                    f"Critic added an issue the first review did not raise, at "
+                    f"{where}: {' '.join(reasons)}"
+                ),
+            }
+        )
+
+    return notes
+
+
+def _host_critic_notes(
+    notes: list[dict[str, Any]],
+    issues: list[dict[str, Any]],
+    working: dict[str, Any],
+) -> dict[Any, list[str]]:
+    """`issue_key -> [critic note texts]`: which issue's footnote carries
+    each of `_critic_delta_internal_notes`' entries in the document compiled
+    from `working` (issue #132).
+
+    A footnote can only hang on an issue's own `<w:ins>`
+    (`redline_block_apply.inject_issue_footnotes` anchors by revision id, and
+    skips an issue none of whose insertions survived), so a host must be an
+    issue that INSERTS text in `working` -- never a pure deletion, and never
+    an issue rolled out of this compile. Candidates are taken in `issues`
+    order, so the assignment is deterministic. For each note:
+
+      1. the first candidate whose `section_ref` is the note's -- the
+         disagreement sits on the clause it is about;
+      2. otherwise the first candidate at all. A critic-added issue has no
+         edits of its own under the add-only merge
+         (`reconciliation.reconcile` forwards only the primary's
+         transcript), so unless the first review also edited its section
+         it has no clause to hang on; its explanation still reaches the
+         document, and names its own section so it cannot be read as a
+         remark about its host.
+
+    No candidate at all (nothing in the document inserts text) leaves the
+    notes unrendered: there is no tracked insertion to attach a footnote to,
+    and anchoring one anywhere else would be an untracked change to the
+    counterparty's text. The disagreement still reaches the reviewer
+    through `critic_delta` on the result.
+    """
+    if not notes:
+        return {}
+    inserts = _insert_texts_by_issue(working)
+    candidates: list[Any] = []
+    for issue in issues:
+        issue_key = issue.get("issue_key")
+        if issue_key in candidates:
+            continue
+        if any((text or "").strip() for text in inserts.get(issue_key) or []):
+            candidates.append(issue_key)
+    if not candidates:
+        return {}
+    section_by_key = {
+        issue.get("issue_key"): (issue.get("section_ref") or "").strip()
+        for issue in issues
+        if issue.get("issue_key") in candidates
+    }
+
+    hosted: dict[Any, list[str]] = {}
+    for note in notes:
+        host = None
+        if note.get("section_ref"):
+            host = next(
+                (key for key in candidates if section_by_key.get(key) == note["section_ref"]),
+                None,
+            )
+        if host is None:
+            host = candidates[0]
+        hosted.setdefault(host, []).append(note["text"])
+    return hosted
+
+
+def _joined_footnote_text(issue, notes_mode: str, critic_notes=None) -> str:
     """One issue's footnote body under `notes_mode`, as the SINGLE string
     `redline_block_apply.inject_issue_footnotes` accepts.
 
@@ -1299,12 +1491,25 @@ def _joined_footnote_text(issue, notes_mode: str) -> str:
 
     `notes_mode="none"` resolves to `[]` and therefore to `""`, which the
     caller filters out so no footnote part is written at all.
+
+    `critic_notes` (issue #132) are the critic-disagreement explanations
+    `_host_critic_notes` assigned to this issue. They are appended AFTER the
+    issue's own text, each wrapped in its OWN `[INTERNAL NOTE: ...]`
+    marking. The notes-mode decision is the caller's and is made once:
+    `generate_redline_from_blocks` builds no notes at all unless
+    `_notes_mode_includes_internal_content(notes_mode)`, so in
+    `none`/`external` this parameter is always empty.
     """
     issue = issue or {}
     texts = footnote_audience.footnote_texts_for_notes_mode(
         issue.get("external_rationale_for_footnote"),
         issue.get(INTERNAL_RATIONALE_FIELD),
         notes_mode,
+    )
+    texts.extend(
+        footnote_audience.mark_internal_footnote(note.strip())
+        for note in critic_notes or []
+        if note and note.strip()
     )
     return "  ".join(texts)
 
@@ -1409,7 +1614,20 @@ def generate_redline_from_blocks(
     #522). `redline_block_apply.inject_issue_footnotes` writes ONE footnote
     per issue, so the `"both"` mode's two resolved texts are joined into one
     footnote body, external first, with the internal half still behind
-    `INTERNAL_FOOTNOTE_PREFIX` -- nothing is dropped. The export marker
+    `INTERNAL_FOOTNOTE_PREFIX` -- nothing is dropped.
+
+    In the same two modes (`internal`/`both`) every critic disagreement in
+    `reconciled_result["critic_delta"]` is explained inside an internal
+    footnote (issue #132): `_critic_delta_internal_notes` words each one,
+    `_host_critic_notes` picks the footnote it rides on, and
+    `_joined_footnote_text` appends it behind its own `[INTERNAL NOTE: ...]`
+    marking. Internal footnotes are the only channel it reaches: `none` and
+    `external` render none of it, and nothing of it is written into the
+    body. A host whose edits all fail to compile is rolled out and its
+    notes re-hosted, so a compile failure on one clause does not lose the
+    explanation of a dispute about another.
+
+    The export marker
     (issue #513) is injected iff this notes mode carries internal content,
     the same condition `generate_redline` applies, reusing the same
     `inject_export_marker_and_footnotes` helper in marker-only form.
@@ -1566,10 +1784,18 @@ def generate_redline_from_blocks(
     dropped: set = set(pen_failures)
     changeset_failures: dict[Any, list[dict[str, Any]]] = {}
     edit_failures: dict[Any, list[dict[str, Any]]] = {}
-    rationale_by_issue = {
-        issue_key: _joined_footnote_text(issues_by_key.get(issue_key), notes_mode)
-        for issue_key in by_issue
-    }
+    # Issue #132: in a notes mode that carries internal content, every
+    # critic disagreement is explained inside an internal footnote. Every
+    # field rendered was leakage-scanned by the gate at the top of this
+    # function, before anything compiled (`leakage_scan.
+    # _scan_critic_delta_fields`), on the channel `leakage_scan.
+    # _FIELD_CHANNELS` declares for it -- see `_critic_delta_internal_notes`
+    # for the list. A block there produced no document at all.
+    critic_notes = (
+        _critic_delta_internal_notes(reconciled_result.get("critic_delta"))
+        if _notes_mode_includes_internal_content(notes_mode)
+        else []
+    )
     compile_result: Optional[dict[str, Any]] = None  # noqa: UP045
     attempted = _transcript_has_edits(proven)
 
@@ -1581,6 +1807,15 @@ def generate_redline_from_blocks(
         if not _transcript_has_edits(working):
             compile_result = None
             break
+        # Hosts are re-chosen against THIS compile's transcript, so a note
+        # never rides on an issue that has been rolled back.
+        hosted = _host_critic_notes(critic_notes, issues, working)
+        rationale_by_issue = {
+            issue_key: _joined_footnote_text(
+                issues_by_key.get(issue_key), notes_mode, hosted.get(issue_key)
+            )
+            for issue_key in working["by_issue"]
+        }
         compile_result = redline_block_apply.apply_block_transcript(
             normalized_docx_bytes,
             working,
@@ -1628,8 +1863,17 @@ def generate_redline_from_blocks(
                 edit_failures[issue_key] = entries
         if not partial:
             # Nothing of these issues landed, so there is nothing to roll
-            # back and the compiled document already stands as delivered.
-            break
+            # back and the compiled document already stands as delivered --
+            # unless one of them was HOSTING critic notes (issue #132). An
+            # issue none of whose edits compiled has no `<w:ins>` to hang a
+            # footnote on, so those notes were silently lost. Rolling it out
+            # changes nothing in the document (none of it landed) and lets
+            # the next compile re-host its notes on an issue that did.
+            stranded = {issue_key for issue_key in fresh if issue_key in hosted}
+            if not stranded:
+                break
+            dropped |= stranded
+            continue
         dropped |= set(fresh)
     else:  # pragma: no cover - defensive: `dropped` grows every iteration
         return {
