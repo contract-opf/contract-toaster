@@ -322,7 +322,17 @@ def check_deliberately_broken_fixture_fails_quote_locate() -> list[str]:
                         "issues": [],
                         "block_patches": [],
                         "block_ops": [],
-                        "critic_delta": None,
+                        # Issue #137: the critic disposes of the primary's I1.
+                        "critic_delta": {
+                            "dispositions": [
+                                {
+                                    "issue_id": "I1",
+                                    "disposition": "KEEP",
+                                    "reason": "Same issue and the same edit.",
+                                }
+                            ],
+                            "overrides": [],
+                        },
                         "verdict_summary": None,
                     }
                 ],

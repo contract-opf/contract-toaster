@@ -58,7 +58,16 @@
         "confidence_state": "OK",
         "confidence_band": null,
         "issues": [],
-        "critic_delta": null,
+        "critic_delta": {
+          "dispositions": [
+            {
+              "issue_id": "I1",
+              "disposition": "KEEP",
+              "reason": "Same issue and the same edit; compliant with the playbook position."
+            }
+          ],
+          "overrides": []
+        },
         "verdict_summary": null,
         "block_patches": [],
         "block_ops": []

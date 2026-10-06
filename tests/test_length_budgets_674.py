@@ -56,6 +56,14 @@ Two defects, one class.
       maximum, and the retry correction built from it says to condense the
       prose rather than drop a finding. The non-length schema failure still
       gets the generic framing -- both branches, not just the new one.
+  [7] The critic's final-result audit fields (issue #137) are pinned to the
+      FREE-PROSE class, not merely stated: [3] proves a cap is told to the
+      model, never which class it is in, and a free-prose field given a
+      smaller number is the #671 failure again however well it is stated.
+      Each carries the same bound as `critic_suggested_replacement`, and a
+      realistic reason the size of a live `critic_objection` validates in
+      both reason fields -- AND is rejected with that one cap set to a
+      short-reason 500, the control that keeps the green half honest.
 
 ## Fixture provenance (fixture rule)
 
@@ -213,6 +221,33 @@ UNCHANGED_CAPS: dict[str, int] = {
     "/definitions/BlockOp/oneOf/1/properties/anchor_block_id": 64,
 }
 
+# [7] Issue #137's critic audit fields, in the FREE-PROSE class from birth.
+#   overrides[].reason      -- the direct successor of `critic_objection`:
+#                              same author, same pass, same internal audit
+#                              audience, measured live at 910 / 1275 and
+#                              moved off 800 by #674 because 800 rejected
+#                              both.
+#   dispositions[].reason   -- internal audit text that lands in no layout of
+#                              its own; "one line" is what the critic tasking
+#                              asks for, not a destination shape that could
+#                              justify a layout-class cap.
+#   overrides[].primary_value / critic_value -- carry a whole replacement
+#                              clause, the text `primary_replacement_text`
+#                              and `critic_suggested_replacement` carry.
+_DISPOSITION_PROPERTIES = "/definitions/CriticDelta/properties/dispositions/items/properties"
+_OVERRIDE_PROPERTIES = "/definitions/CriticDelta/properties/overrides/items/properties"
+FREE_PROSE_CAPS_137: tuple[str, ...] = (
+    f"{_DISPOSITION_PROPERTIES}/reason",
+    f"{_OVERRIDE_PROPERTIES}/reason",
+    f"{_OVERRIDE_PROPERTIES}/primary_value",
+    f"{_OVERRIDE_PROPERTIES}/critic_value",
+)
+
+# The control for [7]'s realistic-value half: a short-reason cap of the size
+# #137's first draft gave both reasons, before review moved them into the
+# free-prose class. A reason that also passes at this number proves nothing.
+SHORT_REASON_CONTROL_CAP = 500
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -275,6 +310,35 @@ def _critic_response(*, objection: str | None = None, contested: str | None = No
         )
     if objection is not None:
         delta["rationale_objections"].append({"section_ref": "12 Term and Termination", "objection": objection})
+    return _response(critic_delta=delta)
+
+
+def _final_result_critic_response(
+    *, disposition_reason: str = "Same issue, narrower wording.", override_reason: str = "Too narrow."
+) -> dict[str, Any]:
+    """A critic response carrying #137's audit arrays: one REVISE disposition
+    and the override that records it, each with the given reason."""
+    delta: dict[str, Any] = {
+        "dispositions": [{"issue_id": "I1", "disposition": "REVISE", "reason": disposition_reason}],
+        "overrides": [
+            {
+                "issue_id": "I1",
+                "field": "replacement_text",
+                "primary_value": (
+                    "The Institution shall indemnify the Facility from claims arising solely "
+                    "from the negligent acts of the Institution's own personnel."
+                ),
+                "critic_value": (
+                    "Each party shall indemnify the other from third-party claims arising from "
+                    "the acts or omissions of its own employees, agents and students."
+                ),
+                "reason": override_reason,
+            }
+        ],
+        "added_issues": [],
+        "contested_replacements": [],
+        "rationale_objections": [],
+    }
     return _response(critic_delta=delta)
 
 
@@ -623,6 +687,64 @@ def test_length_budget_detail_handles_a_root_level_failure(failures: list[str]) 
 
 
 # ---------------------------------------------------------------------------
+# [7] The critic's final-result audit fields are in the free-prose class
+# ---------------------------------------------------------------------------
+
+
+def test_critic_final_result_fields_are_in_the_free_prose_class(failures: list[str]) -> None:
+    """Pinned by CLASS, as the #674-raised fields are: if the free-prose
+    bound moves, these move with it or this fails. A layout-class number on
+    any of them is a destination-driven product decision and needs its own
+    justification, which none of these four has."""
+    free_prose_reference = pp.schema_max_length(
+        SCHEMA,
+        "/definitions/CriticDelta/properties/contested_replacements/items/properties/critic_suggested_replacement",
+    )
+    for pointer in FREE_PROSE_CAPS_137:
+        cap = pp.schema_max_length(SCHEMA, pointer)
+        if cap != free_prose_reference:
+            failures.append(
+                f"{pointer} carries maxLength {cap}, not the free-prose class bound "
+                f"{free_prose_reference}: it is internal model-authored text with no layout of its "
+                "own, so a smaller number is the #671 failure rather than a budget"
+            )
+        if pointer in UNCHANGED_CAPS:
+            failures.append(f"{pointer} is claimed by both the layout and the free-prose class")
+
+
+def test_realistic_critic_reasons_validate(failures: list[str]) -> None:
+    """Red/green, the [1] way: a reason the size of a live `critic_objection`
+    (the field `overrides[].reason` succeeds) validates in BOTH reason fields,
+    and the same body is rejected with that one cap at a short-reason 500."""
+    cases = (
+        (
+            "overrides[].reason",
+            f"{_OVERRIDE_PROPERTIES}/reason",
+            _final_result_critic_response(override_reason=REALISTIC_CRITIC_OBJECTION),
+        ),
+        (
+            "dispositions[].reason",
+            f"{_DISPOSITION_PROPERTIES}/reason",
+            _final_result_critic_response(disposition_reason=REALISTIC_CRITIC_OBJECTION),
+        ),
+    )
+    for label, pointer, body in cases:
+        error = _validates(body, SCHEMA)
+        if error is not None:
+            failures.append(
+                f"a realistic {len(REALISTIC_CRITIC_OBJECTION)}-character {label} is rejected by "
+                f"the shipped artifact: {error}"
+            )
+        control = _validates(body, _schema_with_cap_restored(pointer, SHORT_REASON_CONTROL_CAP))
+        if control is None:
+            failures.append(
+                f"the {label} fixture also validates at a short-reason cap of "
+                f"{SHORT_REASON_CONTROL_CAP} -- it is too short to exercise the free-prose bound, "
+                "so the green run above proves nothing"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -644,6 +766,8 @@ TESTS = [
     test_retry_correction_carries_the_budget_and_forbids_dropping_work,
     test_non_length_schema_failure_keeps_the_generic_framing,
     test_length_budget_detail_handles_a_root_level_failure,
+    test_critic_final_result_fields_are_in_the_free_prose_class,
+    test_realistic_critic_reasons_validate,
 ]
 
 

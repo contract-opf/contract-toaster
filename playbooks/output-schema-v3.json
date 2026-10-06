@@ -66,7 +66,7 @@
       }
     },
     "critic_delta": {
-      "description": "Adversarial-critic output. Null when this response is from the primary reviewer or when the critic found no differences. Present when this response carries critic-only additions, contested replacements, or rationale objections. Structured as a CriticDelta object or null.",
+      "description": "Critic-only record of how the critic treated the first reviewer's work: per-issue dispositions and overrides (issue #137), plus the deprecated added_issues / contested_replacements / rationale_objections. Null when this response is from the primary reviewer. The critic's own response must carry it whenever the first reviewer raised any issue, because every such issue needs a disposition. Structured as a CriticDelta object or null.",
       "oneOf": [
         {"type": "null"},
         {"$ref": "#/definitions/CriticDelta"}
@@ -302,19 +302,78 @@
     },
     "CriticDelta": {
       "type": "object",
-      "description": "The adversarial critic's delta: issues the critic adds, replacements the critic contests, and rationale objections. Preserved in the final result for audit. The critic may not silently overwrite the primary's replacement text; a contested replacement surfaces here rather than being swapped in. Unchanged from v2 — every field, constraint and description is identical.",
+      "description": "The critic's own record of how it treated the first reviewer's work (ADR 0001, issue #137). Under ADR 0001 the critic pass emits a COMPLETE final result -- its own top-level decision, confidence_state, issues, block_patches/block_ops and verdict_summary, with edits anchored to the same block map the first reviewer used -- and this object is the audit trail of how that result differs from the first reviewer's: dispositions (one per first-reviewer issue) and overrides (one per respect in which the critic changed that issue). added_issues, contested_replacements and rationale_objections are DEPRECATED: they are kept for one release because the reconciler still reads them, and are removed once the reconcile ticket makes the critic's own result the final one.",
       "additionalProperties": false,
       "properties": {
+        "dispositions": {
+          "type": "array",
+          "description": "NEW in issue #137 (ADR 0001 amendment 2026-09-17). The critic's explicit disposition for EVERY issue the first reviewer raised -- one entry per first-reviewer issue_key (issue_id is the FIRST REVIEWER's issue_key as it appears in the first reviewer's output, never a key from the critic's own issues list), no exceptions. KEEP = the critic reaches the same issue and the same edit. REVISE = the same issue, but the critic changed its replacement text, rationale or decision (an overrides entry records what changed). DROP = the critic does not stand behind the issue. A first-reviewer issue with no disposition is a schema failure: scripts/critic_review_pass.py checks it against the first reviewer's output, which a response-local JSON Schema cannot see. Hard-ledger dispositions (CLEARED / ASSERT) are added by issue #147.",
+          "items": {
+            "type": "object",
+            "required": ["issue_id", "disposition", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "issue_id": {
+                "$ref": "#/definitions/IssueKey"
+              },
+              "disposition": {
+                "type": "string",
+                "enum": ["KEEP", "REVISE", "DROP"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000,
+                "description": "One line saying why. LENGTH BUDGET (issue #674 classes): FREE-PROSE, 8000 -- the class bound (see verdict_summary and critic_objection). It is INTERNAL audit text that lands in no layout of its own (no delivered-document footnote, no result-view cell), so no destination justifies a layout-class cap; 'one line' is what the critic tasking asks for, not a ceiling the validator enforces. NOT MEASURED -- no live run has populated it yet."
+              }
+            }
+          }
+        },
+        "overrides": {
+          "type": "array",
+          "description": "NEW in issue #137 (ADR 0001 guard 2: every override is recorded). One entry for each respect in which the critic changed (issue_id is the FIRST REVIEWER's issue_key) the first reviewer's replacement text, rationale or decision on an issue: the first reviewer's version, the critic's version and the critic's stated reason. Empty when the critic changed nothing.",
+          "items": {
+            "type": "object",
+            "required": ["issue_id", "field", "primary_value", "critic_value", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "issue_id": {
+                "$ref": "#/definitions/IssueKey"
+              },
+              "field": {
+                "type": "string",
+                "enum": ["replacement_text", "rationale", "decision"],
+                "description": "What changed: the wording the edit produces, the external rationale, or the issue's decision (a DROP is recorded as a change of decision)."
+              },
+              "primary_value": {
+                "type": "string",
+                "maxLength": 8000,
+                "description": "The first reviewer's version, read off its output. 8000: the FREE-PROSE class bound (see verdict_summary) -- it can carry a whole replacement clause. NOT MEASURED."
+              },
+              "critic_value": {
+                "type": "string",
+                "maxLength": 8000,
+                "description": "The critic's version. 8000: same free-prose class bound as primary_value. NOT MEASURED."
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000,
+                "description": "Why the critic overrode the first reviewer. LENGTH BUDGET (issue #674 classes): FREE-PROSE, 8000 -- the class bound (see verdict_summary and critic_objection). This is the direct successor of contested_replacements[].critic_objection (same author, same pass, same internal audit audience), measured live at 910 and 1275 characters and moved from 800 to 8000 by #674 because the smaller cap rejected both; a smaller cap here would bring back the #671 failure. NOT MEASURED for this field itself."
+              }
+            }
+          }
+        },
         "added_issues": {
           "type": "array",
-          "description": "Issues the critic found that the primary missed.",
+          "description": "DEPRECATED (issue #137; kept for one release). Issues the critic found that the primary missed. The critic's own top-level issues list is now the complete final list.",
           "items": {
             "$ref": "#/definitions/Issue"
           }
         },
         "contested_replacements": {
           "type": "array",
-          "description": "Primary replacement texts the critic flagged as drifting from the playbook position.",
+          "description": "DEPRECATED (issue #137; kept for one release). Primary replacement texts the critic flagged as drifting from the playbook position. The critic now writes its own replacement as block_patches/block_ops and records the change in overrides.",
           "items": {
             "type": "object",
             "required": ["section_ref", "primary_replacement_text", "critic_objection"],
@@ -343,7 +402,7 @@
         },
         "rationale_objections": {
           "type": "array",
-          "description": "Rationale weaknesses the critic flagged (e.g. over-flagging, weak reasoning) without necessarily contesting the decision.",
+          "description": "DEPRECATED (issue #137; kept for one release). Rationale weaknesses the critic flagged (e.g. over-flagging, weak reasoning) without necessarily contesting the decision.",
           "items": {
             "type": "object",
             "required": ["section_ref", "objection"],

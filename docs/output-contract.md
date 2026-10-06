@@ -213,6 +213,48 @@ governance step and not a code change. Read the artifact's *schema* as authorita
 dormancy claim* as superseded by this section until that step runs. This paragraph exists so the
 contradiction is recorded rather than discovered.
 
+### The critic's final result (issue #137, ADR 0001)
+
+Under [ADR 0001](adr/0001-critic-has-the-last-word.md) the critic pass emits a **complete final result**,
+in the SAME response shape the primary does — one artifact, one tool schema for both passes, no
+critic-only schema. Its response carries its own `decision`, `confidence_state`, `issues`,
+`block_patches` / `block_ops` and `verdict_summary`, plus `critic_delta`, which is now the **audit record
+of how that result differs from the primary's**:
+
+| `critic_delta` field | Meaning |
+|---|---|
+| `dispositions[]` | One `{issue_id, disposition, reason}` per **primary** issue, no exceptions. `disposition` is `KEEP` (same issue, same edit), `REVISE` (same issue, the critic changed its replacement text, rationale or decision) or `DROP` (the critic does not stand behind it). The prompt asks for a one-line `reason`; the cap is the free-prose class bound, 8000 (see [Length budgets](#length-budgets-issue-674)). |
+| `overrides[]` | One `{issue_id, field, primary_value, critic_value, reason}` per respect in which the critic changed a primary issue. `field` is `replacement_text`, `rationale` or `decision` (a `DROP` is a change of decision). `primary_value`, `critic_value` and `reason` are each ≤ 8000 characters, the free-prose class bound. Empty when the critic changed nothing. |
+| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The reconciler still reads them (`scripts/reconciliation.py`), and the prompt still asks the critic to fill them, until the reconcile ticket makes the critic's own result the final one. The artifact marks each `DEPRECATED`. |
+
+`issue_id` always names the **primary's** `issue_key` as it appears in the primary's output — never a key
+from the critic's own `issues`, which it numbers from `I1` in its own response.
+
+**What the schema cannot say, and where it is enforced.** "Every primary issue has exactly one disposition"
+is a statement about two responses, which a response-local draft-07 schema cannot express. It is enforced
+by `critic_review_pass.critic_delta_rejection`, reported under the ordinary `schema_invalid` token, so a
+missing (or duplicated) disposition spends the critic's one bounded retry like any other schema failure
+and, if repeated, ends the review as `critic_schema_invalid`. A disposition or override naming an
+`issue_id` the primary never raised is **not** rejected: it leaves every primary issue accounted for, and a
+rejection would spend a paid retry over a field the reconciler can ignore. The check is a no-op where the
+artifact defines no `dispositions` (v1/v2) and where the primary raised no issue.
+
+**The critic's edits are anchored to the same block map.** `review_spine.run_review` passes the one
+`build_block_map` object to both passes, and `run_critic_pass` proves the critic's own transcript against it
+inside its bounded retry (`primary_review_pass._reject_block_transcript`), so a critic edit that does not
+match the document's bytes costs the critic its informed retry rather than surviving to stage 5. Failure
+classification is unchanged: an unproven transcript that never recovers is the residual
+`critic_retry_exhausted`.
+
+**Not here.** Which pass's output wins, and forwarding the critic's `block_patches` / `block_ops` through
+`reconciliation.reconcile`, is the reconcile ticket (#136); until it lands, reconciliation still forwards the
+primary's transcript and reads only the deprecated arrays. The hard-ledger dispositions (`CLEARED` /
+`ASSERT`) arrive with #147 and the `role` discriminator on the one tool schema with #148.
+
+**Governance.** The artifact's bytes are content-hash-gated (see the coupling rules above), so this change
+needs a new `release.output_contract_hash` and the legal-approval gate before it activates in a release
+bundle; that step is the owner's.
+
 ## Length budgets (issue #674)
 
 Every `maxLength` in `playbooks/output-schema-v3.json` is one of exactly **two** kinds of cap, and
@@ -221,7 +263,18 @@ conflating them is what made two of them reject legitimate content:
 | Class | What sets the number | Fields |
 |---|---|---|
 | **Layout / identity** | Where the value lands has a shape of its own, so the cap is a product decision | `external_rationale_for_footnote` and `internal_rationale_for_footnote` (800 — typeset into a footnote of the delivered `.docx`), `section_ref` (200) and `section_title` (300) and `replacement_scope_note` (300 — result-view headings and cells), `internal_precedent_citation` (500 — an audit reference), `block_id` / `anchor_block_id` (64 — a code-assigned id) |
-| **Free prose** | Nothing about the destination bounds it; the cap exists only so one response cannot be unbounded | `primary_replacement_text`, `critic_suggested_replacement`, `Segment.text`, `BlockOp.new_text`, and — since #674 — `verdict_summary`, `critic_objection`, `rationale_objections[].objection`. The artifact's number for this class is **8000** |
+| **Free prose** | Nothing about the destination bounds it; the cap exists only so one response cannot be unbounded | `primary_replacement_text`, `critic_suggested_replacement`, `Segment.text`, `BlockOp.new_text`, and — since #674 — `verdict_summary`, `critic_objection`, `rationale_objections[].objection`, and — born into it by #137 — `dispositions[].reason`, `overrides[].reason`, `overrides[].primary_value`, `overrides[].critic_value`. The artifact's number for this class is **8000** |
+
+**The #137 fields are free prose because nothing about their destination bounds them.** All four are
+internal audit text in `critic_delta`, read by no counterparty and typeset into no layout.
+`overrides[].reason` directly succeeds `critic_objection`: the same author, the same pass and the same
+internal audience. `critic_objection` was measured live at 910 and 1275 characters (see below), so a
+smaller cap on its successor would bring the #671 failure back. `dispositions[].reason` is asked for as
+"one line", but that is an instruction in the critic tasking. It lands in no layout that could justify a
+layout-class cap. `primary_value` / `critic_value` carry a whole replacement clause, the same text
+`primary_replacement_text` and `critic_suggested_replacement` carry. None of the four has been measured
+live, because no run has populated them yet. `tests/test_length_budgets_674.py` [7] pins them to the class
+bound rather than to the digits.
 
 **What #674 changed, and what it deliberately did not.** `critic_objection` and
 `rationale_objections[].objection` held **800** — the delivered-footnote budget — despite being internal
@@ -494,10 +547,12 @@ the delta indicator visible.
 > text that ships. What the attorney must see before acting is therefore not a disagreement left
 > unresolved in the document, but the override itself — the reviewer's version, the critic's
 > version, and the critic's stated reason for each issue the critic changed. Read "contested
-> replacement" as "override" throughout this document. **The schema is deliberately unchanged
-> here**: `critic_delta` still carries the `contested_replacements` shape from the add-only design,
-> and every normative rule in this document keyed to that shape still applies byte for byte.
-> Re-shaping the wire contract is a later ticket in epic #134, not this one.
+> replacement" as "override" throughout this document. **The wire contract grew, it was not
+> replaced (issue #137):** `critic_delta` gained `dispositions[]` and `overrides[]` (see
+> [The critic's final result](#the-critics-final-result-issue-137-adr-0001)), and the add-only arrays
+> stay, deprecated, for one release — so every normative rule in this document keyed to the
+> `contested_replacements` shape still applies byte for byte until the reconcile ticket (#136)
+> retires them.
 
 **The receipt's own mirror (issue #96) is counts-only, never these badges' prose.** The provenance
 slip (`frontend/src/toaster/receipt.ts`, `criticLine`) prints at most one brief line — e.g. "Critic:

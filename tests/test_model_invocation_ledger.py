@@ -141,7 +141,7 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
                     _fixture("schema_invalid_missing_issues.json"),
                     _fixture("primary_request_change_valid.json"),
                 ],
-                _CRITIC_MODEL_ID: [_fixture("critic_no_delta_accept_valid.json")],
+                _CRITIC_MODEL_ID: [_fixture("critic_keep_i1_accept_valid.json")],
             },
             usage_sequence=[
                 {"input_tokens": 100, "output_tokens": 20},  # primary attempt 1 (retry)

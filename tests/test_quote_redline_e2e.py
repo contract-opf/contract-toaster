@@ -271,7 +271,19 @@ def _critic_no_delta_response() -> str:
             "confidence_state": "OK",
             "confidence_band": None,
             "issues": [],
-            "critic_delta": None,
+            "critic_delta": {
+                # Issue #137: a critic owes a disposition for every
+                # first-reviewer issue -- here the primary's two, I1 and I2.
+                "dispositions": [
+                    {
+                        "issue_id": key,
+                        "disposition": "KEEP",
+                        "reason": "Same issue and the same edit; compliant with the playbook position.",
+                    }
+                    for key in ("I1", "I2")
+                ],
+                "overrides": [],
+            },
             "verdict_summary": None,
         }
     )

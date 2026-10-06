@@ -143,7 +143,7 @@ def _run_critic(
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     critic_id = _critic_model_id()
     client = model_client.FakeBedrockClient(
-        {critic_id: [_load_fixture_text("critic_no_delta_accept_valid.json")]}
+        {critic_id: [_load_fixture_text("critic_keep_i1_accept_valid.json")]}
     )
     ledger: list[Any] = []
     result = cp.run_critic_pass(

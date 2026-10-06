@@ -260,7 +260,9 @@ def test_decision_moves_accept_to_request_change_via_critic(failures: list[str])
 
 def test_critic_accept_never_reverses_detector_fire(failures: list[str]) -> None:
     primary = _primary_request_change()  # primary already REQUEST_CHANGE
-    critic = _load_fixture("critic_no_delta_accept_valid.json")  # critic says ACCEPT, no delta
+    # Critic says ACCEPT and KEEPs the primary's I1 (the disposition #137
+    # requires); it adds, contests and objects to nothing.
+    critic = _load_fixture("critic_keep_i1_accept_valid.json")
     fire = _detector_fire(topic_id="limitation-of-liability-detector", rule_id="liability-floor")
 
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[fire])
@@ -451,6 +453,9 @@ def _v2_critic_response_with_replacement_text(
     base.pop("block_patches", None)
     base.pop("block_ops", None)
     base["schema_version"] = "output-schema-v1"
+    # v2 has no `dispositions`/`overrides` (issue #137 added them to v3 only).
+    base["critic_delta"].pop("dispositions", None)
+    base["critic_delta"].pop("overrides", None)
     added = base["critic_delta"]["added_issues"][0]
     added.pop("issue_key", None)
     added["proposed_replacement_text"] = text

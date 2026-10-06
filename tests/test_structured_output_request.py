@@ -357,9 +357,20 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         critic_delta_props = self.schema["definitions"]["CriticDelta"]["properties"]
         for name in ("added_issues", "contested_replacements", "rationale_objections"):
             self.assertEqual(critic_delta_props[name]["type"], "array")
+        # Issue #137 added `dispositions` and `overrides`, which strict mode
+        # forces into `required` the same way (an empty `[]` is a value the
+        # full schema accepts for each).
+        for name in ("dispositions", "overrides"):
+            self.assertEqual(critic_delta_props[name]["type"], "array")
         self.assertEqual(
             set(self.schema["definitions"]["CriticDelta"]["required"]),
-            {"added_issues", "contested_replacements", "rationale_objections"},
+            {
+                "added_issues",
+                "contested_replacements",
+                "rationale_objections",
+                "dispositions",
+                "overrides",
+            },
         )
 
         contested_item = critic_delta_props["contested_replacements"]["items"]
@@ -1085,7 +1096,7 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
 
 class TestRunCriticPassThreading(unittest.TestCase):
     def test_capability_false_never_sends_output_schema_even_to_a_legacy_client(self) -> None:
-        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_no_delta_accept_valid.json")))
+        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_keep_i1_accept_valid.json")))
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
         records: list[Any] = []
         # Pinned OFF for the same reason as the primary-pass twin above --
@@ -1106,7 +1117,7 @@ class TestRunCriticPassThreading(unittest.TestCase):
         self.assertFalse(records[-1].schema_enforcement_requested)
 
     def test_capability_true_passes_the_projected_schema_as_output_schema(self) -> None:
-        stamped = _load_fixture("critic_no_delta_accept_valid.json")
+        stamped = _load_fixture("critic_keep_i1_accept_valid.json")
         client = mc.FakeBedrockClient(
             {"anthropic.claude-sonnet-4-6": [json.dumps(_unstamp(stamped))]},
             capabilities={"structured_outputs": True},
