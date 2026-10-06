@@ -751,8 +751,15 @@ class TestStreamedRequestPayload(unittest.TestCase):
         # an explicit `reasoning` block.
         _allowance = mc.openrouter_reasoning_max_tokens(PRIMARY_MODEL_ID)
         self.assertGreater(_allowance, 0)
+        # Issue #143: every request also asks for OpenRouter's usage
+        # accounting, without which a prompt-cache hit is never reported.
+        self.assertEqual(payload["usage"], {"include": True})
         self.assertEqual(
-            {k: v for k, v in payload.items() if k not in ("stream", "stream_options")},
+            {
+                k: v
+                for k, v in payload.items()
+                if k not in ("stream", "stream_options", "usage")
+            },
             {
                 "model": PRIMARY_MODEL_ID,
                 "messages": [

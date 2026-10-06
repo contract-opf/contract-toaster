@@ -56,9 +56,9 @@ message at all.
      into the (uncached) second block.
 
 Fully offline: policy JSON read straight off disk (or a synthetic dict
-injected for the one OpenRouter capability this repo's real policy has not
-yet verified for any id -- see model-policy/openrouter.json's own
-"CAPABILITY DESCRIPTOR" note), injected fake HTTP / bedrock-runtime
+injected so the OpenRouter capability mechanism is exercised without
+asserting anything about a real model id -- see model-policy/openrouter.json's
+own "CAPABILITY DESCRIPTOR" note), injected fake HTTP / bedrock-runtime
 transports stand in for httpx / boto3.
 
 Run: python3 tests/test_document_cache_block.py
@@ -362,14 +362,14 @@ def _openrouter_response(content: str, usage: dict[str, Any] | None = None) -> F
     return FakeHttpResponse(200, body)
 
 
-# model-policy/openrouter.json deliberately declares `prompt_caching` for NO
-# id yet (see that file's own "CAPABILITY DESCRIPTOR" note: "no verification
-# pass has confirmed it for any OpenRouter-routed id"). Fabricating that
-# field on a REAL model id in the shipped policy file would be exactly the
-# unverified-capability claim that note refuses to make. A synthetic,
-# in-memory policy exercises the MECHANISM (does the client's wire behavior
-# change correctly when the descriptor says True) without asserting
-# anything about a real model.
+# A synthetic, in-memory policy exercises the MECHANISM (does the client's
+# wire behavior change correctly when the descriptor says True) without
+# asserting anything about a real model. When this was written
+# model-policy/openrouter.json declared `prompt_caching` for no id; issue
+# #143 declared it for anthropic/claude-opus-5 alone (live-probed
+# 2026-09-16), and tests/test_openrouter_cache_usage_parsing.py asserts the
+# real pin's wire shape -- system blocks with the playbook breakpoint, and
+# `usage.include`.
 _SYNTHETIC_OPENROUTER_POLICY = {
     "schema_version": "1",
     "provider": "openrouter",

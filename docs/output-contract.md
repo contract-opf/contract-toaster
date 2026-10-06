@@ -644,8 +644,8 @@ cap is misconfigured, not that the document is oversized in a normal operational
 
 For the OpenRouter/Docker Compose deployment target this IS reachable in correct operation, because the
 step-14 gate is a conservative offline character-count estimate (no live tokenizer is available
-offline), not the provider's real tokenizer — see `CHARS_PER_TOKEN_ESTIMATE` in
-`scripts/primary_review_pass.py`. `model_client.OpenRouterModelClient.invoke` (issue #270) maps a
+offline), not the provider's real tokenizer — see `INPUT_CHARS_PER_TOKEN_ESTIMATE` in
+`scripts/primary_review_pass.py` (calibrated by issue #144). `model_client.OpenRouterModelClient.invoke` (issue #270) maps a
 provider-side context-length rejection to this exact same `status`/`reason` pair, so the user
 still sees the single oversized-document message above regardless of which layer caught it.
 

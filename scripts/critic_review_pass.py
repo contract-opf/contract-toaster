@@ -300,6 +300,10 @@ def run_critic_pass(
         )
     )
     system_prompt_text = pp.render_system_prompt(system_blocks)
+    # Issue #143: same capability read as run_primary_pass's -- decides only
+    # whether the system blocks go to `invoke()` as a list (cache breakpoint
+    # intact) or as the rendered string.
+    prompt_caching_enabled = bool((model_capabilities or {}).get("prompt_caching"))
     user_prompt = pp.assemble_user_prompt_critic(
         primary_output=primary_output,
         doc_text=doc_text,
@@ -320,7 +324,10 @@ def run_critic_pass(
     # rejected mid-flight by the provider. Fails closed rather than dropping
     # the document: a critic silently critiquing a review of a document it
     # was not shown is the outcome this gate exists to prevent.
-    assembled_tokens = pp.assembled_prompt_tokens(system_blocks, user_prompt)
+    # Issue #144: the schemas this call carries count toward the gate too.
+    assembled_tokens = pp.assembled_prompt_tokens(
+        system_blocks, user_prompt, tool_spec=tool_spec, output_schema=output_schema
+    )
     if assembled_tokens > max_input_tokens:
         return {
             "status": "MANUAL_REVIEW_REQUIRED",
@@ -369,13 +376,21 @@ def run_critic_pass(
         # function's identical comment.
         attempt_started_monotonic = time.monotonic()
         attempt_duration_ms: int | None = None
+        # Issue #144: bound before the call for the same reason as
+        # run_primary_pass's `attempt_user_prompt` -- the ledger write in
+        # `finally` must estimate what THIS attempt sent.
+        attempt_user_prompt = user_prompt + pp.render_retry_correction_block(correction)
         try:
             # Issue #418: same "only when set" kwarg-threading as
             # run_primary_pass -- see that function's identical comment.
             invoke_kwargs: dict[str, Any] = dict(  # noqa: C408
                 model_id=model_id,
-                system_prompt=system_prompt_text,
-                user_prompt=user_prompt + pp.render_retry_correction_block(correction),
+                # Issue #143: the block list when this model caches, so the
+                # playbook block's `cache_control` reaches the wire -- the
+                # same system blocks the primary sent, so a critic on the
+                # primary's model reads the cache the primary just wrote.
+                system_prompt=system_blocks if prompt_caching_enabled else system_prompt_text,
+                user_prompt=attempt_user_prompt,
                 max_output_tokens=attempt_max_output_tokens,
             )
             if tool_spec is not None:
@@ -490,8 +505,14 @@ def run_critic_pass(
                     model_id=model_id,
                     attempt_number=attempt,
                     outcome=outcome,
-                    input_tokens_est=pp.estimate_tokens(system_prompt_text)
-                    + pp.estimate_tokens(user_prompt),
+                    # Issue #144: system, user (with any retry correction)
+                    # and the schemas, at the calibrated input ratio.
+                    input_tokens_est=pp.request_input_tokens_est(
+                        system_prompt_text,
+                        attempt_user_prompt,
+                        tool_spec=tool_spec,
+                        output_schema=output_schema,
+                    ),
                     output_tokens_est=pp.estimate_tokens(raw_response or ""),
                     projected_playbook_hash=projected_hash,
                     replacement_text_failures=replacement_text_failures,

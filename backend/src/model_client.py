@@ -817,7 +817,7 @@ class BedrockModelClient(Protocol):
         self,
         *,
         model_id: str,
-        system_prompt: str,
+        system_prompt: str | list[dict[str, Any]],
         user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
         tool_spec: dict[str, Any] | None = None,
@@ -862,7 +862,19 @@ class BedrockModelClient(Protocol):
         independent per-client re-check discipline as `output_schema`
         above. Capability False flattens a list to a plain string (joining
         each block's `text` in order) rather than sending a content-block
-        array to a model that cannot use it."""
+        array to a model that cannot use it.
+
+        `system_prompt` (issue #143): the SAME two shapes and the SAME
+        capability gate as `user_prompt` -- a plain `str`, or the
+        Anthropic-shaped system block list
+        (`primary_review_pass.assemble_system_blocks`, whose last block --
+        the projected playbook -- carries `cache_control`). A list reaches
+        the wire as a content-block array ONLY when this client's own
+        `prompt_caching` capability is True AND the adapter sends system
+        blocks at all (`OpenRouterModelClient` does; `LiveBedrockModelClient`
+        always flattens -- Bedrock's own cache-point plumbing is separate
+        and unmeasured). Flattening joins each block's `text` with a blank
+        line, which is byte-identical to `render_system_prompt`."""
         ...
 
     def capabilities(self, model_id: str) -> dict[str, bool]:
@@ -917,16 +929,15 @@ def _prepare_message_content(
 
 
 # ---------------------------------------------------------------------------
-# Prompt-cache usage fields (issue #568): both providers report the SAME
-# Anthropic-native field names for this -- `cache_read_input_tokens` /
-# `cache_creation_input_tokens` (docs/evaluation.md's per-run cache-hit-rate
-# derivation already names these off a live Bedrock response; OpenRouter
-# passes them through verbatim for an Anthropic-family model routed through
-# it). Shared so the two adapters' usage parsers cannot drift on the one
-# thing they have identically shaped -- only the BASE token-count key names
-# differ (`input_tokens`/`output_tokens` on Bedrock vs `prompt_tokens`/
-# `completion_tokens` on OpenRouter), which each parser's own caller already
-# knows.
+# Prompt-cache usage fields (issue #568): the Anthropic-native field names
+# `cache_read_input_tokens` / `cache_creation_input_tokens`, which Bedrock
+# reports on `usage` directly (docs/evaluation.md's per-run cache-hit-rate
+# derivation names these off a live Bedrock response). These names are also
+# what the ledger records for BOTH targets. Issue #143 corrected the
+# assumption that OpenRouter passes them through verbatim: it does not -- it
+# reports `usage.prompt_tokens_details.cached_tokens` / `.cache_write_tokens`
+# instead, which `_openrouter_cache_usage_fields` (below
+# `parse_openrouter_usage`) maps onto these names before falling back here.
 # ---------------------------------------------------------------------------
 
 
@@ -1038,7 +1049,7 @@ class FakeBedrockClient:
         self,
         *,
         model_id: str,
-        system_prompt: str,
+        system_prompt: str | list[dict[str, Any]],
         user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
         tool_spec: dict[str, Any] | None = None,
@@ -1093,7 +1104,13 @@ class FakeBedrockClient:
         self.calls.append(
             {
                 "model_id": model_id,
-                "system_prompt": system_prompt,
+                # Issue #143: the system prompt goes through the SAME
+                # capability-gated pass-through-or-flatten the OpenRouter
+                # client applies, so a capability-False fake records the
+                # plain string a real client would send.
+                "system_prompt": _prepare_message_content(
+                    system_prompt, self._capabilities.get("prompt_caching", False)
+                ),
                 # Issue #568: recorded AFTER the SAME capability-gated
                 # pass-through-or-flatten `_prepare_message_content` the real
                 # clients apply -- so `self.calls[-1]["user_prompt"]`
@@ -1141,10 +1158,13 @@ def parse_openrouter_usage(data: dict[str, Any]) -> dict[str, int]:
     failing an otherwise-successful call over.
 
     Issue #568: the returned dict also carries `cache_read_input_tokens` /
-    `cache_creation_input_tokens` when the (Anthropic-family) model routed
-    through OpenRouter reported them on `usage` -- see `_cache_usage_fields`.
-    These two keys are OMITTED (never defaulted to 0) when the provider did
-    not report caching for this call, unlike the two base counts above.
+    `cache_creation_input_tokens` when the provider reported caching for this
+    call. Issue #143: OpenRouter reports them as
+    `usage.prompt_tokens_details.cached_tokens` / `.cache_write_tokens`, not
+    under the Anthropic names -- see `_openrouter_cache_usage_fields`, which
+    maps them. These two keys are OMITTED (never defaulted to 0) when the
+    provider did not report caching for this call, unlike the two base
+    counts above.
 
     Issue #661: on those same "omitted, never 0" terms, the returned dict
     also carries `reasoning_tokens` when the response reported
@@ -1162,9 +1182,42 @@ def parse_openrouter_usage(data: dict[str, Any]) -> dict[str, int]:
         "input_tokens": input_tokens if isinstance(input_tokens, int) else 0,
         "output_tokens": output_tokens if isinstance(output_tokens, int) else 0,
     }
-    result.update(_cache_usage_fields(usage))
+    result.update(_openrouter_cache_usage_fields(usage))
     result.update(_reasoning_usage_fields(usage))
     return result
+
+
+def _openrouter_cache_usage_fields(usage: dict[str, Any]) -> dict[str, int]:
+    """OpenRouter's prompt-cache usage, mapped onto the Anthropic-native
+    names the ledger already records (issue #143).
+
+    OpenRouter does NOT pass Anthropic's `cache_read_input_tokens` /
+    `cache_creation_input_tokens` through: it reports
+    `usage.prompt_tokens_details.cached_tokens` (read from cache) and
+    `.cache_write_tokens` (written to cache), and only when the request sent
+    `"usage": {"include": true}`. Measured 2026-09-16 on
+    anthropic/claude-opus-5 through the production provider block: a repeat
+    request with an 8,103-token cached system block reported
+    `cached_tokens: 8103`. Before this mapping the ledger's cache columns
+    stayed empty on this target whatever the provider did.
+
+    Same "omitted, never 0" discipline as `_cache_usage_fields`: a key is
+    present only when the provider reported an int for it. An Anthropic-
+    native key on `usage` itself, if a route ever sends one, wins -- it is
+    the more specific report.
+    """
+    fields: dict[str, int] = {}
+    details = usage.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        for source_key, target_key in (
+            ("cached_tokens", "cache_read_input_tokens"),
+            ("cache_write_tokens", "cache_creation_input_tokens"),
+        ):
+            value = details.get(source_key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                fields[target_key] = value
+    fields.update(_cache_usage_fields(usage))
+    return fields
 
 
 def parse_openrouter_provenance(data: dict[str, Any]) -> dict[str, str | None]:
@@ -1226,8 +1279,8 @@ class ModelContextLengthExceededError(ModelInvocationError):
     `MANUAL_REVIEW_REQUIRED` / `document_too_large` outcome the step-14
     assembled-size cap produces (`scripts/primary_review_pass.py`), rather
     than a generic pipeline `ERROR`. The sole pre-call oversize gate is a
-    conservative 4-chars/token estimate (`CHARS_PER_TOKEN_ESTIMATE` in
-    `scripts/primary_review_pass.py`) with no live tokenizer available
+    character-count estimate (`INPUT_CHARS_PER_TOKEN_ESTIMATE` in
+    `scripts/primary_review_pass.py`, calibrated by issue #144) with no live tokenizer available
     offline, so a provider-side length rejection is a real -- if rare --
     occurrence in practice, not just a misconfiguration signal. Carries no
     response body (may echo prompt substance), same discipline as
@@ -1777,7 +1830,7 @@ class OpenRouterModelClient:
         self,
         *,
         model_id: str,
-        system_prompt: str,
+        system_prompt: str | list[dict[str, Any]],
         user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
         tool_spec: dict[str, Any] | None = None,
@@ -1812,15 +1865,23 @@ class OpenRouterModelClient:
         # content`'s own docstring. Reuses the SAME already-loaded `policy`
         # (no second file read), mirroring `output_schema`'s identical
         # reuse below.
-        user_content = _prepare_message_content(
-            user_prompt,
-            openrouter_model_capabilities(model_id, policy).get("prompt_caching", False),
+        prompt_caching_capable = openrouter_model_capabilities(model_id, policy).get(
+            "prompt_caching", False
         )
+        user_content = _prepare_message_content(user_prompt, prompt_caching_capable)
+        # Issue #143: the system prompt gets the same gate. A block list from
+        # `assemble_system_blocks` carries `cache_control` on its last block
+        # (the projected playbook, ~35K tokens), and that breakpoint only
+        # reaches OpenRouter when the system message is sent as a content
+        # array -- a flattened string drops it, which is why the playbook was
+        # billed in full on every pass before this issue. Capability False
+        # flattens to exactly `render_system_prompt`'s string.
+        system_content = _prepare_message_content(system_prompt, prompt_caching_capable)
 
         payload = {
             "model": model_id,
             "messages": [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content},
             ],
             "max_tokens": max_output_tokens + reasoning_allowance,
@@ -1845,6 +1906,13 @@ class OpenRouterModelClient:
             # spend settlement that reads them) would go blind.
             "stream": True,
             "stream_options": {"include_usage": True},
+            # Issue #143: OpenRouter's usage accounting. Without it the
+            # response carries no `usage.prompt_tokens_details.cached_tokens`
+            # / `cache_write_tokens`, so a cache hit is invisible to the
+            # ledger even when one happened. Sent on every request, whatever
+            # the model's caching capability -- it changes what is REPORTED,
+            # never what is routed or billed.
+            "usage": {"include": True},
             # Sampling params (temperature/top_p/top_k) deliberately omitted --
             # request contract (model-policy/openrouter.json).
             #
@@ -2173,7 +2241,7 @@ class LiveBedrockModelClient:
         self,
         *,
         model_id: str,
-        system_prompt: str,
+        system_prompt: str | list[dict[str, Any]],
         user_prompt: str | list[dict[str, Any]],
         max_output_tokens: int,
         tool_spec: dict[str, Any] | None = None,  # noqa: ARG002 - Bedrock path is dormant
@@ -2197,7 +2265,10 @@ class LiveBedrockModelClient:
         payload = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_output_tokens,
-            "system": system_prompt,
+            # Issue #143: always the flat string, whatever the capability --
+            # system-block caching was measured on the OpenRouter route
+            # only, so the Bedrock payload stays byte-identical to before.
+            "system": _prepare_message_content(system_prompt, False),
             "messages": [{"role": "user", "content": user_content}],
             # Sampling params (temperature/top_p/top_k) deliberately omitted,
             # and no manually-set extended-thinking budget -- request

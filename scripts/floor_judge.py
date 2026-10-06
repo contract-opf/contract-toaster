@@ -468,8 +468,11 @@ def judge_floor_invariants(
                         model_id=model_id,
                         attempt_number=attempt,
                         outcome=outcome,
-                        input_tokens_est=_primary_review_pass.estimate_tokens(_SYSTEM_PROMPT)
-                        + _primary_review_pass.estimate_tokens(user_prompt),
+                        # Issue #144: the calibrated input estimate the two
+                        # review passes use (no schema rides on this call).
+                        input_tokens_est=_primary_review_pass.request_input_tokens_est(
+                            _SYSTEM_PROMPT, user_prompt
+                        ),
                         output_tokens_est=_primary_review_pass.estimate_tokens(raw_response or ""),
                         actual_input_tokens=(actual_usage or {}).get("input_tokens"),
                         actual_output_tokens=(actual_usage or {}).get("output_tokens"),

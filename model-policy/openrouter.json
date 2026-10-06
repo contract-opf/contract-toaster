@@ -185,8 +185,15 @@
     "`response_format`, so dropping `output_schema` from the payload is the",
     "CORRECT behaviour for this id rather than a silent failure, and schema",
     "enforcement runs through the forced-tool path instead.]",
-    "`prompt_caching` is left absent everywhere in this file: no",
-    "verification pass has confirmed it for any OpenRouter-routed id.",
+    "[WAS, until issue #143:] `prompt_caching` was left absent everywhere in",
+    "this file: no verification pass had confirmed it for any OpenRouter-",
+    "routed id. [NOW: anthropic/claude-opus-5 declares `prompt_caching: true`",
+    "on BOTH its entries (models.primary and its `selectable` entry), from",
+    "the 2026-09-16 live probe recorded in models.primary's",
+    "`prompt_caching_note` (the role pin, not the `selectable` entry, whose",
+    "fields are serialised to the admin picker). No other id declares it:",
+    "Sonnet 4.6 and Sonnet 5",
+    "were not probed on the ZDR route and stay absent (= False) until one is.]",
     "",
     "ZDR-ENDPOINT CORRECTION (issue #142, 2026-09-16): the paragraph above",
     "records what the 2026-08-02 SELECTABLE SOURCE NOTE pass actually",
@@ -303,6 +310,8 @@
       "max_output_tokens": 128000,
       "structured_outputs": false,
       "structured_outputs_note": "Issue #142, probed 2026-09-16 with the production provider block (zdr: true, data_collection: deny, require_parameters: true): a request carrying response_format.type=json_schema for this id 404s -- OpenRouter's routing funnel filters it to zero endpoints at the \"Filter by Data Policy\" step, because neither endpoint that supports response_format for this model is a zero-data-retention endpoint. `structured_outputs` here means \"the endpoint(s) reachable under THIS deployment's ZDR provider block support response_format\", not \"the model supports it somewhere\" -- see docs/design-notes.md's model-policy section. The forced-tool path (OPENROUTER_STRUCTURED_OUTPUT=1, the default) is unaffected -- tools/tool_choice routed fine in the same probe -- so this id still gets schema-enforced output, just not via response_format.",
+      "prompt_caching": true,
+      "prompt_caching_note": "Issue #143, probed 2026-09-16 with the production provider block (zdr: true, data_collection: deny, require_parameters: true): two identical requests with an 8,103-token system block marked cache_control ephemeral, sent with usage.include, reported cache_write_tokens 8103 then cached_tokens 8103, and the second cost 8% of the first ($0.0042 vs $0.0508) -- the ZDR route honours the breakpoint for this id. Owner decision 2026-09-17: the ephemeral provider-side cache is permitted under this deployment's zero-data-retention definition -- see docs/data-handling.md.",
       "request_contract": {
         "omit_sampling_params": [
           "temperature",
@@ -386,7 +395,8 @@
       "context_length": 1000000,
       "reasoning_max_tokens": 4000,
       "max_output_tokens": 128000,
-      "structured_outputs": false
+      "structured_outputs": false,
+      "prompt_caching": true
     },
     {
       "model_id": "openai/gpt-5.6-sol",
