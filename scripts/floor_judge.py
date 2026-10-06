@@ -252,11 +252,21 @@ def _validate_judge_response(raw_text: str, *, expected_invariant_id: str) -> tu
     a model that fences its answer (Claude Haiku 4.5 did, on every call of a
     2026-10-06 live run) had every verdict refused and failed every review
     closed as `floor_invariant_unjudged`.
+
+    Nothing but whitespace or the closing fence may FOLLOW the object. The
+    unwrap keeps only the first balanced object, so a judge that answers
+    `violated: false` and then takes it back ("Correction: {... true ...}")
+    would otherwise pass as not violated -- failing OPEN on a gate nothing
+    downstream can re-fire. Such a response stays refused, and unjudged.
     """
     if not isinstance(raw_text, str):
         return False, None
+    body = _primary_review_pass._extract_json_object(raw_text)
+    trailing = raw_text[raw_text.find(body) + len(body) :]
+    if trailing.strip().strip("`").strip():
+        return False, None
     try:
-        parsed = json.loads(_primary_review_pass._extract_json_object(raw_text))
+        parsed = json.loads(body)
     except (json.JSONDecodeError, TypeError):
         return False, None
     if not isinstance(parsed, dict):
