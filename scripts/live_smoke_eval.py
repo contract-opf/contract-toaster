@@ -117,6 +117,11 @@ Run standalone:
     python3 scripts/live_smoke_eval.py DOCS_DIR --runs-per-doc 3 \\
         --structured-output both --out report.json --dump-dir /tmp/dump --yes
 
+Test tier (owner decision 2026-10-06): live runs use the cheap models until
+testing is declared over -- set OPENROUTER_PRIMARY_MODEL_ID and
+OPENROUTER_CRITIC_MODEL_ID to a test-tier `selectable` id. See
+docs/evaluation.md, "Live smoke on the test tier".
+
 Offline test: `python3 tests/test_live_smoke_eval_offline.py`
 """
 

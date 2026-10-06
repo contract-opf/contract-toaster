@@ -156,6 +156,10 @@ class TestReasoningAllowanceLookup(unittest.TestCase):
             PRIMARY_MODEL_ID,
             policy["models"]["primary"]["model_id"],
             policy["models"]["critic"]["model_id"],
+            # The 2026-10-06 test tier declares the production pins' allowance
+            # so live tests exercise the same request shape.
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-5.6-luna",
         }
         non_reasoning_ids = [
             e["model_id"] for e in policy["selectable"] if e["model_id"] not in pinned

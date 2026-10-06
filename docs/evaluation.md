@@ -50,6 +50,28 @@ The four-check description above is the full regression-gate REGIME this documen
 
 Before issue #400, `scripts/eval_harness.py` scored gold fixtures against the retired deterministic hard-rejection detector engine instead of the LLM-native pipeline above — see [Detector-correctness gate](#detector-correctness-gate) below for where that scoring lives now (`tests/lint-gold-fixtures.py`, unaffected by this rewrite).
 
+### Live smoke on the test tier
+
+Live testing runs on cheap models until the owner declares testing over; only then do live runs move to the production pins (Sonnet 4.6 reviewer, Opus 5 critic). Every live run spends real money, so plan each one. `model-policy/openrouter.json` lists two test-tier `selectable` entries, probed on 2026-10-06 against the production ZDR provider block (its `_comment` records the probes):
+
+| Model | Use | ≈ $/review, uncached |
+|---|---|---|
+| `anthropic/claude-haiku-4.5` | Primary test tier, on both passes. In-family, so its tool-call, schema and caching behaviour best predicts the production models. Prompt caching verified. | 0.21 |
+| `openai/gpt-5.6-luna` | Cross-family check: catches prompt or schema assumptions that only hold for Claude. | 0.05 |
+
+The estimate assumes about 135K input and 15K output tokens across both passes. A probe proves routing, not quality: trust a candidate only after a live run. Third-party-hosted open-weight models (DeepSeek, GLM, Kimi) need an owner decision on their ZDR hosting before any counterparty document goes to them, test or not.
+
+`scripts/live_smoke_eval.py` is the documented way to run the tier. The `OPENROUTER_PRIMARY_MODEL_ID` / `OPENROUTER_CRITIC_MODEL_ID` overrides choose the models; because both ids are `selectable`, the runtime allowlist accepts them. Read the key from the keychain into the process environment and never echo it:
+
+```bash
+OPENROUTER_API_KEY="$(security find-generic-password -s openrouter-api-key -w)" \
+OPENROUTER_PRIMARY_MODEL_ID=anthropic/claude-haiku-4.5 \
+OPENROUTER_CRITIC_MODEL_ID=anthropic/claude-haiku-4.5 \
+python3 scripts/live_smoke_eval.py DOCS_DIR --out report.json --yes
+```
+
+Check the account's remaining credit first (`GET https://openrouter.ai/api/v1/credits`). The report holds status, attempts, tokens and cost only, never document text.
+
 ## Metrics
 
 The harness reports a fixed set of metrics over the gold set on every run. These are the numbers that gate promotion:
