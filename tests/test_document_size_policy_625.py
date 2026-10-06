@@ -3,8 +3,8 @@
 Gate for issue #625: ONE review quality, or a loud failure.
 
 Owner decision (2026-08-25): there is no quality tiering by document size.
-Every document whose assembled prompt fits `MAX_INPUT_TOKENS` (170,000 since
-issue #144; 100,000 when #625 set it) gets
+Every document whose assembled prompt fits `MAX_INPUT_TOKENS` (175,000 since
+issue #137; 170,000 from issue #144; 100,000 when #625 set it) gets
 the full-quality, full-document review; anything over it fails loudly as
 `MANUAL_REVIEW_REQUIRED` / `document_too_large` before any model call. Issue
 #419's section-outline fallback -- the primary was shown a heading +
@@ -17,13 +17,15 @@ the behaviour being removed (and pinned `MAX_INPUT_TOKENS` at 80_000).
 
 ## What this proves
 
-  1. The cap is 170_000, and every self-contained mirror of it agrees
+  1. The cap is 175_000, and every self-contained mirror of it agrees
      (scripts/primary_review_pass.py, backend/src/reviews.py, and the two
      Lambda deployables). The offline 4-chars/token estimate is unchanged.
      Issue #144 moved the gate onto the calibrated input estimate and raised
      the cap 100_000 -> 170_000 to PRESERVE capacity (owner decision
      2026-10-05): group 8 proves a document the old gate admitted with the
-     least room to spare is still admitted.
+     least room to spare is still admitted. Issue #137 grew the counted
+     tool schema by 1,739 tokens (one schema now serves both passes), so the
+     cap rose again to 175_000 to keep that case admitted with headroom.
   2. The outline-mode API surface is GONE from both modules -- not just
      unused. A deletion ticket that leaves the functions importable leaves
      the next caller free to revive the degrade.
@@ -82,7 +84,7 @@ import reconciliation as recon  # noqa: E402
 import review_spine as rs  # noqa: E402
 import reviews as _reviews_module  # noqa: E402
 
-EXPECTED_MAX_INPUT_TOKENS = 170_000
+EXPECTED_MAX_INPUT_TOKENS = 175_000
 
 # Issue #144: the cap the OLD gate enforced, and the units it enforced it
 # in -- system + user text only, at `pp.CHARS_PER_TOKEN_ESTIMATE` (4)
@@ -190,7 +192,7 @@ def _single_paragraph_docx(heading: str, text: str) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def test_max_input_tokens_is_170000_in_every_mirror(failures: list[str]) -> None:
+def test_max_input_tokens_is_175000_in_every_mirror(failures: list[str]) -> None:
     mirrors = {
         "scripts/primary_review_pass.py": pp.MAX_INPUT_TOKENS,
         "backend/src/reviews.py": _reviews_module.MAX_INPUT_TOKENS,
@@ -212,9 +214,9 @@ def test_max_input_tokens_is_170000_in_every_mirror(failures: list[str]) -> None
     ts_source = (REPO_ROOT / "infra" / "lib" / "nested" / "pipeline-stack.ts").read_text(
         encoding="utf-8"
     )
-    if "const MAX_INPUT_TOKENS = 170_000;" not in ts_source:
+    if "const MAX_INPUT_TOKENS = 175_000;" not in ts_source:
         failures.append(
-            "[1b] infra/lib/nested/pipeline-stack.ts must wire MAX_INPUT_TOKENS = 170_000 -- "
+            "[1b] infra/lib/nested/pipeline-stack.ts must wire MAX_INPUT_TOKENS = 175_000 -- "
             "it is the deployed env value the Python copies mirror."
         )
 
@@ -341,10 +343,10 @@ def test_run_primary_pass_reports_no_input_mode(failures: list[str]) -> None:
         {primary_id: [_load_fixture_text("primary_accept_valid.json")]}
     )
     ledger: list[Any] = []
-    # Above the deleted 60,000-token threshold, under the 170,000-token cap:
+    # Above the deleted 60,000-token threshold, under the 175,000-token cap:
     # the case that used to degrade and now must not. Issue #144: sized in
     # the units the cap is now judged in (the calibrated input estimate,
-    # which also counts the ~9,300-token tool schema).
+    # which also counts the ~11,100-token tool schema).
     doc_text = _text_of_length(_ABOVE_OLD_THRESHOLD_UNDER_CAP_CHARS)
 
     result = pp.run_primary_pass(
@@ -383,7 +385,7 @@ def test_over_cap_document_fails_loudly_before_any_model_call(failures: list[str
     )
     ledger: list[Any] = []
     # Issue #144: sized in the units the cap is judged in (the calibrated
-    # input estimate) -- the document ALONE exceeds the 170,000-token cap by
+    # input estimate) -- the document ALONE exceeds the 175,000-token cap by
     # 16,000 tokens, before the system blocks and tool schema are added.
     oversized = _text_of_length(
         int(EXPECTED_MAX_INPUT_TOKENS * pp.INPUT_CHARS_PER_TOKEN_ESTIMATE) + 40_000
@@ -541,7 +543,8 @@ def test_shipped_prompts_never_describe_outline_mode(failures: list[str]) -> Non
 #
 # Issue #144 moved the step-14 gate from "system + user at 4 chars/token"
 # onto `request_input_tokens_est` (2.5 chars/token, tool schema counted) --
-# ~1.6x the old figure plus ~9,300 tokens. Under the old 100,000 cap that
+# ~1.6x the old figure plus the tool schema (~9,300 tokens at #144, ~11,100
+# since issue #137 made one schema serve both passes). Under the old 100,000 cap that
 # would have refused documents that review fine today. The owner decision
 # (2026-10-05) was to keep the honest estimate and raise the cap so the SAME
 # documents are admitted. This pins the hardest case: a document whose OLD
@@ -549,6 +552,12 @@ def test_shipped_prompts_never_describe_outline_mode(failures: list[str]) -> Non
 # gate. The old estimate is computed from the exact system blocks and user
 # content the gate saw (captured, not re-assembled), so a prompt that grows
 # later re-sizes the fixture rather than silently weakening the check.
+#
+# The tool schema is NOT in the old estimate, so it is pure overhead on top
+# of this case: every token the serialized schema grows by must be matched
+# by raising MAX_INPUT_TOKENS by the same amount, or [8c] fails. Issue #137
+# grew it 9,318 -> 11,057 tokens (assembled 169,316 -> 171,055), which is
+# why the cap is 175,000 (~3,900 tokens of headroom), not 170,000.
 # ---------------------------------------------------------------------------
 
 
@@ -622,7 +631,12 @@ def test_old_gate_capacity_is_preserved(failures: list[str]) -> None:
             f"[8c] A document the old gate admitted (old estimate {old}) must still be "
             f"admitted -- issue #144 preserves capacity; got status={result.get('status')!r}, "
             f"reason={result.get('reason')!r}, assembled_tokens={assembled!r} against "
-            f"max_input_tokens={pp.MAX_INPUT_TOKENS}."
+            f"max_input_tokens={pp.MAX_INPUT_TOKENS}. The old gate never counted the tool "
+            f"schema, so any growth in the serialized tool/response-format schema lands on "
+            f"top of this document: a schema that grows by N tokens must raise "
+            f"MAX_INPUT_TOKENS by N (all five copies -- see "
+            f"test_max_input_tokens_is_175000_in_every_mirror) and the reservation figures "
+            f"derived from it (issue #137 grew it 1,739 tokens; cap 170,000 -> 175,000)."
         )
         return
     if len(client.calls) != 1:
@@ -630,7 +644,7 @@ def test_old_gate_capacity_is_preserved(failures: list[str]) -> None:
 
 
 TESTS = [
-    test_max_input_tokens_is_170000_in_every_mirror,
+    test_max_input_tokens_is_175000_in_every_mirror,
     test_outline_mode_symbols_are_deleted,
     test_reconcile_rejects_an_input_mode_argument,
     test_a_document_over_the_old_threshold_is_still_sent_in_full,
