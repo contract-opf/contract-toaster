@@ -108,6 +108,17 @@ any review running inside it. That is handled automatically — see "What a
 redeploy does to running reviews (Docker Compose target)" below for what the
 operator should expect to see afterwards.
 
+**A deploy that changes the worst-case reservation** (any change to
+`MAX_INPUT_TOKENS`, the output ceiling, the retry budget or the pinned
+rates — e.g. issue #144 moved it from 686 to 871 cents on Bedrock and from
+624 to 792 on OpenRouter) leaves the day's `reserved_usd_cents` slightly
+wrong for any review that reserved under the old code and settles under the
+new: settlement recomputes the reservation instead of reading the stored
+figure (the #459 residual), so it releases the NEW amount. The counter runs
+low by the difference per in-flight review until UTC midnight resets it.
+Either drain in-flight reviews before promoting, or accept the drift for the
+rest of the day; it never blocks a review that should start.
+
 The flow:
 
 ```bash

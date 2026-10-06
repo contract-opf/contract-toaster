@@ -115,6 +115,23 @@ def test_a_field_in_a_part_the_source_did_not_have_is_refused() -> None:
     assert _refused(out.getvalue(), SOURCE)
 
 
+def test_striking_a_source_field_frees_no_slot_for_a_new_instruction() -> None:
+    """Independent review of #153: the writer renames a struck field's
+    instrText to delInstrText. Both share one budget, so a new instrText
+    added OUTSIDE any w:ins cannot take the freed slot."""
+    struck_page = (
+        '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+        '<w:del w:id="95" w:author="contract-toaster" w:date="2026-10-06T00:00:00Z">'
+        '<w:r><w:delInstrText xml:space="preserve"> PAGE </w:delInstrText></w:r></w:del>'
+        '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r>'
+        '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+    )
+    smuggled = '<w:p><w:r><w:instrText xml:space="preserve"> HYPERLINK "https://attacker.example" </w:instrText></w:r></w:p>'
+    assert _refused(_docx(struck_page + smuggled + REF_FIELD + LINK + BODY), SOURCE)
+    # Striking alone (no new instruction) is a legitimate redline.
+    assert not _refused(_docx(struck_page + REF_FIELD + LINK + BODY), SOURCE)
+
+
 TESTS = [
     test_a_plain_text_edit_keeps_the_sources_own_fields_and_links,
     test_without_a_baseline_the_old_strict_rule_still_holds,
@@ -122,6 +139,7 @@ TESTS = [
     test_an_inserted_field_cannot_hide_behind_a_deleted_source_field,
     test_more_field_elements_than_the_source_held_is_refused,
     test_a_field_in_a_part_the_source_did_not_have_is_refused,
+    test_striking_a_source_field_frees_no_slot_for_a_new_instruction,
 ]
 
 
