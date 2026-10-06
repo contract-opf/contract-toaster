@@ -289,8 +289,10 @@ def _load_opf_from_bytes(contents: bytes, *, suffix: str) -> dict[str, Any]:
     `validate_playbook_upload`, because this function is the one seam BOTH
     surfaces already share -- the two admin upload routes in
     `backend/src/main.py`, and `pipeline_runner._load_opf_bundle_if_active`,
-    which re-validates the stored artifact through it on every review
-    rather than trusting the activated row. One check therefore also covers
+    which re-validates the stored artifact through it rather than trusting
+    the activated row (once per active version per process since issue
+    #127; a deploy restarts the process, so new checks still reach every
+    artifact). One check therefore also covers
     an artifact activated BEFORE the gate existed, with no migration and no
     separate review-path gate.
 
