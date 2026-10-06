@@ -671,9 +671,12 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     use -- and the attempt count includes truncation's own retry allowance,
     which the pre-#658 formula silently under-reserved.
 
-    Each pass (primary/Opus, critic/Sonnet) is priced at ITS OWN model's
-    rate rather than a single blended "most expensive tier" rate applied to
-    both passes (see the constants above for why that overshot 4.6x).
+    Each pass (primary/Sonnet reviewer, critic/Opus since issue #136) is
+    priced at ITS OWN model's rate rather than a single blended "most
+    expensive tier" rate applied to both passes (see the constants above for
+    why that overshot 4.6x). Both passes share the same token caps, so the
+    #136 role swap left the total unchanged (884 cents Bedrock, 804
+    OpenRouter pins).
 
     The rate table itself is provider-aware AND selection-aware
     (`_active_provider_rates`, issues #268 and #445):

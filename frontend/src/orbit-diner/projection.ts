@@ -515,7 +515,7 @@ function projectResult(
     });
   }
   if (detail.primary_model_id) {
-    metadata.push({ label: 'Primary', value: detail.primary_model_id });
+    metadata.push({ label: 'Reviewer', value: detail.primary_model_id });
   }
   if (detail.critic_model_id) {
     metadata.push({ label: 'Critic', value: detail.critic_model_id });

@@ -368,7 +368,7 @@ def check_g_least_privilege_bedrock() -> list[str]:
     failures += _assert(
         bool(re.search(r"anthropic\.claude-opus", pipeline_text))
         and bool(re.search(r"anthropic\.claude-sonnet", pipeline_text)),
-        "pipeline-stack.ts scopes bedrock:InvokeModel to the primary (Opus) and critic (Sonnet) model ARNs",
+        "pipeline-stack.ts scopes bedrock:InvokeModel to the reviewer (Sonnet) and critic (Opus) model ARNs",
     )
 
     # No other infra file should grant bedrock:InvokeModel scoped to the
