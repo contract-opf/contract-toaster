@@ -111,13 +111,13 @@ Endpoints:
                       `?stale_after_seconds=N` is clamped. Distinct from the
                       public `/health` liveness probe above, which is
                       unchanged.
-  GET  /api/admin/manual-review  — admin: the manual-review queue (#252/#37)
-                      — every review in MANUAL_REVIEW_REQUIRED or
-                      ERROR_MANUAL_REVIEW_REQUIRED, newest first, with its
-                      wait time and 24-hour-SLA state (RUNBOOK.md ->
-                      "Manual-review filter: owner and SLA"). Filterable by
-                      `?status_filter=` and `?triage=`; an unrecognised
-                      filter value is a 400, never silently ignored.
+  GET  /api/admin/manual-review  — admin: the failures queue (#252/#37/#133)
+                      — every failed (ERROR) review, newest first, with its
+                      reason token, wait time and 24-hour-SLA state
+                      (RUNBOOK.md -> "Failures queue: owner and SLA").
+                      Filterable by `?reason=`, `?status_filter=` and
+                      `?triage=`; an unrecognised filter value is a 400,
+                      never silently ignored.
                       `counts` is computed over the unfiltered queue.
   GET  /api/admin/releases       — admin: release activity + the per-review
                       cost-outlier flag (#252) — recent release-bundle
@@ -1389,17 +1389,20 @@ async def get_admin_pipeline_health(
 async def get_admin_manual_review_queue(
     status_filter: str | None = None,
     triage: str | None = None,
+    reason: str | None = None,
     limit: int = MANUAL_REVIEW_DEFAULT_LIMIT,
     caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
     dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
 ) -> JSONResponse:
-    """Admin: the manual-review queue, filterable (issues #252 / #37).
+    """Admin: the failures queue, filterable (issues #252 / #37 / #133).
 
-    Every review sitting in MANUAL_REVIEW_REQUIRED or
-    ERROR_MANUAL_REVIEW_REQUIRED, newest first, with how long it has waited
-    and whether it has passed the 24-hour SLA (RUNBOOK.md -> "Manual-review
-    filter: owner and SLA"). `status_filter` selects one of those two
-    statuses (or "all"); `triage` selects pending/triaged/none against
+    Every failed review (`ERROR`; a legacy pre-#133 manual-review row is
+    reported as `ERROR` too), newest first, with its reason token, how long
+    it has waited and whether it has passed the 24-hour SLA (RUNBOOK.md ->
+    "Failures queue: owner and SLA"). `reason` selects one reason token (or
+    "all"); `status_filter` accepts only "ERROR"/"all", so a caller still
+    asking for a retired status is refused; `triage` selects
+    pending/triaged/none against
     `disposition.legal_triage_status`. `counts` is computed over the
     UNFILTERED queue, so it is the tile figure regardless of the filter.
     `limit` is clamped into [1, admin_dashboard.MANUAL_REVIEW_MAX_LIMIT].
@@ -1413,6 +1416,7 @@ async def get_admin_manual_review_queue(
         status_filter=status_filter,
         triage=triage,
         limit=limit,
+        reason=reason,
     )
     return JSONResponse(content=queue)
 

@@ -33,8 +33,9 @@ Covers the issue's "Required verification" contract assertions:
   (3) a cap-exceeded submission surfaces "Daily spend limit reached".
   (4) the no-active-bundle state surfaces its defined 503 "no active
       playbook" refusal (issue #41).
-  (5) a form-match short-circuit (issue #18) surfaces the fixed
-      MANUAL_REVIEW_REQUIRED user-facing message.
+  (5) a failed review carries its reason and NO status-keyed "manual
+      review" message; a legacy row with the retired status still reads
+      back (issue #133).
   (6) the detail result payload schema includes provenance (per-issue),
       critic deltas, and confidence band (#35/#36).
   (7) a download writes an audit row; the presigned URL's TTL is short and
@@ -593,33 +594,59 @@ class TestNoActiveBundle(ReviewApiTestBase):
 # -- (5) form-match short-circuit (#18) surfaces the fixed message -----------
 
 
-class TestManualReviewRequiredMessage(ReviewApiTestBase):
-    def test_form_match_short_circuit_surfaces_fixed_message(self):
-        review_id = "review-form-match"
+class TestRetiredManualReviewStatus(ReviewApiTestBase):
+    """Issue #133: a review never concludes as "manual review required".
+
+    A new failure is ERROR with its reason token and no status-keyed promise
+    that a legal admin will follow up; a row stored BEFORE that change with
+    the retired status still reads back (no migration) and also carries no
+    such message -- the reason token is what explains it."""
+
+    def _seed(self, review_id: str, status_value: str, reason: str) -> None:
         self._reviews_table().items[review_id] = {
             "review_id": review_id,
             "owner_sub": "owner-form-match",
-            "status": "MANUAL_REVIEW_REQUIRED",
-            "reason": "not_derivative_of_standard_form",
+            "status": status_value,
+            "reason": reason,
             "playbook_id": PLAYBOOK_ID,
             "created_at": "1000",
             "updated_at": "1000",
         }
 
+    def test_an_error_row_carries_its_reason_and_no_manual_review_message(self):
+        # The spine's step-14 size gate writes this token with status ERROR.
+        self._seed("review-form-match", "ERROR", "document_too_large")
         self._authenticate_as("owner-form-match")
-        resp = self.client.get(f"/api/reviews/{review_id}")
+        resp = self.client.get("/api/reviews/review-form-match")
 
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertEqual(body["status"], "MANUAL_REVIEW_REQUIRED")
-        self.assertEqual(body["reason"], "not_derivative_of_standard_form")
-        self.assertEqual(
-            body["message"], reviews_module.STATUS_USER_MESSAGES["MANUAL_REVIEW_REQUIRED"]
-        )
-        self.assertIn("legal admin will review it", body["message"])
-        # De-brand posture: user-facing copy must never say tenant-brand.
-        self.assertNotIn("Exos", body["message"])
-        self.assertNotIn("EXOS", body["message"])
+        self.assertEqual(body["status"], "ERROR")
+        self.assertEqual(body["reason"], "document_too_large")
+        self.assertIsNone(body["message"])
+
+    def test_no_status_message_promises_a_manual_review(self):
+        for status_value, message in reviews_module.STATUS_USER_MESSAGES.items():
+            self.assertNotIn("MANUAL_REVIEW", status_value)
+            self.assertNotIn("legal admin will review", message)
+
+    def test_a_legacy_manual_review_row_still_reads_back(self):
+        # Each retired status paired with the token the pre-#133
+        # STAGE_FAILURE_REASON_STATUS mapped onto it.
+        for legacy, reason in (
+            ("MANUAL_REVIEW_REQUIRED", "document_too_large"),
+            ("ERROR_MANUAL_REVIEW_REQUIRED", "structured_output_retry_exhausted"),
+        ):
+            review_id = f"review-legacy-{legacy.lower()}"
+            self._seed(review_id, legacy, reason)
+            self._authenticate_as("owner-form-match")
+            resp = self.client.get(f"/api/reviews/{review_id}")
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertEqual(body["status"], legacy)
+            self.assertEqual(body["reason"], reason)
+            self.assertIsNone(body["message"])
 
 
 # -- (6) detail schema includes provenance / critic deltas / confidence -----
@@ -827,7 +854,7 @@ class TestDownloadAudit(ReviewApiTestBase):
         self._reviews_table().items[review_id] = {
             "review_id": review_id,
             "owner_sub": "owner-terminal",
-            "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "reason": "redline_not_persisted",
             "failing_stage": "redline",
             "playbook_id": PLAYBOOK_ID,
@@ -914,7 +941,7 @@ def main() -> int:
         TestNonOwnerAuth,
         TestCapExceeded,
         TestNoActiveBundle,
-        TestManualReviewRequiredMessage,
+        TestRetiredManualReviewStatus,
         TestResultPayloadSchema,
         TestDownloadAudit,
         TestListReviews,

@@ -489,7 +489,7 @@ def _expect_terminal_then_ok(
 ) -> None:
     # Fails on both attempts -> terminal with the unchanged classification.
     result, client, ledger = _run(world, [bad, bad])
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(f"{label}a: expected a terminal failure, got {result.get('status')!r}")
         return
     if result.get("reason") != cp.REASON_CRITIC_SCHEMA_INVALID:
@@ -612,7 +612,7 @@ def test_critic_transcript_that_does_not_prove_is_retried_then_fails(
     bad = _full_critic_response(world)
     bad["block_patches"][0]["segments"][0]["text"] = "Each party's liability is capped."  # not the block's text
     result, client, ledger = _run(world, [bad, bad])
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(f"[6a] an unproven critic transcript must fail closed; got {result.get('status')!r}")
     if not str(result.get("last_error", "")).startswith(pp.BLOCK_TRANSCRIPT_ERROR_TOKEN):
         failures.append(f"[6b] last_error should be the transcript rejection; got {result.get('last_error')!r}")
@@ -637,7 +637,7 @@ def test_unknown_block_id_is_rejected(failures: list[str], world: _World) -> Non
     bad = _full_critic_response(world)
     bad["block_patches"][0]["block_id"] = "p9999"
     result, _client, _ledger = _run(world, [bad, bad])
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(f"[6g] a block id the document does not have must fail closed; got {result.get('status')!r}")
 
 

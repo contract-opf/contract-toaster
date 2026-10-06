@@ -34,15 +34,22 @@
  *
  * `backend/src/reviews.py`'s `REVIEW_STATUSES_NON_TERMINAL` /
  * `REVIEW_STATUSES_TERMINAL` supply the STATUS side (`PENDING`, `RUNNING`,
- * `DONE`, `ERROR`, `ERROR_MANUAL_REVIEW_REQUIRED`,
- * `MANUAL_REVIEW_REQUIRED`, `QUARANTINED`, `SUPERSEDED`). The DECISION side
- * (`ACCEPT`, `REQUEST_CHANGE`) is only ever written alongside a `DONE`
- * status (`scripts/review_spine.py`'s `_terminal` — a SYSTEM status must
- * never carry a decision) — EXCEPT the mock pipeline
- * (`backend/src/pipeline_runner.py::_mock_decision`), which can write
- * `decision: "MANUAL_REVIEW_REQUIRED"` alongside that same status. That
- * value is already a member of this union, so `resolveOutcome` handles it
- * for free.
+ * `DONE`, `ERROR`, `QUARANTINED`, `SUPERSEDED`, `CANCELLED`). The DECISION
+ * side (`ACCEPT`, `REQUEST_CHANGE`) is only ever written alongside a `DONE`
+ * status (`scripts/review_spine.py`'s `_terminal` — a failure never carries
+ * a decision).
+ *
+ * ## Retired statuses (issue #133)
+ *
+ * Owner decision 2026-09-16: a review never concludes as "manual review
+ * required". A run that completes is `DONE`; a run that does not is `ERROR`,
+ * and its `reason` token (`REASON_EXPLANATIONS`) says what to do next. The
+ * backend no longer writes `MANUAL_REVIEW_REQUIRED` or
+ * `ERROR_MANUAL_REVIEW_REQUIRED` — but rows stored before that change still
+ * carry them (there is no migration), and the pre-#133 mock pipeline wrote
+ * `MANUAL_REVIEW_REQUIRED` as a DECISION too. `canonicalStatus` reads every
+ * one of those as `ERROR`, so a legacy row renders as the failure it was —
+ * never as a third outcome, and never as a blank or a humanized enum.
  *
  * `QUARANTINED` and `SUPERSEDED` are a second, DIFFERENT exception to "the
  * decision is only ever written alongside DONE": they are post-terminal
@@ -63,8 +70,6 @@ export type ReviewOutcome =
   | 'DONE'
   | 'ACCEPT'
   | 'REQUEST_CHANGE'
-  | 'MANUAL_REVIEW_REQUIRED'
-  | 'ERROR_MANUAL_REVIEW_REQUIRED'
   | 'ERROR'
   | 'QUARANTINED'
   | 'SUPERSEDED'
@@ -93,29 +98,8 @@ export const OUTCOME_CHIPS: Record<ReviewOutcome, OutcomeChip> = {
   // judgment for.
   ACCEPT: { label: 'Accepted', variant: 'ok' },
   REQUEST_CHANGE: { label: 'Changes requested', variant: 'warn' },
-  // The handed-to-a-human outcome (issue #458's class): the pipeline reached
-  // a terminal answer of its own and put the document in a legal admin's
-  // queue. `warn`, not `danger` — #458's finding is that a review which
-  // succeeded into a human's hands must not be painted as a tool fault the
-  // reviewer should resubmit.
-  MANUAL_REVIEW_REQUIRED: { label: 'Needs manual review', variant: 'warn' },
-  // NOT the same event, though until issue #666 this line was a verbatim
-  // copy of the one above — which is how a review that died in the critic
-  // pass and produced nothing came to read, on History, in the same words
-  // and the same colour as a completed one awaiting a human.
-  //
-  // This status is a pipeline FAILURE that fell back closed: no verdict was
-  // ever reached and no redline exists. `scripts/review_spine.py`'s
-  // `_terminal` writes `decision: None` for it (a SYSTEM status must never
-  // carry a decision), and `backend/src/reviews.py`'s `STATUS_USER_MESSAGES`
-  // opens its copy with "A pipeline error prevented automatic review of your
-  // document" where the status above says only that the document "could not
-  // be automatically reviewed". So it leads with ERROR's own word and sits
-  // in ERROR's `danger` — the reviewer must read "this did not finish"
-  // first — while keeping the handoff as a second clause, because a legal
-  // admin really is on it and that half was never the misleading part.
-  ERROR_MANUAL_REVIEW_REQUIRED: { label: 'Failed — needs manual review', variant: 'danger' },
-  // Genuine faults.
+  // Every run that did not complete (issue #133) — the `reason` token, not
+  // this chip, says what happened and what to do next.
   ERROR: { label: 'Failed', variant: 'danger' },
   QUARANTINED: { label: 'Quarantined', variant: 'danger' },
   // An administrative overlay (ARCHITECTURE.md), not a failure — see
@@ -130,6 +114,27 @@ export const OUTCOME_CHIPS: Record<ReviewOutcome, OutcomeChip> = {
 };
 
 const KNOWN_OUTCOMES = new Set<string>(Object.keys(OUTCOME_CHIPS));
+
+/**
+ * Statuses (and, for the pre-#133 mock pipeline, a decision value) that no
+ * writer produces any more but a stored row can still carry. Read-only
+ * vocabulary: see the module doc's "Retired statuses (issue #133)".
+ */
+export const LEGACY_FAILURE_STATUSES: ReadonlySet<string> = new Set([
+  'MANUAL_REVIEW_REQUIRED',
+  'ERROR_MANUAL_REVIEW_REQUIRED',
+]);
+
+/**
+ * The status every reader should act on: a retired manual-review status is
+ * read as `ERROR` (issue #133); anything else passes through unchanged. Total
+ * over its input — a missing status stays missing.
+ */
+export function canonicalStatus(status: string): string;
+export function canonicalStatus(status: string | null | undefined): string | null | undefined;
+export function canonicalStatus(status: string | null | undefined): string | null | undefined {
+  return status && LEGACY_FAILURE_STATUSES.has(status) ? 'ERROR' : status;
+}
 
 function isKnownOutcome(value: string): value is ReviewOutcome {
   return KNOWN_OUTCOMES.has(value);
@@ -166,13 +171,11 @@ const OVERLAY_STATUSES = new Set<string>(['QUARANTINED', 'SUPERSEDED']);
  * Issue #95 (the #666 failure-painted-as-success bug reopened through a
  * stale decision): the module doc above states the invariant every writer
  * is SUPPOSED to hold — `decision` is only ever written alongside a `DONE`
- * status, except the mock pipeline's `MANUAL_REVIEW_REQUIRED` decision
- * alongside that identical status (trivially consistent: resolving either
- * field lands on the same outcome).
+ * status.
  *
  * `backend/src/pipeline_runner.py:1597`'s #584 branch broke that invariant
- * for one shape: a row landed as `status=ERROR_MANUAL_REVIEW_REQUIRED,
- * decision=REQUEST_CHANGE` — a SYSTEM status carrying a stale decision from
+ * for one shape: a row landed as a failed status with
+ * `decision=REQUEST_CHANGE` — a failure carrying a stale decision from
  * before the pipeline downgraded it. The backend fix (#95) strips `decision`
  * at that same branch, and a second guard in `_write_real_terminal` refuses
  * to write one beside any non-`DONE` status. But that leaves the frontend
@@ -206,9 +209,13 @@ const NON_DECISION_BEARING_STATUS = (status: string): boolean => status !== 'DON
  * `DONE` row with no decision map entry yet).
  */
 export function resolveOutcome(
-  status: string | null | undefined,
-  decision?: string | null,
+  rawStatus: string | null | undefined,
+  rawDecision?: string | null,
 ): ReviewOutcome | null {
+  // Issue #133: a legacy manual-review status (or the pre-#133 mock's
+  // manual-review DECISION) is read as the failure it was.
+  const status = canonicalStatus(rawStatus);
+  const decision = canonicalStatus(rawDecision);
   if (status && OVERLAY_STATUSES.has(status)) {
     return status as ReviewOutcome;
   }

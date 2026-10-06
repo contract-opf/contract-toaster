@@ -23,7 +23,7 @@ This is not hypothetical and it is not a fixture artefact. It is how the FIRST
 live-model run of the v3 block-transcript path died, on a 9-block synthetic
 NDA:
 
-    status=ERROR_MANUAL_REVIEW_REQUIRED  primary_attempts=2  validity_rate=0.0
+    status=ERROR  primary_attempts=2  validity_rate=0.0
     block_transcript_rejected:
       - [source_mismatch] block p0005: segment 0 diverges from the block's own
         text at folded offset 1

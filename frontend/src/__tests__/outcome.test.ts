@@ -16,7 +16,13 @@
  *      variant off `status`, two different fields).
  */
 import { describe, expect, it } from 'vitest';
-import { describeOutcome, OUTCOME_CHIPS, resolveOutcome, type ReviewOutcome } from '../outcome';
+import {
+  canonicalStatus,
+  describeOutcome,
+  OUTCOME_CHIPS,
+  resolveOutcome,
+  type ReviewOutcome,
+} from '../outcome';
 
 // Mirrors the union in outcome.ts exactly. Listed by hand, not derived from
 // `Object.keys(OUTCOME_CHIPS)`, so a union member the map forgot would fail
@@ -27,8 +33,6 @@ const ALL_OUTCOMES: ReviewOutcome[] = [
   'DONE',
   'ACCEPT',
   'REQUEST_CHANGE',
-  'MANUAL_REVIEW_REQUIRED',
-  'ERROR_MANUAL_REVIEW_REQUIRED',
   'ERROR',
   'QUARANTINED',
   'SUPERSEDED',
@@ -62,22 +66,23 @@ describe('describeOutcome — label and variant never disagree', () => {
 
   it('issue #95: a SYSTEM status beats a stale decision, even a known one', () => {
     // Live evidence (#95, the #666 bug reopened): `backend/src/
-    // pipeline_runner.py`'s #584 branch used to downgrade `status` to
-    // ERROR_MANUAL_REVIEW_REQUIRED while leaving the spine's original
-    // REQUEST_CHANGE `decision` in place. That row must render as the
-    // FAILURE it is, not as "Changes requested" — the outcome the row's
-    // stale decision still names.
-    const failed = describeOutcome('ERROR_MANUAL_REVIEW_REQUIRED', 'REQUEST_CHANGE');
-    const failedNoDecision = describeOutcome('ERROR_MANUAL_REVIEW_REQUIRED', null);
-    expect(failed).toEqual(failedNoDecision);
-    expect(failed.label).toBe('Failed — needs manual review');
-    expect(failed.variant).toBe('danger');
-    // And it must NOT collapse to the DONE/REQUEST_CHANGE rendering — the
-    // exact confusion #95 exists to prevent.
-    expect(failed).not.toEqual(describeOutcome('DONE', 'REQUEST_CHANGE'));
-    expect(resolveOutcome('ERROR_MANUAL_REVIEW_REQUIRED', 'REQUEST_CHANGE')).toBe(
-      'ERROR_MANUAL_REVIEW_REQUIRED',
-    );
+    // pipeline_runner.py`'s #584 branch used to downgrade `status` to a
+    // failure while leaving the spine's original REQUEST_CHANGE `decision` in
+    // place. That row must render as the FAILURE it is, not as "Changes
+    // requested" — the outcome the row's stale decision still names. Both the
+    // current status (ERROR, issue #133) and the retired one it used to carry
+    // are pinned.
+    for (const status of ['ERROR', 'ERROR_MANUAL_REVIEW_REQUIRED']) {
+      const failed = describeOutcome(status, 'REQUEST_CHANGE');
+      const failedNoDecision = describeOutcome(status, null);
+      expect(failed).toEqual(failedNoDecision);
+      expect(failed.label).toBe('Failed');
+      expect(failed.variant).toBe('danger');
+      // And it must NOT collapse to the DONE/REQUEST_CHANGE rendering — the
+      // exact confusion #95 exists to prevent.
+      expect(failed).not.toEqual(describeOutcome('DONE', 'REQUEST_CHANGE'));
+      expect(resolveOutcome(status, 'REQUEST_CHANGE')).toBe('ERROR');
+    }
   });
 
   it('prefers the decision over the status when both are present and known', () => {
@@ -91,12 +96,21 @@ describe('describeOutcome — label and variant never disagree', () => {
     expect(describeOutcome('QUARANTINED').label).toBe('Quarantined');
   });
 
-  it('handles the mock pipeline’s MANUAL_REVIEW_REQUIRED decision the same as the status-only case', () => {
-    // backend/src/pipeline_runner.py::_mock_decision can write
-    // decision="MANUAL_REVIEW_REQUIRED" alongside status="MANUAL_REVIEW_REQUIRED".
+  it('issue #133: reads every retired manual-review value as the failure it was', () => {
+    // No writer produces these any more, but a stored row can still carry
+    // them — as a status, or (the pre-#133 mock pipeline,
+    // backend/src/pipeline_runner.py::_mock_decision) as a decision too.
+    for (const legacy of ['MANUAL_REVIEW_REQUIRED', 'ERROR_MANUAL_REVIEW_REQUIRED']) {
+      expect(canonicalStatus(legacy)).toBe('ERROR');
+      expect(resolveOutcome(legacy, null)).toBe('ERROR');
+      expect(describeOutcome(legacy, null)).toEqual(OUTCOME_CHIPS.ERROR);
+    }
     expect(describeOutcome('MANUAL_REVIEW_REQUIRED', 'MANUAL_REVIEW_REQUIRED')).toEqual(
-      describeOutcome('MANUAL_REVIEW_REQUIRED', null),
+      OUTCOME_CHIPS.ERROR,
     );
+    // Everything else passes through untouched.
+    expect(canonicalStatus('DONE')).toBe('DONE');
+    expect(canonicalStatus(null)).toBeNull();
   });
 
   it('never renders a bare underscored token, even for an outcome it does not recognise', () => {

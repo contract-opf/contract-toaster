@@ -11,7 +11,7 @@ Covered:
   2. run_mock_pipeline (eiaa): PENDING->RUNNING->DONE, output object copied,
      output_s3_key recorded, spend settled.
   3. run_mock_pipeline (registered-without-mock / unregistered):
-     MANUAL_REVIEW_REQUIRED, no copy, no key (issue #289: registry-driven,
+     ERROR (issue #133), no copy, no key (issue #289: registry-driven,
      not playbook_id-literal-driven -- see TestRunMockPipeline).
   4. A failure inside the body moves the review to ERROR (never wedged RUNNING)
      and still settles the reservation.
@@ -20,6 +20,7 @@ Run: python3 tests/test_pipeline_runner_inprocess.py
 Exit 0 = pass, 1 = fail.
 """
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -53,33 +54,50 @@ from ddb_fixtures import create_submissions_table  # noqa: E402
 REVIEW_ID = "00000000-0000-4000-a000-000000000001"
 
 
+_VALUE_TOKEN_RE = re.compile(r":[A-Za-z0-9_]+")
+_NAME_TOKEN_RE = re.compile(r"#[A-Za-z0-9_]+")
+
+
 class FakeReviewsTable:
+    """Applies the SET clause the writer sent -- every `field = :value`
+    assignment in it, and nothing else -- after checking the request the way
+    DynamoDB does: a placeholder either expression names with no entry in the
+    value/name map, or an entry neither expression uses, is a
+    ValidationException. So a writer whose SET clause and value map disagree
+    (e.g. `decision = :d` with no `:d`) fails here as it would in production,
+    rather than being judged by its value map alone."""
+
     def __init__(self, status: str = "PENDING"):
         self.item = {"review_id": REVIEW_ID, "status": status}
 
     def update_item(self, Key, UpdateExpression, ConditionExpression=None,
                      ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+        names = ExpressionAttributeNames or {}
         vals = ExpressionAttributeValues or {}
+        _validate_placeholders(UpdateExpression, ConditionExpression, names, vals)
         cur = self.item.get("status")
         if ConditionExpression == "#s = :pending" and cur != vals.get(":pending"):
             raise _conditional()
         if ConditionExpression and ":error" in vals and cur == vals[":error"]:
             raise _conditional()
-        if ":running" in vals:
-            self.item["status"] = "RUNNING"
-        elif ":e" in vals:
-            self.item["status"] = "ERROR"
-            self.item["failing_stage"] = vals[":stage"]
-        else:  # terminal write
-            self.item["status"] = vals[":s"]
-            self.item["decision"] = vals.get(":d")
-            if ":sum" in vals:
-                self.item["summary"] = vals[":sum"]
-            if ":r" in vals:
-                self.item["reason"] = vals[":r"]
-            if ":o" in vals:
-                self.item["output_s3_key"] = vals[":o"]
-        self.item["updated_at"] = vals.get(":now")
+        if not UpdateExpression.startswith("SET "):
+            raise _validation(f"unsupported UpdateExpression: {UpdateExpression!r}")
+        for assignment in UpdateExpression[len("SET "):].split(","):
+            field_token, _, value_token = assignment.partition("=")
+            field = names.get(field_token.strip(), field_token.strip())
+            self.item[field] = vals[value_token.strip()]
+
+
+def _validate_placeholders(update_expression, condition_expression, names, vals) -> None:
+    expressions = update_expression + " " + (condition_expression or "")
+    used_values = set(_VALUE_TOKEN_RE.findall(expressions))
+    used_names = set(_NAME_TOKEN_RE.findall(expressions))
+    undefined = sorted((used_values - set(vals)) | (used_names - set(names)))
+    unused = sorted((set(vals) - used_values) | (set(names) - used_names))
+    if undefined:
+        raise _validation(f"undefined placeholder(s) in expression: {undefined}")
+    if unused:
+        raise _validation(f"placeholder(s) unused in expressions: {unused}")
 
 
 class FakeDDB:
@@ -101,6 +119,12 @@ class FakeS3:
 def _conditional() -> Exception:
     exc = Exception("ConditionalCheckFailedException")
     exc.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+    return exc
+
+
+def _validation(message: str) -> Exception:
+    exc = Exception(f"ValidationException: {message}")
+    exc.response = {"Error": {"Code": "ValidationException", "Message": message}}
     return exc
 
 
@@ -163,7 +187,7 @@ class TestRunMockPipeline(unittest.TestCase):
 
     def test_bundled_sample_is_manual_review_coming_soon(self) -> None:
         """Issue #289: _mock_decision is registry-driven, not
-        literal-driven. The "coming soon" MANUAL_REVIEW_REQUIRED branch is
+        literal-driven. The "coming soon" branch (ERROR since issue #133) is
         exercised by a playbook that IS registered but has no
         mock_output_key -- the real "synthetic-nda-sample" entry (issue
         #412's bundled sample: a knowledge-profile playbook, no
@@ -175,22 +199,26 @@ class TestRunMockPipeline(unittest.TestCase):
 
         This is the pipeline-side counterpart to the catalog serving the
         un-activated bundled sample as status "coming_soon": a submission
-        against it (before first-run activation) parks for manual review
-        and produces no output, rather than being mistaken for a
+        against it (before first-run activation) fails with the
+        `playbook_coming_soon` reason and produces no output, rather than being mistaken for a
         typo'd/unknown playbook_id."""
         reviews_table = FakeReviewsTable()
         s3 = FakeS3()
         self._run("synthetic-nda-sample", reviews_table, s3)
-        self.assertEqual(reviews_table.item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(reviews_table.item["status"], "ERROR")
         self.assertEqual(reviews_table.item["reason"], "playbook_coming_soon")
+        # Issue #133: a run that reached no decision is a failure, never a
+        # "manual review" terminal, and carries no decision at all.
+        self.assertNotIn("decision", reviews_table.item)
         self.assertNotIn("output_s3_key", reviews_table.item)
         self.assertEqual(s3.copies, [])
 
     def test_unknown_playbook_is_manual_review(self) -> None:
         reviews_table = FakeReviewsTable()
         self._run("mystery", reviews_table, FakeS3())
-        self.assertEqual(reviews_table.item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(reviews_table.item["status"], "ERROR")
         self.assertEqual(reviews_table.item["reason"], "unknown_playbook")
+        self.assertNotIn("decision", reviews_table.item)
 
     def test_failure_moves_review_to_error(self) -> None:
         reviews_table = FakeReviewsTable()

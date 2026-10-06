@@ -274,7 +274,7 @@ class ExternalRulesetUnchangedTestCase(unittest.TestCase):
                 self.assertEqual(outcome.category, ls.CATEGORY_PLAYBOOK)
                 self.assertEqual(outcome.rule_id, "playbook-ngram")
                 self.assertEqual(
-                    outcome.confidence_state, ls.ERROR_MANUAL_REVIEW_REQUIRED
+                    outcome.confidence_state, ls.CONFIDENCE_STATE_BLOCKED
                 )
 
     def test_rationale_objection_remains_scanned(self):
@@ -382,7 +382,7 @@ class StaticChannelMapTestCase(unittest.TestCase):
                     review_id=f"chan-521-mode-{notes_mode}",
                     playbook_extra_hard_rejection=_PLAYBOOK_NGRAM,
                 )
-                self.assertEqual(result["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+                self.assertEqual(result["status"], "ERROR")
                 self.assertEqual(result["reason"], "leakage_detected")
                 self.assertEqual(result["leakage_category"], ls.CATEGORY_PLAYBOOK)
 
@@ -628,7 +628,7 @@ class ProductionCorpusPopulatesCheckOneTestCase(unittest.TestCase):
             _primary_response_echoing(self.planted, field="verdict_summary"),
             review_id="chan-521-check1-e2e",
         )
-        self.assertEqual(result["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(result["status"], "ERROR")
         self.assertEqual(result["reason"], "leakage_detected")
         self.assertEqual(result["leakage_category"], ls.CATEGORY_SYSTEM_PROMPT)
         self.assertEqual(result["leakage_rule_id"], "system-prompt-ngram")
@@ -684,7 +684,7 @@ class DemonstratedInjectionBlockedTestCase(unittest.TestCase):
             notes_mode="internal",
             review_id="chan-521-injection",
         )
-        self.assertEqual(result["status"], "ERROR_MANUAL_REVIEW_REQUIRED", result)
+        self.assertEqual(result["status"], "ERROR", result)
         self.assertEqual(result["reason"], "leakage_detected")
         self.assertEqual(result["leakage_category"], ls.CATEGORY_SYSTEM_PROMPT)
         self.assertEqual(
@@ -785,7 +785,7 @@ class ShortGuidanceCannotDisableCheckOneTestCase(unittest.TestCase):
                     toaster_guidance=guidance,
                 )
                 self.assertEqual(
-                    result["status"], "ERROR_MANUAL_REVIEW_REQUIRED", result
+                    result["status"], "ERROR", result
                 )
                 self.assertEqual(result["reason"], "leakage_detected")
                 self.assertEqual(

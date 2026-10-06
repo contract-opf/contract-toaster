@@ -72,7 +72,7 @@ transcript against the document's own bytes
 (`scripts/redline_block_apply.py`); `docx_bytes` is populated whenever at
 least one edit compiled, and a REQUEST_CHANGE whose transcript was rejected
 or none of whose edits compiled routes to
-`status="MANUAL_REVIEW_REQUIRED"` instead -- see that module's own
+`status="ERROR"` instead -- see that module's own
 docstring for the full result-shape contract. A result carrying NO
 transcript (an ACCEPT, or a REQUEST_CHANGE whose issues are all flag-only)
 takes `generate_redline`, which produces no document at all.
@@ -92,7 +92,7 @@ BINDING -> DIGEST -> GUIDANCE -> CONTEXT order) instead of the v1
 coverage stage (`scripts/floor_judge.py`) between the critic pass and
 reconciliation: every `opf.floor.invariants` entry is judged, deterministic
 coverage is enforced (an unjudged invariant fails the run closed to
-`MANUAL_REVIEW_REQUIRED`, never silently treated as satisfied), and a
+`ERROR`, never silently treated as satisfied), and a
 violated invariant becomes a `detector_fires` entry `reconciliation
 .reconcile()` cannot downgrade. A knowledge refusal (`review_knowledge
 .KnowledgeRefusal` -- e.g. no digest AND no posture AND no policy) or a
@@ -161,8 +161,11 @@ import redline_generate  # noqa: E402
 import review_knowledge  # noqa: E402
 
 STATUS_OK = "OK"
-STATUS_MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
-STATUS_ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
+# Issue #133 (owner decision 2026-09-16): a review never concludes as "manual
+# review required". A run that completes is OK (DONE on the row); a run that
+# does not is ERROR, and its `reason` token is what tells the attorney what to
+# do. There is no third terminal: every fail-closed result below is ERROR.
+STATUS_ERROR = "ERROR"
 
 # Live progress tokens (issue #447). These are the four sub-stages a WAITING
 # USER can be told about -- the ones that actually consume the wall clock --
@@ -241,12 +244,12 @@ REASON_FLOOR_INVARIANT_TRUNCATED = "floor_invariant_truncated"
 # be diagnosed from the Diagnostics tab the failure exists to be read on.
 #
 # The critic's oversized-prompt gate is NOT one of these: it returns
-# `{"status": "MANUAL_REVIEW_REQUIRED", "reason": "document_too_large"}`
+# `{"status": "ERROR", "reason": "document_too_large"}`
 # (`critic_review_pass.run_critic_pass`) and `critic_failure_reason` below
 # CARRIES THAT THROUGH rather than overwriting it, so the one critic failure
 # that already had a diagnosis keeps it.
 #
-# The bounded-retry terminal (`{"status": "ERROR_MANUAL_REVIEW_REQUIRED",
+# The bounded-retry terminal (`{"status": "ERROR",
 # "attempts": N, "last_error": ...}`) is what these tokens split, by the
 # FIXED-VOCABULARY token half of `last_error` -- the same half
 # `scripts/live_smoke_eval.py::classify_validation_outcome` already
@@ -408,7 +411,7 @@ def document_text_for_review(paragraphs: list[dict[str, Any]]) -> str:
     WHOLE transcript with `source_mismatch`.
 
     That was not hypothetical: it is how the first live-model run of the v3
-    path died (`ERROR_MANUAL_REVIEW_REQUIRED`, both attempts spent). The
+    path died (`ERROR`, both attempts spent). The
     prompt tells the model not to copy the markers, so a COMPLIANT model
     dropped the `"## "` and kept the heading WORDS -- which is exactly the
     form `primary_review_pass._strip_rendered_heading_markers` cannot repair,
@@ -739,8 +742,7 @@ def _terminal(
     critic_attempts: Optional[int] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """A fail-closed ReviewResult: no decision, no redline, no findings --
-    per ARCHITECTURE.md/docs/output-contract.md, a SYSTEM status (MANUAL_
-    REVIEW_REQUIRED / ERROR_MANUAL_REVIEW_REQUIRED) must never carry an
+    per ARCHITECTURE.md/docs/output-contract.md, the ERROR status must never carry an
     ACCEPT/REQUEST_CHANGE decision.
 
     `normalization_notes` (issue #563 follow-up): a fail-closed result can
@@ -815,7 +817,7 @@ def run_review(
     module's docstring "LLM-native review" section.
 
     Returns a `ReviewResult` dict:
-      {"status": "OK" | "MANUAL_REVIEW_REQUIRED" | "ERROR_MANUAL_REVIEW_REQUIRED",
+      {"status": "OK" | "ERROR",
        "decision": "ACCEPT" | "REQUEST_CHANGE" | None,
        "redline_bytes": bytes | None,
        "summary": str | None,
@@ -870,7 +872,7 @@ def run_review(
     placeholder key) for a v1 review or an OPF review with an empty Floor.
     See `floor_judge.FloorJudgment` for the verdict/unjudged shape; this is
     the deterministic Floor-coverage record surfaced here so a fail-closed
-    `MANUAL_REVIEW_REQUIRED` / `floor_invariant_unjudged` result and an
+    `ERROR` / `floor_invariant_unjudged` result and an
     `OK` result carry the SAME record under the SAME key. `truncated`
     (issue #682) is the subset of `unjudged` whose judge ran out of output
     room -- ids only, and a diagnosis rather than a decision: it changes
@@ -892,14 +894,14 @@ def run_review(
     `status="OK"` is the only status carrying a non-None `decision`. Every
     fail-closed condition surfaced anywhere in the composed chain
     (oversized document, unnormalizable input, a terminal critic-pass
-    failure, a leakage-scan hit) routes to a `MANUAL_REVIEW_REQUIRED` /
-    `ERROR_MANUAL_REVIEW_REQUIRED` result instead of raising -- this
+    failure, a leakage-scan hit) routes to an `ERROR` result (with a
+    `reason` token) instead of raising -- this
     function never raises for an expected fail-closed condition, mirroring
     every stage module it composes. `redline_bytes` is `None` on the ACCEPT
     path; on REQUEST_CHANGE it is populated whenever at least one of the
     model's proven block edits compiles into the document (issue #626's
     block compiler -- see redline_generate.py's own docstring for the full
-    result-shape contract, including the zero-applied `MANUAL_REVIEW_REQUIRED`
+    result-shape contract, including the zero-applied `ERROR`
     case).
 
     `toaster_guidance` (issue #398, default `""`): the optional per-review
@@ -1070,9 +1072,9 @@ def run_review(
                 entity_roster=entity_roster,
             )
         except review_knowledge.KnowledgeRefusal:
-            return _terminal(status=STATUS_MANUAL_REVIEW_REQUIRED, reason=REASON_OPF_KNOWLEDGE_REFUSED)
+            return _terminal(status=STATUS_ERROR, reason=REASON_OPF_KNOWLEDGE_REFUSED)
         except opf_prompt.PromptCompositionError:
-            return _terminal(status=STATUS_MANUAL_REVIEW_REQUIRED, reason=REASON_OPF_DIGEST_MISSING)
+            return _terminal(status=STATUS_ERROR, reason=REASON_OPF_DIGEST_MISSING)
         opf_system_blocks = _assemble_opf_system_blocks(
             knowledge,
             toaster_guidance,
@@ -1151,7 +1153,7 @@ def run_review(
         # (issue #563), on the refusal path too -- one channel, not a
         # second one.
         return _terminal(
-            status=STATUS_MANUAL_REVIEW_REQUIRED,
+            status=STATUS_ERROR,
             reason="unnormalizable_input",
             analysis_report=normalized["analysis_report"],
             normalization_notes=normalized["analysis_report"].get("normalization_notes"),
@@ -1325,7 +1327,7 @@ def run_review(
         }
         if judgment.fail_closed:
             return _terminal(
-                status=STATUS_MANUAL_REVIEW_REQUIRED,
+                status=STATUS_ERROR,
                 # Issue #682: WHICH fail-closed diagnosis, not just that one
                 # happened. `truncated` is a subset of `unjudged`, and ANY
                 # truncation in it picks the truncation token: a run that
@@ -1439,11 +1441,14 @@ def run_review(
             notes_mode=notes_mode,
         )
 
-    # A leakage-detected ERROR status means `reconciled["issues"]` itself
-    # carries the field that leaked -- never surface it as "findings" on
-    # that path (docs/output-contract.md: a leakage block produces no
-    # human-surfaced output at all, not a redacted one).
-    leakage_blocked = redline_result["status"] == STATUS_ERROR_MANUAL_REVIEW_REQUIRED
+    # A leakage block means `reconciled["issues"]` itself carries the field
+    # that leaked -- never surface it as "findings" on that path
+    # (docs/output-contract.md: a leakage block produces no human-surfaced
+    # output at all, not a redacted one). Issue #133: every fail-closed
+    # redline result is now `ERROR`, so the gates that withhold output (the
+    # retired `ERROR_MANUAL_REVIEW_REQUIRED` set) are named by
+    # `redline_generate.output_withheld`, not by the status.
+    leakage_blocked = redline_generate.output_withheld(redline_result)
     findings = [] if leakage_blocked else reconciled.get("issues", [])
 
     result: dict[str, Any] = {
@@ -1480,7 +1485,7 @@ def run_review(
         # .objection` (issue #517) -- so the very text a leakage block
         # exists to withhold can live in this key, and carrying it through
         # would put it in `analysis.json` (`pipeline_runner
-        # ._write_real_analysis` runs on terminal MANUAL_REVIEW_REQUIRED
+        # ._write_real_analysis` runs on terminal ERROR
         # results too), out of `get_review_detail`, and into the console's
         # contested-replacement badge. A leakage block produces no
         # human-surfaced output at all, not a redacted one.

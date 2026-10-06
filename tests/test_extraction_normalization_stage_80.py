@@ -37,7 +37,7 @@ module does not exist or does not implement the documented rule.
      with a disclosure note) and the one reject path (a malformed/corrupt
      revision record with no resulting_text -> fail closed).
   4. An un-normalizable fixture fails closed to the issue #38 internal
-     analysis report artifact with `status=MANUAL_REVIEW_REQUIRED`,
+     analysis report artifact with `status=ERROR`,
      `reason=unnormalizable_input`.
   5. The pipeline-stage entry point's input/output event carries S3
      pointers only -- no document substance -- per the issue #19
@@ -873,7 +873,7 @@ def test_run_stage_pointer_only_payload_fail_closed_path(failures: list[str]) ->
         store_json=lambda key, obj: stored.__setitem__(key, obj),
     )
 
-    if output.get("status") != "MANUAL_REVIEW_REQUIRED" or output.get("reason") != "unnormalizable_input":
+    if output.get("status") != "ERROR" or output.get("reason") != "unnormalizable_input":
         failures.append(f"[G5g] Expected fail-closed pointer-only output. Got: {output}")
     report_key = output.get("analysis_report_s3_key")
     if not report_key or report_key not in stored:

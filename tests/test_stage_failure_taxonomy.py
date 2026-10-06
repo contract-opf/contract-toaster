@@ -9,11 +9,10 @@ in-process runner (backend/src/pipeline_runner.py::_fail_review) has its own
 separate, hardcoded ("inprocess_pipeline") stage-failure write. This ticket
 adds ONE target-agnostic `reviews.record_stage_failure(review_id, stage_name,
 reason, dynamodb_resource)` that either caller can invoke, plus a small,
-explicit reason -> terminal-status taxonomy so the two documented
-manual-review outcomes (`ERROR_MANUAL_REVIEW_REQUIRED` for a structured-
-output retry exhausted, `MANUAL_REVIEW_REQUIRED` for a `document_too_large`
-cap exceeded) are reachable through the SAME mechanism as a generic
-unhandled-stage failure (`ERROR`).
+explicit reason -> terminal-status taxonomy. Since issue #133 every reason
+resolves to `ERROR` (the two "manual review" statuses are retired); the
+reason token itself is what distinguishes a structured-output retry
+exhausted from a `document_too_large` cap exceeded.
 
 Wiring the AWS errorTransition Lambda and the Docker Compose runner's per-stage `except`
 blocks onto this function is explicitly OUT OF SCOPE for this ticket (folds
@@ -25,9 +24,8 @@ mechanism itself).
 Covers the issue's acceptance criteria:
   1. A forced failure (any caller, any stage) records the REAL stage name to
      the reviews row -- never the hardcoded 'pipeline' string.
-  2. Both terminal statuses (ERROR_MANUAL_REVIEW_REQUIRED,
-     MANUAL_REVIEW_REQUIRED) are reachable via the reason -> status taxonomy,
-     plus the generic ERROR fallback for any other reason.
+  2. Every reason, documented or not, resolves to ERROR with its own
+     token (issue #133).
   3. `failing_stage` + `status` + `reason` are all surfaced by
      `get_review_detail` (GET /api/reviews/{id}'s implementation).
 
@@ -120,25 +118,27 @@ class TestRecordStageFailure(unittest.TestCase):
         self.assertEqual(item["failing_stage"], "primary_review_pass")
         self.assertNotEqual(item["failing_stage"], "pipeline")
 
-    def test_structured_output_retry_exhausted_reaches_error_manual_review(self) -> None:
+    def test_structured_output_retry_exhausted_reaches_error(self) -> None:
+        """Issue #133: once ERROR_MANUAL_REVIEW_REQUIRED; now ERROR with the
+        SAME reason token, so the reader's copy is unchanged."""
         status_written = reviews.record_stage_failure(
             REVIEW_ID, "primary_review_pass", "structured_output_retry_exhausted", self.ddb
         )
         item = self.ddb.Table(os.environ["REVIEWS_TABLE"]).items[REVIEW_ID]
-        self.assertEqual(status_written, "ERROR_MANUAL_REVIEW_REQUIRED")
-        self.assertEqual(item["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(status_written, "ERROR")
+        self.assertEqual(item["status"], "ERROR")
         self.assertEqual(item["reason"], "structured_output_retry_exhausted")
-        self.assertIn("ERROR_MANUAL_REVIEW_REQUIRED", reviews.REVIEW_STATUSES_TERMINAL)
 
-    def test_document_too_large_reaches_manual_review_required(self) -> None:
+    def test_document_too_large_reaches_error(self) -> None:
+        """Issue #133: once MANUAL_REVIEW_REQUIRED; now ERROR with the SAME
+        reason token."""
         status_written = reviews.record_stage_failure(
             REVIEW_ID, "extract_normalize", "document_too_large", self.ddb
         )
         item = self.ddb.Table(os.environ["REVIEWS_TABLE"]).items[REVIEW_ID]
-        self.assertEqual(status_written, "MANUAL_REVIEW_REQUIRED")
-        self.assertEqual(item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(status_written, "ERROR")
+        self.assertEqual(item["status"], "ERROR")
         self.assertEqual(item["reason"], "document_too_large")
-        self.assertIn("MANUAL_REVIEW_REQUIRED", reviews.REVIEW_STATUSES_TERMINAL)
 
     def test_unrecognized_reason_falls_back_to_generic_error(self) -> None:
         status_written = reviews.record_stage_failure(
@@ -149,37 +149,24 @@ class TestRecordStageFailure(unittest.TestCase):
         self.assertEqual(item["status"], "ERROR")
         self.assertEqual(item["failing_stage"], "leakage_scan")
 
-    def test_taxonomy_only_defines_the_two_documented_manual_review_outcomes(self) -> None:
-        """The #258 invariant, restated after issue #442 extended the table.
+    def test_every_reason_resolves_to_error(self) -> None:
+        """The #258 invariant, restated after issue #133 (owner decision
+        2026-09-16): a review never concludes as "manual review required".
 
-        This used to pin the table to EXACTLY its two original entries. #442
-        deliberately adds the model-provider reason tokens, so an equality pin
-        would now be nothing but a change-detector. What #258 was actually
-        guaranteeing survives intact, and is what is asserted instead:
-
-          * the two documented manual-review outcomes are still reachable by
-            their original reasons, and
-          * they remain the ONLY non-`ERROR` outcomes this table can produce
-            -- no reason quietly acquires a fourth terminal status, and every
-            value is a real terminal status.
-
-        (`model_context_length_exceeded` is a third MANUAL_REVIEW_REQUIRED
-        REASON, not a third STATUS: it is the provider-measured twin of
-        `document_too_large` -- see reviews.STAGE_FAILURE_REASON_STATUS's own
-        comment for why it keeps a separate token.)
+        Every token in the table -- including the four that used to land on
+        the retired MANUAL_REVIEW_REQUIRED / ERROR_MANUAL_REVIEW_REQUIRED
+        statuses -- resolves to ERROR, and keeps its own token so the
+        reader-facing copy keyed on it is unchanged.
         """
-        self.assertEqual(
-            reviews.STAGE_FAILURE_REASON_STATUS["structured_output_retry_exhausted"],
-            "ERROR_MANUAL_REVIEW_REQUIRED",
-        )
-        self.assertEqual(
-            reviews.STAGE_FAILURE_REASON_STATUS["document_too_large"],
-            "MANUAL_REVIEW_REQUIRED",
-        )
-        self.assertEqual(
-            set(reviews.STAGE_FAILURE_REASON_STATUS.values()),
-            {"ERROR", "ERROR_MANUAL_REVIEW_REQUIRED", "MANUAL_REVIEW_REQUIRED"},
-        )
+        for reason in (
+            "structured_output_retry_exhausted",
+            "document_too_large",
+            "model_context_length_exceeded",
+            "redline_not_persisted",
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(reviews.STAGE_FAILURE_REASON_STATUS[reason], "ERROR")
+        self.assertEqual(set(reviews.STAGE_FAILURE_REASON_STATUS.values()), {"ERROR"})
         for reason, status_value in reviews.STAGE_FAILURE_REASON_STATUS.items():
             with self.subTest(reason=reason):
                 self.assertIn(status_value, reviews.REVIEW_STATUSES_TERMINAL)
@@ -203,7 +190,7 @@ class TestGetReviewDetailSurfacesStageFailure(unittest.TestCase):
             REVIEW_ID, {"cognito_sub": "user-1", "is_admin": False}, ddb
         )
         self.assertEqual(detail["failing_stage"], "critic_review_pass")
-        self.assertEqual(detail["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(detail["status"], "ERROR")
         self.assertEqual(detail["reason"], "document_too_large")
 
 

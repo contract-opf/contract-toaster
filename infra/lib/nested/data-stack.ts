@@ -896,7 +896,8 @@ export class DataStack extends cdk.NestedStack {
     //     foundation — owner-or-admin reads; see ARCHITECTURE.md)
     //   - access_scope: reserved for future multi-scope access control
     //   - status: canonical ReviewStatus (PENDING | RUNNING | DONE | ERROR |
-    //     MANUAL_REVIEW_REQUIRED | ERROR_MANUAL_REVIEW_REQUIRED)
+    //     CANCELLED); rows written before #133 may still hold the retired
+    //     manual-review statuses and are read as ERROR
     //   - admin_overlay: separate field for QUARANTINED/SUPERSEDED
     //     (post-terminal administrative overlays — NOT part of the canonical
     //     status; see reconciliation note #23; must not break the

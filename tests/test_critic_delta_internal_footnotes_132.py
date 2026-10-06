@@ -615,7 +615,7 @@ def part_3_critic_text_only_inside_internal_footnotes(failures: list) -> None:
 def part_4_leakage_scan_still_gates_the_delta(failures: list) -> None:
     leaked = "This is internal-only guidance: do not concede our floor on this point."
     result = _run("both", objection=leaked)
-    if result.get("status") != redline_generate.ERROR_MANUAL_REVIEW_REQUIRED:
+    if result.get("status") != redline_generate.STATUS_ERROR:
         failures.append(
             f"[4a] an objection carrying internal-strategy phrasing must block the review in "
             f"'both' mode; got status={result.get('status')!r}"
@@ -697,7 +697,7 @@ def part_4b_every_rendered_field_is_gated(failures: list) -> None:
             )
             continue
         if (
-            result.get("status") != redline_generate.ERROR_MANUAL_REVIEW_REQUIRED
+            result.get("status") != redline_generate.STATUS_ERROR
             or result.get("reason") != "leakage_detected"
             or result.get("category") != leakage_scan.CATEGORY_SYSTEM_PROMPT
             or result.get("field_name") not in scanned_names

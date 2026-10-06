@@ -12,7 +12,7 @@ the shared prompt-manifest assembler both passes use per issue #29):
   14. Assemble the prompt (system: guidance + binary overlay + playbook;
       user: per the #29 manifest below) and enforce the assembled-size cap
       BEFORE any model call -- the single authoritative failure point for
-      oversized documents (`status=MANUAL_REVIEW_REQUIRED`,
+      oversized documents (`status=ERROR`,
       `reason=document_too_large`; no Bedrock invocation attempted).
   15. Primary review: invoke the pinned primary model via the injected
       `model_client.BedrockModelClient` (no temperature/top_p/top_k --
@@ -24,8 +24,9 @@ the shared prompt-manifest assembler both passes use per issue #29):
       commit, because moving one without the other is the model-output-
       contract-drift failure this repo has already lived through). On schema
       failure, exactly ONE bounded structured-output retry; if the retry also
-      fails, `status=ERROR_MANUAL_REVIEW_REQUIRED` (distinct from a pipeline
-      `ERROR`). No best-effort redline either way.
+      fails, `status=ERROR` with `reason=structured_output_retry_exhausted`
+      (the reason, not the status, tells it apart from an infrastructure
+      failure -- issue #133). No best-effort redline either way.
 
       A v3 response's `block_patches`/`block_ops` transcript is proven
       against the document's own bytes by `scripts/block_transcript.py`, and
@@ -396,7 +397,7 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 # context window. This is why the step-15 model call is NOT the only
 # oversize gate: `model_client.OpenRouterModelClient.invoke` maps a
 # provider-side context-length rejection (`ModelContextLengthExceededError`)
-# to this SAME `MANUAL_REVIEW_REQUIRED` / `document_too_large` outcome
+# to this SAME `ERROR` / `document_too_large` outcome
 # (see `run_primary_pass` below), so an estimate miss fails closed exactly
 # like a step-14 cap hit, rather than surfacing as a generic pipeline ERROR.
 # ---------------------------------------------------------------------------
@@ -1794,7 +1795,7 @@ BLOCK_TRANSCRIPT_ERROR_TOKEN = "block_transcript_rejected"  # noqa: S105
 #     the model never answered in a shape the system could read. This is the
 #     condition `structured_output_retry_exhausted` was specified for at both
 #     ends (`backend/src/reviews.py::STAGE_FAILURE_REASON_STATUS` maps it to
-#     `ERROR_MANUAL_REVIEW_REQUIRED`, and the UI has carried its copy since
+#     `ERROR`, and the UI has carried its copy since
 #     issue #442) while NOTHING under `scripts/` ever emitted it.
 REASON_STRUCTURED_OUTPUT_RETRY_EXHAUSTED = "structured_output_retry_exhausted"
 #   * the retry budget spent on a response that PARSED and validated but
@@ -3846,7 +3847,7 @@ def run_primary_pass(
     or the pass fails closed as `document_too_large` below.
 
     Returns one of:
-      {"status": "MANUAL_REVIEW_REQUIRED", "reason": "document_too_large", ...}
+      {"status": "ERROR", "reason": "document_too_large", ...}
         -- step-14 cap check failed BEFORE any model call, OR (issue #270)
         the provider itself rejected the assembled prompt as exceeding the
         model's context length (model_client.ModelContextLengthExceededError)
@@ -3854,10 +3855,10 @@ def run_primary_pass(
         generic pipeline ERROR.
       {"status": "OK", "response": {...}, "attempts": N, ...}
         -- schema-valid response obtained within the retry budget.
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED",
+      {"status": "ERROR",
        "reason": REASON_STRUCTURED_OUTPUT_RETRY_EXHAUSTED, "attempts": N, ...}
         -- still schema-invalid after the one bounded retry.
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED",
+      {"status": "ERROR",
        "reason": REASON_PRIMARY_BLOCK_TRANSCRIPT_REJECTED, "attempts": N, ...}
         -- the response validated but its block transcript never proved
         against the document, with the retry budget spent (issue #627).
@@ -4034,7 +4035,7 @@ def run_primary_pass(
     # documents. No model call is attempted if this fails.
     if assembled_tokens > max_input_tokens:
         return {
-            "status": "MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "reason": "document_too_large",
             "assembled_tokens": assembled_tokens,
             "max_input_tokens": max_input_tokens,
@@ -4171,7 +4172,7 @@ def run_primary_pass(
                     last_error = transcript_rejection
                     outcome = "failure"
                     return {
-                        "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+                        "status": "ERROR",
                         # Issue #670: this exit returned no `reason` key at
                         # all, so the row stored null and the operator was
                         # shown the generic stage copy while the real cause
@@ -4254,8 +4255,8 @@ def run_primary_pass(
             # not fit, so ask for more room. Replaying the SAME ceiling would
             # truncate at the same place, so the budget is what changes.
             #
-            # Re-raised on the last attempt rather than folded into
-            # ERROR_MANUAL_REVIEW_REQUIRED: pipeline_runner.
+            # Re-raised on the last attempt rather than folded into the
+            # retry-exhausted ERROR terminal: pipeline_runner.
             # classify_failure_reason maps this exception to
             # `model_output_truncated`, the token Diagnostics and the result
             # panel key their "the answer did not fit" copy off. Swallowing
@@ -4415,7 +4416,7 @@ def run_primary_pass(
 
         if context_length_rejected:
             return {
-                "status": "MANUAL_REVIEW_REQUIRED",
+                "status": "ERROR",
                 "reason": "document_too_large",
                 "assembled_tokens": assembled_tokens,
                 "max_input_tokens": max_input_tokens,
@@ -4424,7 +4425,7 @@ def run_primary_pass(
     # Retry budget exhausted, still schema-invalid: terminal, distinct from
     # a pipeline ERROR (ARCHITECTURE.md step 17).
     return {
-        "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+        "status": "ERROR",
         # Issue #670: the token both ends already agreed on
         # (`backend/src/reviews.py`, `frontend/src/ReviewSubmission.tsx`)
         # while no producer anywhere under `scripts/` ever emitted it. This

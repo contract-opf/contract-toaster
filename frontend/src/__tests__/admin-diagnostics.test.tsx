@@ -157,7 +157,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
           failure({
             review_id: 'r-long',
             reason: 'model_context_length_exceeded',
-            status: 'MANUAL_REVIEW_REQUIRED',
+            status: 'ERROR',
           }),
         ],
       },
@@ -330,6 +330,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       status: 200,
       body: {
         failures: [
+          // A legacy pre-#133 row: the retired status reads as the failure it was.
           failure({ review_id: 'r-manual', status: 'MANUAL_REVIEW_REQUIRED' }),
           failure({ review_id: 'r-quarantined-outcome', status: 'QUARANTINED' }),
         ],
@@ -338,7 +339,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     render(<AdminDiagnostics />);
 
     const manualRow = await screen.findByTestId('failure-row-r-manual');
-    expect(manualRow.textContent).toContain('Needs manual review');
+    expect(manualRow.textContent).toContain('Failed');
     expect(manualRow.textContent).not.toContain('MANUAL_REVIEW_REQUIRED');
 
     const quarantinedRow = screen.getByTestId('failure-row-r-quarantined-outcome');
@@ -566,7 +567,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     failure({
       review_id: 'r-leakage',
       reason: 'leakage_detected',
-      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      status: 'ERROR',
       leakage_category: 'playbook_leakage',
       leakage_rule_id: 'playbook-ngram',
       leakage_field_name: 'external_rationale_for_footnote',
@@ -688,7 +689,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
       // The class issue #673 measured in live traffic: the critic's JSON was
       // rejected by the output contract.
       reason: 'critic_schema_invalid',
-      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      status: 'ERROR',
       critic_attempts: CRITIC_ATTEMPTS_BASELINE,
       ...overrides,
     });
@@ -827,7 +828,7 @@ describe('AdminDiagnostics — recent failures, with a cause per row', () => {
     failure({
       review_id: reviewId,
       reason,
-      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      status: 'ERROR',
     });
 
   it('tells the two primary-pass terminals apart, and neither reads as the stage fallback', async () => {

@@ -370,8 +370,8 @@ def _part_2_result_mapping(rg, failures: list) -> None:
         corpus=corpus,
         normalized_docx_bytes=_base_draft_docx_bytes(),
     )
-    if result.get("status") != "MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[2a] Expected status=MANUAL_REVIEW_REQUIRED (zero applied), got {result}")
+    if result.get("status") != "ERROR":
+        failures.append(f"[2a] Expected status=ERROR (zero applied), got {result}")
     if result.get("reason") != rg.REASON_BLOCK_EDITS_NOT_APPLIED:
         failures.append(f"[2b] Expected reason=block_edits_not_applied, got {result.get('reason')!r}")
     if result.get("docx_bytes") is not None:
@@ -579,9 +579,9 @@ def _part_4_leakage_gates_generation_and_accept(rg, failures: list) -> None:
         corpus=corpus,
         normalized_docx_bytes=_base_draft_docx_bytes(),
     )
-    if result["status"] != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result["status"] != "ERROR":
         failures.append(
-            f"[4a] Expected ERROR_MANUAL_REVIEW_REQUIRED on a planted leak, got {result}"
+            f"[4a] Expected ERROR on a planted leak, got {result}"
         )
     if result.get("docx_bytes") is not None:
         failures.append("[4b] A leakage-blocked review must not produce a docx.")
@@ -597,7 +597,7 @@ def _part_4_leakage_gates_generation_and_accept(rg, failures: list) -> None:
         corpus=corpus,
         normalized_docx_bytes=_base_draft_docx_bytes(),
     )
-    if accept_result["status"] != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if accept_result["status"] != "ERROR":
         failures.append(
             f"[4d] Expected the ACCEPT path's verdict_summary to be gated by the "
             f"leakage scan too, got {accept_result}"

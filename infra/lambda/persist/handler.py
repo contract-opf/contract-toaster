@@ -13,8 +13,9 @@ Two jobs (issue #189 spend settlement; issue #188 terminal-state write):
 
   2. Terminal-state write (issue #188): flip the `reviews` row from RUNNING
      to its terminal success state and land the pipeline result onto it --
-     `status` (DONE for REQUEST_CHANGE/ACCEPT, MANUAL_REVIEW_REQUIRED
-     otherwise), `decision`, `summary`, `reason`, and -- ONLY when the
+     `status` (DONE for REQUEST_CHANGE/ACCEPT, ERROR otherwise -- issue
+     #133 retired the "manual review" terminal), `decision`, `summary`,
+     `reason`, and -- ONLY when the
      redline stage confirmed it copied the output object
      (`output_object_written`) -- `output_s3_key`. Without this, a review
      never leaves RUNNING and `GET /api/reviews/{id}/output` never has a key
@@ -58,7 +59,7 @@ currently also a pass-through stub, so this is the mock_review output
 shape unchanged):
   {
     "review_id": "...",
-    "decision": "REQUEST_CHANGE" | "MANUAL_REVIEW_REQUIRED",
+    "decision": "REQUEST_CHANGE" | null,
     "reason": null | "playbook_coming_soon" | "unknown_playbook",
     "output_s3_key": null | "outputs/<review_id>/out.docx",
     "summary": "...",
@@ -82,8 +83,10 @@ DAILY_SPEND_TABLE = os.environ.get("DAILY_SPEND_TABLE", "")
 REVIEWS_TABLE = os.environ.get("REVIEWS_TABLE", "")
 
 # Decisions that mean "the pipeline finished successfully" -> terminal
-# status DONE. Anything else (mock: MANUAL_REVIEW_REQUIRED for the
-# not-yet-built playbooks / unknown playbook) is its own terminal status.
+# status DONE. Anything else (mock: no decision for the not-yet-built
+# playbooks / unknown playbook) did not complete, so it is ERROR with its
+# `reason` token -- issue #133: a review never concludes as "manual review
+# required".
 _DONE_DECISIONS = frozenset({"REQUEST_CHANGE", "ACCEPT"})
 
 # ---------------------------------------------------------------------------
@@ -213,9 +216,10 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
     """Issue #188: flip the reviews row RUNNING -> terminal success state and
     land the pipeline result onto it.
 
-    Terminal status: DONE for a REQUEST_CHANGE/ACCEPT decision;
-    MANUAL_REVIEW_REQUIRED otherwise (the mock's not-yet-built /
-    unknown-playbook paths, and the real pipeline's fail-closed paths).
+    Terminal status: DONE for a REQUEST_CHANGE/ACCEPT decision; ERROR
+    otherwise (the mock's not-yet-built / unknown-playbook paths, and the
+    real pipeline's fail-closed paths), with the `reason` token carried
+    verbatim and no decision (issue #133).
 
     A DONE row is additionally stamped `completed_at` (issue #71) -- the
     input `reviews.review_duration_estimate` measures against `created_at`.
@@ -237,7 +241,7 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
         return
 
     decision = event.get("decision")
-    terminal_status = "DONE" if decision in _DONE_DECISIONS else "MANUAL_REVIEW_REQUIRED"
+    terminal_status = "DONE" if decision in _DONE_DECISIONS else "ERROR"
 
     set_clauses = ["#status = :status", "updated_at = :now"]
     names = {"#status": "status"}
@@ -259,12 +263,12 @@ def _write_terminal_reviews_state(event: dict[str, Any], dynamodb_resource: Any)
     # `backend/src/pipeline_runner.py::_write_real_terminal` writes on the
     # in-process path, so a duration is measurable whichever runner produced
     # the row. `updated_at` beside it moves on every later administrative
-    # touch and cannot serve. A MANUAL_REVIEW_REQUIRED row gets none: it has
-    # not completed, a person still has to finish it.
+    # touch and cannot serve. An ERROR row gets none: it did not complete.
     if terminal_status == "DONE":
         set_clauses.append("completed_at = :completed_at")
         values[":completed_at"] = values[":now"]
-    if decision is not None:
+    # A decision is only ever a fact about a DONE row (outcome.ts's invariant).
+    if decision is not None and terminal_status == "DONE":
         set_clauses.append("decision = :decision")
         values[":decision"] = decision
     summary = event.get("summary")
@@ -333,7 +337,7 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     dynamodb_resource = _ddb()
 
     # (1) Terminal-state write -- independent of the spend-settlement guards
-    # below, so a review still reaches DONE/MANUAL_REVIEW_REQUIRED even when
+    # below, so a review still reaches DONE/ERROR even when
     # there is no reservation left to settle.
     _write_terminal_reviews_state(event, dynamodb_resource)
 

@@ -19,7 +19,7 @@ facts is an attorney's determination in either direction --
 A self-check that quietly judges 6 of 7 rules is worse than none: it
 produces a transcript that looks complete, ships with the attribution
 manifest, and attests to a re-read that did not happen for the one rule that
-mattered. So an UNJUDGED rule is fail-closed -> MANUAL_REVIEW_REQUIRED
+mattered. So an UNJUDGED rule is fail-closed -> ERROR
 (docs/output-contract.md: "The decision is binary; uncertainty is a system
 status"), exactly as `scripts/floor_judge.py` treats an unjudged invariant.
 For the same reason, ZERO `must` rules must produce an EMPTY transcript --
@@ -237,10 +237,10 @@ def check_2_unjudged_rule_fails_closed_to_manual_review() -> list[str]:
     if not transcript.fail_closed:
         failures.append("  [2] a transcript with an unjudged rule must be fail_closed")
     status = review_selfcheck.terminal_status_for(transcript)
-    if status != review_selfcheck.STATUS_MANUAL_REVIEW_REQUIRED:
+    if status != review_selfcheck.STATUS_ERROR:
         failures.append(
             f"  [2] a fail-closed transcript must map to "
-            f"{review_selfcheck.STATUS_MANUAL_REVIEW_REQUIRED!r}, got {status!r}. An unjudged "
+            f"{review_selfcheck.STATUS_ERROR!r}, got {status!r}. An unjudged "
             f"binding rule is a system status, never a silent pass and never a legal decision."
         )
 
@@ -434,7 +434,7 @@ def check_6_no_rule_or_document_substance_in_logs_or_exceptions() -> list[str]:
 def main() -> int:
     checks = [
         ("1", "every must rule gets exactly one verdict", check_1_every_must_rule_gets_exactly_one_verdict),
-        ("2", "an unjudged rule fails closed to MANUAL_REVIEW_REQUIRED", check_2_unjudged_rule_fails_closed_to_manual_review),
+        ("2", "an unjudged rule fails closed to ERROR", check_2_unjudged_rule_fails_closed_to_manual_review),
         ("3", "zero must rules is an empty transcript, not a pass", check_3_zero_must_rules_is_an_empty_transcript_not_a_pass),
         ("4", "an introduced replacement-text bound is flagged", check_4_introduced_bound_is_flagged),
         ("5", "the bound check is a judgment, not a lexical match", check_5_the_bound_check_is_a_judgment_not_a_lexical_match),

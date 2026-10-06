@@ -860,9 +860,9 @@ def _run_single_failure_scenario(
             f"[7-{label}-c] Expected validation_outcome={expected_outcome!r}, got "
             f"{row['validation_outcome']!r} in row {row}"
         )
-    if row["status"] != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if row["status"] != "ERROR":
         failures.append(
-            f"[7-{label}-d] Expected status ERROR_MANUAL_REVIEW_REQUIRED, got {row}"
+            f"[7-{label}-d] Expected status ERROR, got {row}"
         )
     if row["primary_attempts"] <= 1:
         failures.append(
@@ -886,7 +886,7 @@ def _run_single_failure_scenario(
         failures.append(
             f"[7-{label}-i] Expected retry_rate 1.0 (the one run retried), got {off_agg}"
         )
-    if off_agg.get("decision_counts") != {"ERROR_MANUAL_REVIEW_REQUIRED": 1}:
+    if off_agg.get("decision_counts") != {"ERROR": 1}:
         failures.append(
             f"[7-{label}-j] Expected decision_counts to fall back to the status token "
             f"(row['decision'] is None), got {off_agg.get('decision_counts')}"

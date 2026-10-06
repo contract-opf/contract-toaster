@@ -157,6 +157,22 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # `output_schema_path` explicitly; this default serves every other caller.
 OUTPUT_SCHEMA_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"
 
+
+def confidence_state_levels(path: Path = OUTPUT_SCHEMA_PATH) -> tuple[str, ...]:
+    """The governed `confidence_state` ladder, least to most degraded, in the
+    order the output-contract artifact declares its enum.
+
+    Issue #133 retired the two "manual review" values as review STATUSES; the
+    confidence band that shares their spelling is a different, informational
+    field (#96) and is unchanged. It is read from the artifact rather than
+    restated, so a pipeline module never spells a confidence value that could
+    be mistaken for a terminal status writer -- and the ladder cannot drift
+    from the schema that validates it.
+    """
+    with path.open(encoding="utf-8") as fh:
+        schema: dict[str, Any] = json.load(fh)
+    return tuple(schema["properties"]["confidence_state"]["enum"])
+
 # Pipeline-stamped fields the model must not be asked to produce -- see the
 # module docstring. Kept as their own named tuples (rather than one shared
 # list) so a future stamped field can be added to just the level it applies
@@ -405,7 +421,7 @@ _NON_SCHEMA_ROOT_KEYWORDS = ("$schema", "$id", "output_contract_version")
 # found that unacceptable, because a schema-enforced call could then never
 # carry an address, so EVERY issue on EVERY structured-outputs-capable model
 # (all six `model-policy/openrouter.json` `selectable` entries, plus
-# Bedrock's pinned primary/critic) would route to `MANUAL_REVIEW_REQUIRED`
+# Bedrock's pinned primary/critic) would route to `ERROR`
 # with `docx_bytes=None`: zero redlines produced, silently, on the very
 # capability that ticket hardened. The fix was to make the field NULLABLE in
 # the projection (a real, emittable "no value" a strict-mode provider can

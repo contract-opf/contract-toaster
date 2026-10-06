@@ -245,7 +245,7 @@ class TestPrimaryAndCriticPassesLedgerRealUsage(unittest.TestCase):
         # holds (last_usage is never reset by this fake, so a naive
         # "always read last_usage" guard-removal would leak attempt 1's
         # numbers onto attempt 2's row here).
-        self.assertEqual(result["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(result["status"], "ERROR")
         self.assertEqual(result["reason"], "document_too_large")
         self.assertEqual(len(ledger), 2)
 

@@ -2,7 +2,7 @@
 Admin dashboard READ-API — issue #252 (the backend slice #91's UI binds to).
 
 #91 (the admin dashboard UI) had nothing to bind to: there were no read
-endpoints for the spend ledger, pipeline health, the manual-review queue, or
+endpoints for the spend ledger, pipeline health, the failures queue, or
 release activity, so every tile in that ticket was testable only against
 hand-written fixtures. This module is those four reads, and nothing else.
 
@@ -70,6 +70,7 @@ Environment variables consumed:
 from __future__ import annotations
 
 import os
+import re
 import statistics
 import time
 from typing import Any
@@ -458,6 +459,11 @@ def get_pipeline_health(
         status_counts[name] = len(
             reviews_module._query_by_status(table, name, projection="review_id")
         )
+    # Issue #133: a legacy pre-#133 manual-review row is read as the failure it
+    # was, so its partition is counted under ERROR rather than as a status no
+    # writer produces any more.
+    for legacy in LEGACY_FAILURE_STATUSES:
+        status_counts[FAILURE_QUEUE_STATUS] += status_counts.pop(legacy, 0)
 
     stale_rows: list[dict[str, Any]] = []
     in_flight = 0
@@ -512,15 +518,34 @@ def get_pipeline_health(
 
 
 # ---------------------------------------------------------------------------
-# GET /api/admin/manual-review — the #37 manual-review queue
+# GET /api/admin/manual-review — the failures queue, by reason (#37, #133)
 # ---------------------------------------------------------------------------
 
-# The two DOCUMENTED manual-review terminal statuses (issue #37; RUNBOOK.md
-# -> "Manual-review filter: owner and SLA"). System statuses, never a third
-# legal category (docs/output-contract.md).
-MANUAL_REVIEW_STATUSES = ("MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED")
+# Issue #133 (owner decision 2026-09-16): a review never concludes as "manual
+# review required". What this route used to list -- the two manual-review
+# terminal statuses -- is now ordinary `ERROR` rows, told apart by their
+# `reason` token, which is what says what to do next. So the queue is every
+# failed review, filterable and countable BY REASON. The route keeps its path
+# so existing operator bookmarks and the RUNBOOK daily check still resolve.
+FAILURE_QUEUE_STATUS = "ERROR"
 
-# RUNBOOK.md -> "Manual-review filter: owner and SLA": the
+# Rows stored before #133 still carry one of the retired statuses. They are
+# read into the queue and reported as `ERROR` (their `reason` is unchanged);
+# nothing writes these any more and there is no migration.
+LEGACY_FAILURE_STATUSES = ("MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED")  # legacy read only
+
+# `status_filter` survives only so a caller still sending one of the retired
+# statuses gets a 400 rather than a silently unfiltered queue.
+QUEUE_STATUS_FILTERS = ("all", FAILURE_QUEUE_STATUS)
+
+# A `reason` filter value is a token, never free text.
+_REASON_TOKEN_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+
+# The `counts["by_reason"]` key for a failed row that carries no reason token at
+# all (a row written before #442 classified failures).
+NO_REASON_RECORDED = "no_reason_recorded"
+
+# RUNBOOK.md -> "Failures queue: owner and SLA": the
 # `contract-toaster-manual-review-stale` alarm fires when an entry has sat
 # unacknowledged for more than 24 hours. The queue flags the same entries so
 # the legal admin's daily check and the alarm agree on what is overdue.
@@ -554,7 +579,7 @@ _MANUAL_REVIEW_FIELDS = (
 
 
 def _manual_review_entry(item: dict[str, Any], now: int) -> dict[str, Any]:
-    """Project one manual-review row and derive its SLA state.
+    """Project one failed row and derive its SLA state.
 
     `reason` is coalesced through `reviews._resolve_failure_reason` — the
     SAME three-field read the Diagnostics route and the reviewer's own detail
@@ -562,8 +587,12 @@ def _manual_review_entry(item: dict[str, Any], now: int) -> dict[str, Any]:
     function's docstring documents (a QUARANTINED row stores its cause under
     `quarantine_reason`, so a bare `.get("reason")` reports "no cause
     recorded" for every one of them).
+
+    `status` is reported as `ERROR` for a legacy pre-#133 row too: that is how
+    every reader treats one, and the reason token carries the distinction.
     """
     entry = {field: item.get(field) for field in _MANUAL_REVIEW_FIELDS}
+    entry["status"] = FAILURE_QUEUE_STATUS
     entry["reason"] = reviews_module._resolve_failure_reason(item)
     entered_at = _as_int(item.get("failed_at")) or _as_int(item.get("updated_at")) or _as_int(
         item.get("created_at")
@@ -583,44 +612,53 @@ def list_manual_review_queue(
     triage: str | None = None,
     limit: Any = MANUAL_REVIEW_DEFAULT_LIMIT,
     now_epoch: float | None = None,
+    reason: str | None = None,
 ) -> dict[str, Any]:
-    """GET /api/admin/manual-review — the manual-review queue, filterable.
+    """GET /api/admin/manual-review — the failures queue, by reason.
 
-    The cross-user view RUNBOOK.md -> "Manual-review filter: owner and SLA"
-    assigns to the legal admin as a daily check, and the half of #74's
-    disposition work #486 explicitly deferred here: every review sitting in
-    `MANUAL_REVIEW_REQUIRED` or `ERROR_MANUAL_REVIEW_REQUIRED`, newest first,
-    each carrying how long it has waited and whether it has passed the
-    24-hour SLA.
+    The cross-user view RUNBOOK.md -> "Failures queue: owner and SLA"
+    assigns to the legal admin as a daily check: every review that failed
+    (`ERROR`, plus any legacy pre-#133 manual-review row, reported as
+    `ERROR`), newest first, each carrying its `reason` token, how long it has
+    waited and whether it has passed the 24-hour SLA.
 
-    Filters (both optional, both validated — an unrecognised value is a 400,
+    Filters (all optional, all validated — an unrecognised value is a 400,
     never a silently ignored parameter that returns an unfiltered queue the
     caller believes is filtered):
 
-      `status_filter`  one of MANUAL_REVIEW_STATUSES, or "all" / None.
+      `reason`         one reason token (e.g. `document_too_large`), or
+                       "all" / None.
+      `status_filter`  "ERROR" or "all" / None. Kept so a caller still asking
+                       for a retired manual-review status is refused, not
+                       silently handed every failure.
       `triage`         "pending" (awaiting legal triage), "triaged" (already
                        triaged), "none" (no triage state — i.e. no
                        EDITED/REJECTED disposition was ever recorded), or
                        "all" / None.
 
     `counts` is computed over the UNFILTERED queue and is therefore the tile
-    figure (#37's "dashboard tile counts reviews in manual-review states"),
-    independent of whatever filter the operator has applied to the list
-    below it.
+    figure, independent of whatever filter the operator has applied to the
+    list below it; `counts["by_reason"]` is the per-token breakdown.
 
     Raises HTTPException(403) for a non-admin caller, HTTPException(400) for
     an unrecognised filter value.
     """
-    require_admin(caller_user_row, "Admin privilege required to view the manual-review queue.")
+    require_admin(caller_user_row, "Admin privilege required to view the failures queue.")
 
     wanted_status = (status_filter or "all").strip()
-    if wanted_status not in ("all",) + MANUAL_REVIEW_STATUSES:  # noqa: RUF005
+    if wanted_status not in QUEUE_STATUS_FILTERS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Unsupported status filter {wanted_status!r}; must be one of "
-                f"{sorted(('all',) + MANUAL_REVIEW_STATUSES)}."  # noqa: RUF005
+                f"{sorted(QUEUE_STATUS_FILTERS)}. Failures are filtered by reason."
             ),
+        )
+    wanted_reason = (reason or "all").strip()
+    if wanted_reason != "all" and not _REASON_TOKEN_RE.match(wanted_reason):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported reason filter; must be a reason token or 'all'.",
         )
     wanted_triage = (triage or "all").strip()
     if wanted_triage not in TRIAGE_FILTERS:
@@ -633,10 +671,10 @@ def list_manual_review_queue(
     now = int(time.time() if now_epoch is None else now_epoch)
 
     table = dynamodb_resource.Table(os.environ["REVIEWS_TABLE"])
-    # Issue #52: the two manual-review partitions of `status-index`, each
-    # read in full (the `counts` tile is exact), never a scan of the table.
+    # Issue #52: the failure partitions of `status-index`, each read in full
+    # (the `counts` tile is exact), never a scan of the table.
     queue: list[dict[str, Any]] = []
-    for name in MANUAL_REVIEW_STATUSES:
+    for name in (FAILURE_QUEUE_STATUS, *LEGACY_FAILURE_STATUSES):
         queue.extend(reviews_module._query_by_status(table, name))
     # `created_at` is a fixed-width epoch-second string, so a reverse string
     # sort is a true newest-first ordering (same key `list_recent_failures`
@@ -644,7 +682,11 @@ def list_manual_review_queue(
     queue.sort(key=lambda i: str(i.get("created_at") or ""), reverse=True)
     entries = [_manual_review_entry(item, now) for item in queue]
 
-    counts = {
+    by_reason: dict[str, int] = {}
+    for entry in entries:
+        token = entry.get("reason") or NO_REASON_RECORDED
+        by_reason[token] = by_reason.get(token, 0) + 1
+    counts: dict[str, Any] = {
         "total": len(entries),
         "sla_breached": sum(1 for e in entries if e["sla_breached"]),
         "pending_triage": sum(
@@ -653,12 +695,11 @@ def list_manual_review_queue(
         "triaged": sum(
             1 for e in entries if e.get("legal_triage_status") == TRIAGE_STATUS_TRIAGED
         ),
+        "by_reason": dict(sorted(by_reason.items())),
     }
-    for name in MANUAL_REVIEW_STATUSES:
-        counts[name] = sum(1 for e in entries if e.get("status") == name)
 
-    if wanted_status != "all":
-        entries = [e for e in entries if e.get("status") == wanted_status]
+    if wanted_reason != "all":
+        entries = [e for e in entries if e.get("reason") == wanted_reason]
     if wanted_triage == "pending":
         entries = [e for e in entries if e.get("legal_triage_status") == TRIAGE_STATUS_PENDING]
     elif wanted_triage == "triaged":
@@ -670,7 +711,7 @@ def list_manual_review_queue(
         {
             "generated_at": now,
             "sla_seconds": MANUAL_REVIEW_SLA_SECONDS,
-            "filters": {"status": wanted_status, "triage": wanted_triage},
+            "filters": {"status": wanted_status, "reason": wanted_reason, "triage": wanted_triage},
             "counts": counts,
             "reviews": entries[:bounded],
         }

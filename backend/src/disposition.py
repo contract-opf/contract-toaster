@@ -75,10 +75,15 @@ TRIAGE_STATUS_TRIAGED = "TRIAGED"
 # the attorney could act on) before a disposition can be recorded against
 # them. Recording a disposition on a still-running review would be a
 # meaningless signal — there is no tool output yet to accept/edit/reject.
+#
+# Issue #133: a review now concludes DONE or fails (ERROR); a failure has no
+# output to dispose of, so only DONE is reachable from a new review. The two
+# retired "manual review" statuses stay listed so a disposition already being
+# recorded against a pre-#133 row is not refused mid-workflow.
 DISPOSITIONABLE_REVIEW_STATUSES = {
     "DONE",
-    "MANUAL_REVIEW_REQUIRED",
-    "ERROR_MANUAL_REVIEW_REQUIRED",
+    "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
+    "ERROR_MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
 }
 
 

@@ -63,7 +63,7 @@ Each gold fixture is a JSON file with:
         "critic":  [ <output-schema-v1 dict>, ... ]
       },
       "expected": {
-        "status": "OK" | "MANUAL_REVIEW_REQUIRED" | "ERROR_MANUAL_REVIEW_REQUIRED",  # default "OK"
+        "status": "OK" | "ERROR",  # default "OK"
         "reason": "<review_spine.run_review's reason token>",   # checked iff present
         "decision": "ACCEPT" | "REQUEST_CHANGE" | null,   # checked iff present
         "min_issues": <int>,                              # checked iff present
@@ -111,7 +111,7 @@ and checks the fixture's `expected` block against the actual `ReviewResult`:
   - **Leakage blocking**: a fixture whose canned output plants confidential
     playbook text (a `hard_rejections[].description`, never surfaced to a
     counterparty) into a human-surfaced field must reconcile to
-    `status="ERROR_MANUAL_REVIEW_REQUIRED"` -- `review_spine.run_review`'s
+    `status="ERROR"` -- `review_spine.run_review`'s
     own leakage gate (`scripts/leakage_scan.py`) does the actual detection;
     the harness asserts the fixture's expected terminal status was reached
     AND, when the fixture also declares `expected.reason`, that the
@@ -395,8 +395,8 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
             docx_bytes, playbook, fake_client, review_id=case.case_id
         )
     except Exception as exc:  # noqa: BLE001
-        # run_review is documented to fail closed to a MANUAL_REVIEW_
-        # REQUIRED-shaped result for an EXPECTED bad outcome, but a fixture
+        # run_review is documented to fail closed to an ERROR-status
+        # result (with a reason token) for an EXPECTED bad outcome, but a fixture
         # whose canned response makes the pipeline RETRY a pass (e.g. a
         # model-output validation failure) can exhaust the fixture's seeded
         # FakeBedrockClient queue and raise model_client.
@@ -422,7 +422,7 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
         )
 
     # An optional `expected.reason` check (issue #400 fix-round-1): checking
-    # `status` alone means ANY cause of e.g. ERROR_MANUAL_REVIEW_REQUIRED
+    # `status` alone means ANY cause of e.g. ERROR
     # satisfies a fixture whose whole point is proving ONE specific cause
     # (e.g. the leakage gate, reason="leakage_detected") actually fired --
     # the fixture staying green would silently stop proving that if some

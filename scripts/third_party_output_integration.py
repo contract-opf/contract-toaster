@@ -172,8 +172,9 @@ SCHEMA_VERSION = "output-schema-v3"
 #: list.
 MAX_ISSUE_KEY_ORDINAL = 9999
 
-ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
-MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+#: Issue #133: every fail-closed result is `ERROR` -- the same single
+#: status `redline_generate` returns; `reason` names the cause.
+STATUS_ERROR = "ERROR"
 
 #: Flag-only reason for an issue whose playbook DID want a redline but whose
 #: counterparty clause could not be addressed in the delivered document --
@@ -735,7 +736,7 @@ def _fail_closed_on_unresolved_anchors(
     `unresolved_anchor_issue_keys` exists to prevent: the playbook DID want
     a redline, and no attorney reading `OK` would know the review failed to
     address it. Before issue #629 this same input fail-closed
-    (`MANUAL_REVIEW_REQUIRED`), because the anchored-patch APPLY step --
+    (`ERROR`), because the anchored-patch APPLY step --
     not a plan step -- was what refused it. Moving that refusal earlier
     must not lose the status, so it is re-derived at the new decision
     point, in the same key shape `generate_redline_from_blocks` returns for
@@ -755,7 +756,7 @@ def _fail_closed_on_unresolved_anchors(
     if result.get("status") != "OK" or result.get("docx_bytes") is not None:
         return result
     return {
-        "status": MANUAL_REVIEW_REQUIRED,
+        "status": STATUS_ERROR,
         "reason": REASON_CLAUSE_ANCHOR_UNRESOLVED,
         "docx_bytes": None,
         "analysis_report": result.get("analysis_report"),
@@ -839,8 +840,9 @@ def generate_third_party_review_output(
     `flag_only` keys -- plus ONE key of this module's own:
 
       `response`: the validated v3 response, or `None` on any
-      `ERROR_MANUAL_REVIEW_REQUIRED` path (leakage detected, output scan
-      failed, round-trip failed), where no result may be surfaced at all.
+      output-withholding path (`redline_generate.output_withheld`: leakage
+      detected, output scan failed, round-trip failed), where no result may
+      be surfaced at all.
 
     An issue whose clause_id did not resolve against this document also
     carries `replacement_text_enforcement.REPLACEMENT_TEXT_OUTCOME_FIELD` ==
@@ -849,7 +851,7 @@ def generate_third_party_review_output(
     unaddressable clause must not be reported as a deliberate flag-only.
     When such an issue's edit was the ONLY thing this run had to deliver,
     the `status` itself is re-derived here rather than passed through --
-    `MANUAL_REVIEW_REQUIRED` / `REASON_CLAUSE_ANCHOR_UNRESOLVED`, the one
+    `ERROR` / `REASON_CLAUSE_ANCHOR_UNRESOLVED`, the one
     verdict the shared implementation cannot reach because this module
     resolves the anchor before calling it (see
     `_fail_closed_on_unresolved_anchors`).
@@ -860,7 +862,7 @@ def generate_third_party_review_output(
     # bytes the writer will edit, so the mapping is built from THIS
     # document. An unnormalizable upload yields no mapping and therefore no
     # ops; `generate_redline_from_blocks` is what reports it, unconditionally
-    # on the REQUEST_CHANGE path, as MANUAL_REVIEW_REQUIRED /
+    # on the REQUEST_CHANGE path, as ERROR /
     # `unnormalizable_input` -- one implementation of that verdict, not two.
     normalized = extraction_normalization_stage.extract_and_normalize(document_docx_bytes)
     block_id_by_clause_id = (
@@ -909,7 +911,7 @@ def generate_third_party_review_output(
     )
     result = _fail_closed_on_unresolved_anchors(result, unresolved)
     result["response"] = (
-        None if result.get("status") == ERROR_MANUAL_REVIEW_REQUIRED else response
+        None if redline_generate.output_withheld(result) else response
     )
     return result
 

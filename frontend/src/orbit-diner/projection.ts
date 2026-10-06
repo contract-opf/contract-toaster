@@ -31,9 +31,13 @@
  * post-terminal administrative overlays (outcome.ts) — have no member in it.
  * They resolve to `ERROR` for the console's phase, and the real outcome is
  * carried alongside as a `support`-scoped message built from `describeOutcome`,
- * so an overlay is never silently reported as a burnt review. `MANUAL_REVIEW_REQUIRED`
- * and `ERROR_MANUAL_REVIEW_REQUIRED` are preserved distinctly and never travel
- * through that generic phase — the whole point of the kit's separate manual state.
+ * so an overlay is never silently reported as a burnt review.
+ *
+ * Issue #133 retired `MANUAL_REVIEW_REQUIRED` / `ERROR_MANUAL_REVIEW_REQUIRED`:
+ * a review never concludes as "manual review required". A legacy row still
+ * stored with one is projected as `ERROR` (`outcome.ts`'s `canonicalStatus`),
+ * so the kit's separate manual state is never entered — the kit keeps its
+ * union members, this projection simply never produces them.
  */
 import { COVER_NOTE_FAILURE_COPY } from '../coverNote';
 import { GUIDANCE_PRECEDENCE_COPY } from '../guidancePrecedenceCopy';
@@ -43,7 +47,7 @@ import {
   notesModeSetting,
   type NotesMode as AppNotesMode,
 } from '../notesMode';
-import { describeOutcome } from '../outcome';
+import { canonicalStatus, describeOutcome } from '../outcome';
 import type { PreflightResult } from '../preflight';
 import { browningSetting, type BrowningLevel } from '../toaster/browning';
 import { receiptLines, receiptText, type ReceiptSource } from '../toaster/receipt';
@@ -316,16 +320,12 @@ const PASSTHROUGH_STATUSES: ReadonlySet<string> = new Set<Status>([
   'RUNNING',
   'DONE',
   'ERROR',
-  'MANUAL_REVIEW_REQUIRED',
-  'ERROR_MANUAL_REVIEW_REQUIRED',
   'CANCELLED',
 ]);
 
 const TERMINAL_STATUSES: ReadonlySet<Status> = new Set<Status>([
   'DONE',
   'ERROR',
-  'MANUAL_REVIEW_REQUIRED',
-  'ERROR_MANUAL_REVIEW_REQUIRED',
   'CANCELLED',
 ]);
 
@@ -350,8 +350,9 @@ function projectStatus(state: ReviewProjectionState): Status {
   if (!state.detail) {
     return 'PENDING';
   }
-  if (PASSTHROUGH_STATUSES.has(state.detail.status)) {
-    return state.detail.status as Status;
+  const status = canonicalStatus(state.detail.status);
+  if (PASSTHROUGH_STATUSES.has(status)) {
+    return status as Status;
   }
   // QUARANTINED / SUPERSEDED (and any future terminal status this bundle has
   // not caught up with). See the module docstring: the phase degrades, the
@@ -720,7 +721,11 @@ function projectMessages(
     });
   }
   // A terminal status the kit's union cannot name still has to say what it is.
-  if (status === 'ERROR' && state.detail && !PASSTHROUGH_STATUSES.has(state.detail.status)) {
+  if (
+    status === 'ERROR' &&
+    state.detail &&
+    !PASSTHROUGH_STATUSES.has(canonicalStatus(state.detail.status))
+  ) {
     push({
       id: 'outcome-overlay',
       scope: 'support',

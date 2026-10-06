@@ -25,7 +25,7 @@ other module in this pipeline (`redline_block_apply.py`, `leakage_scan.py`,
    `leakage_scan.run_leakage_gate()` runs over the FULL reconciled result
    (`verdict_summary`, every issue field, `critic_delta`) before anything
    else -- a positive detection routes straight to
-   `ERROR_MANUAL_REVIEW_REQUIRED` with no document produced, on *either*
+   `ERROR` with no document produced, on *either*
    the ACCEPT or the REQUEST_CHANGE path (docs/output-contract.md ->
    "Leakage scan scope").
 2. **ACCEPT path produces no document.** Per docs/output-contract.md ->
@@ -56,13 +56,13 @@ other module in this pipeline (`redline_block_apply.py`, `leakage_scan.py`,
    reused directly here rather than re-implemented, so the two directions
    can never drift), plus a field-code/hyperlink structural check specific
    to output hygiene. A positive detection routes to
-   `ERROR_MANUAL_REVIEW_REQUIRED` and the document is NOT written anywhere.
+   `ERROR` and the document is NOT written anywhere.
 7. **Word round-trip check**: re-verified on the FINAL assembled bytes
    (defense-in-depth alongside `redline_block_apply.apply_block_transcript`'s
    own internal check, reusing the SAME `verify_docx_round_trip` function so
    the two calls can never drift) before ever being handed to a caller -- a
    document that fails to open is never delivered. A failure here routes to
-   `ERROR_MANUAL_REVIEW_REQUIRED` (`reason="round_trip_verification_failed"`),
+   `ERROR` (`reason="round_trip_verification_failed"`),
    fail-closed like every other gate above -- never an uncaught exception
    (issue #263).
 
@@ -115,8 +115,26 @@ import upload_validation  # noqa: E402
 # blank.
 REASON_LEGACY_UNLABELLED_FLAG_ONLY = "legacy_unlabelled_flag_only"
 
-ERROR_MANUAL_REVIEW_REQUIRED = "ERROR_MANUAL_REVIEW_REQUIRED"
-MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+# Issue #133 (owner decision 2026-09-16): a review never concludes as "manual
+# review required". Every fail-closed result this module returns is `ERROR`,
+# and its `reason` token is what tells the attorney what to do next.
+STATUS_ERROR = "ERROR"
+
+# The gates that used to be told apart by their STATUS (the retired
+# ERROR_MANUAL_REVIEW_REQUIRED, as against plain manual review) -- a leakage
+# hit, a failed output OOXML scan, a failed round trip, a change-set that
+# would not settle -- are the ones whose result must surface NO model-derived
+# output at all: `review_spine.run_review` withholds `findings` and
+# `critic_delta` for them. With one status left, that distinction is carried
+# by this flag instead, set only on those returns. It is read in-process by
+# `output_withheld` and never persisted.
+OUTPUT_WITHHELD_KEY = "output_withheld"
+
+
+def output_withheld(result: dict[str, Any]) -> bool:
+    """True when `result` came from a gate whose output must not be surfaced
+    in any form (see `OUTPUT_WITHHELD_KEY`)."""
+    return bool(result.get(OUTPUT_WITHHELD_KEY))
 
 # Issue #585 finding 1 (review round 2): the umbrella reason for a batch
 # whose `analysis_report` carries ONLY deliberate, never-attempted
@@ -933,7 +951,7 @@ def generate_redline(
          "verdict_summary": ..., "flag_only": [...] (only when present)}
 
       Leakage scan positive detection (either path):
-        {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "reason": "leakage_detected",
+        {"status": "ERROR", "output_withheld": True, "reason": "leakage_detected",
          "field_name": ..., "category": ..., "rule_id": ...,
          "docx_bytes": None, "analysis_report": None}
 
@@ -955,7 +973,8 @@ def generate_redline(
         )
     except leakage_scan.LeakageDetectedError as exc:
         return {
-            "status": ERROR_MANUAL_REVIEW_REQUIRED,
+            "status": STATUS_ERROR,
+            OUTPUT_WITHHELD_KEY: True,
             "reason": "leakage_detected",
             "field_name": exc.field_name,
             "category": exc.category,
@@ -1701,7 +1720,8 @@ def generate_redline_from_blocks(
         )
     except leakage_scan.LeakageDetectedError as exc:
         return {
-            "status": ERROR_MANUAL_REVIEW_REQUIRED,
+            "status": STATUS_ERROR,
+            OUTPUT_WITHHELD_KEY: True,
             "reason": "leakage_detected",
             "field_name": exc.field_name,
             "category": exc.category,
@@ -1730,7 +1750,7 @@ def generate_redline_from_blocks(
     normalized = extraction_normalization_stage.extract_and_normalize(normalized_docx_bytes)
     if normalized.get("status") != "normalized":
         return {
-            "status": MANUAL_REVIEW_REQUIRED,
+            "status": STATUS_ERROR,
             "reason": "unnormalizable_input",
             "docx_bytes": None,
             "analysis_report": normalized.get("analysis_report"),
@@ -1750,7 +1770,7 @@ def generate_redline_from_blocks(
             for issue in issues
         ]
         return {
-            "status": MANUAL_REVIEW_REQUIRED,
+            "status": STATUS_ERROR,
             "reason": REASON_BLOCK_TRANSCRIPT_REJECTED,
             "docx_bytes": None,
             "analysis_report": _build_analysis_report(
@@ -1786,7 +1806,7 @@ def generate_redline_from_blocks(
             for issue in issues
         ]
         return {
-            "status": MANUAL_REVIEW_REQUIRED,
+            "status": STATUS_ERROR,
             "reason": REASON_BLOCK_TRANSCRIPT_REJECTED,
             "docx_bytes": None,
             "analysis_report": _build_analysis_report(
@@ -1886,7 +1906,8 @@ def generate_redline_from_blocks(
             # about the WHOLE package, not about one edit (issue #623).
             failure = batch_failures[0]
             blocked: dict[str, Any] = {
-                "status": ERROR_MANUAL_REVIEW_REQUIRED,
+                "status": STATUS_ERROR,
+                OUTPUT_WITHHELD_KEY: True,
                 "reason": failure["reason"],
                 "detail": failure["detail"],
                 "docx_bytes": None,
@@ -1927,7 +1948,8 @@ def generate_redline_from_blocks(
         dropped |= set(fresh)
     else:  # pragma: no cover - defensive: `dropped` grows every iteration
         return {
-            "status": ERROR_MANUAL_REVIEW_REQUIRED,
+            "status": STATUS_ERROR,
+            OUTPUT_WITHHELD_KEY: True,
             "reason": REASON_BLOCK_EDITS_NOT_APPLIED,
             "detail": "change-set rollback did not settle within its bound",
             "docx_bytes": None,
@@ -1952,7 +1974,8 @@ def generate_redline_from_blocks(
             run_output_ooxml_scan(docx_bytes, normalized_docx_bytes)
         except OutputScanError as exc:
             return {
-                "status": ERROR_MANUAL_REVIEW_REQUIRED,
+                "status": STATUS_ERROR,
+                OUTPUT_WITHHELD_KEY: True,
                 "reason": "output_ooxml_scan_failed",
                 "detail": exc.detail,
                 "docx_bytes": None,
@@ -1962,7 +1985,8 @@ def generate_redline_from_blocks(
             verify_docx_round_trip(docx_bytes)
         except ValueError as exc:
             return {
-                "status": ERROR_MANUAL_REVIEW_REQUIRED,
+                "status": STATUS_ERROR,
+                OUTPUT_WITHHELD_KEY: True,
                 "reason": "round_trip_verification_failed",
                 "detail": str(exc),
                 "docx_bytes": None,
@@ -2045,7 +2069,7 @@ def generate_redline_from_blocks(
     # Something was tried and none of it landed -- a human needs to see why.
     # No "decision" key: a SYSTEM status is never a legal decision.
     return {
-        "status": MANUAL_REVIEW_REQUIRED,
+        "status": STATUS_ERROR,
         "reason": REASON_BLOCK_EDITS_NOT_APPLIED,
         "docx_bytes": None,
         "analysis_report": analysis_report,

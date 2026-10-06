@@ -52,7 +52,7 @@ The pipeline validates every model response against this schema before any redli
 
 | Field | Constraint |
 |---|---|
-| `schema_version` | `const: "output-schema-v1"` — mismatch routes to `ERROR_MANUAL_REVIEW_REQUIRED`. Retained at this literal in `output-schema-v2.json` too; see [Schema versions (v1 → v2)](#schema-versions-v1--v2) |
+| `schema_version` | `const: "output-schema-v1"` — a mismatch fails the review (`ERROR`). Retained at this literal in `output-schema-v2.json` too; see [Schema versions (v1 → v2)](#schema-versions-v1--v2) |
 | `decision` | `enum: [ACCEPT, REQUEST_CHANGE]` — binary only |
 | `confidence_state` | `enum: [OK, LOW_CONFIDENCE, MANUAL_REVIEW_REQUIRED, ERROR_MANUAL_REVIEW_REQUIRED]` |
 | `confidence_band` | string (`LOW_CONFIDENCE` \| `MANUAL_REVIEW_REQUIRED` \| `ERROR_MANUAL_REVIEW_REQUIRED`) or null — **system metadata only**; see [Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band) |
@@ -452,15 +452,23 @@ The ACCEPT result view promises **"a summary of what changed and why each change
 
 ### Leakage-scan cross-reference
 
-`verdict_summary` is explicitly in scope for the leakage scan (see the scope table above). The ACCEPT path is **not** a bypass: a `verdict_summary` that contains a verbatim playbook fragment or a system-prompt token is held for `ERROR_MANUAL_REVIEW_REQUIRED` rather than rendered.
+`verdict_summary` is explicitly in scope for the leakage scan (see the scope table above). The ACCEPT path is **not** a bypass: a `verdict_summary` that contains a verbatim playbook fragment or a system-prompt token fails the review (`ERROR` / `leakage_detected`) rather than being rendered.
 
-## The decision is binary; uncertainty is a system status
+## The decision is binary; a run that does not complete is a failure
 
 The external legal decision is **binary**: `ACCEPT | REQUEST_CHANGE`, carried in the `decision` field.
-There is no third legal category. Pipeline uncertainty is carried by the **internal
-`confidence_state`** (`OK | LOW_CONFIDENCE | MANUAL_REVIEW_REQUIRED | ERROR_MANUAL_REVIEW_REQUIRED`)
-and its reviewer-facing mirror `confidence_band`, both *system status* fields, never a legal verdict —
-see [Confidence band](#confidence-band) below.
+There is no third legal category, and — owner decision 2026-09-16, issue #133 — no third *outcome*
+either: **a review never concludes as "manual review required".** A run that completes is `DONE`
+(with its decision and its file); a run that does not complete is `ERROR`, and its `reason` token is
+what tells the attorney what happened and what to do next. The former `MANUAL_REVIEW_REQUIRED` /
+`ERROR_MANUAL_REVIEW_REQUIRED` statuses are retired; a row stored with one before that change is read
+as `ERROR`, its `reason` unchanged.
+
+Pipeline uncertainty about a review that *did* complete is carried by the **internal
+`confidence_state`** (`OK | LOW_CONFIDENCE | MANUAL_REVIEW_REQUIRED | ERROR_MANUAL_REVIEW_REQUIRED` —
+band labels that merely share the retired statuses' spelling) and its reviewer-facing mirror
+`confidence_band`, both informational *system status* fields, never a legal verdict and never a
+terminal status — see [Confidence band](#confidence-band) below.
 
 **`confidence_band` does not gate `status`.** Owner decision (issue #96, Option B, 2026-09-16)
 retired an earlier, never-implemented mapping from `confidence_state` onto the review's terminal
@@ -470,10 +478,10 @@ that does not complete is a failure.** A completed review keeps `status = DONE` 
 degraded its `confidence_band` is — the band is trust-calibration metadata shown to the attorney
 pre-download (see [Confidence band](#confidence-band) and
 [Critic-delta confidence merge rule](#critic-delta-confidence-merge-rule)), never a downgrade of the
-result itself. `status = MANUAL_REVIEW_REQUIRED` / `ERROR_MANUAL_REVIEW_REQUIRED` remain the outcome
-only when the pipeline genuinely did not reach a legal decision at all — schema-invalid-after-retry,
-a leakage hit, an oversized document, or an unprovable edit. The full, current list of what does and
-does not produce each status is owned by
+result itself. `status = ERROR` is the outcome only when the pipeline genuinely did not reach a legal
+decision at all — schema-invalid-after-retry, a leakage hit, an oversized document, an unprovable edit,
+or an infrastructure failure — and the `reason` token names which. The full, current list of what does
+and does not produce each status is owned by
 [ARCHITECTURE.md → `status` vs `confidence_state`/`confidence_band`](../ARCHITECTURE.md#storage).
 
 ## Per-issue provenance and confidence band
@@ -516,9 +524,8 @@ The top-level **`confidence_band`** field surfaces the pipeline's internal confi
 in the result view, pre-download**. It is null when `confidence_state` is `OK`. It mirrors
 `confidence_state` as a UI-surface label and must be rendered as a distinct **system status** —
 visually separate from the legal decision (`ACCEPT | REQUEST_CHANGE`) and clearly labeled as a
-pipeline / system signal, not a legal opinion. This is consistent with the tool-recommendation framing
-rule that `MANUAL_REVIEW_REQUIRED` is a system status, never a third legal category. **It carries no
-status consequence** (see [The decision is binary; uncertainty is a system status](#the-decision-is-binary-uncertainty-is-a-system-status)
+pipeline / system signal, not a legal opinion — never a third legal category. **It carries no
+status consequence** (see [The decision is binary; a run that does not complete is a failure](#the-decision-is-binary-a-run-that-does-not-complete-is-a-failure)
 above, issue #96 Option B): a review with a non-null band is still `status = DONE` when the pipeline
 completed it, and downloads normally once the pre-download indicators above have rendered.
 
@@ -550,7 +557,7 @@ independent degrade whenever the primary pass had reviewed a section outline rat
 counterparty document text, plus a fixed sentence appended to `verdict_summary` saying so. Owner
 decision (issue #625) deleted that review mode outright: a document either fits
 `primary_review_pass.MAX_INPUT_TOKENS` (175,000 since issue #137; 170,000 from issue #144) and is reviewed in full, or the review terminates
-as `MANUAL_REVIEW_REQUIRED` / `document_too_large` before any model call and never reaches
+as `ERROR` / `document_too_large` before any model call and never reaches
 `reconcile()` at all. There is no longer a reduced review quality for a confidence degrade or a
 summary notice to warn about, and the pipeline-derived `input_mode` field that carried the
 distinction is gone from `scripts/review_spine.py::run_review`'s result dict. Since issue #138 nothing in
@@ -601,7 +608,8 @@ of scannable model prose — `contested_replacements[].critic_objection`,
 `.critic_suggested_replacement` and `rationale_objections[].objection` are all fields
 `scripts/leakage_scan.py` scans and can block on — so
 `scripts/review_spine.py::run_review` suppresses the whole key on exactly the condition it
-suppresses `findings` on: a terminal `ERROR_MANUAL_REVIEW_REQUIRED` from the leakage gate. A leakage
+suppresses `findings` on: a redline-stage gate that withholds all output — the leakage gate above
+all (`redline_generate.output_withheld`; the review fails as `ERROR`). A leakage
 block produces no human-surfaced output at all, not a redacted one, and that includes the analysis
 artifact, `get_review_detail`'s projection, the console's badges and this receipt line.
 `confidence_band` is *not* suppressed on that path: it is a bare enum token off a fixed four-value
@@ -710,7 +718,7 @@ terminates **before any model call** with:
 
 | Field | Value |
 |---|---|
-| `status` | `MANUAL_REVIEW_REQUIRED` |
+| `status` | `ERROR` |
 | `reason` | `document_too_large` |
 
 The user-facing message is: **"Document too large to review — the uploaded file exceeds the
@@ -759,8 +767,8 @@ returns both the delivered bytes and an `analysis_report` (built from
 the failed edits only) in the same result, joining
 every compile failure into that same `changes_not_applied` list (never a silent omission of
 a `REQUEST_CHANGE` edit), so a caller with a mixed-outcome batch delivers the partial redline and
-the report together, with `status = MANUAL_REVIEW_REQUIRED` so a human still sees exactly which
-section(s) were not auto-patched. A batch where every patch matches exactly and locates cleanly,
+the report together (the review is `DONE`; the report is how a human still sees exactly which
+section(s) were not auto-patched). A batch where every patch matches exactly and locates cleanly,
 with no other issue in the batch deliberately flag-only, delivers the full redline with no analysis
 report at all.
 
@@ -836,8 +844,8 @@ text and rationale are model-generated from the counterparty draft). See
 | Storage | `s3://outputs/{review-id}/analysis-report.json` (same bucket and key prefix as `out.docx`) |
 | `out.docx` presence | **Un-normalizable path:** absent — no clean document body exists to patch. **Anchor/hash-mismatch and in-place-locate-failure paths:** present whenever at least one patch both matched exactly AND was located in place, containing the tracked-change redline for every such clause; absent only if every patch in the batch failed. |
 | Access | Owner-or-admin only (same row-level access control as all outputs) |
-| Status set | `MANUAL_REVIEW_REQUIRED` with `reason` = `unnormalizable_input`, `hash_mismatch_at_patch`, or `inplace_locate_failed` |
-| UI surface | Result view — presented as a **distinct system status** (never as `ACCEPT` or `REQUEST_CHANGE`), with the reviewer-facing copy below, a download affordance for the report file, and (anchor/hash-mismatch or in-place-locate-failure path, when the partial `out.docx` is present) a download affordance for the partial redline `.docx` |
+| Status set | `ERROR` with `reason` = `unnormalizable_input`, `hash_mismatch_at_patch`, or `inplace_locate_failed` |
+| UI surface | Result view — presented as a **failure explained by its reason** (never as `ACCEPT` or `REQUEST_CHANGE`), with the reviewer-facing copy below, a download affordance for the report file, and (anchor/hash-mismatch or in-place-locate-failure path, when the partial `out.docx` is present) a download affordance for the partial redline `.docx` |
 
 ### Status mapping
 
@@ -845,15 +853,15 @@ All three fail-closed paths set:
 
 | Field | Value |
 |---|---|
-| `status` | `MANUAL_REVIEW_REQUIRED` |
+| `status` | `ERROR` |
 | `reason` | `unnormalizable_input` (normalization path), `hash_mismatch_at_patch` (redline-patch hash path), or `inplace_locate_failed` (in-place-patch locate path, issue #291) |
 
-`MANUAL_REVIEW_REQUIRED` is the correct status because the pipeline could not complete the redline
-automatically; a human (the legal admin or the reviewing attorney) must complete the work. This is a
-**system status**, never a legal decision.
-The manual-review SLA and daily triage procedure apply (see
-[docs/output-contract.md → Manual-review states: user-facing next-step copy](#manual-review-states-user-facing-next-step-copy)
-and [RUNBOOK.md → Manual-review filter: owner and SLA](../RUNBOOK.md#manual-review-filter-owner-and-sla)).
+`ERROR` is the correct status because the pipeline could not complete the redline automatically
+(issue #133: a run that does not complete is a failure, never a "manual review" outcome); the
+`reason` token says why, and is what the reader-facing explanation is keyed on. It is never a legal
+decision. The failures-queue SLA and daily triage procedure apply (see
+[docs/output-contract.md → Failed reviews: user-facing next-step copy](#failed-reviews-user-facing-next-step-copy)
+and [RUNBOOK.md → Failures queue: owner and SLA](../RUNBOOK.md#failures-queue-owner-and-sla)).
 
 ### Reviewer-facing copy
 
@@ -865,7 +873,7 @@ depending on whether a partial redline also exists:
 | No redline `.docx` exists (un-normalizable path, or every patch in the batch failed) | **"We could not safely apply the suggested edits to your document — here is the analysis to apply by hand. A legal admin will follow up with you. No automated redline was produced."** |
 | A partial redline `.docx` exists (`applied_patches` non-empty) alongside the analysis report | **"We applied the changes we could safely verify and flagged the rest — here is the partial redline and the analysis for the remaining section(s) to apply by hand. A legal admin will follow up with you."** |
 
-Both are displayed as a `MANUAL_REVIEW_REQUIRED` system-status message (distinct from
+Both are displayed as the failure's explanation (status `ERROR`, distinct from
 `ACCEPT | REQUEST_CHANGE`). The download affordance for the
 analysis report — and, in the partial-redline case, a separate download affordance for the
 `.docx` — is shown alongside the message so the attorney can retrieve everything needed to finish
@@ -882,7 +890,7 @@ in your organization's own review process, entirely outside this tool.
 
 - An `ACCEPT` is rendered as **"no requested changes identified by tool"**, never "no action needed" —
   a clean tool pass is a tool result, not a legal opinion.
-- `MANUAL_REVIEW_REQUIRED` is shown as a **distinct system status**, visually separate from the
+- A failed review (`ERROR`, explained by its `reason`) is shown visually separate from the
   `ACCEPT | REQUEST_CHANGE` legal decisions, so a pipeline outcome is never mistaken for a legal opinion.
 - The generated redline `.docx` carries an **internal-notes export marker** iff this review's notes
   mode actually put internal-audience content in scope (`internal`/`both`) — see
@@ -916,25 +924,26 @@ a fix. If a generated `.docx` carries the marker, that specific export is not fo
 transmission — full stop. See
 [RUNBOOK.md → Internal-notes marker on a generated redline](../RUNBOOK.md#internal-notes-marker-on-a-generated-redline).
 
-## Manual-review states: user-facing next-step copy
+## Failed reviews: user-facing next-step copy
 
-When the pipeline routes a review to a manual-review terminal state, the UI displays a system-status
-message (never a legal verdict) that tells the uploader what happens next. One sentence of copy per
-state is required; the canonical text is below.
+Issue #133 (owner decision 2026-09-16): a review never concludes as "manual review required". The two
+status-keyed messages this section used to define — one for `MANUAL_REVIEW_REQUIRED`, one for
+`ERROR_MANUAL_REVIEW_REQUIRED`, each promising that a legal admin would follow up — are retired with
+those statuses. A failed review is `ERROR`, and the UI explains it from its **`reason` token**
+(`REASON_EXPLANATIONS` in `frontend/src/ReviewSubmission.tsx`): what happened, and what to do next.
+That copy is unchanged by #133; the words "manual review" survive only inside a reason's fix copy,
+where a person really is the next step. A legacy row stored with a retired status gets no
+status-keyed message and renders as the failure it was.
 
-| Status | User-facing message |
-|---|---|
-| `MANUAL_REVIEW_REQUIRED` | **"Your document could not be automatically reviewed — a legal admin will review it and follow up with you. No action is needed on your part right now."** |
-| `ERROR_MANUAL_REVIEW_REQUIRED` | **"A pipeline error prevented automatic review of your document — a legal admin will review it and follow up with you. No action is needed on your part right now."** |
-
-Both messages are system-status copy only. They must never imply a legal decision, and nothing in
-this product enforces, requires, gates on, or records attorney approval — these states carry no
+The copy is system-status copy only. It must never imply a legal decision, and nothing in this
+product enforces, requires, gates on, or records attorney approval — a failed review carries no
 watermark or approval framing, same as every other result state.
 
-**Who acts on manual-review states.** The legal admin checks the manual-review filter in the admin
-UI daily and triages each entry. The `contract-toaster-manual-review-stale` alarm fires if any review remains
-in a manual-review state unacknowledged for more than 24 hours. The owner and check cadence are
-defined in [RUNBOOK.md → Manual-review filter: owner and SLA](../RUNBOOK.md#manual-review-filter-owner-and-sla).
+**Who acts on failed reviews.** The legal admin checks the failures queue (`GET
+/api/admin/manual-review`, which keeps its path) daily and triages each entry by reason. The
+`contract-toaster-manual-review-stale` alarm, kept under its original name, fires if a failed review
+remains unacknowledged for more than 24 hours. The owner and check cadence are defined in
+[RUNBOOK.md → Failures queue: owner and SLA](../RUNBOOK.md#failures-queue-owner-and-sla).
 
 ## Markup intensity: the review's `markup_intensity` (issue #54, audit A5)
 
@@ -1138,10 +1147,10 @@ Until #522 closed it, this was a real gap in the other direction: #516's narrati
 
 The two rulesets, and the categories that are dormant in production because retrieval was retired, are in [docs/threat-model.md → Model output leakage](threat-model.md#model-output-leakage).
 
-A positive leakage detection on **any** of these fields routes the review to
-`ERROR_MANUAL_REVIEW_REQUIRED` regardless of which path (ACCEPT or REQUEST_CHANGE) the review is on.
+A positive leakage detection on **any** of these fields fails the review as `ERROR` /
+`leakage_detected` regardless of which path (ACCEPT or REQUEST_CHANGE) the review is on.
 The ACCEPT path is not a bypass of the scan: a `verdict_summary` that contains a verbatim playbook
-fragment or a system-prompt token is held for manual review rather than rendered in the UI.
+fragment or a system-prompt token fails the review rather than being rendered in the UI.
 
 The scan mechanism and residual-risk statement are documented in
 [docs/threat-model.md → Model output leakage](threat-model.md#model-output-leakage).
@@ -1208,7 +1217,7 @@ Any reference to corpus precedent is **internal-audit-only** and is **stripped f
 storage. The **leakage scan** (a distinct pipeline step — see scope table above and
 [docs/threat-model.md → Model output leakage](threat-model.md#model-output-leakage)) blocks the classes
 listed in `output_format.citation_rules.forbid_in_external_output` across all human-surfaced fields;
-a positive detection routes the review to `ERROR_MANUAL_REVIEW_REQUIRED` rather than emitting a
+a positive detection fails the review (`ERROR` / `leakage_detected`) rather than emitting a
 document. Replacement text is bounded by the topic's `replacement_text` constraints (mode, `max_chars`,
 `must_not_introduce`) — enforced as a pure post-validation function,
 `scripts/replacement_text_enforcement.check_replacement_text` (issue #216), called with the topic
@@ -1236,5 +1245,5 @@ the generated file is subjected to the same external-relationship, embedded-obje
 as an uploaded input document (see
 [docs/threat-model.md → Generated redline output hygiene](threat-model.md#generated-redline-output-hygiene-output-ooxml-scan)).
 A generated `.docx` that contains external relationships, embedded OLE objects, field codes referencing
-external resources, or macro-enabled parts is rejected; the review routes to `ERROR_MANUAL_REVIEW_REQUIRED`
+external resources, or macro-enabled parts is rejected; the review fails (`ERROR` / `output_ooxml_scan_failed`)
 rather than delivering a hostile output file. This scan runs after the leakage scan, not instead of it.

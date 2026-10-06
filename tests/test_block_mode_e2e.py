@@ -914,7 +914,7 @@ def test_leaked_insert_segment_blocks_the_review(failures: list) -> None:
     result = _run_block_mode(
         _reconciled(response), docx_bytes, corpus=_planted_corpus()
     )
-    if result["status"] != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result["status"] != "ERROR":
         failures.append(
             "a precedent counterparty name in an insert segment did not block the "
             f"review: status={result['status']!r}"
@@ -950,7 +950,7 @@ def test_leaked_insert_block_new_text_blocks_the_review(failures: list) -> None:
     result = _run_block_mode(
         _reconciled(response), docx_bytes, corpus=_planted_corpus()
     )
-    if result["status"] != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result["status"] != "ERROR":
         failures.append(
             "a precedent counterparty name in an insert_block_after new_text did "
             f"not block the review: status={result['status']!r}"
@@ -998,7 +998,7 @@ def test_replacement_scope_note_is_scanned(failures: list) -> None:
     result = _run_block_mode(
         _reconciled(response), docx_bytes, corpus=_planted_corpus()
     )
-    if result["status"] != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result["status"] != "ERROR":
         failures.append(
             "a precedent counterparty name in replacement_scope_note did not block "
             f"the review: status={result['status']!r}"
@@ -1071,9 +1071,9 @@ def test_transcript_rejection_is_terminal_and_names_the_failures(failures: list)
         ],
     }
     result = _run_block_mode(_reconciled(response), docx_bytes)
-    if result["status"] != "MANUAL_REVIEW_REQUIRED":
+    if result["status"] != "ERROR":
         failures.append(
-            f"a rejected transcript should be MANUAL_REVIEW_REQUIRED, got "
+            f"a rejected transcript should be ERROR, got "
             f"{result['status']!r}"
         )
         return
@@ -1265,7 +1265,7 @@ def test_an_edit_naming_no_issue_is_terminal(failures: list) -> None:
         ],
     }
     result = _run_block_mode(_reconciled(response), docx_bytes)
-    if result["status"] != "MANUAL_REVIEW_REQUIRED":
+    if result["status"] != "ERROR":
         failures.append(
             "an unattributed edit was not fail-closed: status="
             f"{result['status']!r}"

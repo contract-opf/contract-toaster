@@ -37,7 +37,7 @@ entirely server-side via S3 CopyObject.
 Input event shape (pointer-only; from the mock review stage):
   {
     "review_id": "...",
-    "decision": "REQUEST_CHANGE" | "MANUAL_REVIEW_REQUIRED",
+    "decision": "REQUEST_CHANGE" | null,
     "output_s3_key": null | "outputs/<review_id>/out.docx",
     "pre_baked_source_key": "mock-fixtures/eiaa/pre-baked-redline.docx",
     ...
@@ -67,7 +67,7 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     output_s3_key = event.get("output_s3_key")
     source_key = event.get("pre_baked_source_key")
 
-    # MANUAL_REVIEW_REQUIRED (nda / unknown playbook) carries no output_s3_key
+    # A mock run with no decision (nda / unknown playbook) carries no output_s3_key
     # and no pre-baked source -- nothing to materialize, pass straight through.
     if not output_s3_key or not source_key:
         return event

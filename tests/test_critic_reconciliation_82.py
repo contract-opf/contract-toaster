@@ -341,8 +341,8 @@ def test_critic_schema_invalid_after_retry_is_terminal(failures: list[str]) -> N
         ledger_write=ledger.append,
     )
 
-    if critic_result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[6a] Expected terminal ERROR_MANUAL_REVIEW_REQUIRED; got {critic_result!r}")
+    if critic_result.get("status") != "ERROR":
+        failures.append(f"[6a] Expected terminal ERROR; got {critic_result!r}")
     if critic_result.get("attempts") != 2:
         failures.append(f"[6b] Expected exactly 2 attempts (bounded retry budget = 1); got {critic_result.get('attempts')!r}")
     if len(client.calls) != 2:
@@ -365,8 +365,8 @@ def test_critic_schema_invalid_after_retry_is_terminal(failures: list[str]) -> N
         critic_pass_result=critic_result,
         detector_fires=[],
     )
-    if composed.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[6g] A failed critic pass must make the composed review terminal ERROR_MANUAL_REVIEW_REQUIRED; got {composed!r}")
+    if composed.get("status") != "ERROR":
+        failures.append(f"[6g] A failed critic pass must make the composed review terminal ERROR; got {composed!r}")
     if "result" in composed:
         failures.append(f"[6h] A failed critic pass must NEVER yield a reconciled 'result' (silent single-pass DONE); got {composed!r}")
 

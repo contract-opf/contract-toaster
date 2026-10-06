@@ -117,7 +117,7 @@ class TestRedlineCopyStage(unittest.TestCase):
         fake = FakeS3()
         event = {
             "review_id": REVIEW_ID,
-            "decision": "MANUAL_REVIEW_REQUIRED",
+            "decision": None,
             "reason": "playbook_coming_soon",
             "output_s3_key": None,
         }

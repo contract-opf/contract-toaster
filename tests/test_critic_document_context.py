@@ -423,9 +423,9 @@ def test_oversized_document_fails_closed_without_any_model_call(failures: list[s
         failures, review_id="critic-doc-too-large", doc_text=oversized
     )
 
-    if result.get("status") != "MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(
-            f"[3a] Expected status=MANUAL_REVIEW_REQUIRED for an oversized critic prompt; "
+            f"[3a] Expected status=ERROR for an oversized critic prompt; "
             f"got {result!r}"
         )
     if result.get("reason") != "document_too_large":

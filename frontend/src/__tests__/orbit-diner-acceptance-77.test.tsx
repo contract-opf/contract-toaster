@@ -49,7 +49,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import ReviewSubmission, { POLL_INTERVAL_MS } from '../ReviewSubmission';
+import ReviewSubmission, { POLL_INTERVAL_MS, REASON_EXPLANATIONS } from '../ReviewSubmission';
 import { DOWNLOAD_ERROR_COPY } from '../api';
 import { COVER_NOTE_FAILURE_COPY } from '../coverNote';
 import { OUTCOME_CHIPS } from '../outcome';
@@ -619,32 +619,26 @@ describe('#77 route 4 — the cancel/completion race', () => {
 });
 
 // ===========================================================================
-// Route 5 — the manual-review handoff, both spellings
+// Route 5 — a legacy manual-review row, both spellings (issue #133)
 // ===========================================================================
 
-describe('#77 route 5 — a manual-review handoff gets the calm treatment', () => {
-  // Each spelling is seeded with a reason `reviews.py`'s
-  // STAGE_FAILURE_REASON_STATUS maps to THAT status. The table lists every
-  // token explicitly so a row's (status, reason) pair can be read straight
-  // off it, and a pair it does not list is a row no writer produces.
+describe('#77 route 5 — a legacy manual-review row reads as the failure it was', () => {
+  // Issue #133 (owner decision 2026-09-16): a review never concludes as
+  // "manual review required", so the calm "handoff" this route used to pin
+  // no longer exists. What can still arrive is a row stored BEFORE that
+  // change with one of the two retired spellings (there is no migration).
+  // Each is seeded with a reason `reviews.py`'s STAGE_FAILURE_REASON_STATUS
+  // mapped to that status at the time; it must render exactly as the ERROR
+  // the same reason produces today.
   it.each([
-    [
-      'MANUAL_REVIEW_REQUIRED',
-      OUTCOME_CHIPS.MANUAL_REVIEW_REQUIRED.label,
-      // A provider-side length rejection — the document's own problem,
-      // measured inside the review call, so `run_review` is its stage.
-      'model_context_length_exceeded',
-    ],
-    [
-      'ERROR_MANUAL_REVIEW_REQUIRED',
-      OUTCOME_CHIPS.ERROR_MANUAL_REVIEW_REQUIRED.label,
-      // `primary_review_pass` returns this as a terminal status DICT rather
-      // than raising, and `pipeline_runner`'s `result["status"] != "OK"`
-      // branch is what stamps `failing_stage = "run_review"` on it — so the
-      // whole triple below is written together by one call site.
-      'structured_output_retry_exhausted',
-    ],
-  ])('%s reads as a next step, not as a malfunction', async (status, label, reason) => {
+    // A provider-side length rejection — the document's own problem,
+    // measured inside the review call, so `run_review` is its stage.
+    ['MANUAL_REVIEW_REQUIRED', 'model_context_length_exceeded'],
+    // `primary_review_pass` returned this as a terminal status DICT and
+    // `pipeline_runner`'s `result["status"] != "OK"` branch stamped
+    // `failing_stage = "run_review"` on it.
+    ['ERROR_MANUAL_REVIEW_REQUIRED', 'structured_output_retry_exhausted'],
+  ])('%s reads as a failure, explained by its reason', async (status, reason) => {
     stubServer({
       'POST /api/reviews': ok({ review_id: REVIEW_ID, resumed: false }),
       [`GET ${DETAIL_PATH}`]: ok(detail({ status, reason, failing_stage: 'run_review' })),
@@ -652,35 +646,17 @@ describe('#77 route 5 — a manual-review handoff gets the calm treatment', () =
 
     await submitADocument();
 
-    await waitFor(() => expect(consoleStatus()).toBe(status.toLowerCase()));
-    expect(await screen.findByTestId(`toaster-state-${status.toLowerCase()}`)).toBeInTheDocument();
+    await waitFor(() => expect(consoleStatus()).toBe('error'));
+    expect(await screen.findByTestId('toaster-state-error')).toBeInTheDocument();
 
-    // The result stays ON THE PAGE — nobody should have to open something to
-    // read that a human is needed — and it is headed as the next step.
     const result = await screen.findByTestId('review-result');
-    expect(result).toHaveTextContent(label);
-    expect(result).toHaveTextContent('Next step');
-    expect(result.textContent ?? '').not.toContain('What happened');
-
-    // Calm: not the burnt-toast treatment, and not the burnt review's reset.
-    expect(document.querySelector('.od-failure')).toBeNull();
-    expect(screen.queryByTestId('toaster-state-error')).toBeNull();
-    expect(screen.queryByTestId('review-retry-button')).toBeNull();
-    expect(screenText()).toContain('Needs a human');
+    expect(result).toHaveTextContent(OUTCOME_CHIPS.ERROR.label);
+    expect(result).toHaveTextContent('What happened');
+    expect(result.textContent ?? '').not.toContain('Next step');
+    expect(result).toHaveTextContent(REASON_EXPLANATIONS[reason].cause);
+    expect(screenText()).not.toContain('Needs a human');
     // The raw status token is never what the reviewer reads.
     expect(screenText()).not.toContain(status);
-  });
-
-  it('offers the record, and the disposition capture, on a manual handoff', async () => {
-    stubServer({
-      'POST /api/reviews': ok({ review_id: REVIEW_ID, resumed: false }),
-      [`GET ${DETAIL_PATH}`]: ok(detail({ status: 'MANUAL_REVIEW_REQUIRED' })),
-    });
-
-    await submitADocument();
-    await waitFor(() => expect(consoleStatus()).toBe('manual_review_required'));
-
-    expect(await openDisposition()).toBeInTheDocument();
   });
 });
 
@@ -1080,15 +1056,17 @@ describe('#77 route 9 — the host global shortcuts, with each console dialog op
   });
 
   it('reaches nothing behind the record dialog either', async () => {
-    // The record overlay is offered where there is no redline to print, which
-    // is exactly the manual handoff of route 5.
+    // The record overlay is offered where there is no redline to print —
+    // a failed review (issue #133 retired the manual handoff this used to be).
     stubServer({
       'POST /api/reviews': ok({ review_id: REVIEW_ID, resumed: false }),
-      [`GET ${DETAIL_PATH}`]: ok(detail({ status: 'MANUAL_REVIEW_REQUIRED' })),
+      [`GET ${DETAIL_PATH}`]: ok(
+        detail({ status: 'ERROR', reason: 'document_too_large', failing_stage: 'run_review' }),
+      ),
     });
 
     await submitADocument();
-    await waitFor(() => expect(consoleStatus()).toBe('manual_review_required'));
+    await waitFor(() => expect(consoleStatus()).toBe('error'));
 
     const soundBefore = soundLabel();
     fireEvent.click(await screen.findByTestId('review-details-button'));

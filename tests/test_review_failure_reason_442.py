@@ -347,7 +347,7 @@ class TestRunRealPipelineRecordsTheClassifiedReason(unittest.TestCase):
             mc.ModelContextLengthExceededError("opaque", status_code=413)
         )
         self.assertEqual(table.item["reason"], "model_context_length_exceeded")
-        self.assertEqual(table.item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(table.item["status"], "ERROR")
 
     def test_unclassifiable_failure_is_unchanged_from_today(self) -> None:
         table = self._run_with_spine_raising(RuntimeError("something else broke"))

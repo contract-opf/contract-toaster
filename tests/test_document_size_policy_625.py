@@ -405,9 +405,9 @@ def test_over_cap_document_fails_loudly_before_any_model_call(failures: list[str
         ledger_write=ledger.append,
         doc_text=oversized,
     )
-    if result.get("status") != "MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(
-            f"[5a] An over-cap document must terminate MANUAL_REVIEW_REQUIRED (loudly), "
+            f"[5a] An over-cap document must terminate ERROR (loudly), "
             f"got {result.get('status')!r}"
         )
     if result.get("reason") != "document_too_large":

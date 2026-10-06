@@ -163,7 +163,7 @@ def main():
         )
 
     # C6: the un-normalizable path maps to the documented pipeline status
-    # (docs/output-contract.md: status=MANUAL_REVIEW_REQUIRED,
+    # (docs/output-contract.md: status=ERROR,
     # reason=unnormalizable_input) -- never a legal decision.
     for label, result in (
         ("corrupt", result_corrupt),
@@ -198,10 +198,10 @@ def main():
                 f"field (ACCEPT/REQUEST_CHANGE) -- the fail-closed outcome is "
                 f"a SYSTEM status, not a legal decision. Got: {report_builder_result}"
             )
-        status = report_builder_result.get("status", "MANUAL_REVIEW_REQUIRED")
-        if status != "MANUAL_REVIEW_REQUIRED":
+        status = report_builder_result.get("status", "ERROR")
+        if status != "ERROR":
             failures.append(
-                f"[D2:{label}] Fail-closed status must be MANUAL_REVIEW_REQUIRED. "
+                f"[D2:{label}] Fail-closed status must be ERROR (issue #133). "
                 f"Got: {status!r}"
             )
 

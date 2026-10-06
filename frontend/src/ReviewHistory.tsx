@@ -81,7 +81,7 @@ import { formatFailureTime as formatEpochSeconds } from './AdminDiagnostics';
 // and the variant off a separate `historyStatusVariant(row.status)`: two
 // independent reads of overlapping data that could (and did) disagree for
 // the same outcome. See outcome.ts's module docstring for the full history.
-import { describeOutcome } from './outcome';
+import { canonicalStatus, describeOutcome } from './outcome';
 // The shared disposition capture (issue #486) — same module
 // ReviewSubmission.tsx's DONE panel uses, so the two surfaces can never
 // drift on the vocabulary, the display labels, or the POST call. See
@@ -573,11 +573,13 @@ export default function ReviewHistory(): React.ReactElement {
   const filteredRows = (load.status === 'ready' ? load.data : []).filter((row) => {
     if (outcomeFilter === 'redline' && row.decision !== 'REQUEST_CHANGE') return false;
     if (outcomeFilter === 'clean' && row.decision !== 'ACCEPT') return false;
+    // Issue #133: a legacy manual-review row is the failure it was.
+    const rowStatus = canonicalStatus(row.status);
     if (
       outcomeFilter === 'failed' &&
-      row.status !== 'FAILED' &&
-      row.status !== 'CANCELLED' &&
-      row.status !== 'ERROR'
+      rowStatus !== 'FAILED' &&
+      rowStatus !== 'CANCELLED' &&
+      rowStatus !== 'ERROR'
     ) {
       return false;
     }

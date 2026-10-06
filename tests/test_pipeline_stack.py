@@ -17,7 +17,7 @@ Verifies:
      review -> adversarial review -> redline -> persist -> audit, each a
      stubbed/mock task. The mock review task returns a canned result keyed
      by playbook_id (eiaa -> REQUEST_CHANGE from a pre-baked S3 redline;
-     nda -> MANUAL_REVIEW_REQUIRED "coming soon").
+     nda -> ERROR, reason "playbook_coming_soon").
 
   C. Each stage has its own Timeout/retry policy; a Catch-all routes to an
      ERROR-handling state that updates the reviews row and releases the
@@ -207,8 +207,8 @@ def check_b_stage_skeleton_mock_task() -> list[str]:
             "mock_review handler returns REQUEST_CHANGE for playbook_id == 'eiaa'",
         )
         failures += _assert(
-            "MANUAL_REVIEW_REQUIRED" in mock_text and "nda" in mock_text,
-            "mock_review handler returns MANUAL_REVIEW_REQUIRED 'coming soon' for playbook_id == 'nda'",
+            "playbook_coming_soon" in mock_text and "nda" in mock_text,
+            "mock_review handler returns reason playbook_coming_soon for playbook_id == 'nda'",
         )
         failures += _assert(
             bool(re.search(r"time\.sleep|asyncio\.sleep|delay", mock_text, re.IGNORECASE)),

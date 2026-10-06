@@ -694,11 +694,11 @@ def run_two_pass_review(
     rule.
 
     Returns one of:
-      {"status": "MANUAL_REVIEW_REQUIRED" | "ERROR_MANUAL_REVIEW_REQUIRED", ...}
+      {"status": "ERROR", "reason": <token>, ...}
         -- the primary pass failed (propagated verbatim; the critic is
         never invoked in this slice's contract, mirroring
         run_primary_pass's own oversized-doc short-circuit).
-      {"status": "ERROR_MANUAL_REVIEW_REQUIRED", "stage": "critic",
+      {"status": "ERROR", "stage": "critic",
        "attempts": N | None, "last_error": ..., "reason": <token> | None}
         -- the primary pass succeeded but the critic pass did not (after
         its own bounded retry), OR it returned a result `reconcile()`
@@ -717,7 +717,7 @@ def run_two_pass_review(
 
     if critic_pass_result is None or critic_pass_result.get("status") != "OK":
         return {
-            "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "stage": "critic",
             "attempts": (critic_pass_result or {}).get("attempts"),
             "last_error": (critic_pass_result or {}).get("last_error"),
@@ -742,7 +742,7 @@ def run_two_pass_review(
         )
     except ReconciliationRejected as exc:
         return {
-            "status": "ERROR_MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "stage": "critic",
             "attempts": critic_pass_result.get("attempts"),
             "last_error": exc.last_error,

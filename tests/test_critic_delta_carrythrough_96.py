@@ -353,7 +353,7 @@ def test_a_leakage_block_carries_no_critic_delta_at_all() -> None:
     all, not a redacted one."""
     result = _run_leakage_blocked()
 
-    assert result["status"] == "ERROR_MANUAL_REVIEW_REQUIRED", (
+    assert result["status"] == "ERROR", (
         f"setup: the leakage gate must fire on this run; got {result['status']!r}"
     )
     assert result.get("reason") == "leakage_detected", (

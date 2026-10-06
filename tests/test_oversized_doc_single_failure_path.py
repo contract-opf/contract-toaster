@@ -4,8 +4,8 @@ CI gate for issue #24: single authoritative failure path for oversized documents
 
 Three invariants asserted by this gate:
 
-  GATE 1 — Single failure point: step-14 cap terminates with MANUAL_REVIEW_REQUIRED
-    ARCHITECTURE.md step 14 must name the status MANUAL_REVIEW_REQUIRED and the
+  GATE 1 — Single failure point: step-14 cap terminates with ERROR
+    ARCHITECTURE.md step 14 must name the status ERROR (issue #133) and the
     reason code `document_too_large` as the single failure point for oversized
     documents, and must state that this check fires *before* any model call.
     The cap check at step 14 is the single authoritative failure point — there
@@ -56,14 +56,15 @@ def read_text(path: Path) -> str:
 # ARCHITECTURE.md step 14 currently says "Enforce caps: document size, extracted
 # tokens, sections, top-K per section, output tokens" without naming a status or
 # reason code.  The fix must:
-#   (a) name the status MANUAL_REVIEW_REQUIRED for oversized-document termination,
+#   (a) name the status for oversized-document termination -- ERROR since
+#       issue #133 retired MANUAL_REVIEW_REQUIRED (the reason token carries it),
 #   (b) name the reason code `document_too_large`,
 #   (c) state it fires before any model call (i.e. before step 15).
 
-# Pattern (a): step 14 names MANUAL_REVIEW_REQUIRED as the oversized-doc status
+# Pattern (a): step 14 names ERROR as the oversized-doc status (issue #133)
 STEP14_STATUS_PATTERN = re.compile(
     r"(?:step.{0,20}14|step\s+14|14\..{0,30}Assemble|Enforce\s+caps).{0,600}"
-    r"MANUAL_REVIEW_REQUIRED",
+    r"status\s*=\s*ERROR\b",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -137,11 +138,10 @@ RUNBOOK_VALIDATION_EXCEPTION_PATTERN = re.compile(
 )
 
 # Pattern: RUNBOOK must document the user-facing message for oversized documents
-# (the user sees MANUAL_REVIEW_REQUIRED, not a model error)
+# (the user sees ERROR / document_too_large, not a model error)
 RUNBOOK_USER_MESSAGE_PATTERN = re.compile(
-    r"(?:document_too_large|MANUAL_REVIEW_REQUIRED.{0,200}oversized"
-    r"|oversized.{0,200}MANUAL_REVIEW_REQUIRED"
-    r"|document.{0,80}(?:too\s+large|exceeds?.{0,40}cap).{0,200}MANUAL_REVIEW_REQUIRED)",
+    r"(?:document_too_large"
+    r"|document.{0,80}(?:too\s+large|exceeds?.{0,40}cap).{0,200}status\s*=\s*ERROR\b)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -151,10 +151,10 @@ def gate_1_step14_single_failure_point(arch_text: str) -> list[str]:
 
     if not STEP14_STATUS_PATTERN.search(arch_text):
         failures.append(
-            "  Gate 1a: ARCHITECTURE.md step 14 does not name MANUAL_REVIEW_REQUIRED\n"
+            "  Gate 1a: ARCHITECTURE.md step 14 does not name ERROR\n"
             "  as the status for oversized-document termination.\n"
             "  Required: step 14 must state that a document exceeding the cap\n"
-            "  terminates with status=MANUAL_REVIEW_REQUIRED.\n"
+            "  terminates with status=ERROR.\n"
             f"  Missing pattern: {STEP14_STATUS_PATTERN.pattern!r}"
         )
 
@@ -220,13 +220,13 @@ def gate_3_runbook_updated(runbook_text: str) -> list[str]:
             f"  Missing pattern: {RUNBOOK_VALIDATION_EXCEPTION_PATTERN.pattern!r}"
         )
 
-    # (c) RUNBOOK must document the user-facing outcome (MANUAL_REVIEW_REQUIRED)
+    # (c) RUNBOOK must document the user-facing outcome (ERROR / document_too_large)
     if not RUNBOOK_USER_MESSAGE_PATTERN.search(runbook_text):
         failures.append(
             "  Gate 3c: RUNBOOK.md does not document the user-facing outcome for\n"
-            "  oversized documents (MANUAL_REVIEW_REQUIRED + document_too_large).\n"
+            "  oversized documents (ERROR + document_too_large).\n"
             "  Required: RUNBOOK.md must state that an oversized document results in\n"
-            "  MANUAL_REVIEW_REQUIRED with reason document_too_large, not a raw model\n"
+            "  ERROR with reason document_too_large, not a raw model\n"
             "  error — so the operator knows what the user sees.\n"
             f"  Missing pattern: {RUNBOOK_USER_MESSAGE_PATTERN.pattern!r}"
         )

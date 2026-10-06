@@ -154,8 +154,8 @@ const DECISION_WORDS: Record<string, string> = {
  * (`DECISION_WORDS[decision]`), bypassing `resolveOutcome` — the one place
  * `outcome.ts` lets a `status` overrule a stale `decision` (see that
  * module's own header). A row whose SYSTEM status downgraded a review after
- * a decision was already recorded (#95's own shape:
- * `status=ERROR_MANUAL_REVIEW_REQUIRED, decision=REQUEST_CHANGE`) printed
+ * a decision was already recorded (#95's own shape: a failed status with
+ * `decision=REQUEST_CHANGE`) printed
  * "CHANGES REQUESTED" here while the same row's History chip and the
  * console's status line — both already routed through `resolveOutcome` —
  * showed the failure. Same row, contradicting itself across renderings.
@@ -171,15 +171,12 @@ const DECISION_WORDS: Record<string, string> = {
  *
  * Note what that branch does and does NOT print. `DECISION_WORDS` has
  * entries for `ACCEPT` and `REQUEST_CHANGE` only, so a genuine
- * `DONE`+`ACCEPT`/`DONE`+`REQUEST_CHANGE` row gets receipt prose. The mock
- * pipeline's `MANUAL_REVIEW_REQUIRED`+`MANUAL_REVIEW_REQUIRED` pairing
- * (`backend/src/pipeline_runner.py::_mock_decision`, a live producer) also
- * resolves to its own decision and so reaches this branch, but has no
- * `DECISION_WORDS` entry: it falls through `?? decision` and prints the raw
- * wire token `MANUAL_REVIEW_REQUIRED`. That is exactly as it behaved before
- * #95 — this ticket neither introduces nor fixes it. Giving that pairing
- * prose (the raw-identifier-on-screen class #470 exists to close) is a
- * separate ticket and is deliberately not done here.
+ * `DONE`+`ACCEPT`/`DONE`+`REQUEST_CHANGE` row gets receipt prose. The
+ * pre-#133 mock pipeline's `MANUAL_REVIEW_REQUIRED`+`MANUAL_REVIEW_REQUIRED`
+ * pairing used to resolve to its own decision here and print that raw wire
+ * token. Issue #133 retired the value: no writer produces it, and a legacy
+ * row carrying it is read as `ERROR` by `resolveOutcome`, so it prints the
+ * failure label instead.
  */
 function outcomeLine(status?: string | null, decision?: string | null): string | null {
   if (!decision) {

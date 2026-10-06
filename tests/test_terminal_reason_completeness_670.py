@@ -141,11 +141,10 @@ REVIEW_ID = "00000000-0000-4000-a000-000000000670"
 #: The two passes whose terminals this issue is about.
 _TERMINAL_MODULES = ("primary_review_pass.py", "critic_review_pass.py")
 
-#: The fail-closed terminal statuses. `OK` is excluded on purpose: a
-#: successful result has no cause to name.
-_FAIL_CLOSED_STATUSES = frozenset(
-    {"MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED"}
-)
+#: The fail-closed terminal status. `OK` is excluded on purpose: a successful
+#: result has no cause to name. Issue #133 folded the two retired "manual
+#: review" statuses into this one.
+_FAIL_CLOSED_STATUSES = frozenset({"ERROR"})
 
 #: The stage copy an unrecognised (or null) reason falls through to. This is
 #: the string a production operator was actually shown.
@@ -284,7 +283,7 @@ def test_the_retry_exhausted_terminal_names_the_token_the_product_explains(
     failures: list[str],
 ) -> None:
     result = _run_primary_to_retry_exhaustion()
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(
             f"[1a] setup: the real primary pass should exhaust its budget on a "
             f"schema-invalid body; got {result.get('status')!r}"
@@ -308,7 +307,7 @@ def test_the_retry_exhausted_terminal_names_the_token_the_product_explains(
     # explanation for a failure mode nothing can label.
     if reviews_module.STAGE_FAILURE_REASON_STATUS.get(
         "structured_output_retry_exhausted"
-    ) != "ERROR_MANUAL_REVIEW_REQUIRED":
+    ) != "ERROR":
         failures.append(
             "[1e] backend/src/reviews.py no longer maps this token to the terminal "
             "status the pass actually returns"
@@ -328,7 +327,7 @@ def test_a_transcript_that_never_proves_names_a_different_token(
     mis-copied the document's own wording, which is a different lead and
     (issue #683) a different underlying defect."""
     result = _run_primary_to_transcript_rejection()
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(
             f"[2a] setup: a transcript that never proves is terminal; "
             f"got {result.get('status')!r}"
@@ -368,7 +367,7 @@ def test_the_critic_terminal_names_its_own_reason(failures: list[str]) -> None:
     schema_invalid = _run_real_critic(_schema_invalid_critic_body())
     unreadable = _run_real_critic(_unreadable_critic_body())
     for label, result in (("schema-invalid", schema_invalid), ("unreadable", unreadable)):
-        if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+        if result.get("status") != "ERROR":
             failures.append(
                 f"[3a] setup: the {label} critic should exhaust its budget; "
                 f"got {result.get('status')!r}"
@@ -511,7 +510,7 @@ def test_each_terminal_reaches_the_row_with_its_own_explanation(
     explanations = _reason_explanations()
     causes: dict[str, str] = {}
     for label, (result, token) in expected.items():
-        if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+        if result.get("status") != "ERROR":
             failures.append(
                 f"[5a] setup: the {label} run should fail closed; "
                 f"got {result.get('status')!r}"

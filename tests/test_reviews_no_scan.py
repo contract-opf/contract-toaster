@@ -356,12 +356,18 @@ class PipelineHealthTests(NoScanTestBase):
         )
         self._assert_read_the_index_and_followed_pages()
 
-        for name in sorted(TERMINAL | IN_FLIGHT):
+        legacy = set(admin_dashboard.LEGACY_FAILURE_STATUSES)
+        for name in sorted((TERMINAL | IN_FLIGHT) - legacy):
+            # Issue #133: a legacy pre-#133 manual-review row is counted as
+            # the failure it was, under ERROR.
+            counted = {name} | legacy if name == "ERROR" else {name}
             self.assertEqual(
                 body["status_counts"][name],
-                len(_expected_ids(lambda _r, st, _a, _u: st == name)),  # noqa: B023
+                len(_expected_ids(lambda _r, st, _a, _u: st in counted)),  # noqa: B023
                 name,
             )
+        for name in legacy:
+            self.assertNotIn(name, body["status_counts"])
         self.assertEqual(body["in_flight"], {"total": 6, "pending": 3, "running": 3})
         self.assertEqual(body["stale"]["total"], 2)
         # Oldest first, from the index's own order.
@@ -427,12 +433,17 @@ class TriageAndQueueTests(NoScanTestBase):
             [f["review_id"] for f in failures], ["r-error-a", "r-error-b", "r-manual-a"]
         )
 
-    def test_manual_review_queue_counts_every_page(self) -> None:
+    def test_failures_queue_counts_every_page(self) -> None:
+        """Issue #133: the queue is every failed row -- ERROR, plus the legacy
+        pre-#133 manual-review partitions read as ERROR -- counted by reason."""
         body = admin_dashboard.list_manual_review_queue(ADMIN, self.spy, now_epoch=NOW)
         self._assert_read_the_index_and_followed_pages()
-        self.assertEqual(body["counts"]["total"], 4)
-        self.assertEqual(body["counts"]["MANUAL_REVIEW_REQUIRED"], 3)
-        self.assertEqual(body["counts"]["ERROR_MANUAL_REVIEW_REQUIRED"], 1)
+        failed = _expected_ids(
+            lambda _r, st, _a, _u: st == "ERROR" or st in admin_dashboard.LEGACY_FAILURE_STATUSES
+        )
+        self.assertEqual(body["counts"]["total"], len(failed))
+        self.assertEqual(sum(body["counts"]["by_reason"].values()), len(failed))
+        self.assertEqual({r["status"] for r in body["reviews"]}, {"ERROR"})
 
 
 # ---------------------------------------------------------------------------

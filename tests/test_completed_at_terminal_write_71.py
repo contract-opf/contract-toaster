@@ -141,9 +141,9 @@ class TestTheInProcessRunner(TerminalWriteTestBase):
 
     def test_a_failed_terminal_row_is_stamped_failed_at_and_not_completed_at(self):
         self._pending_row()
-        self._write("MANUAL_REVIEW_REQUIRED")
+        self._write("ERROR")
         row = self._row()
-        self.assertEqual(row["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(row["status"], "ERROR")
         self.assertIn("failed_at", row)
         self.assertNotIn("completed_at", row)
 
@@ -186,14 +186,14 @@ class TestThePersistStage(TerminalWriteTestBase):
         self._write("ACCEPT")
         self._assert_completed_stamp(self._row())
 
-    def test_a_manual_review_row_is_not_stamped(self):
-        """MANUAL_REVIEW_REQUIRED is terminal for the pipeline but not a
-        completed review -- a person still has to finish it, so there is no
-        duration to measure and no stamp to write."""
+    def test_a_run_with_no_decision_fails_and_is_not_stamped(self):
+        """A run that reached no decision did not complete (issue #133: it is
+        ERROR, never a "manual review" terminal), so there is no duration to
+        measure and no stamp to write."""
         self._pending_row()
         self._write(None)
         row = self._row()
-        self.assertEqual(row["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(row["status"], "ERROR")
         self.assertNotIn("completed_at", row)
 
     def test_a_refused_write_over_a_cancelled_row_adds_no_stamp(self):

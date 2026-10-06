@@ -2006,7 +2006,7 @@ async def get_review_output(
         # issue #584 no-output-for-REQUEST_CHANGE guard, which is what stops most of
         # these from reaching DONE in the first place -- this covers the
         # remaining fail-closed/administrative terminals that legitimately
-        # carry no output, e.g. MANUAL_REVIEW_REQUIRED, ERROR, CANCELLED).
+        # carry no output, e.g. ERROR, CANCELLED, or a legacy manual-review row).
         # A still-PENDING/RUNNING review keeps the original "yet" wording,
         # since that one genuinely might still produce one.
         never_will = item.get("status") in reviews.REVIEW_STATUSES_TERMINAL

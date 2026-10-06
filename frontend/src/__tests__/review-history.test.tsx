@@ -273,11 +273,11 @@ describe('History — the outcome chip (issue #470)', () => {
     // whether a redline/input pointer was recorded.
     //
     // Both rows are DONE (issue #95 correction): before #95, the second row
-    // used status ERROR_MANUAL_REVIEW_REQUIRED to also vary `status` in the
+    // used a failed status (then ERROR_MANUAL_REVIEW_REQUIRED) to also vary `status` in the
     // same fixture, on the premise that resolveOutcome only looked at
     // decision once status was neither DONE-with-a-decision nor an overlay.
     // #95 changes that premise — a known, non-DONE status now beats a stale
-    // decision outright (see outcome.ts), so ERROR_MANUAL_REVIEW_REQUIRED +
+    // decision outright (see outcome.ts), so a failed status +
     // REQUEST_CHANGE is no longer the same outcome as DONE + REQUEST_CHANGE;
     // it is the #95 regression itself (dedicated test below). Pairing two
     // DONE rows keeps this test's actual subject — has_output/has_input
@@ -317,7 +317,7 @@ describe('History — the outcome chip (issue #470)', () => {
   it('issue #95: a REQUEST_CHANGE that never persisted its redline reads as a FAILURE, not as "Changes requested"', async () => {
     // Live bug report (#95, the #666 failure-painted-as-success bug reopened
     // through a stale decision): `backend/src/pipeline_runner.py`'s #584
-    // branch downgraded `status` to ERROR_MANUAL_REVIEW_REQUIRED while
+    // branch downgraded `status` to a failure (ERROR since issue #133) while
     // leaving the spine's original REQUEST_CHANGE `decision` in place. This
     // row must NOT render the same as a genuinely completed REQUEST_CHANGE
     // review — it must read as the failure it is.
@@ -332,7 +332,7 @@ describe('History — the outcome chip (issue #470)', () => {
     const failedWithStaleDecision: HistoryRow = {
       ...MODERN,
       review_id: 'rev-request-change-failed',
-      status: 'ERROR_MANUAL_REVIEW_REQUIRED',
+      status: 'ERROR',
       decision: 'REQUEST_CHANGE',
       has_output: false,
       has_input: false,
@@ -344,7 +344,7 @@ describe('History — the outcome chip (issue #470)', () => {
     const failedCell = screen.getByTestId(`history-outcome-${failedWithStaleDecision.review_id}`);
 
     expect(doneCell.textContent).toContain(OUTCOME_CHIPS.REQUEST_CHANGE.label);
-    expect(failedCell.textContent).toContain(OUTCOME_CHIPS.ERROR_MANUAL_REVIEW_REQUIRED.label);
+    expect(failedCell.textContent).toContain(OUTCOME_CHIPS.ERROR.label);
     expect(failedCell.textContent).not.toBe(doneCell.textContent);
     expect(failedCell.querySelector('ct-chip')?.getAttribute('variant')).toBe('danger');
     expect(failedCell.querySelector('ct-chip')?.getAttribute('variant')).not.toBe(

@@ -10,11 +10,10 @@
  *   - DONE               -> toast-up treatment; the #255/#271 download gate
  *                            (confidence band, critic delta, download
  *                            button, watermark) renders exactly as before.
- *   - ERROR /
- *     MANUAL_REVIEW_REQUIRED /
- *     ERROR_MANUAL_REVIEW_REQUIRED -> a distinct, sober (non-cute)
- *                            treatment; the existing designed copy is
- *                            untouched.
+ *   - ERROR              -> a distinct, sober (non-cute) treatment; the
+ *                            existing designed copy is untouched. A legacy
+ *                            row stored with a retired manual-review status
+ *                            (issue #133) is read as ERROR and gets the same.
  *
  * Also locks in: the outcome headline renders on every terminal state (issue
  * #492 — no attorney-approval disclaimer any more, see
@@ -139,18 +138,14 @@ describe('toaster illustration — ReviewStatus visual states', () => {
     expect(screen.getByTestId('review-outcome').textContent).toBe('Changes requested');
   });
 
-  // The ILLUSTRATION is deliberately shared by all three (see this file's
-  // header) — the sober treatment, never the popped toast. The HEADLINE is
-  // not: issue #666 split ERROR_MANUAL_REVIEW_REQUIRED's label off
-  // MANUAL_REVIEW_REQUIRED's, because a run that failed and produced nothing
-  // was reading in exactly the words of one that finished and is waiting on
-  // a human. The three expected labels below are therefore three DIFFERENT
-  // strings, and failed-review-outcome-666.test.tsx is what pins them apart
-  // across every surface rather than only this one.
+  // Issue #133 retired the two manual-review statuses: a review never
+  // concludes as "manual review required". A row stored with one before that
+  // change is the failure it was — the same sober treatment and the same
+  // headline as ERROR (legacy-status-renders-128.test.tsx pins the rest).
   it.each([
     ['ERROR', 'Failed'],
-    ['MANUAL_REVIEW_REQUIRED', 'Needs manual review'],
-    ['ERROR_MANUAL_REVIEW_REQUIRED', 'Failed — needs manual review'],
+    ['MANUAL_REVIEW_REQUIRED', 'Failed'],
+    ['ERROR_MANUAL_REVIEW_REQUIRED', 'Failed'],
   ])(
     '%s renders the sober treatment (outcome headline %s), never the toast-up one, and no attorney-approval disclaimer',
     async (status, outcomeLabel) => {
@@ -160,8 +155,9 @@ describe('toaster illustration — ReviewStatus visual states', () => {
         [`GET /api/reviews/rev-${status}`]: {
           review_id: `rev-${status}`,
           status,
+          // The pre-#133 mock pipeline paired the retired value as a decision.
           decision: status === 'MANUAL_REVIEW_REQUIRED' ? 'MANUAL_REVIEW_REQUIRED' : null,
-          message: 'A legal admin will review it.',
+          message: null,
           has_output: false,
         },
       });
@@ -169,7 +165,7 @@ describe('toaster illustration — ReviewStatus visual states', () => {
       await submit();
       await findReviewResult();
 
-      expect(screen.getByTestId(stateBadge('sober', status))).toBeInTheDocument();
+      expect(screen.getByTestId(stateBadge('sober', 'ERROR'))).toBeInTheDocument();
       expect(screen.queryByTestId(stateBadge('done'))).toBeNull();
       expect(screen.queryByTestId(stateBadge('progress'))).toBeNull();
       // Issue #492: the outcome headline, never the removed disclaimer.

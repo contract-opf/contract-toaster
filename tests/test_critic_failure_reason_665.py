@@ -295,7 +295,7 @@ def test_a_retry_exhausted_critic_stores_a_token_not_the_stage_name(
     measured against live OpenRouter traffic (`backend/src/config.py::
     structured_output_enabled`)."""
     critic_result = _run_real_critic()
-    if critic_result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if critic_result.get("status") != "ERROR":
         failures.append(
             f"[1a] setup: the real critic pass should exhaust its retries on a "
             f"schema-invalid body; got {critic_result.get('status')!r}"
@@ -498,7 +498,7 @@ def test_run_review_stores_the_token_and_the_critic_attempt_count(
     failures: list[str],
 ) -> None:
     result = _run_review_with_a_failing_critic()
-    if result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if result.get("status") != "ERROR":
         failures.append(
             f"[4a] setup: a failing critic is terminal (never a silent single-pass "
             f"DONE); got {result.get('status')!r}"
@@ -539,7 +539,7 @@ def test_a_truncation_grant_is_what_raises_the_recorded_budget(
     say so; this is what makes that claim true rather than plausible."""
     client = TruncatesOnceThenSchemaInvalidClient()
     critic_result = _run_real_critic(model_client=client)
-    if critic_result.get("status") != "ERROR_MANUAL_REVIEW_REQUIRED":
+    if critic_result.get("status") != "ERROR":
         failures.append(
             f"[8a] setup: a truncation grant must be spent on a RETRY, not on "
             f"turning the terminal into something else; got {critic_result!r}"

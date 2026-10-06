@@ -305,7 +305,7 @@ class TestLeakageDiagnosisIsPersisted(unittest.TestCase):
     def test_the_review_really_was_blocked_by_the_leakage_gate(self) -> None:
         """Guards the rest of this class: if the fixture stopped tripping the
         gate, every assertion below would be vacuous."""
-        self.assertEqual(self.pipeline.row["status"], "ERROR_MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(self.pipeline.row["status"], "ERROR")
         self.assertEqual(self.pipeline.row["reason"], "leakage_detected")
         self.assertIsNone(self.pipeline.row.get("output_s3_key"))
 

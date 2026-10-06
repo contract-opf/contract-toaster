@@ -769,7 +769,7 @@ def test_a_truncated_floor_judge_reaches_the_operator(failures: list[str]) -> No
             f"[7c] the truncated invariant left `unjudged`: "
             f"{floor_judgment.get('unjudged')!r}"
         )
-    if result.get("status") != "MANUAL_REVIEW_REQUIRED" or result.get("decision") is not None:
+    if result.get("status") != "ERROR" or result.get("decision") is not None:
         failures.append(
             f"[7c] the run did not fail closed: status={result.get('status')!r} "
             f"decision={result.get('decision')!r}"

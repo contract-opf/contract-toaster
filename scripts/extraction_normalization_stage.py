@@ -2428,7 +2428,7 @@ def run_stage(
       {"review_id": ..., "status": "EXTRACTED", "normalized_s3_key": "intermediate/..."}
 
     Output (fail-closed, issue #38):
-      {"review_id": ..., "status": "MANUAL_REVIEW_REQUIRED",
+      {"review_id": ..., "status": "ERROR",
        "reason": "unnormalizable_input", "analysis_report_s3_key": "outputs/<review_id>/analysis-report.json"}
     """
     review_id = event["review_id"]
@@ -2449,7 +2449,7 @@ def run_stage(
         store_json(report_key, result["analysis_report"])
         return {
             "review_id": review_id,
-            "status": "MANUAL_REVIEW_REQUIRED",
+            "status": "ERROR",
             "reason": "unnormalizable_input",
             "analysis_report_s3_key": report_key,
         }

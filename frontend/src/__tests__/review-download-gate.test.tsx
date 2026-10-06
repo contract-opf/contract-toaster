@@ -179,9 +179,12 @@ describe('download affordance — ReviewSubmission.tsx', () => {
       'POST /api/reviews': { review_id: 'rev-43', resumed: false },
       'GET /api/reviews/rev-43': {
         review_id: 'rev-43',
-        status: 'MANUAL_REVIEW_REQUIRED',
-        decision: 'MANUAL_REVIEW_REQUIRED',
-        message: 'A legal admin will review it.',
+        // A failed review: no decision and, since issue #133, no status-keyed
+        // message either.
+        status: 'ERROR',
+        reason: 'document_too_large',
+        decision: null,
+        message: null,
         has_output: false,
       },
     });

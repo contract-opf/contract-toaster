@@ -316,7 +316,7 @@ class TestMockPipelineIsRegistryDriven(unittest.TestCase):
             s3_client=self.s3,
         )
         item = self.reviews_table.get_item(Key={"review_id": self.REVIEW_ID})["Item"]
-        self.assertEqual(item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(item["status"], "ERROR")
         self.assertEqual(item["reason"], "unknown_playbook")
         self.assertNotIn("output_s3_key", item)
 
@@ -333,7 +333,7 @@ class TestMockPipelineIsRegistryDriven(unittest.TestCase):
             s3_client=self.s3,
         )
         item = self.reviews_table.get_item(Key={"review_id": self.REVIEW_ID})["Item"]
-        self.assertEqual(item["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(item["status"], "ERROR")
         self.assertEqual(item["reason"], "playbook_coming_soon")
 
     def test_eiaa_still_reaches_done_with_pre_baked_fixture(self):
