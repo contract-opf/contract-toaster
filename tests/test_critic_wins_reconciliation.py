@@ -974,8 +974,9 @@ def test_a_dropped_floor_invariant_issue_is_retained_in_an_opf_review(
     )
     client = model_client.FakeBedrockClient(
         {
-            metadata["primary_model_id"]: [primary, floor_verdict],
-            metadata["critic_model_id"]: [critic],
+            metadata["primary_model_id"]: [primary],
+            # ADR 0001: the Floor runs after the critic, on the critic's model.
+            metadata["critic_model_id"]: [critic, floor_verdict],
         }
     )
     result = review_spine.run_review(docx_bytes, bundle, client, review_id=REVIEW_ID)

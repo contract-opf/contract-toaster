@@ -347,9 +347,11 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_request_change_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_no_delta_response(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_no_delta_response()],
             }
         )
 
@@ -408,9 +410,11 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_request_change_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_no_delta_response(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_no_delta_response()],
             }
         )
 
@@ -461,9 +465,11 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_request_change_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_no_delta_response(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_no_delta_response()],
             }
         )
 
@@ -591,9 +597,11 @@ class TestFloorCoverage(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     _floor_verdict_response("no-uncapped-liability", violated=True),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
 
@@ -614,9 +622,11 @@ class TestFloorCoverage(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
 
@@ -632,10 +642,12 @@ class TestFloorCoverage(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     "not json",  # first judge attempt: invalid
                     "still not json",  # bounded retry: also invalid -> unjudged
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
 
@@ -662,9 +674,11 @@ class TestFloorCoverage(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     _floor_verdict_response("no-uncapped-liability", violated=True),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
         ledger_records: list[Any] = []
@@ -680,7 +694,9 @@ class TestFloorCoverage(unittest.TestCase):
         self.assertEqual(len(floor_records), 1, ledger_records)
         self.assertEqual(floor_records[0].outcome, "success")
         self.assertEqual(floor_records[0].review_id, "opf-479-12")
-        self.assertEqual(floor_records[0].model_id, PRIMARY_MODEL_ID)
+        # ADR 0001: the Floor is senior judgment, so it runs on the critic's model.
+        self.assertEqual(floor_records[0].model_id, CRITIC_MODEL_ID)
+        self.assertNotEqual(floor_records[0].model_id, PRIMARY_MODEL_ID)
         self.assertEqual(floor_records[0].attempt_number, 1)
 
         self.assertIn("floor_judgment", result)
@@ -819,11 +835,13 @@ class TestOpfLeakageCorpus(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_with_leak(),
-                    _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
                 # Issue #138: the critic's summary is the one that ships, so
                 # the leak must be in the critic's final result to be live.
-                CRITIC_MODEL_ID: [critic_keeps(_primary_accept_with_leak())],
+                CRITIC_MODEL_ID: [
+                    critic_keeps(_primary_accept_with_leak()),
+                    _floor_verdict_response("no-uncapped-liability", violated=False),
+                ],
             }
         )
 
@@ -861,11 +879,13 @@ class TestOpfLeakageCorpus(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_with_leak(),
-                    _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
                 # Issue #138: the critic's summary is the one that ships, so
                 # the leak must be in the critic's final result to be live.
-                CRITIC_MODEL_ID: [critic_keeps(_primary_accept_with_leak())],
+                CRITIC_MODEL_ID: [
+                    critic_keeps(_primary_accept_with_leak()),
+                    _floor_verdict_response("no-uncapped-liability", violated=False),
+                ],
             }
         )
 
@@ -906,11 +926,13 @@ class TestOpfLeakageCorpus(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_with_leak(),
-                    _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
                 # Issue #138: the critic's summary is the one that ships, so
                 # the leak must be in the critic's final result to be live.
-                CRITIC_MODEL_ID: [critic_keeps(_primary_accept_with_leak())],
+                CRITIC_MODEL_ID: [
+                    critic_keeps(_primary_accept_with_leak()),
+                    _floor_verdict_response("no-uncapped-liability", violated=False),
+                ],
             }
         )
 
