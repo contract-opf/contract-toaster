@@ -276,14 +276,14 @@ class TestPerspectiveNoteReachesTheJudge(unittest.TestCase):
         note = "WHO THIS REVIEW ACTS FOR.\nOur client: FixtureCorp"
         invariant = _party_relative_invariant()
         client = model_client_module.FakeBedrockClient(
-            {PRIMARY_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=False)]}
+            {CRITIC_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=False)]}
         )
 
         judgment = floor_judge.judge_floor_invariants(
             invariants=[invariant],
             review_context="Provider shall indemnify FixtureCorp.",
             model_client=client,
-            model_id=PRIMARY_MODEL_ID,
+            model_id=CRITIC_MODEL_ID,
             perspective_note=note,
         )
 
@@ -305,19 +305,19 @@ class TestPerspectiveNoteReachesTheJudge(unittest.TestCase):
         invariant = _party_neutral_invariant()
         seeded = [_floor_verdict_response(invariant["id"], violated=False)]
 
-        default_client = model_client_module.FakeBedrockClient({PRIMARY_MODEL_ID: list(seeded)})
+        default_client = model_client_module.FakeBedrockClient({CRITIC_MODEL_ID: list(seeded)})
         floor_judge.judge_floor_invariants(
             invariants=[invariant],
             review_context="Governed by the laws of the State of Franklin.",
             model_client=default_client,
-            model_id=PRIMARY_MODEL_ID,
+            model_id=CRITIC_MODEL_ID,
         )
-        explicit_client = model_client_module.FakeBedrockClient({PRIMARY_MODEL_ID: list(seeded)})
+        explicit_client = model_client_module.FakeBedrockClient({CRITIC_MODEL_ID: list(seeded)})
         floor_judge.judge_floor_invariants(
             invariants=[invariant],
             review_context="Governed by the laws of the State of Franklin.",
             model_client=explicit_client,
-            model_id=PRIMARY_MODEL_ID,
+            model_id=CRITIC_MODEL_ID,
             perspective_note="",
         )
 
@@ -337,14 +337,14 @@ class TestFailClosedWithoutAResolvableBinding(unittest.TestCase):
         # invoked -- so an implementation that guesses shows up as a
         # judged-satisfied verdict rather than as an exhausted fake.
         client = model_client_module.FakeBedrockClient(
-            {PRIMARY_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=False)]}
+            {CRITIC_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=False)]}
         )
 
         judgment = floor_judge.judge_floor_invariants(
             invariants=[invariant],
             review_context="Provider shall indemnify FixtureCorp.",
             model_client=client,
-            model_id=PRIMARY_MODEL_ID,
+            model_id=CRITIC_MODEL_ID,
         )
 
         self.assertEqual(judgment.unjudged, [invariant["id"]])
@@ -356,14 +356,14 @@ class TestFailClosedWithoutAResolvableBinding(unittest.TestCase):
     def test_party_neutral_invariant_without_a_note_is_still_judged(self):
         invariant = _party_neutral_invariant()
         client = model_client_module.FakeBedrockClient(
-            {PRIMARY_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=True, quote="no law")]}
+            {CRITIC_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=True, quote="no law")]}
         )
 
         judgment = floor_judge.judge_floor_invariants(
             invariants=[invariant],
             review_context="This Agreement states no governing law.",
             model_client=client,
-            model_id=PRIMARY_MODEL_ID,
+            model_id=CRITIC_MODEL_ID,
         )
 
         self.assertEqual(judgment.unjudged, [])
@@ -377,14 +377,14 @@ class TestFailClosedWithoutAResolvableBinding(unittest.TestCase):
         same seed."""
         invariant = _party_relative_invariant()
         client = model_client_module.FakeBedrockClient(
-            {PRIMARY_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=False)]}
+            {CRITIC_MODEL_ID: [_floor_verdict_response(invariant["id"], violated=False)]}
         )
 
         judgment = floor_judge.judge_floor_invariants(
             invariants=[invariant],
             review_context="Provider shall indemnify FixtureCorp.",
             model_client=client,
-            model_id=PRIMARY_MODEL_ID,
+            model_id=CRITIC_MODEL_ID,
             perspective_note="WHO THIS REVIEW ACTS FOR.\nOur client: FixtureCorp",
         )
 
@@ -446,19 +446,29 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     _floor_verdict_response(FIXTURE_INVARIANT_ID, violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
 
+        ledger_records: list = []
         result = review_spine.run_review(
-            _build_docx_bytes(), bundle, client, review_id="opf-679-1"
+            _build_docx_bytes(), bundle, client, review_id="opf-679-1",
+            ledger_write=ledger_records.append,
         )
 
         self.assertEqual(result["status"], "OK", result)
         floor_calls = _floor_calls(client)
         self.assertEqual(len(floor_calls), 1, [c["system_prompt"][:60] for c in client.calls])
+        # ADR 0001: the Floor is senior judgment -- it runs on the critic's
+        # model, and its ledger record says so.
+        floor_records = [r for r in ledger_records if r.pass_name == "floor"]
+        self.assertEqual(len(floor_records), 1, ledger_records)
+        self.assertEqual(floor_records[0].model_id, CRITIC_MODEL_ID)
+        self.assertNotEqual(floor_records[0].model_id, PRIMARY_MODEL_ID)
         judge_prompt = floor_calls[0]["user_prompt"]
         # Look ONLY at what precedes the invariant -- i.e. the prepended
         # note -- so neither the invariant statement nor the document text
@@ -478,11 +488,13 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     _floor_verdict_response(
                         FIXTURE_INVARIANT_ID, violated=True, quote="liability is uncapped"
                     ),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
 
@@ -509,11 +521,13 @@ class TestSpineWiresThePerspectiveIn(unittest.TestCase):
             {
                 PRIMARY_MODEL_ID: [
                     _primary_accept_response(),
+                ],
+                CRITIC_MODEL_ID: [
+                    _critic_accept_response(),
                     # Seeded but must never be consumed: a guess would show
                     # up here as a silent judged-satisfied pass.
                     _floor_verdict_response(FIXTURE_INVARIANT_ID, violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
             }
         )
 

@@ -1302,7 +1302,12 @@ def run_review(
             invariants=floor_invariants,
             review_context=doc_text,
             model_client=model_client,
-            model_id=primary_model_id,
+            # ADR 0001: the critic is the senior reviewer on the stronger
+            # model, and the Floor is senior judgment. Using the reviewer's
+            # model here silently moved the Floor to the weaker tier when
+            # #136 swapped the defaults, and a live review then failed closed
+            # as floor_invariant_unjudged.
+            model_id=critic_model_id,
             review_id=review_id,
             ledger_write=ledger_write,
             # Issue #679: the judge reads NONE of the composed system
