@@ -528,6 +528,57 @@ artifact, `get_review_detail`'s projection, the console's badges and this receip
 `confidence_band` is *not* suppressed on that path: it is a bare enum token off a fixed four-value
 ladder and carries no model text.
 
+### Internal-footnote explanation (issue #132)
+
+The receipt line is the brief half of the owner's 2026-09-16 decision on #96; the fulsome half is in
+the delivered `.docx`, and **only** in a review whose notes mode carries internal content
+(`internal` or `both` — see
+[Which rationale becomes a footnote](#which-rationale-becomes-a-footnote-the-reviews-notes-mode-issue-522-epic-519-item-d)).
+There, `scripts/redline_generate.py::generate_redline_from_blocks` explains every critic
+disagreement inside an internal footnote, each behind its **own** `[INTERNAL NOTE: …]` marking
+(`footnote_audience.mark_internal_footnote`), appended after the host issue's own footnote text:
+
+| Delta entry | What the internal note says |
+|---|---|
+| `contested_replacements[]` | its `section_ref`, the reviewer's text (`primary_replacement_text`), the critic's objection (`critic_objection`) and, when present, the critic's suggested text (`critic_suggested_replacement`) |
+| `rationale_objections[]` | its `section_ref` and the `objection` |
+| `added_issues[]` | its `section_ref` (and `section_title`) and why the critic added it — its `external_rationale_for_footnote`, then its `internal_rationale_for_footnote` when it has one |
+
+**Where a note is anchored.** A footnote can only hang on a tracked insertion, so a note rides on the
+footnote of the first issue (in `issues` order) that both edits the note's `section_ref` and
+inserts text. When no such issue exists — the usual case for a critic-added issue, which carries no
+edits of its own under the add-only merge — it rides on the first footnote in the document, and
+names its own section so it never reads as a remark about its host. A host whose edits all fail to
+compile is rolled out (nothing of it landed) and its notes are re-hosted on one that did. A
+document with no tracked insertion at all has nowhere to anchor a footnote, so it carries no note;
+the disagreement still reaches the reviewer through `critic_delta` on the result.
+
+**Internal footnotes are its only channel.** In `none` and `external` nothing of the delta reaches
+the document, and in no mode is any of it written into the body or the unmarked external half of a
+footnote.
+
+**Every rendered field is leakage-scanned first.** The leakage gate
+(`scripts/leakage_scan.py::_scan_critic_delta_fields`) runs over the whole reconciled result before
+anything is compiled, and a block there produces no document at all. Each field in the table above is
+scanned on the channel `_FIELD_CHANNELS` declares for it, which rendering does not change:
+
+| Rendered field | Channel |
+|---|---|
+| `contested_replacements[].section_ref`, `.primary_replacement_text`, `.critic_objection`, `.critic_suggested_replacement` | `external` |
+| `rationale_objections[].section_ref`, `.objection` | `external` |
+| `added_issues[].section_ref`, `.section_title`, `.external_rationale_for_footnote` | `external` |
+| `added_issues[].internal_rationale_for_footnote` | `internal` — still blocked by the never-acceptable checks (system-prompt leakage, excessive precedent quotation) |
+
+`primary_replacement_text` and the four locators were added to the scan by this issue: before it they
+reached only the result payload, and none of them was scanned.
+`primary_replacement_text` is replacement-text class, like `critic_suggested_replacement`
+([Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose)).
+
+The delta exists on every two-pass review, so this is rendering, never generation — nothing asks a
+model for more text in these modes. Both rendering modes stay unreachable while #572's
+`NOTES_MODE_ENABLED` kill switch is off. `tests/test_critic_delta_internal_footnotes_132.py` asserts
+all of this on the delivered bytes, including a system-prompt n-gram planted in each rendered field.
+
 ### Contested-replacement badge
 
 For each entry in `critic_delta.contested_replacements`, the result view renders a
@@ -947,10 +998,11 @@ as its response keys — the rename is a storage-layer fact, not an API one. See
 | `internal_rationale_for_footnote` | Generated `.docx` footnotes, **only** in the `internal`/`both` notes modes, behind a leading `[INTERNAL]` marking | Yes | `internal` |
 | `counterparty_change_summary` | Reviewer UI (per-issue summary) | Yes | `external` |
 | `proposed_replacement_text` | Generated `.docx` redline | Yes | `external` |
-| `critic_delta.contested_replacements[].critic_objection` / `.critic_suggested_replacement` | Admin view; reviewer detail view | Yes | `external` |
-| `critic_delta.rationale_objections[].objection` | Admin view; reviewer detail view | Yes | `external` |
-| `critic_delta.rationale_objections[].section_ref` | Admin view; reviewer detail view | n/a (a locator, not prose — see below) | n/a |
-| `critic_delta.added_issues[]` | Admin view; reviewer detail view | Yes (each scanned as a primary issue) | `external` (per field, as above) |
+| `critic_delta.contested_replacements[].critic_objection` / `.critic_suggested_replacement` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes | `external` |
+| `critic_delta.contested_replacements[].primary_replacement_text` | The critic's restatement of the wording it contests: the result's `critic_delta` (no view renders it); internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes (replacement-text class, like `critic_suggested_replacement`) | `external` |
+| `critic_delta.rationale_objections[].objection` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes | `external` |
+| `critic_delta.contested_replacements[].section_ref`, `critic_delta.rationale_objections[].section_ref`, `critic_delta.added_issues[].section_ref` / `.section_title` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes, where each note names its section (#132) | Yes (locators — see below) | `external` |
+| `critic_delta.added_issues[]` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
 | `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes | `external` |
 | `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) | n/a |
 
@@ -960,9 +1012,17 @@ replacement — Yes" while `rationale_objections[].objection` was never actually
 `rationale_objections` entry can exist on its own (no contested replacement, no added issue) and
 deliberately does not degrade the confidence band, so on that exact review shape the critic's only
 prose output reached a human unscanned. A field this table promises is covered but isn't is worse
-than one known to be uncovered — a reader reasonably assumes cover. `section_ref` is excluded
-explicitly for the same reason: it is a locator ("Section 8"), not prose, and scanning it would
-false-positive on any playbook whose topic ids or rule descriptions contain a section number.
+than one known to be uncovered — a reader reasonably assumes cover.
+
+The critic delta's locators were excluded until issue #132, as a locator ("Section 8") rather than
+prose that reached only the reviewer's own views. #132 writes each one into the delivered `.docx` —
+every critic note in an internal footnote names its own section — and every critic-delta field in
+that document passes the gate first, so they are scanned now, on the external channel and after the
+prose fields (a review that already blocked on a prose field still reports that field). A corpus
+gram blocks only when it occurs *whole* inside the locator, so a rule description or standard
+clause longer than the locator cannot match it. A primary issue's `section_ref` / `section_title`
+are not scanned, and #132 renders neither into the document: a note's host is chosen by comparing
+with them, never by quoting them.
 
 **Channel column (issue #521, epic #519 item C).** Each scanned field declares an **audience channel** — `external` or `internal` — which selects which of the scanner's two rulesets applies. The declaration is a **static literal table keyed on field identity**, `scripts/leakage_scan.py` → `_FIELD_CHANNELS`: never inferred from the field's text, and never a function of the review's runtime notes mode. A field's audience is a property of the field.
 

@@ -105,7 +105,7 @@ A file that fails any check does not produce an approximate result: the review t
 - `internal_rationale_for_footnote` — the one internal-audience field (issue #522). Scanned like any other, on the internal ruleset; rendered into the `.docx` footnotes only in the `internal`/`both` notes modes, behind a leading `[INTERNAL]` marking.
 - `counterparty_change_summary` — per-issue summaries shown in the reviewer UI.
 - `proposed_replacement_text` — model-written replacement text inserted into the redline `.docx`.
-- `critic_delta` rationale and contested replacement text — prose surfaced in the admin view and reviewer detail view.
+- `critic_delta` rationale and contested replacement text — prose surfaced in the admin view and reviewer detail view. In the `internal`/`both` notes modes it is also written into internal `.docx` footnotes (issue #132), so every critic-delta field those notes render is scanned, including the critic's restatement of the wording it contests (`primary_replacement_text`) and the section locators each note names.
 
 A positive detection on any of these fields routes the review to `ERROR_MANUAL_REVIEW_REQUIRED`. The ACCEPT path is **not** a bypass. The full scope table is in [docs/output-contract.md → Leakage scan scope](output-contract.md#leakage-scan-scope--all-human-surfaced-model-prose).
 
