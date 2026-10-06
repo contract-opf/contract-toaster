@@ -284,16 +284,11 @@ class OutputScanError(Exception):
         super().__init__(f"{reason_code}: {detail}")
 
 
-def _check_no_field_codes(zf: zipfile.ZipFile) -> None:
-    """Defense-in-depth structural check: no `<w:fldChar>`, `<w:instrText>`,
-    `<w:fldSimple>`, or `<w:hyperlink>` element exists anywhere in a `word/*.xml`
-    part of the generated document. Model-generated text (`proposed_replacement_text`,
-    `external_rationale_for_footnote`) reaches this document only as literal
-    `<w:t>`/`<w:delText>` runs (`docx_parts.py`'s only text-insertion
-    path), so hostile replacement text containing field syntax (e.g.
-    `{ HYPERLINK "https://attacker.example" }`) lands as inert literal
-    characters, never as parsed document structure -- this check verifies
-    that guarantee held for the specific bytes just assembled."""
+def _field_code_counts(zf: zipfile.ZipFile) -> dict[tuple[str, str], int]:
+    """`(part name, tag) -> count` of every field-code / hyperlink element in
+    a package's `word/*.xml` parts. Raises `OutputScanError` on a part that
+    does not parse, exactly as the scan always has."""
+    counts: dict[tuple[str, str], int] = {}
     for name in zf.namelist():
         if not (name.startswith("word/") and name.endswith(".xml")):
             continue
@@ -304,16 +299,55 @@ def _check_no_field_codes(zf: zipfile.ZipFile) -> None:
             raise OutputScanError(
                 "malformed_output_part", f"{name} did not parse: {exc}"
             ) from exc
+        inserted: set[int] = set()
+        for ins in root.iter(f"{{{WORD_NS}}}ins"):
+            inserted.update(id(el) for el in ins.iter())
         for tag in _FIELD_CODE_TAGS:
-            if root.findall(f".//{{{WORD_NS}}}{tag}"):
-                raise OutputScanError(
-                    "field_code_in_output",
-                    f"{name} contains a <w:{tag}> element -- model text "
-                    "must be inserted as literal runs only.",
-                )
+            for el in root.iter(f"{{{WORD_NS}}}{tag}"):
+                # Elements inside a tracked insertion are counted
+                # separately, so a field the redline inserts can never be
+                # offset against one the source document already carried.
+                key = (name, tag + (" (inside <w:ins>)" if id(el) in inserted else ""))
+                counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
-def run_output_ooxml_scan(docx_bytes: bytes) -> None:
+def _check_no_field_codes(
+    zf: zipfile.ZipFile, baseline: Optional[zipfile.ZipFile] = None  # noqa: UP045
+) -> None:
+    """Defense-in-depth structural check that model-generated text
+    (`proposed_replacement_text`, `external_rationale_for_footnote`) reached
+    this document only as literal `<w:t>`/`<w:delText>` runs, never as
+    `<w:fldChar>`, `<w:instrText>`, `<w:fldSimple>` or `<w:hyperlink>`
+    structure -- so hostile replacement text containing field syntax (e.g.
+    `{ HYPERLINK "https://attacker.example" }`) lands as inert characters.
+
+    Issue #153: the check is about what the redline ADDED. A counterparty's
+    own document routinely carries page-number fields, cross-references, a
+    table of contents and hyperlinks; refusing those made every ordinary
+    contract fail closed after both model passes were paid for. With a
+    `baseline` (the document the redline was compiled from), each part may
+    hold at most as many elements of each tag as the baseline held, and a
+    part absent from the baseline may hold none. Elements inside a
+    `<w:ins>` are counted separately from the rest, so a field the redline
+    inserts can never hide behind one the source already carried. Without a
+    baseline every field element is refused, as before."""
+    output_counts = _field_code_counts(zf)
+    baseline_counts = _field_code_counts(baseline) if baseline is not None else {}
+    for (name, tag), count in sorted(output_counts.items()):
+        allowed = baseline_counts.get((name, tag), 0)
+        if count > allowed:
+            raise OutputScanError(
+                "field_code_in_output",
+                f"{name} contains {count} w:{tag} element(s) where the "
+                f"source document had {allowed} -- model text must be "
+                "inserted as literal runs only.",
+            )
+
+
+def run_output_ooxml_scan(
+    docx_bytes: bytes, baseline_docx_bytes: Optional[bytes] = None  # noqa: UP045
+) -> None:
     """Subject a just-assembled redline `.docx` to the same
     external-relationship / embedded-object / macro-template scan as an
     uploaded input document (docs/threat-model.md -> "Generated redline
@@ -328,6 +362,10 @@ def run_output_ooxml_scan(docx_bytes: bytes) -> None:
     sanitized document. Runs AFTER the leakage scan, never instead of it
     (docs/output-contract.md -> "Literal-runs-only insertion and output
     OOXML scan").
+
+    `baseline_docx_bytes` (issue #153) is the document the redline was
+    compiled from; field codes and hyperlinks it already carried are
+    allowed to survive, and only additions are refused.
     """
     buf = io.BytesIO(docx_bytes)
     with zipfile.ZipFile(buf) as zf:
@@ -336,7 +374,11 @@ def run_output_ooxml_scan(docx_bytes: bytes) -> None:
             upload_validation._check_relationships(zf)
         except upload_validation.HostileFileError as exc:
             raise OutputScanError(exc.reason_code, exc.detail) from exc
-        _check_no_field_codes(zf)
+        if baseline_docx_bytes is None:
+            _check_no_field_codes(zf)
+        else:
+            with zipfile.ZipFile(io.BytesIO(baseline_docx_bytes)) as baseline_zf:
+                _check_no_field_codes(zf, baseline_zf)
 
 
 def verify_docx_round_trip(docx_bytes: bytes) -> None:
@@ -1899,7 +1941,7 @@ def generate_redline_from_blocks(
 
     if docx_bytes is not None:
         try:
-            run_output_ooxml_scan(docx_bytes)
+            run_output_ooxml_scan(docx_bytes, normalized_docx_bytes)
         except OutputScanError as exc:
             return {
                 "status": ERROR_MANUAL_REVIEW_REQUIRED,
