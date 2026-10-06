@@ -84,6 +84,14 @@ EXPECTED_MAX_INPUT_TOKENS = 100_000
 # still sit provably ABOVE the size that used to trigger the degrade.
 FORMER_OUTLINE_THRESHOLD_TOKENS = 60_000
 
+# Issue #144: the cap is now judged on the calibrated INPUT estimate
+# (`pp.INPUT_CHARS_PER_TOKEN_ESTIMATE` characters/token, tool schema
+# counted), so a document "above the old threshold, under the cap" is sized
+# in those units: 60,000 tokens of document plus 4,000 characters of margin.
+_ABOVE_OLD_THRESHOLD_UNDER_CAP_CHARS = (
+    int(FORMER_OUTLINE_THRESHOLD_TOKENS * pp.INPUT_CHARS_PER_TOKEN_ESTIMATE) + 4_000
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -323,9 +331,12 @@ def test_run_primary_pass_reports_no_input_mode(failures: list[str]) -> None:
         {primary_id: [_load_fixture_text("primary_accept_valid.json")]}
     )
     ledger: list[Any] = []
-    # Comfortably above the deleted 60,000-token threshold, comfortably under
-    # the 100,000-token cap: the case that used to degrade and now must not.
-    doc_text = _text_of_length(FORMER_OUTLINE_THRESHOLD_TOKENS * 4 + 4_000)
+    # Above the deleted 60,000-token threshold, under the 100,000-token cap:
+    # the case that used to degrade and now must not. Issue #144: sized in
+    # the units the cap is now judged in (the calibrated input estimate,
+    # which also counts the ~9,300-token tool schema) -- at the old 4
+    # chars/token this document would no longer fit under the cap.
+    doc_text = _text_of_length(_ABOVE_OLD_THRESHOLD_UNDER_CAP_CHARS)
 
     result = pp.run_primary_pass(
         review_id="size-policy-625-full",
@@ -415,7 +426,9 @@ def test_run_review_end_to_end_reviews_a_large_document_in_full(failures: list[s
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     # Over the deleted threshold, under the cap -- run_review exposes no
     # threshold parameter, so this exercises the REAL wiring end to end.
-    huge_text = _text_of_length(FORMER_OUTLINE_THRESHOLD_TOKENS * 4 + 4_000)
+    # Issue #144: sized in the cap's calibrated units -- see
+    # `_ABOVE_OLD_THRESHOLD_UNDER_CAP_CHARS`.
+    huge_text = _text_of_length(_ABOVE_OLD_THRESHOLD_UNDER_CAP_CHARS)
     docx_bytes = _single_paragraph_docx("Section 1", huge_text)
     client = model_client.FakeBedrockClient(
         {

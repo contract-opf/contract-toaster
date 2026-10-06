@@ -197,7 +197,7 @@ class TestOpenRouterCapabilities(unittest.TestCase):
             mc.openrouter_model_capabilities(_OPENROUTER_CRITIC_MODEL_ID), _ALL_FALSE
         )
 
-    def test_pinned_primary_is_capability_false_after_the_zdr_correction(self) -> None:
+    def test_pinned_primary_is_structured_outputs_false_after_the_zdr_correction(self) -> None:
         # Issue #142: anthropic/claude-opus-5's ZDR endpoint (the only kind
         # this deployment's provider block -- zdr: true, data_collection:
         # deny, require_parameters: true -- is allowed to route to) 404s a
@@ -209,9 +209,11 @@ class TestOpenRouterCapabilities(unittest.TestCase):
         # runs, via the independent forced-tool path
         # (OPENROUTER_STRUCTURED_OUTPUT=1, the default) -- see
         # tests/test_openrouter_capability_matches_zdr.py.
+        # Issue #143: `prompt_caching` is True for this pin -- measured on the
+        # same ZDR route (2026-09-16), and that one came back honoured.
         self.assertEqual(
             mc.openrouter_model_capabilities(_OPENROUTER_PRIMARY_MODEL_ID),
-            _ALL_FALSE,
+            {"structured_outputs": False, "prompt_caching": True},
         )
 
     def test_selectable_model_reads_structured_outputs_true(self) -> None:

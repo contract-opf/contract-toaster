@@ -179,6 +179,8 @@ Document text and all derived substantive content travel via the encrypted `uplo
 
 **Residency rule.** All subprocessor data flows must remain within `us-east-1` or be explicitly approved by the General Counsel. Data residency is a non-negotiable constraint; adding a subprocessor that routes data outside `us-east-1` without GC approval is a policy violation.
 
+**Provider prompt cache (DTS / OpenRouter).** Owner decision 2026-09-17 (issue #149, recorded under #143): the provider-side ephemeral prompt cache — the 5-minute KV cache the zero-data-retention route keeps for a request's `cache_control` prefix — is permitted under this deployment's zero-data-retention definition, and no persistent or extended-TTL prompt cache may be enabled without a new owner decision.
+
 **AV implementation note.** The AV approach is in-account ClamAV to ensure uploaded documents — which may contain confidential counterparty agreement text — never leave the AWS account boundary during scanning. Cloud-based AV services that transmit sample bytes or hashes to a vendor cloud would silently break the `us-east-1` residency and confidentiality guarantees for every upload. The in-account approach eliminates this risk at the cost of managing ClamAV definition updates in-account. See [docs/threat-model.md](threat-model.md) → Hostile file uploads for the full scanning gauntlet.
 
 ## Summary of guarantees

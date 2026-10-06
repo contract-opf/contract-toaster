@@ -102,6 +102,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sys
 import time
@@ -349,11 +350,17 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 #   under MAX_INPUT_TOKENS=100_000 -- the step-14 pre-call gate below. So a
 #   ~85k-token document still reviews in full even carrying a heavy
 #   playbook and guidance payload; a bigger one fails closed instead of
-#   degrading. MAX_INPUT_TOKENS=100_000, ESTIMATED at the 4-chars/token
-#   rate below, is well under 125k tokens of REAL provider tokenization in
-#   the worst case (dense/non-English/code-heavy text can tokenize denser
-#   than the estimate assumes -- see CONSERVATIVE-MARGIN NOTE below), which
-#   is still comfortably inside the pinned models' 200k real context
+#   degrading. [Issue #144: the token figures in this paragraph were
+#   measured at the old 4-chars/token rate with no tool schema counted. The
+#   gate now estimates at INPUT_CHARS_PER_TOKEN_ESTIMATE (2.5) and counts
+#   the ~23,000-character forced-tool schema, so the same payload estimates
+#   ~1.6x higher plus ~9,300 tokens of schema, and the document headroom
+#   under the unchanged 100k cap is correspondingly smaller -- by design:
+#   the measured primary billed 68,460 real tokens for a payload the old
+#   gate called 39,846, so the old cap admitted ~170k real tokens, not
+#   100k.] MAX_INPUT_TOKENS=100_000 is now an upper-bound estimate of REAL
+#   provider tokens on every measured row (see the calibration comment
+#   below), comfortably inside the pinned models' 200k real context
 #   window. The provider-side `ModelContextLengthExceededError` fail-closed
 #   path (model_client.py, mapped to the same `document_too_large` outcome
 #   in `run_primary_pass` below) remains the backstop for an estimate miss
@@ -362,9 +369,12 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 # ---------------------------------------------------------------------------
 # Offline token-count heuristic. No live tokenizer is available offline (no
 # tiktoken/anthropic-tokenizer dependency in this repo) -- ~4 characters per
-# token is a standard rough approximation for English prose and is used only
-# to enforce the step-14 cap deterministically in tests; it is not billed
-# against.
+# token is a standard rough approximation for English prose. Issue #144: it
+# now sizes OUTPUT text and the document (for the output budget) only; what
+# a pass SENDS -- the step-14 cap and the ledger's `input_tokens_est` -- is
+# estimated by `request_input_tokens_est` at the calibrated
+# INPUT_CHARS_PER_TOKEN_ESTIMATE below, because this ratio undercounted the
+# primary's real input by 42%.
 #
 # CONSERVATIVE-MARGIN NOTE (issue #270): this is an ESTIMATE, not the
 # provider's real tokenizer -- dense/non-English/code-heavy text can tokenize
@@ -384,6 +394,84 @@ def estimate_tokens(text: str) -> int:
     if not text:
         return 0
     return max(1, (len(text) + CHARS_PER_TOKEN_ESTIMATE - 1) // CHARS_PER_TOKEN_ESTIMATE)
+
+
+# ---------------------------------------------------------------------------
+# Pre-call INPUT estimate (issue #144). `estimate_tokens` above stays the
+# 4-chars/token heuristic for OUTPUT text and for document sizing
+# (`model_client.output_budget_for_document`'s FLOOR/K constants, issue #658,
+# were derived in those units -- re-denominating them is not this change).
+# What a pass is about to SEND is estimated here instead, because the old
+# figure was wrong in two ways at once, measured live 2026-09-16 on DTS/
+# OpenRouter (real affiliation agreement, real EIAA OPF):
+#
+#   pass               input_tokens_est   actual_input_tokens
+#   primary (Opus 5)          39,846             68,460
+#   critic (Sonnet 4.6)       45,760             54,696
+#   floor (Opus 5, x2)         4,641              5,906
+#
+#   1. It never counted the forced-tool definition. `tools[0].function.
+#      parameters` carries the full model-facing JSON Schema (~23,000
+#      characters for output-schema-v3 in `external` mode), and the
+#      provider bills it as input like any other prompt text.
+#   2. 4 characters/token is an English-prose ratio. The primary's real
+#      ratio over everything it sends -- a JSON-heavy projected playbook
+#      plus that schema -- is ~2.67 characters/token (Opus 5's tokenizer);
+#      the floor judge's prose prompt is ~3.14; the critic on Sonnet 4.6 is
+#      ~3.77.
+#
+# INPUT_CHARS_PER_TOKEN_ESTIMATE is set BELOW the densest of the four rows
+# (the primary's ~2.67), so the estimate is an upper bound on every
+# measured row: primary ~73,100 vs 68,460, critic ~82,500 vs 54,696, floor
+# ~7,400 vs 5,906. It feeds both the step-14 `max_input_tokens` gate
+# (`assembled_prompt_tokens`) and the ledger's `input_tokens_est`, so the
+# gate and the reservation it bounds (`reviews.MAX_INPUT_TOKENS` prices the
+# cap as real tokens) are judged on the tokens the provider will actually
+# bill. The calibration is recorded in docs/evaluation.md ("Input-token
+# estimate calibration"); `tests/test_token_estimate_includes_tool_schema.py`
+# pins this constant to that documented value.
+# ---------------------------------------------------------------------------
+INPUT_CHARS_PER_TOKEN_ESTIMATE = 2.5
+
+
+def estimate_input_tokens(text: str) -> int:
+    """Upper-bound token estimate for text a pass SENDS (issue #144) -- see
+    the calibration comment above. Ceiling division, so a non-empty string
+    is never 0."""
+    if not text:
+        return 0
+    return max(1, math.ceil(len(text) / INPUT_CHARS_PER_TOKEN_ESTIMATE))
+
+
+def _content_text(content: "str | list[dict[str, Any]]") -> str:  # noqa: UP037
+    """The text of a system or user content value, whichever shape it has --
+    a block list's texts are joined exactly as the wire-side flatten
+    (`model_client._prepare_message_content`) joins them."""
+    if isinstance(content, str):
+        return content
+    return "\n\n".join(str(block.get("text", "")) for block in content)
+
+
+def request_input_tokens_est(
+    system_prompt: "str | list[dict[str, Any]]",  # noqa: UP037
+    user_content: "str | list[dict[str, Any]]",  # noqa: UP037
+    *,
+    tool_spec: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
+) -> int:
+    """Estimated input tokens for ONE model call (issue #144): the system
+    prompt, the user content, and -- the part the pre-#144 estimate missed --
+    the serialized forced-tool schema (`tool_spec`, sent as
+    `tools[0].function.parameters`) and provider-native schema
+    (`output_schema`, sent as `response_format.json_schema.schema`) when the
+    call carries them. Pass exactly what the call passes: a schema that is
+    `None` is not on the wire and is not counted."""
+    total = estimate_input_tokens(_content_text(system_prompt))
+    total += estimate_input_tokens(_content_text(user_content))
+    for schema in (tool_spec, output_schema):
+        if schema is not None:
+            total += estimate_input_tokens(json.dumps(schema))
+    return total
 
 
 # ---------------------------------------------------------------------------
@@ -2547,25 +2635,38 @@ def assemble_user_prompt_critic(
 
 
 def estimate_user_content_tokens(user_content: "str | list[dict[str, Any]]") -> int:  # noqa: UP037
-    """Token estimate for `user_content` regardless of shape -- issue #568's
-    list-shaped cached-document content sums each block's own `text`, so
-    callers (`assembled_prompt_tokens` below, and `run_primary_pass`'s
-    per-attempt ledger `input_tokens_est`) are unaffected by which shape a
-    given call actually used."""
+    """4-chars/token estimate for `user_content` regardless of shape -- issue
+    #568's list-shaped cached-document content sums each block's own `text`.
+    Issue #144 moved the step-14 gate and the ledger's `input_tokens_est` onto
+    `request_input_tokens_est` (calibrated, and counting the tool schema);
+    this stays for callers that want the plain heuristic."""
     if isinstance(user_content, str):
         return estimate_tokens(user_content)
     return sum(estimate_tokens(str(block.get("text", ""))) for block in user_content)
 
 
 def assembled_prompt_tokens(
-    system_blocks: list[dict[str, Any]], user_prompt: "str | list[dict[str, Any]]"  # noqa: UP037
+    system_blocks: list[dict[str, Any]],
+    user_prompt: "str | list[dict[str, Any]]",  # noqa: UP037
+    *,
+    tool_spec: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> int:
-    """Total assembled input size (system + user), the quantity step-14
-    enforces against `max_input_tokens`. `user_prompt` may be the legacy
-    plain string or issue #568's block-list cached-document content --
-    either shape is summed via `estimate_user_content_tokens`."""
-    system_text = render_system_prompt(system_blocks)
-    return estimate_tokens(system_text) + estimate_user_content_tokens(user_prompt)
+    """Total assembled input size, the quantity step-14 enforces against
+    `max_input_tokens`. `user_prompt` may be the legacy plain string or issue
+    #568's block-list cached-document content.
+
+    Issue #144: estimated by `request_input_tokens_est` -- the calibrated
+    input ratio, and the forced-tool / provider-native schemas when the call
+    will carry them. Before that the gate counted system + user text at 4
+    chars/token and nothing else, and a primary call it estimated at 39,846
+    tokens was billed 68,460."""
+    return request_input_tokens_est(
+        render_system_prompt(system_blocks),
+        user_prompt,
+        tool_spec=tool_spec,
+        output_schema=output_schema,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3693,7 +3794,11 @@ def run_primary_pass(
         prompt_caching_enabled=prompt_caching_enabled,
     )
 
-    assembled_tokens = assembled_prompt_tokens(system_blocks, user_content)
+    # Issue #144: the gate counts the schemas this call will carry, not just
+    # the prompt text -- `tool_spec` alone is ~23,000 characters of input.
+    assembled_tokens = assembled_prompt_tokens(
+        system_blocks, user_content, tool_spec=tool_spec, output_schema=output_schema
+    )
     # Issue #267 AC: the ledger records the projected view's hash alongside
     # the bundle's own playbook content_hash (recorded on the review row,
     # scripts/canonicalize.py).
@@ -3771,6 +3876,17 @@ def run_primary_pass(
         # `finally`, so the fallback computed there is already tight.
         attempt_started_monotonic = time.monotonic()
         attempt_duration_ms: int | None = None
+        # Issue #568: `append_user_content_suffix` appends the retry
+        # correction to the LAST block only when `user_content` is issue
+        # #568's list form (the cached doc block is never touched); ordinary
+        # string concatenation when it is the legacy plain string -- identical
+        # to every call before this issue. Issue #144: bound once, BEFORE the
+        # call, because `correction` is reassigned for the next attempt before
+        # the `finally` ledger write runs, and that write must estimate what
+        # THIS attempt sent.
+        attempt_user_prompt = append_user_content_suffix(
+            user_content, render_retry_correction_block(correction)
+        )
         try:
             # Issue #418: `tool_spec` is included in the kwargs ONLY when
             # set -- see the comment above where it is resolved. This is
@@ -3778,16 +3894,13 @@ def run_primary_pass(
             # off means the keyword is never sent at all.
             invoke_kwargs: dict[str, Any] = dict(  # noqa: C408
                 model_id=model_id,
-                system_prompt=system_prompt_text,
-                # Issue #568: `append_user_content_suffix` appends the retry
-                # correction to the LAST block only when `user_content` is
-                # issue #568's list form (the cached doc block is never
-                # touched); ordinary string concatenation when it is the
-                # legacy plain string -- identical to every call before
-                # this issue.
-                user_prompt=append_user_content_suffix(
-                    user_content, render_retry_correction_block(correction)
-                ),
+                # Issue #143: the block list when this model caches, so the
+                # playbook block's `cache_control` (issue #30) reaches the
+                # wire; the rendered string otherwise -- byte-identical to
+                # every call before #143 (the client flattens a list the
+                # same way `render_system_prompt` joins it).
+                system_prompt=system_blocks if prompt_caching_enabled else system_prompt_text,
+                user_prompt=attempt_user_prompt,
                 max_output_tokens=attempt_max_output_tokens,
             )
             if tool_spec is not None:
@@ -3995,8 +4108,15 @@ def run_primary_pass(
                     model_id=model_id,
                     attempt_number=attempt,
                     outcome=outcome,
-                    input_tokens_est=estimate_tokens(system_prompt_text)
-                    + estimate_user_content_tokens(user_content),
+                    # Issue #144: every string this attempt put on the wire
+                    # -- system, user (including any retry correction), and
+                    # the schemas -- at the calibrated input ratio.
+                    input_tokens_est=request_input_tokens_est(
+                        system_prompt_text,
+                        attempt_user_prompt,
+                        tool_spec=tool_spec,
+                        output_schema=output_schema,
+                    ),
                     output_tokens_est=estimate_tokens(raw_response or ""),
                     projected_playbook_hash=projected_hash,
                     replacement_text_failures=replacement_text_failures,
