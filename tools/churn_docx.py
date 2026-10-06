@@ -120,6 +120,19 @@ not to introduce randomness.
     sub-clauses now that their tab is in place) against a real generated
     `.docx`, complementing the hand-built OOXML fixtures in
     `tests/test_extraction_normalization_stage_80.py`.
+  - `table_of_contents` (issue #114 follow-up) -- a real Word `TOC` complex
+    field (`<w:fldChar begin>` / `<w:instrText> TOC ... </w:instrText>` /
+    `separate` / cached result / `end`) prepended to the contract, its
+    cached result one `TOC1`-styled paragraph per clause heading, each a
+    hyperlink to the heading's bookmark followed by a tab and a nested
+    `PAGEREF` field, following Word's markup. Every one of those
+    lines reads as a numbered heading, so before issue #114 each opened its
+    own EMPTY logical paragraph and consumed a `block_id` ahead of the real
+    clause of the same name. Exercises
+    `extraction_normalization_stage._partition_field_result_paragraphs`:
+    the generated result reaches neither the block map nor the model, the
+    real clauses keep their ids, and the omission is disclosed in
+    `normalization_notes`.
 
 ## What this is NOT
 
@@ -863,6 +876,106 @@ def mixed_run_children(docx_bytes: bytes, *, seed: int = 0) -> bytes:
     return _rewrite_document_xml(docx_bytes, mutate)
 
 
+def _append_field_char(parent: ET.Element, char_type: str) -> ET.Element:
+    """`<w:r><w:fldChar w:fldCharType="begin|separate|end"/></w:r>` -- one
+    leg of a COMPLEX field, which (unlike `<w:fldSimple>`) is a flat run
+    sequence and so may span several `<w:p>`s."""
+    r = ET.SubElement(parent, _w("r"))
+    fld_char = ET.SubElement(r, _w("fldChar"))
+    fld_char.set(_w("fldCharType"), char_type)
+    return r
+
+
+def _append_instr_text(parent: ET.Element, instr: str) -> ET.Element:
+    """`<w:r><w:instrText xml:space="preserve">...</w:instrText></w:r>` --
+    a complex field's CODE. A different tag from `<w:t>`, so it is markup a
+    reader never sees, not text."""
+    r = ET.SubElement(parent, _w("r"))
+    instr_el = ET.SubElement(r, _w("instrText"))
+    instr_el.set(f"{{{_XML_NS}}}space", "preserve")
+    instr_el.text = instr
+    return r
+
+
+def table_of_contents(docx_bytes: bytes, *, seed: int = 0) -> bytes:
+    """Prepends a real Word `TOC` complex field -- issue #114's shape.
+
+    A table of contents is not a list Word stores as text: it is a field
+    (`<w:fldChar w:fldCharType="begin"/>`, `<w:instrText> TOC \\o "1-3" \\h
+    \\z \\u </w:instrText>`, `separate`, the cached RESULT, `end`) whose
+    cached result Word regenerates from the document's own headings. That
+    result is written as one ordinary body paragraph per entry -- styled
+    `TOC1`, the heading text, a tab, and a nested `PAGEREF` field for the
+    page number -- so every entry looks exactly like a numbered clause
+    heading to any walker that does not model the field.
+
+    Before issue #114 that is precisely what happened: each entry opened its
+    own EMPTY logical paragraph, named like the real clause and holding a
+    `block_id` ahead of it. The model was shown N empty "clauses", the block
+    count was wrong for any long-form agreement, and `delete_block` on one of
+    those ids would have written `[Intentionally omitted.]` into the table of
+    contents. `extraction_normalization_stage._partition_field_result_
+    paragraphs` now drops the whole result region -- with one disclosure line
+    in `normalization_notes` -- and the surrounding "Contents" caption
+    paragraph, which is an ordinary heading rather than field result, is
+    deliberately left alone so the shape proves the difference.
+
+    The `end` field character sits on the LAST entry paragraph. Word's TOC
+    content control more commonly closes with the `end` alone in its own
+    trailing paragraph (pinned in `tests/test_toc_field_result_114.py`);
+    this variant is equally valid OOXML and still proves the state machine
+    carries across `<w:p>` boundaries.
+    """
+
+    def mutate(root: ET.Element) -> None:
+        body = root.find(_w("body"))
+        if body is None:  # pragma: no cover -- python-docx always writes one
+            raise ValueError("document has no <w:body>")
+
+        caption = ET.Element(_w("p"))
+        caption_ppr = ET.SubElement(caption, _w("pPr"))
+        ET.SubElement(caption_ppr, _w("pStyle")).set(_w("val"), "TOCHeading")
+        _append_run(caption, "Contents")
+
+        entry_paragraphs: list[ET.Element] = []
+        headings = [heading for heading, _ in _STANDARD_CLAUSES]
+        for position, heading in enumerate(headings):
+            p_el = ET.Element(_w("p"))
+            ppr = ET.SubElement(p_el, _w("pPr"))
+            ET.SubElement(ppr, _w("pStyle")).set(_w("val"), "TOC1")
+            if position == 0:
+                # The field OPENS inside the first entry's own paragraph --
+                # Word's own layout, and the reason a paragraph-at-a-time
+                # walker cannot see where the result region starts.
+                _append_field_char(p_el, "begin")
+                _append_instr_text(p_el, ' TOC \\o "1-3" \\h \\z \\u ')
+                _append_field_char(p_el, "separate")
+
+            hyperlink = ET.SubElement(p_el, _w("hyperlink"))
+            hyperlink.set(_w("anchor"), f"_Toc{position + 1}")
+            _append_run(hyperlink, heading)
+            tab_run = ET.SubElement(hyperlink, _w("r"))
+            ET.SubElement(tab_run, _w("tab"))
+            # The page number is itself a nested PAGEREF field: the outer
+            # TOC frame has to stay open across it.
+            _append_field_char(hyperlink, "begin")
+            _append_instr_text(hyperlink, f" PAGEREF _Toc{position + 1} \\h ")
+            _append_field_char(hyperlink, "separate")
+            _append_run(hyperlink, str(position + 2))
+            _append_field_char(hyperlink, "end")
+
+            if position == len(headings) - 1:
+                _append_field_char(p_el, "end")
+            entry_paragraphs.append(p_el)
+
+        # After the title paragraph, where Word puts a contents list.
+        insert_at = 1 if len(list(body)) else 0
+        for offset, p_el in enumerate([caption, *entry_paragraphs]):
+            body.insert(insert_at + offset, p_el)
+
+    return _rewrite_document_xml(docx_bytes, mutate)
+
+
 TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "tracked_changes_multi_author": tracked_changes_multi_author,
     "curly_punctuation": curly_punctuation,
@@ -874,6 +987,7 @@ TRANSFORMS: dict[str, Callable[..., bytes]] = {
     "first_page_header_footer": first_page_header_footer,
     "content_control_wrapped_text": content_control_wrapped_text,
     "mixed_run_children": mixed_run_children,
+    "table_of_contents": table_of_contents,
 }
 
 

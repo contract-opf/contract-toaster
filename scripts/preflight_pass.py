@@ -226,7 +226,9 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
 
     `paragraph_count` counts logical, clause-boundary-detected paragraphs
     (the same grouping `normalize_paragraphs` operates over -- one entry per
-    heading/section), not a raw `<w:p>` count.
+    heading/section), not a raw `<w:p>` count. A notes-only group
+    (`"emits_block": False`, see `extract_document_paragraphs`) is not a
+    clause and is not counted (issue #114).
 
     Returns:
       {"word_count": int, "page_estimate": int, "paragraph_count": int,
@@ -286,7 +288,13 @@ def compute_document_stats(docx_bytes: bytes) -> dict[str, Any]:
     return {
         "word_count": word_count,
         "page_estimate": page_estimate,
-        "paragraph_count": len(logical_paragraphs),
+        # A notes-only record (`emits_block: False`) is not a clause: it
+        # carries disclosures about paragraphs extraction dropped (a
+        # `TOC`/`INDEX` field's generated result, issue #114) and never
+        # receives a block id, so it is not counted.
+        "paragraph_count": sum(
+            1 for group in logical_paragraphs if group.get("emits_block", True) is not False
+        ),
         "title": title[:TITLE_MAX_CHARS] if title else title,
         "excerpt": "\n".join(excerpt_parts)[:EXCERPT_CHAR_BUDGET],
         "full_text": "\n".join(full_text_parts),

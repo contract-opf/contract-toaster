@@ -23,7 +23,8 @@ docx-editor's own re-serialization, a filled-in content control or smart tag
 wrapping ordinary text inline or a whole clause, one run whose children
 interleave a tab, a non-breaking hyphen, a soft hyphen, a line break and a
 symbol in document order ahead of three tab-separated lettered
-sub-clauses) — plus one
+sub-clauses, a real Word table of contents whose `TOC` field result would
+otherwise become one empty clause block per entry) — plus one
 `baseline-<flavor>.SYNTHETIC.docx` per
 generated base-contract flavor, untransformed, so
 `tools/document_spine_smoke.py` has a fuller, more realistic corpus to

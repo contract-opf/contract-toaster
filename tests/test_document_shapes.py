@@ -67,6 +67,7 @@ import block_transcript as bt  # noqa: E402
 import churn_docx as cd  # noqa: E402
 import document_spine_smoke as dss  # noqa: E402
 import extraction_normalization_stage as ens  # noqa: E402
+import preflight_pass  # noqa: E402
 import redline_block_apply as rba  # noqa: E402
 
 # One base contract flavor is enough for every required shape (every
@@ -592,6 +593,68 @@ def test_mixed_run_children_survives(failures: list) -> None:
         )
 
 
+def test_table_of_contents_survives(failures: list) -> None:
+    """Issue #114: a real Word `TOC` complex field's cached result is one
+    body-shaped paragraph per heading, each of which reads as a numbered
+    clause heading. Before this issue every one of them opened its own EMPTY
+    logical paragraph, named like the real clause and holding a `block_id`
+    AHEAD of it.
+
+    The property: the generated result reaches neither the block map nor the
+    model, every real clause keeps exactly the `block_id` it has in the
+    untransformed baseline, and the omission is disclosed."""
+    name = "table_of_contents"
+    docx_bytes = _shape_fixture(name)
+    norm = _assert_survives_full_spine(name, docx_bytes, failures)
+    if norm is None:
+        return
+    paragraphs = norm["paragraphs"]
+
+    # No block may be one of the field's generated entries. Each is the
+    # heading text followed by a tab and a page number, with no body -- the
+    # exact `'Definitions\t2' => ''` shape this issue's Evidence records.
+    for block in paragraphs:
+        if "\t" in block["heading"]:
+            failures.append(
+                f"[{name}] a TOC entry reached the block map as a clause: "
+                f"{block['block_id']} {block['heading']!r} => {block['text']!r}"
+            )
+
+    # And the ids are the baseline's, block for block: a TOC must not shift
+    # the address of a single real clause.
+    baseline = ens.extract_and_normalize(_baseline_fixture(SHAPE_BASE_FLAVOR))
+    if baseline.get("status") != "normalized":
+        failures.append(f"[{name}] the untransformed baseline did not normalize")
+        return
+    shaped_ids = [(p["block_id"], p["heading"]) for p in paragraphs]
+    baseline_ids = [(p["block_id"], p["heading"]) for p in baseline["paragraphs"]]
+    if shaped_ids != baseline_ids:
+        failures.append(
+            f"[{name}] a table of contents changed the block map: "
+            f"{shaped_ids!r} != baseline {baseline_ids!r}"
+        )
+
+    # Never silent: the dropped paragraphs are disclosed, counted, and the
+    # sentence names the field code rather than any dropped line's text.
+    notes = norm.get("normalization_notes", "")
+    if "TOC field result" not in notes or f"{len(cd._STANDARD_CLAUSES)} paragraph(s)" not in notes:
+        failures.append(f"[{name}] expected a TOC-omission disclosure naming the count, got: {notes!r}")
+
+    # The disclosure rides a notes-only group, which (unlike a
+    # `leading_deleted` one) survives into the MATERIALIZED read the
+    # preflight card is computed from. It is not a clause, so it must not
+    # be counted as one: the card's paragraph count is the baseline's.
+    shaped_count = preflight_pass.compute_document_stats(docx_bytes)["paragraph_count"]
+    baseline_count = preflight_pass.compute_document_stats(_baseline_fixture(SHAPE_BASE_FLAVOR))[
+        "paragraph_count"
+    ]
+    if shaped_count != baseline_count:
+        failures.append(
+            f"[{name}] preflight paragraph_count {shaped_count} != baseline {baseline_count}: "
+            "the notes-only disclosure group was counted as a paragraph"
+        )
+
+
 def _unzip_document_xml(docx_bytes: bytes) -> bytes:
     import io
     import zipfile
@@ -633,6 +696,7 @@ def test_every_transform_has_a_shape_test(failures: list) -> None:
         "first_page_header_footer",
         "content_control_wrapped_text",
         "mixed_run_children",
+        "table_of_contents",
     }
     missing = set(cd.TRANSFORMS) - exercised
     if missing:
@@ -723,6 +787,7 @@ TESTS = [
     test_first_page_header_footer_survives,
     test_content_control_wrapped_text_survives,
     test_mixed_run_children_survives,
+    test_table_of_contents_survives,
     test_baseline_flavors_also_normalize,
     test_every_transform_has_a_shape_test,
     test_the_smoke_tool_never_echoes_a_sentinel_party_name,
