@@ -33,8 +33,7 @@ judgment is good.
 Of the two retired modules named above, only the detector engine still
 exists: it remains fully alive for its OTHER production consumers
 (`tests/lint-gold-fixtures.py`, `tests/lint-acceptable-variations.py`,
-`scripts/replacement_text_enforcement.py`,
-`scripts/third_party_position_findings.py`). The standard-form line-diff
+`scripts/replacement_text_enforcement.py`). The standard-form line-diff
 was deleted outright by issue #631, together with the anchor-map builder
 and the form-match router that were its last consumers. Either way this
 module imports neither.

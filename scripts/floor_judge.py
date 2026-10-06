@@ -36,7 +36,7 @@ runtime seam:
     today (`scripts/review_spine.py::_issue_from_detector_fire` is the
     lexical-detector analogue), with `provenance="floor:<invariant_id>"`
     mirroring the existing `detector:<rule_id>` convention
-    (`reconciliation.py` docstring, `scripts/third_party_output_integration.py`).
+    (`reconciliation.py` docstring).
     `reconcile()` treats every `detector_fires` entry as monotonic --
     unconditionally appended and forcing `decision="REQUEST_CHANGE"` --
     so a Floor fire has exactly the same "cannot be downgraded by either

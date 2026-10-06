@@ -25,20 +25,16 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
 5. (2026-07-16 update, OPF 0.3) The wholesale Evidence projection is
    RETIRED -- it measured ~1M tokens on the real corpus and could never
    reach a model. Bulk evidence (`full_text`, raw observation fields) must
-   NOT appear in the prompt: the digest carries summaries only, and the
-   lookup_clause_evidence drill-down tool that could fetch detail on demand
-   is implemented but not wired into any tool loop (#580). The composed
-   prompt must also stay inside the 50K review budget.
+   NOT appear in the prompt: the digest carries summaries only. The
+   composed prompt must also stay inside the 50K review budget.
 6. Context block (`perspective` + `de_minimis`) appears only when present
    in the source document.
 7. (issue #579) Guard against naming an unbacked tool: the composed prompt
    must not name a tool the model cannot actually call -- it has no way to
    honor such an instruction. Checked under BOTH structured-output states
    (issue #673 made ON the default), which compose byte-identical prompts:
-   `lookup_clause_evidence` is wired into no tool loop in either state
-   (#580), and the forced structured-output tool reaches the request only
-   in the ON state. A future change that wires a real tool loop back in
-   must update this guard deliberately, not trip over it by accident.
+   the forced structured-output tool reaches the request only in the ON
+   state.
 8. (issue #55, audit finding F6) The flat recognition set deduplicates on
    `entity_normalize.recognition_key`, so a legal-form suffix, punctuation
    or a diacritic does not split one entity into two lines the model has to
@@ -66,7 +62,6 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
 
 import config  # noqa: E402
 import model_client  # noqa: E402
-import opf_clause_lookup  # noqa: E402
 import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
 import opf_terminology  # noqa: E402
@@ -253,8 +248,7 @@ def check_5_wholesale_evidence_is_retired() -> list[str]:
     joined = "\n".join(opf_prompt.compose_opf_system_blocks(doc))
     for sentinel, why in (
         ("SENTINEL_FULL_TEXT_MUST_NOT_REACH_THE_PROMPT",
-         "full_text is the bulk of the corpus; the digest omits it by design and the "
-         "lookup tool fetches it on demand"),
+         "full_text is the bulk of the corpus; the digest omits it by design"),
         ("SENTINEL_COUNTERPARTY_ALIAS",
          "raw evidence fields must not be projected wholesale"),
     ):
@@ -397,11 +391,10 @@ def check_8_recognition_set_folds_legal_form_variants() -> list[str]:
 
 def check_7_no_unbacked_tool_reference() -> list[str]:
     """Issue #579: DIGEST_INTRO used to instruct the model to call
-    `lookup_clause_evidence` to verify exact clause language before relying
-    on it. That tool is implemented but wired into no tool loop (#580), so
-    it reaches no request under ANY configuration -- the model had no way
-    to honor the instruction. Guard: the composed prompt must not name a
-    tool the model cannot call.
+    a clause-lookup tool to verify exact clause language before relying
+    on it. No such tool ever reached a request (#580; the tool itself was
+    retired in #161) -- the model had no way to honor the instruction.
+    Guard: the composed prompt must not name a tool the model cannot call.
 
     Issue #673 flipped `structured_output_enabled()` to default ON, so
     "which tools reach the request" is no longer a single fixed answer.
@@ -412,8 +405,6 @@ def check_7_no_unbacked_tool_reference() -> list[str]:
       - the two states compose byte-identical prompts. `opf_prompt` reads
         no config at all today; pinning that here is what lets the rest of
         this check reason about one string instead of two.
-      - neither state's prompt names `lookup_clause_evidence`, which is
-        sent in neither.
       - the flag-OFF prompt does not name the forced structured-output tool
         either, which is sent only in the ON state.
 
@@ -442,17 +433,6 @@ def check_7_no_unbacked_tool_reference() -> list[str]:
             "OFF and ON states -- opf_prompt is supposed to be flag-blind; a "
             "flag-dependent prompt needs its own tool-naming guard per state"
         )
-
-    # The clause-lookup tool is sent in NEITHER state (no tool loop, #580),
-    # so naming it is unbacked either way.
-    for label, joined in composed.items():
-        if opf_clause_lookup.TOOL_NAME in joined:
-            failures.append(
-                f"  [7] composed prompt ({label} state) names tool "
-                f"{opf_clause_lookup.TOOL_NAME!r}, which is wired into no tool "
-                "loop and reaches no request -- the model is asked to call "
-                "something it will never receive"
-            )
 
     # The forced structured-output tool IS sent in the ON state, so naming
     # it there would be backed; in the OFF state no `tools`/`tool_choice`

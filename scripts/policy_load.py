@@ -13,7 +13,7 @@ of fact and never edits a policy.
 A policy is resolved BY `playbook_id`, from the filename convention
 ``<playbook_id>-policy-v<N>.json`` (integer N). Nothing here -- or in
 playbooks/policy.schema.json, the registry, or the UI -- is specific to any one
-playbook; ``nda-policy-v1.json`` is one instance of the
+playbook; the test fixture ``nda-policy-v1.json`` is one instance of the
 convention, not a special case in code.
 
 `resolve_latest_policy_path` picks the HIGHEST version present for a

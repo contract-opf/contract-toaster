@@ -53,14 +53,11 @@ non-RAG depth path is already designed** and is not the same as "no depth."
   It deliberately omits `full_text`, and as of `digest_version` 2 also omits each preferred
   variation's compiler-written `rationale`. The wholesale alternative "measured ~1M tokens
   on a real corpus and cannot reach a model at all."
-- **The index.** `scripts/opf_clause_lookup.py::lookup_clause_evidence` is "the model's
-  drill-down into the full OPF" — given a `clause_id` or a citation the digest already
-  carries, it returns full clause text and citations. It never invents: an unknown id
-  returns a structured *not found* rather than an empty result that reads as "no evidence
-  exists."
-- **The gap.** The tool is implemented and tested but **not wired** — no tool-use loop hands
-  it to the model. See #579 (the prompt currently instructs the model to call it anyway) and
-  #580 (wire it).
+- **The index.** Depth comes from exact keys, not similarity: per-clause critic dossiers
+  selected deterministically from the rule ids the reviewer, the hard-rejection ledger and
+  the anomaly detectors name, and appended by orchestration (#40). An earlier design served
+  the same keys through a model-callable `lookup_clause_evidence` tool; it was never wired
+  into a request and was retired in #161.
 
 Why this is preferable to retrieval for this problem: the clause identity is already known
 from the diff, so the question is *"what did we do on this clause?"*, not *"what is

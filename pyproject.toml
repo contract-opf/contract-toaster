@@ -284,11 +284,6 @@ ignore_errors = true
 module = "opf_acceptance"
 ignore_errors = true
 
-# scripts/opf_clause_lookup.py
-[[tool.mypy.overrides]]
-module = "opf_clause_lookup"
-ignore_errors = true
-
 # scripts/opf_html.py
 [[tool.mypy.overrides]]
 module = "opf_html"
@@ -362,19 +357,4 @@ ignore_errors = true
 # scripts/seed_active_bundle.py
 [[tool.mypy.overrides]]
 module = "seed_active_bundle"
-ignore_errors = true
-
-# scripts/third_party_clause_matching.py
-[[tool.mypy.overrides]]
-module = "third_party_clause_matching"
-ignore_errors = true
-
-# scripts/third_party_output_integration.py
-[[tool.mypy.overrides]]
-module = "third_party_output_integration"
-ignore_errors = true
-
-# scripts/third_party_position_findings.py
-[[tool.mypy.overrides]]
-module = "third_party_position_findings"
 ignore_errors = true

@@ -17,8 +17,7 @@ same commit that rewrote both passes' prompts to ask for it; see
 
 [`playbooks/output-schema-v2.json`](../playbooks/output-schema-v2.json) and
 [`playbooks/output-schema-v1.json`](../playbooks/output-schema-v1.json) are superseded but **not deleted**:
-v2 remains selectable via `validate_model_response(..., schema_path=...)`, but **not for the third-party
-integration path** — `scripts/third_party_output_integration.py` pins v3 itself (issue #629). Since
+v2 remains selectable via `validate_model_response(..., schema_path=...)`. Since
 issue #628 deleted the quote-fidelity measurement instrument, its only remaining callers are the tests
 that deliberately pin the superseded contract, plus `primary_review_pass._RETIRED_ISSUE_KEYS`, which
 derives from v2-minus-v3 the set of `Issue` keys the prompt must forbid the model to emit.
@@ -117,9 +116,9 @@ model-output-contract-drift failure mode this project has hit before. `schema_ve
 both change together.
 
 `playbooks/output-schema-v1.json` is **not deleted or modified** by this change. It was, at the time,
-also the schema used by `scripts/third_party_output_integration.py`'s independent third-party-paper
-review path, which was out of scope for the quote-based redline plan; issue #629 moved that path to
-`playbooks/output-schema-v3.json` (see below), so v1 is now the historical artifact only.
+also the schema used by an independent third-party-paper review path, which was out of scope for the
+quote-based redline plan; issue #629 moved that path to v3 and issue #161 retired it, so v1 is now the
+historical artifact only.
 
 ## Schema version v3 — the block-transcript contract (active)
 
@@ -130,7 +129,7 @@ review path, which was out of scope for the quote-based redline plan; issue #629
 | `$id` | `.../output-schema/v2.json` | `.../output-schema/v3.json` |
 | `schema_version` const | `"output-schema-v1"` (deliberately unbumped) | `"output-schema-v3"` (**bumped**) |
 | Shape delta | — | removes `issues[].source_quote`; adds required `issues[].issue_key` and optional `issues[].replacement_scope_note`; makes `issues[].proposed_replacement_text` optional; adds top-level `block_patches[]` and `block_ops[]`. Optional `issues[].internal_rationale_for_footnote` (issue #522) is **carried through from v2 unchanged** — it is not a delta, and must stay that way, or the `internal`/`both` notes modes render no footnotes after the flip |
-| Active validator | selectable as `OUTPUT_SCHEMA_V2_PATH`; today only tests pinning the superseded contract select it as a validator (issue #628 deleted the quote-fidelity instrument that was its one production-adjacent reader) | `scripts/primary_review_pass.py`'s `OUTPUT_SCHEMA_PATH` since issue #627 — **both model-facing passes and `scripts/model_output_schema.py`'s request projections validate and project against v3**, as does `scripts/third_party_output_integration.py`, whose responses are code-built rather than model-authored (issue #629) |
+| Active validator | selectable as `OUTPUT_SCHEMA_V2_PATH`; today only tests pinning the superseded contract select it as a validator (issue #628 deleted the quote-fidelity instrument that was its one production-adjacent reader) | `scripts/primary_review_pass.py`'s `OUTPUT_SCHEMA_PATH` since issue #627 — **both model-facing passes and `scripts/model_output_schema.py`'s request projections validate and project against v3** |
 
 `output-schema-v3.json` (issue #624) is a **clean break** per the coupling rules above, and it is the
 Candidate E output contract: instead of naming a document-wide-unique verbatim quote per issue, the model

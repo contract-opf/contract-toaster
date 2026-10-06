@@ -38,16 +38,14 @@ module emits is bounded by the artifact, not by hope. The real playbook measures
 
 What the digest deliberately omits -- every observation's `full_text`, and (as
 of digest_version 2) each preferred variation's compiler-written `rationale` --
-is not lost from the corpus: `scripts/opf_clause_lookup.py` implements a
-drill-down tool that could fetch it on demand. That tool is not wired to the
-model today -- no tool loop sends it, so nothing in the running system can
-call it (#580 tracks restoring the instruction and the tool together).
-Summaries by default is the trade that lets the prompt fit; detail-on-demand
-is not yet a live path.
+is not lost from the corpus, but no running path reaches it today. Depth is
+planned as deterministic dossier selection appended by orchestration (#40),
+not as a model tool call; the unwired drill-down tool was retired in #161.
+Summaries by default is the trade that lets the prompt fit.
 
 So: if a future change is tempted to inline `full_text`, or to "just include the
-evidence section too", it is re-proposing the 1M-token design. Add a lookup, not
-a dump.
+evidence section too", it is re-proposing the 1M-token design. Select a
+bounded dossier, not a dump.
 
 ## Terminology
 

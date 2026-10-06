@@ -51,8 +51,7 @@ parameters that fed them. The detector engine
 (`scripts/detector_common.py`) remains fully alive for OTHER consumers
 unrelated to this issue-generation path (the playbook-authoring lints
 `tests/lint-gold-fixtures.py` / `tests/lint-acceptable-variations.py`,
-`scripts/replacement_text_enforcement.py`,
-`scripts/third_party_position_findings.py`) -- only THIS module's own use
+`scripts/replacement_text_enforcement.py`) -- only THIS module's own use
 of it is removed. The standard-form line-diff has no consumers left at
 all: issue #631 deleted it, along with the anchor-map builder and the
 form-match router.

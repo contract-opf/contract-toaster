@@ -55,9 +55,7 @@ extraction stage), never on the redline XML alone.
      a heading with a body under it afterwards and needs no omission notice.
   2b. The same property in the shape that would have REGRESSED PRODUCTION: a
      `delete_block` paired with an `insert_block_after` on the same block is
-     a clause replaced IN PLACE (that op pair is what
-     `third_party_output_integration.build_third_party_block_edits` emits),
-     and the replacement belongs under the struck clause's own heading. A
+     a clause replaced IN PLACE, and the replacement belongs under the struck clause's own heading. A
      placeholder there would announce an omission directly above the clause
      that replaced it. The `anchor_block_id == "start"` form of the same
      pairing is driven too -- `"start"` lands the new paragraph under the
@@ -587,12 +585,8 @@ def test_a_clause_replaced_in_place_gets_no_placeholder(failures: list) -> None:
     under the struck clause's own heading, so a placeholder would announce an
     omission directly above the clause that replaced it.
 
-    This op pair is not invented here: it is exactly what
-    `third_party_output_integration.build_third_party_block_edits` emits for
-    one `reject` finding on a `fixed`-mode topic (see its docstring), and
-    `tests/test_third_party_output_integration.py`'s in-place-edit test drives
-    it end to end through that producer. Driven here through the same
-    validator the compiler consumes, so the gate has a test of its own.
+    Driven here through the same validator the compiler consumes, so the
+    gate has a test of its own.
     """
     case = "clause_replaced_in_place"
     docx_bytes = _make_docx(

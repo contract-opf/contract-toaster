@@ -1503,12 +1503,9 @@ def run_real_pipeline(review_id: str, payload: dict[str, Any], *, dynamodb_resou
         #     know how to load a full policy document) are dev-time CLI /
         #     library code with no caller anywhere under `backend/src/` --
         #     confirmed by grep, not assumed.
-        #   - The one committed policy artifact, `playbooks/nda-policy-v1
-        #     .json`, is for playbook_id `"nda"` -- a registered-but-inactive
-        #     stub with no `anchor_map_path`, distinct from
-        #     `"synthetic-nda-sample"` (this registry's actual
-        #     `default_playbook_id`) -- and its own `approval.note`
-        #     documents that it governs no production review.
+        #   - No policy artifact ships under `playbooks/`: the one draft
+        #     policy left (`nda-policy-v1.json`) is a test fixture since
+        #     issue #161, for a playbook_id the registry does not carry.
         # Fabricating a policy load here would invent a source that does not
         # exist. Per the 2026-08-04 #479 DECISION's own doctrine (an empty
         # posture is a valid, honestly-recorded state, not something to

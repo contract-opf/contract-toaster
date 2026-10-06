@@ -60,7 +60,6 @@ PLAYBOOKS_DIR = REPO_ROOT / "playbooks"
 # Discovery must find AT LEAST these.  They are named so that moving or renaming
 # a shipped playbook fails here rather than quietly emptying the loop below.
 EXPECTED_SHIPPED = {
-    "playbooks/nda-v0.1.0.json",
     "playbooks/samples/synthetic-nda-sample-v1.0.0.json",
 }
 
