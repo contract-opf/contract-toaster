@@ -108,6 +108,7 @@ from moto import mock_aws  # noqa: E402
 
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
+from critic_final_result import critic_keeps  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
 
@@ -323,27 +324,11 @@ def _primary_request_change_response() -> str:
 
 
 def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "critic_delta": {
-                # Issue #137: a critic owes a disposition for every
-                # first-reviewer issue -- here the primary's one issue, I1.
-                "dispositions": [
-                    {
-                        "issue_id": "I1",
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit; compliant with the playbook position.",
-                    }
-                ],
-                "overrides": [],
-            },
-            "verdict_summary": None,
-        }
-    )
+    """The critic's final result standing behind every first-reviewer issue.
+    Issue #138 / ADR 0001: the critic's response IS the final review, so
+    agreeing means restating the issues and edits with a KEEP disposition
+    each (`critic_final_result.critic_keeps`)."""
+    return critic_keeps(_primary_request_change_response())
 
 
 def _fake_model_client() -> Any:

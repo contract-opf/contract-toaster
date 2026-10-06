@@ -97,7 +97,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 BACKEND_DIR = REPO_ROOT / "backend"
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, BACKEND_DIR):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, BACKEND_DIR, REPO_ROOT / "tests"):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
@@ -114,6 +114,7 @@ from moto import mock_aws  # noqa: E402
 
 import leakage_scan  # noqa: E402
 import model_client as model_client_module  # noqa: E402
+from critic_final_result import critic_keeps  # noqa: E402
 import opf_canonicalize  # noqa: E402
 import policy_load  # noqa: E402
 import review_spine  # noqa: E402
@@ -286,27 +287,11 @@ def _primary_request_change_response() -> str:
 
 
 def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "critic_delta": {
-                # Issue #137: a critic owes a disposition for every
-                # first-reviewer issue -- here the primary's one issue, I1.
-                "dispositions": [
-                    {
-                        "issue_id": "I1",
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit; compliant with the playbook position.",
-                    }
-                ],
-                "overrides": [],
-            },
-            "verdict_summary": None,
-        }
-    )
+    """The critic's final result standing behind the primary's one issue
+    (`I1`). Issue #138 / ADR 0001: the critic's response IS the final review,
+    so agreeing means restating the issue and its edit with a KEEP
+    disposition (`critic_final_result.critic_keeps`)."""
+    return critic_keeps(_primary_request_change_response())
 
 
 def _primary_accept_response() -> str:
@@ -776,7 +761,9 @@ class TestOpfPenRulesEnforcement(unittest.TestCase):
         fake_client = model_client_module.FakeBedrockClient(
             {
                 PRIMARY_MODEL_ID: [_primary_response_with_over_long_replacement()],
-                CRITIC_MODEL_ID: [_critic_no_delta_response()],
+                # Issue #138: the pen rules judge the text that ships -- the
+                # critic's -- so the critic keeps the over-long insert.
+                CRITIC_MODEL_ID: [critic_keeps(_primary_response_with_over_long_replacement())],
             }
         )
 
@@ -834,7 +821,9 @@ class TestOpfLeakageCorpus(unittest.TestCase):
                     _primary_accept_with_leak(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
+                # Issue #138: the critic's summary is the one that ships, so
+                # the leak must be in the critic's final result to be live.
+                CRITIC_MODEL_ID: [critic_keeps(_primary_accept_with_leak())],
             }
         )
 
@@ -874,7 +863,9 @@ class TestOpfLeakageCorpus(unittest.TestCase):
                     _primary_accept_with_leak(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
+                # Issue #138: the critic's summary is the one that ships, so
+                # the leak must be in the critic's final result to be live.
+                CRITIC_MODEL_ID: [critic_keeps(_primary_accept_with_leak())],
             }
         )
 
@@ -917,7 +908,9 @@ class TestOpfLeakageCorpus(unittest.TestCase):
                     _primary_accept_with_leak(),
                     _floor_verdict_response("no-uncapped-liability", violated=False),
                 ],
-                CRITIC_MODEL_ID: [_critic_accept_response()],
+                # Issue #138: the critic's summary is the one that ships, so
+                # the leak must be in the critic's final result to be live.
+                CRITIC_MODEL_ID: [critic_keeps(_primary_accept_with_leak())],
             }
         )
 

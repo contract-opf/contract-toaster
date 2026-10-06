@@ -414,7 +414,7 @@ def test_critic_pass_shares_same_projection_as_primary(failures: list[str]) -> N
     playbook = _sample_playbook()
     # A valid CRITIC body (issue #137: it must dispose of the primary's I1);
     # the assertions below read the prompt, not the answer.
-    responses = {_TEST_MODEL_ID: [_load_fixture_text("critic_keep_i1_accept_valid.json")]}
+    responses = {_TEST_MODEL_ID: [_load_fixture_text("critic_drop_i1_accept_valid.json")]}
     client = model_client.FakeBedrockClient(responses)
     ledger: list[model_client.ModelInvocationRecord] = []
 

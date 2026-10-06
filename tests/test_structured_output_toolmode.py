@@ -567,7 +567,7 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
 
 class TestRunCriticPassThreading(unittest.TestCase):
     def test_flag_off_never_sends_tool_spec_even_to_a_legacy_shaped_client(self) -> None:
-        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_keep_i1_accept_valid.json")))
+        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_drop_i1_accept_valid.json")))
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
         # Explicit "0" for the same reason as the primary-pass twin above.
         with patch.dict("os.environ", {"OPENROUTER_STRUCTURED_OUTPUT": "0"}, clear=True):
@@ -583,7 +583,7 @@ class TestRunCriticPassThreading(unittest.TestCase):
         self.assertEqual(len(legacy.calls), 1)
 
     def test_flag_on_passes_the_model_facing_schema_as_tool_spec(self) -> None:
-        stamped = _load_fixture("critic_keep_i1_accept_valid.json")
+        stamped = _load_fixture("critic_drop_i1_accept_valid.json")
         client = mc.FakeBedrockClient(
             {"anthropic.claude-sonnet-4-6": [json.dumps(_unstamp(stamped))]}
         )

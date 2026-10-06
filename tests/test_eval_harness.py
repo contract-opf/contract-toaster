@@ -270,73 +270,62 @@ def check_deliberately_broken_fixture_fails_quote_locate() -> list[str]:
     playbook = _load_synthetic_generic_playbook()
 
     def _case(issue_key: str, expected: dict) -> dict:
+        primary = {
+            "decision": "REQUEST_CHANGE",
+            "confidence_state": "OK",
+            "confidence_band": None,
+            "issues": [
+                {
+                    "issue_key": "I1",
+                    "section_ref": "sec-8",
+                    "section_title": "Limitation on Liability",
+                    "counterparty_change_summary": "Counterparty removed the liability cap.",
+                    "decision": "REQUEST_CHANGE",
+                    "external_rationale_for_footnote": "Section 8 must retain the standard cap.",
+                    "playbook_topic_id": "limitation-of-liability",
+                    "internal_precedent_citation": None,
+                    "provenance": "model",
+                }
+            ],
+            "block_patches": [
+                {
+                    # `p0001` IS the document's only block, and
+                    # keep+delete reconstruct its text
+                    # ("Liability is unlimited.") byte-for-byte,
+                    # so the transcript PROVES -- both in-pass
+                    # and again at stage 5.
+                    "block_id": "p0001",
+                    "segments": [
+                        {"op": "keep", "text": "Liability is "},
+                        {"op": "delete", "text": "unlimited", "issue_key": issue_key},
+                        {"op": "insert", "text": "capped at $150,000", "issue_key": issue_key},
+                        {"op": "keep", "text": "."},
+                    ],
+                }
+            ],
+            "block_ops": [],
+            "critic_delta": None,
+            "verdict_summary": "One issue identified.",
+        }
+        # Issue #138 (ADR 0001): the critic's result is the final review, so a
+        # critic standing behind I1 restates the issue AND its transcript --
+        # the broken attribution included, which is what then reaches stage 5.
+        critic = json.loads(json.dumps(primary))
+        critic["critic_delta"] = {
+            "dispositions": [
+                {
+                    "issue_id": "I1",
+                    "disposition": "KEEP",
+                    "reason": "Same issue and the same edit.",
+                }
+            ],
+            "overrides": [],
+        }
         return {
             "case_id": f"inline-broken-edit-not-applied-{issue_key}",
             "schema": "llm-native-v1",
             "document": {"clauses": [{"heading": "8. Limitation on Liability", "text": "Liability is unlimited."}]},
-            "model_responses": {
-                "primary": [
-                    {
-                        "decision": "REQUEST_CHANGE",
-                        "confidence_state": "OK",
-                        "confidence_band": None,
-                        "issues": [
-                            {
-                                "issue_key": "I1",
-                                "section_ref": "sec-8",
-                                "section_title": "Limitation on Liability",
-                                "counterparty_change_summary": "Counterparty removed the liability cap.",
-                                "decision": "REQUEST_CHANGE",
-                                "external_rationale_for_footnote": "Section 8 must retain the standard cap.",
-                                "playbook_topic_id": "limitation-of-liability",
-                                "internal_precedent_citation": None,
-                                "provenance": "model",
-                            }
-                        ],
-                        "block_patches": [
-                            {
-                                # `p0001` IS the document's only block, and
-                                # keep+delete reconstruct its text
-                                # ("Liability is unlimited.") byte-for-byte,
-                                # so the transcript PROVES -- both in-pass
-                                # and again at stage 5.
-                                "block_id": "p0001",
-                                "segments": [
-                                    {"op": "keep", "text": "Liability is "},
-                                    {"op": "delete", "text": "unlimited", "issue_key": issue_key},
-                                    {"op": "insert", "text": "capped at $150,000", "issue_key": issue_key},
-                                    {"op": "keep", "text": "."},
-                                ],
-                            }
-                        ],
-                        "block_ops": [],
-                        "critic_delta": None,
-                        "verdict_summary": "One issue identified.",
-                    }
-                ],
-                "critic": [
-                    {
-                        "decision": "REQUEST_CHANGE",
-                        "confidence_state": "OK",
-                        "confidence_band": None,
-                        "issues": [],
-                        "block_patches": [],
-                        "block_ops": [],
-                        # Issue #137: the critic disposes of the primary's I1.
-                        "critic_delta": {
-                            "dispositions": [
-                                {
-                                    "issue_id": "I1",
-                                    "disposition": "KEEP",
-                                    "reason": "Same issue and the same edit.",
-                                }
-                            ],
-                            "overrides": [],
-                        },
-                        "verdict_summary": None,
-                    }
-                ],
-            },
+            "model_responses": {"primary": [primary], "critic": [critic]},
             "expected": expected,
         }
 

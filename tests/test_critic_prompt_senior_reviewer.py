@@ -79,10 +79,10 @@ import synthetic_form_paragraphs as sfp_module  # noqa: E402
 from test_review_spine import (  # noqa: E402
     _SEC8_DRAFT_TEXT,
     _build_draft_docx,
-    _critic_no_delta_response,
     _load_bundle,
     _primary_request_change_response_with_transcript,
 )
+from critic_final_result import critic_keeps  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000137"
 
@@ -122,7 +122,7 @@ class _Composed:
         client = model_client.FakeBedrockClient(
             {
                 self.primary_id: [json.dumps(self.primary_output)],
-                self.critic_id: [_critic_no_delta_response()],
+                self.critic_id: [critic_keeps(self.primary_output)],
             }
         )
         primary = pp.run_primary_pass(

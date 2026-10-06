@@ -106,6 +106,7 @@ os.environ.setdefault("DAILY_SPEND_TABLE", "daily-spend-test")
 os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 
 import pipeline_runner as pr  # noqa: E402, I001
+from critic_final_result import critic_keeps  # noqa: E402
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
 
@@ -271,28 +272,13 @@ def _primary_request_change_response(docx_bytes: bytes | None = None) -> str:
     )
 
 
-def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "critic_delta": {
-                # Issue #137: a critic owes a disposition for every
-                # first-reviewer issue -- here the primary's one issue, I1.
-                "dispositions": [
-                    {
-                        "issue_id": "I1",
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit; compliant with the playbook position.",
-                    }
-                ],
-                "overrides": [],
-            },
-            "verdict_summary": None,
-        }
-    )
+def _critic_no_delta_response(docx_bytes: bytes | None = None) -> str:
+    """The critic's final result standing behind the primary's one issue
+    (`I1`). Issue #138 / ADR 0001: the critic's response IS the final review,
+    so agreeing means restating the issue and its edit with a KEEP
+    disposition (`critic_final_result.critic_keeps`) -- pass the SAME
+    `docx_bytes` the primary's transcript was built over."""
+    return critic_keeps(_primary_request_change_response(docx_bytes))
 
 
 def _primary_accept_response() -> str:
@@ -316,7 +302,8 @@ def _critic_accept_response() -> str:
             "confidence_band": None,
             "issues": [],
             "critic_delta": None,
-            "verdict_summary": None,
+            # Issue #138: the critic's summary is the final one.
+            "verdict_summary": "No changes identified relative to your standard positions.",
         }
     )
 
@@ -476,7 +463,7 @@ class TestRunRealPipeline(unittest.TestCase):
         the two paths are independent by design."""
         docx_bytes = _build_draft_docx({"sec-8": _SEC8_DRAFT_TEXT})
         client = _fake_client(
-            _primary_request_change_response(docx_bytes), _critic_no_delta_response()
+            _primary_request_change_response(docx_bytes), _critic_no_delta_response(docx_bytes)
         )
         reviews_table = FakeReviewsTable()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
@@ -561,7 +548,8 @@ class TestRunRealPipeline(unittest.TestCase):
         client = model_client_module.FakeBedrockClient(
             {
                 primary_id: [json.dumps(flag_only_issue), json.dumps(flag_only_issue)],
-                critic_id: [_critic_no_delta_response()],
+                # Issue #138: the critic restates the flag-only issue it keeps.
+                critic_id: [critic_keeps(flag_only_issue)],
             }
         )
         reviews_table = FakeReviewsTable()

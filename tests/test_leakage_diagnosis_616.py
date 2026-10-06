@@ -212,7 +212,9 @@ class _Run:
 
     def __init__(self, primary_response: str):
         docx_bytes = dts._build_draft_docx({"sec-8": dts._SEC8_DRAFT_TEXT})
-        client = dts._fake_client(primary_response, dts._critic_no_delta_response())
+        # Issue #138: the critic restates the primary (leak and all), so the
+        # leakage gate it must trip runs over the CRITIC's text.
+        client = dts._fake_client(primary_response, dts.critic_keeps(primary_response))
         self.reviews_table = dts.FakeReviewsTable()
         self.s3 = dts.FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})
         with patch.object(pr, "_settle_reservation"):

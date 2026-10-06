@@ -294,23 +294,38 @@ def _primary_response(block_ids: list, *, term: str = "replace", deletions_only=
 
 
 def _critic_response(
+    primary: dict,
     *,
     objection: str = CONTESTED_OBJECTION,
     added_internal: str | None = None,
     critic_edit=None,
 ) -> dict:
-    # The critic numbers its own issues from "I1", colliding with the
-    # primary's -- `reconcile` re-keys it, as on a live review.
-    added = _issue("I1", SEC3, ADDED_RATIONALE)
+    # Issue #138 (ADR 0001): the critic's response is the FINAL review, so it
+    # restates the primary's issues and transcript (KEEP each) and lists the
+    # issue it adds in its own `issues` under the next key of ITS response.
+    # The deprecated `added_issues` array records the same finding under a
+    # key unique across the response, as the prompt asks.
+    added = _issue("I3", SEC3, ADDED_RATIONALE)
     added["section_title"] = "Governing Law"
     if added_internal is not None:
         added[redline_generate.INTERNAL_RATIONALE_FIELD] = added_internal
+    restated = [
+        {key: value for key, value in issue.items() if key != "provenance"}
+        for issue in primary.get("issues") or []
+    ]
     response = {
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
-        "issues": [],
+        "verdict_summary": primary.get("verdict_summary"),
+        "issues": [*restated, added],
+        "block_patches": json.loads(json.dumps(primary.get("block_patches") or [])),
         "critic_delta": {
-            "added_issues": [added],
+            "dispositions": [
+                {"issue_id": issue["issue_key"], "disposition": "KEEP", "reason": "Kept."}
+                for issue in restated
+            ],
+            "overrides": [],
+            "added_issues": [{**added, "issue_key": "I4"}],
             "contested_replacements": [
                 {
                     "section_ref": SEC2,
@@ -355,9 +370,10 @@ def _reconciled(block_ids: list, **kwargs) -> dict:
         for key in ("objection", "added_internal", "critic_edit")
         if key in kwargs
     }
+    primary = _validated(_primary_response(block_ids, **kwargs))
     return reconciliation.reconcile(
-        primary_result=_validated(_primary_response(block_ids, **kwargs)),
-        critic_result=_validated(_critic_response(**critic)),
+        primary_result=primary,
+        critic_result=_validated(_critic_response(primary, **critic)),
     )
 
 

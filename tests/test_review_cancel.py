@@ -170,7 +170,7 @@ def test_no_checkpoint_is_the_unchanged_path(failures: list[str]) -> None:
 
 
 def test_critic_pass_stops_before_the_first_call(failures: list[str]) -> None:
-    client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_fixture("critic_keep_i1_accept_valid.json")]})
+    client = model_client.FakeBedrockClient({_TEST_MODEL_ID: [_fixture("critic_drop_i1_accept_valid.json")]})
     try:
         cp.run_critic_pass(
             review_id="cancel-4",

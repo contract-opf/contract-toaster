@@ -85,9 +85,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, REPO_ROOT / "tests"):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
+
+from critic_final_result import critic_keeps  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -274,8 +276,15 @@ def _validate_v3(response: dict) -> dict:
 
 def _reconciled(response: dict) -> dict:
     """Through the real reconciler, so the block carriers reach stage 5 the
-    way production would deliver them."""
-    return reconciliation.reconcile(primary_result=_validate_v3(response))
+    way production would deliver them. Issue #138: the carriers that reach
+    stage 5 are the CRITIC's, so `response` is the final result a critic
+    standing behind the reviewer's `response` in full restates
+    (`critic_final_result.critic_keeps`)."""
+    primary = _validate_v3(response)
+    return reconciliation.reconcile(
+        primary_result=primary,
+        critic_result=_validate_v3(json.loads(critic_keeps(primary))),
+    )
 
 
 def _multi_edit_response(block_ids: list) -> dict:
@@ -1127,7 +1136,11 @@ def test_stage_five_branch_is_shape_driven_and_live(failures: list) -> None:
     if not ok:
         failures.append(f"the v2 control response is not schema-valid: {v2_parsed}")
         return
-    v2_reconciled = reconciliation.reconcile(primary_result=v2_parsed)
+    # Issue #138: a critic result is required; a v2 critic that restates the
+    # reviewer carries no dispositions (v2 defines none) and no carriers.
+    v2_critic = json.loads(json.dumps(v2_parsed))
+    v2_critic["critic_delta"] = None
+    v2_reconciled = reconciliation.reconcile(primary_result=v2_parsed, critic_result=v2_critic)
     if review_spine.uses_block_mode(v2_reconciled):
         failures.append("a v2 reconciled result was routed to block mode")
     for key in ("block_patches", "block_ops"):

@@ -115,11 +115,11 @@ from test_review_spine import (  # noqa: E402
     _SEC8_STANDARD_TEXT,
     _build_draft_docx,
     _critic_accept_response,
-    _critic_no_delta_response,
     _load_bundle,
     _primary_accept_response,
     _primary_request_change_response,
 )
+from critic_final_result import critic_keeps  # noqa: E402
 from test_review_submission_e2e import FakeDynamoDBResource  # noqa: E402
 from test_review_submission_e2e import _reviews_module as reviews_module  # noqa: E402
 
@@ -435,7 +435,9 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
     request_change_client = model_client.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response_for_unmodified_draft(docx_bytes)],
-            critic_id: [_critic_no_delta_response()],
+            critic_id: [
+                critic_keeps(_primary_request_change_response_for_unmodified_draft(docx_bytes))
+            ],
         }
     )
     request_change_result = review_spine.run_review(

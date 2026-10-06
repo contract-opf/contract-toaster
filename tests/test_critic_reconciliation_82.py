@@ -14,20 +14,24 @@ FAILS on a tree without those two modules (ImportError on the module-level
 imports below) and PASSES once both exist and implement the documented
 reconciliation rules.
 
-## What this test asserts (mirrors the issue's Required verification)
+## What this test asserts (table updated by issue #138 to ADR 0001's rules)
 
-  1. A primary-only issue survives reconciliation unchanged.
-  2. A critic-added issue is appended to the final issues list with
-     provenance="critic-added" attribution.
-  3. A contested replacement leaves the primary's proposed_replacement_text
-     untouched and is recorded under critic_delta.contested_replacements in
-     the shape issue #36's UI consumes (section_ref, primary_replacement_text,
-     critic_objection[, critic_suggested_replacement]).
+  1. A primary issue the critic KEEPs (restates in its final result)
+     survives with provenance "model"; and there is no reconciling without a
+     critic at all -- `reconcile(critic_result=None)` refuses.
+  2. A critic-added issue -- one in the critic's final issues the primary
+     never raised -- carries provenance="critic-added" attribution and is
+     recorded as a computed `added` override.
+  3. A REVISED replacement is the CRITIC's: the final issue is the critic's,
+     and the override (primary version, critic version, reason) is recorded
+     under critic_delta.overrides. The deprecated contested_replacements
+     array is still forwarded in the shape issue #36's UI consumes.
   4. A hard-rejection detector fire survives reconciliation (monotonic) even
      when BOTH model passes are silent on it -- decision forced to
-     REQUEST_CHANGE.
+     REQUEST_CHANGE. (Unchanged.)
   5. The decision can move ACCEPT -> REQUEST_CHANGE via the critic, but a
-     critic ACCEPT can never reverse a decision forced by a detector fire.
+     critic ACCEPT can never reverse a decision forced by a detector fire or
+     a primary hard rejection. (Unchanged assertions.)
   6. A critic response that is schema-invalid after its bounded retry
      reaches terminal ERROR_MANUAL_REVIEW_REQUIRED -- and composing that
      into a two-pass review never produces a silent single-pass DONE
@@ -130,16 +134,31 @@ def _detector_fire(topic_id: str = "one-way-confidentiality", rule_id: str = "on
 
 def test_primary_only_issue_survives(failures: list[str]) -> None:
     primary = _primary_request_change()
-    result = recon.reconcile(primary_result=primary, critic_result=None, detector_fires=[])
+    # Issue #138: the critic's result is final, so a primary issue survives
+    # because the critic KEEPs it -- restated in its own final issues.
+    critic = json.loads(json.dumps(primary))
+    critic["critic_delta"] = {
+        "dispositions": [{"issue_id": "I1", "disposition": "KEEP", "reason": "Same issue."}],
+        "overrides": [],
+    }
+    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
 
     if result["decision"] != "REQUEST_CHANGE":
         failures.append(f"[1a] Expected decision=REQUEST_CHANGE; got {result['decision']!r}")
     if len(result["issues"]) != 1:
-        failures.append(f"[1b] Expected exactly 1 issue (primary-only); got {len(result['issues'])}")
+        failures.append(f"[1b] Expected exactly 1 issue (kept); got {len(result['issues'])}")
     elif result["issues"][0]["provenance"] != "model":
-        failures.append(f"[1c] Primary issue provenance must remain 'model'; got {result['issues'][0]['provenance']!r}")
-    if result["critic_delta"] is not None:
-        failures.append(f"[1d] No critic ran; critic_delta must be null; got {result['critic_delta']!r}")
+        failures.append(f"[1c] A kept primary issue's provenance must remain 'model'; got {result['issues'][0]['provenance']!r}")
+    overrides = (result["critic_delta"] or {}).get("overrides") or []
+    if overrides:
+        failures.append(f"[1d] A critic that changed nothing records no override; got {overrides!r}")
+
+    # No critic, no final review: the primary is never reconciled alone.
+    try:
+        recon.reconcile(primary_result=primary, critic_result=None, detector_fires=[])
+        failures.append("[1e] reconcile() must refuse to run without the critic's result")
+    except ValueError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +190,12 @@ def test_critic_added_issue_appended_with_attribution(failures: list[str]) -> No
 
     if result["decision"] != "REQUEST_CHANGE":
         failures.append(f"[2g] A critic-added issue must force REQUEST_CHANGE; got {result['decision']!r}")
+    computed = [
+        o for o in (result["critic_delta"] or {}).get("overrides") or []
+        if o.get("source") == "computed"
+    ]
+    if [o.get("change") for o in computed] != ["added"]:
+        failures.append(f"[2h] The addition must be recorded as one computed 'added' override; got {computed!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -179,46 +204,53 @@ def test_critic_added_issue_appended_with_attribution(failures: list[str]) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_contested_replacement_primary_text_stands(failures: list[str]) -> None:
+def test_revised_replacement_is_the_critics(failures: list[str]) -> None:
     primary = _primary_request_change()
-    # Issue #627: the model no longer authors `proposed_replacement_text`
-    # (the pipeline derives it from the proven transcript), so the property
-    # being guarded is stated on the whole issue rather than on that one
-    # field -- and stated more strongly for it: the critic may not silently
-    # rewrite ANY of the primary's issue, not just its replacement text.
-    original_issue = json.loads(json.dumps(primary["issues"][0]))
     critic = _load_fixture("critic_contested_replacement_valid.json")
 
     result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
 
     if len(result["issues"]) != 1:
-        failures.append(f"[3a] Contesting a replacement must not add/remove issues; got {len(result['issues'])}")
-    elif result["issues"][0] != original_issue:
-        failures.append(
-            f"[3b] The primary's issue must stand unmodified when the critic contests it; "
-            f"got {result['issues'][0]!r} expected {original_issue!r}"
-        )
+        failures.append(f"[3a] Revising an issue must not add/remove issues; got {len(result['issues'])}")
+    else:
+        expected = dict(critic["issues"][0])
+        expected["provenance"] = "model"  # the primary raised it too
+        if result["issues"][0] != expected:
+            failures.append(
+                f"[3b] The final issue must be the CRITIC's (issue #138); got "
+                f"{result['issues'][0]!r} expected {expected!r}"
+            )
 
     if result["critic_delta"] is None:
-        failures.append("[3c] critic_delta must be non-null when the critic contested a replacement.")
+        failures.append("[3c] critic_delta must be non-null when the critic revised an issue.")
         return
 
+    critic_overrides = [
+        o for o in result["critic_delta"]["overrides"] if o.get("source") == "critic"
+    ]
+    if len(critic_overrides) != 1:
+        failures.append(f"[3d] Expected the critic's one override recorded; got {critic_overrides!r}")
+    else:
+        override = critic_overrides[0]
+        if override.get("primary_value") != (
+            "Each party's aggregate liability under this Agreement shall not exceed $150,000."
+        ) or override.get("critic_value") != (
+            "Each party's aggregate liability under this Agreement shall not exceed $150,000, "
+            "except in cases of gross negligence or willful misconduct."
+        ) or not override.get("reason"):
+            failures.append(f"[3e] The override must carry both versions and the reason: {override!r}")
+
+    # The deprecated array still reaches the #36 UI in its own shape.
     contested = result["critic_delta"]["contested_replacements"]
     if len(contested) != 1:
-        failures.append(f"[3d] Expected exactly 1 contested replacement recorded; got {len(contested)}")
-        return
-    entry = contested[0]
-    for required_field in ("section_ref", "primary_replacement_text", "critic_objection"):
-        if required_field not in entry:
-            failures.append(f"[3e] Contested-replacement entry missing '{required_field}' (issue #36 UI shape): {entry!r}")
-    if entry.get("critic_suggested_replacement") != (
-        "Each party's aggregate liability under this Agreement shall not exceed $150,000, "
-        "except in cases of gross negligence or willful misconduct."
-    ):
-        failures.append("[3f] critic_suggested_replacement must be preserved verbatim for the side-by-side UI.")
+        failures.append(f"[3f] Expected the deprecated contested replacement forwarded; got {contested!r}")
+    else:
+        for required_field in ("section_ref", "primary_replacement_text", "critic_objection"):
+            if required_field not in contested[0]:
+                failures.append(f"[3g] Contested-replacement entry missing '{required_field}' (issue #36 UI shape): {contested[0]!r}")
 
     if result["critic_delta"]["added_issues"] != []:
-        failures.append("[3g] added_issues must be empty for this fixture.")
+        failures.append("[3h] added_issues must be empty for this fixture.")
 
 
 # ---------------------------------------------------------------------------
@@ -260,17 +292,25 @@ def test_decision_moves_accept_to_request_change_via_critic(failures: list[str])
 
 def test_critic_accept_never_reverses_detector_fire(failures: list[str]) -> None:
     primary = _primary_request_change()  # primary already REQUEST_CHANGE
-    # Critic says ACCEPT and KEEPs the primary's I1 (the disposition #137
-    # requires); it adds, contests and objects to nothing.
-    critic = _load_fixture("critic_keep_i1_accept_valid.json")
+    # Critic says ACCEPT and DROPs the primary's I1 (the disposition #137
+    # requires; issue #138 refuses a KEEP whose issue the critic's own list
+    # does not carry); it adds, contests and objects to nothing.
+    critic = _load_fixture("critic_drop_i1_accept_valid.json")
     fire = _detector_fire(topic_id="limitation-of-liability-detector", rule_id="liability-floor")
 
-    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[fire])
+    # Issue #138: the primary's I1 is a hard rejection here, so the critic's
+    # ACCEPT (which carries no issue) cannot remove it either -- guard 1.
+    result = recon.reconcile(
+        primary_result=primary,
+        critic_result=critic,
+        detector_fires=[fire],
+        hard_rejection_rule_ids={"limitation-of-liability"},
+    )
 
     if result["decision"] != "REQUEST_CHANGE":
         failures.append(
             f"[5b] A critic ACCEPT must never downgrade a decision forced by a detector fire "
-            f"(or the primary's own REQUEST_CHANGE); got {result['decision']!r}"
+            f"(or a primary hard rejection); got {result['decision']!r}"
         )
     if len(result["issues"]) != 2:
         failures.append(f"[5c] Expected both the primary issue and the detector fire to survive; got {len(result['issues'])}")
@@ -456,6 +496,10 @@ def _v2_critic_response_with_replacement_text(
     # v2 has no `dispositions`/`overrides` (issue #137 added them to v3 only).
     base["critic_delta"].pop("dispositions", None)
     base["critic_delta"].pop("overrides", None)
+    # Issue #138 made the fixture's own `issues` the critic's complete list;
+    # the v2 projection keeps the pre-#137 shape (the finding in added_issues
+    # only), since v2 issues carry no `issue_key`.
+    base["issues"] = []
     added = base["critic_delta"]["added_issues"][0]
     added.pop("issue_key", None)
     added["proposed_replacement_text"] = text
@@ -578,7 +622,7 @@ def test_run_critic_pass_rejects_inference_profile_before_any_call(failures: lis
 TESTS = [
     test_primary_only_issue_survives,
     test_critic_added_issue_appended_with_attribution,
-    test_contested_replacement_primary_text_stands,
+    test_revised_replacement_is_the_critics,
     test_detector_fire_survives_both_models_silent,
     test_decision_moves_accept_to_request_change_via_critic,
     test_critic_accept_never_reverses_detector_fire,
@@ -609,7 +653,7 @@ def main() -> int:
     if failures:
         print(f"FAIL: {len(failures)} issue(s) found.")
         return 1
-    print("PASS: all critic pass + reconciliation (issue #82) assertions satisfied.")
+    print("PASS: all critic pass + reconciliation (issue #82, rules per #138) assertions satisfied.")
     return 0
 
 

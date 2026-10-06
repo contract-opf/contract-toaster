@@ -117,9 +117,8 @@ REVIEW_ID = "00000000-0000-4000-a000-000000000096"
 
 
 # ---------------------------------------------------------------------------
-# Real runs of the real spine. Two shapes, because the merge rule reaches
-# `confidence_band` by two different routes and `critic_delta` carries two
-# different lists.
+# Real runs of the real spine. Two shapes, because `critic_delta` carries two
+# different lists; the band on each is the critic's own (issue #138).
 # ---------------------------------------------------------------------------
 
 
@@ -143,31 +142,38 @@ def _run(primary_response: str, critic_fixture: str, docx_bytes: bytes) -> dict[
     return _run_raw(primary_response, _critic_fixture(critic_fixture), docx_bytes)
 
 
+def _critic_with_band(name: str, confidence_state: str) -> str:
+    """A shipped critic fixture reporting its own `confidence_state`. Issue
+    #138 (ADR 0001): the critic's band is the final one -- the #265 degrade
+    rule is retired -- so the band this file carries through is the one the
+    CRITIC reported, which is a model output the real pass validates."""
+    critic = json.loads(_critic_fixture(name))
+    critic["confidence_state"] = confidence_state
+    critic["confidence_band"] = confidence_state
+    return json.dumps(critic)
+
+
 def _run_added_issue() -> dict[str, Any]:
-    """The issue's own reproduction: a primary that already reported
-    `LOW_CONFIDENCE`, plus a critic that ADDS an issue the primary missed.
-    The #265 merge rule degrades one level, so the merged band is
+    """The issue's own reproduction: a primary that found nothing, plus a
+    critic that ADDS an issue the primary missed and reports
     `MANUAL_REVIEW_REQUIRED` -- the worst band a completed review can carry,
     and therefore the strongest test of the Option B invariant below."""
-    primary = json.loads(ts._primary_accept_response())
-    primary["confidence_state"] = "LOW_CONFIDENCE"
-    primary["confidence_band"] = "LOW_CONFIDENCE"
-    return _run(
-        json.dumps(primary),
-        "critic_added_issue_valid.json",
+    return _run_raw(
+        ts._primary_accept_response(),
+        _critic_with_band("critic_added_issue_valid.json", "MANUAL_REVIEW_REQUIRED"),
         ts._build_draft_docx(sfp_module, {}),
     )
 
 
 def _run_contested_replacement() -> dict[str, Any]:
     """A fully confident primary REQUEST_CHANGE whose replacement text the
-    critic CONTESTS. Nothing is rewritten -- the objection is recorded in
-    `critic_delta.contested_replacements` -- and the merge rule degrades
-    `OK` to `LOW_CONFIDENCE`."""
+    critic REVISES, reporting `LOW_CONFIDENCE` itself. The override is
+    recorded in `critic_delta` (the critic's own `overrides`, the computed
+    diff, and the deprecated `contested_replacements` it still fills)."""
     docx_bytes = ts._build_draft_docx(sfp_module, {"sec-8": ts._SEC8_DRAFT_TEXT})
-    return _run(
+    return _run_raw(
         ts._primary_request_change_response_with_transcript(docx_bytes),
-        "critic_contested_replacement_valid.json",
+        _critic_with_band("critic_contested_replacement_valid.json", "LOW_CONFIDENCE"),
         docx_bytes,
     )
 
@@ -190,7 +196,9 @@ def _run_leakage_blocked() -> dict[str, Any]:
     objection rewritten to text the leakage scanner blocks -- so the gate
     fires on a `critic_delta` field rather than on a primary issue."""
     docx_bytes = ts._build_draft_docx(sfp_module, {"sec-8": ts._SEC8_DRAFT_TEXT})
-    critic = json.loads(_critic_fixture("critic_contested_replacement_valid.json"))
+    critic = json.loads(
+        _critic_with_band("critic_contested_replacement_valid.json", "LOW_CONFIDENCE")
+    )
     critic["critic_delta"]["contested_replacements"][0]["critic_objection"] = _LEAKY_OBJECTION
     return _run_raw(
         ts._primary_request_change_response_with_transcript(docx_bytes),
@@ -312,8 +320,8 @@ def test_a_contested_replacement_is_carried_as_the_merged_dict_shape() -> None:
 
     assert result["status"] == "OK", "setup: the contested-replacement run still completes"
     assert result["confidence_band"] == "LOW_CONFIDENCE", (
-        "the #265 merge rule degrades a fully confident primary one level when "
-        f"the critic contests a replacement; got {result['confidence_band']!r}"
+        "the critic's own band is the final one (issue #138 retired the #265 "
+        f"degrade rule); got {result['confidence_band']!r}"
     )
     contested = result["critic_delta"]["contested_replacements"]
     assert contested, "the contested replacement must survive the merge"

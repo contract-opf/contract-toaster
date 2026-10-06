@@ -1351,15 +1351,21 @@ def run_review(
             )
         detector_fires = floor_judge.floor_fires(judgment)
 
-    # Stage 4: deterministic reconciliation (issue #82). `detector_fires` is
+    # Stage 4: deterministic reconciliation (issue #82; issue #138 / ADR
+    # 0001 made the critic's result the final review). `detector_fires` is
     # empty for a v1 review (issue #380 retired the lexical detector engine)
     # and for an OPF review with no Floor invariants; populated above for an
-    # OPF review whose Floor judge found a violation.
+    # OPF review whose Floor judge found a violation. The hard-rejection rule
+    # ids are what guard 1 compares a primary issue's topic with: a hard
+    # rejection the critic dropped is re-appended as `primary-retained`.
     report_progress(PROGRESS_RECONCILIATION)
     two_pass = reconciliation.run_two_pass_review(
         primary_pass_result=primary_result,
         critic_pass_result=critic_result,
         detector_fires=detector_fires,
+        hard_rejection_rule_ids=reconciliation.hard_rejection_rule_ids(
+            playbook, floor_invariants
+        ),
     )
     if two_pass["status"] != STATUS_OK:
         # Issue #665: `reason` carries a TOKEN, never `two_pass["stage"]`.
@@ -1371,7 +1377,10 @@ def run_review(
         # This branch is reached ONLY for a critic failure: stage 2 above
         # already returned for a failed primary pass, so
         # `run_two_pass_review`'s own primary-verbatim branch cannot fire
-        # from here.
+        # from here. Issue #138: that includes a critic result reconcile()
+        # refused (a primary issue left without a disposition), which fails
+        # closed as `critic_schema_invalid` rather than shipping the
+        # primary's output alone.
         return _terminal(
             status=two_pass["status"],
             reason=critic_failure_reason(two_pass),
@@ -1395,7 +1404,9 @@ def run_review(
     #
     # Issue #626: block mode. A reconciled result carrying the v3 top-level
     # `block_patches`/`block_ops` (`reconciliation.reconcile` forwards them
-    # from the primary pass) is a Candidate E transcript and routes to
+    # from the CRITIC pass since issue #138, so every gate below -- leakage
+    # scan, block proof, apply, pen rules, OOXML round trip -- runs over the
+    # critic's text) is a Candidate E transcript and routes to
     # `generate_redline_from_blocks`; anything else takes the no-document
     # path above. Issue #627 made this the LIVE branch, not a dormant
     # one: `primary_review_pass` validates against

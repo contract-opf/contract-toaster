@@ -1477,13 +1477,13 @@ def _host_critic_notes(
 
       1. the first candidate whose `section_ref` is the note's -- the
          disagreement sits on the clause it is about;
-      2. otherwise the first candidate at all. A critic-added issue has no
-         edits of its own under the add-only merge
-         (`reconciliation.reconcile` forwards only the primary's
-         transcript), so unless the first review also edited its section
-         it has no clause to hang on; its explanation still reaches the
-         document, and names its own section so it cannot be read as a
-         remark about its host.
+      2. otherwise the first candidate at all. A critic-added issue the
+         critic raised flag-only has no edits of its own (since issue #138
+         `reconciliation.reconcile` forwards the critic's transcript, so an
+         issue the critic DID edit is an ordinary candidate), so unless
+         another issue edited its section it has no clause to hang on; its
+         explanation still reaches the document, and names its own section
+         so it cannot be read as a remark about its host.
 
     No candidate at all (nothing in the document inserts text) leaves the
     notes unrendered: there is no tracked insertion to attach a footnote to,
@@ -1581,7 +1581,8 @@ def generate_redline_from_blocks(
     Same inputs, same gates, IN THE SAME ORDER, and the same status-dict
     vocabulary; only the patcher differs. `reconciled_result` is
     `reconciliation.reconcile()`'s output carrying the v3 top-level
-    `block_patches`/`block_ops` it forwards from the primary pass.
+    `block_patches`/`block_ops` it forwards from the CRITIC pass (issue #138,
+    ADR 0001 -- before it, the primary's).
 
     ## Gate order (identical to `generate_redline`, see its docstring)
 

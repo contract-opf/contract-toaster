@@ -93,6 +93,7 @@ import model_client  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import reconciliation as recon  # noqa: E402
 import review_spine  # noqa: E402
+from critic_final_result import critic_keeps  # noqa: E402
 
 # Cross-file reuse of the already-proven synthetic docx builder and the
 # document-inspection helpers (same convention
@@ -1074,31 +1075,6 @@ def _full_pipeline_response(block_map: dict) -> str:
     )
 
 
-def _critic_accept() -> str:
-    return json.dumps(
-        {
-            "decision": "ACCEPT",
-            "confidence_state": "OK",
-            "issues": [],
-            "block_patches": [],
-            "block_ops": [],
-            "critic_delta": {
-                "dispositions": [
-                    {
-                        "issue_id": key,
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit.",
-                    }
-                    # Issue #137: the primary raised I1-I3, and a critic owes
-                    # a disposition for every one of them.
-                    for key in ("I1", "I2", "I3")
-                ],
-                "overrides": [],
-            },
-        }
-    )
-
-
 def test_a_fake_v3_response_drives_the_full_pipeline_to_a_multi_edit_redline(
     failures: list[str],
 ) -> None:
@@ -1111,7 +1087,9 @@ def test_a_fake_v3_response_drives_the_full_pipeline_to_a_multi_edit_redline(
     client = model_client.FakeBedrockClient(
         {
             primary_id: [_full_pipeline_response(block_map)],
-            critic_id: [_critic_accept()],
+            # Issue #138: the critic's transcript is the one that ships, so a
+            # critic standing behind all three issues restates them.
+            critic_id: [critic_keeps(_full_pipeline_response(block_map))],
         }
     )
     result = review_spine.run_review(
@@ -1212,47 +1190,60 @@ def _primary_result_with_key(issue_key: str) -> dict[str, Any]:
     }
 
 
-def _critic_result_adding_key(issue_key: str) -> dict[str, Any]:
-    """A reconcile-shaped critic response body adding ONE issue under
-    `issue_key`. The added issue's `(playbook_topic_id, section_ref)` is
-    distinct from the primary's, so `_issue_key`'s topic-level dedupe does
-    NOT swallow it -- the only thing being collided here is the handle."""
-    return {
+def _critic_result_dropping_and_adding(issue_key: str, *, orphan_key: str | None = None) -> dict[str, Any]:
+    """A reconcile-shaped critic FINAL result (issue #138, ADR 0001) that
+    DROPS the primary's one issue and raises its own under `issue_key`. The
+    critic numbers from "I1" in its own response, so its first issue
+    routinely takes the key the primary's first issue had. `orphan_key`, when
+    given, is a key the critic's transcript names but no critic issue carries
+    -- an unattributed edit stage 5 rejects for the batch."""
+    result: dict[str, Any] = {
         "schema_version": recon.SCHEMA_VERSION,
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "confidence_band": None,
-        "issues": [],
+        "issues": [
+            {
+                "issue_key": issue_key,
+                "section_ref": "Section 3. Governing Law",
+                "section_title": "Section 3. Governing Law",
+                "counterparty_change_summary": "The forum was moved.",
+                "decision": "REQUEST_CHANGE",
+                "external_rationale_for_footnote": "The forum must stay in your state.",
+                "playbook_topic_id": "governing-law",
+                "internal_precedent_citation": None,
+                "provenance": "critic-added",
+            }
+        ],
         "critic_delta": {
-            "added_issues": [
-                {
-                    "issue_key": issue_key,
-                    "section_ref": "Section 3. Governing Law",
-                    "section_title": "Section 3. Governing Law",
-                    "counterparty_change_summary": "The forum was moved.",
-                    "decision": "REQUEST_CHANGE",
-                    "external_rationale_for_footnote": "The forum must stay in your state.",
-                    "playbook_topic_id": "governing-law",
-                    "internal_precedent_citation": None,
-                    "provenance": "critic-added",
-                }
+            "dispositions": [
+                {"issue_id": "I1", "disposition": "DROP", "reason": "Not supported."}
             ],
-            "contested_replacements": [],
-            "rationale_objections": [],
+            "overrides": [],
         },
         "verdict_summary": None,
     }
+    if orphan_key is not None:
+        result["block_patches"] = [
+            {
+                "block_id": "b0001",
+                "segments": [{"op": "insert", "text": "x", "issue_key": orphan_key}],
+            }
+        ]
+    return result
 
 
-def test_a_critic_added_issue_cannot_take_a_primary_issues_key(
+def test_a_retained_hard_rejection_cannot_take_a_critic_issues_key(
     failures: list[str],
 ) -> None:
-    """The critic's "I1" is re-keyed against the MERGED result; the
-    primary's "I1" is the one that keeps it, because the primary's keys are
-    what `block_patches` segments name."""
+    """Issue #138 inverted which producer keeps its key. The CRITIC's keys
+    are the ones its forwarded `block_patches` segments name, so they never
+    move; a primary hard rejection the critic dropped is re-appended
+    (`primary-retained`) and is the one re-keyed -- lowest unused index."""
     merged = recon.reconcile(
         primary_result=_primary_result_with_key("I1"),
-        critic_result=_critic_result_adding_key("I1"),
+        critic_result=_critic_result_dropping_and_adding("I1"),
+        hard_rejection_rule_ids={"term-length"},
     )
     issues = merged["issues"]
     keys = [issue.get("issue_key") for issue in issues]
@@ -1261,43 +1252,77 @@ def test_a_critic_added_issue_cannot_take_a_primary_issues_key(
             f"[11a] the merged issues list carries a duplicate issue_key: {keys!r}"
         )
     by_topic = {issue.get("playbook_topic_id"): issue for issue in issues}
-    if "governing-law" not in by_topic:
-        failures.append(f"[11b] the critic-added issue never reached the merge: {keys!r}")
+    if "term-length" not in by_topic:
+        failures.append(f"[11b] the dropped hard rejection was not retained: {keys!r}")
         return
-    if by_topic.get("term-length", {}).get("issue_key") != "I1":
+    if by_topic.get("governing-law", {}).get("issue_key") != "I1":
         failures.append(
-            "[11c] the PRIMARY's key was moved instead of the critic's -- that orphans "
-            f"every block_patches segment naming it: {keys!r}"
+            "[11c] the CRITIC's key was moved instead of the retained issue's -- that "
+            f"orphans every block_patches segment naming it: {keys!r}"
         )
-    if by_topic["governing-law"].get("issue_key") != "I2":
+    if by_topic["term-length"].get("issue_key") != "I2":
         failures.append(
-            "[11d] the critic-added issue was not re-keyed to the lowest unused index: "
-            f"{by_topic['governing-law'].get('issue_key')!r}"
+            "[11d] the retained issue was not re-keyed to the lowest unused index: "
+            f"{by_topic['term-length'].get('issue_key')!r}"
         )
-
-    # The audit record and the merged issue are the SAME object, so the
-    # critic_delta the UI renders cannot disagree with the issues list.
-    recorded = (merged.get("critic_delta") or {}).get("added_issues") or []
-    if not recorded:
-        failures.append("[11e] critic_delta lost the added issue entirely")
-    elif recorded[0].get("issue_key") != by_topic["governing-law"].get("issue_key"):
+    if by_topic["term-length"].get("provenance") != recon.PROVENANCE_PRIMARY_RETAINED:
         failures.append(
-            "[11f] critic_delta still records the pre-merge key "
-            f"{recorded[0].get('issue_key')!r} while issues says "
-            f"{by_topic['governing-law'].get('issue_key')!r}"
+            f"[11e] the retained issue's provenance is {by_topic['term-length'].get('provenance')!r}"
         )
 
-    # A critic key that does NOT collide is left exactly as the model wrote
-    # it -- re-keying is a collision repair, not a renumbering.
-    untouched = recon.reconcile(
+    # A key the critic's transcript names is never handed to an appended
+    # issue, even when no critic issue carries it: that would silently give
+    # an unattributed edit an author.
+    reserved = recon.reconcile(
         primary_result=_primary_result_with_key("I1"),
-        critic_result=_critic_result_adding_key("I7"),
+        critic_result=_critic_result_dropping_and_adding("I1", orphan_key="I2"),
+        hard_rejection_rule_ids={"term-length"},
     )
-    added = [i for i in untouched["issues"] if i.get("playbook_topic_id") == "governing-law"]
-    if not added or added[0].get("issue_key") != "I7":
+    retained = [i for i in reserved["issues"] if i.get("playbook_topic_id") == "term-length"]
+    if not retained or retained[0].get("issue_key") != "I3":
         failures.append(
-            f"[11g] a non-colliding critic key was renumbered anyway: {added!r}"
+            f"[11f] a retained issue took a key the critic's transcript names: {retained!r}"
         )
+
+    # Nor a key a forwarded `critic_delta.added_issues` entry carries: v3
+    # requires keys unique across `issues` AND `added_issues`, and the
+    # reconciler forwards the deprecated array verbatim.
+    with_added = _critic_result_dropping_and_adding("I1")
+    with_added["critic_delta"]["added_issues"] = [
+        {**with_added["issues"][0], "issue_key": "I2"}
+    ]
+    spanned = recon.reconcile(
+        primary_result=_primary_result_with_key("I1"),
+        critic_result=with_added,
+        hard_rejection_rule_ids={"term-length"},
+    )
+    retained = [i for i in spanned["issues"] if i.get("playbook_topic_id") == "term-length"]
+    if not retained or retained[0].get("issue_key") != "I3":
+        failures.append(
+            "[11h] a retained issue took a key a forwarded added_issues entry carries: "
+            f"{retained!r}"
+        )
+    duplicate = pp._duplicate_issue_key_error(spanned, pp.load_output_schema())
+    if duplicate is not None:
+        failures.append(f"[11i] the reconciled result repeats an issue_key: {duplicate}")
+
+    # A retained key that does NOT collide is left as it was.
+    untouched = recon.reconcile(
+        primary_result=_primary_result_with_key("I7"),
+        critic_result={
+            **_critic_result_dropping_and_adding("I1"),
+            "critic_delta": {
+                "dispositions": [
+                    {"issue_id": "I7", "disposition": "DROP", "reason": "Not supported."}
+                ],
+                "overrides": [],
+            },
+        },
+        hard_rejection_rule_ids={"term-length"},
+    )
+    kept = [i for i in untouched["issues"] if i.get("playbook_topic_id") == "term-length"]
+    if not kept or kept[0].get("issue_key") != "I7":
+        failures.append(f"[11g] a non-colliding retained key was renumbered anyway: {kept!r}")
 
 
 def test_a_detector_fire_cannot_take_a_model_issues_key(failures: list[str]) -> None:
@@ -1319,8 +1344,11 @@ def test_a_detector_fire_cannot_take_a_model_issues_key(failures: list[str]) -> 
         fire.update(extra)
         return fire
 
+    primary = _primary_result_with_key("I1")
     merged = recon.reconcile(
-        primary_result=_primary_result_with_key("I1"),
+        primary_result=primary,
+        # Issue #138: the critic's final result, standing behind the primary.
+        critic_result=json.loads(critic_keeps(primary)),
         detector_fires=[_fire("uncapped-liability", issue_key="I1"), _fire("assignment")],
     )
     keys = [issue.get("issue_key") for issue in merged["issues"]]
@@ -1335,57 +1363,48 @@ def test_a_detector_fire_cannot_take_a_model_issues_key(failures: list[str]) -> 
         failures.append(f"[12c] a colliding fire kept the model's key: {by_topic!r}")
 
 
-def _critic_adds_colliding_issue() -> str:
-    """The wire-shaped version of the same critic response: what the pass
-    actually returns, keys and all, with the pipeline-stamped fields the
-    model is never asked for left off."""
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "issues": [],
-            "block_patches": [],
-            "block_ops": [],
-            "critic_delta": {
-                "dispositions": [
-                    {
-                        "issue_id": key,
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit.",
-                    }
-                    # Issue #137: the primary raised I1-I3, and a critic owes
-                    # a disposition for every one of them.
-                    for key in ("I1", "I2", "I3")
-                ],
-                "overrides": [],
-                "added_issues": [
-                    {
-                        "issue_key": "I1",
-                        "section_ref": "Section 3. Governing Law",
-                        "section_title": "Section 3. Governing Law",
-                        "counterparty_change_summary": "The forum was moved.",
-                        "decision": "REQUEST_CHANGE",
-                        "external_rationale_for_footnote": (
-                            "The forum must stay in your state."
-                        ),
-                        "playbook_topic_id": "governing-law",
-                        "internal_precedent_citation": None,
-                    }
-                ],
-                "contested_replacements": [],
-                "rationale_objections": [],
-            },
-        }
-    )
+def _critic_restates_and_adds_an_issue(block_map: dict) -> str:
+    """The critic's FINAL result (issue #138, ADR 0001), wire-shaped: it
+    restates the primary's three issues and their edits verbatim (KEEP each)
+    and raises a fourth, flag-only, under the next key in ITS OWN response.
+    The deprecated `added_issues` array records the same finding under a key
+    unique across the response, as the prompt asks."""
+    body = json.loads(_full_pipeline_response(block_map))
+    added = {
+        "issue_key": "I4",
+        "section_ref": "Section 3. Governing Law",
+        "section_title": "Section 3. Governing Law",
+        "counterparty_change_summary": "The forum was moved.",
+        "decision": "REQUEST_CHANGE",
+        "external_rationale_for_footnote": "The forum must stay in your state.",
+        "playbook_topic_id": "governing-law",
+        "internal_precedent_citation": None,
+    }
+    for issue in body["issues"]:
+        issue.pop("provenance", None)
+    body.pop("schema_version", None)
+    body["issues"].append(added)
+    body["critic_delta"] = {
+        "dispositions": [
+            {"issue_id": key, "disposition": "KEEP", "reason": "Same issue and the same edit."}
+            for key in ("I1", "I2", "I3")
+        ],
+        "overrides": [],
+        "added_issues": [{**added, "issue_key": "I5"}],
+        "contested_replacements": [],
+        "rationale_objections": [],
+    }
+    return json.dumps(body)
 
 
 def test_a_colliding_critic_key_does_not_misattribute_the_delivered_redline(
     failures: list[str],
 ) -> None:
-    """End to end, through `run_review`: the same primary transcript as the
-    full-pipeline test, but the critic adds an issue keyed "I1". The
-    delivered document must footnote the primary's own rationale on the
-    primary's own edit."""
+    """End to end, through `run_review`: the same transcript as the
+    full-pipeline test, restated by the critic (issue #138: the critic's
+    transcript is the one that ships), plus a flag-only issue the critic
+    added. The delivered document must footnote each edit's own rationale,
+    and the added issue must not be handed anyone's derived text."""
     docx_bytes = _make_docx(SECTIONS)
     block_map = ens.build_block_map(_paragraphs(docx_bytes))
     bundle = _bundle()
@@ -1395,7 +1414,7 @@ def test_a_colliding_critic_key_does_not_misattribute_the_delivered_redline(
     client = model_client.FakeBedrockClient(
         {
             primary_id: [_full_pipeline_response(block_map)],
-            critic_id: [_critic_adds_colliding_issue()],
+            critic_id: [_critic_restates_and_adds_an_issue(block_map)],
         }
     )
     result = review_spine.run_review(
@@ -1680,7 +1699,7 @@ TESTS = [
     test_a_transcript_that_never_proves_is_terminal_not_silently_accepted,
     test_no_block_map_means_no_pre_check,
     test_a_fake_v3_response_drives_the_full_pipeline_to_a_multi_edit_redline,
-    test_a_critic_added_issue_cannot_take_a_primary_issues_key,
+    test_a_retained_hard_rejection_cannot_take_a_critic_issues_key,
     test_a_detector_fire_cannot_take_a_model_issues_key,
     test_a_colliding_critic_key_does_not_misattribute_the_delivered_redline,
     test_stage_five_and_a_half_is_gone_from_the_spine,

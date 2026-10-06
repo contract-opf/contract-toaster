@@ -81,7 +81,7 @@ BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 # builder. Same convention as tests/test_playbook_catalog_endpoint.py.
 BACKEND_ROOT = REPO_ROOT / "backend"
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, BACKEND_ROOT):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, BACKEND_ROOT, REPO_ROOT / "tests"):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
@@ -103,6 +103,7 @@ import reviews as reviews_module  # noqa: E402
 import sample_playbooks  # noqa: E402
 import seed_active_bundle  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402 -- issue #412 rename/remove reach the catalog
+from critic_final_result import critic_keeps  # noqa: E402
 
 # The REAL deploy bootstrap (issue #433's only install path). Imported by
 # file location because `deploy/dts/` is not an importable package -- this
@@ -462,27 +463,11 @@ def _primary_request_change_response() -> str:
 
 
 def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "critic_delta": {
-                # Issue #137: a critic owes a disposition for every
-                # first-reviewer issue -- here the primary's one issue, I1.
-                "dispositions": [
-                    {
-                        "issue_id": "I1",
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit; compliant with the playbook position.",
-                    }
-                ],
-                "overrides": [],
-            },
-            "verdict_summary": None,
-        }
-    )
+    """The critic's final result standing behind every first-reviewer issue.
+    Issue #138 / ADR 0001: the critic's response IS the final review, so
+    agreeing means restating the issues and edits with a KEEP disposition
+    each (`critic_final_result.critic_keeps`)."""
+    return critic_keeps(_primary_request_change_response())
 
 
 def _fake_client() -> Any:

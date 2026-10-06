@@ -79,9 +79,11 @@ FIXTURE_PATH = (
     / "reformatted-contract.SYNTHETIC.docx"
 )
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, REPO_ROOT / "tests"):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
+
+from critic_final_result import critic_keeps  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -264,29 +266,12 @@ def _primary_request_change_response(docx_bytes: bytes) -> str:
     )
 
 
-def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "critic_delta": {
-                # Issue #137: a critic owes a disposition for every
-                # first-reviewer issue -- here the primary's two, I1 and I2.
-                "dispositions": [
-                    {
-                        "issue_id": key,
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit; compliant with the playbook position.",
-                    }
-                    for key in ("I1", "I2")
-                ],
-                "overrides": [],
-            },
-            "verdict_summary": None,
-        }
-    )
+def _critic_no_delta_response(docx_bytes: bytes) -> str:
+    """The critic's final result standing behind every first-reviewer issue.
+    Issue #138 / ADR 0001: the critic's response IS the final review, so
+    agreeing means restating the issues and edits with a KEEP disposition
+    each (`critic_final_result.critic_keeps`)."""
+    return critic_keeps(_primary_request_change_response(docx_bytes))
 
 
 def _load_bundle() -> dict[str, Any]:
@@ -311,7 +296,7 @@ def _run_pipeline(rs, model_client_module):
     fake_client = model_client_module.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response(docx_bytes)],
-            critic_id: [_critic_no_delta_response()],
+            critic_id: [_critic_no_delta_response(docx_bytes)],
         }
     )
     result = rs.run_review(docx_bytes, bundle, fake_client, review_id="quote-redline-e2e-381")

@@ -25,7 +25,8 @@ primary's passes.
      provider-strict one -- carry the new fields, and the strict one forces
      them into `required` as the strict-mode rule demands.
   5. The cross-response disposition contract (ADR 0001 amendment 2026-09-17):
-     a first-reviewer issue with no disposition, or with two, is
+     a first-reviewer issue with no disposition, or with two, or (issue
+     #138) a KEEP/REVISE for one the critic's own issues do not carry, is
      a `schema_invalid` that spends the one bounded retry and, if the
      retry repeats it, terminates as `critic_schema_invalid` -- the unchanged
      classification. A critic that fixes it on the retry succeeds. An ACCEPT
@@ -135,6 +136,11 @@ def _critic_issue() -> dict[str, Any]:
         "would leave a sentence that reads as an unlimited-liability term."
     )
     return issue
+
+
+def _flag_only(issue: dict[str, Any]) -> dict[str, Any]:
+    """`issue` as the critic restates it with no edit of its own."""
+    return {key: value for key, value in issue.items() if key != "proposed_replacement_text"}
 
 
 def _full_critic_response(world: _World, **delta_overrides: Any) -> dict[str, Any]:
@@ -267,13 +273,16 @@ def test_full_critic_result_validates_and_comes_back_intact(
 
 def test_a_flag_only_critic_result_needs_no_edits(failures: list[str], world: _World) -> None:
     """The shape the fake critic of every older suite has, plus the
-    disposition it now owes: KEEP, no overrides, no edits."""
+    disposition it now owes: KEEP, no overrides, no edits. Issue #138: the
+    kept issue is in the critic's own `issues` (flag-only -- no transcript),
+    because those ARE the final review; a KEEP over an empty list is refused
+    (`test_a_keep_whose_issue_is_absent_fails_then_recovers`)."""
     body = {
         "schema_version": pp.OUTPUT_SCHEMA_VERSION,
         "decision": "REQUEST_CHANGE",
         "confidence_state": "OK",
         "confidence_band": None,
-        "issues": [],
+        "issues": [_flag_only(world.primary["issues"][0])],
         "block_patches": [],
         "block_ops": [],
         "critic_delta": {
@@ -512,6 +521,27 @@ def test_missing_disposition_fails_then_recovers(failures: list[str], world: _Wo
     )
 
 
+def test_a_keep_whose_issue_is_absent_fails_then_recovers(
+    failures: list[str], world: _World
+) -> None:
+    """Issue #138: a KEEP (or REVISE) says the critic stands behind the
+    first reviewer's issue, and the critic's own `issues` are the final
+    review -- so a KEEP over a list that does not carry the issue would drop
+    it silently. It costs the critic its informed retry, like a missing
+    disposition, and the reconciler refuses it as well."""
+    bad = _full_critic_response(
+        world,
+        dispositions=[
+            {"issue_id": "I1", "disposition": "KEEP", "reason": "Same issue and the same edit."}
+        ],
+        overrides=[],
+    )
+    bad.update(decision="ACCEPT", issues=[], block_patches=[], block_ops=[])
+    _expect_terminal_then_ok(
+        failures, world, "[5i]", bad, "KEEPs or REVISEs first-reviewer issue(s) I1"
+    )
+
+
 def test_null_critic_delta_over_a_reviewer_issue_fails(failures: list[str], world: _World) -> None:
     body = _full_critic_response(world)
     body["critic_delta"] = None
@@ -649,6 +679,7 @@ TESTS = [
     test_model_facing_projections_carry_the_new_fields,
     test_one_tool_schema_serves_both_passes,
     test_missing_disposition_fails_then_recovers,
+    test_a_keep_whose_issue_is_absent_fails_then_recovers,
     test_null_critic_delta_over_a_reviewer_issue_fails,
     test_duplicate_disposition_fails,
     test_accept_primary_needs_no_disposition,

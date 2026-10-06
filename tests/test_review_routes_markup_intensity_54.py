@@ -530,7 +530,7 @@ class TestTheV1Prompt(unittest.TestCase):
 
     def _sent_critic_system_prompt(self, **kwargs: Any) -> str:
         client = model_client.FakeBedrockClient(
-            {CRITIC_MODEL_ID: [_load_fixture_text("critic_keep_i1_accept_valid.json")]}
+            {CRITIC_MODEL_ID: [_load_fixture_text("critic_drop_i1_accept_valid.json")]}
         )
         ledger: list[model_client.ModelInvocationRecord] = []
         critic_review_pass.run_critic_pass(

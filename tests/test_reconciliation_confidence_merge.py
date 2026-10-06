@@ -1,35 +1,34 @@
 #!/usr/bin/env python3
 """
-Slice test (TDD) for issue #265: "Reconciliation: critic disagreement never
-reaches the confidence band shown at the download gate".
+`reconcile()`'s confidence band and its schema conformance -- issue #265's
+merge rule, RETIRED by issue #138 (ADR 0001).
 
-## Root problem this proves fixed
+## What changed
 
-Before this slice, `reconcile()` (scripts/reconciliation.py) always copied
-`confidence_state` / `confidence_band` straight from `primary_result`, even
-when the critic contested a replacement or added an issue. The critic can
-force `decision=REQUEST_CHANGE`, but had no way to move the confidence band
--- so the band shown above the download button (the #85/#255 trust gate)
-could misrepresent a contested review as a confident one (`confidence_band
-= null`) even though the critic disagreed with the primary reviewer.
+Issue #265 made a critic that disagreed degrade the primary's
+`confidence_state` one level (a contested replacement or an added issue moved
+`OK` to `LOW_CONFIDENCE`, and so on), because the critic could only flag: the
+primary's words shipped, and a band that hid the critic's objection would
+have misrepresented a contested review as a confident one.
 
-## Merge rule under test (documented in docs/output-contract.md -> "Confidence
-band" -> "Critic-delta confidence merge rule")
+Under ADR 0001 the critic no longer contests -- it decides. Its result is the
+final review, so its own `confidence_state` is the final one
+(docs/output-contract.md -> "Confidence band" -> "Critic-delta confidence
+merge rule", rewritten by #138). This file pins the retirement:
 
-  - Confidence levels are ordered OK < LOW_CONFIDENCE < MANUAL_REVIEW_REQUIRED
-    < ERROR_MANUAL_REVIEW_REQUIRED (least to most degraded).
-  - If the critic contests a replacement OR adds an issue, the final
-    confidence_state is degraded (moved) at least one level below the
-    primary's confidence_state, capped at ERROR_MANUAL_REVIEW_REQUIRED.
-  - A critic rationale objection alone (no contested replacement, no added
-    issue) does NOT degrade the band.
-  - No critic delta at all -> the primary's confidence_state/confidence_band
-    pass through unchanged.
-  - The rule is monotonic: the critic can only degrade (never improve/raise)
-    the band relative to the primary's own confidence_state.
-  - confidence_band mirrors confidence_state: null when confidence_state is
-    OK, else the confidence_state string itself (per docs/output-contract.md
-    -> "Confidence band").
+  - the final `confidence_state` is the CRITIC's, whatever the primary's;
+  - so a critic CAN report a better band than the primary (the old rule's
+    monotonic "never raise" no longer holds -- the primary's band is not the
+    baseline any more);
+  - a critic override, an added issue or a rationale objection moves nothing
+    by itself;
+  - `confidence_band` mirrors the final `confidence_state`: null when OK.
+
+And it keeps the schema-conformance guard (`[7]`, issue #627 lineage): the
+result `reconcile()` stamps with `SCHEMA_VERSION` must validate against that
+schema, EXCEPT for the pipeline-owned extensions #138 documents, which are
+stripped first and nothing else: a `primary-retained` provenance, the
+`source` tag on a critic override, and the computed override entries.
 
 Run with: python3 tests/test_reconciliation_confidence_merge.py
 Exit codes: 0 = pass, 1 = fail
@@ -37,6 +36,7 @@ Exit codes: 0 = pass, 1 = fail
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 from typing import Any
@@ -50,330 +50,170 @@ if str(SCRIPTS_DIR) not in sys.path:
 import primary_review_pass as pp  # noqa: E402
 import reconciliation as recon  # noqa: E402
 
+_LEVELS = ("OK", "LOW_CONFIDENCE", "MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED")
 
-def _primary(confidence_state: str = "OK", decision: str = "ACCEPT") -> dict[str, Any]:
+
+def _issue(key: str, topic: str = "limitation-of-liability", section: str = "8") -> dict[str, Any]:
+    return {
+        "issue_key": key,
+        "section_ref": section,
+        "section_title": "Limitation of Liability",
+        "counterparty_change_summary": "Cap lowered to $75,000.",
+        "decision": "REQUEST_CHANGE",
+        "external_rationale_for_footnote": "Cap must remain at $150,000.",
+        "playbook_topic_id": topic,
+        "internal_precedent_citation": None,
+        "provenance": "model",
+    }
+
+
+def _primary(confidence_state: str = "OK", *, with_issue: bool = False) -> dict[str, Any]:
     return {
         "schema_version": recon.SCHEMA_VERSION,
-        "decision": decision,
+        "decision": "REQUEST_CHANGE" if with_issue else "ACCEPT",
         "confidence_state": confidence_state,
         "confidence_band": None if confidence_state == "OK" else confidence_state,
-        "issues": [],
+        "issues": [_issue("I1")] if with_issue else [],
         "critic_delta": None,
         "verdict_summary": "Nothing material changed.",
     }
 
 
-def _critic_added_issue() -> dict[str, Any]:
+def _critic(
+    confidence_state: str = "OK",
+    *,
+    keeps_primary_issue: bool = False,
+    adds_issue: bool = False,
+    objects: bool = False,
+    overrides: bool = False,
+) -> dict[str, Any]:
+    """A critic FINAL result (issue #138) with the knobs the old merge rule
+    keyed on. Every shape here is what `run_critic_pass` accepts: a
+    disposition for each primary issue, keys unique across the response."""
+    issues = []
+    dispositions = []
+    if keeps_primary_issue:
+        issues.append(_issue("I1"))
+        dispositions.append(
+            {
+                "issue_id": "I1",
+                "disposition": "REVISE" if overrides else "KEEP",
+                "reason": "Same issue.",
+            }
+        )
+    added: list[dict[str, Any]] = []
+    if adds_issue:
+        issues.append(_issue("I2", topic="non-exclusive-arrangement", section="9"))
+        added.append(_issue("I7", topic="non-exclusive-arrangement", section="9"))
     return {
         "schema_version": recon.SCHEMA_VERSION,
-        "decision": "REQUEST_CHANGE",
-        "confidence_state": "OK",
-        "confidence_band": None,
-        "issues": [],
+        "decision": "REQUEST_CHANGE" if issues else "ACCEPT",
+        "confidence_state": confidence_state,
+        "confidence_band": None if confidence_state == "OK" else confidence_state,
+        "issues": issues,
         "critic_delta": {
-            "added_issues": [
+            "dispositions": dispositions,
+            "overrides": [
                 {
-                    # Issue #627: v3 requires mutual uniqueness across the
-                    # WHOLE response, `issues` and `critic_delta.added_issues`
-                    # alike, and `validate_model_response` rejects a
-                    # duplicate -- but only WITHIN the one response it is
-                    # handed, which is why `reconcile` re-keys a critic
-                    # addition against the MERGED result. That re-keying is
-                    # asserted in tests/test_v3_flip_627.py, on a key that
-                    # actually collides; this fixture picks a free one so
-                    # these cases stay about the confidence merge.
-                    "issue_key": "I7",
-                    "section_ref": "9",
-                    "section_title": "Non-Exclusivity",
-                    "counterparty_change_summary": "Counterparty added a non-exclusive carve-out.",
-                    "decision": "REQUEST_CHANGE",
-                    "external_rationale_for_footnote": "Non-exclusivity must be flagged.",
-                    "proposed_replacement_text": "This arrangement is exclusive.",
-                    "playbook_topic_id": "non-exclusive-arrangement",
-                    "internal_precedent_citation": None,
-                    "provenance": "model",
+                    "issue_id": "I1",
+                    "field": "rationale",
+                    "primary_value": "Cap must remain at $150,000.",
+                    "critic_value": "The cap must stay at $150,000 with the carve-out.",
+                    "reason": "The rationale omitted the carve-out.",
                 }
-            ],
-            "contested_replacements": [],
-            "rationale_objections": [],
-        },
-        "verdict_summary": None,
-    }
-
-
-def _critic_contested_replacement() -> dict[str, Any]:
-    return {
-        "schema_version": recon.SCHEMA_VERSION,
-        "decision": "REQUEST_CHANGE",
-        "confidence_state": "OK",
-        "confidence_band": None,
-        "issues": [],
-        "critic_delta": {
-            "added_issues": [],
-            "contested_replacements": [
-                {
-                    "section_ref": "8",
-                    "primary_replacement_text": "Liability shall not exceed $150,000.",
-                    "critic_objection": "This drifts from the playbook's gross-negligence carve-out.",
-                    "critic_suggested_replacement": "Liability shall not exceed $150,000, except in cases of gross negligence.",
-                }
-            ],
-            "rationale_objections": [],
-        },
-        "verdict_summary": None,
-    }
-
-
-def _critic_rationale_objection_only() -> dict[str, Any]:
-    return {
-        "schema_version": recon.SCHEMA_VERSION,
-        "decision": "REQUEST_CHANGE",
-        "confidence_state": "OK",
-        "confidence_band": None,
-        "issues": [],
-        "critic_delta": {
-            "added_issues": [],
+            ]
+            if overrides
+            else [],
+            "added_issues": added,
             "contested_replacements": [],
             "rationale_objections": [
-                {
-                    # `objection`, NOT `critic_objection`. The schema's
-                    # CriticDelta.rationale_objections items are
-                    # {section_ref, objection} with additionalProperties:
-                    # false, `leakage_scan.py` reads `.get("objection")`, and
-                    # primary_review_pass.py:296 documents the same name.
-                    # (`critic_objection` is the CONTESTED_REPLACEMENTS key --
-                    # a different array.) This fixture used the wrong key,
-                    # which made reconcile()'s merged output schema-invalid;
-                    # caught by
-                    # test_reconcile_output_validates_against_the_schema_it_stamps.
-                    "section_ref": "8",
-                    "objection": "The rationale footnote undersells the risk.",
-                }
-            ],
+                # `objection`, NOT `critic_objection` -- the schema's
+                # CriticDelta.rationale_objections items are
+                # {section_ref, objection}.
+                {"section_ref": "8", "objection": "The rationale undersells the risk."}
+            ]
+            if objects
+            else [],
         },
-        "verdict_summary": None,
+        "verdict_summary": "The critic's own summary.",
     }
 
 
-def _primary_request_change_issue() -> dict[str, Any]:
-    primary = _primary(confidence_state="OK", decision="REQUEST_CHANGE")
-    primary["issues"] = [
-        {
-            # Issue #627: v3 requires a response-local `issue_key` on every
-            # Issue. The model authors it; a validated primary response
-            # therefore always carries one.
-            "issue_key": "I1",
-            "section_ref": "8",
-            "section_title": "Limitation of Liability",
-            "counterparty_change_summary": "Cap lowered to $75,000.",
-            "decision": "REQUEST_CHANGE",
-            "external_rationale_for_footnote": "Cap must remain at $150,000.",
-            "proposed_replacement_text": "Liability shall not exceed $150,000.",
-            "playbook_topic_id": "limitation-of-liability",
-            "internal_precedent_citation": None,
-            "provenance": "model",
-        }
-    ]
-    return primary
-
-
 # ---------------------------------------------------------------------------
-# 1. Critic-added issue degrades an OK band to LOW_CONFIDENCE.
+# 1. The critic's band is final -- every (primary, critic) pair.
 # ---------------------------------------------------------------------------
 
 
-def test_critic_added_issue_degrades_ok_band(failures: list[str]) -> None:
-    primary = _primary(confidence_state="OK")
-    critic = _critic_added_issue()
-
-    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
-
-    if result["confidence_state"] != "LOW_CONFIDENCE":
-        failures.append(
-            f"[1a] Critic-added issue must degrade confidence_state one level from OK; "
-            f"got {result['confidence_state']!r}"
-        )
-    if result["confidence_band"] != "LOW_CONFIDENCE":
-        failures.append(
-            f"[1b] confidence_band must mirror the degraded confidence_state; got {result['confidence_band']!r}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 2. Contested replacement degrades an OK band to LOW_CONFIDENCE.
-# ---------------------------------------------------------------------------
-
-
-def test_contested_replacement_degrades_ok_band(failures: list[str]) -> None:
-    primary = _primary_request_change_issue()
-    critic = _critic_contested_replacement()
-
-    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
-
-    if result["confidence_state"] != "LOW_CONFIDENCE":
-        failures.append(
-            f"[2a] Contested replacement must degrade confidence_state one level from OK; "
-            f"got {result['confidence_state']!r}"
-        )
-    if result["confidence_band"] != "LOW_CONFIDENCE":
-        failures.append(f"[2b] confidence_band must mirror LOW_CONFIDENCE; got {result['confidence_band']!r}")
-    # Primary text must still stand -- this reconciliation slice does not
-    # change that #82 rule.
-    if result["issues"][0]["proposed_replacement_text"] != "Liability shall not exceed $150,000.":
-        failures.append("[2c] Primary replacement text must remain unmodified by the confidence merge.")
+def test_the_critics_band_is_final_for_every_pair(failures: list[str]) -> None:
+    for primary_state in _LEVELS:
+        for critic_state in _LEVELS:
+            result = recon.reconcile(
+                primary_result=_primary(primary_state),
+                critic_result=_critic(critic_state),
+            )
+            if result["confidence_state"] != critic_state:
+                failures.append(
+                    f"[1a] primary={primary_state} critic={critic_state}: expected the "
+                    f"critic's own state; got {result['confidence_state']!r}"
+                )
+            expected_band = None if critic_state == "OK" else critic_state
+            if result["confidence_band"] != expected_band:
+                failures.append(
+                    f"[1b] primary={primary_state} critic={critic_state}: confidence_band "
+                    f"must mirror the final state ({expected_band!r}); got "
+                    f"{result['confidence_band']!r}"
+                )
 
 
 # ---------------------------------------------------------------------------
-# 3. Degradation is one level at a time, capped at ERROR_MANUAL_REVIEW_REQUIRED.
+# 2. The #265 triggers move nothing by themselves any more.
 # ---------------------------------------------------------------------------
 
 
-def test_degradation_steps_one_level_at_a_time(failures: list[str]) -> None:
-    cases = [
-        ("OK", "LOW_CONFIDENCE"),
-        ("LOW_CONFIDENCE", "MANUAL_REVIEW_REQUIRED"),
-        ("MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED"),
-        ("ERROR_MANUAL_REVIEW_REQUIRED", "ERROR_MANUAL_REVIEW_REQUIRED"),  # capped
-    ]
-    for start, expected in cases:
-        primary = _primary(confidence_state=start)
-        critic = _critic_added_issue()
-        result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
-        if result["confidence_state"] != expected:
+def test_disagreement_alone_does_not_degrade(failures: list[str]) -> None:
+    cases = {
+        "critic added issue": (_primary(), _critic(adds_issue=True)),
+        "critic override": (
+            _primary(with_issue=True),
+            _critic(keeps_primary_issue=True, overrides=True),
+        ),
+        "rationale objection": (
+            _primary(with_issue=True),
+            _critic(keeps_primary_issue=True, objects=True),
+        ),
+    }
+    for label, (primary, critic) in cases.items():
+        result = recon.reconcile(primary_result=primary, critic_result=critic)
+        if result["confidence_state"] != "OK" or result["confidence_band"] is not None:
             failures.append(
-                f"[3] Degrading from {start!r} must yield {expected!r}; got {result['confidence_state']!r}"
+                f"[2a] {label}: a confident critic's disagreement must not degrade its own "
+                f"band (the #265 rule is retired); got {result['confidence_state']!r} / "
+                f"{result['confidence_band']!r}"
             )
 
 
-# ---------------------------------------------------------------------------
-# 4. A rationale objection alone does NOT degrade the band.
-# ---------------------------------------------------------------------------
-
-
-def test_rationale_objection_alone_does_not_degrade(failures: list[str]) -> None:
-    primary = _primary(confidence_state="OK")
-    critic = _critic_rationale_objection_only()
-
-    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
-
-    if result["confidence_state"] != "OK":
+def test_a_critic_may_report_a_better_band_than_the_primary(failures: list[str]) -> None:
+    """The old rule was monotonic against the PRIMARY's band. Under ADR 0001
+    the primary's band is no baseline: the critic, which has strictly more
+    information, reports the final one."""
+    result = recon.reconcile(
+        primary_result=_primary("MANUAL_REVIEW_REQUIRED"),
+        critic_result=_critic("OK"),
+    )
+    if result["confidence_state"] != "OK" or result["confidence_band"] is not None:
         failures.append(
-            f"[4a] A rationale objection alone must not degrade confidence_state; got {result['confidence_state']!r}"
-        )
-    if result["confidence_band"] is not None:
-        failures.append(f"[4b] confidence_band must remain null when confidence_state is OK; got {result['confidence_band']!r}")
-
-
-# ---------------------------------------------------------------------------
-# 5. No critic delta at all -> primary band passes through unchanged.
-# ---------------------------------------------------------------------------
-
-
-def test_no_delta_keeps_primary_band(failures: list[str]) -> None:
-    primary = _primary(confidence_state="MANUAL_REVIEW_REQUIRED")
-
-    result = recon.reconcile(primary_result=primary, critic_result=None, detector_fires=[])
-
-    if result["confidence_state"] != "MANUAL_REVIEW_REQUIRED":
-        failures.append(
-            f"[5a] No critic run -> confidence_state must pass through unchanged; got {result['confidence_state']!r}"
-        )
-    if result["confidence_band"] != "MANUAL_REVIEW_REQUIRED":
-        failures.append(f"[5b] confidence_band must pass through unchanged; got {result['confidence_band']!r}")
-
-
-def test_no_delta_with_critic_result_keeps_primary_band(failures: list[str]) -> None:
-    # Critic ran, replied ACCEPT with no delta at all -- primary band unaffected.
-    primary = _primary(confidence_state="LOW_CONFIDENCE")
-    critic = {
-        "schema_version": recon.SCHEMA_VERSION,
-        "decision": "ACCEPT",
-        "confidence_state": "OK",
-        "confidence_band": None,
-        "issues": [],
-        "critic_delta": None,
-        "verdict_summary": None,
-    }
-
-    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
-
-    if result["confidence_state"] != "LOW_CONFIDENCE":
-        failures.append(
-            f"[5c] Critic with no delta must not change confidence_state; got {result['confidence_state']!r}"
-        )
-    if result["confidence_band"] != "LOW_CONFIDENCE":
-        failures.append(f"[5d] confidence_band must remain LOW_CONFIDENCE; got {result['confidence_band']!r}")
-
-
-# ---------------------------------------------------------------------------
-# 6. Monotonic: the critic can never raise (improve) the band, only degrade.
-# ---------------------------------------------------------------------------
-
-
-def test_critic_can_never_raise_the_band(failures: list[str]) -> None:
-    # Primary is already at its worst state; critic has no delta at all --
-    # the band must not somehow "improve" back toward OK.
-    primary = _primary(confidence_state="ERROR_MANUAL_REVIEW_REQUIRED")
-    critic = {
-        "schema_version": recon.SCHEMA_VERSION,
-        "decision": "ACCEPT",
-        "confidence_state": "OK",
-        "confidence_band": None,
-        "issues": [],
-        "critic_delta": None,
-        "verdict_summary": None,
-    }
-
-    result = recon.reconcile(primary_result=primary, critic_result=critic, detector_fires=[])
-    if result["confidence_state"] != "ERROR_MANUAL_REVIEW_REQUIRED":
-        failures.append(
-            f"[6a] A critic ACCEPT with no delta must never raise/improve the primary's confidence_state; "
-            f"got {result['confidence_state']!r}"
+            f"[3a] the critic's OK must stand over the primary's MANUAL_REVIEW_REQUIRED; got "
+            f"{result['confidence_state']!r} / {result['confidence_band']!r}"
         )
 
 
 # ---------------------------------------------------------------------------
-# 7. reconcile()'s merged output validates against the schema it stamps.
-#
-# RESTORED GUARD. This assertion previously lived in
-# tests/test_full_doc_threshold.py as
-# `test_reconcile_output_validates_against_output_schema_v2`. Issue #625
-# deleted that whole file -- correctly, since it pinned the now-deleted
-# outline mode -- but the file was also the ONLY place asserting that
-# `reconcile()`'s return dict actually validates against the schema it
-# self-declares (`schema_version = SCHEMA_VERSION = "output-schema-v1"`,
-# loaded via `pp.load_output_schema()` -> playbooks/output-schema-v2.json).
-# Nothing replaced it: after #625, `grep -rn "load_output_schema" tests/`
-# returned nothing at all.
-#
-# The original was a "Finding #1/#2" regression guard against two specific
-# ways the merged dict can go invalid:
-#   #1  an extra top-level key -- the schema is `additionalProperties: false`,
-#       so ANY stray key fails. (The original case was a dead `input_mode`
-#       key, which #625 removed along with the mode.)
-#   #2  a `verdict_summary` outside `oneOf [null, string(1..2000)]` --
-#       over the 2000-char maximum, or an empty string.
-#
-# The risk today is low: post-#625 `reconcile()` returns a fixed key set and
-# passes `verdict_summary` straight through from the primary. That is exactly
-# why the guard is cheap to restore and easy to forget -- it costs nothing
-# now and catches the regression the moment either property stops holding.
-#
-# The original iterated the two `input_mode` values. That axis no longer
-# exists, so this version sweeps the axis that does: the merge shapes already
-# covered behaviourally above (no critic, critic-contested, detector fires,
-# null verdict_summary), plus the two boundary values of #2.
+# 7. Schema conformance of what `reconcile()` stamps.
 # ---------------------------------------------------------------------------
 
 
 def _detector_fire() -> dict[str, Any]:
-    """A deterministic detector fire, appended verbatim into `issues`.
-
-    `reconcile()` copies each fire straight into the final issue list, so a
-    malformed fire lands unaltered in the output it then stamps as
-    schema-valid. No other test in the suite passes a NON-EMPTY
-    `detector_fires`, so this is the only coverage that path has.
-    """
+    """A deterministic detector fire, appended verbatim into `issues`."""
     return {
         "section_ref": "12",
         "section_title": "Assignment",
@@ -384,90 +224,113 @@ def _detector_fire() -> dict[str, Any]:
         "playbook_topic_id": "assignment-consent",
         "internal_precedent_citation": None,
         # Must match the schema's provenance pattern
-        # ^(model|critic-added|detector:[a-z0-9][a-z0-9-]*)$ -- a bare
-        # "detector" is rejected.
+        # ^(model|critic-added|detector:[a-z0-9][a-z0-9-]*)$
         "provenance": "detector:assignment-consent",
     }
+
+
+def _without_pipeline_extensions(result: dict[str, Any]) -> dict[str, Any]:
+    """`result` minus EXACTLY the pipeline-owned extensions issue #138 adds
+    (docs/output-contract.md -> "The critic's final result"), so the rest of
+    the object is still held to the schema it is stamped with:
+
+      * an issue's `primary-retained` provenance (not a value any model may
+        emit, so the model-facing pattern does not admit it);
+      * the `source` tag on a critic-authored override;
+      * the computed override entries (`source="computed"`), whose shape
+        carries both versions of a whole issue.
+    """
+    stripped = copy.deepcopy(result)
+    for issue in stripped.get("issues") or []:
+        if issue.get("provenance") == recon.PROVENANCE_PRIMARY_RETAINED:
+            issue["provenance"] = "model"
+    delta = stripped.get("critic_delta")
+    if isinstance(delta, dict):
+        kept = []
+        for entry in delta.get("overrides") or []:
+            if entry.get("source") == recon.OVERRIDE_SOURCE_COMPUTED:
+                continue
+            entry.pop("source", None)
+            kept.append(entry)
+        delta["overrides"] = kept
+    return stripped
 
 
 def test_reconcile_output_validates_against_the_schema_it_stamps(failures: list[str]) -> None:
     schema = pp.load_output_schema()
 
-    summary_at_max = _primary()
+    summary_at_max = _critic()
     summary_at_max["verdict_summary"] = "x" * 2000
-
-    null_summary = _primary()
+    null_summary = _critic()
     null_summary["verdict_summary"] = None
 
     cases: list[tuple[str, dict[str, Any]]] = [
-        ("no critic", {"primary_result": _primary(), "critic_result": None, "detector_fires": []}),
+        ("critic accepts", {"primary_result": _primary(), "critic_result": _critic()}),
         (
             "critic added issue",
-            {
-                "primary_result": _primary(),
-                "critic_result": _critic_added_issue(),
-                "detector_fires": [],
-            },
+            {"primary_result": _primary(), "critic_result": _critic(adds_issue=True)},
         ),
         (
-            "critic contested replacement",
+            "critic override",
             {
-                "primary_result": _primary_request_change_issue(),
-                "critic_result": _critic_contested_replacement(),
-                "detector_fires": [],
+                "primary_result": _primary(with_issue=True),
+                "critic_result": _critic(keeps_primary_issue=True, overrides=True),
             },
         ),
         (
             "critic rationale objection",
             {
-                "primary_result": _primary_request_change_issue(),
-                "critic_result": _critic_rationale_objection_only(),
-                "detector_fires": [],
+                "primary_result": _primary(with_issue=True),
+                "critic_result": _critic(keeps_primary_issue=True, objects=True),
             },
         ),
         (
             "detector fire",
             {
                 "primary_result": _primary(),
-                "critic_result": None,
+                "critic_result": _critic(),
                 "detector_fires": [_detector_fire()],
             },
         ),
         (
-            "detector fire alongside a critic delta",
+            "critic drops a hard rejection",
             {
-                "primary_result": _primary_request_change_issue(),
-                "critic_result": _critic_added_issue(),
-                "detector_fires": [_detector_fire()],
+                "primary_result": _primary(with_issue=True),
+                "critic_result": {
+                    **_critic(),
+                    "critic_delta": {
+                        "dispositions": [
+                            {"issue_id": "I1", "disposition": "DROP", "reason": "Not needed."}
+                        ],
+                        "overrides": [],
+                    },
+                },
+                "hard_rejection_rule_ids": {"limitation-of-liability"},
             },
         ),
-        ("null verdict_summary", {"primary_result": null_summary, "critic_result": None, "detector_fires": []}),
+        ("null verdict_summary", {"primary_result": _primary(), "critic_result": null_summary}),
         (
             "verdict_summary at the 2000-char maximum",
-            {"primary_result": summary_at_max, "critic_result": None, "detector_fires": []},
+            {"primary_result": _primary(), "critic_result": summary_at_max},
         ),
     ]
 
     for label, kwargs in cases:
         result = recon.reconcile(**kwargs)
-
-        # The self-declaration this guard is anchored on: reconcile() stamps
-        # every result with SCHEMA_VERSION, so that stamp must be the schema
-        # the result is then validated against.
         if result.get("schema_version") != recon.SCHEMA_VERSION:
             failures.append(
                 f"[7a] {label}: reconcile() stamped schema_version="
                 f"{result.get('schema_version')!r}, expected {recon.SCHEMA_VERSION!r}"
             )
-
         try:
-            pp.jsonschema.validate(instance=result, schema=schema)
+            pp.jsonschema.validate(instance=_without_pipeline_extensions(result), schema=schema)
         except pp.jsonschema.ValidationError as exc:
             stray = sorted(set(result) - set(schema.get("properties", {})))
             hint = f" (top-level keys not in the schema: {stray})" if stray else ""
             failures.append(
-                f"[7b] {label}: reconcile()'s output must validate against the schema it "
-                f"stamps itself with ({pp.OUTPUT_SCHEMA_PATH.name}), got: {exc.message}{hint}"
+                f"[7b] {label}: reconcile()'s output, less the documented pipeline "
+                f"extensions, must validate against the schema it stamps itself with "
+                f"({pp.OUTPUT_SCHEMA_PATH.name}), got: {exc.message}{hint}"
             )
 
 
@@ -476,13 +339,9 @@ def test_reconcile_output_validates_against_the_schema_it_stamps(failures: list[
 # ---------------------------------------------------------------------------
 
 TESTS = [
-    test_critic_added_issue_degrades_ok_band,
-    test_contested_replacement_degrades_ok_band,
-    test_degradation_steps_one_level_at_a_time,
-    test_rationale_objection_alone_does_not_degrade,
-    test_no_delta_keeps_primary_band,
-    test_no_delta_with_critic_result_keeps_primary_band,
-    test_critic_can_never_raise_the_band,
+    test_the_critics_band_is_final_for_every_pair,
+    test_disagreement_alone_does_not_degrade,
+    test_a_critic_may_report_a_better_band_than_the_primary,
     test_reconcile_output_validates_against_the_schema_it_stamps,
 ]
 
@@ -505,7 +364,7 @@ def main() -> int:
     if failures:
         print(f"FAIL: {len(failures)} issue(s) found.")
         return 1
-    print("PASS: all reconciliation confidence-merge (issue #265) assertions satisfied.")
+    print("PASS: all reconciliation confidence (issue #265 retired by #138) assertions satisfied.")
     return 0
 
 

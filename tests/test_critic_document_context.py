@@ -89,10 +89,10 @@ import review_spine  # noqa: E402
 # convention tests/test_llm_native_overlay.py uses for this exact set.
 from test_review_spine import (  # noqa: E402
     _build_draft_docx,
-    _critic_no_delta_response,
     _load_bundle,
     _primary_accept_response,
 )
+from critic_final_result import critic_keeps  # noqa: E402
 
 # Synthetic document text. Distinctive enough that finding it in a prompt
 # cannot be an accident, and short enough to sit well under every cap.
@@ -143,7 +143,7 @@ def _run_critic(
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     critic_id = _critic_model_id()
     client = model_client.FakeBedrockClient(
-        {critic_id: [_load_fixture_text("critic_keep_i1_accept_valid.json")]}
+        {critic_id: [_load_fixture_text("critic_drop_i1_accept_valid.json")]}
     )
     ledger: list[Any] = []
     result = cp.run_critic_pass(
@@ -552,7 +552,7 @@ def test_run_review_shows_the_critic_exactly_what_the_primary_saw(
     client = model_client.FakeBedrockClient(
         {
             primary_id: [_primary_accept_response()],
-            critic_id: [_critic_no_delta_response()],
+            critic_id: [critic_keeps(_primary_accept_response())],
         }
     )
     result = review_spine.run_review(

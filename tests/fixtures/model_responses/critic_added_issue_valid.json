@@ -3,15 +3,27 @@
   "decision": "REQUEST_CHANGE",
   "confidence_state": "OK",
   "confidence_band": null,
-  "issues": [],
+  "issues": [
+    {
+      "issue_key": "I1",
+      "section_ref": "10-non-exclusive",
+      "section_title": "Non-Exclusive Arrangement",
+      "counterparty_change_summary": "Counterparty struck 'non-exclusive' from Section 10, which the primary pass did not flag.",
+      "decision": "REQUEST_CHANGE",
+      "external_rationale_for_footnote": "Section 10 must retain the non-exclusive framing.",
+      "playbook_topic_id": "non-exclusive-arrangement",
+      "internal_precedent_citation": null,
+      "provenance": "critic-added"
+    }
+  ],
   "block_patches": [],
   "block_ops": [],
   "critic_delta": {
     "dispositions": [
       {
         "issue_id": "I1",
-        "disposition": "KEEP",
-        "reason": "Same issue and the same edit; compliant with the playbook position."
+        "disposition": "DROP",
+        "reason": "The change is within the playbook's acceptable range; the issue does not stand."
       }
     ],
     "overrides": [],
@@ -31,5 +43,5 @@
     "contested_replacements": [],
     "rationale_objections": []
   },
-  "verdict_summary": null
+  "verdict_summary": "One issue identified in Section 10 requiring attention before your organization can accept this draft."
 }

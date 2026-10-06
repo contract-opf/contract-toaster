@@ -313,7 +313,7 @@ def test_a_model_that_declares_no_cap_fails_closed(failures: list[str]) -> None:
 
 def test_the_critic_pass_sizes_from_the_document_too(failures: list[str]) -> None:
     doc_text = _doc_text(6)
-    client = BudgetRecordingClient([_fixture("critic_keep_i1_accept_valid.json")])
+    client = BudgetRecordingClient([_fixture("critic_drop_i1_accept_valid.json")])
     cp.run_critic_pass(
         review_id="budget-658-critic",
         primary_output=json.loads(_fixture("primary_request_change_valid.json")),
