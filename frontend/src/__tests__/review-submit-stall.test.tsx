@@ -69,8 +69,11 @@ describe('submitTimeoutMs (issue #53)', () => {
   });
 
   it('the copy names no status, path or duration', () => {
+    // Issue #120 replaced the #53 wording ("Nothing was submitted"), which
+    // asserted an outcome this client's timer cannot know;
+    // upload-stall-copy-120.test.tsx pins why.
     expect(UPLOAD_STALLED_COPY).toBe(
-      'The upload stalled before it finished. Nothing was submitted — check your connection and try again.',
+      "The upload didn't finish in time, so we can't tell whether your file arrived. Check History before you submit it again — if the review is there, it is already running.",
     );
     expect(UPLOAD_STALLED_COPY).not.toMatch(/\d/);
     expect(UPLOAD_STALLED_COPY).not.toMatch(/\/api\//);
@@ -210,14 +213,26 @@ describe('the rendered submit abandons a stalled upload (issue #53)', () => {
     // abort, the rejection and the resulting render.)
     await vi.advanceTimersByTimeAsync(1);
     expect(signal!.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(0);
+    // Issue #120: before the banner, the panel asks the `?scope=mine`
+    // listing whether the server created the review anyway (this stub
+    // answers 404, so it finds nothing). That round trip is promise hops,
+    // not fake timers, so the banner is waited for by awaited state against
+    // a REAL-time deadline (vi.waitFor runs on real timers), never by a
+    // count of flushes — the #151 rule.
+    await vi.waitFor(
+      async () => {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.queryByTestId('review-submit-error')).not.toBeNull();
+      },
+      { interval: 0, timeout: 12_000 },
+    );
     const banner = screen.getByTestId('review-submit-error');
     expect(banner.textContent).toContain(UPLOAD_STALLED_COPY);
     // `submitting` is false again: the start control is back and armed for
     // a retry, and the stop control that stood in for it is gone.
     expect(stillSubmitting()).toBe(false);
     expect(submitArmed()).toBe(true);
-    // Nothing was submitted, so nothing is polled: one POST, no review id.
+    // No review id came back, so nothing is polled: one POST, no review id.
     expect(h.posts).toHaveLength(1);
   });
 

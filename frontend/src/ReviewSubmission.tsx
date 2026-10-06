@@ -10,8 +10,10 @@
  *   1. Upload: a multipart POST /api/reviews with the chosen .docx file.
  *      A 202 response carries `{review_id, resumed}`. The POST runs under
  *      a stall timeout (issue #53): `submitTimeoutMs(file.size)` — 60 s
- *      plus 1 s per MiB — after which the request is aborted, the submit
- *      control re-arms, and the reviewer reads UPLOAD_STALLED_COPY.
+ *      plus 1 s per MiB — after which the request is aborted and the
+ *      `?scope=mine` listing is asked whether the server created the review
+ *      anyway (issue #120): found, the panel attaches to it; not found, the
+ *      submit control re-arms and the reviewer reads UPLOAD_STALLED_COPY.
  *   2. Poll: GET /api/reviews/{review_id} every few seconds while `status`
  *      is a non-terminal pipeline status (`PENDING` / `RUNNING` --
  *      src/reviews.py's `REVIEW_STATUSES_NON_TERMINAL`); stop once it
@@ -422,15 +424,110 @@ export function submitTimeoutMs(fileSizeBytes: number): number {
 }
 
 /**
- * What the reviewer reads when the timeout fires. Says what happened and
- * what to do, and nothing about statuses, paths or durations — the same
- * posture as every other `friendlyErrorMessage` fallback (the technical
- * detail goes to the console). "Nothing was submitted" is literally true:
- * the backend writes no row until the whole body has arrived and been
- * stored, so an abandoned upload has no review to resume.
+ * What the reviewer reads when the timeout fires and the follow-up check
+ * (`checkForStalledSubmission`, issue #120) found no review from this
+ * attempt. Says what is known and what to do, and nothing about statuses,
+ * paths or durations — the same posture as every other
+ * `friendlyErrorMessage` fallback (the technical detail goes to the console).
+ *
+ * It deliberately does NOT say "nothing was submitted" (the #53 wording).
+ * The timer runs on this client's clock alone, and `post_review`
+ * (backend/src/review_routes.py) runs the AV gauntlet, the S3 put, the spend
+ * reservation and the row writes only AFTER the whole body has arrived — a
+ * server that is still in that work when the budget runs out has no row
+ * for the check to find yet, and creates (and charges for) the review a
+ * moment later. So the outcome is unknown, and the copy says so and points
+ * at History, where such a review appears, before a resubmit that could
+ * become a second paid review.
  */
 export const UPLOAD_STALLED_COPY =
-  'The upload stalled before it finished. Nothing was submitted — check your connection and try again.';
+  "The upload didn't finish in time, so we can't tell whether your file arrived. Check History before you submit it again — if the review is there, it is already running.";
+
+// Issue #120: tolerance for matching a `?scope=mine` listing row's
+// `created_at` (`str(int(time.time()))`, second-granularity,
+// backend/src/reviews.py) against the millisecond timestamp this client
+// captured when the stalled attempt began. It absorbs that second-level
+// quantization plus ordinary clock skew between this client and whichever
+// server stamped the row, without being wide enough to misattribute a
+// considerably older review to this attempt.
+export const STALL_REATTACH_TOLERANCE_MS = 5_000;
+
+// Issue #120: the follow-up listing check runs on the same connection that
+// just stalled, so it gets a budget of its own. Without one, a captive
+// portal that swallows the POST would swallow this GET too and pin the
+// console in "Submitting" — the exact defect #53 exists to prevent.
+export const STALL_CHECK_TIMEOUT_MS = 15_000;
+
+/**
+ * Issue #120: called ONLY when the size-scaled submit budget (#53) ran out.
+ * Asks the same `?scope=mine` listing the reload-resume probe uses (issue
+ * #489) whether the server created a review for this attempt after all.
+ *
+ * The listing is owner-scoped but carries nothing that ties a row to THIS
+ * tab's request, and the same caller can be submitting from another tab on
+ * the same slow link. So a row is attributed to this attempt only when it
+ * is the ONLY row created no earlier than `startedAtMs` less
+ * `STALL_REATTACH_TOLERANCE_MS`, and — when the submit named a playbook —
+ * its `playbook_id` (one of `_REVIEW_LIST_ITEM_FIELDS`, written from the
+ * POST's own form field) is that playbook. Two rows in the window is a
+ * guess between them, and a row under another playbook is not this
+ * attempt's; both answer `null` rather than attach this tab to another
+ * tab's review. Returns the matched review's id, or `null` when there is
+ * no such row, or the check itself fails or runs out of
+ * `STALL_CHECK_TIMEOUT_MS` (offline, a 401 that expired mid-stall, the
+ * same captive portal). `null` therefore means "not known", never "nothing
+ * was submitted" — see `UPLOAD_STALLED_COPY`.
+ */
+async function checkForStalledSubmission(
+  startedAtMs: number,
+  submittedPlaybookId: string | null,
+): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STALL_CHECK_TIMEOUT_MS);
+  const aborted = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener(
+      'abort',
+      () => reject(Object.assign(new Error('stall check aborted'), { name: 'AbortError' })),
+      { once: true },
+    );
+  });
+  try {
+    const response = await Promise.race([
+      authorizedFetch('/api/reviews?scope=mine', { signal: controller.signal }),
+      aborted,
+    ]);
+    if (!response.ok) {
+      return null;
+    }
+    const data = (await Promise.race([response.json(), aborted])) as { reviews?: unknown };
+    type ListingRow = { review_id?: unknown; created_at?: unknown; playbook_id?: unknown };
+    const rows = Array.isArray(data.reviews) ? (data.reviews as Array<ListingRow | null>) : [];
+    // Every row created inside this attempt's window. Anything older (or
+    // with an unparseable `created_at`) is an earlier review, not this one.
+    const inWindow = rows.filter((row): row is ListingRow & { review_id: string } => {
+      const createdMs = Number(row?.created_at) * 1000;
+      return (
+        typeof row?.review_id === 'string' &&
+        Number.isFinite(createdMs) &&
+        createdMs >= startedAtMs - STALL_REATTACH_TOLERANCE_MS
+      );
+    });
+    if (inWindow.length !== 1) {
+      // None, or more than one and no way to tell which is this tab's.
+      return null;
+    }
+    const match = inWindow[0];
+    if (submittedPlaybookId && match.playbook_id !== submittedPlaybookId) {
+      // Created under another playbook — another tab's review, not this one.
+      return null;
+    }
+    return match.review_id;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Adaptive poll cadence (issue #50). A review that is going to finish fast
 // deserves a fast answer, so a review's first two minutes poll every 3 s;
@@ -1336,6 +1433,17 @@ export default function ReviewSubmission(): React.ReactElement {
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /**
+   * Issue #120. True only while `submitError` holds UPLOAD_STALLED_COPY: the
+   * budget ran out and the follow-up check could not find the review, so the
+   * outcome is UNKNOWN, not failed. The console renders every other submit
+   * error under "That didn't go through" with a "Try again" key, which would
+   * contradict the copy beneath it; this flag is how `projectMessages` tells
+   * the two apart. Set only by the stall branch of `submitReview`; cleared at
+   * the top of every `submitReview` call (before any of its early refusals)
+   * and by `resetForRetry` — the only other places `submitError` changes.
+   */
+  const [submitOutcomeUnknown, setSubmitOutcomeUnknown] = useState(false);
   const [pollError, setPollError] = useState<string | null>(null);
   /**
    * Issue #122. The TERMINAL poll state, kept apart from `pollError` on
@@ -2367,6 +2475,9 @@ export default function ReviewSubmission(): React.ReactElement {
   // existing submission tests keep exercising the identical function.
   const submitReview = useCallback(
     async () => {
+      // Issue #120: whatever this call ends in, it is no longer the earlier
+      // stall's unknown outcome — including the two refusals just below.
+      setSubmitOutcomeUnknown(false);
       if (!file) {
         setSubmitError('Choose a .docx file first.');
         return;
@@ -2444,6 +2555,10 @@ export default function ReviewSubmission(): React.ReactElement {
       // wait even where the fetch in front of it ignores its signal.
       const controller = new AbortController();
       const timeoutMs = submitTimeoutMs(file.size);
+      // Issue #120: the moment this attempt began, for
+      // `checkForStalledSubmission` to compare against a listing row's
+      // `created_at` if the budget runs out.
+      const submitStartedAtMs = Date.now();
       const stallTimer = setTimeout(() => controller.abort(), timeoutMs);
       const aborted = new Promise<never>((_, reject) => {
         controller.signal.addEventListener(
@@ -2452,6 +2567,39 @@ export default function ReviewSubmission(): React.ReactElement {
           { once: true },
         );
       });
+
+      // Composed before the request so both ways a submission can land —
+      // the POST's own 202, or (issue #120) the listing check after a
+      // stall — record the same guidance for it. See the field's comment
+      // in the request body below.
+      const guidance = composeGuidance(browning, toasterGuidance);
+
+      // Landing on a review this submission created. One function for both
+      // ways that can be learned (issue #120), so a review found after a
+      // stall is shown exactly as one the POST answered with.
+      const attachSubmitted = (submittedId: string, resumed: boolean): void => {
+        const selected = playbooks.find((entry) => entry.playbook_id === playbookId);
+        setSubmittedPlaybookLabel(selected?.display_name ?? (playbookId || null));
+        setSubmittedGuidance(guidance || null);
+        setSubmittedResumed(resumed);
+        setSubmittedFilename(file.name);
+        // Issue #735: frozen only once the submission actually landed — a POST
+        // that failed priced nothing, so there is nothing to capture for it.
+        setSubmittedEstimateCents(reviewCostUsdCents);
+        setReviewId(submittedId);
+        // Issue #58: the ONLY place this key is ever written -- a review id
+        // that the server has confirmed exists and belongs to this caller.
+        // The mount probe above reads it back after a reload. From the
+        // POST's 202 it is exactly this tab's review. From the stall check
+        // (issue #120) it is an inference: the listing names the caller, not
+        // the tab, so `checkForStalledSubmission` takes a row only when it is
+        // the one row in this attempt's window and carries this submit's
+        // playbook. What remains is one case it cannot see — another tab of
+        // the same caller, same playbook, whose row is the only one in the
+        // window because this tab's own has not been written yet. That tab's
+        // review would be attached and recorded here.
+        writeInflightReviewId(submittedId);
+      };
 
       try {
         const formData = new FormData();
@@ -2473,8 +2621,8 @@ export default function ReviewSubmission(): React.ReactElement {
         // Issue #495 used to compose the browning sentence in FRONT of the
         // typed text here. Issue #54 cut that over: `composeGuidance` now
         // returns the reviewer's own words only, and the dial travels as
-        // the `markup_intensity` field below.
-        const guidance = composeGuidance(browning, toasterGuidance);
+        // the `markup_intensity` field below. (`guidance` is composed above
+        // the `try`, issue #120.)
         if (guidance) {
           formData.append('toaster_guidance', guidance);
         }
@@ -2522,30 +2670,37 @@ export default function ReviewSubmission(): React.ReactElement {
         }
 
         const data = (await response.json()) as SubmitResponse;
-        const selected = playbooks.find((entry) => entry.playbook_id === playbookId);
-        setSubmittedPlaybookLabel(selected?.display_name ?? (playbookId || null));
-        setSubmittedGuidance(guidance || null);
-        setSubmittedResumed(Boolean(data.resumed));
-        setSubmittedFilename(file.name);
-        // Issue #735: frozen only once the submission actually landed — a POST
-        // that failed priced nothing, so there is nothing to capture for it.
-        setSubmittedEstimateCents(reviewCostUsdCents);
-        setReviewId(data.review_id);
-        // Issue #58: the ONLY place this key is ever written -- a review id
-        // that the server has just confirmed exists and belongs to this
-        // caller. The mount probe above reads it back after a reload.
-        writeInflightReviewId(data.review_id);
+        attachSubmitted(data.review_id, Boolean(data.resumed));
       } catch (err) {
         if (controller.signal.aborted) {
-          // The budget ran out, not the server. `err` here is either the
-          // fetch's own AbortError or the race's — one fixed sentence for
-          // both; the numbers go to the console, never the DOM.
-          setSubmitError(
-            friendlyErrorMessage(
-              `POST /api/reviews abandoned after ${timeoutMs} ms (file ${file.size} B)`,
-              UPLOAD_STALLED_COPY,
-            ),
-          );
+          // The budget ran out — that is not the same as the POST having
+          // failed. Issue #120: `post_review` does the AV gauntlet, the S3
+          // put, the spend reservation and the row writes AFTER the body
+          // has arrived, so the server may have created (and be charging
+          // for) a review this client stopped waiting for. Ask before
+          // telling the reviewer anything.
+          const createdId = await checkForStalledSubmission(submitStartedAtMs, playbookId || null);
+          if (createdId) {
+            // Found: land on it exactly as a successful POST would. A row
+            // created inside this attempt's window is a new review — an
+            // idempotent resume would have answered with the ORIGINAL row,
+            // whose `created_at` predates the window and is never matched —
+            // so `resumed` is false.
+            attachSubmitted(createdId, false);
+          } else {
+            // `err` here is either the fetch's own AbortError or the
+            // race's — one fixed sentence for both; the numbers go to the
+            // console, never the DOM. Flagged as an unknown outcome so the
+            // console does not headline it as a failure or offer a one-press
+            // resubmit (see `submitOutcomeUnknown`).
+            setSubmitError(
+              friendlyErrorMessage(
+                `POST /api/reviews abandoned after ${timeoutMs} ms (file ${file.size} B)`,
+                UPLOAD_STALLED_COPY,
+              ),
+            );
+            setSubmitOutcomeUnknown(true);
+          }
         } else {
           setSubmitError(
             err instanceof Error
@@ -2683,6 +2838,7 @@ export default function ReviewSubmission(): React.ReactElement {
     setReviewId(null);
     setFile(null);
     setSubmitError(null);
+    setSubmitOutcomeUnknown(false);
     setDownloadError(null);
     setReadyAnnouncement('');
     // Issue #735: the captured estimate belongs to the review this reset just
@@ -3486,6 +3642,7 @@ export default function ReviewSubmission(): React.ReactElement {
     downloadStarted: autoSaved,
     cancelPending,
     submitError,
+    submitOutcomeUnknown,
     pollError,
     pollStopped,
     downloadError,
