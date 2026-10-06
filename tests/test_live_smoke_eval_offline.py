@@ -1155,6 +1155,12 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
             f"got {rows}"
         )
     report_text = out_path.read_text()
+    # NOTE (issue #157): the absence of the `error_token` KEY below is a
+    # report-shape rule, not a substance guard. `attempt_accounting`'s
+    # `retry_reason` deliberately carries the SAME closed-vocabulary token on
+    # every retry row (that is the point of it), so the token's VALUE does
+    # reach the default report. The substance guards here are the raw
+    # jsonschema message fragment and the finding sentinel.
     for leaked in (_SCHEMA_INVALID_RAW_FRAGMENT, SENTINEL_FINDING, "error_token"):
         if leaked in report_text:
             failures.append(
@@ -1417,10 +1423,6 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
         _NESTED_INVALID_PATH,
         SENTINEL_FINDING,
         "error_message",
-        # The #643 diagnostic's KEY, quoted: issue #157's metadata-only
-        # `schema_error_location` (a schema-document path) is allowed in the
-        # default report and shares the bare prefix.
-        '"schema_error"',
         "offending_value",
     ):
         if leaked in report_text:
@@ -1429,6 +1431,36 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
                 f"report -- per-attempt error detail is model substance and "
                 f"belongs only in --dump-dir."
             )
+    # The #643 diagnostic's `schema_error` object (instance path + offending
+    # value) must not appear as a KEY anywhere in the default report. Checked
+    # structurally rather than by substring, because issue #157's
+    # metadata-only `schema_error_location` (a schema-document path) is
+    # allowed there and shares the prefix; any OTHER `schema_error*` key is
+    # rejected too, so a future sibling cannot slip in under the prefix.
+    def _schema_error_keys(node: Any, trail: str = "$") -> list[str]:
+        found: list[str] = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if (
+                    isinstance(key, str)
+                    and key.startswith("schema_error")
+                    and key != "schema_error_location"
+                ):
+                    found.append(f"{trail}.{key}")
+                found.extend(_schema_error_keys(value, f"{trail}.{key}"))
+        elif isinstance(node, list):
+            for index, item in enumerate(node):
+                found.extend(_schema_error_keys(item, f"{trail}[{index}]"))
+        return found
+
+    leaked_keys = _schema_error_keys(json.loads(report_text))
+    if leaked_keys:
+        failures.append(
+            f"[10m1] Expected no `schema_error` (or other `schema_error*` "
+            f"besides `schema_error_location`) key anywhere in the default "
+            f"report, found {leaked_keys}"
+        )
+
     # Issue #157: what the default report DOES say about the same rejection
     # is the SCHEMA-side location -- the walk through the schema document to
     # the rejecting `enum`, never the instance path asserted absent above.
