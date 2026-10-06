@@ -14,9 +14,8 @@ the seed, not an activation route that no longer exists.
 
   1. The shipped playbook (playbooks/samples/synthetic-nda-sample-v1.0.0.json)
      is real content -- schema-valid, brand-free, and genuinely different
-     from the OLD "coming soon" placeholder stub (playbooks/nda-v0.1.0.json,
-     left untouched here -- see tests/test_nda_policy.py's own
-     harvested-but-not-wired gate, which this ticket does not touch). It
+     from the OLD "coming soon" placeholder stub (an NDA v0.1.0 draft that
+     issue #161 retired). It
      carries NO `bundled_sample` marker -- issue #433 removed that field
      from the registry and the `PlaybookEntry` dataclass entirely.
   2. `src.sample_playbooks.seed_shipped_playbook` fails closed on what it
@@ -539,9 +538,8 @@ class TestShippedPlaybookIsRealContent(unittest.TestCase):
         self.assertGreaterEqual(len(doc["hard_rejections"]), 1)
 
     def test_sample_is_not_the_old_coming_soon_stub(self):
-        """playbooks/nda-v0.1.0.json (untouched by this ticket -- still the
-        harvest source tests/test_nda_policy.py pins) is a stub whose
-        general_principles[0] says it "governs no production review". The
+        """The old NDA placeholder stub (retired by issue #161) said in its
+        general_principles[0] that it "governs no production review". The
         bundled sample must be genuinely different content -- proven here
         by a topic id that only exists in the new sample, and by the
         stub's own self-description being absent."""

@@ -22,20 +22,14 @@ parsed), never on an intermediate patch/entry structure -- the mode contract
 is about what a reader opens in Word, so proving it on a dict would prove
 nothing about the document.
 
-Both delivering paths are covered:
-
-  - **first-party**: `redline_generate.generate_redline_from_blocks` ->
-    `redline_block_apply.apply_block_transcript` ->
-    `redline_generate.inject_export_marker_and_footnotes` (parts 1-4)
-  - **third-party paper**: the same compiler, reached through
-    `third_party_output_integration` (part 7)
-
-Both resolve the audience through the SAME pure function,
-`footnote_audience.footnote_texts_for_notes_mode`, so they cannot drift
-apart on which mode renders what. (A standalone whole-document writer used
-to be a third path; issue #629 moved third-party paper off it and issue
-#631 deleted it, so part 5 now pins the audience resolver's own contract
-directly instead of through a writer that no longer exists.)
+The delivering path is `redline_generate.generate_redline_from_blocks` ->
+`redline_block_apply.apply_block_transcript` ->
+`redline_generate.inject_export_marker_and_footnotes` (parts 1-4). It
+resolves the audience through the pure function
+`footnote_audience.footnote_texts_for_notes_mode`, whose own contract part 5
+pins directly. (A separate third-party-paper caller of the same compiler
+was part 7 until issue #161 retired that path; paper side is not a
+partition, so there is no second caller to keep in step.)
 
 ## Accept-all is deliberate, not incidental (issue #522 owner comment)
 
@@ -789,112 +783,6 @@ def _part_6_field_is_declared_optional_and_scanned(failures: list) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Part 7 — the block compiler's other live caller: third-party paper
-# ---------------------------------------------------------------------------
-
-_TP_PLAYBOOK = {
-    "topics": [
-        {
-            "id": "limitation-of-liability",
-            "section_ref": "Limitation on Liability",
-            "replacement_text": {
-                "mode": "fixed",
-                "fixed_text": "Liability is capped at the fees paid.",
-            },
-        }
-    ]
-}
-
-_TP_SOURCE_DOCUMENT_ID = "counterparty-upload-522"
-
-# What the third-party path renders per mode. `internal`/`both` carry NO
-# internal note because #250's finding shape has none to carry (its model
-# call asks only for `{"decision", "rationale"}`) -- see
-# `third_party_output_integration`'s module docstring. That is asserted
-# rather than assumed, so the day this path grows internal-audience prose,
-# this expectation has to be revisited deliberately instead of silently
-# rendering nothing.
-_TP_EXPECTED_BY_MODE = {
-    "none": [],
-    "external": [_EXTERNAL_NOTE],
-    "internal": [],
-    "both": [_EXTERNAL_NOTE],
-}
-
-
-def _part_7_third_party_path_honours_the_mode(failures: list) -> None:
-    import third_party_clause_segmentation  # local to this part
-    import third_party_output_integration  # local to this part
-
-    # The real upload, segmented by #248's real segmenter -- since issue
-    # #629 the third-party path writes IN PLACE into these bytes, so a
-    # hand-built clause record with an invented clause_id would address
-    # nothing and prove nothing.
-    #
-    # These two style-less paragraphs carry no clause boundary between them,
-    # so the shared detector (#277) merges them into ONE logical clause --
-    # which is what the segmenter really does with this fixture, and what
-    # the block map therefore addresses.
-    docx_bytes = _build_docx_bytes([_SEC8_TEXT, _SEC9_TEXT])
-    segmented = third_party_clause_segmentation.segment_document(
-        docx_bytes, source_document_id=_TP_SOURCE_DOCUMENT_ID
-    )
-    if segmented["status"] != "segmented" or len(segmented["clauses"]) != 1:
-        failures.append(f"[7-fixture] upload did not segment as expected: {segmented!r}")
-        return
-    clauses = segmented["clauses"]
-    findings = [
-        {
-            "decision": "reject",
-            "clause_id": clauses[0]["clause_id"],
-            "playbook_topic_id": "limitation-of-liability",
-            "rationale": _EXTERNAL_NOTE,
-            "source": "model_judgement",
-        }
-    ]
-
-    for mode in ALL_MODES:
-        result = third_party_output_integration.generate_third_party_review_output(
-            findings=findings,
-            clause_records=clauses,
-            playbook=_TP_PLAYBOOK,
-            document_docx_bytes=docx_bytes,
-            corpus=leakage_scan.ConfidentialCorpus(),
-            source_document_id=_TP_SOURCE_DOCUMENT_ID,
-            notes_mode=mode,
-        )
-        out_bytes = result.get("docx_bytes")
-        if result.get("status") != "OK" or not out_bytes:
-            failures.append(
-                f"[7a/{mode}] Expected a delivered third-party redline, got "
-                f"status={result.get('status')!r} reason={result.get('reason')!r}"
-            )
-            continue
-        expected = _TP_EXPECTED_BY_MODE[mode]
-        actual = _footnote_texts(out_bytes)
-        if actual != expected:
-            failures.append(
-                f"[7b/{mode}] Third-party footnote text does not match the mode "
-                f"contract.\n  expected: {expected}\n  actual:   {actual}"
-            )
-        if not expected and FOOTNOTES_PART in _part_names(out_bytes):
-            failures.append(
-                f"[7c/{mode}] Third-party path emitted word/footnotes.xml with "
-                f"nothing to put in it."
-            )
-        # The export marker follows the same rule on this path as on the
-        # first-party one: present iff the mode carries internal content.
-        marker_present = redline_generate.MARKER_TEXT in _all_document_text(
-            out_bytes
-        )
-        if marker_present != (mode in ("internal", "both")):
-            failures.append(
-                f"[7d/{mode}] Internal-notes export marker present={marker_present}; "
-                f"it must appear iff the mode carries internal content."
-            )
-
-
-# ---------------------------------------------------------------------------
 # Part 8 — the renderer has a PRODUCER, gated on the same mode
 # ---------------------------------------------------------------------------
 #
@@ -1105,7 +993,6 @@ def main() -> None:
     _part_4_unknown_mode_falls_back_to_external(failures)
     _part_5_resolver(failures)
     _part_6_field_is_declared_optional_and_scanned(failures)
-    _part_7_third_party_path_honours_the_mode(failures)
     _part_8_the_prompt_asks_for_the_field_it_renders(failures)
 
     if failures:

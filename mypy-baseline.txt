@@ -75,7 +75,6 @@ scripts/live_smoke_eval.py
 scripts/normalize_input.py
 scripts/ooxml_util.py
 scripts/opf_acceptance.py
-scripts/opf_clause_lookup.py
 scripts/opf_html.py
 scripts/opf_injection_scan.py
 scripts/opf_load.py
@@ -91,6 +90,3 @@ scripts/replacement_text_enforcement.py
 scripts/review_knowledge.py
 scripts/review_spine.py
 scripts/seed_active_bundle.py
-scripts/third_party_clause_matching.py
-scripts/third_party_output_integration.py
-scripts/third_party_position_findings.py

@@ -993,9 +993,8 @@ def _plan_omitted_clause_placeholders(
     always.
 
     The anchored half is not hypothetical -- it is how a clause is REPLACED
-    in place. `scripts/third_party_output_integration.py` emits
-    `delete_block` + `insert_block_after` on the same block for one
-    `issue_key`, and the governed replacement text belongs under the struck
+    in place: `delete_block` + `insert_block_after` on the same block for
+    one `issue_key`, and the governed replacement text belongs under the struck
     clause's own heading; a placeholder there would announce an omission
     directly above the replacement clause.
 

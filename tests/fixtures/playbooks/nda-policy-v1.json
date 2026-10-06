@@ -1,5 +1,5 @@
 {
-  "$schema": "./policy.schema.json",
+  "$schema": "../../../playbooks/policy.schema.json",
   "playbook_id": "nda",
   "version": 1,
   "title": "NDA review policy",

@@ -78,7 +78,7 @@ BUNDLE_SCHEMA = REPO_ROOT / "playbooks" / "bundle.schema-v2.json"
 # version, never its specific content (issue #413 evicted the real eiaa
 # harvest this used to point at; issue #412 deleted the "sample-agreement"
 # playbook + its policy, which this used to point at instead).
-POLICY_TEMPLATE = REPO_ROOT / "playbooks" / "nda-policy-v1.json"
+POLICY_TEMPLATE = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "nda-policy-v1.json"
 
 PLAYBOOK_ID = "acme-university"  # an agreement_type alias of the fixture
 

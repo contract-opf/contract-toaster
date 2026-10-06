@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate for the digest prompt, terminology, and clause-evidence lookup
+"""Gate for the digest prompt and terminology
 (work items 3 + 4 of the OPF 0.3 launch).
 
  1. TERMINOLOGY maps to the digest's REAL field names. A header whose
@@ -14,15 +14,12 @@
  3. THE WHOLESALE DUMP IS RETIRED: no `full_text` reaches the prompt, and the
     composed prompt fits the review budget with room for policy + floor.
  4. n-COUNTS AND CITATIONS survive into the block -- they are what the model
-    weights precedent by, and what the lookup tool resolves.
+    weights precedent by.
  5. EMPTY LISTS render nothing, not an empty header: an empty section reads as
     "we looked and found none", a claim the digest does not make.
  6. NO DIGEST => REFUSE. The digest is the knowledge; composing without it
     would review a contract on model judgement alone while lineage still
     recorded a governing playbook.
- 7. LOOKUP round-trips: by clause_id and by citation, returning the `full_text`
-    and `rationale` the digest deliberately drops; a miss is reported as a miss,
-    never as an empty result that reads like "no evidence exists".
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -39,7 +36,6 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import opf_clause_lookup  # noqa: E402
 import opf_prompt  # noqa: E402
 import opf_terminology  # noqa: E402
 
@@ -131,7 +127,7 @@ def check_4_n_counts_and_citations() -> list[str]:
     if "(n=6, sometimes)" not in block:
         failures.append("  n-count + band missing from the digest block (precedent weighting)")
     if "[acme-university@3 §8.1]" not in block:
-        failures.append("  citation missing from the digest block (the lookup tool's key)")
+        failures.append("  citation missing from the digest block")
     if "{risk: worse/material}" not in block:
         failures.append("  risk_delta missing from a concession/unacceptable entry")
     # The intro must tell the model what n MEANS, or the number is noise.
@@ -181,44 +177,6 @@ def _strip_digest(doc: dict) -> dict:
     return doc
 
 
-def check_7_lookup_roundtrip() -> list[str]:
-    failures: list[str] = []
-    doc = _doc()
-
-    # By clause_id: returns what the digest drops.
-    got = opf_clause_lookup.lookup_clause_evidence(doc, clause_id="clause.indemnification")
-    if not got.get("found"):
-        failures.append("  lookup by clause_id did not find a known clause")
-        return failures
-    full_texts = [o.get("full_text") for o in got["observed_positions"]]
-    if not any(full_texts):
-        failures.append("  lookup returned no full_text -- the whole reason the tool exists")
-    if not any(pv.get("rationale") for pv in got["preferred_variations"] if isinstance(pv, dict)):
-        failures.append(
-            "  lookup returned no rationale -- digest_version 2 drops it from the digest, so "
-            "this tool is the only way the model can read it"
-        )
-
-    # By citation, as carried in the digest.
-    ref = doc["digest"]["clauses"][0]["preferred_variations"][0]["observation_ref"]
-    by_ref = opf_clause_lookup.lookup_clause_evidence(doc, example_ref=ref)
-    if not by_ref.get("found"):
-        failures.append("  lookup by a citation the digest itself carries did not resolve")
-
-    # A miss is reported as a miss.
-    miss = opf_clause_lookup.lookup_clause_evidence(doc, clause_id="clause.does-not-exist")
-    if miss.get("found") is not False or "reason" not in miss:
-        failures.append("  unknown clause_id did not return a structured not-found")
-    if not miss.get("known_clause_ids"):
-        failures.append("  not-found did not name the clause ids that DO exist (unhelpful miss)")
-
-    # Malformed calls come back as errors the model can correct, not exceptions.
-    bad = opf_clause_lookup.handle_tool_call(doc, {})
-    if bad.get("found") is not False:
-        failures.append("  a tool call with no selector did not return a structured error")
-    return failures
-
-
 def main() -> int:
     checks = [
         ("1", "terminology maps to the digest's real field names", check_1_terminology_matches_digest_fields),
@@ -227,7 +185,6 @@ def main() -> int:
         ("4", "n-counts, bands, citations and risk survive into the block", check_4_n_counts_and_citations),
         ("5", "empty lists render nothing, not an empty header", check_5_empty_lists_render_nothing),
         ("6", "no digest => refuse to compose", check_6_no_digest_refuses),
-        ("7", "lookup_clause_evidence round-trips; misses are legible", check_7_lookup_roundtrip),
     ]
     ok = True
     for code, name, fn in checks:

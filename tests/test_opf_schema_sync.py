@@ -155,8 +155,8 @@ UPSTREAM_FROZEN_SHA256 = {
 # The bar for a row here is CONSUMPTION, not existence. A field this repo never
 # reads does not belong in this table -- pinning it would make the gate fire on
 # churn that cannot hurt us, and a gate that cries wolf gets muted. (Example:
-# digestExemplarForm.deviation is surfaced by opf_clause_lookup.py off the full
-# OPF, never rendered from the digest, so it is deliberately uncontracted.)
+# digestExemplarForm.deviation is never rendered from the digest, so it is
+# deliberately uncontracted.)
 # ---------------------------------------------------------------------------
 
 # Consumed by both 0.2 and 0.3.
@@ -183,9 +183,9 @@ _COMMON_CONTRACT: list[tuple[str, str, object]] = [
      {"acceptableIfEntry"}),
     ("$defs.clausePosition.properties.summary.properties.fallbacks", "array_of", {"observation"}),
     ("$defs.clausePosition.properties.summary.properties.rejected", "array_of", {"observation"}),
-    # opf_clause_lookup drills down to full_text + citations; the digest omits
-    # full_text by design, so losing it upstream would break the lookup tool.
-    # It is rendered as text: an object here would print as a Python repr.
+    # opf_injection_scan scans full_text and opf_acceptance checks it never
+    # leaks into the prompt; both treat it as text, so an object here would
+    # slip past the scan as a Python repr.
     ("$defs.observation.properties.full_text", "type_is", "string"),
     ("$defs.observation.properties.precedent_count", "type_is", "integer"),
     ("$defs.observation.required", "superset_of",

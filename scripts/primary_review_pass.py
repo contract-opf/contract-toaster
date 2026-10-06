@@ -200,9 +200,7 @@ def load_output_schema(path: Path = OUTPUT_SCHEMA_PATH) -> dict[str, Any]:
     (`playbooks/output-schema-v3.json` since issue #627) -- the ACTIVE
     artifact.
 
-    `OUTPUT_SCHEMA_V2_PATH` remains selectable, but NOT for the third-party
-    path: `scripts/third_party_output_integration.py` pins v3 itself (issue
-    #629) and never reads this default. Since issue #628 deleted the
+    `OUTPUT_SCHEMA_V2_PATH` remains selectable. Since issue #628 deleted the
     quote-fidelity measurement instrument, its only remaining callers are
     `_RETIRED_ISSUE_KEYS` below and the tests that deliberately pin the
     superseded contract."""
