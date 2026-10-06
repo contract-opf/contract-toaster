@@ -66,7 +66,7 @@ The pipeline validates every model response against this schema before any redli
 | `issues[].proposed_replacement_text` | string, max 8000 chars |
 | `issues[].playbook_topic_id` | `^[a-z0-9_]+(?:[-.][a-z0-9_]+)*$` — the id copied verbatim out of the ACTIVE playbook's own vocabulary. Admits kebab-case (a v1 playbook's `topics[].id`), snake_case and the dotted digest form (`clause.ferpa_student_records`): `playbooks/opf/playbook.schema-0.{2,3}.json` constrains an OPF playbook's `taxonomy.entries[].id` to `^[a-z0-9_]+$`, so underscore is a **word character here, not a separator** — rejecting it (issue #672) made 39 of the 61 topics in the real `educational-affiliation` playbook uncitable and discarded every review that cited one (issue #671). Still not free text: uppercase, whitespace, path punctuation, and a leading/trailing/doubled `-`/`.` separator are rejected |
 | `issues[].internal_precedent_citation` | string (max 500 chars) or null |
-| `issues[].provenance` | `"model"` \| `"critic-added"` \| `"detector:<rule_id>"` — **system metadata only**; see [Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band) |
+| `issues[].provenance` | `"model"` \| `"critic-added"` \| `"detector:<rule_id>"` (plus the pipeline-only `"primary-retained"`, issue #138) — **system metadata only**; see [Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band) |
 | `issues[].source_quote` | string, 1–8000 chars, **OPTIONAL** — **v2 only**; see [Schema versions (v1 → v2)](#schema-versions-v1--v2) |
 | `critic_delta` | `CriticDelta` object or null |
 | `verdict_summary` | string (1–2000 chars) or null — ACCEPT-path narrative summary; see [ACCEPT summary shape](#accept-summary-shape) |
@@ -225,7 +225,7 @@ of how that result differs from the primary's**:
 |---|---|
 | `dispositions[]` | One `{issue_id, disposition, reason}` per **primary** issue, no exceptions. `disposition` is `KEEP` (same issue, same edit), `REVISE` (same issue, the critic changed its replacement text, rationale or decision) or `DROP` (the critic does not stand behind it). The prompt asks for a one-line `reason`; the cap is the free-prose class bound, 8000 (see [Length budgets](#length-budgets-issue-674)). |
 | `overrides[]` | One `{issue_id, field, primary_value, critic_value, reason}` per respect in which the critic changed a primary issue. `field` is `replacement_text`, `rationale` or `decision` (a `DROP` is a change of decision). `primary_value`, `critic_value` and `reason` are each ≤ 8000 characters, the free-prose class bound. Empty when the critic changed nothing. |
-| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The reconciler still reads them (`scripts/reconciliation.py`), and the prompt still asks the critic to fill them, until the reconcile ticket makes the critic's own result the final one. The artifact marks each `DEPRECATED`. |
+| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The prompt still asks the critic to fill them, and since issue #138 the reconciler forwards them verbatim (it no longer merges from them) for the consumers that still read them: the receipt's counts, the internal footnotes (#132) and the leakage scan. The artifact marks each `DEPRECATED`. |
 
 `issue_id` always names the **primary's** `issue_key` as it appears in the primary's output — never a key
 from the critic's own `issues`, which it numbers from `I1` in its own response.
@@ -234,10 +234,14 @@ from the critic's own `issues`, which it numbers from `I1` in its own response.
 is a statement about two responses, which a response-local draft-07 schema cannot express. It is enforced
 by `critic_review_pass.critic_delta_rejection`, reported under the ordinary `schema_invalid` token, so a
 missing (or duplicated) disposition spends the critic's one bounded retry like any other schema failure
-and, if repeated, ends the review as `critic_schema_invalid`. A disposition or override naming an
-`issue_id` the primary never raised is **not** rejected: it leaves every primary issue accounted for, and a
-rejection would spend a paid retry over a field the reconciler can ignore. The check is a no-op where the
-artifact defines no `dispositions` (v1/v2) and where the primary raised no issue.
+and, if repeated, ends the review as `critic_schema_invalid`. Since issue #138 the same check also rejects
+a `KEEP` or `REVISE` for a primary issue the critic's own `issues` do not carry (no critic issue pairs with
+it — see the pairing rule under "The critic's result is final" below): the critic's issues are the final
+review, so that issue would vanish under a disposition saying it stays. The pairing is one function,
+`reconciliation.kept_issue_keys_without_counterpart`, shared by the pass and the merger. A disposition or
+override naming an `issue_id` the primary never raised is **not** rejected: it leaves every primary issue
+accounted for, and a rejection would spend a paid retry over a field the reconciler can ignore. The check is
+a no-op where the artifact defines no `dispositions` (v1/v2) and where the primary raised no issue.
 
 **The critic's edits are anchored to the same block map.** `review_spine.run_review` passes the one
 `build_block_map` object to both passes, and `run_critic_pass` proves the critic's own transcript against it
@@ -246,10 +250,41 @@ match the document's bytes costs the critic its informed retry rather than survi
 classification is unchanged: an unproven transcript that never recovers is the residual
 `critic_retry_exhausted`.
 
-**Not here.** Which pass's output wins, and forwarding the critic's `block_patches` / `block_ops` through
-`reconciliation.reconcile`, is the reconcile ticket (#136); until it lands, reconciliation still forwards the
-primary's transcript and reads only the deprecated arrays. The hard-ledger dispositions (`CLEARED` /
-`ASSERT`) arrive with #147 and the `role` discriminator on the one tool schema with #148.
+**The critic's result is final (issue #138).** `reconciliation.reconcile` takes the critic's `issues`,
+`decision`, `confidence_state` and `verdict_summary`, and forwards the **critic's** `block_patches` /
+`block_ops` to stage 5 — so the leakage scan, block proof, apply, pen rules and OOXML round trip all run over
+the critic's text. It never forwards the primary's transcript and never splices the two (overlapping or
+inconsistent spans are rejected by the block proof, not merged). A final issue that matches one the primary
+raised (same `playbook_topic_id` and `section_ref`, or failing that the same `playbook_topic_id` — a
+fallback never applied to a primary issue the critic disposed of as `DROP`) is stamped provenance `model`; one
+the primary did not raise, `critic-added`. Pipeline-owned additions to the result,
+none of which a model may emit and none of which the model-facing schema admits:
+
+- **`primary-retained` provenance.** Every primary issue whose `playbook_topic_id` is a hard-rejection rule
+  id (`hard_rejections[].id`, or an OPF review's Floor invariant ids) and which pairs with no critic issue is
+  re-appended flag-only (its edits stay in the primary's transcript, which does not ship), re-keyed to the
+  lowest `issue_key` that neither the final issues, the critic's transcript nor a forwarded
+  `critic_delta.added_issues` entry uses, and forces `REQUEST_CHANGE`. The rule is per issue: a primary that
+  raises one hard rule in two sections, and a critic that keeps one and drops the other, leaves the dropped
+  one retained.
+- **`critic_delta.overrides[].source`.** `critic` on the critic's own override records (forwarded as
+  emitted), `computed` on the diff `reconcile` adds. A computed entry carries `change` (`dropped` — the
+  primary raised it, the critic did not; `added` — the reverse; `replaced` — a matched issue whose authored
+  edits differ), `issue_id` (the primary's key, `null` for `added`), `critic_issue_key`, `field`,
+  `primary_value`, `critic_value` and `reason` (the critic's disposition reason where there is one). A
+  `replaced` entry's values render each side's edits as a *rendered edit record*: exactly one line per edit,
+  `- removed text` or `+ added text`, each edit's whitespace folded so a line break inside it cannot start an
+  unprefixed line; a `dropped` entry also carries `primary_issue`, `primary_edits` and `retained`, an `added`
+  entry `critic_issue` and `critic_edits`. This record is internal audit content: it reaches the analysis
+  artifact and `get_review_detail`'s `critic_delta` verbatim, and no attorney-facing layout yet — so every
+  model-authored text in it passes the leakage scan first (see
+  [Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose)).
+
+**Fails closed, never primary-only.** No critic result, a failed critic pass, or a critic result that leaves a
+primary issue with no disposition (or two), or that `KEEP`s or `REVISE`s one its own issues do not carry, ends
+the review on a `critic_*` reason; the last two are the merger's own copy of the pass's disposition check,
+reported as `critic_schema_invalid`. The hard-ledger dispositions
+(`CLEARED` / `ASSERT`) arrive with #147 and the `role` discriminator on the one tool schema with #148.
 
 **Governance.** The artifact's bytes are content-hash-gated (see the coupling rules above), so this change
 needs a new `release.output_contract_hash` and the legal-approval gate before it activates in a release
@@ -459,6 +494,7 @@ component produced the issue. Valid values:
 | `"model"` | The LLM primary reviewer flagged this issue |
 | `"critic-added"` | The adversarial critic added this issue (not present in the primary output) |
 | `"detector:<rule_id>"` | A deterministic hard-rejection rule fired; `rule_id` is the kebab-case id from the playbook `hard_rejections` list (e.g. `"detector:no-exos-indemnity"`) |
+| `"primary-retained"` | Pipeline-stamped, never model-emitted (issue #138): a hard rejection the primary reviewer raised that the critic's final result dropped, re-appended by reconciliation because hard rejections are monotonic. Flag-only. |
 
 **Purpose — trust calibration, not legal categorization.** A deterministic detector fire
 (`detector:<rule_id>`) is mechanical and near-certain: a trigger term was found in the diff hunks
@@ -492,33 +528,20 @@ below — never the objection prose or derived clause text those indicators carr
 
 ### Critic-delta confidence merge rule
 
-`confidence_state` (and its mirrored `confidence_band`) is not taken from the primary pass alone.
-`reconcile()` (`scripts/reconciliation.py`) merges the primary's `confidence_state` with the
-adversarial critic's delta so that a review the critic disagrees with is never shown at the same
-confidence level as a review the critic silently agreed with — the confidence band shown at the
-pre-download trust gate (see [Critic-delta presentation](#critic-delta-presentation) and the
-[#255 download gate](#download-gate--delta-indicator-must-be-visible-before-download)) must not
-misrepresent a contested review as a confident one.
+**Retired by issue #138 ([ADR 0001](adr/0001-critic-has-the-last-word.md)): the critic's own
+`confidence_state` is the final one**, and `confidence_band` mirrors it (null when `OK`, else the
+`confidence_state` string itself). `reconcile()` (`scripts/reconciliation.py`) no longer reads the
+primary's band at all.
 
-The merge rule:
-
-- **Ordering.** `confidence_state` values are ordered least to most degraded:
-  `OK` < `LOW_CONFIDENCE` < `MANUAL_REVIEW_REQUIRED` < `ERROR_MANUAL_REVIEW_REQUIRED`.
-- **Trigger.** If the critic pass produced one or more entries in
-  `critic_delta.contested_replacements` **or** `critic_delta.added_issues`, the final
-  `confidence_state` is degraded **one level** below the primary's own `confidence_state`
-  (capped at `ERROR_MANUAL_REVIEW_REQUIRED` — it never wraps or exceeds the worst level).
-  A `critic_delta.rationale_objections` entry alone (no contested replacement, no added issue)
-  does **not** trigger degradation — the critic disagreeing with *why* an issue was raised, without
-  contesting the replacement text or adding a new issue, is not evidence the reviewer's output
-  itself is less trustworthy.
-- **No delta, no change.** When the critic produced no delta at all (or no critic pass ran), the
-  primary's `confidence_state` / `confidence_band` pass through unchanged.
-- **Monotonic.** The critic can only move `confidence_state` toward `ERROR_MANUAL_REVIEW_REQUIRED`;
-  it can never raise/improve the band back toward `OK`, regardless of the critic's own
-  `confidence_state` or decision.
-- **`confidence_band` always mirrors the merged `confidence_state`**: null when `OK`, else the
-  `confidence_state` string itself — same rule as the unmerged case above.
+The rule this replaces (issue #265) degraded the primary's `confidence_state` one level whenever the
+critic contested a replacement or added an issue, and never let the critic raise it. That was right while
+the critic could only flag: the primary's words shipped, and a band that hid the critic's objection would
+have misrepresented a contested review as a confident one at the pre-download trust gate. Under ADR 0001
+the critic does not contest, it decides — its words are the ones that ship — so the band that describes
+the delivered review is the critic's own. A critic override, an added issue or a rationale objection
+moves nothing by itself, and a critic may report a better band than the primary did. The disagreement
+itself is still surfaced, in `critic_delta` (see [The critic's final result](#the-critics-final-result-issue-137-adr-0001)
+and [Critic-delta presentation](#critic-delta-presentation)).
 
 ### No size-based confidence degrade (issue #625, 2026-08-25)
 
@@ -530,8 +553,8 @@ decision (issue #625) deleted that review mode outright: a document either fits
 as `MANUAL_REVIEW_REQUIRED` / `document_too_large` before any model call and never reaches
 `reconcile()` at all. There is no longer a reduced review quality for a confidence degrade or a
 summary notice to warn about, and the pipeline-derived `input_mode` field that carried the
-distinction is gone from `scripts/review_spine.py::run_review`'s result dict. The critic-delta
-merge above is now the only rule that moves `confidence_state`.
+distinction is gone from `scripts/review_spine.py::run_review`'s result dict. Since issue #138 nothing in
+`reconcile()` moves `confidence_state`: it is the critic's own.
 
 ## Critic-delta presentation
 
@@ -551,8 +574,9 @@ the delta indicator visible.
 > replaced (issue #137):** `critic_delta` gained `dispositions[]` and `overrides[]` (see
 > [The critic's final result](#the-critics-final-result-issue-137-adr-0001)), and the add-only arrays
 > stay, deprecated, for one release — so every normative rule in this document keyed to the
-> `contested_replacements` shape still applies byte for byte until the reconcile ticket (#136)
-> retires them.
+> `contested_replacements` shape still applies byte for byte: the reconcile ticket (#138) made the
+> critic's result final but forwards the deprecated arrays verbatim, and retiring them belongs to the
+> receipt/footnotes follow-up that moves those surfaces onto `overrides`.
 
 **The receipt's own mirror (issue #96) is counts-only, never these badges' prose.** The provenance
 slip (`frontend/src/toaster/receipt.ts`, `criticLine`) prints at most one brief line — e.g. "Critic:
@@ -1058,6 +1082,10 @@ as its response keys — the rename is a storage-layer fact, not an API one. See
 | `critic_delta.rationale_objections[].objection` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes | `external` |
 | `critic_delta.contested_replacements[].section_ref`, `critic_delta.rationale_objections[].section_ref`, `critic_delta.added_issues[].section_ref` / `.section_title` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes, where each note names its section (#132) | Yes (locators — see below) | `external` |
 | `critic_delta.added_issues[]` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
+| `critic_delta.dispositions[].reason` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes | `external` |
+| `critic_delta.overrides[].reason`, and a critic-stated override's `.primary_value` / `.critic_value` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes (the two values are replacement-text class when the entry's `field` is `replacement_text`) | `external` |
+| A computed override's `.primary_value` / `.critic_value` / `.primary_edits` / `.critic_edits` (rendered edit records) | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes — every line except a `- removed text` line, the `+ ` prefix stripped (replacement-text class, like the insert segment each restates) | `external` |
+| A computed override's `.primary_issue` / `.critic_issue` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
 | `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes | `external` |
 | `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) | n/a |
 
@@ -1078,6 +1106,16 @@ gram blocks only when it occurs *whole* inside the locator, so a rule descriptio
 clause longer than the locator cannot match it. A primary issue's `section_ref` / `section_title`
 are not scanned, and #132 renders neither into the document: a note's host is chosen by comparing
 with them, never by quoting them.
+
+The reconciler's audit record (issue #138) is scanned after every field above, on the same reasoning
+as `rationale_objections`: it reaches the review's owner, and since #138 it is the *only* place the
+primary's dropped issues and the primary's inserted text reach anyone — the critic's transcript, not the
+primary's, is forwarded — so leaving it unscanned would let a primary leak through a critic that merely
+disagreed. A rendered edit record's `- ` lines are exempt because they are the document's own words (the
+block transcript proves them against the document's bytes, the same reason a `delete` segment is never
+scanned); the exemption is read off the prefix only on an entry the reconciler stamped
+`source: "computed"`, and any other line of that record is scanned, so a critic cannot hide prose behind
+the prefix in its own override.
 
 **Channel column (issue #521, epic #519 item C).** Each scanned field declares an **audience channel** — `external` or `internal` — which selects which of the scanner's two rulesets applies. The declaration is a **static literal table keyed on field identity**, `scripts/leakage_scan.py` → `_FIELD_CHANNELS`: never inferred from the field's text, and never a function of the review's runtime notes mode. A field's audience is a property of the field.
 

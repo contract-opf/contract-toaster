@@ -1096,7 +1096,7 @@ class TestRunPrimaryPassThreading(unittest.TestCase):
 
 class TestRunCriticPassThreading(unittest.TestCase):
     def test_capability_false_never_sends_output_schema_even_to_a_legacy_client(self) -> None:
-        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_keep_i1_accept_valid.json")))
+        legacy = LegacyShapedFakeClient(json.dumps(_load_fixture("critic_drop_i1_accept_valid.json")))
         primary_output = _load_fixture(_PRIMARY_VALID_FIXTURE)
         records: list[Any] = []
         # Pinned OFF for the same reason as the primary-pass twin above --
@@ -1117,7 +1117,7 @@ class TestRunCriticPassThreading(unittest.TestCase):
         self.assertFalse(records[-1].schema_enforcement_requested)
 
     def test_capability_true_passes_the_projected_schema_as_output_schema(self) -> None:
-        stamped = _load_fixture("critic_keep_i1_accept_valid.json")
+        stamped = _load_fixture("critic_drop_i1_accept_valid.json")
         client = mc.FakeBedrockClient(
             {"anthropic.claude-sonnet-4-6": [json.dumps(_unstamp(stamped))]},
             capabilities={"structured_outputs": True},

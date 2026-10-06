@@ -678,7 +678,7 @@ class TestPipelineActuallyWiresIt(RosterStoreTestBase):
 
         docx_bytes = dts._build_draft_docx({"sec-8": dts._SEC8_DRAFT_TEXT})
         client = dts._fake_client(
-            dts._primary_request_change_response(docx_bytes), dts._critic_no_delta_response()
+            dts._primary_request_change_response(docx_bytes), dts._critic_no_delta_response(docx_bytes)
         )
         s3 = dts.FakeS3({f"uploads/user-1/{dts.REVIEW_ID}/in.docx": docx_bytes})
         with patch.object(pipeline_runner, "_settle_reservation"), patch.object(

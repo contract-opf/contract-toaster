@@ -123,6 +123,7 @@ from test_review_spine import (  # noqa: E402
     _primary_request_change_response,
     _primary_request_change_response_with_transcript,
 )
+from critic_final_result import critic_keeps  # noqa: E402
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -378,7 +379,7 @@ def test_run_critic_pass_gates_narration_by_notes_mode(failures: list[str]) -> N
     }
 
     external_client = model_client.FakeBedrockClient(
-        {critic_id: [_critic_no_delta_response()]}
+        {critic_id: [critic_keeps(primary_output)]}
     )
     cp.run_critic_pass(
         review_id="review-516-critic-external",
@@ -415,7 +416,7 @@ def test_end_to_end_redline_carries_no_narration_in_default_mode(failures: list[
     fake_client = model_client.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],
-            critic_id: [_critic_no_delta_response()],
+            critic_id: [_critic_no_delta_response(docx_bytes)],
         }
     )
 

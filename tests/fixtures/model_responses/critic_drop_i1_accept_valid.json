@@ -10,8 +10,8 @@
     "dispositions": [
       {
         "issue_id": "I1",
-        "disposition": "KEEP",
-        "reason": "Same issue and the same edit; compliant with the playbook position."
+        "disposition": "DROP",
+        "reason": "The change is within the playbook's acceptable range; the issue does not stand."
       }
     ],
     "overrides": [],

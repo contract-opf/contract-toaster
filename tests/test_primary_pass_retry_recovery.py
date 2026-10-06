@@ -106,7 +106,7 @@ def _review_with_bad_confidence_state() -> str:
 # so the only thing wrong with it is the same one field the live incident
 # actually produced.
 def _critic_review_with_bad_confidence_state() -> str:
-    body = json.loads(_fixture("critic_keep_i1_accept_valid.json"))
+    body = json.loads(_fixture("critic_drop_i1_accept_valid.json"))
     body["confidence_state"] = "medium"
     return json.dumps(body)
 
@@ -268,7 +268,7 @@ def test_critic_schema_error_is_fed_back_into_the_retry_prompt(failures: list[st
         {
             _CRITIC_MODEL_ID: [
                 _critic_review_with_bad_confidence_state(),
-                _fixture("critic_keep_i1_accept_valid.json"),
+                _fixture("critic_drop_i1_accept_valid.json"),
             ]
         }
     )
@@ -303,7 +303,7 @@ def test_critic_first_attempt_prompt_is_never_polluted(failures: list[str]) -> N
     (AC3): attempt 1 must be exactly what it always was, with no correction
     block, for a critic review that validates on the first try."""
     client = model_client.FakeBedrockClient(
-        {_CRITIC_MODEL_ID: [_fixture("critic_keep_i1_accept_valid.json")]}
+        {_CRITIC_MODEL_ID: [_fixture("critic_drop_i1_accept_valid.json")]}
     )
     result = _run_critic(client)
 

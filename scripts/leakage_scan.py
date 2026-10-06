@@ -41,6 +41,11 @@ Scanned fields (per the output-contract.md scope table):
   - critic_delta locators: contested_replacements[].section_ref,
     rationale_objections[].section_ref, added_issues[].section_ref and
     added_issues[].section_title (issue #132)
+  - critic_delta audit record (issue #138): dispositions[].reason, and each
+    overrides[] entry's reason, primary_value, critic_value -- plus, on an
+    entry the reconciler computed, the added lines of its rendered edit
+    records (primary_edits, critic_edits, and the two values) and its
+    primary_issue / critic_issue, each scanned as an issue
 
   Issue #132 writes every critic disagreement into an internal footnote of
   the delivered `.docx` (`redline_generate._critic_delta_internal_notes`),
@@ -348,6 +353,27 @@ CHANNEL_INTERNAL = "internal"
 BLOCK_SEGMENT_INSERT_FIELD = "block_patches.segments.insert"
 BLOCK_OP_NEW_TEXT_FIELD = "block_ops.insert_block_after.new_text"
 
+#: Issue #138: the reconciler's audit record (`critic_delta.dispositions[]`
+#: and `critic_delta.overrides[]`, `reconciliation.reconcile`). Every
+#: model-authored text in it reaches the review's owner through the analysis
+#: artifact and `get_review_detail`, so each is scanned here.
+#:
+#: `overrides[].source` is stamped by the reconciler, never by a model
+#: (`reconcile` overwrites whatever a critic entry carried, and the artifact's
+#: `additionalProperties: false` forbids the key besides). An entry tagged
+#: `OVERRIDE_SOURCE_COMPUTED` is one the reconciler built, whose edit
+#: summaries are RENDERED EDIT RECORDS: one line per edit, `- removed text`
+#: (the document's own words, which the block transcript proves against its
+#: bytes -- the same text `_scan_block_edit_fields` deliberately never scans
+#: as a `delete` segment) or `+ added text` (the model's own writing).
+#: `reconciliation._render_edits` writes the record with these very
+#: constants, so the writer and this reader cannot drift. Any line that does
+#: not start with the removed prefix is scanned -- a `+` line, and anything
+#: else at all -- so the record's format can only ever widen the scan.
+OVERRIDE_SOURCE_COMPUTED = "computed"
+RENDERED_EDIT_REMOVED_PREFIX = "- "
+RENDERED_EDIT_ADDED_PREFIX = "+ "
+
 
 # The STATIC field -> channel table. Keyed on field identity only: never on
 # the field's text, never on the review's notes mode. Keys are the same
@@ -424,6 +450,21 @@ _FIELD_CHANNELS: dict[str, str] = {
     "critic_delta.rationale_objections.section_ref": CHANNEL_EXTERNAL,
     "critic_delta.added_issues.section_ref": CHANNEL_EXTERNAL,
     "critic_delta.added_issues.section_title": CHANNEL_EXTERNAL,
+    # Issue #138: the reconciler's audit record. The critic's one-line
+    # disposition reason, and each override's reason and two versions --
+    # model prose on a critic-stated entry, and on a computed one the
+    # rendered edit records whose added lines are model prose (see
+    # `OVERRIDE_SOURCE_COMPUTED`). A computed entry's `primary_issue` /
+    # `critic_issue` reuses the bare per-issue names, exactly as an
+    # `added_issues[]` entry does. None of them is rendered into the
+    # delivered `.docx`; all of them reach the review's owner, so all of them
+    # are judged on the strict external ruleset.
+    "critic_delta.dispositions.reason": CHANNEL_EXTERNAL,
+    "critic_delta.overrides.reason": CHANNEL_EXTERNAL,
+    "critic_delta.overrides.primary_value": CHANNEL_EXTERNAL,
+    "critic_delta.overrides.critic_value": CHANNEL_EXTERNAL,
+    "critic_delta.overrides.primary_edits": CHANNEL_EXTERNAL,
+    "critic_delta.overrides.critic_edits": CHANNEL_EXTERNAL,
     # Scanned outside `scan_model_output`, by its own pass:
     # `backend/src/review_routes.py` calls `LeakageScanner.scan` directly on
     # the cover-note draft. Enumerated here anyway -- this table is the
@@ -1189,6 +1230,10 @@ def scan_model_output(
         rationale_objections[].section_ref, added_issues[].section_ref and
         added_issues[].section_title (issue #132) -- every critic-delta
         field `redline_generate._critic_delta_internal_notes` renders
+      - critic_delta's audit record (issue #138): dispositions[].reason and
+        overrides[] (reason, both values, and on a computed entry the added
+        lines of its rendered edit records and its primary_issue /
+        critic_issue) -- see `_scan_critic_delta_audit_record`
       - block_patches[].segments[] with op="insert", and block_ops[] with
         op="insert_block_after" (their `new_text`) -- issue #626, v3-only.
         These are the texts the block-mode redline WRITES into the
@@ -1516,6 +1561,140 @@ def _scan_critic_delta_fields(
                     rule_id=result.rule_id,
                     confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
                 )
+
+    # Issue #138: the reconciler's audit record, after every field above so a
+    # review that already blocked on one of those still reports it.
+    return _scan_critic_delta_audit_record(critic_delta, scanner, current_counterparty_name)
+
+
+def _scan_text_field(
+    text: Any,
+    scanner: LeakageScanner,
+    field_name: str,
+    current_counterparty_name: str | None,
+    *,
+    is_replacement_text: bool = False,
+) -> ScanOutcome | None:
+    """Scan one free-text field under its declared channel; the first
+    positive detection as a `ScanOutcome`, else `None`."""
+    if not isinstance(text, str) or not text:
+        return None
+    result = scanner.scan(
+        text,
+        field_name=field_name,
+        is_replacement_text=is_replacement_text,
+        current_counterparty_name=current_counterparty_name,
+        channel=channel_for_field(field_name),
+    )
+    if not result.blocked:
+        return None
+    return ScanOutcome(
+        blocked=True,
+        field_name=field_name,
+        category=result.category,
+        rule_id=result.rule_id,
+        confidence_state=ERROR_MANUAL_REVIEW_REQUIRED,
+    )
+
+
+def _scan_rendered_edit_record(
+    record: Any,
+    scanner: LeakageScanner,
+    field_name: str,
+    current_counterparty_name: str | None,
+) -> ScanOutcome | None:
+    """Scan a computed override's rendered edit record (see
+    `OVERRIDE_SOURCE_COMPUTED`): every line except a removed-text line, the
+    added prefix stripped. Replacement-text class, like the insert segment
+    each added line restates (`BLOCK_SEGMENT_INSERT_FIELD`)."""
+    if not isinstance(record, str) or not record:
+        return None
+    for line in record.split("\n"):
+        if line.startswith(RENDERED_EDIT_REMOVED_PREFIX):
+            continue
+        if line.startswith(RENDERED_EDIT_ADDED_PREFIX):
+            line = line[len(RENDERED_EDIT_ADDED_PREFIX) :]
+        outcome = _scan_text_field(
+            line, scanner, field_name, current_counterparty_name, is_replacement_text=True
+        )
+        if outcome is not None:
+            return outcome
+    return None
+
+
+def _scan_critic_delta_audit_record(
+    critic_delta: dict[str, Any],
+    scanner: LeakageScanner,
+    current_counterparty_name: str | None = None,
+) -> ScanOutcome | None:
+    """Issue #138: every model-authored text in `critic_delta.dispositions[]`
+    and `critic_delta.overrides[]`, which `reconciliation.reconcile` forwards
+    to the review's owner (analysis artifact, `get_review_detail`).
+
+      - `dispositions[].reason` -- the critic's prose.
+      - `overrides[].reason` -- the critic's prose (on a computed entry, its
+        disposition reason or a fixed sentence).
+      - a critic-stated override's `primary_value` / `critic_value` -- the
+        critic's prose; replacement-text class when the entry declares
+        `field: "replacement_text"` (a schema enum on the entry, never the
+        text's content), exactly as `critic_suggested_replacement` is.
+      - a computed override's `primary_value` / `critic_value` /
+        `primary_edits` / `critic_edits` -- rendered edit records
+        (`_scan_rendered_edit_record`); the primary's added text reaches the
+        owner ONLY through these since the critic's transcript, not the
+        primary's, is the one forwarded.
+      - a computed override's `primary_issue` / `critic_issue` -- scanned as
+        an issue (`_scan_issue_fields`), so a primary issue the critic
+        dropped is held to the same scan it met when it was final.
+    """
+    for entry in critic_delta.get("dispositions") or []:
+        if not isinstance(entry, dict):
+            continue
+        outcome = _scan_text_field(
+            entry.get("reason"),
+            scanner,
+            "critic_delta.dispositions.reason",
+            current_counterparty_name,
+        )
+        if outcome is not None:
+            return outcome
+
+    for entry in critic_delta.get("overrides") or []:
+        if not isinstance(entry, dict):
+            continue
+        outcome = _scan_text_field(
+            entry.get("reason"),
+            scanner,
+            "critic_delta.overrides.reason",
+            current_counterparty_name,
+        )
+        if outcome is not None:
+            return outcome
+        computed = entry.get("source") == OVERRIDE_SOURCE_COMPUTED
+        for value_key in ("primary_value", "critic_value", "primary_edits", "critic_edits"):
+            field_name = f"critic_delta.overrides.{value_key}"
+            if computed:
+                outcome = _scan_rendered_edit_record(
+                    entry.get(value_key), scanner, field_name, current_counterparty_name
+                )
+            else:
+                outcome = _scan_text_field(
+                    entry.get(value_key),
+                    scanner,
+                    field_name,
+                    current_counterparty_name,
+                    is_replacement_text=entry.get("field") == "replacement_text",
+                )
+            if outcome is not None:
+                return outcome
+        for issue_key in ("primary_issue", "critic_issue"):
+            issue = entry.get(issue_key)
+            if not isinstance(issue, dict):
+                continue
+            outcome = _scan_issue_fields(issue, scanner, current_counterparty_name)
+            if outcome is not None:
+                outcome.field_name = f"critic_delta.overrides.{issue_key}.{outcome.field_name}"
+                return outcome
 
     return None
 

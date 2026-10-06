@@ -42,9 +42,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 BACKEND_SRC_DIR = REPO_ROOT / "backend" / "src"
 
-for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR):
+for _dir in (SCRIPTS_DIR, BACKEND_SRC_DIR, REPO_ROOT / "tests"):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
+
+from critic_final_result import critic_keeps  # noqa: E402
 
 
 def _import_live_smoke_eval():
@@ -186,28 +188,15 @@ def _request_change_response(verdict_summary: str) -> str:
     )
 
 
-def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "critic_delta": {
-                # Issue #137: a critic owes a disposition for every
-                # first-reviewer issue -- here the primary's one issue, I1.
-                "dispositions": [
-                    {
-                        "issue_id": "I1",
-                        "disposition": "KEEP",
-                        "reason": "Same issue and the same edit; compliant with the playbook position.",
-                    }
-                ],
-                "overrides": [],
-            },
-            "verdict_summary": None,
-        }
-    )
+def _critic_no_delta_response(
+    verdict_summary: str = "One issue identified requiring attention before acceptance.",
+) -> str:
+    """The critic's final result standing behind the primary's one issue
+    (`I1`). Issue #138 / ADR 0001: the critic's response IS the final review,
+    so agreeing means restating the issue and its edit with a KEEP disposition
+    (`critic_final_result.critic_keeps`) over the SAME primary response every
+    caller here scripts (`_request_change_response` with this summary)."""
+    return critic_keeps(_request_change_response(verdict_summary))
 
 
 def _critic_accept_response() -> str:

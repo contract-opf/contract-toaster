@@ -122,10 +122,10 @@ import review_spine  # noqa: E402
 from test_review_spine import (  # noqa: E402
     _SEC8_DRAFT_TEXT,
     _build_draft_docx,
-    _critic_no_delta_response,
     _load_bundle,
     _primary_request_change_response,
 )
+from critic_final_result import critic_keeps  # noqa: E402
 
 import json  # noqa: E402
 
@@ -567,7 +567,9 @@ def _run_review_with_model_output(
     fake_client = model_client.FakeBedrockClient(
         {
             primary_id: [primary_response],
-            critic_id: [_critic_no_delta_response()],
+            # Issue #138: the critic restates the primary, so the planted
+            # text reaches the gates as the CRITIC's text.
+            critic_id: [critic_keeps(primary_response)],
         }
     )
     return review_spine.run_review(

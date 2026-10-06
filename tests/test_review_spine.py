@@ -87,6 +87,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
+from critic_final_result import critic_keeps  # noqa: E402
+
 
 def _import_review_spine():
     try:
@@ -335,39 +337,13 @@ def _primary_request_change_response_with_transcript(docx_bytes: bytes) -> str:
     )
 
 
-def _keep_i1_critic_delta() -> dict:
-    """The disposition every critic owes the primary's one issue (`I1`) under
-    ADR 0001 / issue #137: KEEP, no overrides. A critic that has nothing to
-    change still has to SAY it kept the issue -- silence is a schema failure
-    (`critic_review_pass.critic_delta_rejection`). Lenient on an ACCEPT
-    primary, which has no `I1`: a disposition for an issue nobody raised is
-    ignored, not rejected."""
-    return {
-        "dispositions": [
-            {
-                "issue_id": "I1",
-                "disposition": "KEEP",
-                "reason": "Same issue and the same edit; compliant with the playbook position.",
-            }
-        ],
-        "overrides": [],
-    }
-
-
-def _critic_no_delta_response() -> str:
-    return json.dumps(
-        {
-            "schema_version": _ACTIVE_SCHEMA_VERSION,
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "block_patches": [],
-            "block_ops": [],
-            "critic_delta": _keep_i1_critic_delta(),
-            "verdict_summary": None,
-        }
-    )
+def _critic_no_delta_response(docx_bytes: bytes) -> str:
+    """The critic's final result when it stands behind the primary's one
+    issue (`I1`) in full. Issue #138 / ADR 0001: the critic's response IS the
+    final review, so agreeing means restating the issue and its edit
+    (`critic_final_result.critic_keeps`) with a KEEP disposition -- a KEEP
+    over an empty issues list would now ship a review with no issue."""
+    return critic_keeps(_primary_request_change_response_with_transcript(docx_bytes))
 
 
 def _primary_accept_response() -> str:
@@ -451,31 +427,14 @@ def _primary_request_change_response_schema_enforced(docx_bytes: bytes) -> str:
     )
 
 
-def _critic_no_delta_response_schema_enforced() -> str:
+def _critic_no_delta_response_schema_enforced(docx_bytes: bytes) -> str:
     """The capability-True counterpart to `_critic_no_delta_response`
-    (issue #567 fix round 3, finding 2) -- same `schema_version` omission
-    as `_primary_request_change_response_schema_enforced` above; this
-    response carries no Issue objects, so no `provenance` field is at
-    stake either way."""
-    return json.dumps(
-        {
-            "decision": "REQUEST_CHANGE",
-            "confidence_state": "OK",
-            "confidence_band": None,
-            "issues": [],
-            "block_patches": [],
-            "block_ops": [],
-            # A strict-mode provider must emit EVERY property of an object it
-            # emits at all (`_force_all_properties_required_in_place`), so the
-            # three deprecated arrays ride along empty.
-            "critic_delta": {
-                **_keep_i1_critic_delta(),
-                "added_issues": [],
-                "contested_replacements": [],
-                "rationale_objections": [],
-            },
-            "verdict_summary": None,
-        }
+    (issue #567 fix round 3, finding 2) -- the primary's schema-enforced
+    response restated (issue #138), so it carries no `schema_version` or
+    `provenance` either; a strict-mode provider emits every CriticDelta
+    property, so the three deprecated arrays ride along empty."""
+    return critic_keeps(
+        _primary_request_change_response_schema_enforced(docx_bytes), schema_enforced=True
     )
 
 
@@ -490,7 +449,10 @@ def _critic_accept_response() -> str:
             "block_patches": [],
             "block_ops": [],
             "critic_delta": None,
-            "verdict_summary": None,
+            # Issue #138: the critic's summary is the final one.
+            "verdict_summary": (
+                "No changes identified relative to your standard positions."
+            ),
         }
     )
 
@@ -537,7 +499,7 @@ def _part_1_request_change(rs, model_client_module, sfp_module, failures: list[s
     fake_client = model_client_module.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],
-            critic_id: [_critic_no_delta_response()],
+            critic_id: [_critic_no_delta_response(docx_bytes)],
         }
     )
 
@@ -697,7 +659,7 @@ def _part_4_schema_enforcement_requested_keys(
     fake_client_off = model_client_module.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response_with_transcript(docx_bytes)],
-            critic_id: [_critic_no_delta_response()],
+            critic_id: [_critic_no_delta_response(docx_bytes)],
         }
     )
     result_off = rs.run_review(docx_bytes, bundle, fake_client_off, review_id="spine-test-4a")
@@ -735,7 +697,7 @@ def _part_4_schema_enforcement_requested_keys(
     fake_client_on = model_client_module.FakeBedrockClient(
         {
             primary_id: [_primary_request_change_response_schema_enforced(docx_bytes)],
-            critic_id: [_critic_no_delta_response_schema_enforced()],
+            critic_id: [_critic_no_delta_response_schema_enforced(docx_bytes)],
         },
         capabilities={"structured_outputs": True},
     )

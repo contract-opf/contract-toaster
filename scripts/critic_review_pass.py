@@ -144,13 +144,18 @@ def critic_delta_rejection(
     vocabulary keeps `LAST_ERROR_REASONS` / `critic_schema_invalid` and the
     informed retry working unchanged.
 
-    Two rejections:
+    Three rejections:
 
       * a first-reviewer issue with NO disposition (the silent-ratification
         hole: a critic that never mentions an issue has neither kept nor
         dropped it, and the reconcile step cannot tell which);
       * a first-reviewer issue disposed of TWICE (two verdicts on one issue,
-        which the reconcile step would have to arbitrate).
+        which the reconcile step would have to arbitrate);
+      * (issue #138) a KEEP or REVISE for a first-reviewer issue the critic's
+        own `issues` do not carry (`reconciliation
+        .kept_issue_keys_without_counterpart`): the critic's issues are the
+        final review, so the kept issue would vanish under a disposition
+        that says it stays.
 
     Deliberately NOT rejected: a disposition or an override naming an
     `issue_id` the first reviewer never raised. Such an entry is noise, not a
@@ -196,6 +201,23 @@ def critic_delta_rejection(
         problems.append(
             "critic_delta.dispositions disposes of issue_id(s) "
             f"{', '.join(repeated)} more than once"
+        )
+    # Issue #138: a KEEP or REVISE says the critic stands behind the issue,
+    # and its own `issues` ARE the final review -- so an issue kept there but
+    # absent here would be silently dropped under a "same issue" reason. The
+    # reconciler refuses that shape too; checking it here spends the critic's
+    # informed retry on it first. One pairing rule for both callers (a local
+    # import: `reconciliation` imports this module).
+    import reconciliation  # noqa: PLC0415
+
+    vanished = reconciliation.kept_issue_keys_without_counterpart(primary_output, response)
+    if vanished:
+        problems.append(
+            "critic_delta.dispositions KEEPs or REVISEs first-reviewer issue(s) "
+            f"{', '.join(sorted(vanished, key=_issue_key_sort))} that your own "
+            "\"issues\" do not carry -- an issue you KEEP or REVISE appears in "
+            "your issues with the same playbook_topic_id; one you do not stand "
+            "behind is a DROP"
         )
     if not problems:
         return None
