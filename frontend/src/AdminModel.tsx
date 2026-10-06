@@ -10,12 +10,15 @@
  *   - DELETE /api/admin/model-key — clear it, reverting to OPENROUTER_API_KEY.
  *   - GET    /api/admin/model-selection — the selectable catalogue, the policy
  *     defaults, and which model each pass will run on next.
- *   - POST   /api/admin/model-selection — set the primary/critic choice.
+ *   - POST   /api/admin/model-selection — set the reviewer/critic choice (the
+ *     wire keys stay `primary` / `critic`).
  *
- * TWO dropdowns, never one (issue #445): the app deliberately runs a separate
- * adversarial critic pass over the primary reviewer's output, and that second
- * opinion is what computes the decision. There is no "use one model for both"
- * option to offer, so don't add one.
+ * TWO dropdowns, never one (issue #445): the app runs two passes, named as
+ * ADR 0001 defines them — the Reviewer makes the initial review of the
+ * contract against the playbook, and the Critic, the senior reviewer, reads
+ * the contract, the playbook and the reviewer's proposed changes and has the
+ * last word: its result is the final review. There is no "use one model for
+ * both" option to offer, so don't add one.
  *
  * THE DEFAULT IS MARKED, NOT DUPLICATED (issue #604). There is no separate
  * "Default: <id>" pseudo-option above the catalogue any more — the policy pin

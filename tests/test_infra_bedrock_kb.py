@@ -392,7 +392,7 @@ def check_g_reconciled_least_privilege() -> list[str]:
     failures += _assert(
         bool(re.search(r"anthropic\.claude-opus", pipeline_text))
         and bool(re.search(r"anthropic\.claude-sonnet", pipeline_text)),
-        "pipeline-stack.ts scopes bedrock:InvokeModel to the primary (Opus) and critic (Sonnet) model ARNs",
+        "pipeline-stack.ts scopes bedrock:InvokeModel to the reviewer (Sonnet) and critic (Opus) model ARNs",
     )
 
     # G6: the reconciled invariant statement itself must be documented

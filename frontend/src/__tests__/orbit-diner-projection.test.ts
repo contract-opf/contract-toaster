@@ -507,7 +507,7 @@ describe('result', () => {
     expect(model.result?.metadata).toEqual([
       { label: 'Playbook version', value: 'v3' },
       { label: 'Standing instructions', value: 'v7' },
-      { label: 'Primary', value: 'primary-model' },
+      { label: 'Reviewer', value: 'primary-model' },
       { label: 'Critic', value: 'critic-model' },
     ]);
   });

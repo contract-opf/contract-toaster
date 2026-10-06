@@ -56,14 +56,15 @@ const MAX_SECTIONS = 200; // max sections considered per document
 const TOP_K = 8; // top-K retrieved precedents per section
 const MAX_RETRIES = 1; // max_retries_per_pass -- one bounded structured-output retry
 
-// Primary/critic review model IDs (model-policy/bedrock-us-east-1.json).
+// Primary (reviewer) / critic review model IDs (model-policy/bedrock-us-east-1.json;
+// issue #136 put Sonnet on the reviewer and Opus on the critic, ADR 0001).
 // Single-region native IDs only -- never a global./us./eu./apac. prefixed
 // cross-region inference profile (see ARCHITECTURE.md -> Model-selection
 // policy). pipelineReviewRole's bedrock:InvokeModel grant is scoped to
 // EXACTLY these two model ARNs -- never a foundation-model/* wildcard --
 // per the issue #59/#60 reconciliation (see Check G below).
-const PRIMARY_MODEL_ID = 'anthropic.claude-opus-4-8';
-const CRITIC_MODEL_ID = 'anthropic.claude-sonnet-4-6';
+const PRIMARY_MODEL_ID = 'anthropic.claude-sonnet-4-6';
+const CRITIC_MODEL_ID = 'anthropic.claude-opus-4-8';
 
 /** Maximum plausible review duration (execution-level timeout backstop). */
 const EXECUTION_TIMEOUT = cdk.Duration.minutes(15);
@@ -134,7 +135,7 @@ const MAX_CONCURRENT_EXECUTIONS = 5;
  *
  * RECONCILED least-privilege invariant (issue #59 Check G x issue #60):
  * pipelineReviewRole's bedrock:InvokeModel grant is scoped to EXACTLY the
- * primary (Opus) and critic (Sonnet) review model ARNs — never a
+ * reviewer (Sonnet) and critic (Opus) review model ARNs — never a
  * foundation-model/* wildcard. pipelineReviewRole remains the ONLY role
  * anywhere in this infra tree granted bedrock:InvokeModel on those two
  * model ARNs, and the ONLY role granted bedrock:Retrieve /
@@ -207,7 +208,7 @@ export class PipelineStack extends cdk.NestedStack {
         sid: 'BedrockInvokeModel',
         effect: iam.Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
-        // Scoped to EXACTLY the primary (Opus) and critic (Sonnet) review
+        // Scoped to EXACTLY the reviewer (Sonnet) and critic (Opus) review
         // model ARNs -- never a foundation-model/* wildcard. This is the
         // ARN-scoped reconciliation of issue #59 Check G against issue #60's
         // KB service role, which separately holds InvokeModel scoped ONLY to

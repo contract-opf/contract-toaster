@@ -398,7 +398,7 @@
       "model_id": "anthropic/claude-opus-5",
       "display_name": "Claude Opus 5",
       "tier": "Highest",
-      "note": "Strongest nuanced legal reasoning. Structured output via forced tool call; response_format not offered on the ZDR route (probed 2026-09-16).",
+      "note": "Strongest nuanced legal reasoning; the policy default for the critic pass. Structured output via forced tool call (probed 2026-09-16).",
       "cost_per_million_input_usd": 5.0,
       "cost_per_million_output_usd": 25.0,
       "context_length": 1000000,

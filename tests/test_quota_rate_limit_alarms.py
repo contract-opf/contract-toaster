@@ -8,7 +8,7 @@ Three acceptance criteria checked here (all fail against the current repo state)
   AC1 — Quotas recorded in the model-policy artifact; throughput ceiling documented.
         The model-policy JSON at model-policy/bedrock-us-east-1.json must exist and
         carry `granted_tpm`, `granted_rpm`, and `review_throughput_ceiling` for both
-        the primary (Opus 4.8) and critic (Sonnet 4.6) models, plus a
+        the primary/reviewer (Sonnet 4.6) and critic (Opus 4.8) models, plus a
         `max_eval_parallelism` field that documents the max concurrent eval runners.
 
   AC2 — Eval harness rate-limiting documented.
@@ -66,12 +66,12 @@ def check_ac1_quota_artifact() -> list[str]:
     if not primary.get("granted_tpm"):
         failures.append(
             "  AC1 FAIL: models.primary.granted_tpm missing or zero in model-policy "
-            "artifact (must record the actual granted TPM quota for Opus 4.8)"
+            "artifact (must record the actual granted TPM quota for Sonnet 4.6)"
         )
     if not primary.get("granted_rpm"):
         failures.append(
             "  AC1 FAIL: models.primary.granted_rpm missing or zero in model-policy "
-            "artifact (must record the actual granted RPM quota for Opus 4.8)"
+            "artifact (must record the actual granted RPM quota for Sonnet 4.6)"
         )
 
     # Check critic model
@@ -79,12 +79,12 @@ def check_ac1_quota_artifact() -> list[str]:
     if not critic.get("granted_tpm"):
         failures.append(
             "  AC1 FAIL: models.critic.granted_tpm missing or zero in model-policy "
-            "artifact (must record the actual granted TPM quota for Sonnet 4.6)"
+            "artifact (must record the actual granted TPM quota for Opus 4.8)"
         )
     if not critic.get("granted_rpm"):
         failures.append(
             "  AC1 FAIL: models.critic.granted_rpm missing or zero in model-policy "
-            "artifact (must record the actual granted RPM quota for Sonnet 4.6)"
+            "artifact (must record the actual granted RPM quota for Opus 4.8)"
         )
 
     # Check throughput ceiling
