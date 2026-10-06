@@ -118,6 +118,19 @@ class TestAutosaveIsNotAFreeUnlimitedDownload(AutosaveBase):
         row = self._reviews_table().get_item(Key={"review_id": "rev-idor"})["Item"]
         self.assertNotIn("autosave_presigned_at", row)
 
+    def test_an_admin_autosave_is_charged_audited_and_spends_nothing_of_the_owners(self) -> None:
+        """An admin fetching someone else's redline is always charged and
+        audited; the flag must not make it free, and must not burn the
+        owner's single auto-save."""
+        self._seed("rev-admin")
+        self._authenticate_as("admin-sub", is_admin=True)
+        self.assertEqual(
+            self.client.get(ROUTE.format("rev-admin") + "?autosave=1").status_code, 200
+        )
+        self.assertEqual(len(self._download_rows("rev-admin")), 1)
+        row = self._reviews_table().get_item(Key={"review_id": "rev-admin"})["Item"]
+        self.assertNotIn("autosave_presigned_at", row)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

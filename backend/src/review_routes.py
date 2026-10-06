@@ -2019,6 +2019,11 @@ async def get_review_output(
             ),
         )
 
+    # Only the review's OWNER may use the uncharged, unaudited auto-save:
+    # an admin's download of someone else's redline is always charged and
+    # audited, and must not be able to spend the owner's single auto-save.
+    if autosave and caller_sub != owner_sub:
+        autosave = False
     if autosave:
         _claim_autosave(table, review_id)
     try:
