@@ -3475,6 +3475,7 @@ def validate_model_response(
     issue_provenance: str = "model",
     schema_path: Path = OUTPUT_SCHEMA_PATH,
     schema_error_sink: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
+    schema_location_sink: Optional[Callable[[str], None]] = None,  # noqa: UP045
 ) -> tuple[bool, Any]:
     """Unwrap -> parse -> stamp envelope -> strictly schema-validate a raw
     model response.
@@ -3544,6 +3545,15 @@ def validate_model_response(
     folded into the return value. Not called for `invalid_json` /
     `invalid_response_contract`, which reject before there is any instance
     to point at and whose returned messages are already self-describing.
+
+    `schema_location_sink` (issue #157, default `None`): called with ONE
+    string -- `schema_error_location(exc)` for a jsonschema rejection, the
+    fixed `ISSUE_KEY_UNIQUENESS_LOCATION` token for the uniqueness check --
+    immediately before the same `schema_invalid` return. Unlike
+    `schema_error_sink` above, everything it carries comes from the SCHEMA
+    document, never the instance, so it is safe to persist on the invocation
+    ledger (`ModelInvocationRecord.schema_error_location`) and is wired on
+    every review, not only a diagnostic one.
     """
     try:
         parsed = json.loads(_extract_json_object(raw_text))
@@ -3610,6 +3620,8 @@ def validate_model_response(
                     "offending_value": _debug_safe_value(exc.instance),
                 }
             )
+        if schema_location_sink is not None:
+            schema_location_sink(schema_error_location(exc))
         return False, f"schema_invalid: {exc.message}{suffix}"
     duplicate = _duplicate_issue_key_error(parsed, schema)
     if duplicate is not None:
@@ -3631,8 +3643,61 @@ def validate_model_response(
                     "offending_value": "",
                 }
             )
+        if schema_location_sink is not None:
+            schema_location_sink(ISSUE_KEY_UNIQUENESS_LOCATION)
         return False, f"schema_invalid: {duplicate}"
     return True, parsed
+
+
+#: `ModelInvocationRecord.schema_error_location` for the cross-response
+#: `issue_key` uniqueness rejection (issue #157): it is not a jsonschema
+#: failure, so it has no schema path; a fixed token naming the check stands
+#: in, the same name the #643 diagnostic records as its `validator`.
+ISSUE_KEY_UNIQUENESS_LOCATION = "issue_key_uniqueness"
+
+
+def schema_error_location(exc: "jsonschema.ValidationError") -> str:  # noqa: UP037
+    """Where in the SCHEMA a jsonschema rejection fired, as a "/"-joined
+    walk through the schema document ending in the rejecting validator
+    keyword -- e.g. "properties/issues/items/properties/disposition/enum"
+    (issue #157).
+
+    Built from `exc.absolute_schema_path` alone, which indexes the schema
+    the pipeline loaded from disk, so it can never carry a byte of model
+    output. `exc.absolute_path` / `exc.path` -- the INSTANCE path -- are
+    deliberately not read: under `additionalProperties` or
+    `patternProperties` an instance path segment is a key the MODEL chose,
+    and that would carry model output past the invocation ledger's
+    METADATA-ONLY invariant (`backend/src/invocation_ledger.py`). The
+    keyword is appended only when the path does not already end in it
+    (jsonschema's paths do, but a hand-built error might not), and the
+    result is the bare keyword when the path is empty.
+    """
+    parts = [str(part) for part in exc.absolute_schema_path]
+    validator = str(exc.validator)
+    if not parts or parts[-1] != validator:
+        parts.append(validator)
+    return "/".join(parts)
+
+
+def attempt_retry_reason(outcome: str, last_error: Any) -> str:
+    """`ModelInvocationRecord.retry_reason` for one attempt (issue #157): the
+    attempt's own `_error_token` when it was retried, "" on a success or a
+    terminal failure (neither of which was retried). Shared by both passes so
+    the rule lives once."""
+    return _error_token(last_error) if outcome == "retry" else ""
+
+
+def ledgered_schema_error_location(outcome: str, last_error: Any, locations: list[str]) -> str:
+    """`ModelInvocationRecord.schema_error_location` for one attempt (issue
+    #157): the first schema-side location THIS attempt's validation reported,
+    and only when the attempt's own error is `schema_invalid` -- "" on a
+    success, and on any attempt that failed for another reason (a
+    transcript, replacement-text or truncation failure after a location was
+    somehow captured must not be ledgered as a schema failure)."""
+    if outcome == "success" or _error_token(last_error) != "schema_invalid":
+        return ""
+    return locations[0] if locations else ""
 
 
 def _error_token(last_error: Any) -> str:
@@ -4087,6 +4152,12 @@ def run_primary_pass(
         # write below guards `last_error` -- attempt 2's diagnostic must
         # never inherit attempt 1's rejected value.
         schema_errors: list[dict[str, Any]] = []
+        # Issue #157: THIS attempt's schema-side rejection location(s), for
+        # the ledger's `schema_error_location`. Unlike `schema_errors` above
+        # this is wired on every review -- it carries only schema-document
+        # paths and fixed check names, never instance values -- and is reset
+        # per attempt for the same reason.
+        schema_locations: list[str] = []
         # Issue #414: timed around the invoke() call only (assembly/validation
         # are local CPU work, not spend), so `duration_ms` on every ledgered
         # attempt -- success, retry, or terminal failure alike -- reflects the
@@ -4143,6 +4214,7 @@ def run_primary_pass(
                 schema_error_sink=(
                     None if attempt_diagnostic_write is None else schema_errors.append
                 ),
+                schema_location_sink=schema_locations.append,
             )
             if is_valid:
                 # Issue #627: prove the block transcript against the real
@@ -4393,6 +4465,14 @@ def run_primary_pass(
                     # failed once then recovered) -- only a non-success
                     # attempt's own `last_error` is this attempt's error.
                     error_token=("" if outcome == "success" else _error_token(last_error)),
+                    # Issue #157: why THIS attempt was retried ("" unless
+                    # outcome == "retry") and, on a schema_invalid attempt,
+                    # where in the schema it failed -- both schema-side /
+                    # fixed-vocabulary, never the instance.
+                    retry_reason=attempt_retry_reason(outcome, last_error),
+                    schema_error_location=ledgered_schema_error_location(
+                        outcome, last_error, schema_locations
+                    ),
                 )
             )
             # Issue #643: the DEBUG-ONLY companion to the ledger write above

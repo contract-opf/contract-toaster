@@ -1163,6 +1163,58 @@ def _part_9_dump_dir_per_attempt_diagnostics(lse, tmp_path: Path, failures: list
                 f"--dump-dir, never the shareable default report."
             )
 
+    # Issue #157: the METADATA-ONLY half of the per-attempt story DOES belong
+    # in the default report -- why each attempt retried (`retry_reason`, a
+    # closed token) and where its schema failed (`schema_error_location`, a
+    # path through the schema document). Attempt 1's response is missing the
+    # root `confidence_state`, so the rejecting keyword is the root
+    # `required`.
+    expected_accounting = [
+        {
+            "pass_name": "primary",
+            "attempt_number": 1,
+            "outcome": "retry",
+            "retry_reason": "schema_invalid",
+            "schema_error_location": "required",
+        },
+        {
+            "pass_name": "primary",
+            "attempt_number": 2,
+            "outcome": "success",
+            "retry_reason": "",
+            "schema_error_location": "",
+        },
+        {
+            "pass_name": "critic",
+            "attempt_number": 1,
+            "outcome": "success",
+            "retry_reason": "",
+            "schema_error_location": "",
+        },
+    ]
+    if len(rows) == 1 and rows[0].get("attempt_accounting") != expected_accounting:
+        failures.append(
+            f"[9m] Expected the report row's attempt_accounting to be "
+            f"{expected_accounting}, got {rows[0].get('attempt_accounting')!r}"
+        )
+    retry_counts = (report.get("aggregate") or {}).get("off", {}).get("retry_reason_counts")
+    if retry_counts != {"primary:schema_invalid": 1}:
+        failures.append(
+            f"[9n] Expected aggregate['off']['retry_reason_counts'] == "
+            f"{{'primary:schema_invalid': 1}}, got {retry_counts!r} (report "
+            f"keys {list(report)})"
+        )
+    # The dump's per-attempt entries carry the same two fields.
+    if len(primary_attempts) == 2:
+        first, second = primary_attempts
+        if (first.get("retry_reason"), first.get("schema_error_location")) != (
+            "schema_invalid",
+            "required",
+        ):
+            failures.append(f"[9o] Expected dump attempt 1 to carry retry_reason/schema_error_location, got {first}")
+        if (second.get("retry_reason"), second.get("schema_error_location")) != ("", ""):
+            failures.append(f"[9p] Expected dump attempt 2 retry_reason/schema_error_location to be empty, got {second}")
+
 
 # ---------------------------------------------------------------------------
 # Part 10: --dump-dir carries the FULL per-attempt error message and, on a
@@ -1364,7 +1416,10 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
         _NESTED_INVALID_PATH,
         SENTINEL_FINDING,
         "error_message",
-        "schema_error",
+        # The #643 diagnostic's KEY, quoted: issue #157's metadata-only
+        # `schema_error_location` (a schema-document path) is allowed in the
+        # default report and shares the bare prefix.
+        '"schema_error"',
         "offending_value",
     ):
         if leaked in report_text:
@@ -1373,6 +1428,21 @@ def _part_10_dump_dir_carries_full_error(lse, tmp_path: Path, failures: list[str
                 f"report -- per-attempt error detail is model substance and "
                 f"belongs only in --dump-dir."
             )
+    # Issue #157: what the default report DOES say about the same rejection
+    # is the SCHEMA-side location -- the walk through the schema document to
+    # the rejecting `enum`, never the instance path asserted absent above.
+    report_rows = json.loads(report_text).get("runs", [])
+    first_accounting = (
+        (report_rows[0].get("attempt_accounting") or [{}])[0] if len(report_rows) == 1 else {}
+    )
+    if first_accounting.get("schema_error_location") != (
+        "properties/issues/items/properties/decision/enum"
+    ):
+        failures.append(
+            f"[10m2] Expected the default report's attempt 1 "
+            f"schema_error_location to be the schema path to the rejecting "
+            f"enum, got {first_accounting!r}"
+        )
 
     # Second scenario: the offending instance is far larger than the dump
     # should ever carry. The bound must hold and must SAY it truncated,
