@@ -245,9 +245,18 @@ def _validate_judge_response(raw_text: str, *, expected_invariant_id: str) -> tu
 
     Returns (True, {"invariant_id", "violated", "evidence_quote"}) on
     success, (False, None) on any validation failure.
+
+    A ```json fence or a prose preamble around the object is unwrapped first
+    by the same `_extract_json_object` the review passes use -- unwrapping,
+    not repair, so `json.loads` stays the sole judge of validity. Without it
+    a model that fences its answer (Claude Haiku 4.5 did, on every call of a
+    2026-10-06 live run) had every verdict refused and failed every review
+    closed as `floor_invariant_unjudged`.
     """
+    if not isinstance(raw_text, str):
+        return False, None
     try:
-        parsed = json.loads(raw_text)
+        parsed = json.loads(_primary_review_pass._extract_json_object(raw_text))
     except (json.JSONDecodeError, TypeError):
         return False, None
     if not isinstance(parsed, dict):
