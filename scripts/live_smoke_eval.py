@@ -81,9 +81,11 @@ class and nothing more (measured on the 2026-09-01 live check, #642). Both
 new fields come from `run_review`'s `attempt_diagnostic_write` seam, are
 model SUBSTANCE, and therefore live under `--dump-dir` and NOWHERE else --
 `classify_validation_outcome` below still derives the default report's
-`validation_outcome` the "token, never the raw message" way, and the whole
-per-attempt list stays OUT of the default report, same as every other
-substance the dump captures.
+`validation_outcome` the "token, never the raw message" way, and the
+substance-bearing per-attempt diagnostic (`error_message`, `schema_error`)
+stays OUT of the default report, same as every other substance the dump
+captures. Only the metadata-only `attempt_accounting` view (issue #157,
+next paragraph) is in the default report.
 
 Issue #157 adds the one per-attempt view that IS shareable: each report row
 carries `attempt_accounting` -- pass, attempt number, ledgered outcome,

@@ -234,6 +234,67 @@ def test_primary_issue_key_uniqueness_records_the_fixed_token() -> None:
     assert ledger[0].schema_error_location == "issue_key_uniqueness", ledger[0]
 
 
+class _ScriptedRaisingClient:
+    """Plays a script of responses; an exception instance in the script is
+    raised from that attempt's invoke() instead of returned."""
+
+    def __init__(self, script: list[Any]) -> None:
+        self._script = list(script)
+
+    def invoke(self, **_kwargs: Any) -> str:
+        step = self._script.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+
+def _run_primary_scripted(script: list[Any]) -> tuple[dict[str, Any], list[Any]]:
+    ledger: list[model_client.ModelInvocationRecord] = []
+    result = pp.run_primary_pass(
+        review_id="ledger-157-scripted",
+        retrieved_precedent=[],
+        playbook=_playbook(),
+        model_client=_ScriptedRaisingClient(script),
+        model_id=_PRIMARY_MODEL_ID,
+        ledger_write=ledger.append,
+        doc_text=_DOC_TEXT,
+    )
+    return result, ledger
+
+
+def test_primary_truncation_retry_records_its_reason_and_no_location() -> None:
+    result, ledger = _run_primary_scripted(
+        [
+            model_client.ModelOutputTruncatedError("finish_reason == length"),
+            _fixture("primary_request_change_valid.json"),
+        ]
+    )
+    assert result["status"] == "OK", result
+    assert [r.outcome for r in ledger] == ["retry", "success"], ledger
+    assert ledger[0].retry_reason == "model_output_truncated", ledger[0]
+    assert ledger[0].schema_error_location == "", ledger[0]
+    assert ledger[1].retry_reason == "", ledger[1]
+
+
+def test_primary_context_length_failure_has_no_retry_reason() -> None:
+    """A context-length rejection is terminal (never retried), so its row
+    carries the error_token but an empty retry_reason. Attempt 1 is
+    schema-invalid so the rejection lands on a SECOND attempt, after a row
+    that did retry."""
+    result, ledger = _run_primary_scripted(
+        [
+            _fixture("schema_invalid_missing_issues.json"),
+            model_client.ModelContextLengthExceededError("too big"),
+        ]
+    )
+    assert result["status"] == "ERROR", result
+    assert [r.outcome for r in ledger] == ["retry", "failure"], ledger
+    assert ledger[0].retry_reason == "schema_invalid", ledger[0]
+    assert ledger[1].error_token == "context_length_exceeded", ledger[1]
+    assert ledger[1].retry_reason == "", ledger[1]
+    assert ledger[1].schema_error_location == "", ledger[1]
+
+
 def test_primary_non_schema_retry_records_no_location() -> None:
     _result, ledger = _run_primary(
         ["not json at all", _fixture("primary_request_change_valid.json")]
@@ -413,6 +474,8 @@ TESTS = [
     test_primary_required_rejection_names_the_missing_properties,
     test_primary_terminal_failure_row_has_no_retry_reason,
     test_primary_issue_key_uniqueness_records_the_fixed_token,
+    test_primary_truncation_retry_records_its_reason_and_no_location,
+    test_primary_context_length_failure_has_no_retry_reason,
     test_primary_non_schema_retry_records_no_location,
     test_critic_schema_invalid_then_valid,
     test_critic_delta_rejection_records_a_fixed_check_token,
