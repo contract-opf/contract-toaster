@@ -109,7 +109,7 @@ the shipped index will name paths that are not in it.
 - `infra/README.md` — The AWS CDK stack layout, environments, deploy identity context, deploy profiles and the security invariants the infrastructure pins. anchors: stack-layout, environments, deploy-identity-context-issues-316-349-409, usage, deploy-profiles-issue-231, security-invariants, nested-stack-notes covers: infra/**
 
 ## playbooks/opf/
-- `playbooks/opf/README.md` — Provenance for the vendored Open Playbook Format JSON Schemas — which engine commit each copy came from and how to re-vendor them. anchors: provenance--which-engine-commit-each-copy-came-from, re-vendoring, sibling-id-uniqueness-spec-313-is-enforced-loader-side-not-by-the-schema covers: playbooks/opf/**
+- `playbooks/opf/README.md` — Provenance for the vendored Open Playbook Format JSON Schemas — which engine commit each copy came from and how to re-vendor them. anchors: provenance--which-engine-commit-each-copy-came-from, re-vendoring, sibling-id-uniqueness-is-enforced-loader-side-not-by-the-schema covers: playbooks/opf/**
 
 ## standard-forms/
 - `standard-forms/README.md` — The retired standard-forms directory: what it holds, why it existed, and which gates were retired with it. anchors: contents, why-this-directory-exists, anchor-map-artifact, heading-hash-drift-gate, builder-fixture-tests, form-coverage-gate-retired-2026-09-02-issue-631, building--updating-the-anchor-map-retired-2026-09-02-issue-631, codeowners covers: standard-forms/**

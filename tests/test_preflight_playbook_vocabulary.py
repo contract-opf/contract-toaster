@@ -45,8 +45,11 @@ handler. So every row and object these tests assert over is a shape
 production writes; nothing asserts over a state the system cannot reach.
 
 Coverage (the issue's "Required verification" list for this file):
-  - OPF 0.3 and OPF 0.2 artifacts (both schemas declare an identical
-    top-level `agreement_type` object), and the legacy v1 registry shape.
+  - OPF 0.5 artifacts with and without a digest (the gold fixture carries
+    the engine-derived sections; the synthetic EIAA fixture carries none),
+    both through the one top-level `agreement_type` object
+    `playbooks/opf/playbook.schema-0.5.json` declares, and the legacy v1
+    registry shape.
   - Active-vs-inactive version selection: a second uploaded version whose
     `agreement_type.name` differs leaves the vocabulary alone until it is
     activated.
@@ -119,18 +122,18 @@ import preflight_pass  # noqa: E402
 import test_preflight_491 as preflight491  # noqa: E402
 
 # The two committed OPF fixtures. Both are real, schema-valid, identity-
-# sealed artifacts the loader accepts today (tests/test_opf_ingest_03.py
+# sealed artifacts the loader accepts today (tests/test_opf_ingest_05.py
 # loads this exact pair), so what is uploaded here is what an admin would
 # upload.
-OPF_03_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
-OPF_02_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
+OPF_DIGEST_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+OPF_NO_DIGEST_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 
 # `playbook_upload._check_agreement_type_match` refuses an upload whose
 # playbook_id is not one of the artifact's own agreement_type keys (id +
 # aliases), so these ids are not free choices -- they are the ids these two
 # artifacts can actually be installed under.
-OPF_03_PLAYBOOK_ID = "acme-university"  # agreement_type.name: Educational Affiliation Agreement
-OPF_02_PLAYBOOK_ID = "eiaa"  # ...: Synthetic Educational Internship & Affiliation Agreement
+OPF_DIGEST_PLAYBOOK_ID = "acme-university"  # agreement_type.name: Educational Affiliation Agreement
+OPF_NO_DIGEST_PLAYBOOK_ID = "eiaa"  # ...: Synthetic Educational Internship & Affiliation Agreement
 
 
 def _with_perspective(doc: dict[str, Any]) -> dict[str, Any]:
@@ -138,12 +141,12 @@ def _with_perspective(doc: dict[str, Any]) -> dict[str, Any]:
     identity afterwards.
 
     Issue #676 made `perspective` an upload-time minimum
-    (`playbook_upload.OPF_UPLOAD_MINIMUMS`): schema-OPTIONAL in both OPF
-    0.2 and 0.3, but refused by the admin upload path this harness drives.
-    The 0.3 gold fixture already carries one, so this is a no-op there; the
-    0.2 fixture (`tests/fixtures/opf/synthetic-eiaa.opf.json`) does not.
+    (`playbook_upload.OPF_UPLOAD_MINIMUMS`): schema-OPTIONAL in OPF
+    0.5, but refused by the admin upload path this harness drives. The gold
+    fixture already carries one, so this is a no-op there; the no-digest
+    fixture (`tests/fixtures/opf/synthetic-eiaa.opf.json`) does not.
 
-    Added here rather than to the committed 0.2 file because that file's
+    Added here rather than to the committed no-digest file because that file's
     identity is load-bearing elsewhere: `tests/test_bind_bundle.py` check 6
     compares the committed `playbooks/bundles/synthetic-eiaa.bundle-v2.json`
     against a fresh `bind_bundle()` over that fixture, so re-sealing it
@@ -167,8 +170,8 @@ def _with_perspective(doc: dict[str, Any]) -> dict[str, Any]:
     return doc
 
 
-OPF_03_TYPE_NAME = "Educational Affiliation Agreement"
-OPF_02_TYPE_NAME = "Synthetic Educational Internship & Affiliation Agreement"
+OPF_DIGEST_TYPE_NAME = "Educational Affiliation Agreement"
+OPF_NO_DIGEST_TYPE_NAME = "Synthetic Educational Internship & Affiliation Agreement"
 
 # The playbook `playbooks/registry.json` ships (legacy v1, on-disk).
 V1_PLAYBOOK_ID = "synthetic-nda-sample"
@@ -180,7 +183,7 @@ OTHER = preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE
 def _reseal(doc: dict[str, Any]) -> dict[str, Any]:
     """Recompute `identity` so a mutated OPF document hashes honestly again
     -- the loader verifies `identity.content_hash` and would otherwise
-    refuse the upload. Same helper shape as tests/test_opf_ingest_03.py's."""
+    refuse the upload. Same helper shape as tests/test_opf_ingest_05.py's."""
     doc = copy.deepcopy(doc)
     original_sections = set(doc["identity"].get("section_digests") or {})
     doc["identity"]["content_hash"] = opf_canonicalize.content_hash(doc)
@@ -420,14 +423,14 @@ class PreflightVocabularyTestBase(unittest.TestCase):
 
 
 class TestDbInstalledOpfPlaybookReachesTheVocabulary(PreflightVocabularyTestBase):
-    def test_opf_03_active_type_is_in_the_vocabulary_and_the_model_schema(self):
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+    def test_opf_active_type_is_in_the_vocabulary_and_the_model_schema(self):
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
 
-        self.assertIn(OPF_03_TYPE_NAME, self._vocabulary())
+        self.assertIn(OPF_DIGEST_TYPE_NAME, self._vocabulary())
 
-        client = self._model_client(OPF_03_TYPE_NAME)
+        client = self._model_client(OPF_DIGEST_TYPE_NAME)
         resp = self._preflight(
-            preflight491._nda_shaped_docx_bytes(), playbook_id=OPF_03_PLAYBOOK_ID
+            preflight491._nda_shaped_docx_bytes(), playbook_id=OPF_DIGEST_PLAYBOOK_ID
         )
 
         self.assertEqual(resp.status_code, 200)
@@ -438,34 +441,34 @@ class TestDbInstalledOpfPlaybookReachesTheVocabulary(PreflightVocabularyTestBase
         enum = client.invocations[0]["output_schema"]["properties"][
             "agreement_type_guess"
         ]["enum"]
-        self.assertIn(OPF_03_TYPE_NAME, enum)
+        self.assertIn(OPF_DIGEST_TYPE_NAME, enum)
         # And it survives `sanitize_classification`'s exact-match gate, so
         # it is what the reviewer sees.
-        self.assertEqual(body["agreement_type_guess"], OPF_03_TYPE_NAME)
+        self.assertEqual(body["agreement_type_guess"], OPF_DIGEST_TYPE_NAME)
         # Half two of the defect: the selected playbook's own type resolves,
         # so the verdict is a real comparison instead of "unclear".
         self.assertEqual(body["match"], "likely")
 
-    def test_opf_02_active_type_resolves_the_same_way(self):
-        """0.2 and 0.3 declare an identical `agreement_type` object
-        (`playbooks/opf/playbook.schema-0.2.json` /
-        `...-0.3.json`), so one resolver covers both -- asserted, not
-        assumed, against a real 0.2 artifact."""
-        self._install_opf_fixture(OPF_02_PLAYBOOK_ID, OPF_02_FIXTURE)
+    def test_opf_without_a_digest_active_type_resolves_the_same_way(self):
+        """An OPF 0.5 artifact with no digest or other derived section
+        resolves through the same top-level `agreement_type` object
+        (`playbooks/opf/playbook.schema-0.5.json`) as the gold fixture --
+        asserted, not assumed, against a real no-digest artifact."""
+        self._install_opf_fixture(OPF_NO_DIGEST_PLAYBOOK_ID, OPF_NO_DIGEST_FIXTURE)
 
-        name, aliases = self._resolve(OPF_02_PLAYBOOK_ID)
-        self.assertEqual(name, OPF_02_TYPE_NAME)
+        name, aliases = self._resolve(OPF_NO_DIGEST_PLAYBOOK_ID)
+        self.assertEqual(name, OPF_NO_DIGEST_TYPE_NAME)
         # `aliases` plus the machine `id`, per the OPF schema's own
         # "e.g. a consuming app's own dial key" note.
         self.assertIn("educational-internship-affiliation", aliases)
         self.assertIn("eiaa", aliases)
-        self.assertIn(OPF_02_TYPE_NAME, self._vocabulary())
+        self.assertIn(OPF_NO_DIGEST_TYPE_NAME, self._vocabulary())
 
     def test_the_registry_v1_playbook_still_resolves_alongside_it(self):
         """The legacy v1 shape (`playbook.agreement_type` /
         `playbook.agreement_aliases`, read off the registry's on-disk JSON)
         must not regress while the OPF branch is added."""
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
 
         name, aliases = self._resolve(V1_PLAYBOOK_ID)
         self.assertEqual(name, V1_TYPE_NAME)
@@ -473,7 +476,7 @@ class TestDbInstalledOpfPlaybookReachesTheVocabulary(PreflightVocabularyTestBase
 
         vocabulary = self._vocabulary()
         self.assertIn(V1_TYPE_NAME, vocabulary)
-        self.assertIn(OPF_03_TYPE_NAME, vocabulary)
+        self.assertIn(OPF_DIGEST_TYPE_NAME, vocabulary)
         self.assertIn(OTHER, vocabulary)
 
 
@@ -498,18 +501,18 @@ class TestNoShippedContractTypeSurvives(PreflightVocabularyTestBase):
         """The vocabulary is exactly what this deployment has installed. A
         type no installed playbook declares -- however common a contract
         type it is -- must not be offerable."""
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
 
         self.assertEqual(
             sorted(self._vocabulary()),
-            sorted([OPF_03_TYPE_NAME, V1_TYPE_NAME, OTHER]),
+            sorted([OPF_DIGEST_TYPE_NAME, V1_TYPE_NAME, OTHER]),
         )
 
     def test_other_is_always_offered_and_is_not_a_contract_type(self):
         """"Other" is the null answer, not a type: it is offered even with
         playbooks installed, and a vocabulary of ONLY it counts as empty
         (`_vocabulary_has_installed_types`)."""
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         self.assertIn(OTHER, self._vocabulary())
         self.assertTrue(review_routes._vocabulary_has_installed_types(self._vocabulary()))
         self.assertFalse(review_routes._vocabulary_has_installed_types([OTHER]))
@@ -524,48 +527,48 @@ class TestOnlyTheActiveVersionIsOffered(PreflightVocabularyTestBase):
     RENAMED = "Clinical Placement Agreement"
 
     def test_an_uploaded_but_unactivated_version_changes_nothing(self):
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE, version="v1")
-        self.assertIn(OPF_03_TYPE_NAME, self._vocabulary())
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE, version="v1")
+        self.assertIn(OPF_DIGEST_TYPE_NAME, self._vocabulary())
 
         self._install_opf_version(
-            OPF_03_PLAYBOOK_ID,
-            _renamed_type(OPF_03_FIXTURE, self.RENAMED),
+            OPF_DIGEST_PLAYBOOK_ID,
+            _renamed_type(OPF_DIGEST_FIXTURE, self.RENAMED),
             "v2",
             activate=False,
         )
 
         vocabulary = self._vocabulary()
-        self.assertIn(OPF_03_TYPE_NAME, vocabulary)
+        self.assertIn(OPF_DIGEST_TYPE_NAME, vocabulary)
         self.assertNotIn(self.RENAMED, vocabulary)
 
     def test_activating_that_version_changes_it(self):
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE, version="v1")
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE, version="v1")
         self._install_opf_version(
-            OPF_03_PLAYBOOK_ID,
-            _renamed_type(OPF_03_FIXTURE, self.RENAMED),
+            OPF_DIGEST_PLAYBOOK_ID,
+            _renamed_type(OPF_DIGEST_FIXTURE, self.RENAMED),
             "v2",
             activate=False,
         )
         self.assertNotIn(self.RENAMED, self._vocabulary())
 
         playbook_versions.activate_playbook_version(
-            OPF_03_PLAYBOOK_ID, "v2", "admin-659", self.ddb
+            OPF_DIGEST_PLAYBOOK_ID, "v2", "admin-659", self.ddb
         )
 
         vocabulary = self._vocabulary()
         self.assertIn(self.RENAMED, vocabulary)
-        self.assertNotIn(OPF_03_TYPE_NAME, vocabulary)
+        self.assertNotIn(OPF_DIGEST_TYPE_NAME, vocabulary)
 
     def test_a_playbook_with_no_active_version_contributes_nothing(self):
         """A `coming_soon` DB playbook -- uploaded, never activated -- is in
         the catalog but has no active artifact, so it yields no type rather
         than the type of a version nobody activated."""
         self._install_opf_fixture(
-            OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE, version="v1", activate=False
+            OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE, version="v1", activate=False
         )
 
-        self.assertEqual(self._resolve(OPF_03_PLAYBOOK_ID), (None, []))
-        self.assertNotIn(OPF_03_TYPE_NAME, self._vocabulary())
+        self.assertEqual(self._resolve(OPF_DIGEST_PLAYBOOK_ID), (None, []))
+        self.assertNotIn(OPF_DIGEST_TYPE_NAME, self._vocabulary())
 
 
 # ---------------------------------------------------------------------------
@@ -575,20 +578,20 @@ class TestOnlyTheActiveVersionIsOffered(PreflightVocabularyTestBase):
 
 class TestMatchVerdictUsesTheRealTypeAndAliases(PreflightVocabularyTestBase):
     def test_the_opf_name_matches(self):
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         self.assertEqual(
-            self._match(OPF_03_TYPE_NAME, playbook_id=OPF_03_PLAYBOOK_ID), "likely"
+            self._match(OPF_DIGEST_TYPE_NAME, playbook_id=OPF_DIGEST_PLAYBOOK_ID), "likely"
         )
 
     def test_an_opf_alias_matches_case_insensitively(self):
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         # "eiaa-fixture" is one of the artifact's declared `aliases`;
         # "educational-affiliation" is its machine `id`.
         self.assertEqual(
-            self._match("EIAA-Fixture", playbook_id=OPF_03_PLAYBOOK_ID), "likely"
+            self._match("EIAA-Fixture", playbook_id=OPF_DIGEST_PLAYBOOK_ID), "likely"
         )
         self.assertEqual(
-            self._match("Educational-Affiliation", playbook_id=OPF_03_PLAYBOOK_ID),
+            self._match("Educational-Affiliation", playbook_id=OPF_DIGEST_PLAYBOOK_ID),
             "likely",
         )
 
@@ -599,9 +602,9 @@ class TestMatchVerdictUsesTheRealTypeAndAliases(PreflightVocabularyTestBase):
         """The banner this restores: before the fix an OPF playbook resolved
         to `(None, [])`, so a wrong guess produced "unclear" and the amber
         `review-preflight-match-unlikely` note never rendered."""
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         self.assertEqual(
-            self._match(V1_TYPE_NAME, playbook_id=OPF_03_PLAYBOOK_ID), "unlikely"
+            self._match(V1_TYPE_NAME, playbook_id=OPF_DIGEST_PLAYBOOK_ID), "unlikely"
         )
 
     def test_an_unresolvable_playbook_is_still_unclear_never_an_error(self):
@@ -615,23 +618,23 @@ class TestMatchVerdictUsesTheRealTypeAndAliases(PreflightVocabularyTestBase):
 
 class TestUnreadableArtifactIsSkipped(PreflightVocabularyTestBase):
     def test_a_missing_active_artifact_costs_that_playbook_its_entry_only(self):
-        storage_key = self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        storage_key = self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         # The activated row still points at these bytes; the bytes are gone.
         self.raw_s3.delete_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=storage_key)
 
-        self.assertEqual(self._resolve(OPF_03_PLAYBOOK_ID), (None, []))
+        self.assertEqual(self._resolve(OPF_DIGEST_PLAYBOOK_ID), (None, []))
         vocabulary = self._vocabulary()
-        self.assertNotIn(OPF_03_TYPE_NAME, vocabulary)
+        self.assertNotIn(OPF_DIGEST_TYPE_NAME, vocabulary)
         # ...and the OTHER installed playbook is unaffected.
         self.assertIn(V1_TYPE_NAME, vocabulary)
 
     def test_preflight_still_returns_its_stats(self):
-        storage_key = self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        storage_key = self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
         self.raw_s3.delete_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=storage_key)
 
         self._model_client(V1_TYPE_NAME)
         resp = self._preflight(
-            preflight491._nda_shaped_docx_bytes(), playbook_id=OPF_03_PLAYBOOK_ID
+            preflight491._nda_shaped_docx_bytes(), playbook_id=OPF_DIGEST_PLAYBOOK_ID
         )
 
         self.assertEqual(resp.status_code, 200)
@@ -705,7 +708,7 @@ class TestActiveVersionCache(PreflightVocabularyTestBase):
     def test_a_repeat_lookup_does_not_re_read_the_artifact(self):
         """Issue #659: "one preflight does not issue an S3 GET per installed
         playbook on every upload"."""
-        storage_key = self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE)
+        storage_key = self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE)
 
         self._vocabulary()
         self.assertEqual(self.s3.get_object_keys.count(storage_key), 1)
@@ -717,12 +720,12 @@ class TestActiveVersionCache(PreflightVocabularyTestBase):
         """Keyed on the ACTIVE version's identity, not on the playbook_id --
         an id-keyed cache would serve the retired version's agreement type
         until the process restarted."""
-        self._install_opf_fixture(OPF_03_PLAYBOOK_ID, OPF_03_FIXTURE, version="v1")
-        self.assertIn(OPF_03_TYPE_NAME, self._vocabulary())
+        self._install_opf_fixture(OPF_DIGEST_PLAYBOOK_ID, OPF_DIGEST_FIXTURE, version="v1")
+        self.assertIn(OPF_DIGEST_TYPE_NAME, self._vocabulary())
 
         self._install_opf_version(
-            OPF_03_PLAYBOOK_ID,
-            _renamed_type(OPF_03_FIXTURE, "Clinical Placement Agreement"),
+            OPF_DIGEST_PLAYBOOK_ID,
+            _renamed_type(OPF_DIGEST_FIXTURE, "Clinical Placement Agreement"),
             "v2",
             activate=True,
         )
@@ -751,7 +754,7 @@ class TestAgreementTypeLabelNormalization(PreflightVocabularyTestBase):
         self.assertGreater(len(long_name), preflight_pass.AGREEMENT_TYPE_MAX_CHARS)
         self.assertTrue(long_name[preflight_pass.AGREEMENT_TYPE_MAX_CHARS - 1].isspace())
         self._install_opf_version(
-            OPF_03_PLAYBOOK_ID, _renamed_type(OPF_03_FIXTURE, long_name), "v1"
+            OPF_DIGEST_PLAYBOOK_ID, _renamed_type(OPF_DIGEST_FIXTURE, long_name), "v1"
         )
 
         capped = long_name[: preflight_pass.AGREEMENT_TYPE_MAX_CHARS].strip()
@@ -759,18 +762,18 @@ class TestAgreementTypeLabelNormalization(PreflightVocabularyTestBase):
         self.assertIn(capped, vocabulary)
         self.assertNotIn(long_name, vocabulary)
         # The vocabulary entry and the match target are the SAME string...
-        name, _aliases = self._resolve(OPF_03_PLAYBOOK_ID)
+        name, _aliases = self._resolve(OPF_DIGEST_PLAYBOOK_ID)
         self.assertEqual(name, capped)
         # ...so a guess echoing the enum entry verbatim still matches.
-        self.assertEqual(self._match(capped, playbook_id=OPF_03_PLAYBOOK_ID), "likely")
+        self.assertEqual(self._match(capped, playbook_id=OPF_DIGEST_PLAYBOOK_ID), "likely")
 
     def test_control_characters_and_newlines_never_reach_a_label(self):
         self._install_opf_version(
-            OPF_03_PLAYBOOK_ID,
-            _renamed_type(OPF_03_FIXTURE, "Affiliation\tAgreement\n(Clinical)"),
+            OPF_DIGEST_PLAYBOOK_ID,
+            _renamed_type(OPF_DIGEST_FIXTURE, "Affiliation\tAgreement\n(Clinical)"),
             "v1",
         )
-        name, _aliases = self._resolve(OPF_03_PLAYBOOK_ID)
+        name, _aliases = self._resolve(OPF_DIGEST_PLAYBOOK_ID)
         self.assertEqual(name, "Affiliation Agreement (Clinical)")
 
 

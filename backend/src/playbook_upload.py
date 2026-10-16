@@ -11,8 +11,9 @@ status:"draft", ...}` via `src.playbook_versions.record_playbook_version_upload`
 admin got "draft recorded" for a file that might not even be JSON.
 
 This module wires up the ingestion stack that already existed and was
-already tested but unused: `scripts/opf_load.py::load_opf_document` (OPF 0.2/
-0.3 schema dispatch, `identity.content_hash` verification, injection scan,
+already tested but unused: `scripts/opf_load.py::load_opf_document` (OPF 0.5
+schema validation -- the one format, issue #128 -- `identity.content_hash`
+verification, injection scan,
 `.opf.html` bundle extraction via `scripts/opf_html.py`) and
 `scripts/playbook_validation.py::validate_playbook_document` (the legacy v1
 `playbooks/schema.json` path).
@@ -36,7 +37,8 @@ other OPF validation failure -- this module never loosens that.
 
 `_load_opf_from_bytes` additionally refuses an OPF document that omits a
 field the OPF spec's own prose calls mandatory but the JSON Schema's
-`required` list does not enforce -- today exactly one, `perspective`. The
+`required` list does not enforce -- today exactly one, `perspective` (whose
+OPF 0.5 digest copy, `digest.perspective`, must name the principal too). The
 list lives in ONE named place, `OPF_UPLOAD_MINIMUMS` below, with the
 requirement's source and the field's purpose stated on each entry (both
 surfaced to the operator on rejection). Because the check sits in
@@ -169,12 +171,16 @@ def _opf_artifact_kind(opf_version: Any) -> str:
 #     enforces (that would be duplication), and nothing goes in here without
 #     a stated reason on the entry itself.
 #
-# Today the list is exactly one field. Every top-level property of
-# `playbooks/opf/playbook.schema-0.3.json` AND `...-0.2.json` was scanned
-# for normative language (must/required/shall) in its description that the
-# schema's `required` list does NOT back, and `perspective` was the only
-# match in either (issue #676). That scan is not a claim to trust: it is
-# re-run against the schema files themselves by
+# Today the list is exactly one field. Every top-level property of the
+# vendored schema (`playbooks/opf/playbook.schema-0.5.json` since issue #128;
+# 0.2 and 0.3 before it) was scanned for normative language
+# (must/required/shall) in its description that the schema's `required` list
+# does NOT back, and `perspective` was the only match (issue #676). The 0.5
+# derived sections (`digest`, `manifest`, `dossiers`, `provenance_index`) say
+# "when present it MUST equal build_...(document)" -- a consistency rule the
+# engine's validator enforces on a section that is there, not a requirement
+# that it be there -- so they are not minimums. That scan is not a claim to
+# trust: it is re-run against the schema file itself by
 # tests/test_playbook_minimums_676.py::TestSchemaPremise, so a schema bump
 # that promotes `perspective` into `required` -- or that adds a second
 # normative-but-optional field -- turns that test red rather than leaving a
@@ -198,8 +204,9 @@ class OpfMinimum:
 
 
 def _perspective_defect(doc: dict[str, Any]) -> str | None:
-    """Value-free description of what is missing from `/perspective`, or
-    None when it names a principal.
+    """Value-free description of what is missing from `/perspective` (or
+    from its OPF 0.5 digest copy, `/digest/perspective`), or None when both
+    name a principal.
 
     Both the absent-block and the blank-string cases are defects: the
     schema requires `party` and `counterparty_type` to be present strings
@@ -207,38 +214,64 @@ def _perspective_defect(doc: dict[str, Any]) -> str | None:
     the schema and still name nobody. Since the entire point of the field
     is to say who "us" is, a blank value fails the requirement exactly as
     an absent block does.
+
+    Issue #128: digest 4 carries its own copy of `perspective` (required
+    as a key by the 0.5 schema, but nullable), so the digest always says
+    who "us" is. A document carrying a digest whose copy is null or names
+    nobody is refused too -- the digest is what the review prompt is built
+    from, and a reader of it alone must not be left without a principal.
+    The engine never emits that shape (its digest copies the top-level
+    block), so this only fires on a hand-edited or non-reference
+    producer's document. A document with NO digest is not refused here:
+    the schema makes the section optional, and the review path refuses a
+    digest-less playbook on its own (`opf_prompt.PromptCompositionError`)
+    unless a policy-only review was positively declared.
     """
     perspective = doc.get("perspective")
     if perspective is None:
         return "the document carries no top-level 'perspective' block."
+    defect = _blank_perspective_fields(perspective, "the document's 'perspective' block")
+    if defect:
+        return defect
+    digest = doc.get("digest")
+    if isinstance(digest, dict):
+        copy_ = digest.get("perspective")
+        if copy_ is None:
+            return "the document's digest carries no 'perspective' copy ('/digest/perspective' is null)."
+        return _blank_perspective_fields(copy_, "the digest's 'perspective' copy")
+    return None
+
+
+def _blank_perspective_fields(perspective: Any, what: str) -> str | None:
+    """Value-free defect phrase for a perspective object that is not an
+    object, or that leaves `party`/`counterparty_type` blank; None if fine."""
     if not isinstance(perspective, dict):
-        return "the document's top-level 'perspective' is not an object."
+        return f"{what} is not an object."
     blank = [
         name
         for name in ("party", "counterparty_type")
         if not str(perspective.get(name) or "").strip()
     ]
     if blank:
-        return (
-            "the document's 'perspective' block leaves "
-            + " and ".join(f"'{name}'" for name in blank)
-            + " empty."
-        )
+        return f"{what} leaves " + " and ".join(f"'{name}'" for name in blank) + " empty."
     return None
 
 
 OPF_UPLOAD_MINIMUMS: tuple[OpfMinimum, ...] = (
     OpfMinimum(
         field="perspective",
-        # SOURCE: spec prose. `playbooks/opf/playbook.schema-0.3.json` (and
-        # -0.2.json, identically) describes /perspective as "Whose
+        # SOURCE: spec prose. `playbooks/opf/playbook.schema-0.5.json` (and
+        # 0.2/0.3 before it, identically) describes /perspective as "Whose
         # perspective this playbook is reviewed 'as' -- an open-standard OPF
         # instance must say who 'us' is", but omits it from the schema's own
-        # `required` list, so nothing enforced it.
+        # `required` list, so nothing enforced it. Its digest 4 copy
+        # (`/digest/perspective`, "the digest always says who 'us' is") is
+        # checked under the same entry -- see `_perspective_defect`.
         requirement_source=(
             "the OPF schema's own /perspective description ('an open-standard "
             "OPF instance must say who \"us\" is') -- normative prose the "
-            "schema's `required` list does not enforce"
+            "schema's `required` list does not enforce -- and its digest copy, "
+            "which the schema describes as how 'the digest always says who \"us\" is'"
         ),
         # WHY IT IS ENFORCED: without a principal the review has no side to
         # be on. Issue #675 measured the consequence on a live model run

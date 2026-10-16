@@ -69,8 +69,8 @@ import opf_load  # noqa: E402
 import playbook_registry  # noqa: E402
 import policy_load  # noqa: E402
 
-FIXTURE_JSON = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
-FIXTURE_HTML = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.html"
+FIXTURE_JSON = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE_HTML = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.html"
 MODEL_POLICY = REPO_ROOT / "model-policy" / "bedrock-us-east-1.json"
 BUNDLE_SCHEMA = REPO_ROOT / "playbooks" / "bundle.schema-v2.json"
 # Any already-valid, already-synthetic policy works here: these checks only

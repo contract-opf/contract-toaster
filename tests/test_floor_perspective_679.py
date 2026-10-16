@@ -65,8 +65,8 @@ data. What is deterministically checkable offline -- and what was actually
 broken -- is that the resolved identity REACHES the judge, and that the
 fail-closed path exists when it cannot be resolved.
 
-Fixtures: the gold OPF 0.3 fixture `tests/gold-fixtures-opf/
-acme-university.opf.json` (already used by
+Fixtures: the gold OPF 0.5 fixture `tests/gold-fixtures-opf/
+acme-university-0.5.opf.json` (already used by
 tests/test_review_opf_digest_mode_479.py) -- its `perspective` and its one
 `counterparty`-phrased floor invariant are BOTH exactly what a real
 activated artifact carries, so nothing here is a hand-built shape
@@ -74,9 +74,8 @@ production cannot reach. The no-perspective variant is that same fixture
 with `perspective` deleted and re-sealed (re-sealed because
 `opf_load.load_opf_document` re-validates the content hash, so a tampered
 doc would never reach the pipeline) -- and `perspective` is absent from the
-top-level `required` list of BOTH `playbooks/opf/playbook.schema-0.2.json`
-and `playbook.schema-0.3.json`, so an artifact without it validates,
-uploads and activates like any other. That branch is reachable in
+top-level `required` list of `playbooks/opf/playbook.schema-0.5.json`, so
+an artifact without it validates, uploads and activates like any other. That branch is reachable in
 production, not invented for this test.
 
 Run standalone: `python3 tests/test_floor_perspective_679.py`
@@ -107,7 +106,7 @@ import model_client as model_client_module  # noqa: E402
 import opf_canonicalize  # noqa: E402
 import review_spine  # noqa: E402
 
-OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 
 PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
@@ -421,7 +420,7 @@ class TestNoteResolvedFromThePlaybook(unittest.TestCase):
         self.assertEqual(review_spine._floor_perspective_note(doc), "")
 
     def test_blank_party_resolves_to_no_note(self):
-        """`playbooks/opf/playbook.schema-0.3.json` puts no `minLength` on
+        """`playbooks/opf/playbook.schema-0.5.json` puts no `minLength` on
         `perspective.party`, so a blank one is a schema-VALID artifact that
         binds nothing -- it must fail closed, not render "Our client: "."""
         doc = _load_opf_doc()

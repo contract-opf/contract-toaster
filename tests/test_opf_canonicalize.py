@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
 """Gate for scripts/opf_canonicalize.py — the OPF content-hash definition.
 
-An OPF 0.3 upload is accepted only if its declared ``identity.content_hash``
+An OPF 0.5 upload is accepted only if its declared ``identity.content_hash``
 matches the hash recomputed over its own canonical body. That check is only as
 trustworthy as the canonicalizer, so this pins its behavior:
 
   1. GOLDEN HASH: the committed fixture hashes to a pinned value. If the
      canonical form (key sort / separators / exclusion rules) drifts, or the
      fixture content changes, this fails.
-  2. EXCLUSIONS: content_hash is invariant under changes to ``identity``,
-     ``curation``, and ``compiler.generated_at``/``run_id``; it changes when
-     real content changes.
+  2. EXCLUSIONS: content_hash is invariant under changes to ``identity`` and
+     ``compiler.generated_at``/``run_id``, and nothing else; it changes when
+     real content changes -- including the 0.5 ``digest`` / ``manifest`` /
+     ``dossiers`` sections and a stray ``curation`` key (OPF 0.5 retired that
+     section, and with it its exclusion: engine #233).
   3. verify_content_hash: true for the honest fixture, false when the declared
      hash is tampered or absent.
-  4. SECTION DIGESTS: evidence/posture/floor/curation digests are present and
-     stable.
+  4. SECTION DIGESTS: exactly evidence/posture/floor digests, matching what the
+     fixture declares.
+  5. CONFORMANCE (issue #128, closing the gap #14 named): every vendored OPF
+     0.5 conformance vector (playbooks/opf/conformance-0.5/, pinned in
+     tests/test_opf_schema_sync.py) reproduces the engine's expected
+     ``canonical``, ``content_hash`` and ``section_digests`` exactly. The
+     vectors are the engine's own definition of the canonical form, so this is
+     the check that the vendored canonicalizer still IS that definition.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -33,9 +41,11 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import opf_canonicalize  # noqa: E402
 
-FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 
-GOLDEN_CONTENT_HASH = "sha256:c3dfddcb16fba4fd41d7ceb62b404a3c7a33117d0c76ed453946eba2a3abc45e"
+GOLDEN_CONTENT_HASH = "sha256:6647c41a7f825e6dbcb89a2a80c87a287ab45303e633e4446e8b0e7e962c6a08"
+
+CONFORMANCE_DIR = REPO_ROOT / "playbooks" / "opf" / "conformance-0.5"
 
 
 def _load() -> dict:
@@ -62,12 +72,19 @@ def check_exclusions() -> list[str]:
     base = opf_canonicalize.content_hash(doc)
     failures: list[str] = []
 
-    # Mutating identity / curation must NOT change the hash.
+    # Mutating identity must NOT change the hash.
     d = copy.deepcopy(doc)
     d["identity"]["content_hash"] = "sha256:" + "0" * 64
-    d["curation"] = {"pins": [{"id": "p1"}]}
+    d["identity"]["section_digests"]["evidence"] = "sha256:" + "0" * 64
     if opf_canonicalize.content_hash(d) != base:
-        failures.append("  hash changed when mutating identity/curation (must be excluded)")
+        failures.append("  hash changed when mutating identity (must be excluded)")
+
+    # OPF 0.5 retired `curation`, and the engine no longer excludes it: a
+    # document carrying one hashes differently (and fails schema validation).
+    d = copy.deepcopy(doc)
+    d["curation"] = {"pins": [{"id": "p1"}]}
+    if opf_canonicalize.content_hash(d) == base:
+        failures.append("  hash unchanged when adding a curation section (0.5 no longer excludes it)")
 
     # Mutating compiler.generated_at / run_id must NOT change the hash.
     d = copy.deepcopy(doc)
@@ -91,6 +108,17 @@ def check_exclusions() -> list[str]:
     d["evidence"]["clauses"][0]["title"] = "Indemnification (edited)"
     if opf_canonicalize.content_hash(d) == base:
         failures.append("  hash unchanged when editing evidence content (must be covered)")
+
+    # The 0.5 derived sections are content like any other.
+    for section, mutate in (
+        ("digest", lambda x: x["digest"]["clauses"][0].__setitem__("title", "edited")),
+        ("manifest", lambda x: x["manifest"].__setitem__("hard_rules", [])),
+        ("dossiers", lambda x: x["dossiers"].clear()),
+    ):
+        d = copy.deepcopy(doc)
+        mutate(d)
+        if opf_canonicalize.content_hash(d) == base:
+            failures.append(f"  hash unchanged when editing {section} (must be covered)")
 
     return failures
 
@@ -118,17 +146,35 @@ def check_section_digests() -> list[str]:
     doc = _load()
     digests = opf_canonicalize.compute_section_digests(doc)
     failures: list[str] = []
-    for name in ("evidence", "posture", "floor", "curation"):
-        if name not in digests:
-            failures.append(f"  section digest missing: {name}")
-            continue
-        if not digests[name].startswith("sha256:"):
-            failures.append(f"  section digest malformed: {name}={digests[name]!r}")
-    # The three required digests must match what the fixture declares.
-    declared = doc["identity"]["section_digests"]
-    for name in ("evidence", "posture", "floor"):
-        if declared.get(name) != digests[name]:
-            failures.append(f"  declared section_digests.{name} != recomputed")
+    if sorted(digests) != ["evidence", "floor", "posture"]:
+        failures.append(f"  section digests are {sorted(digests)}, expected exactly evidence/floor/posture")
+    for name, value in digests.items():
+        if not value.startswith("sha256:"):
+            failures.append(f"  section digest malformed: {name}={value!r}")
+    # They must match what the fixture declares.
+    if doc["identity"]["section_digests"] != digests:
+        failures.append("  declared section_digests != recomputed")
+    return failures
+
+
+def check_conformance_vectors() -> list[str]:
+    failures: list[str] = []
+    manifest = json.loads((CONFORMANCE_DIR / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("format_version", {}).get("opf_version") != "0.5":
+        failures.append("  vendored conformance manifest is not stamped opf_version 0.5")
+    entries = manifest.get("vectors") or []
+    if not entries:
+        return ["  vendored conformance manifest lists no vectors"]
+    for entry in entries:
+        vector = json.loads((CONFORMANCE_DIR / entry["file"]).read_text(encoding="utf-8"))
+        doc, expected = vector["input"], vector["expected"]
+        name = entry["name"]
+        if opf_canonicalize.canonicalize_playbook(doc) != expected["canonical"]:
+            failures.append(f"  {name}: canonical form differs from the engine's")
+        if opf_canonicalize.content_hash(doc) != expected["content_hash"]:
+            failures.append(f"  {name}: content_hash differs from the engine's")
+        if opf_canonicalize.compute_section_digests(doc) != expected["section_digests"]:
+            failures.append(f"  {name}: section_digests differ from the engine's")
     return failures
 
 
@@ -138,6 +184,7 @@ def main() -> int:
         ("2", "content_hash exclusion/inclusion rules", check_exclusions),
         ("3", "verify_content_hash honest/tampered/absent", check_verify),
         ("4", "section digests present + match declared", check_section_digests),
+        ("5", "every vendored OPF 0.5 conformance vector reproduces", check_conformance_vectors),
     ]
     ok = True
     for code, name, fn in checks:

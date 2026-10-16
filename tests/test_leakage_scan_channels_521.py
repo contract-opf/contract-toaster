@@ -950,7 +950,7 @@ class OpfBuilderTestCase(unittest.TestCase):
     `review_spine._assemble_opf_system_blocks` rather than
     `primary_review_pass.assemble_system_blocks`."""
 
-    OPF_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+    OPF_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 
     def setUp(self):
         import review_knowledge

@@ -14,7 +14,8 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    perspective/de_minimis -- so 3 blocks); deterministic across two runs
    (byte-identical, i.e. `==`, on independently deep-copied input).
 2. Exclusion list: none of `posture.rubric`, `posture.generation`,
-   `corpus`, `compiler`, `identity`, `curation`, `baseline`, `composes`, or
+   `corpus`, `compiler`, `identity`, `curation`, `baseline`, `composes`, the
+   OPF 0.5 `manifest` / `dossiers` / `provenance_index`, or
    any `x_*`-prefixed key (nested inside `evidence`, engine #180) leaks
    into any composed block -- checked via sentinel strings planted in each
    of those sections.
@@ -22,11 +23,12 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    doc without it.
 4. No tenant-brand strings appears in the composed output for the synthetic
    fixture.
-5. (2026-07-16 update, OPF 0.3) The wholesale Evidence projection is
-   RETIRED -- it measured ~1M tokens on the real corpus and could never
-   reach a model. Bulk evidence (`full_text`, raw observation fields) must
-   NOT appear in the prompt: the digest carries summaries only. The
-   composed prompt must also stay inside the 50K review budget.
+5. (2026-07-16 update, OPF 0.3; OPF 0.5 since issue #128) The wholesale
+   Evidence projection is RETIRED -- it measured ~1M tokens on the real
+   corpus and could never reach a model. The per-deal precedent record
+   (`evidence.precedent[]`) must NOT appear in the prompt: the digest carries
+   the projection. The composed prompt must also stay inside the 50K review
+   budget.
 6. Context block (`perspective` + `de_minimis`) appears only when present
    in the source document.
 7. (issue #579) Guard against naming an unbacked tool: the composed prompt
@@ -64,13 +66,12 @@ import config  # noqa: E402
 import model_client  # noqa: E402
 import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
-import opf_terminology  # noqa: E402
 
-# The 0.3 gold fixture: this module composes a DIGEST prompt, so its test must
-# compose from a digest-bearing document. The 0.2 fixture has no digest section
-# at all and now (correctly) raises — that back-compat is the loader's contract
-# and is covered by test_opf_load / test_opf_ingest_03, not here.
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+# The 0.5 gold fixture: this module composes a DIGEST prompt, so its test must
+# compose from a digest-bearing document. The synthetic-eiaa fixture carries
+# no digest section and (correctly) raises -- covered by
+# tests/test_opf_digest_prompt.py, not here.
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 FIXTURE_02_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 
 
@@ -85,7 +86,7 @@ def check_1_block_order_and_determinism() -> list[str]:
 
     if len(blocks) != 4:
         failures.append(
-            f"  [1] expected 4 blocks (0.3 fixture has perspective + de_minimis), got {len(blocks)}"
+            f"  [1] expected 4 blocks (0.5 fixture has perspective + de_minimis), got {len(blocks)}"
         )
         return failures
 
@@ -101,12 +102,14 @@ def check_1_block_order_and_determinism() -> list[str]:
     if posture_block != doc["posture"]["system_prompt"]:
         failures.append("  [1] posture block does not equal posture.system_prompt verbatim")
 
-    # The digest block is PROSE under canonical headers, not a JSON dump: the
-    # headers exist so `fallbacks`/`rejected` are not read as the judgements
-    # they are not, and dumping JSON would hand the model those raw names.
-    for term in opf_terminology.TERMS:
-        if term.header not in digest_block:
-            failures.append(f"  [1] digest block missing canonical header {term.header!r}")
+    # The digest block is PROSE under plain headers, not a JSON dump: a raw
+    # dump would hand the model field names without the one thing that
+    # matters about refused asks and unsigned openings -- that neither is
+    # ever replacement language (issue #129).
+    if not digest_block.startswith(opf_prompt.DIGEST_INTRO):
+        failures.append("  [1] digest block does not open with DIGEST_INTRO")
+    if digest_block.lstrip().startswith("{") or '"signed_variants"' in digest_block:
+        failures.append("  [1] digest block is a JSON dump, not rendered prose")
     for clause in doc["digest"]["clauses"]:
         if f"clause_id: {clause['id']}" not in digest_block:
             failures.append(f"  [1] digest block missing clause_id {clause['id']!r}")
@@ -171,6 +174,9 @@ def check_2_exclusions_sentinel() -> list[str]:
         }
     ]
     doc["evidence"]["clauses"][0]["x_test_ext"] = {"note": "SENTINEL_XEXT_MUST_NOT_LEAK"}
+    doc["manifest"]["hard_rules"][0]["statement"] = "SENTINEL_MANIFEST_MUST_NOT_LEAK"
+    next(iter(doc["dossiers"].values()))["title"] = "SENTINEL_DOSSIER_MUST_NOT_LEAK"
+    doc["provenance_index"]["compiler"] = "SENTINEL_PROVENANCE_MUST_NOT_LEAK"
 
     blocks = opf_prompt.compose_opf_system_blocks(doc)
     joined = "\n".join(blocks)
@@ -186,6 +192,9 @@ def check_2_exclusions_sentinel() -> list[str]:
         "SENTINEL_CURATION_MUST_NOT_LEAK",
         "SENTINEL_COMPOSES_MUST_NOT_LEAK",
         "SENTINEL_XEXT_MUST_NOT_LEAK",
+        "SENTINEL_MANIFEST_MUST_NOT_LEAK",
+        "SENTINEL_DOSSIER_MUST_NOT_LEAK",
+        "SENTINEL_PROVENANCE_MUST_NOT_LEAK",
     ]
     for sentinel in sentinels:
         if sentinel in joined:
@@ -226,29 +235,29 @@ def check_5_wholesale_evidence_is_retired() -> list[str]:
     It previously proved that an unanticipated `evidence` field survived into
     the prompt -- forward-compat by wholesale projection. That property IS the
     ~1M-token design: projecting everything is exactly why it could not fit a
-    context window. OPF 0.3 replaced it with the engine-built digest, so the
-    property is deliberately gone, and this now guards the replacement instead:
-    bulk evidence must NOT reach the prompt.
+    context window. The engine-built digest replaced it, so the property is
+    deliberately gone, and this now guards the replacement instead: bulk
+    evidence must NOT reach the prompt.
 
-    Forward-compat did not vanish, it moved: `digest_version` is dispatched on
-    at ingest (scripts/opf_load.py), so a digest shape this composer does not
-    understand is refused at the door rather than silently half-rendered here.
-    Checked by tests/test_opf_ingest_03.py.
+    Forward-compat did not vanish, it moved: `digest_version` is checked at
+    ingest (scripts/opf_load.py accepts "4" only), so a digest shape this
+    composer does not understand is refused at the door rather than silently
+    half-rendered here. Checked by tests/test_opf_ingest_05.py.
     """
     failures = []
     doc = _load_fixture()
-    # Bulk fields that only exist in the full evidence section.
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"] = (
+    # Bulk fields that only exist in the per-deal precedent record.
+    doc["evidence"]["precedent"][0]["signed_text"]["text"] = (
         "SENTINEL_FULL_TEXT_MUST_NOT_REACH_THE_PROMPT"
     )
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["counterparty_ref"] = {
+    doc["evidence"]["precedent"][0]["counterparty_ref"] = {
         "alias": "SENTINEL_COUNTERPARTY_ALIAS",
     }
 
     joined = "\n".join(opf_prompt.compose_opf_system_blocks(doc))
     for sentinel, why in (
         ("SENTINEL_FULL_TEXT_MUST_NOT_REACH_THE_PROMPT",
-         "full_text is the bulk of the corpus; the digest omits it by design"),
+         "the precedent record is the bulk of the corpus; the digest projects it"),
         ("SENTINEL_COUNTERPARTY_ALIAS",
          "raw evidence fields must not be projected wholesale"),
     ):
@@ -265,7 +274,7 @@ def check_5_wholesale_evidence_is_retired() -> list[str]:
 def check_6_context_block_only_when_present() -> list[str]:
     failures = []
     # Strip explicitly rather than relying on the fixture happening to lack
-    # them: the 0.3 gold fixture carries both.
+    # them: the 0.5 gold fixture carries both.
     doc_without_context = _load_fixture()
     doc_without_context.pop("perspective", None)
     doc_without_context.pop("de_minimis", None)

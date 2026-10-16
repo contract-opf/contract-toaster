@@ -1620,7 +1620,7 @@ def _read_active_release_bundle_hash(
     from a genuinely inactive playbook, so the submission route refused
     with HTTP 503 "no active playbook" for a playbook an admin had, in
     fact, just activated. So: when the active `playbook_versions` row for this
-    playbook_id carries an OPF `artifact_kind` (`opf-0.2` / `opf-0.3`), the
+    playbook_id carries an OPF `artifact_kind` (any `opf-*` kind), the
     v1 on-disk read is skipped entirely -- it is never reached, and never
     the thing validated.
 

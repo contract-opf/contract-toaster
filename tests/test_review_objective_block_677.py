@@ -24,7 +24,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "backend"))
 
 import opf_prompt  # noqa: E402
-import opf_terminology  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import review_spine  # noqa: E402
 
@@ -105,28 +104,31 @@ class TestBindingAndRefusedAsks(unittest.TestCase):
         self.assertIn("never us", opf_prompt.BINDING_INTRO)
 
     def test_refused_asks_are_not_labelled_as_usable_wording(self) -> None:
-        # The HEADER mirrors the playbook-engine's canonical vocabulary and is
-        # pinned cross-repo by tests/test_opf_digest_prompt.py -- the corrective
-        # framing belongs in the toaster-authored help text, not in it.
-        self.assertEqual(
-            opf_terminology.UNACCEPTABLE.header,
-            "Unacceptable variations — rejected/reversed asks",
-        )
-        self.assertIn("NEVER be used as replacement", opf_terminology.UNACCEPTABLE.help)
-        self.assertIn("NEVER our position", opf_terminology.UNACCEPTABLE.help)
-
-    def test_a_refused_ask_renders_without_a_risk_tag(self) -> None:
-        """`{risk: neutral/none}` beside wording we turned down reads as
-        endorsement. The risk delta describes the ask's effect, not our
-        appetite for it."""
-        entry = {
-            "text_summary": "SYNTHETIC refused wording",
-            "risk_delta": {"direction": "neutral", "magnitude": "none"},
+        # Issue #129 retired digest 2's engine-mirrored headers (and with them
+        # `opf_terminology`); the corrective framing #677 measured now lives
+        # in DIGEST_INTRO, and every rendered refused-ask list repeats it.
+        self.assertIn("NEVER our position", opf_prompt.DIGEST_INTRO)
+        self.assertIn("must NEVER be used as replacement language", opf_prompt.DIGEST_INTRO)
+        self.assertIn("that is a good outcome, not a defect", opf_prompt.DIGEST_INTRO)
+        clause = {
+            "id": "clause.synthetic",
+            "title": "Synthetic",
+            "refused_asks": [{"text": "SYNTHETIC refused wording", "n_deals": 1, "label": None}],
         }
-        refused = opf_prompt._LIST_FORMATTERS["unacceptable"](entry, "test")
-        kept = opf_prompt._LIST_FORMATTERS["concessions"](entry, "test")
-        self.assertNotIn("risk", refused)
-        self.assertIn("risk", kept)  # the sibling sections still carry it
+        self.assertIn(
+            "Asked for and refused (never replacement language):",
+            opf_prompt._digest_clause_block(clause),
+        )
+
+    def test_a_refused_ask_renders_as_a_refusal_never_as_an_option(self) -> None:
+        """Nothing beside wording we turned down may read as endorsement:
+        it is rendered as refused, never with the signed-variant facts."""
+        entry = {"text": "SYNTHETIC refused wording", "n_deals": 2, "label": None,
+                 "ref": {"document_id": "deal-a", "version": 2, "clause_path": "1"}}
+        refused = "\n".join(opf_prompt._fmt_refused_ask(entry, False, "test"))
+        self.assertIn("refused in 2 deals", refused)
+        for endorsement in ("signed in", "reached from our standard", "signed as proposed"):
+            self.assertNotIn(endorsement, refused)
 
 
 if __name__ == "__main__":

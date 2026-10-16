@@ -6,9 +6,9 @@ playbook's topic vocabulary could not be cited at all -- the root cause of
 
 ## The contradiction this file pins
 
-`playbooks/opf/playbook.schema-0.2.json` and `-0.3.json` -- the schemas the
-toaster validates every uploaded playbook against, authored OUTSIDE this
-repo -- constrain `taxonomy.entries[].id` to::
+`playbooks/opf/playbook.schema-0.5.json` (0.2 and 0.3 before it) -- the
+schema the toaster validates every uploaded playbook against, authored
+OUTSIDE this repo -- constrains `taxonomy.entries[].id` to::
 
     ^[a-z0-9_]+$
 
@@ -119,11 +119,12 @@ OUTPUT_SCHEMA_PATHS = {
     "v2": REPO_ROOT / "playbooks" / "output-schema-v2.json",
     "v3": REPO_ROOT / "playbooks" / "output-schema-v3.json",
 }
+# The one OPF schema this repo reads since issue #128 (0.2 and 0.3 shared
+# this taxonomy-id grammar, and 0.5 kept it).
 OPF_SCHEMA_PATHS = {
-    "0.2": REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.2.json",
-    "0.3": REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.3.json",
+    "0.5": REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json",
 }
-GOLD_OPF_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-real-shape.opf.json"
+GOLD_OPF_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5-real-shape.opf.json"
 
 PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 
@@ -242,11 +243,15 @@ def _minimal_digest_clause(template: dict[str, Any], topic_id: str) -> dict[str,
     clause["id"] = f"clause.{topic_id}"
     clause["taxonomy_id"] = topic_id
     clause["title"] = topic_id.replace("_", " ").title()
-    clause["preferred_variations"] = []
-    clause["concessions"] = []
-    clause["unacceptable"] = []
-    clause["exemplar_forms"] = []
-    clause.pop("our_standard", None)
+    clause["our_standard"] = None
+    for key in ("signed_variants", "refused_asks", "changed_openings"):
+        clause[key] = []
+    for key in (
+        "n_deals", "n_signed_standard", "n_opened_standard", "n_kept_standard",
+        "n_variants_total", "n_refused_total", "n_changed_openings_total",
+    ):
+        clause[key] = 0
+    clause["positions"] = dict.fromkeys(clause["positions"], 0)
     return clause
 
 
@@ -255,15 +260,17 @@ def _minimal_evidence_clause(template: dict[str, Any], topic_id: str) -> dict[st
     clause["id"] = f"clause.{topic_id}"
     clause["taxonomy_id"] = topic_id
     clause["title"] = topic_id.replace("_", " ").title()
-    clause.pop("our_standard", None)
-    clause.pop("negotiation_trail", None)
+    clause["our_standard"] = None
+    for key in list(clause):
+        if key.startswith("n_"):
+            clause[key] = 0
     return clause
 
 
 def _wide_vocabulary_opf_doc() -> dict[str, Any]:
-    """A representative OPF 0.3 playbook carrying the full 61-id vocabulary.
+    """A representative OPF 0.5 playbook carrying the full 61-id vocabulary.
 
-    Built from `tests/gold-fixtures-opf/acme-university-real-shape.opf.json`
+    Built from `tests/gold-fixtures-opf/acme-university-0.5-real-shape.opf.json`
     -- the repo's existing real-shape OPF fixture -- by widening ONLY its
     taxonomy and clause vocabulary, then re-sealing `identity` with the
     production canonicalizer (`opf_canonicalize`) so the artifact hashes
@@ -290,11 +297,16 @@ def _wide_vocabulary_opf_doc() -> dict[str, Any]:
     doc["digest"]["clauses"] = [
         _minimal_digest_clause(digest_template, topic_id) for topic_id in REPRESENTATIVE_TOPIC_IDS
     ]
-    doc["digest"]["clause_count"] = len(REPRESENTATIVE_TOPIC_IDS)
+    doc["digest"]["uncovered_clause_types"] = []
     doc["evidence"]["clauses"] = [
         _minimal_evidence_clause(evidence_template, topic_id)
         for topic_id in REPRESENTATIVE_TOPIC_IDS
     ]
+    # No deal behind the widened vocabulary: an empty precedent record, and
+    # none of the optional sections derived from the old one.
+    doc["evidence"]["precedent"] = []
+    for section in ("manifest", "dossiers", "provenance_index"):
+        doc.pop(section, None)
 
     doc["identity"] = {
         "content_hash": opf_canonicalize.content_hash(doc),
@@ -390,7 +402,7 @@ def test_output_contract_admits_the_whole_opf_taxonomy_id_grammar(failures: list
     patterns = {version: _opf_taxonomy_id_pattern(version) for version in OPF_SCHEMA_PATHS}
     if len(set(patterns.values())) != 1:
         failures.append(
-            f"[1a] OPF 0.2 and 0.3 no longer share one taxonomy-id grammar ({patterns!r}); "
+            f"[1a] the vendored OPF schemas no longer share one taxonomy-id grammar ({patterns!r}); "
             "this test's containment claim must be re-derived per version before it means "
             "anything."
         )

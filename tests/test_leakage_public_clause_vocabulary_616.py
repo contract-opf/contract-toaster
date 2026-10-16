@@ -22,13 +22,15 @@ contract without naming its clauses**, so this is a FALSE POSITIVE.
 
 ## How a public label became blocked content
 
-`leakage_scan.ConfidentialCorpus.from_opf_document` derives `playbook_ngrams`
-from each digest clause's `concessions`/`unacceptable`/`exemplar_forms`
-`text_summary`. `$defs.digestObservationSummary.text_summary` in
-`playbooks/opf/playbook.schema-0.3.json` has no `minLength`, so a
-`text_summary` that summarises nothing -- the bare clause name repeated -- is
-schema-valid, and becomes a blocked gram byte-identical to the SAME
-document's public `taxonomy.entries[].label`. The owner measured 18 fields in
+`leakage_scan.ConfidentialCorpus.from_opf_document` derived `playbook_ngrams`
+from each (then digest 2) clause's summary entries, which carried no
+`minLength`, so a summary that summarised nothing -- the bare clause name
+repeated -- was schema-valid, and became a blocked gram byte-identical to the
+SAME document's public `taxonomy.entries[].label`. Since issue #128 the corpus
+reads digest 4's precedent texts (signed variants, refused asks, openings not
+signed as proposed) and the per-deal precedent record, and
+`playbooks/opf/playbook.schema-0.5.json` puts no `minLength` on those either,
+so the hazard -- and this guard -- carry over unchanged. The owner measured 18 fields in
 the real bound playbook whose entire content is `indemnification`, including
 that taxonomy label. The toaster consumes a playbook authored elsewhere, so
 it cannot assume those fields are well-formed; the guard belongs here.
@@ -46,9 +48,10 @@ would be indistinguishable from switching the check off.
 
 ## Fixture reachability
 
-The document under test is the shipped gold OPF fixture with one
-`text_summary` rewritten to the bare-clause-name shape the real playbook was
-measured to contain. `TestProductionAcceptsThisPlaybook` re-derives
+The document under test is the shipped gold OPF 0.5 fixture with two precedent
+texts (a refused ask and an opening not signed as proposed, in the digest AND in
+the precedent record they summarise) rewritten to the bare-clause-name shape
+the real playbook was measured to contain. `TestProductionAcceptsThisPlaybook` re-derives
 `identity.section_digests`/`content_hash` and pushes the result through
 `opf_load.load_opf_document(require_identity=True)` -- the real production
 loader, schema validation, hash verification and injection scan included -- so
@@ -70,7 +73,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -106,9 +109,36 @@ def _gold_doc() -> dict[str, Any]:
     return json.loads(OPF_FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
+def _records(doc: dict[str, Any], entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """The precedent records a digest entry summarises (its precedent_ids)."""
+    ids = set(entry["precedent_ids"])
+    return [r for r in doc["evidence"]["precedent"] if r["id"] in ids]
+
+
+def _rewrite_refused_ask(doc: dict[str, Any], clause_index: int, text: str) -> None:
+    """Rewrite a clause's first refused ask in the digest AND in the record it
+    summarises (a refused ask's text is not part of the precedent id)."""
+    entry = doc["digest"]["clauses"][clause_index]["refused_asks"][0]
+    old = entry["text"]
+    entry["text"] = text
+    for record in _records(doc, entry):
+        for ask in record["refused_asks"]:
+            if ask["text"] == old:
+                ask["text"] = text
+
+
+def _rewrite_opening(doc: dict[str, Any], clause_index: int, text: str) -> None:
+    """Rewrite a clause's first opening-not-signed-as-proposed in the digest
+    AND in the record's `opening_text` (not part of the precedent id)."""
+    entry = doc["digest"]["clauses"][clause_index]["changed_openings"][0]
+    entry["text"] = text
+    for record in _records(doc, entry):
+        record["opening_text"]["text"] = text
+
+
 def _bare_clause_name_doc() -> dict[str, Any]:
-    """The gold fixture with two `text_summary` values rewritten to the bare
-    clause name -- the shape measured in the real bound playbook.
+    """The gold fixture with two precedent texts rewritten to the bare clause
+    name -- the shape measured in the real bound playbook.
 
     Both rewritten fields keep every other key, so this is the same document
     the pipeline already reads, differing only in the one string that caused
@@ -120,18 +150,29 @@ def _bare_clause_name_doc() -> dict[str, Any]:
     first = clauses[0]
     assert first["taxonomy_id"] == CLAUSE_TAXONOMY_ID, first["taxonomy_id"]
     assert first["title"] == CLAUSE_LABEL, first["title"]
-    assert first["unacceptable"], "fixture must carry an `unacceptable` entry"
+    assert first["refused_asks"], "fixture must carry a refused ask"
     # Lower-cased, exactly like the taxonomy `id` and unlike the `label`, so
     # the match is proven to survive normalization rather than depending on
     # the label's own casing.
-    first["unacceptable"][0]["text_summary"] = CLAUSE_TAXONOMY_ID
+    _rewrite_refused_ask(doc, 0, CLAUSE_TAXONOMY_ID)
 
     multiword = clauses[MULTIWORD_CLAUSE_INDEX]
     assert multiword["title"] == MULTIWORD_CLAUSE_LABEL, multiword["title"]
-    assert multiword["concessions"], "fixture must carry a `concessions` entry"
-    multiword["concessions"][0]["text_summary"] = MULTIWORD_CLAUSE_LABEL
+    assert multiword["changed_openings"], "fixture must carry a changed opening"
+    _rewrite_opening(doc, MULTIWORD_CLAUSE_INDEX, MULTIWORD_CLAUSE_LABEL)
 
     return doc
+
+
+def _digest_texts(doc: dict[str, Any]) -> list[str]:
+    """Every precedent text the digest carries (not our standard)."""
+    texts: list[str] = []
+    for clause in doc["digest"]["clauses"]:
+        for entry in clause["signed_variants"]:
+            texts.extend([entry["text"]] if "text" in entry else [e["text"] for e in entry["exemplars"]])
+        texts.extend(e["text"] for e in clause["refused_asks"])
+        texts.extend(e["text"] for e in clause["changed_openings"])
+    return texts
 
 
 def _corpus(doc: dict[str, Any], **kwargs: Any) -> leakage_scan.ConfidentialCorpus:
@@ -155,8 +196,8 @@ def _scan_summary(
 
 class TestProductionAcceptsThisPlaybook(unittest.TestCase):
     def test_the_bare_clause_name_document_passes_the_real_opf_loader(self):
-        """A `text_summary` holding nothing but the clause's own name is not a
-        malformed document this test invented -- it is schema-valid OPF 0.3
+        """A precedent text holding nothing but the clause's own name is not a
+        malformed document this test invented -- it is schema-valid OPF 0.5
         that `opf_load.load_opf_document` accepts, hash check and injection
         scan included. That is what makes every assertion below a statement
         about production rather than about a fixture."""
@@ -170,7 +211,7 @@ class TestProductionAcceptsThisPlaybook(unittest.TestCase):
             loaded = opf_load.load_opf_document(path, require_identity=True)
 
         self.assertEqual(
-            loaded["digest"]["clauses"][0]["unacceptable"][0]["text_summary"],
+            loaded["digest"]["clauses"][0]["refused_asks"][0]["text"],
             CLAUSE_TAXONOMY_ID,
             "The loader must have carried the bare-clause-name summary through "
             "unchanged, or this reachability proof is about a different string.",
@@ -182,15 +223,15 @@ class TestProductionAcceptsThisPlaybook(unittest.TestCase):
         removes the hazard also turns this file red and invites the guard to
         be re-examined."""
         schema = json.loads(
-            (REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.3.json").read_text(
+            (REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json").read_text(
                 encoding="utf-8"
             )
         )
-        text_summary = schema["$defs"]["digestObservationSummary"]["properties"][
-            "text_summary"
-        ]
-        self.assertEqual(text_summary.get("type"), "string")
-        self.assertNotIn("minLength", text_summary)
+        for definition in ("digestVariant", "digestRefusedAsk", "digestChangedOpening", "textRef"):
+            with self.subTest(definition=definition):
+                text = schema["$defs"][definition]["properties"]["text"]
+                self.assertEqual(text.get("type"), "string")
+                self.assertNotIn("minLength", text)
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +257,7 @@ class TestNamingAClauseIsNotLeakage(unittest.TestCase):
 
     def test_the_bare_clause_name_is_gone_from_the_blocked_corpus(self):
         """State the mechanism directly, not only through the scan: neither
-        rewritten `text_summary` survives into `playbook_ngrams`."""
+        rewritten precedent text survives into `playbook_ngrams`."""
         norms = {leakage_scan._normalize(g) for g in self.corpus.playbook_ngrams}
         self.assertNotIn(leakage_scan._normalize(CLAUSE_TAXONOMY_ID), norms)
         self.assertNotIn(leakage_scan._normalize(MULTIWORD_CLAUSE_LABEL), norms)
@@ -233,12 +274,12 @@ class TestNamingAClauseIsNotLeakage(unittest.TestCase):
         self.assertFalse(outcome.blocked, f"{outcome.category} / {outcome.rule_id}")
 
     def test_check_2b_does_not_re_fire_the_same_false_positive(self):
-        """`our_standard.text` feeds `standard_clause_ngrams`, which is
+        """Our standard's part text feeds `standard_clause_ngrams`, which is
         allowlisted for replacement text but NOT for `verdict_summary`. A fix
         that narrowed only `playbook_ngrams` would move the incident to
         `rule_id="standard-clause-ngram"` and change nothing for the user."""
         doc = _bare_clause_name_doc()
-        doc["digest"]["clauses"][0]["our_standard"]["text"] = CLAUSE_LABEL
+        doc["digest"]["clauses"][0]["our_standard"]["parts"][0]["text"] = CLAUSE_LABEL
         corpus = _corpus(doc)
 
         self.assertNotIn(
@@ -249,11 +290,11 @@ class TestNamingAClauseIsNotLeakage(unittest.TestCase):
         self.assertFalse(outcome.blocked, f"{outcome.category} / {outcome.rule_id}")
 
     def test_a_one_word_summary_that_is_not_a_taxonomy_label_is_dropped_too(self):
-        """The two rules are independent. A single-word `text_summary` that
+        """The two rules are independent. A single-word precedent text that
         matches no taxonomy entry is still a term of art rather than internal
         strategy, and must not blanket-block output that uses that word."""
         doc = _bare_clause_name_doc()
-        doc["digest"]["clauses"][0]["exemplar_forms"][0]["text_summary"] = "reciprocal"
+        doc["digest"]["clauses"][0]["signed_variants"][0]["text"] = "reciprocal"
         corpus = _corpus(doc)
 
         outcome = _scan_summary(
@@ -279,20 +320,16 @@ class TestTheGateStillFires(unittest.TestCase):
         self.corpus = _corpus(self.doc)
 
     def test_confidential_reasoning_from_the_same_document_still_blocks(self):
-        """The surviving `unacceptable`/`concessions` summaries in this very
-        document -- genuine internal reasoning about what the tenant will not
-        take -- are still blocked verbatim in `verdict_summary`."""
+        """The surviving precedent texts in this very document -- what the
+        tenant signed elsewhere, refused, or did not sign as proposed -- are
+        still blocked verbatim in `verdict_summary`."""
         confidential = [
-            entry["text_summary"]
-            for clause in self.doc["digest"]["clauses"]
-            for list_field in ("concessions", "unacceptable", "exemplar_forms")
-            for entry in clause.get(list_field) or []
-            if entry.get("text_summary")
-            and len(entry["text_summary"].split()) > 1
-            # The two summaries this test file rewrote to a bare clause name
+            text
+            for text in _digest_texts(self.doc)
+            if len(text.split()) > 1
+            # The two texts this test file rewrote to a bare clause name
             # are the false positive, not the control.
-            and entry["text_summary"]
-            not in (CLAUSE_TAXONOMY_ID, MULTIWORD_CLAUSE_LABEL)
+            and text not in (CLAUSE_TAXONOMY_ID, MULTIWORD_CLAUSE_LABEL)
         ]
         self.assertTrue(
             confidential,
@@ -339,7 +376,7 @@ class TestTheGateStillFires(unittest.TestCase):
             f"Uncapped one-way {CLAUSE_TAXONOMY_ID} covering the counterparty's "
             "own negligence is where we walk away from the deal."
         )
-        doc["digest"]["clauses"][0]["unacceptable"][0]["text_summary"] = confidential
+        _rewrite_refused_ask(doc, 0, confidential)
         corpus = _corpus(doc)
 
         outcome = _scan_summary(corpus, f"Overall: {confidential}")
@@ -365,18 +402,19 @@ class TestTheGateStillFires(unittest.TestCase):
             for key in ("statement", "rationale"):
                 if inv.get(key):
                     expected_playbook.append(inv[key])
-        expected_standard: list[str] = []
-        for clause in gold["digest"]["clauses"]:
-            if clause.get("our_standard", {}).get("text"):
-                expected_standard.append(clause["our_standard"]["text"])
-            for list_field in ("concessions", "unacceptable", "exemplar_forms"):
-                for entry in clause.get(list_field) or []:
-                    if entry.get("text_summary"):
-                        expected_playbook.append(entry["text_summary"])
-            for entry in clause.get("preferred_variations") or []:
-                for key in ("if", "to"):
-                    if isinstance(entry, dict) and entry.get(key):
-                        expected_playbook.append(entry[key])
+        expected_playbook.extend(_digest_texts(gold))
+        for record in gold["evidence"]["precedent"]:
+            if record["signed_text"] and not record["standard"]:
+                expected_playbook.append(record["signed_text"]["text"])
+            if record["opening_text"] and record["opened_with"] != "standard":
+                expected_playbook.append(record["opening_text"]["text"])
+            expected_playbook.extend(ask["text"] for ask in record["refused_asks"])
+        expected_standard = [
+            part["text"]
+            for clause in gold["digest"]["clauses"]
+            if clause.get("our_standard")
+            for part in clause["our_standard"]["parts"]
+        ]
 
         self.assertEqual(sorted(corpus.playbook_ngrams), sorted(expected_playbook))
         self.assertEqual(
@@ -430,7 +468,7 @@ class TestScopeOfTheNarrowing(unittest.TestCase):
         doc = _bare_clause_name_doc()
         doc["taxonomy"]["entries"][0]["label"] = long_label
         doc["digest"]["clauses"][0]["title"] = long_label
-        doc["digest"]["clauses"][0]["unacceptable"][0]["text_summary"] = long_label
+        _rewrite_refused_ask(doc, 0, long_label)
 
         corpus = _corpus(
             doc,

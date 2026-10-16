@@ -104,7 +104,7 @@ import src.reviews as reviews  # noqa: E402
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 INVALID_DETAIL = "markup_intensity must be one of: light, medium, heavy."
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 V1_PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 MODEL_RESPONSES_DIR = REPO_ROOT / "tests" / "fixtures" / "model_responses"
 STANDING_INSTRUCTIONS = "Prefer mutual terms wherever the playbook allows it."
@@ -129,22 +129,29 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # no markup level; the V1 pins further down did NOT move, because the
 # Context block exists only on the OPF path.
 #
+# RE-CAPTURED AGAIN, for issues #128/#129 (2026-10-16): OPF 0.5 / digest 4 is
+# now the only format, so the fixture is the acme-university 0.5 gold fixture
+# and the Digest block is the digest-4 precedent renderer. Both are
+# DELIBERATE changes to the OPF knowledge these pins cover; the markup
+# intensity block is still composed nowhere in them, and the V1 pins did NOT
+# move.
+#
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
-# for the acme-university 0.3 gold fixture, bare and with standing
+# for the acme-university 0.5 gold fixture, bare and with standing
 # instructions. The markup-intensity block is NOT composed there, so no
 # markup level may ever move these.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "1dddabc9381f7afc847000af10f2de47351d4e9cef072524c4353c22a47e2924"
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "e9919779116f06b2164aa0d89b54cc38a5e0935eec300b53568801487a625630"
 GOLDEN_KNOWLEDGE_WITH_INSTRUCTIONS_SHA256 = (
-    "19e1680b5b3eae42f5e9971d3cd807e2e737d62b55932536927a0a108761b577"
+    "377333883b850a4cb03ce77568f4db64dab0ab1242e188b1c314813e7fcd5c8f"
 )
 # The ASSEMBLED OPF prompt (`review_spine._assemble_opf_system_blocks` over
 # `resolve_knowledge` of the same fixture): sha256 of the blocks' texts joined
 # with "\n\n", bare, and with STANDING_INSTRUCTIONS + TOASTER_GUIDANCE.
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "33699c1014932900fb45220caddcb80ff3864c8e1914dcee837bba747d15e8c7"
+    "f8d2199d4a3674da9d011cf1d85ce2a5797a5f55ab07e14eb65d1ccfe4d80166"
 )
 GOLDEN_OPF_ASSEMBLED_FULL_SHA256 = (
-    "ca61ddbbbaf379fa76cc68e848c4b1f8dc61cf97d6f19a241fe38294f1271214"
+    "4fbf69855bf8e77ee958e1040e01693b4dccac0fb8bcd82d9e27de8ca69cc64f"
 )
 # The ASSEMBLED v1 prompt (`primary_review_pass.assemble_system_blocks` over
 # V1_PLAYBOOK), same two shapes.

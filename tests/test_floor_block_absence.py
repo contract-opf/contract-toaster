@@ -47,9 +47,9 @@ import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
 
 FIXTURES = REPO_ROOT / "tests" / "gold-fixtures-opf"
-FULL_FIXTURE = FIXTURES / "acme-university.opf.json"
-EMPTY_FLOOR_FIXTURE = FIXTURES / "acme-university-empty-floor.opf.json"
-REAL_SHAPE_FIXTURE = FIXTURES / "acme-university-real-shape.opf.json"
+FULL_FIXTURE = FIXTURES / "acme-university-0.5.opf.json"
+EMPTY_FLOOR_FIXTURE = FIXTURES / "acme-university-0.5-empty-floor.opf.json"
+REAL_SHAPE_FIXTURE = FIXTURES / "acme-university-0.5-real-shape.opf.json"
 POLICY_FIXTURE = FIXTURES / "acme-university-policy-v1.json"
 
 #: The retired prose. It is a lie over an empty list in BOTH halves: there are

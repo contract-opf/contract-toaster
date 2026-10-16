@@ -5,9 +5,9 @@
   },
   "bundle_schema_version": 2,
   "lineage": {
-    "opf_content_hash": "sha256:83be9d09e9fb7f7d422faa33262a69500cffb39ae44e7570f86f4e4b6de98110",
+    "opf_content_hash": "sha256:1ece46f1303272b6104025dc240bf6f695c7013cdedc5efd69fbfa19fbd48f93",
     "opf_section_digests": {
-      "evidence": "sha256:2fc639e2ab936a51f0234068aac1629ae4626afabd308d4bda45403065e70256",
+      "evidence": "sha256:b3380c98411baa0676a9b72d5ef87d90b3320efebc7b6d8aa89e6b34475d8aea",
       "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd",
       "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842"
     }
@@ -40,13 +40,17 @@
           "document_id": "synthetic-doc-001",
           "in_scope": true,
           "provenance": "our_paper",
-          "title": "Synthetic Fixture Document 1"
+          "signed_version": 1,
+          "title": "Synthetic Fixture Document 1",
+          "versions": 1
         },
         {
           "document_id": "synthetic-doc-002",
           "in_scope": true,
           "provenance": "counterparty_paper",
-          "title": "Synthetic Fixture Document 2"
+          "signed_version": 1,
+          "title": "Synthetic Fixture Document 2",
+          "versions": 1
         }
       ],
       "stats": {
@@ -57,59 +61,87 @@
       "clauses": [
         {
           "id": "clause-liability-cap",
-          "observed_positions": [
-            {
-              "deviation": "none",
-              "example_ref": {
-                "clause_path": "5.2",
-                "document_id": "synthetic-doc-001",
-                "version": 1
-              },
-              "outcome": "signed",
-              "provenance": "our_paper",
-              "risk_delta": {
-                "direction": "neutral",
-                "magnitude": "none"
-              },
-              "text_summary": "Synthetic observation: liability capped at a fixed dollar amount stated in the agreement."
-            }
-          ],
-          "summary": {
-            "confidence": {
-              "score": 0.8
-            },
-            "historical_stance": "consistently_held"
-          },
+          "n_changed_openings": 0,
+          "n_deals": 1,
+          "n_kept_standard": 0,
+          "n_opened_standard": 0,
+          "n_refused": 0,
+          "n_signed_standard": 0,
+          "n_variants": 1,
+          "our_standard": null,
           "taxonomy_id": "liability_cap",
           "title": "Liability Cap"
         },
         {
           "id": "clause-termination",
-          "observed_positions": [
-            {
-              "deviation": "reworded_equivalent",
-              "example_ref": {
-                "clause_path": "9.1",
-                "document_id": "synthetic-doc-002",
-                "version": 1
-              },
-              "outcome": "signed",
-              "provenance": "counterparty_paper",
-              "risk_delta": {
-                "direction": "worse",
-                "magnitude": "minor"
-              },
-              "text_summary": "Synthetic observation: counterparty proposed a shortened notice period, later settled at 30 days."
-            }
-          ],
-          "summary": {
-            "confidence": {
-              "score": 0.5
-            },
-            "historical_stance": "mixed"
-          },
+          "n_changed_openings": 0,
+          "n_deals": 1,
+          "n_kept_standard": 0,
+          "n_opened_standard": 0,
+          "n_refused": 0,
+          "n_signed_standard": 0,
+          "n_variants": 1,
+          "our_standard": null,
           "taxonomy_id": "termination",
           "title": "Termination for Convenience"
+        }
+      ],
+      "precedent": [
+        {
+          "document_id": "synthetic-doc-001",
+          "id": "prec.00d660b05b9a9a0c",
+          "moved": false,
+          "opened_with": "non_standard",
+          "opening_text": null,
+          "paper": "ours",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "refused_asks": [],
+          "rounds": 0,
+          "signed": true,
+          "signed_text": {
+            "ref": {
+              "char_span": [
+                0,
+                87
+              ],
+              "clause_path": "5.2",
+              "document_id": "synthetic-doc-001",
+              "version": 1
+            },
+            "text": "Synthetic clause: liability is capped at a fixed dollar amount stated in the agreement.",
+            "vs_standard": null
+          },
+          "standard": false,
+          "taxonomy_id": "liability_cap"
+        },
+        {
+          "document_id": "synthetic-doc-002",
+          "id": "prec.8486b2b2d3deb3f7",
+          "moved": false,
+          "opened_with": "non_standard",
+          "opening_text": null,
+          "paper": "theirs",
+          "paper_basis": "provenance_detection",
+          "paper_confidence": 0.9,
+          "refused_asks": [],
+          "rounds": 0,
+          "signed": true,
+          "signed_text": {
+            "ref": {
+              "char_span": [
+                0,
+                89
+              ],
+              "clause_path": "9.1",
+              "document_id": "synthetic-doc-002",
+              "version": 1
+            },
+            "text": "Synthetic clause: either party may terminate for convenience on thirty (30) days' notice.",
+            "vs_standard": null
+          },
+          "standard": false,
+          "taxonomy_id": "termination"
         }
       ]
     },
@@ -128,14 +160,14 @@
       ]
     },
     "identity": {
-      "content_hash": "sha256:83be9d09e9fb7f7d422faa33262a69500cffb39ae44e7570f86f4e4b6de98110",
+      "content_hash": "sha256:1ece46f1303272b6104025dc240bf6f695c7013cdedc5efd69fbfa19fbd48f93",
       "section_digests": {
-        "evidence": "sha256:2fc639e2ab936a51f0234068aac1629ae4626afabd308d4bda45403065e70256",
+        "evidence": "sha256:b3380c98411baa0676a9b72d5ef87d90b3320efebc7b6d8aa89e6b34475d8aea",
         "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd",
         "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842"
       }
     },
-    "opf_version": "0.2",
+    "opf_version": "0.5",
     "posture": {
       "system_prompt": "This is a synthetic posture for a fictional educational internship and affiliation agreement, authored only for test fixtures. It expresses no real party's negotiation intent. Treat all monetary and party details in this document as placeholders."
     },

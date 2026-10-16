@@ -43,12 +43,22 @@ review -- see below):
   - `posture.system_prompt`
   - every `floor.invariants[].statement` / `.rationale`
   - the ENTIRE `evidence` subtree, wholesale: every string value found by a
-    recursive walk of `evidence`, at any depth (`.clauses[].title`,
-    `.observed_positions[].text_summary` AND `.full_text`,
-    `.our_standard.text`, `.summary.fallbacks[]` / `.summary.rejected[]`
-    text fields, `.negotiation_trail[].change_summary`, and any future
-    evidence field, known or not) -- see "Why evidence is walked wholesale"
-    below.
+    recursive walk of `evidence`, at any depth (OPF 0.5: `.clauses[].title`,
+    `.clauses[].our_standard.text` and `.parts[].text`,
+    `.precedent[].signed_text.text`, `.precedent[].opening_text.text` --
+    recorded for ANY distinct opening since 0.5, whatever its origin --,
+    `.precedent[].refused_asks[].text`, every `vs_standard` reason, and any
+    future evidence field, known or not) -- see "Why evidence is walked
+    wholesale" below.
+  - the ENTIRE `digest` subtree, wholesale (`.clauses[].our_standard.parts[]
+    .text`, `.signed_variants[].text` and `.exemplars[].text`,
+    `.refused_asks[].text`, `.changed_openings[].text`, every `reason`,
+    `.uncovered_clause_types[].label`, ...).
+  - the ENTIRE `manifest`, `dossiers` and `provenance_index` subtrees (OPF
+    0.5, engine #228), wholesale: the hard-rule manifest carries each Floor
+    rule's `statement` and `fallback_language`, and every critic dossier
+    carries our standard plus whole excerpt texts (`opening`, `signed`) and
+    Floor rules -- text a later stage (#40, #147, #148) hands a model.
   - `taxonomy.entries[].label`
   - every `x_*` string value, anywhere in the document (extensions are the
     obvious smuggling channel -- walked unconditionally rather than
@@ -58,13 +68,16 @@ review -- see below):
 
 ### Why `evidence` and `digest` are walked wholesale
 
-`scripts/opf_prompt.py` projects playbook knowledge into the model's context
-wholesale: historically the WHOLE `evidence` section via a single
-`json.dumps(...)` of `evidence` minus `x_*` keys, and, for OPF 0.3, the whole
-`digest` section (the compact model-facing projection of that same evidence --
-see `playbooks/opf/playbook.schema-0.3.json`, `$defs.digestClause`). Every
-string anywhere in either subtree therefore lands in the model's context
-verbatim, so BOTH are walked wholesale here.
+`scripts/opf_prompt.py` projects playbook knowledge into the model's context:
+historically the WHOLE `evidence` section via a single `json.dumps(...)` of
+`evidence` minus `x_*` keys, and now the `digest` section (the compact
+model-facing projection of that same evidence -- see
+`playbooks/opf/playbook.schema-0.5.json`, `$defs.digestClause`). The digest's
+strings land in the model's context verbatim, the evidence is the source every
+digest entry cites back into, and the OPF 0.5 `manifest` / `dossiers` /
+`provenance_index` sections exist to be handed to a model by later stages --
+so ALL of them are walked wholesale here. The scan surface must be at least
+the prompt surface, today and after the next renderer change.
 
 `digest` is scanned in its own right rather than relied upon to be
 evidence-derived: nothing in the schema forces a producer's `digest` to be a
@@ -73,16 +86,15 @@ injected digest would otherwise reach the model unscanned.
 
 An enumerated per-field scan (the original #346 shape) silently under-scans
 whenever the projected surface grows a field the scanner's authors did not
-enumerate --
-which is exactly what happened: `observed_positions[].full_text` and
-`our_standard.text` are both schema-legal (`playbooks/opf/playbook.schema-0.2.json`,
-`$defs.observation` / `$defs.clausePosition`) and both flow into the prompt
-via the wholesale projection, but neither was in the original enumerated
-list. The scan surface must equal the prompt surface, so `evidence` is
-walked the same way it is projected: wholesale, not by field allowlist.
+enumerate -- which is exactly what happened under OPF 0.2, when an
+observation's `full_text` and a clause's `our_standard.text` both flowed into
+the prompt but neither was in the original enumerated list. OPF 0.5 widened
+the surface again (`opening_text` for every distinct opening, the digest's
+`changed_openings`, the dossiers' whole excerpts), and a wholesale walk
+covered each of them the day the schema did, with no change here.
 
 `json_path` uses dotted/bracket notation (e.g.
-`"evidence.clauses[0].observed_positions[1].full_text"`) -- deliberately
+`"evidence.precedent[3].opening_text.text"`) -- deliberately
 NOT the RFC 6901 JSON Pointer format `opf_load._json_pointer` uses for
 schema errors, so the two error styles are never confused for each other.
 
@@ -206,8 +218,8 @@ def _walk_x_fields(node: Any, path: str) -> list[tuple[str, str]]:
     Walks unconditionally (does not special-case which section an `x_*`
     key appears under) because the OPF schema allows `x_*` extensions at
     many levels (document root, posture, floor, floor.invariants[],
-    corpus.documents[], clausePosition, observation, curationPin,
-    clauseConcept) and extensions are, per issue #346, "the obvious
+    corpus.documents[], digest, ...) and extensions are, per issue #346,
+    "the obvious
     smuggling channel" -- every one of them is in scope.
     """
     results: list[tuple[str, str]] = []
@@ -241,7 +253,8 @@ def _collect_strings(node: Any, path: str) -> list[tuple[str, str]]:
 
 def _walk_section_strings(node: Any, path: str) -> list[tuple[str, str]]:
     """Recursively collect every string leaf under a model-bound section
-    (`evidence`, and for OPF 0.3 `digest`), with its json_path, at ANY depth
+    (`evidence`, `digest`, `manifest`, `dossiers`, `provenance_index`), with
+    its json_path, at ANY depth
     and under ANY field name -- known or not (see module docstring, "Why
     `evidence` and `digest` are walked wholesale": `opf_prompt.py` projects
     these subtrees into the prompt wholesale, so the scan surface must match).
@@ -265,7 +278,7 @@ def _walk_section_strings(node: Any, path: str) -> list[tuple[str, str]]:
 
 
 def scan_untrusted_playbook_text(opf_doc: dict) -> list[dict]:
-    """Scan every model-bound text field of an OPF v0.2/v0.3 document for
+    """Scan every model-bound text field of an OPF 0.5 document for
     hardcoded prompt-injection patterns (see module docstring for scope
     and the "tripwire, not a security boundary" caveat).
 
@@ -302,12 +315,16 @@ def scan_untrusted_playbook_text(opf_doc: dict) -> list[dict]:
     for path, text in _walk_section_strings(evidence, "evidence"):
         _add(text, path)
 
-    # OPF 0.3: `digest` is the compact model-facing projection of evidence and
-    # is what the review prompt actually carries, so it is scanned in its own
-    # right -- a producer's digest is not guaranteed to be evidence-derived.
-    digest = opf_doc.get("digest") or {}
-    for path, text in _walk_section_strings(digest, "digest"):
-        _add(text, path)
+    # `digest` is the compact model-facing projection of evidence and is what
+    # the review prompt actually carries, so it is scanned in its own right --
+    # a producer's digest is not guaranteed to be evidence-derived (the
+    # engine's validator enforces that; this repo does not re-derive it).
+    # The OPF 0.5 hard-rule manifest, critic dossiers and provenance index
+    # (engine #228) are the same class: derived sections a later stage hands
+    # a model, scanned in their own right for the same reason.
+    for section in ("digest", "manifest", "dossiers", "provenance_index"):
+        for path, text in _walk_section_strings(opf_doc.get(section) or {}, section):
+            _add(text, path)
 
     taxonomy = opf_doc.get("taxonomy") or {}
     for i, entry in enumerate(taxonomy.get("entries") or []):
