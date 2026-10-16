@@ -128,7 +128,11 @@ about the document, and you do not propose replacement language.
 Respond with STRICT JSON ONLY -- no prose, no markdown fencing -- in
 exactly this shape:
 
-{"invariant_id": "<the invariant_id you were given>", "violated": true|false, "evidence_quote": "<short quote from REVIEW_CONTEXT, <=200 chars, empty string when not violated>"}
+{"invariant_id": "<the invariant_id you were given>", "violated": true|false, "evidence_quote": "<verbatim quote from REVIEW_CONTEXT, empty string when not violated>"}
+
+Keep evidence_quote to about 200 characters -- the shortest excerpt that
+shows the violation. Go longer only when the violation cannot be shown in
+less, and never past 500 characters: a longer quote is rejected.
 """
 
 # One bounded re-invoke per invariant on an invalid response (ticket AC),
@@ -136,7 +140,17 @@ exactly this shape:
 # primary_review_pass.MAX_RETRIES_PER_PASS's "1 initial + 1 retry" shape.
 _MAX_RETRIES_PER_INVARIANT = 1
 
-_EVIDENCE_QUOTE_MAX_CHARS = 200
+# Owner decision 2026-10-16 (issue #160), after a live Claude Haiku 4.5 judge
+# quoted 264 characters on every violated call against a hard 200: 200 stays
+# the TARGET the system prompt asks for (`_EVIDENCE_QUOTE_TARGET_CHARS`), and
+# 500 is the hard bound `_check_judge_response` enforces -- room to go longer
+# when the violation needs it, about 2x the observed overshoot. Above 500 the
+# verdict is still refused, never truncated -- and
+# the retry now SAYS so, with the limit and the overshoot (`_correction_block`),
+# because a model re-sent the identical prompt overshoots identically. The
+# output budget below derives from this number, so it grows with it.
+_EVIDENCE_QUOTE_MAX_CHARS = 500
+_EVIDENCE_QUOTE_TARGET_CHARS = 200
 
 # ---------------------------------------------------------------------------
 # Output budget (issue #682)
@@ -235,16 +249,22 @@ def _build_user_prompt(
     )
 
 
-def _validate_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple[bool, dict[str, Any] | None]:
+def _check_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple[dict[str, Any] | None, str]:
     """Parse + strictly validate one judge response for one invariant.
 
     Mirrors primary_review_pass.validate_model_response's strictness:
     reject non-JSON, wrong invariant_id, missing/non-bool violated. Also
-    rejects a non-string or over-length evidence_quote (the ">200 chars"
-    bound the system prompt asks for) -- never best-effort-patched.
+    rejects a non-string or over-length evidence_quote (the
+    `_EVIDENCE_QUOTE_MAX_CHARS` bound the system prompt states) -- never
+    best-effort-patched.
 
-    Returns (True, {"invariant_id", "violated", "evidence_quote"}) on
-    success, (False, None) on any validation failure.
+    Returns `(verdict, "")` on success, `(None, error)` on any validation
+    failure, where `error` follows the review passes' "TOKEN: detail"
+    convention. The TOKEN is a closed vocabulary (`invalid_json`,
+    `wrong_invariant_id`, `invalid_violated`, `invalid_evidence_quote`,
+    `evidence_quote_too_long`) and is all the ledger ever records
+    (`primary_review_pass._error_token`); the detail feeds only the retry's
+    correction block, and carries numbers, never model or document text.
 
     A ```json fence or a prose preamble around the object is unwrapped first
     by the same `_extract_json_object` the review passes use -- unwrapping,
@@ -260,30 +280,87 @@ def _validate_judge_response(raw_text: str, *, expected_invariant_id: str) -> tu
     downstream can re-fire. Such a response stays refused, and unjudged.
     """
     if not isinstance(raw_text, str):
-        return False, None
+        return None, "invalid_json: the response was not text"
     body = _primary_review_pass._extract_json_object(raw_text)
     trailing = raw_text[raw_text.find(body) + len(body) :]
     if trailing.strip().strip("`").strip():
-        return False, None
+        return None, "invalid_json: text followed the JSON object"
     try:
         parsed = json.loads(body)
     except (json.JSONDecodeError, TypeError):
-        return False, None
+        return None, "invalid_json: the response was not a JSON object"
     if not isinstance(parsed, dict):
-        return False, None
+        return None, "invalid_json: the response was not a JSON object"
     if parsed.get("invariant_id") != expected_invariant_id:
-        return False, None
+        return None, "wrong_invariant_id: invariant_id must echo the one you were given"
     violated = parsed.get("violated")
     if not isinstance(violated, bool):
-        return False, None
+        return None, "invalid_violated: violated must be true or false"
     evidence_quote = parsed.get("evidence_quote", "")
-    if not isinstance(evidence_quote, str) or len(evidence_quote) > _EVIDENCE_QUOTE_MAX_CHARS:
-        return False, None
-    return True, {
+    if not isinstance(evidence_quote, str):
+        return None, "invalid_evidence_quote: evidence_quote must be a string"
+    if len(evidence_quote) > _EVIDENCE_QUOTE_MAX_CHARS:
+        over = len(evidence_quote) - _EVIDENCE_QUOTE_MAX_CHARS
+        return None, (
+            f"evidence_quote_too_long: evidence_quote is {len(evidence_quote)} characters; "
+            f"the maximum is {_EVIDENCE_QUOTE_MAX_CHARS}, so it is {over} over"
+        )
+    return {
         "invariant_id": expected_invariant_id,
         "violated": violated,
         "evidence_quote": evidence_quote,
-    }
+    }, ""
+
+
+def _validate_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple[bool, dict[str, Any] | None]:
+    """`(True, verdict)` / `(False, None)` -- `_check_judge_response` without
+    the reason, for callers that only need the yes/no."""
+    verdict, _error = _check_judge_response(raw_text, expected_invariant_id=expected_invariant_id)
+    return verdict is not None, verdict
+
+
+#: Heading of the correction appended to a retried judge prompt -- the review
+#: passes' own (`primary_review_pass.RETRY_CORRECTION_HEADING`), so a reader of
+#: any pass's retry sees the same marker.
+_RETRY_CORRECTION_HEADING = _primary_review_pass.RETRY_CORRECTION_HEADING
+
+
+def _correction_block(error: str) -> str:
+    """The correction appended to the retry's user prompt (issue #160).
+
+    "" for no error, so an attempt with nothing to correct is byte-identical
+    to attempt 1. Appended to the USER prompt only, as the review passes do:
+    the system prompt stays fixed.
+
+    An over-length quote names the limit and the overshoot and asks for a
+    shorter verbatim excerpt -- never a paraphrase, and never a different
+    verdict: the fault is the quote's length, not the judgment. Every other
+    fault restates the response shape.
+    """
+    if not error:
+        return ""
+    if error.startswith("evidence_quote_too_long"):
+        fault = "Your verdict was rejected because evidence_quote is too long:"
+        remedy = (
+            f"Resend the SAME verdict -- same invariant_id, same violated -- with "
+            f"evidence_quote cut to at most {_EVIDENCE_QUOTE_MAX_CHARS} characters "
+            f"(aim for about {_EVIDENCE_QUOTE_TARGET_CHARS}), counting characters. "
+            "Quote a shorter excerpt copied verbatim from "
+            "REVIEW_CONTEXT: do not paraphrase, summarize or add ellipses, and do "
+            "not change your judgment to make the quote fit."
+        )
+    else:
+        fault = "Your previous response did not match the required response shape:"
+        remedy = (
+            "Resend your verdict in exactly the shape stated above. Only the "
+            "shape was wrong -- do not change your judgment to accommodate it."
+        )
+    return (
+        f"\n\n{_RETRY_CORRECTION_HEADING}\n"
+        f"{fault}\n\n"
+        f"  {error}\n\n"
+        f"{remedy} Respond with a single raw JSON object and nothing else."
+    )
 
 
 @dataclass
@@ -413,6 +490,9 @@ def judge_floor_invariants(
         )
 
         verdict: dict[str, Any] | None = None
+        # Issue #160: the previous attempt's validation error, fed back as a
+        # correction on the retry and ledgered as a token on every attempt.
+        last_error = ""
         # Issue #682: whether ANY attempt for THIS invariant ran out of
         # output room. Reset per invariant, and only consulted once the
         # attempt budget is spent -- an invariant that truncates and then
@@ -422,6 +502,12 @@ def judge_floor_invariants(
         for attempt in range(1, attempts_allowed + 1):
             raw_response = None
             outcome = "failure"
+            # Issue #160: a retry carries the correction for the PREVIOUS
+            # attempt's fault; attempt 1 (and a retry after a truncation,
+            # which has no shape to correct) sends the base prompt unchanged.
+            attempt_prompt = user_prompt + _correction_block(last_error)
+            last_error = ""
+            attempt_truncated = False
             # Issue #414: same timing/usage seam as run_primary_pass /
             # run_critic_pass (see those functions' identical comments) --
             # `attempt_duration_ms` is captured the instant invoke()
@@ -435,14 +521,14 @@ def judge_floor_invariants(
                 raw_response = model_client.invoke(
                     model_id=model_id,
                     system_prompt=_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
+                    user_prompt=attempt_prompt,
                     max_output_tokens=max_output_tokens,
                 )
                 attempt_duration_ms = int((time.monotonic() - attempt_started_monotonic) * 1000)
-                is_valid, parsed = _validate_judge_response(
+                parsed, last_error = _check_judge_response(
                     raw_response, expected_invariant_id=invariant_id
                 )
-                if is_valid:
+                if parsed is not None:
                     outcome = "success"
                     verdict = parsed
                 else:
@@ -472,8 +558,14 @@ def judge_floor_invariants(
                 # judge that reliably outruns its ceiling is the sized
                 # `DEFAULT_MAX_OUTPUT_TOKENS` above, not an unbounded loop.
                 ran_out_of_room = True
+                attempt_truncated = True
                 outcome = "retry" if attempt < attempts_allowed else "failure"
             finally:
+                # The token this attempt failed on, for the ledger only. A
+                # truncation is ledgered but never fed back as a correction.
+                attempt_error = last_error or (
+                    "model_output_truncated" if attempt_truncated else ""
+                )
                 actual_usage = (
                     getattr(model_client, "last_usage", None) if raw_response is not None else None
                 )
@@ -490,7 +582,7 @@ def judge_floor_invariants(
                         # Issue #144: the calibrated input estimate the two
                         # review passes use (no schema rides on this call).
                         input_tokens_est=_primary_review_pass.request_input_tokens_est(
-                            _SYSTEM_PROMPT, user_prompt
+                            _SYSTEM_PROMPT, attempt_prompt
                         ),
                         output_tokens_est=_primary_review_pass.estimate_tokens(raw_response or ""),
                         actual_input_tokens=(actual_usage or {}).get("input_tokens"),
@@ -512,6 +604,14 @@ def judge_floor_invariants(
                         # -- the reasoning tokens the provider reported for
                         # THIS attempt, None (not 0) when it reported none.
                         reasoning_tokens=(actual_usage or {}).get("reasoning_tokens"),
+                        # Issue #160: the closed-vocabulary TOKEN this attempt
+                        # failed on (never its detail), and the same token as
+                        # `retry_reason` on a retried attempt -- the #157
+                        # convention the review passes already ledger.
+                        error_token=(
+                            "" if outcome == "success" else _primary_review_pass._error_token(attempt_error)
+                        ),
+                        retry_reason=_primary_review_pass.attempt_retry_reason(outcome, attempt_error),
                     )
                 )
             if verdict is not None:
@@ -547,7 +647,8 @@ def floor_fires(judgment: FloorJudgment) -> list[dict[str, Any]]:
     that rule text is confidential internal reasoning and must never be
     echoed into an external-facing field -- `provenance` alone carries the
     invariant id as system metadata. `evidence_quote` (already bounded to
-    <=200 chars and drawn from the counterparty's own review_context, not
+    `_EVIDENCE_QUOTE_MAX_CHARS`, inside the output schema's 2000-char cap on
+    that field, and drawn from the counterparty's own review_context, not
     from internal reasoning) is used for `counterparty_change_summary` when
     present.
     """
