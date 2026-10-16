@@ -116,9 +116,12 @@ check still works unauthenticated, `/version` does not.
 ## Gotchas hit today
 
 - `frontend/.env.local` must not exist when running the gate.
-- The public checkout's `.venv` must be Python 3.11
-  (`/usr/local/opt/python@3.11/bin/python3.11 -m venv .venv`), then
-  `pip install -r backend/requirements.txt -r requirements-dev.txt`.
+- The public checkout's `.venv` is Python 3.13, matching `.python-version`,
+  `requires-python` and CI (rebuilt 2026-10-07; it was 3.11 before):
+  `/usr/local/bin/python3.13 -m venv .venv`, then
+  `pip install -r backend/requirements.txt -r requirements-dev.txt`. The ct-*
+  checkouts and agent worktrees symlink to it, so swap it only by rename
+  while no gate is running.
 - Two `scripts/check.sh` runs writing the same log file corrupt it; the exit
   code is still authoritative.
 - `npm test -- src/__tests__/<file>` is the single-file shape; the wrapper
