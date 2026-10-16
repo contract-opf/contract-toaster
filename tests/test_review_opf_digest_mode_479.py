@@ -71,7 +71,7 @@ sets it the same way that file's own tests do.
   6. Replacement-text / pen-rule enforcement and the leakage-scan corpus
      are NOT silently disabled for an OPF-governed review.
 
-Uses the gold OPF 0.3 fixtures already committed at
+Uses the gold OPF 0.5 fixtures already committed at
 `tests/gold-fixtures-opf/` (same fixtures `tests/test_playbook_upload_478.py`
 uses) -- no live AWS, no network; DynamoDB/S3 mocked with `moto`.
 
@@ -124,9 +124,9 @@ import src.playbook_upload as playbook_upload  # noqa: E402
 import src.playbook_versions as playbook_versions  # noqa: E402
 
 OPF_FIXTURE_DIR = REPO_ROOT / "tests" / "gold-fixtures-opf"
-FULL_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university.opf.json"  # posture + 1 floor invariant
-EMPTY_FLOOR_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-empty-floor.opf.json"
-EMPTY_POSTURE_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-real-shape.opf.json"
+FULL_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.5.opf.json"  # posture + 1 floor invariant
+EMPTY_FLOOR_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.5-empty-floor.opf.json"
+EMPTY_POSTURE_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.5-real-shape.opf.json"
 # playbook_id "acme-university" -- matches this policy fixture's own
 # playbook_id field, and the playbook_id every _opf_bundle/_activate_opf
 # test below activates the OPF artifact under.
@@ -156,7 +156,7 @@ def _opf_bundle(doc: dict[str, Any]) -> dict[str, Any]:
 def _reseal(doc: dict[str, Any]) -> dict[str, Any]:
     """Recompute `identity.content_hash` (+ section digests) after mutating
     *doc* so it hashes honestly again -- same technique as
-    tests/test_playbook_upload_478.py::_reseal / test_opf_ingest_03.py's own
+    tests/test_playbook_upload_478.py::_reseal / test_opf_ingest_05.py's own
     helper. Models a real, self-consistent artifact (e.g. a stub-basis
     compile) rather than a hash-tampered one that `opf_load.load_opf_document`
     would reject on re-validation."""
@@ -852,14 +852,13 @@ class TestOpfLeakageCorpus(unittest.TestCase):
         self.assertIsNone(result["decision"])
         self.assertEqual(result["findings"], [])
 
-    def test_model_output_echoing_bare_string_preferred_variation_is_blocked(self):
-        # The schema's other `oneOf` branch (conformance item 6):
-        # `opf_prompt._fmt_preferred` renders a legacy bare-string
-        # `preferred_variations` entry into the prompt verbatim regardless.
+    def test_model_output_echoing_a_refused_ask_is_blocked(self):
+        # Issue #128: on a digest 4 playbook the corpus carries the precedent
+        # texts the Digest block renders -- here the fixture's own refused
+        # ask, which `opf_prompt._fmt_refused_ask` puts into the prompt
+        # verbatim and which must never reach counterparty-facing output.
         doc = _load_opf_doc(FULL_FIXTURE_PATH)  # posture + 1 floor invariant
-        doc = json.loads(json.dumps(doc))  # deep copy -- never mutate the shared fixture
-        leaking_text = "Do not accept any indemnity that omits a liability cap."
-        doc["digest"]["clauses"][0]["preferred_variations"].append(leaking_text)
+        leaking_text = doc["digest"]["clauses"][0]["refused_asks"][0]["text"]
         bundle = _opf_bundle(doc)
         docx_bytes = _build_docx_bytes()
 

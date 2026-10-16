@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-OPF prompt composition -- issue #284, rebuilt on the DIGEST for OPF 0.3.
+OPF prompt composition -- issue #284, rebuilt on the DIGEST for OPF 0.3, and
+on digest_version 4 (OPF 0.5, the only format this repo reads) by issue #129.
 
 Pure composition: turn a schema-shaped OPF document (see `scripts/opf_load.py`
 for the loader/validator this consumes) plus an optional approved review policy
@@ -28,30 +29,42 @@ nothing else is dropped". That design was measured at roughly ONE MILLION tokens
 on the real corpus. It does not fit any model's context; it could never have run
 a single review. It was not too expensive, it was impossible.
 
-OPF 0.3 replaces it with the engine-built `digest` section, which is the same
-knowledge projected for exactly this use: per clause, the stance plus four
-deduplicated, frequency-annotated lists, each entry carrying a citation that
-resolves back into the full OPF. The engine enforces a ~40K-token budget on it
-BY CONSTRUCTION (tightening per-list caps until it fits), so the block this
-module emits is bounded by the artifact, not by hope. The real playbook measures
-~38K tokens.
+The engine-built `digest` section replaces it: the same knowledge projected
+for exactly this use. Digest 4 (OPF 0.5) is verdict-free precedent -- per
+clause, our standard (in its parts), how many signed deals opened with it and
+kept it, the positions of the signed texts, the signed variants (with how many
+were reached from our standard and how many were signed as proposed), the
+refused asks and the openings not signed as proposed -- each entry carrying a
+citation that resolves back into the full OPF. The engine enforces a
+~40K-token budget on it BY CONSTRUCTION (tightening per-list caps until it
+fits, totals always uncapped), so the block this module emits is bounded by
+the artifact, not by hope.
 
-What the digest deliberately omits -- every observation's `full_text`, and (as
-of digest_version 2) each preferred variation's compiler-written `rationale` --
-is not lost from the corpus, but no running path reaches it today. Depth is
-planned as deterministic dossier selection appended by orchestration (#40),
-not as a model tool call; the unwired drill-down tool was retired in #161.
-Summaries by default is the trade that lets the prompt fit.
+What the digest deliberately omits -- every signed text beyond its 300-char
+summary, the per-deal precedent record, the per-part reasons -- is not lost
+from the playbook, but no running path reaches it today. Depth is planned as
+deterministic dossier selection appended by orchestration (#40; OPF 0.5 ships
+the `dossiers` section for it), not as a model tool call; the unwired
+drill-down tool was retired in #161. Summaries by default is the trade that
+lets the prompt fit, and the block says what each capped list left out.
 
-So: if a future change is tempted to inline `full_text`, or to "just include the
-evidence section too", it is re-proposing the 1M-token design. Select a
-bounded dossier, not a dump.
+So: if a future change is tempted to inline the precedent record, or to "just
+include the evidence section too", it is re-proposing the 1M-token design.
+Select a bounded dossier, not a dump.
 
-## Terminology
+## Plain facts, plain headers (issue #129)
 
-Headers come from `scripts/opf_terminology.py`, verbatim from the engine's
-renderer, so the words in the model's prompt match the words in the playbook a
-reviewer reads. OPF field names are untouched -- the mapping is display-only.
+Digest 2 was rendered under four judged headers (preferred variations /
+concessions / unacceptable / exemplar forms), a stance sentence, frequency
+bands and risk annotations. On the real playbook the stance was "mixed" for 22
+of 24 clauses and the bands were inflated, and live runs showed the model
+mining the "unacceptable" list as replacement language. Digest 4 carries none
+of that, and this module renders it as facts: counts of distinct deals, the
+wording, and a citation. The one judged value is the `vs_standard` label (with
+its reason and part map), rendered as an index the model must check against
+the cited text, never as an instruction -- DIGEST_INTRO says so in as many
+words. The display renames (`scripts/opf_terminology.py`) are retired with
+digest 2: the digest 4 field names are already plain.
 
 Mirrors the block/cache-breakpoint CONVENTION of
 `scripts/primary_review_pass.py:assemble_system_blocks` (fixed block order,
@@ -61,7 +74,7 @@ return type: this function returns `list[str]`.
 ## What is excluded, and why nothing has to special-case it
 
 `compose_opf_system_blocks` only ever reads five paths off the input doc:
-`posture.system_prompt`, `digest.clauses`, `floor.invariants`,
+`posture.system_prompt`, `digest` (`clauses` and `corpus`), `floor.invariants`,
 `perspective`, and `de_minimis` (plus, off the separate policy document,
 `rules[].{id,strength,text}`, and off the caller's own `instructions_text`
 param -- issue #479/#482/#483's operator standing instructions, never read
@@ -69,13 +82,13 @@ from the OPF document itself, and its `entity_roster` param -- issue #678's
 deployment-scoped roster of our own legal entities, likewise not an OPF
 field and deliberately never becoming one). Note `evidence` is NOT among
 them any more:
-the digest is the projection of it that reaches the model, and the full
-evidence section is read only on demand, off disk, by the lookup tool.
-Every other top-level section --
+the digest is the projection of it that reaches the model, and nothing reads
+the full evidence section into a prompt. Every other top-level section --
 `posture.rubric` (excised from the schema entirely per engine #178, but this
 function does not validate its input, so a caller-constructed dict carrying
 it is simply never looked at), `posture.generation` (interview transcript),
-`corpus`, `compiler`, `identity`, `curation`, `baseline`, `composes` -- is
+`corpus`, `compiler`, `identity`, `baseline`, `composes`, `manifest`,
+`dossiers`, `provenance_index` -- is
 excluded automatically because the function never touches it, not via a
 per-field denylist. That is also why a doc WITH `posture.rubric` produces
 byte-identical output to the same doc without it (issue #284 AC).
@@ -109,22 +122,23 @@ The guards' BEHAVIOR is unchanged, and so is this module's purity in the sense
 that matters: the returned blocks are byte-identical to what they were, still a
 deterministic function of the input. Only stderr is new.
 
-## `historical_stance` stays descriptive (OPF §2.2)
+## Precedent stays descriptive
 
-The Digest block renders `historical_stance` as a labelled fact ("Historical
-stance: usually_held (held 8 of 10 ...)") and never rephrases it as an
-instruction. The distinction is load-bearing: "usually_held" describes what the
-corpus did, and the moment a prompt renders it as "hold this clause" the
-playbook has stopped being evidence and started being policy -- which is the
-policy document's job, not the digest's. DIGEST_INTRO says so to the model in
-as many words.
+The Digest block renders what the corpus did ("Opened with our standard in 4
+signed deals; signed it unchanged in 2") and never rephrases it as an
+instruction. The distinction is load-bearing: the moment a prompt renders
+precedent as "hold this clause" the playbook has stopped being evidence and
+started being policy -- which is the policy document's job, not the digest's.
+DIGEST_INTRO says so to the model in as many words.
 
 Unlike the retired wholesale projection, this block renders a KNOWN shape (the
-digest's four lists), so a genuinely new digest field would not appear in the
-prompt until this module renders it. That is the deliberate trade for headers a
-model can read: `digest_version` is dispatched on at ingest
-(`scripts/opf_load.py`), so a shape this module does not understand is refused
-at the door rather than silently half-rendered here.
+digest 4 clause), so a genuinely new digest field would not appear in the
+prompt until this module renders it. That is the deliberate trade for text a
+model can read: `digest_version` is checked at ingest (`scripts/opf_load.py`
+accepts "4" only), so a shape this module does not understand is refused at
+the door rather than silently half-rendered here, and
+`tests/test_opf_schema_sync.py` pins every field this module reads at the
+shape it reads it.
 
 De-brand: no tenant-brand strings anywhere in this module (project de-brand rule).
 """
@@ -142,7 +156,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import entity_normalize  # noqa: E402
-import opf_terminology  # noqa: E402
 import primary_review_pass  # noqa: E402
 
 #: Composition modes. `review_knowledge.py` re-exports these and adds its own
@@ -281,23 +294,44 @@ def _posture_block(opf_doc: dict, overrides: Optional[dict] = None) -> str | Non
 
 
 DIGEST_INTRO = (
-    "PLAYBOOK KNOWLEDGE (descriptive, not prescriptive).\n"
-    "What the signed corpus has actually shown for each clause. This is precedent, "
-    "not instruction: it tells you what we have done, never what you must do. "
-    "Weigh it by n -- the number of corpus observations behind an entry "
-    "(bands: often n>=10, sometimes n=2-9, rare n=1). A position held across many "
-    "deals is strong evidence; a single instance is weak.\n"
-    "These are SUMMARIES, not the corpus's exact wording. Each entry cites "
-    "its source, but the full clause text and a variation's full rationale "
-    "are not included here -- do not present drafted language as quoted "
-    "from the corpus; weigh it as precedent, never as text to reproduce "
-    "verbatim."
+    "PLAYBOOK PRECEDENT (descriptive, not prescriptive).\n"
+    "This is precedent: what we have signed, and what we have refused, in past deals of "
+    "this agreement type, clause by clause. It describes; it does not instruct, and no "
+    "entry here is an instruction. Weigh it against the document in front of you and "
+    "decide for this contract yourself.\n"
+    "How to read each clause:\n"
+    "- Our standard: our own template language for the clause, in its parts.\n"
+    "- Signed language on record: wording other than our standard that we signed. A "
+    "variant reached from our standard is a concession we have signed: it marks the edge "
+    "of what we have accepted, not a preference. A variant signed as proposed is wording "
+    "the other side opened with that we signed unchanged.\n"
+    "- Asked for and refused: wording the other side proposed and we did not sign. It is "
+    "NEVER our position and must NEVER be used as replacement language or as a model for "
+    "an edit; its only use is precedent for refusing the same ask if it is made again. If "
+    "the document already gives us something better, that is a good outcome, not a "
+    "defect.\n"
+    "- Opening language not signed as proposed: wording a first draft opened with that "
+    "did not survive as written. It may have come from either side. Like a refused ask, "
+    "it is never a source of replacement language.\n"
+    "- A label (less protective of us, more protective of us, mixed, different concept, "
+    "equivalent wording) compares an entry with OUR STANDARD, from our side. It was "
+    "judged once, against our standard, never against this contract: it is an index, not "
+    "an instruction. Check the cited text and decide for the live contract. An unlabelled "
+    "entry was not judged. A part map gives one token per part of our standard, in order: "
+    "= same legal effect; + more protective of us; - less protective of us; x+, x-, x0 "
+    "omitted, with a more protective, less protective or no effect for us. Additions no "
+    "part covers are marked +, - or 0 the same way.\n"
+    "- Every count is of distinct deals. A citation [document@version §clause] names "
+    "where the entry was signed or proposed.\n"
+    "Each quoted entry is a summary of at most 300 characters ending on a sentence "
+    "boundary, not necessarily the whole clause: do not present it as quoted in full "
+    "from the corpus."
 )
 
 class PromptCompositionError(ValueError):
     """Raised when an OPF document cannot compose a knowledge prompt.
 
-    Currently: no `digest` section. The 0.3 schema marks `digest` optional (not
+    Currently: no `digest` section. The 0.5 schema marks `digest` optional (not
     every producer populates it; the reference engine always does), but this is
     a KNOWLEDGE-FIRST review -- the digest IS the knowledge. Composing anyway
     would emit a prompt with no corpus precedent in it and review a contract on
@@ -307,29 +341,48 @@ class PromptCompositionError(ValueError):
     """
 
 
-def _fmt_n(entry: dict, where: str) -> str:
-    """`(n=6, often)` — the precedent weight, or '' when the entry carries none.
+#: `vs_standard` label -> the words the model reads. Index, never instruction
+#: (DIGEST_INTRO says so). The schema's label enum is pinned EXACTLY in
+#: tests/test_opf_schema_sync.py: a sixth label would render as its raw token,
+#: which is honest but unexplained by the intro.
+_LABEL_WORDS = {
+    "less_protective": "less protective of us",
+    "more_protective": "more protective of us",
+    "mixed": "mixed",
+    "different_concept": "different concept",
+    "equivalent": "equivalent wording",
+}
 
-    Dropping n is not cosmetic: DIGEST_INTRO tells the model to WEIGH every
-    entry by n, so an entry rendered without one is precedent of unstated
-    strength presented alongside precedent of stated strength.
-    """
-    n = entry.get("n")
-    if n is None:
-        _omit("precedent weight (n) — entry rendered with no n for the model to weigh by", where)
-        return ""
-    band = entry.get("band")
-    if not band:
-        _omit("frequency band — n rendered without its often/sometimes/rare label", where)
-        return f" (n={n})"
-    return f" (n={n}, {band})"
+#: `positions` key -> its words, in the order the positions line reads them:
+#: our standard first, then the risky positions, then the rest.
+_POSITION_WORDS = (
+    ("standard", "our standard"),
+    ("less_protective", "less protective of us"),
+    ("mixed", "mixed"),
+    ("different_concept", "different concept"),
+    ("unjudged", "not judged"),
+    ("more_protective", "more protective of us"),
+    ("equivalent", "equivalent wording"),
+)
+
+
+def _plural(n: Any, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _count(value: Any, field: str, where: str) -> int | None:
+    """A required non-negative count, or None (recorded) when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        _omit(f"{field} — not an integer; the count it states is not rendered", where)
+        return None
+    return value
 
 
 def _fmt_cite(ref: Any, where: str) -> str:
-    """`[doc@v §path]` — grounds the summary in a real corpus location.
+    """`[doc@v §path]` — grounds the entry in a real corpus location.
 
     Dropping the citation strands the entry: DIGEST_INTRO tells the model each
-    summary cites its source, and an uncited entry is one that does not.
+    entry names where it was signed or proposed, and an uncited entry does not.
     """
     if ref is None:
         _omit("citation — entry has no ref, so it reaches the model ungrounded, with no corpus location an operator or auditor can resolve it to", where)
@@ -344,79 +397,169 @@ def _fmt_cite(ref: Any, where: str) -> str:
     return f" [{doc_id}@{ver} §{path}]"
 
 
-def _fmt_risk(risk: Any, where: str) -> str:
-    """`{risk: worse/material}` — direction is from OUR perspective."""
-    if risk is None:
-        return ""  # optional by schema on the digest summaries; absence is not a drop.
-    if not isinstance(risk, dict):
-        _omit(f"risk_delta — value is a {type(risk).__name__}, not an object; not rendered", where)
+def _fmt_label(entry: dict, where: str) -> str:
+    """`[less protective of us] ` — the entry's `vs_standard` label, or '' when
+    the entry was not judged (`label` null is a fact, not a drop)."""
+    label = entry.get("label")
+    if label is None:
         return ""
-    direction, magnitude = risk.get("direction"), risk.get("magnitude")
-    if not direction:
-        _omit("risk_delta — carries no direction, so the whole risk annotation is dropped", where)
+    if not isinstance(label, str):
+        _omit(f"vs_standard label — value is a {type(label).__name__}, not a string; not rendered", where)
         return ""
-    if not magnitude:
-        _omit("risk magnitude — direction rendered without none/minor/material", where)
-        return f" {{risk: {direction}}}"
-    return f" {{risk: {direction}/{magnitude}}}"
+    return f"[{_LABEL_WORDS.get(label, label)}] "
 
 
-def _fmt_preferred(entry: Any, where: str) -> str:
-    if isinstance(entry, str):  # legacy bare-string entry
-        _omit(
-            "preferred variation structure — legacy bare-string entry, so no "
-            "if/to split, no n/band weight and no citation",
-            where,
+def _fmt_quote(entry: dict, where: str) -> str:
+    text = entry.get("text")
+    if not isinstance(text, str) or not text:
+        _omit("entry text — entry rendered with no wording", where)
+        return '""'
+    return f'"{text}"'
+
+
+def _fmt_judgment(entry: dict, show_part_map: bool, where: str) -> list[str]:
+    """The indented lines under a judged entry: its one-sentence reason (the
+    owner's when `label_by` is `owner`) and, where it adds something beyond
+    the label, its part map and addition tokens."""
+    if entry.get("label") is None:
+        return []
+    lines: list[str] = []
+    reason = entry.get("reason")
+    if isinstance(reason, str) and reason:
+        who = "Owner's label; owner's reason" if entry.get("label_by") == "owner" else "Judged difference"
+        lines.append(f"      {who}: {reason}")
+    elif reason is not None:
+        _omit("vs_standard reason — not a string; the label renders without its reason", where)
+    part_map, additions = entry.get("part_map"), entry.get("additions")
+    if show_part_map or additions:
+        rendered = []
+        if isinstance(part_map, list) and part_map:
+            rendered.append("part map " + " ".join(str(t) for t in part_map))
+        if isinstance(additions, list) and additions:
+            rendered.append("additions " + " ".join(str(t) for t in additions))
+        if rendered:
+            lines.append("      " + "; ".join(rendered))
+    return lines
+
+
+def _fmt_signed_variant(entry: Any, show_part_map: bool, where: str) -> list[str]:
+    """One signed-variant line (plus its judgment), or the collapsed
+    equivalent-wording entry."""
+    if not isinstance(entry, dict):
+        _omit(f"signed variant — entry is a {type(entry).__name__}, not an object; not rendered", where)
+        return []
+    n_deals = _count(entry.get("n_deals"), "n_deals", where)
+    facts = [f"signed in {_plural(n_deals, 'deal')}"] if n_deals is not None else []
+    if entry.get("last_signed"):
+        facts.append(f"most recently {entry['last_signed']}")
+    for field, words in (("n_from_standard", "reached from our standard in"),
+                         ("n_unchanged", "signed as proposed in")):
+        n = _count(entry.get(field), field, where)
+        if n:
+            facts.append(f"{words} {n}")
+
+    if entry.get("label") == "equivalent" and "exemplars" in entry:
+        # The engine collapses every text labelled equivalent into ONE entry
+        # (`n_texts` distinct texts, at most two exemplars): wording that
+        # differs from ours without changing its effect is one fact, not a
+        # list to read through.
+        n_texts = _count(entry.get("n_texts"), "n_texts", where)
+        if n_texts is not None:
+            facts.insert(0, _plural(n_texts, "text"))
+        exemplars = entry.get("exemplars") if isinstance(entry.get("exemplars"), list) else []
+        if not exemplars:
+            _omit("equivalent-wording exemplars — collapsed entry rendered with no example text", where)
+        examples = "; ".join(
+            _fmt_quote(e, where) + _fmt_cite(e.get("ref"), where) for e in exemplars if isinstance(e, dict)
         )
-        return f"  - {entry}"
-    # digest_version 2 projects these to {if, to, observation_ref, n, band};
-    # `rationale` stays in the full OPF, reachable via the lookup tool.
-    line = f"  - FROM: {entry.get('if')}\n    ACCEPTABLE AS: {entry.get('to')}"
-    return line + _fmt_n(entry, where) + _fmt_cite(entry.get("observation_ref"), where)
+        line = f"  - {_fmt_label(entry, where)}{', '.join(facts)}"
+        return [line + (f"; for example {examples}" if examples else "")]
+
+    line = f"  - {_fmt_label(entry, where)}{_fmt_quote(entry, where)} — {', '.join(facts)}"
+    return [line + _fmt_cite(entry.get("ref"), where), *_fmt_judgment(entry, show_part_map, where)]
 
 
-def _fmt_summary_entry(entry: dict, where: str) -> str:
-    if not entry.get("text_summary"):
-        _omit("text_summary — entry rendered as an empty bullet", where)
-    return (
-        f"  - {entry.get('text_summary', '')}"
-        + _fmt_n(entry, where)
-        + _fmt_risk(entry.get("risk_delta"), where)
-        + _fmt_cite(entry.get("example_ref"), where)
-    )
+def _fmt_refused_ask(entry: Any, show_part_map: bool, where: str) -> list[str]:
+    """A REFUSED ask (issue #677): the other side's wording we did not sign.
 
-
-def _fmt_refused_entry(entry: dict, where: str) -> str:
-    """A REFUSED counterparty ask (issue #677).
-
-    Same shape as `_fmt_summary_entry` MINUS the risk annotation. `{risk:
-    neutral/none}` on an ask we turned down reads as "this wording is harmless",
-    which is the opposite of the section's meaning: the risk delta describes the
-    ask's effect, not our appetite for it. Live runs showed the model drawing
-    REPLACEMENT LANGUAGE from this section near-verbatim and proposing it as our
-    position, so nothing here may look like an approval signal.
+    Rendered as a record, never as an option: DIGEST_INTRO tells the model it
+    is never replacement language (live runs showed a model mining exactly
+    this list for replacement wording when it read as a menu).
     """
-    return (
-        f"  - {entry.get('text_summary', '')}"
-        + _fmt_n(entry, where)
-        + _fmt_cite(entry.get("example_ref"), where)
-    )
+    if not isinstance(entry, dict):
+        _omit(f"refused ask — entry is a {type(entry).__name__}, not an object; not rendered", where)
+        return []
+    n_deals = _count(entry.get("n_deals"), "n_deals", where)
+    facts = f" — refused in {_plural(n_deals, 'deal')}" if n_deals is not None else ""
+    line = f"  - {_fmt_label(entry, where)}{_fmt_quote(entry, where)}{facts}"
+    return [line + _fmt_cite(entry.get("ref"), where), *_fmt_judgment(entry, show_part_map, where)]
 
 
-_LIST_FORMATTERS = {
-    "preferred_variations": _fmt_preferred,
-    "concessions": _fmt_summary_entry,
-    "unacceptable": _fmt_refused_entry,
-    "exemplar_forms": _fmt_summary_entry,
-}
+def _fmt_changed_opening(entry: Any, show_part_map: bool, where: str) -> list[str]:
+    """`"<text>" — <n> deal(s)[, ended at our standard in X][, struck in Y] [ref]`."""
+    if not isinstance(entry, dict):
+        _omit(f"changed opening — entry is a {type(entry).__name__}, not an object; not rendered", where)
+        return []
+    n_deals = _count(entry.get("n_deals"), "n_deals", where)
+    facts = [_plural(n_deals, "deal")] if n_deals is not None else []
+    for field, words in (("n_to_standard", "ended at our standard in"), ("n_struck", "struck in")):
+        n = _count(entry.get(field), field, where)
+        if n:
+            facts.append(f"{words} {n}")
+    line = f"  - {_fmt_label(entry, where)}{_fmt_quote(entry, where)} — {', '.join(facts)}"
+    return [line + _fmt_cite(entry.get("ref"), where), *_fmt_judgment(entry, show_part_map, where)]
+
+
+def _entry_list(clause: dict, field: str, where: str) -> list:
+    entries = clause.get(field)
+    if entries is None:
+        _omit(f"{field} — absent; the section is not rendered", where)
+        return []
+    if not isinstance(entries, list):
+        _omit(f"{field} — value is a {type(entries).__name__}, not a list; the whole section is skipped", where)
+        return []
+    return entries
+
+
+def _texts_shown(variants: list) -> int:
+    """Distinct signed texts the listed entries stand for: the collapsed
+    equivalent-wording entry stands for `n_texts` of them."""
+    shown = 0
+    for entry in variants:
+        if isinstance(entry, dict) and entry.get("label") == "equivalent" and "exemplars" in entry:
+            n_texts = entry.get("n_texts")
+            shown += n_texts if isinstance(n_texts, int) and not isinstance(n_texts, bool) else 1
+        else:
+            shown += 1
+    return shown
+
+
+def _positions_line(clause: dict, where: str) -> str | None:
+    """`Positions of the 6 signed deals: 2 our standard, 4 less protective of us.`"""
+    positions = clause.get("positions")
+    if not isinstance(positions, dict):
+        _omit("positions — absent or not an object; no positions line rendered", where)
+        return None
+    parts: list[str] = []
+    total = 0
+    for key, words in _POSITION_WORDS:
+        n = positions.get(key)
+        if isinstance(n, bool) or not isinstance(n, int):
+            continue
+        total += n
+        if n:
+            parts.append(f"{n} {words}")
+    if not total:
+        return None
+    return f"Positions of the {_plural(total, 'signed deal')}: {', '.join(parts)}."
 
 
 def _digest_clause_block(clause: dict) -> str:
-    """One clause, rendered under the canonical headers.
+    """One digest-4 clause, rendered as plain facts under plain headers.
 
-    Text, not JSON: these headers exist to stop `fallbacks`/`rejected` being
-    read as the judgements they are not, and a raw JSON dump would hand the
-    model exactly those misleading field names.
+    Text, not JSON: a raw dump would hand the model field names
+    (`refused_asks`, `changed_openings`) without the one thing that matters
+    about them -- that neither is ever replacement language.
     """
     clause_id = clause.get("id")
     where = f"clause {clause_id!r}"
@@ -426,56 +569,98 @@ def _digest_clause_block(clause: dict) -> str:
         _omit("clause title — headed by taxonomy_id/id instead", where)
     lines.append(f"## {title}  [clause_id: {clause_id}]")
 
-    stance = clause.get("historical_stance")
-    detail = clause.get("stance_detail") or {}
-    if not stance:
-        _omit("historical_stance — clause rendered with no stance line at all", where)
-    else:
-        if detail.get("held") is not None and detail.get("of") is not None:
-            held = f" (held {detail['held']} of {detail['of']} on {detail.get('basis', 'all')} paper)"
-        else:
-            # The held-rate is the EVIDENCE behind the stance label; without it
-            # "usually_held" reaches the model as an assertion with no count.
-            _omit("stance_detail held-rate — stance label rendered with no held X of Y behind it", where)
-            held = ""
-        lines.append(f"Historical stance: {stance}{held}")
-
     our_standard = clause.get("our_standard")
-    if isinstance(our_standard, dict) and our_standard.get("text"):
-        lines.append(f"Our standard language: {our_standard['text']}")
+    parts = our_standard.get("parts") if isinstance(our_standard, dict) else None
+    part_texts = [p.get("text") for p in parts or [] if isinstance(p, dict) and p.get("text")]
+    if part_texts:
+        cite = _fmt_cite(our_standard.get("source_ref"), f"{where} / our_standard")
+        if len(part_texts) == 1:
+            lines.append(f'Our standard: "{part_texts[0]}"{cite}')
+        else:
+            lines.append(f"Our standard, in {len(part_texts)} parts:{cite}")
+            lines.extend(f'  {i}. "{text}"' for i, text in enumerate(part_texts, start=1))
     elif our_standard is not None:
         _omit(
-            "our_standard — present but carries no readable `text`; the clause's "
+            "our_standard — present but carries no readable part text; the clause's "
             "standard language never reaches the model",
             where,
         )
+    else:
+        lines.append("Our standard: none on record for this clause.")
+    show_part_map = len(part_texts) > 1
 
-    for term in opf_terminology.TERMS:
-        entries = clause.get(term.digest_field) or []
-        if not isinstance(entries, list):
-            _omit(
-                f"{term.digest_field} — value is a {type(entries).__name__}, not a list; "
-                f"the whole section is skipped",
-                where,
-            )
-            continue
-        if not entries:
-            # Say nothing rather than print an empty header: an empty section
-            # reads as "we looked and found none", which is a claim the digest
-            # does not make.
-            continue
-        lines.append(f"\n{term.header} ({len(entries)})")
-        lines.append(f"  {term.help}")
-        fmt = _LIST_FORMATTERS[term.digest_field]
-        lines.extend(
-            fmt(e, f"{where} / {term.digest_field}[{index}]")
-            for index, e in enumerate(entries)
+    n_opened = _count(clause.get("n_opened_standard"), "n_opened_standard", where)
+    n_kept = _count(clause.get("n_kept_standard"), "n_kept_standard", where)
+    if n_opened:
+        kept = f"; signed it unchanged in {n_kept}" if n_kept is not None else ""
+        lines.append(f"Opened with our standard in {_plural(n_opened, 'signed deal')}{kept}.")
+
+    positions = _positions_line(clause, where)
+    if positions:
+        lines.append(positions)
+
+    variants = _entry_list(clause, "signed_variants", where)
+    n_standard = _count(clause.get("n_signed_standard"), "n_signed_standard", where)
+    n_deals = _count(clause.get("n_deals"), "n_deals", where)
+    if n_standard is not None and n_deals is not None:
+        header = (
+            f"\nSigned language on record ({n_standard} of {_plural(n_deals, 'deal')} "
+            "signed our standard unchanged):"
         )
+    else:
+        header = "\nSigned language on record:"
+    lines.append(header if variants else header + " no other wording signed.")
+    for index, entry in enumerate(variants):
+        lines.extend(_fmt_signed_variant(entry, show_part_map, f"{where} / signed_variants[{index}]"))
+
+    refused = _entry_list(clause, "refused_asks", where)
+    if refused:
+        lines.append("\nAsked for and refused (never replacement language):")
+        for index, entry in enumerate(refused):
+            lines.extend(_fmt_refused_ask(entry, show_part_map, f"{where} / refused_asks[{index}]"))
+
+    openings = _entry_list(clause, "changed_openings", where)
+    if openings:
+        lines.append("\nOpening language not signed as proposed (never replacement language):")
+        for index, entry in enumerate(openings):
+            lines.extend(_fmt_changed_opening(entry, show_part_map, f"{where} / changed_openings[{index}]"))
+
+    # The digest caps each list; its totals are uncapped. Say what the cap
+    # left out rather than let the model read a partial list as the whole one.
+    hidden = []
+    for total_field, shown, noun in (
+        ("n_variants_total", _texts_shown(variants), "signed variant"),
+        ("n_refused_total", len(refused), "refused ask"),
+        ("n_changed_openings_total", len(openings), "opening not signed as proposed"),
+    ):
+        total = _count(clause.get(total_field), total_field, where)
+        if total is not None and total > shown:
+            hidden.append(f"{total - shown} more {noun}{'' if total - shown == 1 else 's'}")
+    if hidden:
+        lines.append(f"\n({', '.join(hidden)} on record, not shown here.)")
     return "\n".join(lines)
 
 
+def _corpus_line(digest: dict) -> str | None:
+    """`From 6 deals (6 signed), signed between 2024-Q1 and 2026-03-02.`"""
+    corpus = digest.get("corpus")
+    if not isinstance(corpus, dict):
+        _omit("digest corpus — absent; the block does not say how many deals it rests on", "digest")
+        return None
+    n_deals, n_signed = corpus.get("n_deals"), corpus.get("n_signed")
+    if not isinstance(n_deals, int) or not isinstance(n_signed, int):
+        _omit("digest corpus counts — not integers; the block does not say how many deals it rests on", "digest")
+        return None
+    line = f"From {_plural(n_deals, 'deal')} ({n_signed} signed)"
+    first, last = corpus.get("first_signed"), corpus.get("last_signed")
+    if first and last:
+        line += f", signed between {first} and {last}"
+    return line + "."
+
+
 def _digest_block(opf_doc: dict) -> str:
-    """The model-facing knowledge block, built from the OPF 0.3 `digest`.
+    """The model-facing knowledge block, built from the OPF 0.5 `digest`
+    (digest_version 4, the only one `scripts/opf_load.py` accepts).
 
     Replaces the retired ~1M-token wholesale `evidence` projection -- see the
     module docstring before considering a change here.
@@ -485,12 +670,13 @@ def _digest_block(opf_doc: dict) -> str:
         raise PromptCompositionError(
             "cannot compose a review prompt: this OPF document has no digest.clauses. "
             "The digest is the model-facing knowledge; without it the review would run "
-            "on model judgement alone while lineage still recorded a governing playbook. "
-            "An OPF 0.2 document has no digest section at all and cannot drive this path."
+            "on model judgement alone while lineage still recorded a governing playbook."
         )
-    clauses = _strip_x_keys(digest["clauses"])
-    body = "\n\n".join(_digest_clause_block(c) for c in clauses)
-    return f"{DIGEST_INTRO}\n\n{body}"
+    digest = _strip_x_keys(digest)
+    body = "\n\n".join(_digest_clause_block(c) for c in digest["clauses"] if isinstance(c, dict))
+    corpus = _corpus_line(digest)
+    head = f"{DIGEST_INTRO}\n{corpus}" if corpus else DIGEST_INTRO
+    return f"{head}\n\n{body}"
 
 
 def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:  # noqa: UP045

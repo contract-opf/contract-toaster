@@ -76,7 +76,7 @@ ROSTER_ENTITY = "Synthetic Holdings GmbH"
 DOCUMENT_SPELLING = "SYNTHETIC HOLDINGS G.m.b.H."
 UNRELATED_ENTITY = "Meridian Fabrication Works Ltd"
 
-OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 
 
 def _docx_naming(party: str | None) -> bytes:

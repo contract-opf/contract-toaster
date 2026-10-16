@@ -89,7 +89,7 @@ import opf_prompt  # noqa: E402
 #: that a v1 review has no mode at all.
 MODE_V1_PROJECTION = "v1_projection"
 
-#: An OPF 0.3 playbook: Posture + Binding + Digest (+ Guidance/Context).
+#: An OPF playbook (0.5 / digest 4): Posture + Binding + Digest (+ Guidance/Context).
 MODE_PLAYBOOK_DIGEST = opf_prompt.MODE_PLAYBOOK_DIGEST
 
 #: Policy rules alone, NO digest block. A legitimate review -- of a document

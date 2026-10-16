@@ -24,7 +24,7 @@ reuses the exact same tested validate/store engine
 ## Fixture note
 
 Same convention as tests/test_playbook_upload_478.py: the committed gold
-OPF 0.3 fixture (`tests/gold-fixtures-opf/acme-university.opf.json`,
+OPF 0.5 fixture (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`,
 agreement_type.id "educational-affiliation", aliases ["acme-university",
 "eiaa-fixture"]) stands in for a real playbook-engine artifact. That id is
 NOT a registered playbook_id anywhere in the real `playbooks/registry.json`
@@ -77,8 +77,8 @@ import opf_canonicalize  # noqa: E402
 import src.main as backend_main  # noqa: E402
 import src.playbook_versions as pv  # noqa: E402
 
-OPF03_JSON_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
-OPF03_HTML_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.html"
+OPF03_JSON_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+OPF03_HTML_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.html"
 V1_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 
 # The document's own agreement_type.id (the identity `POST /api/admin/
@@ -92,7 +92,7 @@ NON_ADMIN_SUB = "reviewer-1"
 CREATE_PATH = "/api/admin/playbooks"
 
 
-def _opf03_doc() -> dict:
+def _opf05_doc() -> dict:
     return json.loads(OPF03_JSON_PATH.read_text(encoding="utf-8"))
 
 
@@ -202,7 +202,7 @@ class PlaybookCreateTestBase(unittest.TestCase):
 
 class TestCreateNewOpfPlaybookHappyPath(PlaybookCreateTestBase):
     def test_derives_identity_from_the_artifact_and_creates_playbook_and_version(self):
-        doc_bytes = json.dumps(_opf03_doc()).encode("utf-8")
+        doc_bytes = json.dumps(_opf05_doc()).encode("utf-8")
         resp = self._create(doc_bytes, "playbook.opf.json", version="1.0.0")
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
@@ -213,7 +213,7 @@ class TestCreateNewOpfPlaybookHappyPath(PlaybookCreateTestBase):
         self.assertEqual(body["playbook_id"], DERIVED_PLAYBOOK_ID)
         self.assertEqual(body["version"], "1.0.0")
         self.assertEqual(body["status"], pv.STATUS_DRAFT)
-        self.assertEqual(body["artifact_kind"], "opf-0.3")
+        self.assertEqual(body["artifact_kind"], "opf-0.5")
         self.assertIsNotNone(body["storage_key"])
         self.assertTrue(body["storage_key"].startswith(f"playbooks/{DERIVED_PLAYBOOK_ID}/"))
 
@@ -231,13 +231,13 @@ class TestCreateNewOpfPlaybookHappyPath(PlaybookCreateTestBase):
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["playbook_id"], DERIVED_PLAYBOOK_ID)
-        self.assertEqual(resp.json()["artifact_kind"], "opf-0.3")
+        self.assertEqual(resp.json()["artifact_kind"], "opf-0.5")
 
 
 class TestCreateRequiresAdmin(PlaybookCreateTestBase):
     def test_non_admin_gets_403(self):
         self._authenticate_as(NON_ADMIN_SUB)
-        doc_bytes = json.dumps(_opf03_doc()).encode("utf-8")
+        doc_bytes = json.dumps(_opf05_doc()).encode("utf-8")
         resp = self._create(doc_bytes, "playbook.opf.json")
         self.assertEqual(resp.status_code, 403)
 
@@ -255,7 +255,7 @@ class TestCreateRejectsLegacyV1(PlaybookCreateTestBase):
 
 class TestCreateRejectsRegistryConflict(PlaybookCreateTestBase):
     def test_agreement_type_matching_a_registered_playbook_is_refused(self):
-        doc = _opf03_doc()
+        doc = _opf05_doc()
         # Retarget this document's identity at a REAL, registered
         # playbook_id (the actual playbooks/registry.json this route
         # checks against, not a synthetic override).
@@ -276,7 +276,7 @@ class TestCreateRejectsRegistryConflict(PlaybookCreateTestBase):
 
 class TestCreateRejectsDbConflict(PlaybookCreateTestBase):
     def test_second_create_for_the_same_derived_id_is_refused(self):
-        doc_bytes = json.dumps(_opf03_doc()).encode("utf-8")
+        doc_bytes = json.dumps(_opf05_doc()).encode("utf-8")
         first = self._create(doc_bytes, "playbook.opf.json", version="1.0.0")
         self.assertEqual(first.status_code, 200, first.text)
 
@@ -301,7 +301,7 @@ class TestCreateStubBasisWatermark(PlaybookCreateTestBase):
     versions-upload route."""
 
     def test_stub_basis_watermark_is_refused_without_accept_and_allowed_with_it(self):
-        doc = _opf03_doc()
+        doc = _opf05_doc()
         doc["compiler"]["stub_basis_present"] = True
         doc = _reseal(doc)
         doc_bytes = json.dumps(doc).encode("utf-8")

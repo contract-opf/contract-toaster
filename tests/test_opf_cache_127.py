@@ -50,7 +50,7 @@ import opf_canonicalize  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
 import src.playbook_upload as playbook_upload  # noqa: E402
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 PLAYBOOK_ID = "cache-127"
 BUCKET = "uploads-127"
 

@@ -558,10 +558,11 @@ REVIEW_GUIDANCE_BLOCK = render_review_guidance_block()
 # `verdict_summary`, `scripts/leakage_scan.py` fired
 # (`playbook_leakage` / `playbook-ngram` / `verdict_summary`), and the whole
 # review died at `run_review` with nothing for the user to download. On the
-# OPF 0.3 path `ConfidentialCorpus.from_opf_document` puts Floor invariant
+# OPF path `ConfidentialCorpus.from_opf_document` puts Floor invariant
 # `statement`/`rationale`, `posture.system_prompt`, and the digest's
-# `concessions`/`unacceptable`/`exemplar_forms` summaries into
-# `playbook_ngrams` -- all of it written as normative contract prose, i.e.
+# precedent texts (then digest 2's summaries; since issue #128 digest 4's
+# signed variants, refused asks and changed openings, plus the per-deal
+# precedent record) into `playbook_ngrams` -- all of it contract prose, i.e.
 # exactly the wording a model reaches for when it states back which position
 # it applied. Restating it word-for-word therefore trips the gate.
 #

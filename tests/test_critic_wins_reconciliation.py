@@ -938,7 +938,7 @@ def test_a_planted_audit_record_gram_never_reaches_the_analysis_artifact(
 # 11. Hard-rejection ids resolved from an OPF review's Floor invariants.
 # ---------------------------------------------------------------------------
 
-_OPF_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
+_OPF_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 
 
 def test_a_dropped_floor_invariant_issue_is_retained_in_an_opf_review(

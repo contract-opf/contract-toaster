@@ -1936,8 +1936,9 @@ async def post_admin_playbook_version_upload(
 
     Issue #478: the uploaded bytes are no longer dropped. The body is first
     checked against `src.upload_validation.MAX_UPLOAD_SIZE_BYTES` (413 if
-    over-cap, before anything parses it), then detected (OPF 0.2/0.3
-    `.opf.html` bundle, bare OPF `.json`, or legacy v1 `.json`), validated
+    over-cap, before anything parses it), then detected (OPF `.opf.html`
+    bundle, bare OPF `.json` -- OPF 0.5 only, issue #128 -- or legacy v1
+    `.json`), validated
     (`src.playbook_upload.validate_playbook_upload` -- schema,
     `identity.content_hash`, injection scan, agreement-type match, stub-basis
     watermark), and -- only once a `(playbook_id, version)` conflict has

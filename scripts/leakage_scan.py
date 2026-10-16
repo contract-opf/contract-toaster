@@ -674,15 +674,16 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
     the clause it was discussing. **You cannot review a contract without
     naming its clauses**, so that is a false positive, not a disclosure.
 
-    The gram got into the corpus honestly: `from_opf_document` derives
-    `playbook_ngrams` from each digest clause's `concessions` /
-    `unacceptable` / `exemplar_forms` `text_summary` entries, and
-    `$defs.digestObservationSummary.text_summary` in
-    `playbooks/opf/playbook.schema-0.3.json` carries no `minLength`. A
-    playbook whose author wrote a `text_summary` that summarises nothing --
-    just the clause name back again -- therefore contributes a blocked gram
-    byte-identical to that same document's PUBLIC taxonomy `label`. The
-    owner measured 18 such fields in the real bound playbook.
+    The gram got into the corpus honestly: `from_opf_document` derived
+    `playbook_ngrams` from each (then digest 2) clause's summary entries,
+    and the schema carried no `minLength` on them. A playbook whose author
+    wrote a summary that summarises nothing -- just the clause name back
+    again -- therefore contributed a blocked gram byte-identical to that
+    same document's PUBLIC taxonomy `label`. The owner measured 18 such
+    fields in the real bound playbook. Digest 4's texts are signed or
+    proposed wording, not summaries, but the schema still carries no
+    `minLength` on them (`$defs.digestVariant.text` in
+    `playbooks/opf/playbook.schema-0.5.json`), so the guard stays.
 
     The toaster is an empty shell consuming a playbook authored elsewhere
     (`playbook-engine`), so it cannot assume those fields are well-formed.
@@ -690,8 +691,8 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
 
     This returns the document's own public clause vocabulary: taxonomy entry
     `id`s and `label`s, plus the `title` and `taxonomy_id` of every clause in
-    `evidence.clauses` and in the model-facing `digest.clauses`, plus
-    `evidence.clause_library` `taxonomy_id`s. Those strings are how the model
+    `evidence.clauses` and in the model-facing `digest.clauses`. Those
+    strings are how the model
     is *asked* to refer to a clause -- `opf_prompt._digest_clause_block`
     renders `title` to the model as that clause's heading -- so they are
     published vocabulary by construction and cannot simultaneously be
@@ -721,7 +722,6 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
     evidence = opf_doc.get("evidence")
     if isinstance(evidence, dict):
         clause_groups.append(evidence.get("clauses"))
-        clause_groups.append(evidence.get("clause_library"))
     digest = opf_doc.get("digest")
     if isinstance(digest, dict):
         clause_groups.append(digest.get("clauses"))
@@ -733,6 +733,73 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
                 _add(clause.get("taxonomy_id"))
 
     return vocabulary
+
+
+def _texts_of(entries: Any, key: str = "text") -> list[str]:
+    """Non-empty string `key` values of the dict entries of a list (fail-soft:
+    anything malformed is skipped, the same guards the prompt renderer has)."""
+    out: list[str] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, dict):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                out.append(value)
+    return out
+
+
+def _opf_digest_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
+    """Every precedent text a digest 4 clause carries into the prompt (issue
+    #128): signed variants (and the collapsed equivalent entry's exemplars),
+    refused asks and openings not signed as proposed -- never our standard,
+    which is `_opf_standard_texts`'."""
+    texts: list[str] = []
+    digest = opf_doc.get("digest")
+    clauses = digest.get("clauses") if isinstance(digest, dict) else None
+    for clause in clauses if isinstance(clauses, list) else []:
+        if not isinstance(clause, dict):
+            continue
+        variants = clause.get("signed_variants")
+        texts.extend(_texts_of(variants))
+        for entry in variants if isinstance(variants, list) else []:
+            if isinstance(entry, dict):
+                texts.extend(_texts_of(entry.get("exemplars")))
+        texts.extend(_texts_of(clause.get("refused_asks")))
+        texts.extend(_texts_of(clause.get("changed_openings")))
+    return texts
+
+
+def _opf_evidence_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
+    """Every non-standard text of the OPF 0.5 per-deal precedent record
+    (`evidence.precedent[]`, issue #128): the signed text unless it is our
+    standard, the opening unless the deal opened with our standard, and every
+    refused ask."""
+    texts: list[str] = []
+    evidence = opf_doc.get("evidence")
+    records = evidence.get("precedent") if isinstance(evidence, dict) else None
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        signed_text = record.get("signed_text")
+        if record.get("standard") is not True and isinstance(signed_text, dict):
+            texts.extend(_texts_of([signed_text]))
+        opening_text = record.get("opening_text")
+        if record.get("opened_with") != "standard" and isinstance(opening_text, dict):
+            texts.extend(_texts_of([opening_text]))
+        texts.extend(_texts_of(record.get("refused_asks")))
+    return texts
+
+
+def _opf_standard_texts(opf_doc: dict[str, Any]) -> list[str]:
+    """Our standard, part by part, from every digest 4 clause: the position
+    openly asked for (allowlisted for replacement text)."""
+    texts: list[str] = []
+    digest = opf_doc.get("digest")
+    clauses = digest.get("clauses") if isinstance(digest, dict) else None
+    for clause in clauses if isinstance(clauses, list) else []:
+        our_standard = clause.get("our_standard") if isinstance(clause, dict) else None
+        if isinstance(our_standard, dict):
+            texts.extend(_texts_of(our_standard.get("parts")))
+    return texts
 
 
 def _without_public_vocabulary(
@@ -887,19 +954,59 @@ class ConfidentialCorpus:
         every Floor invariant's `statement` + `rationale`
         (`opf_prompt.resolve_floor_invariants`, so an
         `overrides.floor_additions` entry is covered too -- the same union
-        the Binding block itself renders), plus each digest clause's
-        internal precedent reasoning that is NOT the tenant's own openly-
-        asked-for position: `concessions`/`unacceptable`/`exemplar_forms`
-        text_summary entries and `preferred_variations` if/to text -- the
-        same fields `scripts/opf_prompt.py::_digest_clause_block` sends to
-        the model. `preferred_variations` covers BOTH `oneOf` schema
-        branches: the object shape (`if`/`to`) and the legacy bare-string
-        shape, the latter rendered verbatim by `opf_prompt._fmt_preferred`.
+        the Binding block itself renders), plus every precedent text that
+        is NOT the tenant's own openly-asked-for position (issue #128):
+
+          - from the digest 4 clauses `scripts/opf_prompt.py
+            ::_digest_clause_block` sends to the model: each signed
+            variant's `text` (and each collapsed equivalent-wording entry's
+            `exemplars[].text`), each refused ask's `text`, and each changed
+            opening's `text`;
+          - from `evidence.precedent[]`, the per-deal record those entries
+            summarise: `signed_text.text` (unless it IS our standard,
+            `standard: true`), `opening_text.text` (unless the deal opened
+            with our standard, `opened_with: "standard"` -- that text is our
+            standard), and every `refused_asks[].text`.
+
+        Reading the precedent record as well as the digest is what keeps
+        the corpus whole on a capped digest: the digest lists at most a few
+        entries per clause (totals uncapped), while the record holds every
+        deal's wording. It is the same fail-closed direction as #104: a
+        corpus that is silently smaller than the playbook is the failure to
+        avoid. The judged `reason` beside a label is NOT added: it describes
+        a difference from our standard in general words a faithful review
+        of the live contract may legitimately use.
 
         `standard_clause_ngrams` (allowlisted for replacement text): each
-        digest clause's `our_standard.text` -- the contract position openly
-        asked for, exactly like a v1 topic's `our_standard` (see
+        digest clause's `our_standard.parts[].text` -- the contract position
+        openly asked for, exactly like a v1 topic's `our_standard` (see
         `from_playbook`'s own docstring for why that one is allowlisted).
+
+        The OPF 0.5 `manifest` and `dossiers` (playbook-engine#228) are
+        covered BY DERIVATION, not read (issue #128). Every text field they
+        carry is a selection of something this corpus already reads: a hard
+        rule's `statement` and a dossier floor rule's `statement` /
+        `rationale` are the Floor invariant's (blocked above);
+        `fallback_language` and a dossier's `our_standard.parts[].text` are
+        our standard (allowlisted); a dossier excerpt's `opening` / `signed`
+        is a whole precedent text from `evidence.precedent[]` (blocked), or
+        our standard itself (allowlisted part by part). Two reasons this is
+        enough, given that `opf_injection_scan.py` notes the toaster cannot
+        guarantee those sections are evidence-derived: neither section is
+        composed into any prompt today (`opf_prompt` never reads them), so a
+        text found ONLY there cannot reach the model to be leaked by it; and
+        `tests/test_leakage_opf_precedent_128.py` pins the derivation on the
+        gold fixture, the engine's NDA example and every conformance vector
+        (008 exercises every field). When dossiers are wired into a prompt
+        (#40), this builder must read them directly. Deliberate exclusions,
+        never added on either path: `vs_standard` (its `reason`,
+        `part_reasons` and addition `summary` -- the same reasoning as the
+        `reason` above); a hard rule's `condition` (match phrases and
+        patterns -- contract vocabulary a faithful review must be free to
+        use) and `permissible_proof` (the Floor's `x_permissible_proof`
+        extension; `opf_prompt._binding_block` renders only an invariant's
+        id, statement and rationale); and identifiers and titles (rule/clause/precedent ids
+        and public clause vocabulary, see below).
 
         Also covers `posture.system_prompt` (issue #479 fix round 2):
         `scripts/opf_prompt.py::_posture_block` renders it VERBATIM as the
@@ -924,7 +1031,7 @@ class ConfidentialCorpus:
         (the control blocks plus `knowledge.system_blocks()`).
 
         Public clause vocabulary is excluded from BOTH derived lists (issue
-        #616). A `text_summary` or an `our_standard.text` whose whole content
+        #616). A precedent text or an our-standard part whose whole content
         is the clause's own name is the playbook's published label, not its
         confidential reasoning, and admitting it blocked every honest review
         against the real playbook -- see `_opf_public_vocabulary` for the
@@ -950,31 +1057,9 @@ class ConfidentialCorpus:
             if rationale:
                 playbook_ngrams.append(rationale)
 
-        digest = opf_doc.get("digest") or {}
-        for clause in digest.get("clauses") or []:
-            if not isinstance(clause, dict):
-                continue
-            our_standard = clause.get("our_standard")
-            if isinstance(our_standard, dict) and our_standard.get("text"):
-                standard_clause_ngrams.append(our_standard["text"])
-            for list_field in ("concessions", "unacceptable", "exemplar_forms"):
-                for entry in clause.get(list_field) or []:
-                    if isinstance(entry, dict) and entry.get("text_summary"):
-                        playbook_ngrams.append(entry["text_summary"])
-            for entry in clause.get("preferred_variations") or []:
-                if not isinstance(entry, dict):
-                    # The schema's other `oneOf` branch: a legacy
-                    # bare-string entry. `opf_prompt._fmt_preferred` renders
-                    # it into the prompt verbatim -- skipping it here would
-                    # leave that exact text uncovered by the corpus it is
-                    # otherwise scanned against.
-                    if isinstance(entry, str) and entry:
-                        playbook_ngrams.append(entry)
-                    continue
-                for key in ("if", "to"):
-                    value = entry.get(key)
-                    if value:
-                        playbook_ngrams.append(value)
+        playbook_ngrams.extend(_opf_digest_precedent_texts(opf_doc))
+        playbook_ngrams.extend(_opf_evidence_precedent_texts(opf_doc))
+        standard_clause_ngrams.extend(_opf_standard_texts(opf_doc))
 
         # Issue #616: drop the grams that are only this document's own public
         # clause vocabulary before they become blocked content. The UNFILTERED

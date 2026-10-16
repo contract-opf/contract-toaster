@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-OPF loader/validator (v0.2 and v0.3) -- issue #283, extended for the OPF 0.3
-launch.
+OPF loader/validator -- issue #283, extended for the OPF 0.3 launch and cut
+over to OPF 0.5 ONLY by issue #128.
 
 Loads an Open Playbook Format (OPF) document, validates it against the VENDORED
-schema named by its own `opf_version` (playbooks/opf/playbook.schema-0.2.json or
-playbook.schema-0.3.json), verifies its `identity.content_hash`, runs the
+schema (playbooks/opf/playbook.schema-0.5.json), verifies its
+`identity.content_hash`, runs the
 fail-closed prompt-injection scan, and matches its `agreement_type` to a
 registered playbook_id (scripts/playbook_registry.py) via `agreement_type.id`/
 `aliases`.
 
-## Two upload forms (OPF 0.3)
+## Two upload forms
 
 `load_opf_document` accepts BOTH shapes an engine-derived playbook travels in:
 
@@ -33,46 +33,39 @@ through. `load_opf` (the internal/bare loader used by bind) keeps the softer
 verify-if-present contract for backward compatibility; `bind_bundle` requires
 `identity` on its own.
 
-## Version selection (two independent versions)
+## One format: OPF 0.5 / digest_version 4 (issue #128)
 
-`opf_version` selects the schema. An absent/unknown version is rejected
-(OpfVersionError) rather than defaulted -- a document that declares a version we
-do not vendor a schema for has not been validated by anything, and guessing
-would be a fail-open.
+The owner's 2026-10-06 direction: this repo supports exactly ONE format,
+`opf_version` "0.5" with `digest_version` "4" -- no backward compatibility and
+no dispatch by version (there are zero installed copies to stay compatible
+with). The 0.2/0.3 schemas, the digest-2 reader and every 0.3 path are gone.
 
-`digest.digest_version` is a SEPARATE version governing the digest section's
-shape and SELECTION SEMANTICS, and is resolved BEFORE schema validation -- same
-dispatch-then-validate order as `opf_version`, and for the same reason: the
-version tells you which shape to expect, so validating against the wrong one
-yields a confusing error about a field rather than a legible one about a
-version. (OPF 0.3 is frozen at digest_version 2; see playbooks/opf/README.md.)
+Both versions are still CHECKED, and checked BEFORE schema validation, because
+the check names the cause instead of a symptom:
 
-Schema validation is not a substitute for this check, on two counts:
+  - `opf_version`: anything but "0.5" (absent, non-string, "0.3", "0.4") is
+    refused with OpfVersionError rather than validated against a schema it was
+    never written for -- which would fail at some field deep inside the
+    document and describe a symptom, not the cause. Never defaulted: a
+    document that declares a version we do not vendor a schema for has not
+    been validated by anything, and guessing would be a fail-open.
+  - `digest.digest_version`: a SEPARATE version governing the digest section's
+    shape and SELECTION SEMANTICS. Anything but "4" is refused with
+    OpfDigestVersionError. The 0.5 schema pins the const too, but schema
+    validation is not a substitute: a version can change what the data MEANS
+    without changing its shape (what the lists include, how entries are
+    ranked or capped), and no schema check can see that. Reading a digest
+    whose selection semantics we do not understand would silently mis-weight
+    precedent, which is worse than refusing to run.
 
-  - LEGIBILITY: a whole digest_version 1 document does fail the frozen v2 schema
-    -- but at `/digest/clauses/N/preferred_variations/0: failed the 'oneOf'
-    check`, which describes a symptom. "unsupported digest version" names the
-    cause.
-  - SEMANTICS: a version can change what the data MEANS without changing its
-    shape, and no schema check can see that. digest_version 1 -> 2 is exactly
-    this class in part: v1's `concessions`/`unacceptable` were 1:1 projections,
-    v2's are deduped, precedent-weighted and capped -- yet both validate against
-    the v2 schema, since `n`/`band` are optional there. A future version whose
-    lists stay shape-compatible but change how entries are ranked or capped
-    would be invisible to the schema and visible only here.
+## posture.rubric, curation
 
-Unsupported digest_version is rejected, never coerced -- reading a digest whose
-selection semantics we do not understand would silently mis-weight precedent,
-which is worse than refusing to run.
-
-## posture.rubric
-
-Not consumed here, deliberately. As of engine #178 (see issue #283's
-2026-07-14 engine-drift correction), the vendored schema no longer even
-accepts `posture.rubric` -- `posture` has `additionalProperties: false` and
-no `rubric` property, so a document carrying it now FAILS schema validation
-like any other unrecognized property. This module needs no special-case for
-it either way: `load_opf` already raises on any schema violation.
+Not consumed here, deliberately. The vendored schema does not accept
+`posture.rubric` (engine #178) or the retired top-level `curation` section
+(engine #233) -- both objects are `additionalProperties: false` -- so a
+document carrying either FAILS schema validation like any other unrecognized
+property. This module needs no special-case for them: `load_opf` already
+raises on any schema violation.
 
 ## No document content in errors
 
@@ -114,25 +107,18 @@ except ImportError as _exc:  # pragma: no cover - dev dependency, see requiremen
 
 OPF_SCHEMA_DIR = REPO_ROOT / "playbooks" / "opf"
 
-# opf_version -> vendored schema path. Adding a version means vendoring its
-# schema (see playbooks/opf/README.md) and pinning it in test_opf_schema_sync.
-OPF_SCHEMA_PATHS = {
-    "0.2": OPF_SCHEMA_DIR / "playbook.schema-0.2.json",
-    "0.3": OPF_SCHEMA_DIR / "playbook.schema-0.3.json",
-}
-SUPPORTED_OPF_VERSIONS = tuple(sorted(OPF_SCHEMA_PATHS))
+# The ONE format this repo reads (issue #128; see "One format" above). The
+# schema is vendored byte-for-byte from playbook-engine and pinned in
+# tests/test_opf_schema_sync.py (playbooks/opf/README.md has the procedure).
+OPF_VERSION = "0.5"
+OPF_SCHEMA_PATH = OPF_SCHEMA_DIR / "playbook.schema-0.5.json"
 
-# digest_version values this repo can read. OPF 0.3 is FROZEN at digest_version
-# 2 (playbook-engine spec/CHANGELOG.md, engine 204057e), and v2 is the shape the
-# digest prompt is built for: all four lists deduped/ranked/capped and carrying
-# precedent-weighted `n` + frequency `band`, with preferred_variations projected
-# to {if, to, observation_ref, n, band} (`rationale` stays in the full OPF).
-# v1 is deliberately NOT accepted: its lists are 1:1 projections without n/band,
-# so reading it as v2 would mis-weight precedent instead of failing.
-SUPPORTED_DIGEST_VERSIONS = ("2",)
-
-# Back-compat alias: the 0.2 path this module used to hard-code.
-OPF_SCHEMA_PATH = OPF_SCHEMA_PATHS["0.2"]
+# The ONE digest_version this repo reads. Digest 4 is the verdict-free
+# precedent projection `scripts/opf_prompt.py` renders: per clause our
+# standard (as parts), the opened/kept counts, the positions by `vs_standard`
+# label, the signed variants with their provenance counts, the refused asks
+# and the openings not signed as proposed.
+DIGEST_VERSION = "4"
 
 _SCHEMA_CACHE: dict[str, dict] = {}
 
@@ -160,9 +146,9 @@ class OpfInjectionError(OpfValidationError):
 
 
 class OpfVersionError(OpfValidationError):
-    """Raised when `opf_version` is missing, non-string, or names a version
-    this repo does not vendor a schema for. Never defaulted: an unvalidated
-    document must not load."""
+    """Raised when `opf_version` is missing, non-string, or anything but
+    OPF_VERSION ("0.5"). Never defaulted: an unvalidated document must not
+    load."""
 
 
 class OpfHashMismatchError(OpfValidationError):
@@ -177,14 +163,14 @@ class OpfHashMismatchError(OpfValidationError):
 
 
 class OpfDigestVersionError(OpfValidationError):
-    """Raised when a document's `digest.digest_version` is one this repo cannot
-    read (see SUPPORTED_DIGEST_VERSIONS).
+    """Raised when a document's `digest.digest_version` is anything but
+    DIGEST_VERSION ("4").
 
-    Separate from OpfVersionError because the two versions are independent: a
-    perfectly valid OPF 0.3 document can carry a digest whose selection
-    semantics we do not understand. Rejecting is the fail-closed choice --
-    reading a v1 digest as if it were v2 would silently mis-weight precedent
-    (v1's lists carry no `n`), which is worse than refusing to run.
+    Separate from OpfVersionError because the two versions are independent:
+    the digest's shape and selection semantics are versioned on their own.
+    Rejecting is the fail-closed choice -- reading a digest whose selection
+    semantics we do not understand would silently mis-weight precedent, which
+    is worse than refusing to run.
     """
 
 
@@ -195,29 +181,30 @@ class OpfExtractError(OpfValidationError):
 
 class OpfDuplicateIdError(OpfValidationError):
     """Raised when an OPF document repeats an id within one of the four
-    sibling sets OPF spec section 3.13 makes normative:
-    `evidence.clauses[].id`, `evidence.clause_library[].concept_id`,
+    sibling sets the engine's validator makes normative for OPF 0.5:
+    `evidence.clauses[].id`, `evidence.precedent[].id`,
     `floor.invariants[].id`, and `corpus.documents[].document_id`.
 
-    Parity with the playbook-engine's fail-closed validator rule
-    (playbook_engine/validator.py::_check_duplicate_ids, engine commit
-    390a259, 2026-07-29): sibling-id uniqueness shipped as a blocking rule
-    with no schema change and no version bump, so JSON Schema validation
-    alone cannot catch it -- a document the engine now refuses to produce
+    Parity with the playbook-engine's fail-closed validator rules
+    (playbook_engine/validator.py::_check_duplicate_ids for clauses,
+    invariants and documents; `_check_precedent` for precedent ids, which
+    the engine requires unique since OPF 0.4): sibling-id uniqueness is a
+    blocking rule the JSON Schema cannot express, so schema validation
+    alone cannot catch it -- a document the engine refuses to produce
     would otherwise load here. Undetected, the id-keyed lookups the runtime
-    relies on (digest `clauses[].id` <-> evidence ids, floor invariant ids
-    for floor_refs and the floor judge) would silently resolve to the first
+    relies on (digest `clauses[].id` <-> evidence ids, digest
+    `precedent_ids` <-> evidence precedent ids, floor invariant ids for
+    floor_refs and the floor judge) would silently resolve to the first
     match instead of failing loudly.
 
     The message names the JSON Pointer to the offending sibling array,
     including the index of the duplicate occurrence -- value-free and
-    sufficient on its own to locate the problem. The vendored schemas do
-    NOT constrain these four id fields (`clausePosition.id`,
-    `clauseConcept.concept_id`, `floor.invariants[].id`,
-    `corpus.documents[].document_id` are each bare `{"type": "string"}`,
-    with no `pattern` or `maxLength` -- unlike `agreement_type.id` and
-    `posture.*.entries[].id`, which the schema does pin to
-    `^[a-z0-9_-]+$`). That means an id here is arbitrary, unbounded,
+    sufficient on its own to locate the problem. The vendored schema does
+    NOT constrain these four id fields (`precedentClause.id`,
+    `precedent.id`, `floor.invariants[].id`, `corpus.documents[].document_id`
+    are each bare `{"type": "string"}`, with no `pattern` or `maxLength` --
+    unlike `agreement_type.id`, which the schema does pin to
+    `^[a-z0-9-]+$`). That means an id here is arbitrary, unbounded,
     uploader-controlled text, and this check runs BEFORE the injection
     scan (see `_validate_doc`), so it must not assume the value is safe to
     echo. The id is only ever included in the message when it independently
@@ -228,11 +215,11 @@ class OpfDuplicateIdError(OpfValidationError):
     """
 
 
-def _load_schema(version: str) -> dict:
-    if version not in _SCHEMA_CACHE:
-        with open(OPF_SCHEMA_PATHS[version], encoding="utf-8") as f:
-            _SCHEMA_CACHE[version] = json.load(f)
-    return _SCHEMA_CACHE[version]
+def _load_schema() -> dict:
+    if OPF_VERSION not in _SCHEMA_CACHE:
+        with open(OPF_SCHEMA_PATH, encoding="utf-8") as f:
+            _SCHEMA_CACHE[OPF_VERSION] = json.load(f)
+    return _SCHEMA_CACHE[OPF_VERSION]
 
 
 def _json_pointer(path_segments: Any) -> str:
@@ -272,13 +259,14 @@ def _describe_injection(findings: list[dict]) -> str:
 def resolve_opf_version(doc: dict) -> str:
     """Return the document's `opf_version`, or raise OpfVersionError.
 
-    Never defaults -- see module docstring ("Version selection").
+    Never defaults -- see module docstring ("One format").
     """
     version = doc.get("opf_version")
-    if not isinstance(version, str) or version not in OPF_SCHEMA_PATHS:
+    if version != OPF_VERSION:
         raise OpfVersionError(
             "OPF validation failed at /opf_version: missing or unsupported version; "
-            f"supported versions are {list(SUPPORTED_OPF_VERSIONS)}"
+            f"this repo reads only OPF {OPF_VERSION} (no other version is accepted). "
+            f"Recompile the playbook with a playbook-engine that emits OPF {OPF_VERSION}."
         )
     return version
 
@@ -286,42 +274,44 @@ def resolve_opf_version(doc: dict) -> str:
 def resolve_digest_version(doc: dict) -> Optional[str]:  # noqa: UP045
     """Return the document's `digest.digest_version`, or None if it has no digest.
 
-    Raises OpfDigestVersionError if a digest is present but declares a version
-    this repo cannot read. None is a legitimate answer (0.2 documents have no
-    digest section at all) -- the caller decides whether a digest is required.
+    Raises OpfDigestVersionError if a digest is present but declares anything
+    but DIGEST_VERSION. None is a legitimate answer (the 0.5 schema marks
+    `digest` optional) -- the caller decides whether a digest is required;
+    `scripts/opf_prompt.py` refuses to compose a review prompt without one.
     """
     digest = doc.get("digest")
     if not isinstance(digest, dict):
         return None
     version = digest.get("digest_version")
-    if not isinstance(version, str) or version not in SUPPORTED_DIGEST_VERSIONS:
+    if version != DIGEST_VERSION:
         raise OpfDigestVersionError(
             "OPF validation failed at /digest/digest_version: unsupported digest version; "
-            f"this repo reads {list(SUPPORTED_DIGEST_VERSIONS)}. A digest whose selection "
+            f"this repo reads only digest_version {DIGEST_VERSION}. A digest whose selection "
             "semantics we do not understand is refused rather than read as if it were "
-            "current -- its lists may not carry the precedent counts the review weights."
+            "current -- its lists may not carry the precedent counts the review weighs."
         )
     return version
 
 
 # (JSON Pointer to the sibling array, dotted path to reach it from the
-# document root, id field name) for each of the four sets OPF spec section
-# 3.13 makes normative -- parity with the engine's _check_duplicate_ids.
+# document root, id field name) for each of the four sets the engine's
+# validator makes unique for OPF 0.5 -- parity with its _check_duplicate_ids
+# (clauses, invariants, documents) and _check_precedent (precedent ids).
 _SIBLING_ID_SETS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("/evidence/clauses", ("evidence", "clauses"), "id"),
-    ("/evidence/clause_library", ("evidence", "clause_library"), "concept_id"),
+    ("/evidence/precedent", ("evidence", "precedent"), "id"),
     ("/floor/invariants", ("floor", "invariants"), "id"),
     ("/corpus/documents", ("corpus", "documents"), "document_id"),
 )
 
 # Only ids that already look like machine identifiers -- and are short --
-# are safe to echo in an error message. The vendored schemas do NOT pin
-# clausePosition.id / clauseConcept.concept_id / floor.invariants[].id /
+# are safe to echo in an error message. The vendored schema does NOT pin
+# precedentClause.id / precedent.id / floor.invariants[].id /
 # corpus.documents[].document_id to this shape (see OpfDuplicateIdError
 # docstring), so this is a defensive filter this module applies itself,
-# not a guarantee inherited from the schema. `^[a-z0-9_-]+$` mirrors the
-# pattern the schema DOES use elsewhere (agreement_type.id, posture ids);
-# the length cap is this module's own sane bound, not a schema value.
+# not a guarantee inherited from the schema. `^[a-z0-9_-]+$` is close to
+# the pattern the schema DOES use for agreement_type.id; the length cap is
+# this module's own sane bound, not a schema value.
 _SAFE_ID_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 _SAFE_ID_MAX_LEN = 100
 
@@ -337,8 +327,8 @@ def _safe_id_repr(item_id: str) -> str:
 
 
 def _check_duplicate_sibling_ids(doc: dict) -> None:
-    """Raise OpfDuplicateIdError if any of the four OPF section 3.13 sibling
-    sets repeats an id. Must run AFTER schema validation, which is what
+    """Raise OpfDuplicateIdError if any of the four sibling-id sets repeats
+    an id. Must run AFTER schema validation, which is what
     guarantees each set here is shaped as an array of objects carrying the
     named id field as a string -- this function does not re-derive that,
     it only walks what schema validation already proved well-formed
@@ -372,7 +362,7 @@ def _check_duplicate_sibling_ids(doc: dict) -> None:
                 raise OpfDuplicateIdError(
                     f"OPF validation failed at {pointer}/{index}: duplicate {id_field}"
                     f"{_safe_id_repr(item_id)} "
-                    "(OPF spec section 3.13 requires ids to be unique among siblings)"
+                    "(OPF requires ids to be unique among siblings)"
                 )
             seen.add(item_id)
 
@@ -381,13 +371,13 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
     """Schema-validate, hash-verify, and injection-scan an in-memory OPF doc.
 
     Order is deliberate: versions first (both of them), then structure (schema),
-    then sibling-id uniqueness (OPF spec section 3.13 -- schema-shaped but not
-    schema-checkable, see OpfDuplicateIdError), then artifact integrity
-    (content_hash), then content safety (injection scan). Dispatching on a
-    version before validating against a shape is what turns "failed the
-    'oneOf' check at /digest/clauses/3/preferred_variations/0" into
-    "unsupported digest version" -- and it is the only check that can see a
-    semantic version change that leaves the shape intact (module docstring).
+    then sibling-id uniqueness (schema-shaped but not schema-checkable, see
+    OpfDuplicateIdError), then artifact integrity (content_hash), then
+    content safety (injection scan). Checking a version before validating
+    against a shape is what turns "failed the 'required' check at
+    /evidence" on an OPF 0.3 upload into "unsupported version" -- and it is
+    the only check that can see a semantic version change that leaves the
+    shape intact (module docstring).
     The duplicate-id check runs right after schema validation because it
     depends on the shape guarantees schema validation just proved (each
     sibling set is an array of objects carrying its id field as a string)
@@ -398,11 +388,11 @@ def _validate_doc(doc: dict, *, require_identity: bool) -> dict:
     a faithfully-compiled playbook can still carry injected text mined out
     of the corpus.
     """
-    version = resolve_opf_version(doc)
+    resolve_opf_version(doc)
     resolve_digest_version(doc)  # independent version; see module docstring
 
     try:
-        jsonschema.validate(instance=doc, schema=_load_schema(version))
+        jsonschema.validate(instance=doc, schema=_load_schema())
     except jsonschema.ValidationError as exc:
         raise OpfValidationError(_describe(exc)) from None
 
@@ -436,10 +426,9 @@ def is_html_bundle(path: Path) -> bool:
 
 
 def load_opf(path: Path) -> dict:
-    """Load and validate a bare OPF JSON document (v0.2 or v0.3).
+    """Load and validate a bare OPF 0.5 JSON document.
 
-    Validates against the schema named by the document's own `opf_version`,
-    verifies `identity.content_hash` IF the document carries one, and runs the
+    Validates against the vendored 0.5 schema, verifies `identity.content_hash` IF the document carries one, and runs the
     fail-closed injection tripwire.
 
     For untrusted uploads use `load_opf_document`, which additionally REQUIRES

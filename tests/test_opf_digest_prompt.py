@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""Gate for the digest prompt and terminology
-(work items 3 + 4 of the OPF 0.3 launch).
+"""Gate for the digest prompt: digest_version 4 rendered as precedent (issue
+#129; the digest-2 renderer, its stance sentence, bands, risk annotations and
+the `opf_terminology` renames were deleted with it).
 
- 1. TERMINOLOGY maps to the digest's REAL field names. A header whose
-    digest_field is wrong renders nothing and silently drops that whole section
-    from every prompt -- which is exactly what happened while writing this
-    (UNACCEPTABLE pointed at `rejected`, the full-OPF name, instead of the
-    digest's `unacceptable`), costing the model all pushback precedent with no
-    error anywhere. So every Term's digest_field must exist on a real digest
-    clause, and every list the digest actually carries must have a header.
- 2. HEADERS ARE VERBATIM from the engine's renderer -- the words a reviewer
-    reads in the playbook are the words the model reads in its prompt.
- 3. THE WHOLESALE DUMP IS RETIRED: no `full_text` reaches the prompt, and the
-    composed prompt fits the review budget with room for policy + floor.
- 4. n-COUNTS AND CITATIONS survive into the block -- they are what the model
-    weights precedent by.
- 5. EMPTY LISTS render nothing, not an empty header: an empty section reads as
-    "we looked and found none", a claim the digest does not make.
- 6. NO DIGEST => REFUSE. The digest is the knowledge; composing without it
-    would review a contract on model judgement alone while lineage still
-    recorded a governing playbook.
+ 1. THE NDA EXAMPLE (issue #129's own test): the engine's public OPF 0.5
+    example (tests/fixtures/opf/engine-nda-example.opf.json) renders its
+    governing-law block with "Opened with our standard in 4 signed deals;
+    signed it unchanged in 2.", the New York variant with "reached from our
+    standard in 2" and the California variant with "signed as proposed in 2".
+ 2. PLAIN FACTS ONLY: none of digest 2's judged vocabulary (stance, n/band,
+    risk, the four renamed headers) reaches the block, and every digest clause
+    is rendered under its clause_id.
+ 3. THE WHOLESALE DUMP IS RETIRED: no precedent id and no per-deal text the
+    digest does not carry reaches the prompt, and it fits the review budget.
+ 4. LABELS ARE AN INDEX: each judged entry carries its label, its reason and
+    its citation; an unjudged one carries no label; the collapsed
+    equivalent-wording entry renders once; the positions line counts deals;
+    an owner-set label says so; a standard of several parts gets its part map.
+ 5. EMPTY LISTS render nothing, not an empty header; the openings-not-signed
+    list renders with its to-standard and struck counts.
+ 6. A CAPPED LIST SAYS SO: when the digest lists fewer entries than its
+    uncapped total, the block states how many more are on record.
+ 7. NO DIGEST => REFUSE.
+ 8. THE INTRO says precedent, not instruction; refused asks and unsigned
+    openings are never replacement language; a label is an index to check.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -37,127 +41,162 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import opf_prompt  # noqa: E402
-import opf_terminology  # noqa: E402
 
-FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university.opf.json"
-FIXTURE_02 = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
-
-# The four canonical headers, verbatim from playbook-engine
-# document_renderer.py on main. If the engine rewords one, this fails and the
-# vocabulary is re-synced deliberately -- never drifted into.
-CANONICAL_HEADERS = {
-    "preferred_variations": "Preferred variations",
-    "concessions": "Acceptable variations — concessions",
-    "unacceptable": "Unacceptable variations — rejected/reversed asks",
-    "exemplar_forms": "All signed forms — evidence library",
-}
+FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+NO_DIGEST_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
+NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
+VECTOR_009 = (
+    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "009-standard-parts-and-owner-label.json"
+)
 
 
-def _doc() -> dict:
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+def _doc(path: Path = FIXTURE) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _vector_doc(path: Path) -> dict:
+    """A conformance vector as the engine emits it: input + expected digest."""
+    vector = json.loads(path.read_text(encoding="utf-8"))
+    doc = copy.deepcopy(vector["input"])
+    doc["digest"] = vector["expected"]["digest"]
+    return doc
 
 
 def _digest_block(doc: dict) -> str:
-    """The Digest block, found by its intro rather than by index.
-
-    Was `compose_opf_system_blocks(doc)[1]`. As of PR F1 a block is ABSENT when
-    it has nothing to say (an empty Posture composes no block at all, rather
-    than an empty string), so position is not identity and an index silently
-    reads whatever block moved into the slot.
-    """
+    """The Digest block, found by its intro rather than by index (a block is
+    ABSENT when it has nothing to say, so position is not identity)."""
     blocks = [b for b in opf_prompt.compose_opf_system_blocks(doc) if opf_prompt.DIGEST_INTRO in b]
     assert len(blocks) == 1, f"expected exactly one Digest block, got {len(blocks)}"
     return blocks[0]
 
 
-def check_1_terminology_matches_digest_fields() -> list[str]:
-    failures: list[str] = []
-    clause = _doc()["digest"]["clauses"][0]
+def _clause_section(block: str, clause_id: str) -> str:
+    """The rendered text of one clause, up to the next clause heading."""
+    start = block.index(f"[clause_id: {clause_id}]")
+    end = block.find("\n## ", start)
+    return block[start:] if end == -1 else block[start:end]
 
-    for term in opf_terminology.TERMS:
-        if term.digest_field not in clause:
-            failures.append(
-                f"  Term {term.header!r} points at digest_field {term.digest_field!r}, which does "
-                f"not exist on a digest clause -- its section renders nothing, silently."
-            )
-    # And the reverse: every list the digest carries must have a header, or the
-    # prompt drops knowledge the engine bothered to project.
-    known = {t.digest_field for t in opf_terminology.TERMS}
-    for field, value in clause.items():
-        if isinstance(value, list) and field not in known:
-            failures.append(f"  digest clause carries list {field!r} with no canonical header")
+
+def _line_containing(section: str, needle: str) -> str:
+    return next((line for line in section.splitlines() if needle in line), "")
+
+
+def check_1_nda_example() -> list[str]:
+    failures: list[str] = []
+    governing_law = _clause_section(_digest_block(_doc(NDA_EXAMPLE)), "clause.governing_law")
+    if "Opened with our standard in 4 signed deals; signed it unchanged in 2." not in governing_law:
+        failures.append("  governing-law block lacks the opened-with/kept line (4 / 2)")
+    new_york = _line_containing(governing_law, "State of New York")
+    if "reached from our standard in 2" not in new_york:
+        failures.append(f"  New York variant lacks 'reached from our standard in 2': {new_york!r}")
+    california = _line_containing(governing_law, "State of California")
+    if "signed as proposed in 2" not in california:
+        failures.append(f"  California variant lacks 'signed as proposed in 2': {california!r}")
+    if "reached from our standard" in california:
+        failures.append("  California variant claims a concession the digest does not record")
+    if "[beta-industries@4 §21]" not in new_york:
+        failures.append("  New York variant lost its citation")
     return failures
 
 
-def check_2_headers_verbatim() -> list[str]:
+def check_2_plain_facts_only() -> list[str]:
     failures: list[str] = []
-    for field, expected in CANONICAL_HEADERS.items():
-        actual = opf_terminology.header_for_digest_field(field)
-        if actual != expected:
-            failures.append(f"  {field}: header is {actual!r}, engine's canonical is {expected!r}")
-    block = _digest_block(_doc())
-    for expected in CANONICAL_HEADERS.values():
-        if expected not in block:
-            failures.append(f"  composed digest block missing header {expected!r}")
-    # The raw compiler field names must NOT be the headers the model reads:
-    # `fallbacks`/`rejected` read as judgements they are not.
-    for misleading in ("fallbacks", "acceptable_if"):
-        if f"\n{misleading}" in block:
-            failures.append(f"  raw OPF field name {misleading!r} used as a header in the prompt")
+    for path in (FIXTURE, NDA_EXAMPLE):
+        doc = _doc(path)
+        block = _digest_block(doc)
+        for retired in (
+            "Historical stance", "(n=", "often", "sometimes", "{risk:",
+            "Preferred variations", "concessions", "Unacceptable variations", "evidence library",
+        ):
+            if retired in block:
+                failures.append(f"  {path.name}: digest-2 vocabulary {retired!r} reached the block")
+        for clause in doc["digest"]["clauses"]:
+            if f"[clause_id: {clause['id']}]" not in block:
+                failures.append(f"  {path.name}: clause {clause['id']!r} not rendered")
     return failures
 
 
 def check_3_wholesale_retired() -> list[str]:
     failures: list[str] = []
-    doc = _doc()
-    doc["evidence"]["clauses"][0]["observed_positions"][0]["full_text"] = "SENTINEL_FULL_TEXT"
-    joined = "\n".join(opf_prompt.compose_opf_system_blocks(doc))
-    if "SENTINEL_FULL_TEXT" in joined:
-        failures.append("  full_text reached the prompt -- that is the ~1M-token design")
-    tokens = len(joined) // 4
-    if tokens >= 50_000:
-        failures.append(f"  composed prompt is {tokens} tokens, over the 50K review budget")
+    for path in (FIXTURE, NDA_EXAMPLE):
+        doc = _doc(path)
+        # A per-deal text the digest does not carry: plant it on a record.
+        doc["evidence"]["precedent"][0]["signed_text"]["text"] = "SENTINEL_PRECEDENT_TEXT"
+        joined = "\n".join(opf_prompt.compose_opf_system_blocks(doc))
+        if "SENTINEL_PRECEDENT_TEXT" in joined:
+            failures.append(f"  {path.name}: a precedent record's text reached the prompt")
+        leaked = [r["id"] for r in doc["evidence"]["precedent"] if r["id"] in joined]
+        if leaked:
+            failures.append(f"  {path.name}: {len(leaked)} precedent id(s) reached the prompt")
+        tokens = len(joined) // 4
+        if tokens >= 50_000:
+            failures.append(f"  {path.name}: composed prompt is {tokens} tokens, over the 50K review budget")
     return failures
 
 
-def check_4_n_counts_and_citations() -> list[str]:
+def check_4_labels_are_an_index() -> list[str]:
     failures: list[str] = []
     block = _digest_block(_doc())
-    # The indemnification clause's preferred variation has n=6 and a citation.
-    if "(n=6, sometimes)" not in block:
-        failures.append("  n-count + band missing from the digest block (precedent weighting)")
-    if "[acme-university@3 §8.1]" not in block:
-        failures.append("  citation missing from the digest block")
-    if "{risk: worse/material}" not in block:
-        failures.append("  risk_delta missing from a concession/unacceptable entry")
-    # The intro must tell the model what n MEANS, or the number is noise.
-    if "n>=10" not in block or "descriptive, not prescriptive" not in block:
-        failures.append("  digest intro does not explain n-weighting / descriptive stance")
+    indemnification = _clause_section(block, "clause.indemnification")
+    judged = _line_containing(indemnification, "prompt notice and reasonable cooperation")
+    if not judged.startswith("  - [less protective of us] ") or "[fixture-college@2 §8.1]" not in judged:
+        failures.append(f"  judged variant lacks its label or citation: {judged!r}")
+    if "Judged difference: Conditions our indemnity on prompt notice and cooperation." not in indemnification:
+        failures.append("  judged variant lacks its one-sentence reason")
+    unjudged = _line_containing(indemnification, "intellectual property rights")
+    if not unjudged.startswith('  - "'):
+        failures.append(f"  an unjudged variant carries a label it does not have: {unjudged!r}")
+    if "Positions of the 4 signed deals: 2 our standard, 1 less protective of us, 1 not judged." not in indemnification:
+        failures.append("  positions line missing or wrong for indemnification")
+    confidentiality = _clause_section(block, "clause.confidentiality")
+    equivalent = [line for line in confidentiality.splitlines() if "[equivalent wording]" in line]
+    if len(equivalent) != 1 or "1 text, signed in 1 deal, reached from our standard in 1" not in equivalent[0]:
+        failures.append(f"  collapsed equivalent-wording entry not rendered once with its counts: {equivalent!r}")
+
+    several_parts = _digest_block(_vector_doc(VECTOR_009))
+    if "Our standard, in 4 parts:" not in several_parts:
+        failures.append("  a standard of several parts is not rendered part by part")
+    if "part map = x0 - =; additions +" not in several_parts:
+        failures.append("  a several-part standard's part map is not rendered")
+    if "Owner's label; owner's reason:" not in several_parts:
+        failures.append("  an owner-set label is not marked as the owner's")
     return failures
 
 
-def check_5_empty_lists_render_nothing() -> list[str]:
+def check_5_lists() -> list[str]:
+    failures: list[str] = []
+    block = _digest_block(_doc())
+    governing_law = _clause_section(block, "clause.governing-law")
+    for header in ("Asked for and refused", "Opening language not signed as proposed"):
+        if header in governing_law:
+            failures.append(f"  governing law has no {header!r} entries yet rendered the header")
+    indemnification = _clause_section(block, "clause.indemnification")
+    if "Asked for and refused (never replacement language):" not in indemnification:
+        failures.append("  indemnification's refused ask is not rendered")
+    opening = _line_containing(indemnification, "neither party shall indemnify")
+    if "— 1 deal, ended at our standard in 1 [acme-nursing-school@1 §7]" not in opening:
+        failures.append(f"  changed opening lacks its counts or citation: {opening!r}")
+    return failures
+
+
+def check_6_capped_list_says_so() -> list[str]:
     failures: list[str] = []
     doc = _doc()
-    for clause in doc["digest"]["clauses"]:
-        clause["concessions"] = []
-    block = _digest_block(doc)
-    if CANONICAL_HEADERS["concessions"] in block:
-        failures.append(
-            "  an emptied list still rendered its header -- an empty section reads as "
-            "'we looked and found none', which the digest does not claim"
-        )
-    # The other sections must survive the emptying.
-    if CANONICAL_HEADERS["preferred_variations"] not in block:
-        failures.append("  emptying one list removed another's header")
+    clause = next(c for c in doc["digest"]["clauses"] if c["id"] == "clause.governing-law")
+    clause["signed_variants"] = clause["signed_variants"][:1]  # as the engine's cap would leave it
+    section = _clause_section(_digest_block(doc), "clause.governing-law")
+    if "(1 more signed variant on record, not shown here.)" not in section:
+        failures.append("  a capped signed-variant list does not say how many more are on record")
+    if "not shown here" in _clause_section(_digest_block(_doc()), "clause.governing-law"):
+        failures.append("  an uncapped clause claims entries not shown")
     return failures
 
 
-def check_6_no_digest_refuses() -> list[str]:
+def check_7_no_digest_refuses() -> list[str]:
     failures: list[str] = []
-    # A 0.2 document has no digest at all.
-    doc_02 = json.loads(FIXTURE_02.read_text(encoding="utf-8"))
-    for label, doc in (("0.2 document", doc_02), ("0.3 with digest removed", _strip_digest(_doc()))):
+    stripped = _doc()
+    stripped.pop("digest", None)
+    for label, doc in (("0.5 document with no digest", _doc(NO_DIGEST_FIXTURE)), ("digest removed", stripped)):
         try:
             opf_prompt.compose_opf_system_blocks(doc)
             failures.append(
@@ -171,20 +210,36 @@ def check_6_no_digest_refuses() -> list[str]:
     return failures
 
 
-def _strip_digest(doc: dict) -> dict:
-    doc = copy.deepcopy(doc)
-    doc.pop("digest", None)
-    return doc
+def check_8_intro() -> list[str]:
+    failures: list[str] = []
+    intro = opf_prompt.DIGEST_INTRO
+    for phrase in (
+        "descriptive, not prescriptive",
+        "no entry here is an instruction",
+        "a concession we have signed: it marks the edge of what we have accepted, not a preference",
+        "must NEVER be used as replacement language",
+        "It may have come from either side",
+        "never a source of replacement language",
+        "it is an index, not an instruction. Check the cited text and decide for the live contract",
+    ):
+        if phrase not in intro:
+            failures.append(f"  DIGEST_INTRO does not say {phrase!r}")
+    block = _digest_block(_doc())
+    if "From 5 deals (4 signed)." not in block:
+        failures.append("  the block does not say how many deals the precedent rests on")
+    return failures
 
 
 def main() -> int:
     checks = [
-        ("1", "terminology maps to the digest's real field names", check_1_terminology_matches_digest_fields),
-        ("2", "headers are the engine's canonical strings, not raw field names", check_2_headers_verbatim),
-        ("3", "wholesale dump retired: no full_text, prompt within budget", check_3_wholesale_retired),
-        ("4", "n-counts, bands, citations and risk survive into the block", check_4_n_counts_and_citations),
-        ("5", "empty lists render nothing, not an empty header", check_5_empty_lists_render_nothing),
-        ("6", "no digest => refuse to compose", check_6_no_digest_refuses),
+        ("1", "the engine's NDA example renders the #129 facts", check_1_nda_example),
+        ("2", "plain facts only: no digest-2 vocabulary, every clause rendered", check_2_plain_facts_only),
+        ("3", "wholesale dump retired: no precedent record text or id, within budget", check_3_wholesale_retired),
+        ("4", "labels, reasons, citations, positions, part maps, owner labels", check_4_labels_are_an_index),
+        ("5", "empty lists render nothing; openings render their counts", check_5_lists),
+        ("6", "a capped list says how many more are on record", check_6_capped_list_says_so),
+        ("7", "no digest => refuse to compose", check_7_no_digest_refuses),
+        ("8", "the intro frames precedent as an index, never instruction", check_8_intro),
     ]
     ok = True
     for code, name, fn in checks:

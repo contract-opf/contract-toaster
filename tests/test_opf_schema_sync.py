@@ -1,45 +1,41 @@
 #!/usr/bin/env python3
-"""Vendored-OPF-schema sync + shape-contract gate (OPF 0.3 launch).
+"""Vendored-OPF-schema sync + shape-contract gate (OPF 0.5 / digest 4).
 
-The OPF schemas under ``playbooks/opf/`` are VENDORED copies of the
+The OPF schema under ``playbooks/opf/`` is a VENDORED copy of the
 playbook-engine spec: physically committed here because this repo's CI has no
-sibling checkout and must validate uploads hermetically. The cost of vendoring
-is that a copy is a SNAPSHOT — the source can move and ours silently won't.
-That happened three times during the 0.3 launch: 0.2 drifted by a lone
-`description` string; 0.3 gained digest `n`/`band` (engine 3993b4f); 0.3 then
-swapped `preferred_variations`' item type to `digestPreferredVariation` and
-started enforcing a 40K-token budget (engine 1cc0237).
+sibling checkout and must validate uploads hermetically. Since issue #128 it is
+exactly ONE file, ``playbook.schema-0.5.json`` (the owner's 2026-10-06
+direction: one format, no backward compatibility), vendored from engine main
+``b90c647`` together with the engine's OPF 0.5 conformance vectors
+(``playbooks/opf/conformance-0.5/``, replayed by
+``tests/test_opf_canonicalize.py``).
 
-UPSTREAM HAS SINCE FIXED THE ROOT CAUSE (engine 458ac7a, 2026-07-16):
-`spec/CHANGELOG.md` makes a published `opf_version` IMMUTABLE once a consumer
-exists — shape *or semantic* changes go to a new version (0.3 → 0.4), never an
-in-place edit, with the rule stated as "the schema still validates old data is
-NOT sufficient: two artifacts claiming the same version must mean the same
-thing". `digest_version` governs the digest independently under the same rule,
-and their CI pins each schema's sha256 to that changelog. OPF 0.3 is FROZEN at
-digest_version 2. The pins below are byte-identical to the engine's published
-frozen pins, so we are vendored at the frozen shape.
+The cost of vendoring is that a copy is a SNAPSHOT -- the source can move and
+ours silently won't. That happened three times during the 0.3 launch (0.2
+drifted by a lone `description` string; 0.3 gained digest `n`/`band`; 0.3 then
+swapped an item type and started enforcing a token budget). Upstream fixed the
+root cause (engine 458ac7a): a published `opf_version` is IMMUTABLE once a
+consumer exists, and `digest_version` governs the digest under the same rule.
+OPF 0.5 was deliberately left unfrozen until it had a consumer: this repo's
+vendoring of it (#128) is what freezes it, at the pins below.
 
-That makes drift structurally unlikely rather than merely detectable — but this
-gate stays, because "unlikely" is not "impossible" and a frozen upstream is a
-promise, not a mechanism we control. It alarms in three layers, deliberately at
-different urgencies:
+This gate alarms in three layers, deliberately at different urgencies:
 
   1. SHAPE CONTRACT (high urgency, runs in CI): the vendored schema must still
      declare every field THIS repo consumes, AT THE SHAPE we consume it. Fires
-     only when the engine changes something that can break us — so cosmetic
-     churn stays quiet. This is the check that distinguishes "the format broke
-     us" from "the format was reworded". It is bidirectional: see the contract
-     header for why a WIDENING is a break too.
-  2. UPSTREAM PIN (medium, runs in CI): each vendored schema's sha256 is pinned
-     below at the value the ENGINE PUBLISHED as that version's frozen sha
-     (engine 458ac7a `spec/CHANGELOG.md`), not at whatever our copy happens to
-     hash to. Be clear-eyed about what that buys and what it does not:
+     only when the engine changes something that can break us -- so cosmetic
+     churn stays quiet. It is bidirectional: see the contract header for why a
+     WIDENING is a break too.
+  2. UPSTREAM PIN (medium, runs in CI): the vendored schema's sha256, and the
+     concatenated sha256 of the vendored conformance set, are pinned below at
+     the values the ENGINE PUBLISHED (its `spec/CHANGELOG.md` "Current pins"),
+     not at whatever our copy happens to hash to. Be clear-eyed about what that
+     buys and what it does not:
 
-       IT DETECTS  — a hand-edit of our copy; a re-vendor that forgot the pin;
+       IT DETECTS  -- a hand-edit of our copy; a re-vendor that forgot the pin;
                      a re-vendor from the wrong file, the wrong version, or a
                      source that does not match the engine's published sha.
-       IT CANNOT   — see upstream move AFTER we transcribed the number. The
+       IT CANNOT   -- see upstream move AFTER we transcribed the number. The
                      pin lives in this repo beside the copy, and the re-vendor
                      procedure updates both. Nothing here re-fetches upstream,
                      so a pin+copy updated together are consistent with each
@@ -47,29 +43,25 @@ different urgencies:
                      (or upstream's own freeze) covers that.
 
      So this is a self-pin with an upstream-sourced VALUE. That is strictly
-     more than a self-pin with a self-sourced value — the number has to come
-     from the engine's changelog and match — but it is not a drift detector,
+     more than a self-pin with a self-sourced value -- the number has to come
+     from the engine's changelog and match -- but it is not a drift detector,
      and this gate does not claim to be one.
-  3. SOURCE PARITY (low — a chore signal, LOCAL-ONLY): when the sibling repo is
-     present (``../playbook-engine/spec/*.json`` or ``$PLAYBOOK_ENGINE_REPO``),
-     the vendored copy must be BYTE-IDENTICAL to source. This is the ONLY layer
-     that compares against something outside this repo, and therefore the only
-     true upstream-drift detector — and it does not run in CI, because CI has
-     no sibling checkout. It skips cleanly when the sibling is absent. Treat it
-     as a backstop that fires on a dev's laptop, never as the primary alarm.
-     That asymmetry is precisely why layer 1 carries the weight.
+  3. SOURCE PARITY (low -- a chore signal, LOCAL-ONLY): when the sibling repo is
+     present (``../playbook-engine`` or ``$PLAYBOOK_ENGINE_REPO``), the
+     vendored schema and conformance set must be BYTE-IDENTICAL to source.
+     This is the ONLY layer that compares against something outside this repo,
+     and therefore the only true upstream-drift detector -- and it does not
+     run in CI, because CI has no sibling checkout. It skips cleanly when the
+     sibling is absent. Treat it as a backstop that fires on a dev's laptop,
+     never as the primary alarm. That asymmetry is precisely why layer 1
+     carries the weight.
 
-Re-vendor procedure: copy ``spec/playbook.schema-0.X.json`` byte-for-byte over
-``playbooks/opf/playbook.schema-0.X.json``, then set the pin below FROM THE
-ENGINE'S PUBLISHED FROZEN SHA (`spec/CHANGELOG.md`) — never from `sha256sum` of
-the file you just copied, which would make the pin a tautology — and record the
-engine commit in playbooks/opf/README.md.
-
-Re-vendor + re-verify before binding a real playbook remains the standing rule.
-Under the freeze a re-vendor should now be a no-op; if it is NOT, that is a
-loud signal (either 0.3 moved despite the freeze, or the playbook was compiled
-against a different version) and must be understood, never papered over by
-re-pinning.
+Re-vendor procedure: copy ``spec/playbook.schema-0.5.json`` and
+``spec/conformance/0.5/{manifest.json,vectors/*.json}`` byte-for-byte, then set
+the pins below FROM THE ENGINE'S PUBLISHED SHAS (`spec/CHANGELOG.md`) -- never
+from `sha256sum` of the files you just copied, which would make the pin a
+tautology -- and record the engine commit in playbooks/opf/README.md. A newer
+format is a new `opf_version` and a new ticket, not a re-vendor over 0.5.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -85,211 +77,243 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OPF_DIR = REPO_ROOT / "playbooks" / "opf"
 
-# The sha256 the ENGINE PUBLISHED as each version's FROZEN sha (engine 458ac7a,
-# `spec/CHANGELOG.md`), which our vendored bytes must equal. Transcribe from the
-# engine changelog on re-vendor; do NOT regenerate from our own copy (see the
-# module docstring, layer 2 — a pin computed from the file it pins proves only
-# that the file equals itself).
+# The sha256 the ENGINE PUBLISHED for each vendored artifact (engine
+# `spec/CHANGELOG.md`, "Current pins", at main b90c647), which our vendored
+# bytes must equal. Transcribe from the engine changelog on re-vendor; do NOT
+# regenerate from our own copy (see the module docstring, layer 2 -- a pin
+# computed from the file it pins proves only that the file equals itself).
 UPSTREAM_FROZEN_SHA256 = {
-    "playbook.schema-0.2.json": "eae5f882f9289f2144cc784109d3dd04de7673d6e563d195fd693fd38ae1138d",
-    "playbook.schema-0.3.json": "d2d81ca1c4f7547b508b2a22310906ce9a3bf43a2436e8730f0b1e4c9b0a0e15",
+    "playbook.schema-0.5.json": "f09c1b7abc08c14b80f7f2b8d572fd5cf26d9491a0566e27311387af960e6657",
 }
+
+# The engine pins its conformance set as ONE sha256 over manifest.json followed
+# by vectors/*.json sorted by filename, concatenated (its
+# tests/test_spec_consistency.py::_conformance_fixture_digest_v05).
+CONFORMANCE_DIR_NAME = "conformance-0.5"
+UPSTREAM_CONFORMANCE_SHA256 = "79cb9f0b4b01b4dc914258ff530a5a5aa22d1b9bf17dd54e4663a16a796fb308"
+# Where the engine keeps the same set, relative to its repo root.
+SOURCE_CONFORMANCE_SUBDIR = Path("spec") / "conformance" / "0.5"
 
 
 # ---------------------------------------------------------------------------
 # Shape contract: every field this repo actually CONSUMES from an OPF document.
 #
-# Each entry is (dotted_path_into_schema, assertion, expected). This is a
+# Each entry is (dotted_path_into_schema, assertion, expected). A dotted
+# segment that is an integer indexes a list (e.g. a `oneOf` branch). This is a
 # deliberate inventory of our dependency surface, not a mirror of the schema:
 # if the engine drops, renames, retypes or WIDENS one of these, the failure
 # message names what we lost and which code needs it. If the engine rewords a
 # `description` or adds a field we don't read, nothing here fires.
 #
 # Assertions:
-#   exists        — the node is present at all. LAST RESORT: it asserts nothing
+#   exists        -- the node is present at all. LAST RESORT: it asserts nothing
 #                   beyond presence, so it cannot see a retype. Use it only
 #                   where the value's shape genuinely does not matter to us.
-#   equals        — the node equals `expected` exactly
-#   type_is       — the node is a schema whose `type` equals `expected`
+#   equals        -- the node equals `expected` exactly
+#   type_is       -- the node is a schema whose `type` equals `expected`
 #                   (a string, or a list like ["object", "null"])
-#   enum_is       — the node is an enum list whose members are EXACTLY
-#                   `expected` — no more, no fewer
-#   superset_of   — the node (a list) contains every element of `expected`.
+#   enum_is       -- the node is an enum list whose members are EXACTLY
+#                   `expected` -- no more, no fewer
+#   keys_exactly  -- the node is an object whose keys are EXACTLY `expected`
+#                   (used on `properties` maps this repo renders key by key)
+#   superset_of   -- the node (a list) contains every element of `expected`.
 #                   Correct for `required`: the engine adding a required field
 #                   cannot break a reader.
-#   refs_exactly  — the node's $ref targets (following oneOf/anyOf/allOf
+#   refs_exactly  -- the node's $ref targets (following oneOf/anyOf/allOf
 #                   branches) are EXACTLY the set `expected`
-#   array_of      — the node is an array whose items' $ref targets are exactly
+#   array_of      -- the node is an array whose items' $ref targets are exactly
 #                   `expected` AND which declares no maxItems cap
 #
-# WHY BOTH DIRECTIONS. The first cut of this contract asserted that
-# digestClause.preferred_variations EXISTED and that $defs.acceptableIfEntry
-# still existed -- and passed clean through engine 1cc0237, which swapped
-# preferred_variations' item type from acceptableIfEntry to a new
-# digestPreferredVariation (dropping `rationale`). Both assertions were true;
-# the thing that broke us was the TYPE of the items, which nothing asserted.
+# WHY BOTH DIRECTIONS. A one-directional vocabulary -- presence, superset,
+# ref-membership -- catches REMOVAL and NARROWING while staying structurally
+# blind to ADDITION and WIDENING (a mutation matrix once measured 8 caught, 11
+# missed, every miss a widening or a retype). That blindness is the same bug:
+# this repo does not merely need the fields to be THERE, it renders them at an
+# assumed shape, and everything downstream of that assumption fails SOFT.
 #
-# The second cut fixed that with a one-directional vocabulary — presence,
-# superset, ref-membership — and so caught REMOVAL and NARROWING while staying
-# structurally blind to ADDITION and WIDENING. A mutation matrix put numbers on
-# it: 8 caught, 11 missed, and every miss a widening or a retype. That blindness
-# is not a smaller version of the same bug, it is the same bug: this repo does
-# not merely need the fields to be THERE, it renders them at an assumed shape,
-# and everything downstream of that assumption fails SOFT.
-#
-# Concretely, the two lies a widening tells:
-#   (a) opf_prompt.DIGEST_INTRO ships the model a HARDCODED band legend --
-#       "often n>=10, sometimes n=2-9, rare n=1". An added band value, or a
-#       re-banded n, does not break the render: it makes the legend LIE to the
-#       model about how to weight precedent. Hence `enum_is`, not `superset_of`.
+# Concretely, the lies a widening tells under digest 4:
+#   (a) opf_prompt.DIGEST_INTRO ships the model a HARDCODED legend for the
+#       `vs_standard` labels and the part-map / addition tokens. An added label
+#       or token does not break the render: it reaches the model unexplained,
+#       or (a positions key) silently drops out of the positions line. Hence
+#       `enum_is` / `keys_exactly`, not `superset_of`.
 #   (b) opf_prompt's renderers are uniformly .get()/isinstance-guarded, so a
-#       retype (n integer->string), a foreign type union'd into a list, or a
-#       maxItems cap silently truncating a list produces a SHORTER prompt, not
-#       an error. Hence `type_is`/`array_of`, not `exists`.
-#
-# So: every consumed list pins what its items ARE and that it is still a list;
-# every consumed scalar pins its type; every consumed enum pins its exact
-# membership; every consumed object we read unknown-key-free pins
-# additionalProperties. `exists` survives only where shape truly is irrelevant.
+#       retype (a count integer->string), a foreign type union'd into a list,
+#       or a maxItems cap silently truncating a list produces a SHORTER prompt,
+#       not an error. Hence `type_is`/`array_of`, not `exists`.
 #
 # The bar for a row here is CONSUMPTION, not existence. A field this repo never
 # reads does not belong in this table -- pinning it would make the gate fire on
 # churn that cannot hurt us, and a gate that cries wolf gets muted. (Example:
-# digestExemplarForm.deviation is never rendered from the digest, so it is
-# deliberately uncontracted.)
+# a precedent record's `paper` is never read -- paper side is never a
+# partition -- so it is deliberately uncontracted.)
 # ---------------------------------------------------------------------------
 
-# Consumed by both 0.2 and 0.3.
-_COMMON_CONTRACT: list[tuple[str, str, object]] = [
-    # opf_load.resolve_opf_version dispatches on this (the const VALUE differs
-    # per file, so only its presence and type are common to both).
-    ("properties.opf_version", "type_is", "string"),
-    ("properties.opf_version.const", "exists", None),
+_LABELS = ["equivalent", "more_protective", "less_protective", "mixed", "different_concept", None]
+_COUNT = "integer"
+
+_CONTRACT: list[tuple[str, str, object]] = [
+    # opf_load.resolve_opf_version accepts exactly this value.
+    ("properties.opf_version.type", "equals", "string"),
+    ("properties.opf_version.const", "equals", "0.5"),
     # opf_canonicalize.verify_content_hash / bind_bundle lineage.
     ("properties.identity.properties.content_hash.pattern", "equals", "^sha256:[0-9a-f]{64}$"),
     ("properties.identity.properties.section_digests.required", "superset_of",
      ["evidence", "posture", "floor"]),
-    # review_spine / opf_prompt read the evidence clause tree.
-    ("properties.evidence.properties.clauses", "array_of", {"clausePosition"}),
-    ("$defs.clausePosition.required", "superset_of",
-     ["id", "taxonomy_id", "title", "observed_positions", "summary"]),
-    ("$defs.clausePosition.properties.observed_positions", "array_of", {"observation"}),
-    ("$defs.clausePosition.properties.our_standard", "type_is", ["object", "null"]),
-    ("$defs.clausePosition.properties.summary.properties.historical_stance", "type_is", "string"),
-    # `acceptable_if` items are oneOf[bare string (legacy), acceptableIfEntry];
-    # the string branch carries no $ref, so the ref-target set is the entry type
-    # alone. A THIRD branch appearing is exactly what these must fail on.
-    ("$defs.clausePosition.properties.summary.properties.acceptable_if", "array_of",
-     {"acceptableIfEntry"}),
-    ("$defs.clausePosition.properties.summary.properties.fallbacks", "array_of", {"observation"}),
-    ("$defs.clausePosition.properties.summary.properties.rejected", "array_of", {"observation"}),
-    # opf_injection_scan scans full_text and opf_acceptance checks it never
-    # leaks into the prompt; both treat it as text, so an object here would
-    # slip past the scan as a Python repr.
-    ("$defs.observation.properties.full_text", "type_is", "string"),
-    ("$defs.observation.properties.precedent_count", "type_is", "integer"),
-    ("$defs.observation.required", "superset_of",
-     ["text_summary", "example_ref", "deviation", "risk_delta", "provenance", "outcome"]),
-    # Terminology mapping + the prompt's preferred-variations block.
-    ("$defs.acceptableIfEntry.required", "superset_of", ["if", "to", "rationale", "observation_ref"]),
+    # The spine refuses to run on a stub basis unless explicitly accepted.
+    ("properties.compiler.properties.stub_basis_present.type", "equals", "boolean"),
+    # Floor invariants drive the Binding block (and its suppression).
+    ("properties.floor.properties.invariants", "type_is", "array"),
+    ("properties.floor.properties.invariants.items.required", "superset_of", ["id", "statement"]),
+    ("properties.posture", "type_is", "object"),
+    # playbook_upload's perspective minimum, the Context block and the floor
+    # judge's principal binding read both fields as strings.
+    ("properties.perspective.required", "superset_of", ["party", "counterparty_type"]),
+    ("properties.perspective.properties.party", "type_is", "string"),
+    ("properties.perspective.properties.counterparty_type", "type_is", "string"),
+    # The evidence section: opf_load's sibling-id sets, the leakage corpus
+    # (leakage_scan._opf_evidence_precedent_texts) and the acceptance
+    # harness's wholesale-evidence check read the per-deal precedent record.
+    ("properties.evidence.properties.clauses", "array_of", {"precedentClause"}),
+    ("properties.evidence.properties.precedent", "array_of", {"precedent"}),
+    ("$defs.precedentClause.properties.id", "type_is", "string"),
+    ("$defs.precedent.required", "superset_of",
+     ["id", "signed_text", "opened_with", "opening_text", "standard", "refused_asks"]),
+    ("$defs.precedent.properties.id", "type_is", "string"),
+    ("$defs.precedent.properties.standard", "type_is", "boolean"),
+    # leakage_scan skips an opening only when it is exactly "standard".
+    ("$defs.precedent.properties.opened_with.enum", "enum_is", ["standard", "non_standard", "absent", None]),
+    ("$defs.precedent.properties.signed_text", "refs_exactly", {"textRef"}),
+    ("$defs.precedent.properties.opening_text", "refs_exactly", {"textRef"}),
+    ("$defs.precedent.properties.refused_asks", "array_of", {"refusedAsk"}),
+    ("$defs.textRef.properties.text", "type_is", "string"),
+    ("$defs.refusedAsk.properties.text", "type_is", "string"),
+    # The injection scan walks these three sections wholesale (issue #128);
+    # their shape does not matter to it, only that they are where it looks.
+    ("properties.manifest", "exists", None),
+    ("properties.dossiers", "exists", None),
+    ("properties.provenance_index", "exists", None),
+    # ---- The digest: the model-facing prompt surface (opf_prompt) ----------
+    ("properties.digest.required", "superset_of", ["digest_version", "corpus", "clauses", "perspective"]),
+    # opf_load.resolve_digest_version accepts exactly this value.
+    ("properties.digest.properties.digest_version.type", "equals", "string"),
+    ("properties.digest.properties.digest_version.const", "equals", "4"),
+    # playbook_upload's perspective minimum reads the digest copy.
+    ("properties.digest.properties.perspective.oneOf.1.$ref", "equals", "#/properties/perspective"),
+    # opf_prompt._corpus_line.
+    ("properties.digest.properties.corpus.required", "superset_of",
+     ["n_deals", "n_signed", "first_signed", "last_signed"]),
+    ("properties.digest.properties.corpus.properties.n_deals", "type_is", _COUNT),
+    ("properties.digest.properties.corpus.properties.n_signed", "type_is", _COUNT),
+    ("properties.digest.properties.clauses", "array_of", {"digestClause"}),
+    # Every field opf_prompt._digest_clause_block renders. additionalProperties
+    # false is what makes "these are the digest" true: opened up, the engine
+    # could ship a clause field the prompt silently drops.
+    ("$defs.digestClause.required", "superset_of",
+     ["id", "taxonomy_id", "title", "our_standard", "n_deals", "n_signed_standard",
+      "n_opened_standard", "n_kept_standard", "positions", "signed_variants", "refused_asks",
+      "changed_openings", "n_variants_total", "n_refused_total", "n_changed_openings_total"]),
+    ("$defs.digestClause.additionalProperties", "equals", False),
+    ("$defs.digestClause.properties.title", "type_is", "string"),
+    ("$defs.digestClause.properties.n_deals", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_signed_standard", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_opened_standard", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_kept_standard", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_variants_total", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_refused_total", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_changed_openings_total", "type_is", _COUNT),
+    # Our standard, in its parts (the leakage scan's allowlisted standard text
+    # and the prompt's "Our standard" line).
+    ("$defs.digestClause.properties.our_standard", "refs_exactly", {"digestOurStandard"}),
+    ("$defs.digestOurStandard.type", "equals", ["object", "null"]),
+    ("$defs.digestOurStandard.properties.parts.type", "equals", "array"),
+    ("$defs.digestOurStandard.properties.parts.items.required", "superset_of", ["part_id", "text"]),
+    ("$defs.digestOurStandard.properties.parts.items.properties.text", "type_is", "string"),
+    ("$defs.digestOurStandard.properties.source_ref", "refs_exactly", {"citation"}),
+    # The positions line renders the keys it knows, in its own order: a new
+    # key would silently fall out of the line, so the key set is EXACT.
+    ("$defs.digestClause.properties.positions", "refs_exactly", {"digestPositions"}),
+    ("$defs.digestPositions.properties", "keys_exactly",
+     ["standard", "equivalent", "more_protective", "less_protective", "mixed",
+      "different_concept", "unjudged"]),
+    ("$defs.digestPositions.additionalProperties", "equals", False),
+    # ITEM TYPES of every digest list the prompt renders, and that each is
+    # still a LIST, uncapped. A type swap here is the #358 breakage; a union
+    # widened to admit a foreign type is #358 from the other side; a maxItems
+    # cap is the same class again (the totals are uncapped, so the block's
+    # "not shown here" line would then undercount).
+    ("$defs.digestClause.properties.signed_variants", "array_of",
+     {"digestVariant", "digestEquivalentVariants"}),
+    ("$defs.digestClause.properties.refused_asks", "array_of", {"digestRefusedAsk"}),
+    ("$defs.digestClause.properties.changed_openings", "array_of", {"digestChangedOpening"}),
+    # A signed variant.
+    ("$defs.digestVariant.required", "superset_of",
+     ["text", "n_deals", "last_signed", "n_from_standard", "n_unchanged", "label",
+      "part_map", "additions", "reason", "ref"]),
+    ("$defs.digestVariant.additionalProperties", "equals", False),
+    ("$defs.digestVariant.properties.text", "type_is", "string"),
+    # The acceptance harness treats a precedent text longer than this as one
+    # the digest cannot have carried verbatim.
+    ("$defs.digestVariant.properties.text.maxLength", "equals", 300),
+    ("$defs.digestVariant.properties.n_deals", "type_is", _COUNT),
+    ("$defs.digestVariant.properties.n_from_standard", "type_is", _COUNT),
+    ("$defs.digestVariant.properties.n_unchanged", "type_is", _COUNT),
+    ("$defs.digestVariant.properties.label.enum", "enum_is", _LABELS),
+    ("$defs.digestVariant.properties.label_by.const", "equals", "owner"),
+    ("$defs.digestVariant.properties.reason.type", "equals", ["string", "null"]),
+    ("$defs.digestVariant.properties.part_map.oneOf.1.items.enum", "enum_is",
+     ["=", "+", "-", "x+", "x-", "x0"]),
+    ("$defs.digestVariant.properties.additions.oneOf.1.items.enum", "enum_is", ["+", "-", "0"]),
+    ("$defs.digestVariant.properties.ref", "refs_exactly", {"citation"}),
+    # The collapsed equivalent-wording entry.
+    ("$defs.digestEquivalentVariants.required", "superset_of",
+     ["label", "n_deals", "n_texts", "n_from_standard", "n_unchanged", "last_signed", "exemplars"]),
+    ("$defs.digestEquivalentVariants.additionalProperties", "equals", False),
+    ("$defs.digestEquivalentVariants.properties.label.const", "equals", "equivalent"),
+    ("$defs.digestEquivalentVariants.properties.n_texts", "type_is", _COUNT),
+    ("$defs.digestEquivalentVariants.properties.exemplars.type", "equals", "array"),
+    ("$defs.digestEquivalentVariants.properties.exemplars.items.required", "superset_of", ["text", "ref"]),
+    ("$defs.digestEquivalentVariants.properties.exemplars.items.properties.text", "type_is", "string"),
+    # A refused ask.
+    ("$defs.digestRefusedAsk.required", "superset_of", ["text", "n_deals", "label", "reason", "ref"]),
+    ("$defs.digestRefusedAsk.additionalProperties", "equals", False),
+    ("$defs.digestRefusedAsk.properties.text", "type_is", "string"),
+    ("$defs.digestRefusedAsk.properties.n_deals", "type_is", _COUNT),
+    ("$defs.digestRefusedAsk.properties.label.enum", "enum_is", _LABELS),
+    ("$defs.digestRefusedAsk.properties.ref", "refs_exactly", {"citation"}),
+    # An opening not signed as proposed.
+    ("$defs.digestChangedOpening.required", "superset_of",
+     ["text", "n_deals", "n_to_standard", "n_struck", "label", "reason", "ref"]),
+    ("$defs.digestChangedOpening.additionalProperties", "equals", False),
+    ("$defs.digestChangedOpening.properties.text", "type_is", "string"),
+    ("$defs.digestChangedOpening.properties.n_to_standard", "type_is", _COUNT),
+    ("$defs.digestChangedOpening.properties.n_struck", "type_is", _COUNT),
+    ("$defs.digestChangedOpening.properties.label.enum", "enum_is", _LABELS),
+    ("$defs.digestChangedOpening.properties.ref", "refs_exactly", {"citation"}),
     # opf_prompt._fmt_cite renders all three as `[doc@v §path]`.
     ("$defs.citation.required", "superset_of", ["document_id", "version", "clause_path"]),
     ("$defs.citation.properties.document_id", "type_is", "string"),
     ("$defs.citation.properties.clause_path", "type_is", "string"),
-    # opf_prompt._fmt_risk renders `{risk: direction/magnitude}`. The values are
-    # rendered VERBATIM, so their enums may grow without lying to anyone — only
-    # the keys are contracted.
-    ("$defs.riskDelta.required", "superset_of", ["direction", "magnitude"]),
-    # Floor invariants drive the floor prompt block (and its suppression).
-    ("properties.floor.properties.invariants", "type_is", "array"),
-    ("properties.floor.properties.invariants.items.required", "superset_of", ["id", "statement"]),
-    ("properties.posture", "type_is", "object"),
-]
-
-# Consumed only from 0.3.
-_V03_CONTRACT: list[tuple[str, str, object]] = [
-    # The spine refuses to run on a stub basis unless explicitly accepted.
-    ("properties.compiler.properties.stub_basis_present.type", "equals", "boolean"),
-    # The digest IS the model-facing prompt surface in 0.3.
-    ("properties.digest.required", "superset_of", ["digest_version", "clause_count", "clauses"]),
-    # opf_load.SUPPORTED_DIGEST_VERSIONS compares this against a set of STRINGS
-    # and fail-closes on ingest, so a retype here is caught at runtime too --
-    # but caught at re-vendor time is cheaper than caught on a live upload.
-    ("properties.digest.properties.digest_version", "type_is", "string"),
-    ("properties.digest.properties.clauses", "array_of", {"digestClause"}),
-    ("$defs.digestClause.required", "superset_of",
-     ["id", "taxonomy_id", "title", "historical_stance",
-      "preferred_variations", "concessions", "unacceptable", "exemplar_forms"]),
-    # `.get(...) or {}` / isinstance-guarded in opf_prompt._digest_clause_block:
-    # a retype to a bare string does not raise, it just stops rendering.
-    ("$defs.digestClause.properties.our_standard", "type_is", ["object", "null"]),
-    ("$defs.digestClause.properties.stance_detail", "type_is", ["object", "null"]),
-    ("$defs.digestClause.properties.historical_stance", "type_is", ["string", "null"]),
-    # ITEM TYPES of every digest list the prompt renders, and that each is still
-    # a LIST, uncapped. A type swap here is the #358 breakage; a union widened
-    # to admit a foreign type is #358 from the other side; a maxItems cap is the
-    # same class again (the prompt renders whatever survives, and says nothing
-    # about what did not). `preferred_variations` items are oneOf[bare string
-    # (legacy, handled by _fmt_preferred), digestPreferredVariation].
-    ("$defs.digestClause.properties.preferred_variations", "array_of", {"digestPreferredVariation"}),
-    ("$defs.digestClause.properties.concessions", "array_of", {"digestObservationSummary"}),
-    ("$defs.digestClause.properties.unacceptable", "array_of", {"digestObservationSummary"}),
-    ("$defs.digestClause.properties.exemplar_forms", "array_of", {"digestExemplarForm"}),
-    # n-counts + frequency bands are what the prompt weights precedent by, and
-    # DIGEST_INTRO hardcodes the band legend -- so `enum_is`, exactly these
-    # three. A fourth band, or a dropped one, makes the legend lie.
-    ("$defs.digestExemplarForm.required", "superset_of", ["text_summary", "n", "band"]),
-    ("$defs.digestExemplarForm.properties.n", "type_is", "integer"),
-    ("$defs.digestExemplarForm.properties.n.minimum", "equals", 1),
-    ("$defs.digestExemplarForm.properties.band.enum", "enum_is", ["often", "sometimes", "rare"]),
-    # _fmt_summary_entry renders risk_delta and example_ref on BOTH summary
-    # types. Neither was pinned before, so upstream could have dropped the risk
-    # annotations out of the model's prompt without a single check firing.
-    ("$defs.digestExemplarForm.properties.risk_delta", "refs_exactly", {"riskDelta"}),
-    ("$defs.digestExemplarForm.properties.example_ref", "refs_exactly", {"citation"}),
-    ("$defs.digestExemplarForm.additionalProperties", "equals", False),
-    ("$defs.digestObservationSummary.required", "superset_of", ["text_summary"]),
-    ("$defs.digestObservationSummary.properties.text_summary", "type_is", "string"),
-    ("$defs.digestObservationSummary.properties.n", "type_is", "integer"),
-    ("$defs.digestObservationSummary.properties.n.minimum", "equals", 1),
-    ("$defs.digestObservationSummary.properties.band.enum", "enum_is", ["often", "sometimes", "rare"]),
-    ("$defs.digestObservationSummary.properties.risk_delta", "refs_exactly", {"riskDelta"}),
-    ("$defs.digestObservationSummary.properties.example_ref", "refs_exactly", {"citation"}),
-    ("$defs.digestObservationSummary.additionalProperties", "equals", False),
-    # preferred_variations ship if/to verbatim + n/band; `rationale` deliberately
-    # stays in the full OPF (reached via the clause-evidence lookup tool).
-    ("$defs.digestPreferredVariation.required", "superset_of", ["if", "to", "n", "band"]),
-    ("$defs.digestPreferredVariation.properties.if", "type_is", "string"),
-    ("$defs.digestPreferredVariation.properties.to", "type_is", "string"),
-    ("$defs.digestPreferredVariation.properties.observation_ref", "refs_exactly", {"citation"}),
-    ("$defs.digestPreferredVariation.properties.n", "type_is", "integer"),
-    # `minimum: 1` is SEMANTIC, not cosmetic: _fmt_n prints `(n=0, rare)` as
-    # readily as `(n=6, often)`. Relaxing it to 0 lets "no precedent" render as
-    # precedent, which is the one thing the digest exists to prevent.
-    ("$defs.digestPreferredVariation.properties.n.minimum", "equals", 1),
-    ("$defs.digestPreferredVariation.properties.band.enum", "enum_is", ["often", "sometimes", "rare"]),
-    # additionalProperties:false is what makes "the four lists are the digest"
-    # true. Opened up, the engine can ship a clause field the prompt silently
-    # drops -- knowledge that reaches the artifact but never the model.
-    ("$defs.digestPreferredVariation.additionalProperties", "equals", False),
-    ("$defs.digestClause.additionalProperties", "equals", False),
 ]
 
 SHAPE_CONTRACT: dict[str, list[tuple[str, str, object]]] = {
-    "playbook.schema-0.2.json": _COMMON_CONTRACT,
-    "playbook.schema-0.3.json": _COMMON_CONTRACT + _V03_CONTRACT,
+    "playbook.schema-0.5.json": _CONTRACT,
 }
 
 _MISSING = object()
 
 
 def _at(schema: object, dotted: str) -> object:
-    """Resolve a dotted path into the schema, or return _MISSING."""
+    """Resolve a dotted path into the schema, or return _MISSING. An integer
+    segment indexes a list (a `oneOf` branch, say)."""
     node: object = schema
     for seg in dotted.split("."):
-        if not isinstance(node, dict) or seg not in node:
+        if isinstance(node, list) and seg.isdigit() and int(seg) < len(node):
+            node = node[int(seg)]
+        elif isinstance(node, dict) and seg in node:
+            node = node[seg]
+        else:
             return _MISSING
-        node = node[seg]
     return node
 
 
@@ -359,8 +383,8 @@ def check_shape_contract() -> list[str]:
                 if not isinstance(node, list):
                     failures.append(f"  {name}: {dotted} is {type(node).__name__}, expected an enum list")
                     continue
-                added = sorted(set(node) - set(expected))
-                removed = sorted(set(expected) - set(node))
+                added = sorted(set(node) - set(expected), key=repr)
+                removed = sorted(set(expected) - set(node), key=repr)
                 if added or removed:
                     detail = ", ".join(
                         part for part in (
@@ -369,10 +393,22 @@ def check_shape_contract() -> list[str]:
                         ) if part
                     )
                     failures.append(
-                        f"  {name}: {dotted} enum changed: {detail} (now {sorted(node)!r})\n"
+                        f"  {name}: {dotted} enum changed: {detail} (now {sorted(node, key=repr)!r})\n"
                         f"    -> this repo pins the EXACT membership: an added value is as "
                         f"breaking as a removed one, because the prompt hardcodes what "
                         f"these values mean."
+                    )
+            elif assertion == "keys_exactly":
+                if not isinstance(node, dict):
+                    failures.append(f"  {name}: {dotted} is {type(node).__name__}, expected an object")
+                    continue
+                added = sorted(set(node) - set(expected))
+                removed = sorted(set(expected) - set(node))
+                if added or removed:
+                    failures.append(
+                        f"  {name}: {dotted} keys changed: ADDED {added} REMOVED {removed}\n"
+                        f"    -> this repo renders these keys one by one; a new key would "
+                        f"silently drop out of the prompt, a removed one renders as nothing."
                     )
             elif assertion == "superset_of":
                 if not isinstance(node, list):
@@ -452,6 +488,37 @@ def check_upstream_pin() -> list[str]:
     return failures
 
 
+def _conformance_sha256(directory: Path) -> str | None:
+    """The engine's conformance pin over *directory*: one sha256 over
+    manifest.json then vectors/*.json sorted by filename, concatenated."""
+    manifest = directory / "manifest.json"
+    vectors = sorted((directory / "vectors").glob("*.json"))
+    if not manifest.is_file() or not vectors:
+        return None
+    hasher = hashlib.sha256(manifest.read_bytes())
+    for vector in vectors:
+        hasher.update(vector.read_bytes())
+    return hasher.hexdigest()
+
+
+def check_conformance_pin() -> list[str]:
+    """The vendored OPF 0.5 conformance set must equal the set the engine
+    PUBLISHED (its concatenated pin). Runs in CI; same reasoning as
+    check_upstream_pin."""
+    directory = OPF_DIR / CONFORMANCE_DIR_NAME
+    actual = _conformance_sha256(directory)
+    if actual is None:
+        return [f"  MISSING vendored conformance set: {directory.relative_to(REPO_ROOT)}"]
+    if actual != UPSTREAM_CONFORMANCE_SHA256:
+        return [
+            f"  {CONFORMANCE_DIR_NAME}: vendored vectors do NOT match the engine's published pin\n"
+            f"    upstream: {UPSTREAM_CONFORMANCE_SHA256}\n"
+            f"    vendored: {actual}\n"
+            f"    -> re-vendor spec/conformance/0.5/ byte-for-byte; never hand-edit a vector."
+        ]
+    return []
+
+
 def check_source_parity() -> list[str]:
     """LOCAL-ONLY upstream-drift detector; skips when the sibling is absent.
 
@@ -479,6 +546,12 @@ def check_source_parity() -> list[str]:
                 f"  {name}: vendored copy DIFFERS from source {source} "
                 f"(re-vendor byte-for-byte + update the pin)."
             )
+    source_conformance = spec_dir.parent / SOURCE_CONFORMANCE_SUBDIR
+    if _conformance_sha256(source_conformance) != _conformance_sha256(OPF_DIR / CONFORMANCE_DIR_NAME):
+        failures.append(
+            f"  {CONFORMANCE_DIR_NAME}: vendored vectors DIFFER from source {source_conformance} "
+            f"(re-vendor byte-for-byte + update the pin)."
+        )
     return failures
 
 
@@ -486,7 +559,8 @@ def main() -> int:
     checks = [
         ("1", "shape contract: every field this repo consumes is still declared, at the shape we consume it", check_shape_contract),
         ("2", "vendored schema sha256 matches the engine's PUBLISHED frozen sha (runs in CI)", check_upstream_pin),
-        ("3", "vendored schema byte-identical to playbook-engine source (chore signal, local-only)", check_source_parity),
+        ("2b", "vendored OPF 0.5 conformance set matches the engine's PUBLISHED pin (runs in CI)", check_conformance_pin),
+        ("3", "vendored schema + conformance byte-identical to playbook-engine source (chore signal, local-only)", check_source_parity),
     ]
     ok = True
     for code, name, fn in checks:

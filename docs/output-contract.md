@@ -1171,11 +1171,12 @@ already requires a minimum 40-character verbatim span and is not
 short-fragment-prone in the same way.
 
 **Public clause vocabulary is not confidential reasoning (issue #616).** On the
-OPF 0.3 path `ConfidentialCorpus.from_opf_document` derives `playbook_ngrams`
+OPF path `ConfidentialCorpus.from_opf_document` derives `playbook_ngrams`
 and `standard_clause_ngrams` from playbook prose authored in a separate tool,
-and `$defs.digestObservationSummary.text_summary` in
-`playbooks/opf/playbook.schema-0.3.json` carries no `minLength`. A
-`text_summary` that summarises nothing — the bare clause name repeated — is
+and the schema puts no `minLength` on that prose (then digest 2's
+`text_summary`; since issue #128 digest 4's `$defs.digestVariant.text` in
+`playbooks/opf/playbook.schema-0.5.json`, and the precedent record's texts).
+A summary that summarised nothing — the bare clause name repeated — was
 therefore schema-valid and became a blocked gram identical to the same
 document's **public** `taxonomy.entries[].label`. Against the real
 `educational-affiliation` playbook that blocked every review at

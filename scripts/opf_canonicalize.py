@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical serialization + content hashing for OPF playbooks (OPF 0.2 / 0.3).
+"""Canonical serialization + content hashing for OPF playbooks (OPF 0.5).
 
 VENDORED, byte-faithful in semantics, from the playbook-engine reference
 implementation ``playbook_engine/canonicalize.py`` (issue #143). This is the
@@ -25,29 +25,34 @@ with:
     this string, so this only affects the human-readable form, not the hash.
 
 Array element order is NOT touched — order is semantic (e.g.
-``observed_positions`` order, taxonomy entry order) and reordering would
+``evidence.precedent`` order, taxonomy entry order) and reordering would
 silently change meaning.
 
-Whole-document ``content_hash`` excludes three things so it isn't
-self-referential and isn't perturbed by non-content run/curation metadata:
+Whole-document ``content_hash`` excludes two things so it isn't
+self-referential and isn't perturbed by non-content run metadata:
 
   - the top-level ``identity`` object itself — it carries ``content_hash``
     (and the section digests), the very values being computed;
   - ``compiler.generated_at`` / ``compiler.run_id`` — wall-clock timestamp and
     run identifier; two compiles of byte-identical content a second apart (or
-    with a different ``run_id``) must hash identically;
-  - the top-level ``curation`` object (issue #147) — the attorney-pin overlay;
-    a pin surviving a recompile is not itself a change to corpus-derived
-    content, so it gets its own section digest instead.
+    with a different ``run_id``) must hash identically.
 
-A section digest (``evidence``/``posture``/``floor``/``curation``) is the hash
-of that section's own canonical bytes in isolation.
+OPF 0.5 removed the top-level ``curation`` section (engine issue #233; a 0.5
+document carrying it fails schema validation), so it is no longer excluded
+and no longer has a section digest. Everything else the 0.5 document carries
+-- ``digest``, ``manifest``, ``dossiers``, ``provenance_index`` included --
+joins ``content_hash`` like any other top-level content.
+
+A section digest (``evidence``/``posture``/``floor``) is the hash of that
+section's own canonical bytes in isolation.
 
 Hash format: ``"sha256:" + hexdigest`` (``^sha256:[0-9a-f]{64}$``).
 
 Keep in sync with playbook-engine ``playbook_engine/canonicalize.py``; the
 schema sync test (tests/test_opf_schema_sync.py) guards the schemas, and
-tests/test_opf_canonicalize.py pins a golden hash so drift here is caught.
+tests/test_opf_canonicalize.py pins a golden hash and replays the engine's
+vendored OPF 0.5 conformance vectors (playbooks/opf/conformance-0.5/), so
+drift here is caught.
 """
 
 from __future__ import annotations
@@ -58,15 +63,15 @@ import json
 from typing import Any
 
 # Top-level keys excluded from the whole-document canonical form. "identity"
-# is self-referential; "curation" (issue #147) is the attorney-pin overlay —
-# see module docstring.
-_EXCLUDED_TOP_LEVEL_KEYS = frozenset({"identity", "curation"})
+# is self-referential: it carries content_hash/section_digests, the very
+# values being computed.
+_EXCLUDED_TOP_LEVEL_KEYS = frozenset({"identity"})
 
 # `compiler` sub-keys excluded from the whole-document canonical form: run
 # metadata, not playbook content. See module docstring.
 _EXCLUDED_COMPILER_KEYS = frozenset({"generated_at", "run_id"})
 
-_SECTION_NAMES = ("evidence", "posture", "floor", "curation")
+_SECTION_NAMES = ("evidence", "posture", "floor")
 
 
 def canonicalize(value: Any) -> str:
@@ -87,7 +92,7 @@ def sha256_hex(canonical_str: str) -> str:
 def canonicalize_playbook(playbook: dict[str, Any]) -> str:
     """Return the whole-document canonical form used for ``content_hash``.
 
-    Strips the excluded top-level ``identity``/``curation`` keys and the
+    Strips the excluded top-level ``identity`` key and the
     excluded ``compiler`` sub-keys (``generated_at``, ``run_id``) from a deep
     copy of *playbook* before serializing — see module docstring for why.
     """
@@ -117,10 +122,9 @@ def section_digest(section: Any) -> str:
 
 
 def compute_section_digests(playbook: dict[str, Any]) -> dict[str, str]:
-    """Return ``{"evidence", "posture", "floor", "curation"}`` section digests.
+    """Return ``{"evidence", "posture", "floor"}`` section digests.
 
-    ``curation`` digests ``{}`` (a stable value) when the playbook carries no
-    ``curation`` key — e.g. a corpus-only compile with no pins yet.
+    Each value is ``section_digest(playbook.get(name, {}))``.
     """
     return {name: section_digest(playbook.get(name, {})) for name in _SECTION_NAMES}
 
@@ -129,7 +133,7 @@ def verify_content_hash(playbook: dict[str, Any]) -> bool:
     """True iff ``playbook['identity']['content_hash']`` matches the recomputed
     whole-document hash. False if ``identity`` or ``content_hash`` is absent.
 
-    This is the ingest-time integrity gate: an OPF 0.3 upload whose declared
+    This is the ingest-time integrity gate: an OPF 0.5 upload whose declared
     hash does not match its own canonical body must be rejected (see
     scripts/opf_load.py).
     """

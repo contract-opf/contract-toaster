@@ -39,7 +39,7 @@ import opf_prompt  # noqa: E402
 import review_knowledge  # noqa: E402
 
 FIXTURES = REPO_ROOT / "tests" / "gold-fixtures-opf"
-FULL_FIXTURE = FIXTURES / "acme-university.opf.json"
+FULL_FIXTURE = FIXTURES / "acme-university-0.5.opf.json"
 POLICY_FIXTURE = FIXTURES / "acme-university-policy-v1.json"
 
 

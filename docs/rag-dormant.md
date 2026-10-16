@@ -48,14 +48,20 @@ Primary focus at the moment is a fully working system without RAG."*
 This is the part worth understanding before reconsidering retrieval, because **the
 non-RAG depth path is already designed** and is not the same as "no depth."
 
-- **The projection.** `scripts/opf_prompt.py::_digest_block` renders the OPF `digest` —
-  positions, `historical_stance` with observation counts and strength bands, and citations.
-  It deliberately omits `full_text`, and as of `digest_version` 2 also omits each preferred
-  variation's compiler-written `rationale`. The wholesale alternative "measured ~1M tokens
-  on a real corpus and cannot reach a model at all."
+- **The projection.** `scripts/opf_prompt.py::_digest_block` renders the OPF `digest`
+  (`digest_version` 4, OPF 0.5 — the only format this repo reads since issue #128) as
+  precedent: per clause our standard, how many deals opened with it and kept it, the
+  positions of the signed texts, the signed variants with how many were reached from our
+  standard or signed as proposed, the refused asks and the openings not signed as proposed,
+  each with distinct-deal counts and a citation. It carries no stance, band or risk
+  verdict, and no per-deal precedent record: variant and ask texts are ≤ 300-character
+  summaries. The wholesale alternative "measured ~1M tokens on a real corpus and cannot
+  reach a model at all."
 - **The index.** Depth comes from exact keys, not similarity: per-clause critic dossiers
   selected deterministically from the rule ids the reviewer, the hard-rejection ledger and
-  the anomaly detectors name, and appended by orchestration (#40). An earlier design served
+  the anomaly detectors name, and appended by orchestration (#40). OPF 0.5 ships those
+  dossiers precomputed (`dossiers`, with the hard-rule `manifest`), so #40 selects rather
+  than builds them. An earlier design served
   the same keys through a model-callable `lookup_clause_evidence` tool; it was never wired
   into a request and was retired in #161.
 
