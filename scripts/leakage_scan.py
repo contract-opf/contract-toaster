@@ -515,10 +515,28 @@ _MIN_SYSTEM_PROMPT_NGRAM_CHARS = 40
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
+def _carve_restorable_texts(text: str, restorable: list[str]) -> str:
+    """`text` with every whole-token occurrence of each `restorable` text
+    replaced by a line break (issue #166), so what surrounds it -- a label, a
+    quote mark, a citation -- is split off on its own instead of fusing with
+    the restorable text's first or last sentence into a candidate gram.
+
+    Each pattern is one escaped literal between fixed lookarounds
+    (`_token_pattern`), so a substitution is linear in `text`. Raw text, not
+    normalized: the prompt renders our standard's part text verbatim, and a
+    rendering that changed it (a neutralised delimiter, #162) simply does not
+    match here and falls back to the containment exemption -- fail closed."""
+    for restorable_text in restorable:
+        if restorable_text in text:
+            text = _token_pattern(restorable_text).sub("\n", text)
+    return text
+
+
 def system_prompt_ngrams_from_blocks(
     system_blocks: list[dict[str, Any]] | None,
     *,
     exempt_texts: list[str] | tuple[str, ...] = (),
+    restorable_texts: list[str] | tuple[str, ...] = (),
 ) -> list[str]:
     """Derive check-1 n-grams from the system blocks composed for a review.
 
@@ -588,6 +606,26 @@ def system_prompt_ngrams_from_blocks(
     is self-bounding, since containing a >=40-character candidate already
     requires the exempt text to be at least that long.
 
+    `restorable_texts` (issue #166) -- our standard's part texts, which the
+    prompt QUOTES: the digest renders `Our standard: "<part>" [cite]`, or one
+    `N. "<part>"` line per part. Containment alone cannot exempt a quoted
+    multi-sentence part, because its first and last sentence pieces carry the
+    label, a quote mark or the citation, so neither is inside the part nor
+    contains it -- and a model restoring the standard in quotes, or quoting
+    it in an internal note, then fail-closes as `system_prompt_leakage`.
+    Each restorable text is therefore carved out of the block (replaced by a
+    line break) BEFORE the split, so only what surrounds it is left to become
+    a gram. Two bounds, so this exempts our standard and nothing else:
+
+      - only the texts the caller names as restorable are carved, never the
+        playbook ngrams or the operator guidance in `exempt_texts`: posture
+        prose and Floor statements keep their check-1 grams exactly as
+        before, and remain blocked by check 2 on the external channel;
+      - the same length floor and whole-token matching as the bounded
+        containment direction above: a restorable text shorter than
+        `_MIN_SYSTEM_PROMPT_NGRAM_CHARS` is never carved, so a short part
+        cannot cut a common phrase out of every instruction sentence.
+
     Returns `[]` for an empty/absent block list, so a caller that has no
     composed prompt to hand (a test constructing a corpus directly) is
     byte-identical to before this function existed.
@@ -609,6 +647,16 @@ def system_prompt_ngrams_from_blocks(
         for norm in norm_exempt
         if len(norm) >= _MIN_SYSTEM_PROMPT_NGRAM_CHARS
     ]
+    # Carved out of each block before the split; see `restorable_texts` above.
+    # Longest first, so a part that contains a shorter one is carved whole.
+    carvable = sorted(
+        {
+            text
+            for text in restorable_texts
+            if isinstance(text, str) and len(text.strip()) >= _MIN_SYSTEM_PROMPT_NGRAM_CHARS
+        },
+        key=lambda text: (-len(text), text),
+    )
 
     grams: list[str] = []
     seen: set[str] = set()
@@ -616,6 +664,7 @@ def system_prompt_ngrams_from_blocks(
         text = (block or {}).get("text") or ""
         if not isinstance(text, str):
             continue
+        text = _carve_restorable_texts(text, carvable)
         for line in text.splitlines():
             for candidate in _SENTENCE_SPLIT.split(line):
                 candidate = candidate.strip()
@@ -660,6 +709,9 @@ def _resolve_system_prompt_ngrams(
                 *standard_clause_ngrams,
                 *playbook_ngrams,
             ],
+            # Issue #166: our standard is quoted in the prompt, so it is
+            # carved out before the split, not only exempted by containment.
+            restorable_texts=standard_clause_ngrams,
         )
     )
     return resolved
