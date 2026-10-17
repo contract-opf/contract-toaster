@@ -1056,7 +1056,15 @@ def run_review(
     ledger: list[dict[str, Any]] = []
     if opf_bundle_v2 is not None:
         try:
-            knowledge = review_knowledge.resolve_knowledge(
+            # Issue #127: `knowledge_memo` rides only on a bundle
+            # `pipeline_runner._load_opf_bundle_if_active` served from its
+            # per-active-version cache of validated documents. It holds the
+            # composed blocks (and the omissions composing them recorded)
+            # for this document, keyed by every other input below, so
+            # `_assemble_opf_system_blocks` takes cached blocks on a hit. A
+            # miss, or no memo at all, is `resolve_knowledge` exactly.
+            knowledge = review_knowledge.resolve_knowledge_memoized(
+                opf_bundle_v2.get("knowledge_memo"),
                 bundle_v2=opf_bundle_v2,
                 policy=policy,
                 declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
