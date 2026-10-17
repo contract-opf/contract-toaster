@@ -1345,6 +1345,28 @@ read per-topic (each topic's own list), not from a shared blanket list, so a top
 may state a concept the topic itself is required to preserve (e.g. `limitation-of-liability`'s
 `must_preserve` "Mutual consequential damages waiver.") without self-contradicting.
 
+### Issues the playbook has no precedent for (issue #158)
+
+The playbook is one input, and for many clauses it is silent (no digest entry) or thin (precedent
+from one or two deals). The digest block shows coverage — each clause heading reads `precedent in
+<n_deals> of <corpus.n_deals> deals`, and a closing line names the digest's `uncovered_clause_types`
+as `Label (taxonomy_id)` — and the toaster's own default for those clauses is
+`scripts/opf_prompt.py`'s `SILENT_PLAYBOOK_DEFAULT`, a constant inside the cached shared prefix,
+which the administrator's standing instructions override per playbook. An issue raised under it obeys
+two citation rules, stated to the model in that same paragraph. No schema change: both values are
+already valid v3 output.
+
+- `internal_precedent_citation` is `null`. Nothing in the corpus supports the position, so there is
+  nothing to cite, and inventing a citation would put a false reference into the audit record.
+- When the clause type is on the closing no-precedent line, `playbook_topic_id` is that entry's
+  `taxonomy_id` (an uncovered type has no digest clause, so no `clause.<taxonomy_id>` id exists to
+  copy). Every taxonomy id already satisfies the v3 `playbook_topic_id` pattern (issue #672).
+
+That no precedent supports the position is said in `internal_rationale_for_footnote` when the notes
+mode asks for one, never in `external_rationale_for_footnote`: the external footnote reaches the
+counterparty, and what our playbook does or does not hold is internal. Pinned by
+`tests/test_opf_prompt.py` (checks 9–11).
+
 ## Literal-runs-only insertion and output OOXML scan
 
 Model-generated text fields — `proposed_replacement_text` and `external_rationale_for_footnote` (footnote

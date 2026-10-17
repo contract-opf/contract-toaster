@@ -700,7 +700,9 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
 
     This returns the document's own public clause vocabulary: taxonomy entry
     `id`s and `label`s, plus the `title` and `taxonomy_id` of every clause in
-    `evidence.clauses` and in the model-facing `digest.clauses`. Those
+    `evidence.clauses` and in the model-facing `digest.clauses`, and (issue
+    #158) the `label` and `taxonomy_id` of every `digest.uncovered_clause_types`
+    entry, which the digest block names on its closing no-precedent line. Those
     strings are how the model
     is *asked* to refer to a clause -- `opf_prompt._digest_clause_block`
     renders `title` to the model as that clause's heading -- so they are
@@ -740,6 +742,12 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
             if isinstance(clause, dict):
                 _add(clause.get("title"))
                 _add(clause.get("taxonomy_id"))
+
+    if isinstance(digest, dict) and isinstance(digest.get("uncovered_clause_types"), list):
+        for entry in digest["uncovered_clause_types"]:
+            if isinstance(entry, dict):
+                _add(entry.get("label"))
+                _add(entry.get("taxonomy_id"))
 
     return vocabulary
 

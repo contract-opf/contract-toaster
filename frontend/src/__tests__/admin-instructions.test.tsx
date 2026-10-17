@@ -40,6 +40,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminInstructions from '../AdminInstructions';
+import { UNCOVERED_CLAUSES_HINT_COPY } from '../guidancePrecedenceCopy';
 
 vi.mock('../auth', () => ({
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -189,6 +190,26 @@ describe('AdminInstructions — precedence copy', () => {
     expect(hint).toContain("govern over the playbook's positions");
     expect(hint).toContain('hard requirements');
     expect(hint).toContain('The instructions box on the Review screen still wins for a single review');
+    expect(hint).not.toContain('will override');
+  });
+
+  it('tells the administrator the instructions can direct clauses the playbook does not cover (issue #158)', async () => {
+    stubRoutes();
+    render(<AdminInstructions playbookId="eiaa" playbookDisplayName="EIAA" />);
+
+    const textarea = await screen.findByTestId('admin-instructions-text');
+    const describedBy = textarea.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const hint = document.getElementById(describedBy!.split(' ')[0]!)!.textContent ?? '';
+
+    // The shared constant, verbatim and once -- not a restated copy.
+    expect(hint.split(UNCOVERED_CLAUSES_HINT_COPY)).toHaveLength(2);
+    expect(UNCOVERED_CLAUSES_HINT_COPY).toContain('set the direction for clauses this playbook has little or no precedent for');
+    // It sits with the precedence copy, before the leave-blank sentence.
+    expect(hint.indexOf(UNCOVERED_CLAUSES_HINT_COPY)).toBeLessThan(
+      hint.indexOf('Leave blank to let the playbook speak for itself.'),
+    );
     expect(hint).not.toContain('will override');
   });
 });

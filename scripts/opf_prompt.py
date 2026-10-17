@@ -74,7 +74,8 @@ return type: this function returns `list[str]`.
 ## What is excluded, and why nothing has to special-case it
 
 `compose_opf_system_blocks` only ever reads these paths off the input doc:
-`posture.system_prompt`, `digest` (`clauses` and `corpus`), `floor.invariants`,
+`posture.system_prompt`, `digest` (`clauses`, `corpus` and, since issue #158,
+`uncovered_clause_types`), `floor.invariants`,
 `manifest.hard_rules` (issue #163: each rule's id, statement, clause link,
 `required_presence`, `condition` and `fallback_language`, plus the public
 `evidence.clauses[].title` its clause ids resolve to -- never its
@@ -127,6 +128,18 @@ a warning nobody reads.
 The guards' BEHAVIOR is unchanged, and so is this module's purity in the sense
 that matters: the returned blocks are byte-identical to what they were, still a
 deterministic function of the input. Only stderr is new.
+
+## Coverage, and the silent-playbook default (issue #158)
+
+The playbook is one input to a review, and for many clauses -- especially on
+counterparty paper -- it has thin precedent or none. Digest 4 makes that
+legible and this module renders it: each clause heading states `precedent
+in <n_deals> of <corpus.n_deals> deals`, and one closing line names the
+`uncovered_clause_types` (recognised types with no precedent, each with the
+taxonomy id an issue on it cites). What to do then is the toaster's own
+direction, not the playbook's: `SILENT_PLAYBOOK_DEFAULT`, a constant inside
+DIGEST_INTRO (so inside the shared prefix, #148), which the administrator's
+standing instructions override per playbook. It adds no settings surface.
 
 ## Precedent stays descriptive
 
@@ -299,6 +312,42 @@ def _posture_block(opf_doc: dict, overrides: Optional[dict] = None) -> str | Non
     return str(system_prompt)
 
 
+#: The toaster's own default for a clause the playbook is silent or thin on
+#: (issue #158). The playbook reports what it knows and how much -- each
+#: clause heading's "precedent in N of M deals" and the closing
+#: uncovered-types line -- and stops there; what to do when it knows little
+#: is this direction, overridable per playbook by the administrator's
+#: standing instructions (`primary_review_pass.STANDING_INSTRUCTIONS_INTRO`,
+#: sent after the document). A CONSTANT with no request-specific value in
+#: it, so it rides inside DIGEST_INTRO in the shared prefix both passes
+#: cache byte-identically (#148, tests/test_shared_prefix_byte_identical.py).
+#: The citation sentence is the prompt half of the output contract's rule
+#: (docs/output-contract.md -> "Issues the playbook has no precedent for"):
+#: no invented `internal_precedent_citation`, and an uncovered clause type
+#: is cited by its taxonomy id. The "no precedent" remark goes to the
+#: INTERNAL rationale only: the external footnote reaches the counterparty
+#: and must not disclose what our playbook does or does not hold.
+#: The frontend's standing-instructions hint
+#: (`frontend/src/guidancePrecedenceCopy.ts`,
+#: `UNCOVERED_CLAUSES_HINT_COPY`) cross-references this text (issue #484's
+#: rule); change the two together.
+SILENT_PLAYBOOK_DEFAULT = (
+    "Where the playbook is silent or thin. Each clause heading below says in how many "
+    "of the corpus's deals that clause has precedent, and a closing line, when there is "
+    "one, lists the recognised clause types with no precedent at all. Where a clause in the document "
+    "has no entry here, or its precedent comes from only one or two deals, the playbook "
+    "is silent or thin: do not treat that silence as acceptance or as rejection. "
+    "Compare the term with our standard language when the playbook has one, and with "
+    "the nearest clause it does cover. Raise an issue only where the term is materially "
+    "worse for us than that standard or than customary drafting for this agreement "
+    "type, and say that no precedent supports the position in the internal rationale "
+    "when one is asked for, never in the external one. An issue raised on that basis "
+    "cites no precedent: its internal_precedent_citation is null, and when its clause "
+    "type is on the closing no-precedent line, its playbook_topic_id is the id shown "
+    "in parentheses beside that type. The administrator's standing instructions may give "
+    "different direction for these clauses; where they do, they govern."
+)
+
 DIGEST_INTRO = (
     "PLAYBOOK PRECEDENT (descriptive, not prescriptive).\n"
     "This is precedent: what we have signed, and what we have refused, in past deals of "
@@ -331,7 +380,8 @@ DIGEST_INTRO = (
     "where the entry was signed or proposed.\n"
     "Each quoted entry is a summary of at most 300 characters ending on a sentence "
     "boundary, not necessarily the whole clause: do not present it as quoted in full "
-    "from the corpus."
+    "from the corpus.\n"
+    + SILENT_PLAYBOOK_DEFAULT
 )
 
 class PromptCompositionError(ValueError):
@@ -560,12 +610,19 @@ def _positions_line(clause: dict, where: str) -> str | None:
     return f"Positions of the {_plural(total, 'signed deal')}: {', '.join(parts)}."
 
 
-def _digest_clause_block(clause: dict) -> str:
+def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str:
     """One digest-4 clause, rendered as plain facts under plain headers.
 
     Text, not JSON: a raw dump would hand the model field names
     (`refused_asks`, `changed_openings`) without the one thing that matters
     about them -- that neither is ever replacement language.
+
+    `corpus_n_deals` is `digest.corpus.n_deals` (None when it is not a
+    count, which `_corpus_line` already records). With it, the heading
+    states the clause's coverage -- `precedent in <n_deals> of
+    <corpus.n_deals> deals` (issue #158) -- so a clause seen in one deal of
+    forty is legibly thin rather than read as settled; DIGEST_INTRO's
+    silent-playbook paragraph says what to do then.
     """
     clause_id = clause.get("id")
     where = f"clause {clause_id!r}"
@@ -573,7 +630,13 @@ def _digest_clause_block(clause: dict) -> str:
     title = clause.get("title") or clause.get("taxonomy_id") or clause.get("id")
     if not clause.get("title"):
         _omit("clause title — headed by taxonomy_id/id instead", where)
-    lines.append(f"## {title}  [clause_id: {clause_id}]")
+    n_deals = _count(clause.get("n_deals"), "n_deals", where)
+    coverage = (
+        f" — precedent in {n_deals} of {_plural(corpus_n_deals, 'deal')}"
+        if n_deals is not None and corpus_n_deals is not None
+        else ""
+    )
+    lines.append(f"## {title}  [clause_id: {clause_id}]{coverage}")
 
     our_standard = clause.get("our_standard")
     parts = our_standard.get("parts") if isinstance(our_standard, dict) else None
@@ -607,7 +670,6 @@ def _digest_clause_block(clause: dict) -> str:
 
     variants = _entry_list(clause, "signed_variants", where)
     n_standard = _count(clause.get("n_signed_standard"), "n_signed_standard", where)
-    n_deals = _count(clause.get("n_deals"), "n_deals", where)
     if n_standard is not None and n_deals is not None:
         header = (
             f"\nSigned language on record ({n_standard} of {_plural(n_deals, 'deal')} "
@@ -667,6 +729,60 @@ def _corpus_line(digest: dict) -> str | None:
     return line + "."
 
 
+def _corpus_n_deals(digest: dict) -> int | None:
+    """`digest.corpus.n_deals` when it is a count, else None (unrecorded:
+    `_corpus_line` records the same defect once)."""
+    corpus = digest.get("corpus")
+    n_deals = corpus.get("n_deals") if isinstance(corpus, dict) else None
+    if isinstance(n_deals, bool) or not isinstance(n_deals, int):
+        return None
+    return n_deals
+
+
+#: Lead of the closing coverage line (issue #158). DIGEST_INTRO's
+#: silent-playbook paragraph refers to it as "the closing no-precedent line".
+UNCOVERED_LINE_LEAD = "Recognised clause types with no precedent in this playbook: "
+
+
+def _uncovered_line(digest: dict) -> str | None:
+    """`Recognised clause types with no precedent in this playbook: Audit
+    Rights (audit_rights), Term (term).` -- or None when the list is empty
+    (an empty list is omitted, never shown as an empty header).
+
+    `uncovered_clause_types` is every recognised (active or custom) taxonomy
+    entry with no evidence, uncapped and sorted by the engine. The id in
+    parentheses is what an issue on such a clause cites as its
+    `playbook_topic_id` (DIGEST_INTRO says so; docs/output-contract.md).
+    """
+    entries = digest.get("uncovered_clause_types")
+    if entries is None:
+        _omit("uncovered_clause_types — absent; the block does not say which clause types have no precedent", "digest")
+        return None
+    if not isinstance(entries, list):
+        _omit(
+            f"uncovered_clause_types — value is a {type(entries).__name__}, not a list; "
+            "the no-precedent line is not rendered",
+            "digest",
+        )
+        return None
+    items: list[str] = []
+    for index, entry in enumerate(entries):
+        where = f"digest / uncovered_clause_types[{index}]"
+        taxonomy_id = entry.get("taxonomy_id") if isinstance(entry, dict) else None
+        if not isinstance(taxonomy_id, str) or not taxonomy_id:
+            _omit("uncovered clause type — entry carries no taxonomy_id; not rendered", where)
+            continue
+        label = entry.get("label")
+        if not isinstance(label, str) or not label:
+            _omit("uncovered clause type label — absent; rendered by its taxonomy_id alone", where)
+            items.append(taxonomy_id)
+            continue
+        items.append(f"{label} ({taxonomy_id})")
+    if not items:
+        return None
+    return f"{UNCOVERED_LINE_LEAD}{', '.join(items)}."
+
+
 def _digest_block(opf_doc: dict) -> str:
     """The model-facing knowledge block, built from the OPF 0.5 `digest`
     (digest_version 4, the only one `scripts/opf_load.py` accepts).
@@ -682,10 +798,15 @@ def _digest_block(opf_doc: dict) -> str:
             "on model judgement alone while lineage still recorded a governing playbook."
         )
     digest = _strip_x_keys(digest)
-    body = "\n\n".join(_digest_clause_block(c) for c in digest["clauses"] if isinstance(c, dict))
+    corpus_n_deals = _corpus_n_deals(digest)
+    body = "\n\n".join(
+        _digest_clause_block(c, corpus_n_deals) for c in digest["clauses"] if isinstance(c, dict)
+    )
     corpus = _corpus_line(digest)
     head = f"{DIGEST_INTRO}\n{corpus}" if corpus else DIGEST_INTRO
-    return f"{head}\n\n{body}"
+    uncovered = _uncovered_line(digest)
+    tail = f"\n\n{uncovered}" if uncovered else ""
+    return f"{head}\n\n{body}{tail}"
 
 
 def resolve_floor_invariants(opf_doc: dict, overrides: Optional[dict] = None) -> list[dict[str, Any]]:  # noqa: UP045
