@@ -41,13 +41,10 @@ only while no manifest text reached a prompt.
      NOT blocked (contract vocabulary). End to end, a critic whose
      `verdict_summary` echoes a manifest statement fails the review closed
      as `leakage_detected`. The multi-sentence property is scoped to the
-     manifest block because the composed prompt as a whole does not have
-     it: the digest block renders our standard inside quote marks, which
-     turns the first and last sentence of each quoted part of a
-     multi-sentence standard into check-1 grams, and with the standard in
-     several parts a quoted faithful restoration or quoted internal note
-     fails closed (pre-existing; follow-up: digest standard quotes vs
-     check-1 exemption).
+     manifest block here; the digest block renders our standard inside
+     quote marks, and the whole composed prompt has it only because issue
+     #166 carves each standard part out before the check-1 split
+     (`tests/test_leakage_quoted_standard_166.py` pins that).
 
 ## Fixture reachability
 
@@ -203,9 +200,10 @@ def _with_standard(doc: dict[str, Any], parts: tuple[str, ...]) -> dict[str, Any
     standard, and the digest's `our_standard.parts` (`digest_standard`: each
     part's id and text, in order). The engine cross-check in section 1
     checks both. With the digest rebuilt, the composed prompt quotes the
-    standard there (follow-up: digest standard quotes vs check-1
-    exemption), which is why the multi-sentence leakage test is scoped to
-    the grams the manifest block itself contributes."""
+    standard there; issue #166's carve keeps those quoted parts out of
+    check 1 (`tests/test_leakage_quoted_standard_166.py`), and the
+    multi-sentence leakage test below stays scoped to the grams the
+    manifest block itself contributes."""
     (clause,) = [c for c in doc["evidence"]["clauses"] if c["id"] == "clause.indemnification"]
     template = clause["our_standard"]["parts"][0]
     clause["our_standard"]["parts"] = [
@@ -674,14 +672,11 @@ class TestManifestLeakage(unittest.TestCase):
         internal note both pass, while a rendered rule line still blocks.
 
         Scoped to the manifest block's own grams -- the block exactly as the
-        review composes it, with the corpus's own exemptions -- because the
-        whole composed prompt does not have this property: the document's
-        engine-consistent digest renders the standard inside quote marks, so
-        the first and last sentence of each quoted part are check-1 grams
-        there, and with two parts the quoted restoration and the quoted
-        internal note below both fail closed as `system_prompt_leakage`
-        (pre-existing; follow-up: digest standard quotes vs check-1
-        exemption)."""
+        review composes it, with the corpus's own exemptions. The digest
+        renders the same standard inside quote marks; the whole composed
+        prompt has this property too only because issue #166 carves each
+        quoted part out before the split, which
+        `tests/test_leakage_quoted_standard_166.py` pins."""
         single = (" ".join(MULTI_SENTENCE_PARTS),)
         for parts in (single, MULTI_SENTENCE_PARTS):
             with self.subTest(parts=len(parts)):
