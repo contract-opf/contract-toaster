@@ -70,9 +70,13 @@ never by tenant name.
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import hashlib
 import json
 import sys
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Sequence  # noqa: UP035
@@ -252,6 +256,31 @@ def resolve_knowledge(
     `opf_prompt.PromptCompositionError` when a declared playbook-mode document
     has no digest to render.
     """
+    knowledge, _omissions = _resolve_knowledge(
+        bundle_v2=bundle_v2,
+        policy=policy,
+        declared_mode=declared_mode,
+        accept_stub_basis=accept_stub_basis,
+        accept_empty_posture=accept_empty_posture,
+        entity_roster=entity_roster,
+    )
+    return knowledge
+
+
+def _resolve_knowledge(
+    *,
+    bundle_v2: dict,
+    policy: Optional[dict],  # noqa: UP045
+    declared_mode: str,
+    accept_stub_basis: bool,
+    accept_empty_posture: bool,
+    entity_roster: Optional[Sequence[str]],  # noqa: UP045
+) -> tuple[ReviewKnowledge, dict[str, list]]:
+    """`resolve_knowledge`'s body, also returning the raw `{kind: [count,
+    where]}` omission record `compose_opf_system_blocks` filled in -- the
+    shape its stderr warning is built from, which `ReviewKnowledge` itself
+    narrows to counts. `resolve_knowledge_memoized` keeps it beside the
+    knowledge so a memo hit can replay that warning (issue #127)."""
     if declared_mode == MODE_V1_PROJECTION:
         raise KnowledgeRefusal(
             "declared_mode 'v1_projection' does not resolve through this seam: the v1 path "
@@ -352,7 +381,7 @@ def resolve_knowledge(
         omissions_out=omissions,
     )
 
-    return ReviewKnowledge(
+    knowledge = ReviewKnowledge(
         mode=declared_mode,
         opf_doc=opf_doc,
         overrides=overrides,
@@ -363,3 +392,180 @@ def resolve_knowledge(
         accepted_stub_basis=accepted_stub_basis,
         prompt_omissions={kind: count for kind, (count, _where) in omissions.items()},
     )
+    return knowledge, omissions
+
+
+# --- Per-document memo (issue #127) ----------------------------------------
+
+
+class KnowledgeMemo:
+    """Resolved knowledge for ONE validated OPF document, memoised (issue #127).
+
+    Composition is a deterministic function of its inputs, and between two
+    reviews of the same active playbook version only the per-review inputs
+    can vary -- the document cannot. So `backend/src/pipeline_runner.py`
+    keeps one of these beside each validated document in its per-version
+    cache and hands it to the spine on the bundle (`knowledge_memo`), and
+    `resolve_knowledge_memoized` serves the already-composed POSTURE /
+    BINDING / DIGEST / MANIFEST / GUIDANCE / CONTEXT blocks from it instead
+    of re-rendering the digest on every review.
+
+    Each entry is the knowledge AND the raw omission record its composition
+    produced, stored together: `prompt_omissions` reaches the review's
+    lineage, and the raw record is what a hit replays as the stderr warning,
+    so a hit records exactly what a miss would have.
+
+    Scoped to one document by its owner, so nothing here can pair a memo
+    with the wrong document; `knowledge_memo_key` also carries the
+    document's verified `identity.content_hash` as a second check. Every
+    OTHER input `resolve_knowledge` reads is part of the key, so a change to
+    the policy or the entity roster misses and composes afresh. Only a
+    successful resolution is stored: a `KnowledgeRefusal` or
+    `PromptCompositionError` propagates and is recomputed next time.
+    Entries hold no document, policy or overrides reference -- a hit binds
+    the calling review's own -- so the memo neither pins a review's copy in
+    memory nor lets one review's mutation reach the next.
+
+    Bounded (LRU) and thread-safe: the runner may serve concurrent reviews.
+    """
+
+    MAX_ENTRIES = 4
+
+    def __init__(self, max_entries: int = MAX_ENTRIES) -> None:
+        self._max_entries = max_entries
+        self._entries: OrderedDict[str, tuple[ReviewKnowledge, dict[str, list]]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> tuple[ReviewKnowledge, dict[str, list]] | None:
+        with self._lock:
+            hit = self._entries.get(key)
+            if hit is not None:
+                self._entries.move_to_end(key)
+            return hit
+
+    def put(self, key: str, knowledge: ReviewKnowledge, omissions: dict[str, list]) -> None:
+        with self._lock:
+            self._entries[key] = (knowledge, omissions)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+def knowledge_memo_key(
+    *,
+    opf_doc: dict,
+    overrides: Optional[dict],  # noqa: UP045
+    policy: Optional[dict],  # noqa: UP045
+    declared_mode: str,
+    accept_stub_basis: bool,
+    accept_empty_posture: bool,
+    entity_roster: Optional[Sequence[str]],  # noqa: UP045
+) -> str | None:
+    """A digest of every `resolve_knowledge` input, the document standing in
+    by its verified `identity.content_hash`.
+
+    None -- resolve without the memo -- when the document carries no content
+    hash, or an input does not serialise to JSON: the key is never a lossy
+    rendering of what was composed.
+    """
+    content_hash = (opf_doc.get("identity") or {}).get("content_hash")
+    if not isinstance(content_hash, str) or not content_hash:
+        return None
+    try:
+        canonical = json.dumps(
+            {
+                "content_hash": content_hash,
+                "overrides": overrides,
+                "policy": policy,
+                "declared_mode": declared_mode,
+                "accept_stub_basis": bool(accept_stub_basis),
+                "accept_empty_posture": bool(accept_empty_posture),
+                "entity_roster": list(entity_roster) if entity_roster is not None else None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def resolve_knowledge_memoized(
+    memo: Optional[KnowledgeMemo],  # noqa: UP045
+    *,
+    bundle_v2: dict,
+    policy: Optional[dict],  # noqa: UP045
+    declared_mode: str,
+    accept_stub_basis: bool = False,
+    accept_empty_posture: bool = False,
+    entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
+) -> ReviewKnowledge:
+    """`resolve_knowledge`, served from `memo` when it already holds the
+    answer for these inputs (issue #127). `memo=None` is exactly
+    `resolve_knowledge`.
+
+    A hit replays the stored omission warning and returns the stored
+    knowledge bound to THIS review's document, overrides and policy, so its
+    `blocks`, `content_hash()` and `lineage_record()` are the ones a miss
+    would have produced, and downstream reads of `opf_doc` see this review's
+    own copy.
+    """
+    opf_doc = bundle_v2.get("opf") or {}
+    overrides = bundle_v2.get("overrides")
+    key = (
+        None
+        if memo is None
+        else knowledge_memo_key(
+            opf_doc=opf_doc,
+            overrides=overrides,
+            policy=policy,
+            declared_mode=declared_mode,
+            accept_stub_basis=accept_stub_basis,
+            accept_empty_posture=accept_empty_posture,
+            entity_roster=entity_roster,
+        )
+    )
+    if memo is None or key is None:
+        return resolve_knowledge(
+            bundle_v2=bundle_v2,
+            policy=policy,
+            declared_mode=declared_mode,
+            accept_stub_basis=accept_stub_basis,
+            accept_empty_posture=accept_empty_posture,
+            entity_roster=entity_roster,
+        )
+    hit = memo.get(key)
+    if hit is not None:
+        stored, omissions = hit
+        opf_prompt._report_omissions(copy.deepcopy(omissions))
+        return dataclasses.replace(
+            stored,
+            opf_doc=opf_doc,
+            overrides=overrides,
+            policy=policy,
+            prompt_omissions=dict(stored.prompt_omissions),
+        )
+    knowledge, omissions = _resolve_knowledge(
+        bundle_v2=bundle_v2,
+        policy=policy,
+        declared_mode=declared_mode,
+        accept_stub_basis=accept_stub_basis,
+        accept_empty_posture=accept_empty_posture,
+        entity_roster=entity_roster,
+    )
+    memo.put(
+        key,
+        dataclasses.replace(
+            knowledge,
+            opf_doc=None,
+            overrides=None,
+            policy=None,
+            prompt_omissions=dict(knowledge.prompt_omissions),
+        ),
+        copy.deepcopy(omissions),
+    )
+    return knowledge

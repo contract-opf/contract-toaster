@@ -117,6 +117,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import canonicalize  # noqa: E402
 import document_injection_scan  # noqa: E402
 import playbook_registry  # noqa: E402
+import review_knowledge  # noqa: E402
 import review_spine  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -632,9 +633,14 @@ def _fail_review(review_id: str, dynamodb_resource: Any) -> None:
 #: has served. A new activation or a rollback changes the active row and
 #: therefore the key, so invalidation needs no hook into `playbook_versions`;
 #: an entry for a version no longer active is never asked for again and ages
-#: out.
+#: out. Each entry also carries that document's `review_knowledge.KnowledgeMemo`
+#: (#127 item 2): the composed system blocks, which are therefore invalidated
+#: by exactly the same activation/rollback key change, and dropped with the
+#: document whenever the entry is.
 _OPF_CACHE_MAX_ENTRIES = 8
-_opf_cache: OrderedDict[tuple[str, str, str], dict[str, Any]] = OrderedDict()
+_opf_cache: OrderedDict[
+    tuple[str, str, str], tuple[dict[str, Any], review_knowledge.KnowledgeMemo]
+] = OrderedDict()
 _opf_cache_lock = threading.Lock()
 
 
@@ -671,11 +677,15 @@ def _stored_object_still_matches(s3_client: Any, bucket: str, storage_key: str) 
         return False
 
 
-def _load_validated_opf(active_item: dict[str, Any], s3_client: Any) -> dict[str, Any]:
+def _load_validated_opf(
+    active_item: dict[str, Any], s3_client: Any
+) -> tuple[dict[str, Any], review_knowledge.KnowledgeMemo | None]:
     """The validated OPF document for `active_item`, from cache when the
     same active version was validated before in this process, otherwise
     fetched and re-validated through `playbook_upload._load_opf_from_bytes`
-    exactly as before.
+    exactly as before -- and the `KnowledgeMemo` of composed system blocks
+    that belongs to that cached document, or None when the document is not
+    cacheable (the spine then composes afresh, exactly as without a memo).
 
     Fail-closed is unchanged: a miss runs the full path, and a document is
     cached ONLY after it validated AND the fetched bytes hashed to the digest
@@ -709,8 +719,10 @@ def _load_validated_opf(active_item: dict[str, Any], s3_client: Any) -> dict[str
         with _opf_cache_lock:
             _opf_cache.pop(key, None)
         cached = None
+    memo: review_knowledge.KnowledgeMemo | None = None
     if cached is not None:
-        opf_doc = copy.deepcopy(cached)
+        opf_doc = copy.deepcopy(cached[0])
+        memo = cached[1]
         cache_hit = True
     else:
         raw_bytes = s3_client.get_object(Bucket=bucket, Key=storage_key)["Body"].read()
@@ -718,8 +730,9 @@ def _load_validated_opf(active_item: dict[str, Any], s3_client: Any) -> dict[str
         cache_hit = False
         expected = _storage_key_digest(storage_key)
         if expected and hashlib.sha256(raw_bytes).hexdigest() == expected:
+            memo = review_knowledge.KnowledgeMemo()
             with _opf_cache_lock:
-                _opf_cache[key] = copy.deepcopy(opf_doc)
+                _opf_cache[key] = (copy.deepcopy(opf_doc), memo)
                 _opf_cache.move_to_end(key)
                 while len(_opf_cache) > _OPF_CACHE_MAX_ENTRIES:
                     _opf_cache.popitem(last=False)
@@ -730,7 +743,7 @@ def _load_validated_opf(active_item: dict[str, Any], s3_client: Any) -> dict[str
         cache_hit,
         int((time.monotonic() - started) * 1000),
     )
-    return opf_doc
+    return opf_doc, memo
 
 
 def _load_opf_bundle_if_active(
@@ -759,7 +772,9 @@ def _load_opf_bundle_if_active(
     review-run time. Issue #127 caches the validated result per active
     version in-process (`_load_validated_opf`): the same document is not
     re-validated on every review, and a hit is only ever a document that
-    passed this full path for the bytes the row says were activated.
+    passed this full path for the bytes the row says were activated. The
+    same entry carries the document's composed system blocks
+    (`knowledge_memo`, #127 item 2), so they are invalidated with it.
 
     Issue #676 rides on that same reuse: `_load_opf_from_bytes` also
     enforces the spec-normative minimums
@@ -809,11 +824,18 @@ def _load_opf_bundle_if_active(
     artifact_kind = active_item.get("artifact_kind") or ""
     if not artifact_kind.startswith("opf-"):
         return None
-    opf_doc = _load_validated_opf(active_item, s3_client)
+    opf_doc, knowledge_memo = _load_validated_opf(active_item, s3_client)
     return {
         "opf_bundle_v2": {
             "opf": opf_doc,
             "overrides": None,
+            # Issue #127 item 2: the composed system blocks for this cached
+            # document (`review_knowledge.KnowledgeMemo`), shared -- never
+            # copied -- across every review of this active version, so
+            # `review_spine.run_review` composes the digest once per version
+            # rather than once per review. None when the document was not
+            # cacheable; the spine then composes it afresh.
+            "knowledge_memo": knowledge_memo,
             # Issue #479 fix round 2: the activated row's own recorded
             # operator decision (main.py's upload route -> `main.py`:1109 ->
             # `playbook_versions.record_playbook_version_upload`) MUST ride
