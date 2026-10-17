@@ -67,6 +67,18 @@ Fix round 2 (the reviewer's remaining finding):
      each and the critic's issue is added once. At `reconcile()` and end to
      end.
 
+Issue #156 (the #138 reviewer's observation):
+
+ 13. A guard-1 addition never ships under a summary that contradicts it. The
+     critic concludes ACCEPT ("No changes identified.") and drops the
+     primary's hard rejection: the review is REQUEST_CHANGE, so its
+     `verdict_summary` is replaced by a fixed, escaped sentence naming the
+     count of retained hard rejections -- no clause text, no rule id, no
+     rule description. When the critic itself requested changes its summary
+     is kept and the sentence appended; with nothing retained and no fire
+     appended the critic's summary is untouched. An appended detector fire is
+     named the same way. At `reconcile()` and end to end.
+
 ## Fixture fidelity
 
 Every end-to-end case drives `review_spine.run_review` with the shipped
@@ -94,6 +106,7 @@ Exit codes: 0 = pass, 1 = fail
 
 from __future__ import annotations
 
+import html
 import io
 import json
 import os
@@ -1130,6 +1143,171 @@ def test_a_dropped_issue_never_pairs_end_to_end(failures: list[str]) -> None:
             failures.append(f"[12b] {label}: the primary's edit shipped on its own")
 
 
+
+# ---------------------------------------------------------------------------
+# 13. A guard-1 addition never ships under a no-change summary (issue #156).
+# ---------------------------------------------------------------------------
+
+NO_CHANGE_SUMMARY = "No changes identified."
+CRITIC_CHANGE_SUMMARY = "One issue identified in Section 9 requiring attention."
+
+
+def _check_guard_one_summary(
+    row: str, label: str, summary: Any, expected: str | None, failures: list[str]
+) -> None:
+    """`summary` must be exactly `expected`, read as a change, and carry no
+    clause text, rule id, rule description or markup."""
+    if summary != expected:
+        failures.append(f"[{row}] {label}: verdict_summary {summary!r}, expected {expected!r}")
+        return
+    if not isinstance(summary, str):
+        return
+    if "no change" in summary.lower():
+        failures.append(f"[{row}] {label}: the summary still reads as no-change: {summary!r}")
+    for text in (_SEC8_DRAFT_TEXT, TEXT_A, TEXT_B, HARD_RULE_ID, _hard_rule_description()):
+        if text in summary:
+            failures.append(f"[{row}] {label}: the summary carries clause or rule text: {summary!r}")
+    if html.escape(summary) != summary:
+        failures.append(f"[{row}] {label}: the summary is not markup-free: {summary!r}")
+
+
+def test_a_retained_hard_rejection_never_ships_a_no_change_summary_end_to_end(
+    failures: list[str],
+) -> None:
+    """The ticket's row: the shape of [2i], through the REAL critic pass and
+    the real stage-5 gates (the fixed sentence is leakage-scanned like any
+    summary)."""
+    docx_bytes, block_id = _draft()
+    primary = _response([_hard_issue()], [_replace_sec8(block_id, TEXT_A)])
+    critic = _response(
+        [], [], critic_delta=_delta([("I1", "DROP")]), summary=NO_CHANGE_SUMMARY
+    )
+    result = _run(docx_bytes, primary, [critic])
+    if result.get("status") != "OK" or result.get("decision") != "REQUEST_CHANGE":
+        failures.append(
+            f"[13a] setup: expected a completed REQUEST_CHANGE; got status="
+            f"{result.get('status')!r} decision={result.get('decision')!r} "
+            f"reason={result.get('reason')!r}"
+        )
+        return
+    expected = (
+        "Changes are requested: 1 playbook hard rejection from the first review "
+        "was retained after the second review dropped it."
+    )
+    _check_guard_one_summary("13a", "critic ACCEPT, one retained", result.get("summary"), expected, failures)
+
+
+def test_a_guard_one_addition_names_itself_in_reconcile(failures: list[str]) -> None:
+    hard_ids = recon.hard_rejection_rule_ids(_load_bundle())
+    two_hard = json.loads(
+        _response(
+            [
+                _sec8_issue("I1", playbook_topic_id=HARD_RULE_ID, section_ref="sec-8"),
+                _sec8_issue("I2", playbook_topic_id=HARD_RULE_ID, section_ref="sec-12"),
+            ],
+            [],
+        )
+    )
+    one_hard = json.loads(_response([_hard_issue()], []))
+    soft = json.loads(_response([_sec8_issue()], []))
+    accept_none = json.loads(_response([], []))
+    other = _sec8_issue("I1", playbook_topic_id="assignment", section_ref="sec-9")
+    # The critic raising the fire's own (topic, section_ref) itself, as a
+    # model-authored issue, so guard 1 has nothing to append.
+    carried_fire = _sec8_issue(
+        "I1",
+        playbook_topic_id=_fire()["playbook_topic_id"],
+        section_ref=_fire()["section_ref"],
+    )
+
+    def critic(issues: list[dict[str, Any]], drops: list[str], summary: str | None) -> dict:
+        return json.loads(
+            _response(
+                issues, [], critic_delta=_delta([(k, "DROP") for k in drops]), summary=summary
+            )
+        )
+
+    one_retained = (
+        "Changes are requested: 1 playbook hard rejection from the first review "
+        "was retained after the second review dropped it."
+    )
+    cases: list[tuple[str, dict, dict, list, str | None, str]] = [
+        (
+            "critic ACCEPT, two retained",
+            two_hard,
+            critic([], ["I1", "I2"], NO_CHANGE_SUMMARY),
+            [],
+            "Changes are requested: 2 playbook hard rejections from the first review "
+            "were retained after the second review dropped them.",
+            "REQUEST_CHANGE",
+        ),
+        (
+            "critic ACCEPT with a null summary, one retained",
+            one_hard,
+            critic([], ["I1"], None),
+            [],
+            one_retained,
+            "REQUEST_CHANGE",
+        ),
+        (
+            "critic REQUEST_CHANGE, one retained: the critic's summary is kept",
+            one_hard,
+            critic([other], ["I1"], CRITIC_CHANGE_SUMMARY),
+            [],
+            f"{CRITIC_CHANGE_SUMMARY} {one_retained}",
+            "REQUEST_CHANGE",
+        ),
+        (
+            "critic ACCEPT, a detector fire appended",
+            accept_none,
+            critic([], [], NO_CHANGE_SUMMARY),
+            [_fire()],
+            "Changes are requested: 1 playbook Floor invariant was judged violated.",
+            "REQUEST_CHANGE",
+        ),
+        (
+            "critic ACCEPT, one retained and a detector fire appended",
+            one_hard,
+            critic([], ["I1"], NO_CHANGE_SUMMARY),
+            [_fire()],
+            "Changes are requested: 1 playbook hard rejection from the first review "
+            "was retained after the second review dropped it; 1 playbook Floor "
+            "invariant was judged violated.",
+            "REQUEST_CHANGE",
+        ),
+        (
+            "critic ACCEPT, a non-hard issue dropped: the summary is untouched",
+            soft,
+            critic([], ["I1"], NO_CHANGE_SUMMARY),
+            [],
+            NO_CHANGE_SUMMARY,
+            "ACCEPT",
+        ),
+        (
+            "critic REQUEST_CHANGE carrying the fire itself: nothing appended",
+            accept_none,
+            critic([carried_fire], [], CRITIC_CHANGE_SUMMARY),
+            [_fire()],
+            CRITIC_CHANGE_SUMMARY,
+            "REQUEST_CHANGE",
+        ),
+    ]
+    for label, primary, critic_result, fires, expected, decision in cases:
+        result = recon.reconcile(
+            primary_result=primary,
+            critic_result=critic_result,
+            detector_fires=fires,
+            hard_rejection_rule_ids=hard_ids,
+        )
+        if result["decision"] != decision:
+            failures.append(f"[13b] {label}: decision {result['decision']!r}, expected {decision!r}")
+        summary = result.get("verdict_summary")
+        if expected in (NO_CHANGE_SUMMARY, CRITIC_CHANGE_SUMMARY):
+            if summary != expected:
+                failures.append(f"[13b] {label}: the critic's summary was rewritten: {summary!r}")
+            continue
+        _check_guard_one_summary("13b", label, summary, expected, failures)
+
 TESTS = [
     test_the_redline_carries_the_critics_text,
     test_the_override_carries_both_versions_and_the_reason,
@@ -1149,6 +1327,8 @@ TESTS = [
     test_a_dropped_floor_invariant_issue_is_retained_in_an_opf_review,
     test_a_dropped_issue_never_pairs_in_reconcile,
     test_a_dropped_issue_never_pairs_end_to_end,
+    test_a_retained_hard_rejection_never_ships_a_no_change_summary_end_to_end,
+    test_a_guard_one_addition_names_itself_in_reconcile,
 ]
 
 
