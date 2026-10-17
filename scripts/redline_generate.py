@@ -1478,6 +1478,103 @@ def _critic_delta_internal_notes(critic_delta: Any) -> list[dict[str, Any]]:
     return notes
 
 
+#: Provenance prefix of a hard-rejection ledger issue (issue #147;
+#: `hard_ledger.PROVENANCE_PREFIX`, restated to keep this module free of the
+#: ledger's import).
+_LEDGER_PROVENANCE_PREFIX = "ledger:"
+
+#: The closing sentence of an inserting ledger issue's internal note, and
+#: the one that replaces it when this compile does not carry that insertion
+#: (issue #147): `hard_ledger.internal_note` with `OUTCOME_INSERTED` /
+#: `OUTCOME_REFUSED`, restated like the prefix above.
+#: `tests/test_hard_ledger.py` pins both equal to the ledger's own sentences.
+_LEDGER_INSERTED_OUTCOME = "its standard language was inserted."
+_LEDGER_REFUSED_OUTCOME = (
+    "its standard language did not pass the redline's checks and was not "
+    "inserted, so it is flagged only."
+)
+
+#: Issue #147: the result key `generate_redline_from_blocks` lists the issue
+#: keys whose edits the delivered document carries under. Read through
+#: `delivered_issue_keys`, never directly.
+DELIVERED_ISSUE_KEYS_KEY = "delivered_issue_keys"
+
+
+def delivered_issue_keys(result: dict[str, Any]) -> set:
+    """The issue keys whose edits the document a redline `result` DELIVERED
+    carries -- the final compile's applied edits, after every pen-rule
+    refusal and change-set rollback. Empty for every result that delivered
+    no document: an `ERROR`, an ACCEPT, a REQUEST_CHANGE with nothing to
+    compile, and the no-transcript path (`generate_redline`), which never
+    lists any. `hard_ledger.settle` reads this so the ledger record counts
+    only insertions the delivered document has (issue #147)."""
+    if not (isinstance(result, dict) and result.get("docx_bytes")):
+        return set()
+    return set(result.get(DELIVERED_ISSUE_KEYS_KEY) or ())
+
+
+def _ledger_flag_only_notes(
+    issues: list[dict[str, Any]],
+    working: dict[str, Any],
+    proven: Optional[dict[str, Any]] = None,  # noqa: UP045
+) -> list[dict[str, Any]]:
+    """Issue #147: the internal note of every hard-rejection ledger issue
+    that inserts nothing in the document compiled from `working`, as
+    `{"section_ref", "text"}` entries for `_host_critic_notes`.
+
+    An asserted ledger entry is flag-only when its rule has no standard
+    language, or when its clause's standard language is already proposed (by
+    another asserted rule on the same clause, or by the critic's own
+    transcript), or when its own insertion was rolled out of this compile.
+    Its issue then authors no surviving `<w:ins>`, so it has no footnote of
+    its own -- yet the rule id and reason must reach the internal footnotes.
+    Hosting it like a critic note puts it on the clause's own insertion when
+    there is one (same `section_ref`), else on the first inserting issue,
+    and the text names its own section so it never reads as a remark about
+    its host. Fixed sentences only: `hard_ledger.internal_note` built the
+    note, and the leakage gate scanned it as an issue field before anything
+    compiled. Nothing to host on (no insertion at all) leaves it unrendered,
+    as for a critic note; it still reaches the reviewer through the issue
+    and the counts-only `verdict_summary`.
+
+    A ledger issue whose insertion `proven` carries but `working` does not
+    -- refused by the pen rules, or rolled back with its change set -- was
+    noted as inserted before stage 5 ran. Its hosted note says instead that
+    its standard language did not pass the redline's checks and was not
+    inserted (`_LEDGER_REFUSED_OUTCOME`), so the delivered document never
+    claims an insertion it lacks."""
+    inserts = _insert_texts_by_issue(working)
+    proposed = _insert_texts_by_issue(proven) if proven is not None else {}
+    notes: list[dict[str, Any]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        provenance = issue.get("provenance")
+        if not (isinstance(provenance, str) and provenance.startswith(_LEDGER_PROVENANCE_PREFIX)):
+            continue
+        issue_key = issue.get("issue_key")
+        if any((text or "").strip() for text in inserts.get(issue_key) or []):
+            continue
+        internal = issue.get(INTERNAL_RATIONALE_FIELD)
+        if not (isinstance(internal, str) and internal.strip()):
+            continue
+        text = internal.strip()
+        refused = any((value or "").strip() for value in proposed.get(issue_key) or [])
+        if refused and text.endswith(_LEDGER_INSERTED_OUTCOME):
+            text = text[: -len(_LEDGER_INSERTED_OUTCOME)] + _LEDGER_REFUSED_OUTCOME
+        section = (issue.get("section_ref") or "").strip()
+        notes.append(
+            {
+                "section_ref": section,
+                "text": (
+                    f"Hard-rejection ledger entry for {section or 'an unnamed section'}: "
+                    f"{text}"
+                ),
+            }
+        )
+    return notes
+
+
 def _host_critic_notes(
     notes: list[dict[str, Any]],
     issues: list[dict[str, Any]],
@@ -1703,8 +1800,10 @@ def generate_redline_from_blocks(
 
     Returns the same result shapes `generate_redline` documents, plus two
     block-mode-only `reason` values on the fail-closed paths
-    (`REASON_BLOCK_TRANSCRIPT_REJECTED`, `REASON_BLOCK_EDITS_NOT_APPLIED`).
-    Never raises for any gate.
+    (`REASON_BLOCK_TRANSCRIPT_REJECTED`, `REASON_BLOCK_EDITS_NOT_APPLIED`),
+    and, on a result that delivers a document, `DELIVERED_ISSUE_KEYS_KEY`:
+    the issue keys whose edits it carries (issue #147; read through
+    `delivered_issue_keys`). Never raises for any gate.
     """
     # Local import: see the module-level NOTE about the redline_generate <->
     # redline_block_apply cycle.
@@ -1879,7 +1978,16 @@ def generate_redline_from_blocks(
             break
         # Hosts are re-chosen against THIS compile's transcript, so a note
         # never rides on an issue that has been rolled back.
-        hosted = _host_critic_notes(critic_notes, issues, working)
+        # Issue #147: a flag-only ledger issue's rule id and reason ride on
+        # an inserting issue's internal footnote, chosen against this same
+        # compile (`_ledger_flag_only_notes`); one whose insertion this
+        # compile rolled out says so rather than that it was inserted.
+        ledger_notes = (
+            _ledger_flag_only_notes(issues, working, proven)
+            if _notes_mode_includes_internal_content(notes_mode)
+            else []
+        )
+        hosted = _host_critic_notes(critic_notes + ledger_notes, issues, working)
         rationale_by_issue = {
             issue_key: _joined_footnote_text(
                 issues_by_key.get(issue_key), notes_mode, hosted.get(issue_key)
@@ -2051,6 +2159,13 @@ def generate_redline_from_blocks(
             "analysis_report": analysis_report,
             "verdict_summary": verdict_summary,
             "flag_only": all_flag_only,
+            # Issue #147: the issues whose edits this document carries -- the
+            # FINAL compile's applied edits (the rollback loop above leaves
+            # no partial change set in it), read by `delivered_issue_keys`.
+            DELIVERED_ISSUE_KEYS_KEY: sorted(
+                {entry["issue_key"] for entry in (compile_result or {}).get("applied") or []},
+                key=str,
+            ),
         }
 
     if not attempted:

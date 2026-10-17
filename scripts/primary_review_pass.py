@@ -849,6 +849,9 @@ _RATIONALE_OBJECTION_POINTER = (
 )
 _DISPOSITION_POINTER = "/definitions/CriticDelta/properties/dispositions/items/properties"
 _OVERRIDE_POINTER = "/definitions/CriticDelta/properties/overrides/items/properties"
+_LEDGER_DISPOSITION_POINTER = (
+    "/definitions/CriticDelta/properties/ledger_dispositions/items/properties"
+)
 
 # Field label -> JSON pointer, for the budgets stated in the OUTPUT CONTRACT
 # block both passes are sent. Order is the order they are rendered in.
@@ -888,6 +891,9 @@ _CRITIC_LENGTH_BUDGETS: tuple[tuple[str, str], ...] = (
     ("reason", f"{_OVERRIDE_POINTER}/reason"),
     ("primary_value", f"{_OVERRIDE_POINTER}/primary_value"),
     ("critic_value", f"{_OVERRIDE_POINTER}/critic_value"),
+    # Issue #147: a ledger disposition's `reason` carries the same cap as the
+    # two above, so it adds no line to the tasking -- it is stated by theirs.
+    ("reason", f"{_LEDGER_DISPOSITION_POINTER}/reason"),
 )
 
 # Pointer -> why this cap is deliberately NOT stated to the model.
@@ -918,6 +924,19 @@ LENGTH_BUDGETS_DELIBERATELY_UNSTATED: dict[str, str] = {
     "/definitions/BlockOp/oneOf/1/properties/new_text": (
         "whole-paragraph replacement language, sized by the paragraph it "
         "replaces rather than by anything the model chooses"
+    ),
+    # Issue #147: the hard-rejection ledger disposition's copied fields.
+    f"{_LEDGER_DISPOSITION_POINTER}/rule_id": (
+        "a playbook rule id copied verbatim from the ledger block, not authored "
+        "text -- the model cannot shorten it and must not try"
+    ),
+    f"{_LEDGER_DISPOSITION_POINTER}/block_id": (
+        "same copied block id as BlockPatch.block_id"
+    ),
+    f"{_LEDGER_DISPOSITION_POINTER}/span": (
+        "transcription, not prose: a stated ceiling invites cutting the cited "
+        "words short, and a span that no longer establishes the protection "
+        "asserts the entry rather than shortening an answer"
     ),
 }
 
@@ -2816,6 +2835,7 @@ def critic_role_suffix(
     primary_output: dict[str, Any],
     request_control_text: str = "",
     with_document: bool = True,
+    hard_ledger_text: str = "",
 ) -> str:
     """The critic pass's role suffix (issue #148): [the per-review control
     layer -- the SAME bytes the primary's suffix opened with] -> the critic
@@ -2835,9 +2855,18 @@ def critic_role_suffix(
     critic is told to re-derive its issues from the document FIRST and only
     then compare them with the first reviewer's, so the first reviewer's
     answer is the last thing it reads, after the instruction not to anchor
-    on it."""
+    on it.
+
+    `hard_ledger_text` (issue #147, default `""`): the hard-rejection ledger
+    block (`hard_ledger.render_critic_ledger_block`) -- every ledger entry the
+    critic must dispose of in `critic_delta.ledger_dispositions`. It follows
+    the tasking and precedes the first reviewer's output, so that output is
+    still the last thing the critic reads. Empty adds nothing: a review with
+    no ledger sends exactly the suffix it sent before #147."""
     parts = [request_control_text] if request_control_text.strip() else []
     parts.append(CRITIC_TASKING_BLOCK if with_document else CRITIC_TASKING_BLOCK_NO_DOCUMENT)
+    if hard_ledger_text.strip():
+        parts.append(hard_ledger_text)
     parts.append(
         _delimited_block("PRIMARY_REVIEWER_OUTPUT", json.dumps(primary_output, sort_keys=True))
     )
@@ -2884,6 +2913,7 @@ def assemble_user_prompt_critic(
     primary_output: dict[str, Any],
     doc_text: str = "",
     request_control_text: str = "",
+    hard_ledger_text: str = "",
 ) -> str:
     """Critic-pass user prompt, as ONE string (the capability-False path):
     the counterparty document the primary pass read, then the critic's role
@@ -2918,6 +2948,7 @@ def assemble_user_prompt_critic(
         primary_output=primary_output,
         request_control_text=request_control_text,
         with_document=bool(doc_text),
+        hard_ledger_text=hard_ledger_text,
     )
     if not doc_text:
         return suffix
@@ -3080,6 +3111,7 @@ def assemble_user_content_critic(
     doc_text: str = "",
     prompt_caching_enabled: bool = False,
     request_control_text: str = "",
+    hard_ledger_text: str = "",
 ) -> "str | list[dict[str, Any]]":  # noqa: UP037
     """The critic-pass user content `critic_review_pass.run_critic_pass`
     sends (issue #148) -- the critic's mirror of
@@ -3101,6 +3133,7 @@ def assemble_user_content_critic(
             primary_output=primary_output,
             doc_text=doc_text,
             request_control_text=request_control_text,
+            hard_ledger_text=hard_ledger_text,
         )
     return build_document_cached_user_content(
         doc_text,
@@ -3108,6 +3141,7 @@ def assemble_user_content_critic(
             primary_output=primary_output,
             request_control_text=request_control_text,
             with_document=True,
+            hard_ledger_text=hard_ledger_text,
         ),
     )
 

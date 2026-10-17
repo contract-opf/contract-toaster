@@ -1094,6 +1094,13 @@ _ANALYSIS_FIELDS = (
     # `null` in this fixed-shape document) for every other review, exactly
     # like the three leakage fields above.
     "critic_attempts",
+    # Issue #147: the hard-rejection ledger record (`hard_ledger.enforce`) --
+    # rule ids, controlled reason tokens, block ids, counts and span hashes,
+    # never clause, span or critic text. Present only on an OPF review whose
+    # manifest demands presence; `null` in this fixed-shape document
+    # otherwise. `reviews.get_review_detail` projects it for the receipt's
+    # counts-only line.
+    "hard_ledger",
 )
 
 

@@ -368,7 +368,8 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         # Issue #137 added `dispositions` and `overrides`, which strict mode
         # forces into `required` the same way (an empty `[]` is a value the
         # full schema accepts for each).
-        for name in ("dispositions", "overrides"):
+        # Issue #147 added `ledger_dispositions`, forced the same way.
+        for name in ("dispositions", "overrides", "ledger_dispositions"):
             self.assertEqual(critic_delta_props[name]["type"], "array")
         self.assertEqual(
             set(self.schema["definitions"]["CriticDelta"]["required"]),
@@ -378,6 +379,7 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
                 "rationale_objections",
                 "dispositions",
                 "overrides",
+                "ledger_dispositions",
             },
         )
 

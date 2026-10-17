@@ -24,9 +24,9 @@ The reviewer reaches these shapes through two real producers:
     it, send `null`, send `{}`, or send an object of empty arrays.
   * PROVIDER-ENFORCED (`structured_outputs` ON):
     `project_output_schema_for_provider()` forces EVERY property required,
-    `critic_delta` and all five `CriticDelta` arrays included. A model that
-    takes the object branch there MUST emit all five arrays -- for a
-    reviewer, all five empty. That is the one shape the provider can force
+    `critic_delta` and all six `CriticDelta` arrays (six since #147) included. A model that
+    takes the object branch there MUST emit all six arrays -- for a
+    reviewer, all six empty. That is the one shape the provider can force
     on a reviewer that it would never write unprompted.
 
 ## What this test asserts
@@ -35,7 +35,7 @@ The reviewer reaches these shapes through two real producers:
      `critic_delta` with a `null` branch, and the description the model
      reads says it is null on the reviewer's response.
   2. Every critic-only "no value" shape that CONFORMS to the schema --
-     absent, `null`, `{}`, all five arrays empty, and each array alone
+     absent, `null`, `{}`, all six arrays empty, and each array alone
      empty -- passes the reviewer's FULL validation
      (`validate_model_response`).
   3. Driven through `run_primary_pass` on the tool-mode path, each
@@ -52,7 +52,7 @@ The reviewer reaches these shapes through two real producers:
      ledger locates it under `properties/critic_delta`.
   6. The NON-conforming "nothing here" shapes the non-strict forced tool on
      the Sonnet ZDR route lets through -- `critic_delta` as `[]`, `""` or
-     `"null"`, `{"dispositions": null}`, and all five arrays `null` -- are
+     `"null"`, `{"dispositions": null}`, and all six arrays `null` -- are
      each rejected on the reviewer pass: `run_primary_pass` ledgers
      `["retry", "success"]` with `retry_reason == "schema_invalid"` and a
      `schema_error_location` under `properties/critic_delta`, so the next
@@ -230,13 +230,14 @@ def test_tool_mode_schema_leaves_critic_delta_optional_and_nullable() -> None:
 
 def test_strict_projection_forces_critic_delta_and_every_array() -> None:
     """The precondition for case 4: under provider enforcement the object
-    branch drags all five arrays in with it."""
+    branch drags all six arrays in with it."""
     projected = mos.project_output_schema_for_provider()
     assert "critic_delta" in projected["required"], projected["required"]
     assert _permits_null(projected["properties"]["critic_delta"]), projected["properties"]
     critic_delta_def = projected["definitions"]["CriticDelta"]
     assert set(critic_delta_def["required"]) == set(_CRITIC_DELTA_ARRAYS), critic_delta_def
-    assert len(_CRITIC_DELTA_ARRAYS) == 5, _CRITIC_DELTA_ARRAYS
+    # Six since issue #147 added `ledger_dispositions`.
+    assert len(_CRITIC_DELTA_ARRAYS) == 6, _CRITIC_DELTA_ARRAYS
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +247,7 @@ def test_strict_projection_forces_critic_delta_and_every_array() -> None:
 
 def test_every_critic_only_empty_shape_validates_on_the_reviewer_pass() -> None:
     shapes = _critic_only_shapes()
-    # absent, null, {}, all-five-empty, and each of the five alone.
+    # absent, null, {}, all-six-empty, and each of the six alone.
     assert len(shapes) == 4 + len(_CRITIC_DELTA_ARRAYS), shapes.keys()
     for name, value in shapes.items():
         body = _with_critic_delta(_reviewer_response(), value)

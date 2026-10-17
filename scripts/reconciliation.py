@@ -61,8 +61,12 @@ Amendment):
     `critic_schema_invalid` -- the ADR Amendment calls a missing disposition
     a schema failure, and a KEEP whose issue vanished is the same silent
     drop wearing a disposition; either fails the review closed rather than
-    dropping the issue). `run_two_pass_review` turns both into the terminal
-    critic-failure shape, so the primary's output never ships alone.
+    dropping the issue). Since issue #147 the same holds for the hard-rejection
+    ledger: a ledger rule with no disposition, or more than one, in
+    `critic_delta.ledger_dispositions` is refused the same way
+    (`hard_ledger.disposition_problems`). `run_two_pass_review` turns all of
+    these into the terminal critic-failure shape, so the primary's output
+    never ships alone.
   - **Confidence is the critic's.** The issue #265 degrade rule (critic
     contests -> confidence drops a level) is retired: the critic no longer
     contests, it decides, so its own band is final. There is no size-based
@@ -86,6 +90,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import critic_review_pass as _cp  # noqa: E402
+import hard_ledger as _hl  # noqa: E402
 import leakage_scan as _ls  # noqa: E402
 import primary_review_pass as _pp  # noqa: E402
 
@@ -467,6 +472,7 @@ def reconcile(
     critic_result: dict[str, Any] | None,
     detector_fires: list[dict[str, Any]] | None = None,
     hard_rejection_rule_ids: Iterable[str] = (),
+    hard_ledger_rule_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Make the critic's result the final review, under the three guards in
     this module's docstring.
@@ -503,6 +509,18 @@ def reconcile(
     paired with a DIFFERENT primary issue does not stand in for this one, and
     a primary issue the critic DROPped is never paired on the topic alone.
 
+    `hard_ledger_rule_ids` (issue #147, default empty): the hard-rejection
+    ledger's rule ids. Every one must carry exactly one disposition in
+    `critic_result["critic_delta"]["ledger_dispositions"]`; a missing or
+    repeated one raises `ReconciliationRejected` (`critic_schema_invalid`) --
+    the merger's own copy of `critic_review_pass.critic_delta_rejection`'s
+    ledger check, because a missing ledger disposition is a schema failure
+    that fails the review closed (ADR 0001 Amendment item 2), never a silent
+    pass. What the dispositions then PROVE is `hard_ledger.evaluate_ledger`'s
+    job, run by the spine against the document's block map; the raw
+    dispositions are not forwarded (their `span` and `reason` are model text
+    the ledger record replaces with controlled tokens and a hash).
+
     Returns the final `output-schema-v3`-shaped dict, plus the critic's
     `block_patches` / `block_ops` when it carries them.
     """
@@ -524,6 +542,24 @@ def reconcile(
             problems.append(
                 "critic_delta.dispositions disposes of issue_id(s) "
                 f"{', '.join(repeated)} more than once"
+            )
+        raise ReconciliationRejected(
+            _cp.REASON_CRITIC_SCHEMA_INVALID, "schema_invalid: " + "; ".join(problems)
+        )
+    ledger_missing, ledger_repeated = _hl.disposition_problems(
+        hard_ledger_rule_ids, critic_result
+    )
+    if ledger_missing or ledger_repeated:
+        problems = []
+        if ledger_missing:
+            problems.append(
+                "critic_delta.ledger_dispositions has no disposition for hard-rejection "
+                f"ledger rule(s) {', '.join(ledger_missing)}"
+            )
+        if ledger_repeated:
+            problems.append(
+                "critic_delta.ledger_dispositions disposes of ledger rule(s) "
+                f"{', '.join(ledger_repeated)} more than once"
             )
         raise ReconciliationRejected(
             _cp.REASON_CRITIC_SCHEMA_INVALID, "schema_invalid: " + "; ".join(problems)
@@ -743,6 +779,7 @@ def run_two_pass_review(
     critic_pass_result: dict[str, Any] | None,
     detector_fires: list[dict[str, Any]] | None = None,
     hard_rejection_rule_ids: Iterable[str] = (),
+    hard_ledger_rule_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Compose the primary-pass and critic-pass orchestration results (the
     `{"status": ..., "response": ...}` dicts returned by
@@ -797,6 +834,7 @@ def run_two_pass_review(
             critic_result=critic_pass_result["response"],
             detector_fires=detector_fires,
             hard_rejection_rule_ids=hard_rejection_rule_ids,
+            hard_ledger_rule_ids=hard_ledger_rule_ids,
         )
     except ReconciliationRejected as exc:
         return {

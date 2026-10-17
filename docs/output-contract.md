@@ -65,7 +65,7 @@ The pipeline validates every model response against this schema before any redli
 | `issues[].proposed_replacement_text` | string, max 8000 chars |
 | `issues[].playbook_topic_id` | `^[a-z0-9_]+(?:[-.][a-z0-9_]+)*$` — the id copied verbatim out of the ACTIVE playbook's own vocabulary. Admits kebab-case (a v1 playbook's `topics[].id`), snake_case and the dotted digest form (`clause.ferpa_student_records`): `playbooks/opf/playbook.schema-0.{2,3}.json` constrains an OPF playbook's `taxonomy.entries[].id` to `^[a-z0-9_]+$`, so underscore is a **word character here, not a separator** — rejecting it (issue #672) made 39 of the 61 topics in the real `educational-affiliation` playbook uncitable and discarded every review that cited one (issue #671). Still not free text: uppercase, whitespace, path punctuation, and a leading/trailing/doubled `-`/`.` separator are rejected |
 | `issues[].internal_precedent_citation` | string (max 500 chars) or null |
-| `issues[].provenance` | `"model"` \| `"critic-added"` \| `"detector:<rule_id>"` (plus the pipeline-only `"primary-retained"`, issue #138) — **system metadata only**; see [Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band) |
+| `issues[].provenance` | `"model"` \| `"critic-added"` \| `"detector:<rule_id>"` (plus the pipeline-only `"primary-retained"`, issue #138, and `"ledger:<rule_id>"`, issue #147) — **system metadata only**; see [Per-issue provenance and confidence band](#per-issue-provenance-and-confidence-band) |
 | `issues[].source_quote` | string, 1–8000 chars, **OPTIONAL** — **v2 only**; see [Schema versions (v1 → v2)](#schema-versions-v1--v2) |
 | `critic_delta` | `CriticDelta` object or null |
 | `verdict_summary` | string (1–2000 chars) or null — ACCEPT-path narrative summary; see [ACCEPT summary shape](#accept-summary-shape) |
@@ -224,6 +224,7 @@ of how that result differs from the primary's**:
 |---|---|
 | `dispositions[]` | One `{issue_id, disposition, reason}` per **primary** issue, no exceptions. `disposition` is `KEEP` (same issue, same edit), `REVISE` (same issue, the critic changed its replacement text, rationale or decision) or `DROP` (the critic does not stand behind it). The prompt asks for a one-line `reason`; the cap is the free-prose class bound, 8000 (see [Length budgets](#length-budgets-issue-674)). |
 | `overrides[]` | One `{issue_id, field, primary_value, critic_value, reason}` per respect in which the critic changed a primary issue. `field` is `replacement_text`, `rationale` or `decision` (a `DROP` is a change of decision). `primary_value`, `critic_value` and `reason` are each ≤ 8000 characters, the free-prose class bound. Empty when the critic changed nothing. |
+| `ledger_dispositions[]` | **New in issue #147.** One `{rule_id, disposition, block_id?, span?, reason}` per entry of the **hard-rejection ledger** the critic's tasking lists, no exceptions — an ACCEPT carries them too, and the array is empty or absent only when the review has no ledger. `disposition` is `CLEARED` (the critic found the required protection: `block_id` names the paragraph and `span` copies the exact words that establish it) or `ASSERT` (missing or inadequate: `block_id` may name the paragraph where it belongs). `block_id` and `span` are optional, and an empty string means none (`span` ≤ 8000, the free-prose class Segment.text sits in; `rule_id` and `block_id` are copied ids). The critic's claim is never trusted: see [The hard-rejection ledger](#the-hard-rejection-ledger-issue-147) below. |
 | `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The prompt still asks the critic to fill them, and since issue #138 the reconciler forwards them verbatim (it no longer merges from them) for the consumers that still read them: the receipt's counts, the internal footnotes (#132) and the leakage scan. The artifact marks each `DEPRECATED`. |
 
 `issue_id` always names the **primary's** `issue_key` as it appears in the primary's output — never a key
@@ -305,6 +306,68 @@ reported as `critic_schema_invalid`. The hard-ledger dispositions
 **Governance.** The artifact's bytes are content-hash-gated (see the coupling rules above), so this change
 needs a new `release.output_contract_hash` and the legal-approval gate before it activates in a release
 bundle; that step is the owner's.
+
+### The hard-rejection ledger (issue #147)
+
+ADR 0001's Amendment item 1 makes hard-rejection **recall** an invariant enforced outside both models
+(`scripts/hard_ledger.py`). The disposition shape is `critic_delta.ledger_dispositions[]`, above; this is
+what code does with it.
+
+- **Opened before either pass.** One `UNPROVEN_HARD_REJECTION` entry per OPF 0.5 `manifest.hard_rules[]`
+  rule with `required_presence: true`. A v1 bundle, or a manifest demanding no presence, opens none and
+  changes nothing — the critic's prompt is byte-identical to a review without a ledger.
+- **Every entry needs exactly one disposition.** `critic_review_pass.critic_delta_rejection` checks it
+  inside the critic's bounded retry (`critic_delta_ledger_disposition_missing` /
+  `_repeated` on the invocation ledger), and `reconciliation.reconcile` checks it again; a critic that
+  never accounts for an entry ends the review as `ERROR` / `critic_schema_invalid`. A disposition
+  naming a rule id the ledger does not hold is ignored, like an unknown `issue_id`.
+- **Cleared only by code.** `CLEARED` clears an entry only when the `block_id` resolves in the block map,
+  the `span` is found in that block's own text (in `text_fold`'s comparison-only folded form: whitespace
+  runs and typographic punctuation are transcription noise, casing and words are not), the block's
+  heading matches the title of the clause the rule names, and the rule's deterministic predicate holds
+  on that WHOLE clause's own text (every block under the heading, never the critic's sub-span):
+  `required_phrases` (every, or any, phrase, case-insensitively), `numeric_bound` (every number the
+  pattern captures in the clause is within the bounds; a clause over 20,000 characters is not
+  evaluable), `cross_reference` (the referenced clause's title appears as a word), or, for a `"judged"`
+  rule, presence alone inside the clause's section. The ledger record names why an entry was not cleared
+  with a controlled token: `critic_asserted`, `span_missing`, `unknown_block_id`, `span_hash_mismatch`,
+  `span_outside_clause`, `predicate_unsatisfied`, `predicate_not_evaluable`.
+- **An asserted entry fails closed into the document.** It becomes a pipeline-built issue (provenance
+  `ledger:<rule_id>`, fixed `counterparty_change_summary` and `external_rationale_for_footnote`, the
+  clause's public title as `section_ref`, and an `internal_rationale_for_footnote` naming the rule id and
+  a fixed reason sentence) plus an `insert_block_after` op carrying the manifest's `fallback_language`,
+  anchored after a block the critic named only when that block is under the clause's own heading, else at
+  the end of the clause's section, else at the end of the nearest present section in template order.
+  That op is an ordinary edit: stage 5 gates it exactly like the critic's own, and can refuse it (an OPF
+  review's pen rules are `playbooks/pen-rules.defaults.json`'s, so a standard over 1,500 characters or
+  with a `must_not_introduce` phrase is refused). An entry with no standard language, whose clause's
+  standard another edit already proposes, or whose insertion stage 5 refused, is flag-only: its issue
+  authors no delivered edit, and in a notes mode with internal content its internal note rides on an
+  inserting issue's footnote (the clause's own first), naming its own section — for a refused
+  insertion, saying it did not pass the redline's checks and was not inserted. The decision is forced to
+  `REQUEST_CHANGE`, and `verdict_summary` gains a counts-only sentence that counts inserted and
+  flag-only entries apart ("1 required protection was not found in the agreement and is asserted in the
+  redline.", "... and is flagged only; no standard language was inserted for it.", "2 required
+  protections were not found in the agreement: 1 is asserted in the redline and 1 is flagged only.") —
+  replacing an ACCEPT's no-change summary, appended to a REQUEST_CHANGE's. Those counts are what the
+  delivered document carries: the sentence is rebuilt after stage 5 from the settled record (below). The
+  review is `DONE`; there is no manual-review outcome (#133). It is not `DONE` when nothing is delivered
+  (a REQUEST_CHANGE with no delivered document never is, #584): a refused insertion that was the review's
+  only edit ends it `ERROR` / `block_edits_not_applied`, with the refused standard in
+  `analysis_report.changes_not_applied`, and a review whose only ledger entries have no standard language
+  delivers no document, which the runner ends `ERROR` / `redline_not_persisted`.
+- **The record.** `hard_ledger` on the result (and the analysis artifact, and `get_review_detail`) is
+  `{entries: [{rule_id, clause_id, status, reason, predicate, block_id, span_sha256, inserted,
+  anchor_block_id, issue_key, judge_recommendation?}], cleared, asserted, inserted}` — no span, clause or
+  critic text, so it survives a leakage block. `block_id` is the block the critic cited, as cited.
+  `inserted`, `anchor_block_id` and the `inserted` count are SETTLED after stage 5
+  (`hard_ledger.settle`): an entry is `inserted` only when the delivered document carries its issue's
+  edit, so a refused insertion reads `inserted: false`, `anchor_block_id: null`. The receipt prints its
+  counts only ("1 required protection not found — standard language inserted.", or with nothing
+  delivered "1 required protection not found — flagged only, no standard language inserted.").
+- **The Floor judge.** A ledger entry whose condition is a deterministic predicate is no longer judged; a
+  `"judged"` entry still is, and the verdict is recorded as `judge_recommendation` without ever clearing
+  it. A `violated` verdict is still a monotonic Floor fire.
 
 ## Length budgets (issue #674)
 
@@ -519,6 +582,7 @@ component produced the issue. Valid values:
 | `"critic-added"` | The adversarial critic added this issue (not present in the primary output) |
 | `"detector:<rule_id>"` | A deterministic hard-rejection rule fired; `rule_id` is the kebab-case id from the playbook `hard_rejections` list (e.g. `"detector:no-exos-indemnity"`) |
 | `"primary-retained"` | Pipeline-stamped, never model-emitted (issue #138): a hard rejection the primary reviewer raised that the critic's final result dropped, re-appended by reconciliation because hard rejections are monotonic. Flag-only. |
+| `"ledger:<rule_id>"` | Pipeline-stamped, never model-emitted (issue #147): a hard-rejection ledger entry no validated span and deterministic predicate cleared, asserted into the document as the manifest's fallback language (or flag-only when the clause has no standard, when another edit already proposes that clause's standard, or when stage 5 refused the insertion). `rule_id` is the playbook's Floor invariant id. |
 
 **Purpose — trust calibration, not legal categorization.** A deterministic detector fire
 (`detector:<rule_id>`) is mechanical and near-certain: a trigger term was found in the diff hunks

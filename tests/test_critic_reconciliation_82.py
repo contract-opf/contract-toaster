@@ -493,9 +493,11 @@ def _v2_critic_response_with_replacement_text(
     base.pop("block_patches", None)
     base.pop("block_ops", None)
     base["schema_version"] = "output-schema-v1"
-    # v2 has no `dispositions`/`overrides` (issue #137 added them to v3 only).
+    # v2 has no `dispositions`/`overrides` (issue #137 added them to v3 only)
+    # and no `ledger_dispositions` (issue #147, v3 only).
     base["critic_delta"].pop("dispositions", None)
     base["critic_delta"].pop("overrides", None)
+    base["critic_delta"].pop("ledger_dispositions", None)
     # Issue #138 made the fixture's own `issues` the critic's complete list;
     # the v2 projection keeps the pre-#137 shape (the finding in added_issues
     # only), since v2 issues carry no `issue_key`.

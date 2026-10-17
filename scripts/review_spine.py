@@ -149,6 +149,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
 import critic_review_pass  # noqa: E402
 import extraction_normalization_stage  # noqa: E402
 import floor_judge  # noqa: E402
+import hard_ledger  # noqa: E402
 import leakage_scan  # noqa: E402
 import model_client as _model_client  # noqa: E402
 import opf_prompt  # noqa: E402
@@ -1047,6 +1048,12 @@ def run_review(
     # can tell what actually governed it (`prompt_omissions`) rather than
     # inferring it from an unqualified `posture_source`.
     opf_knowledge_lineage: dict[str, Any] | None = None
+    # Issue #147: the hard-rejection ledger, opened from the OPF document's
+    # hard-rule manifest BEFORE either pass runs -- one UNPROVEN entry per
+    # presence-required rule. Empty for a v1 bundle (no manifest) and for an
+    # OPF document whose manifest demands no presence, in which case nothing
+    # below changes.
+    ledger: list[dict[str, Any]] = []
     if opf_bundle_v2 is not None:
         try:
             knowledge = review_knowledge.resolve_knowledge(
@@ -1096,6 +1103,8 @@ def run_review(
         )
         floor_perspective_note = _floor_perspective_note(knowledge.opf_doc, entity_roster)
         opf_knowledge_lineage = knowledge.lineage_record()
+        ledger = hard_ledger.build_ledger(knowledge.opf_doc)
+    ledger_rule_ids = hard_ledger.ledger_rule_ids(ledger)
 
     # Leakage-scan corpus (issue #73), built AFTER system-block assembly
     # above (issue #521). It used to be built before it, which is precisely
@@ -1285,6 +1294,10 @@ def run_review(
         instructions_text=instructions_text,
         system_blocks_override=opf_system_blocks,
         playbook_hash_override=opf_playbook_hash,
+        # Issue #147: the critic must dispose of every ledger entry
+        # explicitly; the pass renders the ledger into its role suffix and
+        # holds it to that inside its bounded retry.
+        hard_ledger=ledger,
     )
 
     # Stage 3.5: OPF Floor coverage (issue #479 "what to build" item 3):
@@ -1307,9 +1320,16 @@ def run_review(
     # `return` below.
     detector_fires: list[dict[str, Any]] = []
     floor_judgment_report: Optional[dict[str, Any]] = None  # noqa: UP045
-    if floor_invariants:
+    judge_verdicts: list[dict[str, Any]] = []
+    # Issue #147: a ledger entry whose condition is a deterministic predicate
+    # leaves the judged Floor -- code decides it (`hard_ledger
+    # .evaluate_ledger`, after reconciliation). A `"judged"` ledger entry
+    # stays in front of the judge, but its verdict is only recorded on the
+    # ledger as a recommendation; it never clears the entry.
+    judged_invariants = hard_ledger.judged_floor_invariants(floor_invariants, ledger)
+    if judged_invariants:
         judgment = floor_judge.judge_floor_invariants(
-            invariants=floor_invariants,
+            invariants=judged_invariants,
             review_context=doc_text,
             model_client=model_client,
             # ADR 0001: the critic is the senior reviewer on the stronger
@@ -1367,6 +1387,7 @@ def run_review(
                 normalization_notes=normalization_notes,
             )
         detector_fires = floor_judge.floor_fires(judgment)
+        judge_verdicts = list(judgment.verdicts)
 
     # Stage 4: deterministic reconciliation (issue #82; issue #138 / ADR
     # 0001 made the critic's result the final review). `detector_fires` is
@@ -1383,6 +1404,7 @@ def run_review(
         hard_rejection_rule_ids=reconciliation.hard_rejection_rule_ids(
             playbook, floor_invariants
         ),
+        hard_ledger_rule_ids=ledger_rule_ids,
     )
     if two_pass["status"] != STATUS_OK:
         # Issue #665: `reason` carries a TOKEN, never `two_pass["stage"]`.
@@ -1406,6 +1428,29 @@ def run_review(
             critic_attempts=two_pass.get("attempts"),
         )
     reconciled = two_pass["result"]
+
+    # Stage 4.5 (issue #147): the hard-rejection ledger. Every entry is
+    # evaluated against the SAME block map both passes were proven against:
+    # cleared only by the critic's cited span, validated against the
+    # document's own text, plus a deterministic predicate. Every entry still
+    # unproven fails closed INTO THE DOCUMENT -- the manifest's fallback
+    # language as an ordinary block op with provenance `ledger:<rule_id>`,
+    # which stage 5 below gates like every other edit. `hard_ledger_record`
+    # carries ids, tokens, counts and hashes only, and is the PLAN until it
+    # is settled against what stage 5 delivered (below stage 5).
+    hard_ledger_record: Optional[dict[str, Any]] = None  # noqa: UP045
+    # The reconciled result BEFORE the ledger's issues and counts-only
+    # sentence: `hard_ledger.settled_verdict_summary` rebuilds the summary
+    # from it once stage 5 has said what it actually delivered.
+    pre_ledger_reconciled = reconciled
+    if ledger:
+        evaluated = hard_ledger.evaluate_ledger(
+            ledger,
+            critic_result.get("response"),
+            block_map,
+            judge_verdicts=judge_verdicts,
+        )
+        reconciled, hard_ledger_record = hard_ledger.enforce(reconciled, evaluated, block_map)
 
     # Stage 5: leakage-gated redline generation (issue #26/#83). `redline_docx_bytes`
     # (computed at stage 1 above) is the original upload when there was
@@ -1466,11 +1511,32 @@ def run_review(
     leakage_blocked = redline_generate.output_withheld(redline_result)
     findings = [] if leakage_blocked else reconciled.get("issues", [])
 
+    # Issue #147: stage 4.5 recorded the ledger insertions it HANDED to
+    # stage 5, and stage 5 gates each one like any other edit -- the pen
+    # rules (for an OPF review, `playbooks/pen-rules.defaults.json`'s
+    # `max_chars` and `must_not_introduce`), the change-set rollback, the
+    # batch gates -- so it can refuse one. The record, and the counts-only
+    # sentence in the summary, are re-derived here from the issue keys whose
+    # edits the delivered document actually carries, so neither (nor the
+    # receipt line read off the record) ever claims an insertion the
+    # document lacks. A result with no summary (every ERROR) keeps none; the
+    # rebuilt one differs from the summary the leakage gate scanned only in
+    # that fixed, counts-only sentence.
+    summary = redline_result.get("verdict_summary")
+    if hard_ledger_record is not None:
+        hard_ledger_record = hard_ledger.settle(
+            hard_ledger_record, redline_generate.delivered_issue_keys(redline_result)
+        )
+        if hard_ledger_record["asserted"] and summary is not None:
+            summary = hard_ledger.settled_verdict_summary(
+                pre_ledger_reconciled, hard_ledger_record
+            )
+
     result: dict[str, Any] = {
         "status": redline_result["status"],
         "decision": redline_result.get("decision"),
         "redline_bytes": redline_result.get("docx_bytes"),
-        "summary": redline_result.get("verdict_summary"),
+        "summary": summary,
         "findings": findings,
         # Issue #96 (owner decision, Option B): `reconcile()` already
         # computes both of these (`scripts/reconciliation.py`'s merged
@@ -1597,4 +1663,10 @@ def run_review(
         result["floor_judgment"] = floor_judgment_report
     if opf_knowledge_lineage is not None:
         result["opf_knowledge_lineage"] = opf_knowledge_lineage
+    # Issue #147: absent (never a null placeholder) for a review with no
+    # ledger. No model or document text: rule ids, reason tokens, block ids,
+    # counts and span hashes -- so it survives a leakage block, like
+    # `confidence_band`.
+    if hard_ledger_record is not None:
+        result["hard_ledger"] = hard_ledger_record
     return result
