@@ -482,8 +482,8 @@ def _assemble_opf_system_blocks(
     `BINARY_DECISION_OVERLAY_BLOCK` -- neither describes playbook CONTENT,
     only the review's objective and the response shape, so they apply
     unchanged regardless of knowledge mode) followed by
-    `knowledge.system_blocks()` -- POSTURE, BINDING, DIGEST, GUIDANCE,
-    CONTEXT, in that fixed order (`opf_prompt.compose_opf_system_blocks`'s
+    `knowledge.system_blocks()` -- POSTURE, BINDING, DIGEST, MANIFEST,
+    GUIDANCE, CONTEXT, in that fixed order (`opf_prompt.compose_opf_system_blocks`'s
     own contract), each present-or-absent per that function's "a block is
     absent or it has content" doctrine.
 

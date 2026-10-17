@@ -73,9 +73,12 @@ return type: this function returns `list[str]`.
 
 ## What is excluded, and why nothing has to special-case it
 
-`compose_opf_system_blocks` only ever reads five paths off the input doc:
+`compose_opf_system_blocks` only ever reads these paths off the input doc:
 `posture.system_prompt`, `digest` (`clauses` and `corpus`), `floor.invariants`,
-`perspective`, and `de_minimis` (plus, off the separate policy document,
+`manifest.hard_rules` (issue #163: each rule's id, statement, clause link,
+`required_presence`, `condition` and `fallback_language`, plus the public
+`evidence.clauses[].title` its clause ids resolve to -- never its
+`permissible_proof`), `perspective`, and `de_minimis` (plus, off the separate policy document,
 `rules[].{id,strength,text}`, and off the caller's own `entity_roster`
 param -- issue #678's deployment-scoped roster of our own legal entities,
 not an OPF field and deliberately never becoming one). The operator's
@@ -90,7 +93,7 @@ the full evidence section into a prompt. Every other top-level section --
 `posture.rubric` (excised from the schema entirely per engine #178, but this
 function does not validate its input, so a caller-constructed dict carrying
 it is simply never looked at), `posture.generation` (interview transcript),
-`corpus`, `compiler`, `identity`, `baseline`, `composes`, `manifest`,
+`corpus`, `compiler`, `identity`, `baseline`, `composes`,
 `dossiers`, `provenance_index` -- is
 excluded automatically because the function never touches it, not via a
 per-field denylist. That is also why a doc WITH `posture.rubric` produces
@@ -159,6 +162,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import entity_normalize  # noqa: E402
+import hard_ledger  # noqa: E402
 
 #: Composition modes. `review_knowledge.py` re-exports these and adds its own
 #: MODE_V1_PROJECTION (the pre-OPF projection path, which does not compose here).
@@ -818,6 +822,154 @@ def _binding_block(
     return "\n".join(lines)
 
 
+MANIFEST_INTRO = (
+    "HARD-RULE MANIFEST (the playbook's hard rules, one per signed Floor invariant).\n"
+    "Each rule is a signed Floor invariant, tagged [floor:<id>] as in the rules that bind "
+    "this review, with how the playbook checks the clause it names:\n"
+    "- Presence required: the clause's absence or deletion is itself a hard rejection. Code "
+    "enforces it after the review: unless the clause is shown in this agreement and passes "
+    "its test, code inserts the rule's fallback language itself.\n"
+    "- Test: what the clause's own text must show. A judged rule has no machine test; it is "
+    "decided on the clause's own text.\n"
+    "- Fallback language: our standard text for the clause, the language code inserts for a "
+    "presence-required rule that is not shown to be met. It is given verbatim on the indented "
+    "lines under its label."
+)
+
+#: A `"judged"` condition in words. `hard_ledger.describe_condition` renders a
+#: non-dict condition as a presence check, which is right for a ledger entry
+#: (every entry demands presence) and wrong for a manifest rule that does not.
+_JUDGED_TEST = "judged; no machine test"
+
+
+def _manifest_rule_lines(
+    index: int, position: int, rule: dict, titles: dict[str, str]
+) -> list[str]:
+    """One manifest rule, numbered `index`: tag and statement, then its clause
+    and presence, its test, its fallback language. Never the
+    `permissible_proof` list (see `_manifest_block`)."""
+    where = f"manifest.hard_rules[{position}]"
+    rule_id = rule.get("rule_id")
+    if not isinstance(rule_id, str) or not rule_id:
+        _omit("manifest rule id — rule rendered with an empty [floor:] tag", where)
+        rule_id = ""
+    statement = rule.get("statement")
+    if not isinstance(statement, str) or not statement:
+        _omit("manifest rule statement — rule rendered with nothing to enforce", where)
+        statement = ""
+    lines = [f"{index}. [floor:{rule_id}] {statement}".rstrip()]
+
+    # The clause by its public title; failing that, by the id or taxonomy id
+    # the rule names (public clause vocabulary either way -- the engine
+    # nulls `clause_id` when the corpus has no evidence for the taxonomy id).
+    clause_id = rule.get("clause_id")
+    taxonomy_id = rule.get("taxonomy_id")
+    title = titles.get(clause_id) if isinstance(clause_id, str) else None
+    for fallback_name in (clause_id, taxonomy_id):
+        if title is None and isinstance(fallback_name, str) and fallback_name:
+            title = fallback_name
+    clause = f"Clause: {title}." if title else "Clause: none named."
+    presence = rule.get("required_presence")
+    if presence is True:
+        clause += " Presence required."
+    elif presence is False:
+        clause += " Presence not required."
+    else:
+        _omit("manifest required_presence — not a boolean; presence not stated", where)
+    lines.append(f"   {clause}")
+
+    condition = rule.get("condition")
+    if condition == "judged":
+        test = _JUDGED_TEST
+    elif isinstance(condition, dict) and condition.get("type") in (
+        "required_phrases",
+        "numeric_bound",
+        "cross_reference",
+    ):
+        reference = condition.get("clause_id")
+        test = hard_ledger.describe_condition(
+            condition, titles.get(reference) if isinstance(reference, str) else None
+        )
+    else:
+        _omit("manifest condition — not a known predicate; test not stated", where)
+        test = None
+    if test is not None:
+        lines.append(f"   Test: {test}.")
+
+    fallback = rule.get("fallback_language")
+    if isinstance(fallback, str) and fallback.strip():
+        # The label on a line of its own, then the text, unquoted, one
+        # indented line per line of it. Never `label: "text"`: the leakage
+        # corpus derives check-1 grams from this block by line and sentence
+        # (`leakage_scan.system_prompt_ngrams_from_blocks`), and exempts our
+        # standard only where a piece is inside it or contains all of it. A
+        # piece that mixes a fallback sentence with a quote mark or the label
+        # is neither, so a multi-sentence fallback would turn its first and
+        # last sentences into check-1 grams and fail closed every review
+        # that quotes our standard faithfully. On their own lines, every
+        # piece is a piece of the fallback (exempt), and the label is
+        # shorter than any gram.
+        lines.append("   Fallback language:")
+        lines.extend(
+            f"      {line.strip()}" for line in fallback.splitlines() if line.strip()
+        )
+    elif fallback is None:
+        lines.append("   Fallback language: none.")
+    else:
+        _omit("manifest fallback_language — not a non-empty string; not rendered", where)
+    return lines
+
+
+def _manifest_block(opf_doc: dict) -> str | None:
+    """The OPF 0.5 hard-rule manifest (`manifest.hard_rules`,
+    playbook-engine#228) as one block of the shared prefix (issue #163): per
+    rule, its `[floor:<id>]` tag and statement, the clause it names (by public
+    title), whether that clause's presence is required, its test (the
+    predicate in words, via `hard_ledger.describe_condition` -- the critic's
+    ledger tasking says the same words), and its fallback language.
+
+    Returns None -- no block -- when the document carries no manifest, or a
+    manifest with no rules. The real playbook ships `floor == {}`, so its
+    manifest is empty and its prompt is unchanged by this block. Neither is
+    recorded as an omission: the manifest is optional in the 0.5 schema and an
+    empty one is derived from an empty Floor, which the Binding block already
+    records.
+
+    Not rendered, deliberately: a rule's `permissible_proof` (the Floor's
+    `x_permissible_proof` -- the issue scopes the block to presence rules,
+    predicates and fallback language) and a `numeric_bound`'s regex `pattern`
+    (the bound and unit are rendered). `taxonomy_id` is not rendered beside
+    the clause title: it is the same public clause name in another spelling,
+    and stands in for the title only when the rule names no evidence clause.
+
+    Request-independent like every block here: a deterministic function of
+    the document, so both passes and every review of the playbook send the
+    same bytes (#148), ahead of the system-side cache breakpoint.
+    """
+    manifest = opf_doc.get("manifest")
+    if not isinstance(manifest, dict):
+        return None
+    manifest = _strip_x_keys(manifest)
+    rules = manifest.get("hard_rules")
+    if not isinstance(rules, list) or not rules:
+        return None
+    titles = hard_ledger.clause_titles(opf_doc)
+    lines = [MANIFEST_INTRO]
+    index = 0
+    for position, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            _omit(
+                f"manifest rule — entry is a {type(rule).__name__}, not an object",
+                f"manifest.hard_rules[{position}]",
+            )
+            continue
+        index += 1
+        lines.extend(_manifest_rule_lines(index, position, rule, titles))
+    if index == 0:
+        return None
+    return "\n".join(lines)
+
+
 def _guidance_block(policy: Optional[dict] = None) -> str | None:  # noqa: UP045
     """Policy `should` rules, verbatim. None when the policy has none.
 
@@ -996,9 +1148,11 @@ def compose_opf_system_blocks(
 ) -> list[str]:
     """Compose an OPF document's knowledge into review system-prompt blocks.
 
-    Fixed order -- POSTURE, BINDING, DIGEST, GUIDANCE, CONTEXT -- so the model
-    reads what BINDS it before the precedent it weighs, and reads prescriptive
-    intent before either. Every block is ABSENT or has content; none is ever an
+    Fixed order -- POSTURE, BINDING, DIGEST, MANIFEST, GUIDANCE, CONTEXT -- so
+    the model reads what BINDS it before the precedent it weighs, and reads
+    prescriptive intent before either. MANIFEST (issue #163) is the OPF 0.5
+    hard-rule manifest, directly after the digest: like every block here it
+    precedes the system-side cache breakpoint, so it caches with the digest. Every block is ABSENT or has content; none is ever an
     empty string, so a caller cannot index a slot that says nothing (the shape
     the real playbook's `posture == {}` and `floor == {}` used to produce).
     Because blocks are absent rather than empty, POSITION IS NOT IDENTITY: match
@@ -1061,6 +1215,7 @@ def compose_opf_system_blocks(
             _posture_block(opf_doc, overrides),
             _binding_block(opf_doc, overrides, policy),
             None if mode == MODE_POLICY_ONLY else _digest_block(opf_doc),
+            _manifest_block(opf_doc),
             _guidance_block(policy),
             _context_block(opf_doc, entity_roster),
         ):

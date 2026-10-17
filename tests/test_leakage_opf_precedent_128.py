@@ -26,10 +26,12 @@ format change instead of a lookup failure. This pins the replacement:
   5. A `vs_standard` reason is not blocked content: it describes a difference
      from our standard in words a faithful review may use.
   6. The derived `manifest` and `dossiers` sections (playbook-engine#228) are
-     covered by derivation: every text field they carry is already in the
-     corpus (or is our standard, allowlisted part by part, or public clause
-     vocabulary), except the deliberate exclusions `from_opf_document`'s
-     docstring names.
+     covered: every text field they carry is already in the corpus (or is
+     our standard, allowlisted part by part, or public clause vocabulary),
+     except the deliberate exclusions `from_opf_document`'s docstring names.
+     The dossiers by derivation; the manifest is also read directly since
+     issue #163 composed it into the prompt
+     (`tests/test_manifest_shared_prefix_163.py` pins the direct read).
 
 Fixture reachability: every document here is unmutated engine output -- a
 committed gold OPF 0.5 fixture generated with the engine's reference
@@ -222,9 +224,10 @@ def _derived_section_texts(doc: dict[str, Any]) -> list[tuple[str, str, str]]:
 
 class TestDerivedSectionsAreCoveredByDerivation(unittest.TestCase):
     """Issue #128's "Scans" bullet: the leakage corpus covers the text fields
-    of the engine #228 manifest and dossiers. It does so by derivation -- they
-    are selections of the Floor, our standard and the per-deal record, all of
-    which the corpus reads -- and this pins that on real engine output."""
+    of the engine #228 manifest and dossiers. On engine output they are
+    selections of the Floor, our standard and the per-deal record, all of
+    which the corpus reads -- and this pins that on real engine output. (The
+    manifest is also read directly since issue #163.)"""
 
     def _assert_covered(self, doc: dict[str, Any]) -> int:
         corpus = _corpus(doc)

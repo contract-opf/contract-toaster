@@ -142,15 +142,25 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # NOT move: a review with none of the three gets the same system prompt it
 # always did.
 #
+# RE-CAPTURED for issue #163 (2026-10-17): the OPF 0.5 hard-rule manifest is
+# now composed into the shared prefix as its own block, directly after the
+# digest -- a DELIBERATE prompt change owned by #163. The two OPF pins moved
+# by exactly that block: the knowledge hash with the manifest block removed
+# is the previous pin (e9919779...), checked when this was re-captured. The
+# V1 pin did NOT move (a v1 bundle has no manifest). Re-captured again in
+# #163's fix round 1: MANIFEST_INTRO now says the fallback language sits on
+# indented lines under its label (the fixture's one rule has none); with the
+# manifest block removed the knowledge hash is still e9919779....
+#
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
 # for the acme-university 0.5 gold fixture. The markup-intensity block is NOT
 # composed there, so no markup level may ever move it.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "e9919779116f06b2164aa0d89b54cc38a5e0935eec300b53568801487a625630"
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "29cf2549f5343afa41006894497e8d7fcc7a0e1bd23cf6dd47d8af9e5da8278a"
 # The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
 # over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
 # joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "f8d2199d4a3674da9d011cf1d85ce2a5797a5f55ab07e14eb65d1ccfe4d80166"
+    "fc2010d445760099af2c68f2681f53f10721d572ef1ec847aaa2f920ba0d3184"
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).

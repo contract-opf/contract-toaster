@@ -15,7 +15,8 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    (byte-identical, i.e. `==`, on independently deep-copied input).
 2. Exclusion list: none of `posture.rubric`, `posture.generation`,
    `corpus`, `compiler`, `identity`, `curation`, `baseline`, `composes`, the
-   OPF 0.5 `manifest` / `dossiers` / `provenance_index`, or
+   OPF 0.5 `dossiers` / `provenance_index`, a manifest rule's
+   `permissible_proof` (issue #163 composes the rest of the manifest), or
    any `x_*`-prefixed key (nested inside `evidence`, engine #180) leaks
    into any composed block -- checked via sentinel strings planted in each
    of those sections.
@@ -84,9 +85,10 @@ def check_1_block_order_and_determinism() -> list[str]:
     doc = _load_fixture()
     blocks = opf_prompt.compose_opf_system_blocks(doc)
 
-    if len(blocks) != 4:
+    if len(blocks) != 5:
         failures.append(
-            f"  [1] expected 4 blocks (0.5 fixture has perspective + de_minimis), got {len(blocks)}"
+            f"  [1] expected 5 blocks (0.5 fixture has a manifest, perspective + de_minimis), "
+            f"got {len(blocks)}"
         )
         return failures
 
@@ -96,8 +98,15 @@ def check_1_block_order_and_determinism() -> list[str]:
     # prose, one floor invariant, a digest and a context, and no policy -- only
     # their order changed. Note a block is now ABSENT rather than empty when it
     # has nothing to say, so this unpack is only safe because every one of the
-    # four is known to be present for THIS fixture.
-    posture_block, floor_block, digest_block, _context = blocks
+    # five is known to be present for THIS fixture. Issue #163 added the
+    # MANIFEST block directly after the digest (the fixture's manifest has one
+    # rule).
+    posture_block, floor_block, digest_block, manifest_block, _context = blocks
+
+    if manifest_block != opf_prompt._manifest_block(doc) or not manifest_block.startswith(
+        opf_prompt.MANIFEST_INTRO
+    ):
+        failures.append("  [1] manifest block is not the composed hard-rule manifest")
 
     if posture_block != doc["posture"]["system_prompt"]:
         failures.append("  [1] posture block does not equal posture.system_prompt verbatim")
@@ -174,7 +183,8 @@ def check_2_exclusions_sentinel() -> list[str]:
         }
     ]
     doc["evidence"]["clauses"][0]["x_test_ext"] = {"note": "SENTINEL_XEXT_MUST_NOT_LEAK"}
-    doc["manifest"]["hard_rules"][0]["statement"] = "SENTINEL_MANIFEST_MUST_NOT_LEAK"
+    # Issue #163 composes the manifest; its `permissible_proof` stays out.
+    doc["manifest"]["hard_rules"][0]["permissible_proof"] = ["SENTINEL_MANIFEST_MUST_NOT_LEAK"]
     next(iter(doc["dossiers"].values()))["title"] = "SENTINEL_DOSSIER_MUST_NOT_LEAK"
     doc["provenance_index"]["compiler"] = "SENTINEL_PROVENANCE_MUST_NOT_LEAK"
 
@@ -279,7 +289,8 @@ def check_6_context_block_only_when_present() -> list[str]:
     doc_without_context.pop("perspective", None)
     doc_without_context.pop("de_minimis", None)
     blocks_without = opf_prompt.compose_opf_system_blocks(doc_without_context)
-    if len(blocks_without) != 3:
+    # Posture, Binding, Digest, Manifest (issue #163).
+    if len(blocks_without) != 4:
         failures.append(
             f"  [6] expected no Context block when perspective/de_minimis absent, got {len(blocks_without)} blocks"
         )
@@ -288,12 +299,12 @@ def check_6_context_block_only_when_present() -> list[str]:
     doc_with_context["perspective"] = {"party": "Our Org", "counterparty_type": "Educational Institution"}
     doc_with_context["de_minimis"] = ["typo fixes", "formatting-only changes"]
     blocks_with = opf_prompt.compose_opf_system_blocks(doc_with_context)
-    if len(blocks_with) != 4:
+    if len(blocks_with) != 5:
         failures.append(
-            f"  [6] expected a 4th Context block when perspective/de_minimis present, got {len(blocks_with)} blocks"
+            f"  [6] expected a 5th Context block when perspective/de_minimis present, got {len(blocks_with)} blocks"
         )
     else:
-        context_block = blocks_with[3]
+        context_block = blocks_with[4]
         if "Our Org" not in context_block:
             failures.append("  [6] Context block missing perspective.party")
         if "typo fixes" not in context_block:
