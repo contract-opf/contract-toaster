@@ -131,10 +131,9 @@ export class ObservabilityStack extends cdk.NestedStack {
     const isMinimal = profile === 'minimal';
     const monthlyBudgetUsd = props.monthlyBudgetUsd ?? 100;
     const appRunnerServiceName = props.appRunnerServiceName ?? `contract-toaster-api-${envName}`;
-    const bedrockModelIds = props.bedrockModelIds ?? [
-      'anthropic.claude-opus-4-8',
-      'anthropic.claude-sonnet-4-6',
-    ];
+    // The pinned review model(s) in model-policy/bedrock-us-east-1.json --
+    // since issue #148 one model, Opus 4.8, for both the reviewer and the critic.
+    const bedrockModelIds = props.bedrockModelIds ?? ['anthropic.claude-opus-4-8'];
 
     // -----------------------------------------------------------------------
     // contract-toaster-alarms SNS topic (issue #57 naming; issue #61 is the first

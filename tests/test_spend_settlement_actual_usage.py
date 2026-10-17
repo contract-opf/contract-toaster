@@ -94,6 +94,7 @@ import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import model_client  # noqa: E402
+from fake_model_queues import seeded_by_model  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
 
@@ -417,13 +418,16 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
         primary_id = model_client.openrouter_primary_model_id()
         critic_id = model_client.openrouter_critic_model_id()
         client = UsageAccumulatingClient(
-            {
-                primary_id: [
-                    _fixture("schema_invalid_missing_issues.json"),
-                    dts._primary_request_change_response(),
-                ],
-                critic_id: [dts._critic_no_delta_response()],
-            },
+            seeded_by_model(
+                (
+                    primary_id,
+                    [
+                        _fixture("schema_invalid_missing_issues.json"),
+                        dts._primary_request_change_response(),
+                    ],
+                ),
+                (critic_id, [dts._critic_no_delta_response()]),
+            ),
             usage_sequence=[
                 # Realistic (not toy) token magnitudes -- these round-trip
                 # through the per-million-token rate table and `int(round(
@@ -477,7 +481,7 @@ class TestRealPipelineSettlesActualUsage(MotoSubmissionsMixin, unittest.TestCase
         primary_id = model_client.openrouter_primary_model_id()
         critic_id = model_client.openrouter_critic_model_id()
         client = UsageAccumulatingClient(
-            {primary_id: [dts._primary_request_change_response()], critic_id: []},
+            seeded_by_model((primary_id, [dts._primary_request_change_response()]), (critic_id, [])),
             usage_sequence=[{"input_tokens": 20_000, "output_tokens": 1_500}],
         )
         docx_bytes = dts._build_draft_docx({"sec-8": dts._SEC8_DRAFT_TEXT})

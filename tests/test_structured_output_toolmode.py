@@ -127,6 +127,12 @@ def _unstamp(parsed: dict[str, Any]) -> dict[str, Any]:
     if isinstance(critic_delta, dict):
         for added in critic_delta.get("added_issues") or []:
             added.pop("provenance", None)
+    # Issue #148: the pipeline also DROPS the model-facing `role`
+    # discriminator before validating (`model_output_schema.
+    # strip_model_facing_only_fields`), so the inverse puts it back -- the
+    # one shared tool schema requires it. A critic's answer is the one
+    # carrying a `critic_delta` object.
+    unstamped["role"] = "critic" if isinstance(critic_delta, dict) else "reviewer"
     return unstamped
 
 
@@ -184,9 +190,33 @@ class TestModelFacingOutputSchema(unittest.TestCase):
         jsonschema.Draft7Validator.check_schema(self.schema)
 
     def test_top_level_required_drops_schema_version_keeps_the_rest(self) -> None:
+        # Issue #148 adds the model-facing `role` discriminator, required.
         self.assertEqual(
-            set(self.schema["required"]), {"decision", "confidence_state", "issues"}
+            set(self.schema["required"]), {"decision", "confidence_state", "issues", "role"}
         )
+
+    def test_the_role_discriminator_is_model_facing_only(self) -> None:
+        """Issue #148: one tool schema for both passes, with a required `role`
+        the full artifact does not declare -- and the pipeline drops it
+        before the full-schema check, never rejecting on it."""
+        self.assertEqual(
+            self.schema["properties"]["role"]["enum"],
+            [mos.ROLE_REVIEWER, mos.ROLE_CRITIC],
+        )
+        full = json.loads(pp.OUTPUT_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self.assertNotIn("role", full["properties"])
+        stamped = _load_fixture(_PRIMARY_VALID_FIXTURE)
+        for role in (mos.ROLE_REVIEWER, mos.ROLE_CRITIC, "not-a-role"):
+            with self.subTest(role=role):
+                body = _unstamp(stamped)
+                body["role"] = role
+                ok, parsed = pp.validate_model_response(json.dumps(body))
+                self.assertTrue(ok, parsed)
+                self.assertNotIn("role", parsed)
+        body = _unstamp(stamped)
+        body.pop("role")
+        ok, parsed = pp.validate_model_response(json.dumps(body))
+        self.assertTrue(ok, parsed)
 
     def test_top_level_properties_no_longer_declares_schema_version(self) -> None:
         # Stripped from properties too, not just required -- see the

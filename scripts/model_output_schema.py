@@ -262,6 +262,47 @@ def _notes_mode_includes_internal_content(notes_mode: str) -> bool:
     return (notes_mode or "").strip().lower() in _NOTES_MODES_WITH_INTERNAL_CONTENT
 
 
+# The role discriminator (issue #148). Both passes of a review send ONE tool
+# definition: Anthropic keys a prompt-cache hit on an exact byte prefix in the
+# order tools -> system -> messages, so a critic whose tool schema differed
+# from the reviewer's by a single byte could never reuse the cache the
+# reviewer just wrote. The output contract was already one artifact for both
+# passes (issue #137: `critic_delta` is the critic's branch, null on the
+# reviewer's response); `role` is the field that says, inside that one
+# shared tool, which branch this answer is. Each pass's role suffix (after
+# the counterparty document) tells the model the value to send.
+#
+# MODEL-FACING ONLY, like the stamped fields above in reverse: the full
+# artifact does not declare it (and forbids unknown top-level keys), so
+# `primary_review_pass.validate_model_response` drops it via
+# `strip_model_facing_only_fields` before the full-schema check. It is never
+# checked against the pass that asked: the pipeline knows which pass it ran,
+# and making a wrong or missing value a rejection would add a retry class to
+# the reviewer -- the doubled bill issue #157 measured.
+ROLE_DISCRIMINATOR_FIELD = "role"
+ROLE_REVIEWER = "reviewer"
+ROLE_CRITIC = "critic"
+_ROLE_DISCRIMINATOR_SCHEMA: dict[str, Any] = {
+    "type": "string",
+    "enum": [ROLE_REVIEWER, ROLE_CRITIC],
+    "description": (
+        "Which pass this answer is. One output contract serves both passes of "
+        "a review: 'reviewer' for the first review of the document (leave "
+        "critic_delta null), 'critic' for the senior reviewer who reads the "
+        "first reviewer's output and has the last word. The task after the "
+        "document says which you are."
+    ),
+}
+
+
+def strip_model_facing_only_fields(parsed: Any) -> None:
+    """Drop the model-facing-only `role` discriminator from a parsed
+    response, in place -- see `ROLE_DISCRIMINATOR_FIELD`. A non-dict (which
+    the full-schema check will reject on its own terms) is left alone."""
+    if isinstance(parsed, dict):
+        parsed.pop(ROLE_DISCRIMINATOR_FIELD, None)
+
+
 def _strip_stamped_fields(
     properties: dict[str, Any], required: list[Any], fields: tuple[str, ...]
 ) -> list[Any]:
@@ -280,8 +321,10 @@ def model_facing_output_schema(
 ) -> dict[str, Any]:
     """The projected JSON Schema sent as the forced tool's `parameters`
     under structured output (issue #418): `output-schema-v2.json` with the
-    pipeline-stamped fields removed from every `required` list AND every
-    `properties` dict they appear in --
+    `role` discriminator added (issue #148 -- see `ROLE_DISCRIMINATOR_FIELD`;
+    the SAME projection serves both passes, so their tool definitions are the
+    same bytes) and the pipeline-stamped fields removed from every
+    `required` list AND every `properties` dict they appear in --
 
       - top-level `schema_version` (removed from the document root).
       - `provenance` on the shared `definitions.Issue` schema -- reached
@@ -342,6 +385,15 @@ def model_facing_output_schema(
         issue_def["required"] = _strip_stamped_fields(
             issue_properties, issue_required, derived_fields
         )
+
+    # Issue #148: the role discriminator, appended last so every key the
+    # artifact itself declares keeps its order. Required, so the one shared
+    # tool asks every answer to say which pass it is -- see
+    # `ROLE_DISCRIMINATOR_FIELD` for why it is never enforced on the way back.
+    schema.setdefault("properties", {})[ROLE_DISCRIMINATOR_FIELD] = dict(
+        _ROLE_DISCRIMINATOR_SCHEMA
+    )
+    schema["required"] = [*schema.get("required", []), ROLE_DISCRIMINATOR_FIELD]
 
     return schema
 

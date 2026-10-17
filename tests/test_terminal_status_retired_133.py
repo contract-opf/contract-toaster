@@ -81,6 +81,7 @@ import boto3  # noqa: E402, I001
 from moto import mock_aws  # noqa: E402
 
 import model_client  # noqa: E402
+from fake_model_queues import seeded_by_model  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import redline_generate  # noqa: E402
@@ -165,7 +166,10 @@ def _spine(docx_bytes: bytes, primary_responses: list[str], review_id: str) -> d
     primary_id = bundle["playbook"]["metadata"]["primary_model_id"]
     critic_id = bundle["playbook"]["metadata"]["critic_model_id"]
     client = model_client.FakeBedrockClient(
-        {primary_id: list(primary_responses), critic_id: _critic_responses(primary_responses)}
+        seeded_by_model(
+            (primary_id, list(primary_responses)),
+            (critic_id, _critic_responses(primary_responses)),
+        )
     )
     return review_spine.run_review(docx_bytes, bundle, client, review_id=review_id)
 
@@ -215,7 +219,10 @@ def _run_pipeline(docx_bytes: bytes, primary_responses: list[str]) -> dict[str, 
     primary_id = model_client.openrouter_primary_model_id()
     critic_id = model_client.openrouter_critic_model_id()
     client = model_client.FakeBedrockClient(
-        {primary_id: list(primary_responses), critic_id: _critic_responses(primary_responses)}
+        seeded_by_model(
+            (primary_id, list(primary_responses)),
+            (critic_id, _critic_responses(primary_responses)),
+        )
     )
     reviews_table = dts.FakeReviewsTable()
     s3 = dts.FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})

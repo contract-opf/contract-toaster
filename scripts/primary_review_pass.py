@@ -36,49 +36,41 @@ the shared prompt-manifest assembler both passes use per issue #29):
       rather than dying terminally at stage 5.
 
 Per the #29/#30 per-pass prompt manifest (ARCHITECTURE.md -> "Per-pass
-prompt manifest"):
+prompt manifest"), as restructured by issue #148 (byte-identical shared
+prefix). Anthropic keys a prompt-cache hit on an exact byte prefix in the
+order tools -> system -> messages, so the two passes are built to be
+byte-identical up to a ROLE SUFFIX:
 
-  System prompt (both passes): (a) review guidance, (b) binary-decision
-  overlay, (c) playbook JSON -- in that fixed order, with a prompt-cache
-  breakpoint AFTER the playbook block (issue #30: caching the static prefix
-  through the playbook is what pays off on retries/eval runs).
+  Tools (both passes): ONE model-facing tool schema
+  (`model_output_schema.model_facing_output_schema`) with a `role`
+  discriminator, so the two passes' tool definitions are the same bytes.
 
-  Issue #398 (LLM-native overlay, code-only) adds two further blocks to
-  that same assembly. Each is OMITTED entirely -- never rendered as an
-  empty block -- when it has nothing to say (the same "a block is absent
-  or it has content" doctrine scripts/opf_prompt.py documents):
+  System prompt (both passes, `assemble_system_blocks` or the OPF composer):
+  (a) review guidance, (b) binary-decision overlay (the output contract and
+  its hard-gate protocol), [topic replacement-text modes], [judged-NL Floor]
+  (issue #398: present only when the playbook carries `hard_rejections`,
+  projecting each rule as a non-negotiable "MUST NOT" obligation), (c) the
+  playbook JSON / OPF digest -- with prompt-cache breakpoint ONE after it.
+  Nothing request-specific: this prefix is shared by every review of the
+  same playbook.
 
-    - A toaster-guidance block, between (a) and (b), present only when the
-      caller supplies a non-empty `toaster_guidance` (the per-review
-      free-text instructions typed into the toaster -- POST /api/reviews'
-      optional field, threaded through scripts/review_spine.py::run_review).
-      States explicit precedence: on conflict, this per-review guidance
-      governs over the playbook's positions below -- but never over the
-      Floor block (next).
-    - A judged-NL Floor block, between (b) and (c), present only when the
-      playbook carries `hard_rejections`. Projects each rule's
-      `id`/`description` as a non-negotiable "MUST NOT" obligation the
-      model itself must catch -- the safety companion to retiring the
-      deterministic hard_rejections detector (issue #380, lands AFTER
-      this): docs/planning/long-range-plan-2026-07-22.md D3's "Accepted
-      trade: the deterministic hard-stop floor is replaced by the critic
-      self-check + the judged-NL Floor." Unlike the toaster-guidance
-      block, the Floor is unconditional and cannot be waived by anything
-      else in the prompt (playbook position or toaster guidance alike).
+  First user block (both passes): the counterparty document, block-id
+  marked, with prompt-cache breakpoint TWO on it
+  (`build_document_cached_user_content`, issue #568) -- shared by both
+  passes of one review.
+
+  Role suffix, after the document (`primary_role_suffix` /
+  `critic_role_suffix`): the per-review control layer
+  (`render_request_control_text` -- standing instructions, markup
+  intensity, toaster guidance; each absent rather than empty), then the
+  reviewer's tasking (plus retrieved precedent, when any) or the critic's
+  tasking plus the primary reviewer's full structured output. A retry
+  correction is appended after that (`append_user_content_suffix`).
 
   See `render_toaster_guidance_block` / `render_floor_block` /
-  `assemble_system_blocks` below.
-
-  Primary user prompt: standard-form diff (always) + anchored clause text
-  (always) + retrieved precedent (always) + the full counterparty document
-  text (always -- issue #625 deleted the section-outline fallback; a
-  document too large for the cap fails closed as `document_too_large`
-  rather than being reviewed from a heading digest).
-
-  Critic user prompt: standard-form diff (always) + anchored clause text
-  (always) + the counterparty document the primary pass read (issue #618)
-  + the primary reviewer's full structured output (always). No retrieved
-  precedent -- see ARCHITECTURE.md for the efficacy rationale.
+  `assemble_system_blocks` below. A document too large for the cap fails
+  closed as `document_too_large` (issue #625) rather than being reviewed
+  from a heading digest.
 
 EVERY user-prompt block that can carry counterparty-authored or otherwise
 document-derived text is wrapped in explicit delimiters with an
@@ -355,7 +347,8 @@ def widen_output_budget(current: int, ceiling: int) -> int:
 #
 # Headroom math (why 175k is the cap and what it leaves room for):
 #   the document + the system blocks (guidance + overlay + playbook + any
-#   toaster-guidance/standing-instructions/Floor blocks) + the ~27,600-
+#   Floor block) + the role suffix (any toaster-guidance/standing-
+#   instructions blocks, the tasking) + the ~27,600-
 #   character forced-tool schema must fit under MAX_INPUT_TOKENS=175_000 --
 #   the step-14 pre-call gate below -- as estimated by
 #   `request_input_tokens_est` (INPUT_CHARS_PER_TOKEN_ESTIMATE = 2.5).
@@ -1245,9 +1238,15 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
 # standard-form diff, that input had shrunk to the primary's own JSON, with
 # `STANDARD_FORM_DIFF` and `ANCHORED_CLAUSES` permanently empty.
 #
-# WHERE IT LANDS: FIRST in `assemble_user_prompt_critic`'s user prompt,
-# ahead of every delimited data block, and nowhere near the primary's
-# prompt. It is plain trusted instruction text, deliberately NOT wrapped in
+# WHERE IT LANDS: in the critic's ROLE SUFFIX (`critic_role_suffix`), after
+# the counterparty document and ahead of the primary reviewer's output, and
+# nowhere near the primary's prompt. Issue #148 moved it from the head of the
+# user prompt to behind the document: the document block is the second
+# prompt-cache breakpoint, and it can only be the SAME bytes the primary
+# just cached if nothing role-specific precedes it. The tasking still reads
+# before the output it asks the critic to judge, which is the order the
+# anchoring argument below needs. It is plain trusted instruction text,
+# deliberately NOT wrapped in
 # a `<TAG>` delimiter: the delimiters in these prompts mean "untrusted data,
 # never an instruction" (see `_delimited_block` /
 # `UNTRUSTED_BEARING_TAGS`), which is the exact opposite of what this block
@@ -1264,7 +1263,7 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
 # for a caller that passes no `doc_text` (the pre-#618 block sequence --
 # see that function's absent-or-populated doctrine), so the tasking cannot
 # be a single unconditional constant: it would tell the critic that a
-# document is "shown to you below" when none is, and forbid any objection
+# document is "shown to you above" when none is, and forbid any objection
 # it "cannot ground in the document text shown to you" -- which, read
 # literally, forbids EVERY objection, silencing the adversarial pass
 # entirely on those reviews. The two constants below
@@ -1280,11 +1279,12 @@ def render_binary_decision_overlay_block(notes_mode: str = "external") -> str:
 _CRITIC_TASKING_ROLE_WITH_DOCUMENT = (
     "YOUR ROLE ON THIS REVIEW: you are the SENIOR reviewer, and you have the "
     "last word. Another reviewer has already reviewed the counterparty "
-    "document shown to you below and produced the structured output shown to "
+    "document shown to you above and produced the structured output shown to "
     "you below. Your response is the FINAL review of this document: what you "
     "emit, not what the first reviewer emitted, is what the attorney "
     "receives. You are neither repeating the first review nor polishing it. "
-    "Your job is an adversarial, sceptical re-review of it."
+    "Your job is an adversarial, sceptical re-review of it. Report it "
+    'through the output contract with "role" set to "critic".'
 )
 
 _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT = (
@@ -1294,7 +1294,8 @@ _CRITIC_TASKING_ROLE_WITHOUT_DOCUMENT = (
     "ITSELF IS NOT SHOWN TO YOU ON THIS REVIEW: this prompt was composed "
     "without it, so the document text is not among the material you have. "
     "You are neither repeating the first review nor polishing it. Your job is "
-    "an adversarial, sceptical re-review of it on the material you do have."
+    "an adversarial, sceptical re-review of it on the material you do have. "
+    'Report it through the output contract with "role" set to "critic".'
 )
 
 # The sceptical-review instruction (issue #137, ADR 0001). The critic is the
@@ -2040,8 +2041,9 @@ STANDING_INSTRUCTIONS_INTRO = (
 
 
 def render_standing_instructions_block(instructions_text: str) -> str | None:
-    """Render the standing-instructions system block, or None when there is
-    nothing to render.
+    """Render the standing-instructions block, or None when there is
+    nothing to render. Sent in the role suffix after the document since
+    issue #148 -- see `render_request_control_text`.
 
     "A block is absent or it has content" (same doctrine as
     render_toaster_guidance_block below): never an empty
@@ -2068,20 +2070,22 @@ def render_standing_instructions_block(instructions_text: str) -> str | None:
 # intensities indistinguishable in audit and let the model weigh the setting
 # as free text. It is now a closed-vocabulary wire field (`markup_intensity`:
 # `light | medium | heavy`, `backend/src/reviews.py::MARKUP_INTENSITIES`),
-# rendered HERE as its OWN system block with FIXED wording per level, in the
-# same slot on BOTH review paths: after the standing-instructions block
-# above, before the toaster-guidance block below (`assemble_system_blocks`
-# for a v1 review, `scripts/review_spine.py::_assemble_opf_system_blocks`
-# for an OPF review -- the two assemblers that emit the toaster-guidance
-# block, so the reviewer's own typed words still read LAST, nearest the
-# decision overlay, exactly where #495's prose sentence used to put them).
-# It lives in this module, not `scripts/opf_prompt.py`, because both
-# assemblers already draw their guidance blocks from here and `opf_prompt`
-# imports this module (the reverse import would be circular).
+# rendered HERE as its OWN block with FIXED wording per level, in the same
+# slot on BOTH review paths: after the standing-instructions block above,
+# before the toaster-guidance block below, so the reviewer's own typed words
+# still read LAST, exactly where #495's prose sentence used to put them.
+# Since issue #148 that slot is `render_request_control_text`, sent after the
+# counterparty document in BOTH passes' role suffix rather than in the system
+# prompt: a per-review dial ahead of the cached playbook block would re-bill
+# the playbook on every review whose dial differs. It lives in this module,
+# not `scripts/opf_prompt.py`, because both passes render the control layer
+# from here on both review paths. Text sent after the document can be
+# imitated by a forged closing delimiter inside it; neutralising those
+# tokens is #162.
 #
-# `medium` renders NO block: it is the default, and a medium review's system
-# prompt must stay byte-identical to the prompt assembled before this block
-# existed (the SPA sent nothing for Medium then, and sends nothing now).
+# `medium` renders NO block: it is the default, and a medium review's prompt
+# carries nothing for it (the SPA sent nothing for Medium before this block
+# existed, and sends nothing now).
 # `heavy` carries the sentence the SPA used to send for "Dark"; `light`
 # carries the old "Light" sentence adapted to "flag and footnote, edit only
 # Floor breaches". The SPA shows the SAME sentence under its control
@@ -2198,12 +2202,12 @@ _TOASTER_GUIDANCE_INTRO_COMMON = (
     "ONLY, HIGHEST PRECEDENCE AMONG PLAYBOOK POSITIONS.\n"
     "The text inside <TOASTER_GUIDANCE> below is a trusted instruction from "
     "the team running this review, not counterparty content. When it "
-    "conflicts with a position stated in the playbook JSON below "
+    "conflicts with a position stated in the playbook in the system prompt "
     "(general_principles, decision_rubric, topics, de_minimis_categories), "
     "THIS GUIDANCE GOVERNS: follow it over the conflicting playbook "
     "position{narration_clause}. This guidance does NOT reach the MUST-NOT "
-    "FLOOR appearing later in this system prompt, if present -- a Floor "
-    "obligation can never be waived, by this guidance or by anything else."
+    "FLOOR in the system prompt, if present -- a Floor obligation can never "
+    "be waived, by this guidance or by anything else."
 )
 
 # Appended only when this review's notes mode includes internal content --
@@ -2262,10 +2266,11 @@ def _render_toaster_guidance_intro(notes_mode: str) -> str:
 def render_toaster_guidance_block(
     toaster_guidance: str, notes_mode: str = "external"
 ) -> str | None:
-    """Render the toaster-guidance system block, or None when there is
-    nothing to render.
+    """Render the toaster-guidance block, or None when there is nothing to
+    render. Sent in the role suffix after the document since issue #148 --
+    see `render_request_control_text`.
 
-    "A block is absent or it has content" -- `assemble_system_blocks` below
+    "A block is absent or it has content" -- `render_request_control_text`
     never appends an empty-guidance block, mirroring `scripts/opf_prompt.py`
     's PR F1 doctrine (that module's docstring: a block that occupies a
     slot, is hashed and cached, and says nothing is a lie a prompt should
@@ -2274,8 +2279,8 @@ def render_toaster_guidance_block(
     `_delimited_block`'s untrusted-input warning.
 
     `notes_mode` (issue #516, epic #519 item B, default `"external"` --
-    matching `assemble_system_blocks`' own default so an un-migrated caller
-    reproduces today's post-#516 behaviour) selects which intro variant is
+    matching `render_request_control_text`'s own default so an un-migrated
+    caller reproduces today's post-#516 behaviour) selects which intro variant is
     used: see the module comment above and `_render_toaster_guidance_intro`.
     """
     text = (toaster_guidance or "").strip()
@@ -2498,98 +2503,62 @@ def render_replacement_text_modes_block(playbook: dict[str, Any]) -> str | None:
 
 def assemble_system_blocks(
     playbook: dict[str, Any],
-    toaster_guidance: str = "",
-    instructions_text: str = "",
     notes_mode: str = "external",
-    markup_intensity: str = "medium",
 ) -> list[dict[str, Any]]:
-    """(a) guidance -> [standing instructions, if any] -> [markup intensity,
-    unless medium] -> [toaster guidance, if any] -> (b) binary overlay -> [topic replacement-text modes, if the
-    playbook has topics] -> [judged-NL Floor, if the playbook has
-    hard_rejections] -> (c) PROJECTED playbook JSON, in that order, with a
-    prompt-cache breakpoint AFTER the LAST block (issue #30) -- always the
-    playbook block, since it is appended last and every block ahead of it is
-    either fixed or conditional-but-earlier. Returned as Anthropic-message-
-    API-shaped content blocks so the cache breakpoint is a structural
-    property (`cache_control` on the playbook block) a caller/test can
-    assert directly, not prose to parse.
+    """The SHARED, request-independent system prefix both passes send (issue
+    #148): (a) guidance -> (b) binary overlay (the output contract and its
+    hard-gate protocol) -> [topic replacement-text modes, if the playbook has
+    topics] -> [judged-NL Floor, if the playbook has hard_rejections] -> (c)
+    PROJECTED playbook JSON, in that order, with a prompt-cache breakpoint
+    AFTER the LAST block (issue #30) -- always the playbook block, since it is
+    appended last and every block ahead of it is fixed by the playbook and
+    the output contract alone. Returned as Anthropic-message-API-shaped
+    content blocks so the cache breakpoint is a structural property
+    (`cache_control` on the playbook block) a caller/test can assert
+    directly, not prose to parse.
+
+    NOTHING REQUEST-SPECIFIC LIVES HERE (issue #148). Anthropic keys a cache
+    hit on an exact byte prefix in the order tools -> system -> messages, so
+    any per-review value ahead of the playbook block re-bills the whole
+    playbook on every review that carries a different one. The three
+    per-review layers that used to sit in this list -- the playbook's
+    standing instructions (issue #483), the markup-intensity dial (issue
+    #54) and the per-review toaster guidance (issue #398) -- are rendered by
+    `render_request_control_text` and sent AFTER the counterparty document,
+    in the user message's role suffix (`primary_role_suffix` /
+    `critic_role_suffix`). Their relative order is unchanged, so the
+    precedence ladder (Floor > per-review guidance > standing instructions >
+    playbook) still reads in the same sequence; the guidance block's two
+    positional references ("the playbook JSON below", "the Floor later in
+    this system prompt") were reworded to point at the system prompt from
+    their new place after it.
 
     The playbook block carries `project_playbook_for_prompt(playbook)`, not
     the raw playbook dict (issue #267) -- this is the single seam both the
     primary and critic passes go through, so the projection is identical for
-    both (critic_review_pass.py calls this function directly).
-
-    `instructions_text` (issue #483, epic #481, default `""`) is the
-    playbook's resolved standing instructions (issue #482's store),
-    threaded from scripts/review_spine.py::run_review. It sits BEFORE the
-    `toaster_guidance` block -- the more specific per-review layer reads
-    later, nearer the decision overlay -- per the epic's precedence ladder:
-    Floor > per-review guidance > standing instructions > playbook. Empty
-    (the default) omits the block entirely -- see
-    render_standing_instructions_block.
-
-    `toaster_guidance` (issue #398, default `""`) is the optional per-review
-    free-text instructions threaded from POST /api/reviews through
-    scripts/review_spine.py::run_review. Empty (the default) reproduces
-    today's behavior for this block exactly -- see
-    render_toaster_guidance_block. The Floor block's presence depends only
-    on the playbook's own `hard_rejections`, never on `toaster_guidance` or
-    `instructions_text` -- it is a separate, unconditional addition -- see
-    render_floor_block. The topic replacement-text-modes block (issue #573)
-    is the same kind of separate, unconditional addition, gated only on
-    `playbook["topics"]` -- see render_replacement_text_modes_block. It sits
-    BEFORE the Floor block (immediately after the binary overlay) so the
-    Floor block keeps its own pinned position immediately before the
+    both (critic_review_pass.py calls this function directly). The Floor
+    block's presence depends only on the playbook's own `hard_rejections` --
+    see render_floor_block. The topic replacement-text-modes block (issue
+    #573) is the same kind of separate, unconditional addition, gated only
+    on `playbook["topics"]` -- see render_replacement_text_modes_block. It
+    sits BEFORE the Floor block (immediately after the binary overlay) so
+    the Floor block keeps its own pinned position immediately before the
     playbook JSON.
 
-    `notes_mode` (issues #520/#522, default `"external"`) is threaded into
-    TWO blocks, which together are the whole prompt-side notes-mode gate:
-
-    - `render_toaster_guidance_block` (issue #516, epic #519 item B):
-      whether the toaster-guidance block instructs the model to narrate a
-      guidance/playbook conflict at all depends on it -- that narration is
-      internal-audience content, so the instruction is only given when the
-      mode puts internal content in scope (`internal`/`both`), and it names
-      `internal_rationale_for_footnote` as the per-issue place for it. See
-      that function's docstring and the module comment above
-      `_TOASTER_GUIDANCE_INTRO_COMMON`.
-    - `render_binary_decision_overlay_block` (issue #522, epic #519 item
-      D): whether the issue-object contract carries the
-      `internal_rationale_for_footnote` key at all depends on it. Without
-      this half the clause above would name a key the output contract
-      forbids, and the renderer that emits it
-      (`footnote_audience.footnote_texts_for_notes_mode`) would have no
-      producer. See the module comment above
-      `_render_binary_decision_overlay`.
-
-    `external` (the default) gets neither, same as `none` -- both render
-    byte-identically to the pre-#516/#522 prompt.
-
-    `markup_intensity` (issue #54, default `"medium"`) is the reviewer's
-    closed-vocabulary markup dial (`light | medium | heavy`), read out of the
-    execution payload by `backend/src/pipeline_runner.py` and threaded
-    through `scripts/review_spine.py::run_review` -> `run_primary_pass` /
-    `critic_review_pass.run_critic_pass` -> here, exactly as `notes_mode`
-    is. Rendered by `render_markup_intensity_block` as its own fixed-wording
-    block AFTER the standing-instructions block and BEFORE the
-    toaster-guidance block, so the reviewer's own typed words still read
-    last. `medium` renders NO block, so the default is byte-identical to
-    before the parameter existed. The OPF path renders the same block in
-    the same slot (`scripts/review_spine.py::_assemble_opf_system_blocks`).
+    `notes_mode` (issues #520/#522, default `"external"`) selects whether the
+    output-contract block (`render_binary_decision_overlay_block`, issue
+    #522, epic #519 item D) carries the `internal_rationale_for_footnote`
+    key. It stays in the shared prefix because it is a property of the
+    OUTPUT CONTRACT, not of the request: the model-facing tool schema
+    (`model_output_schema.model_facing_output_schema`) varies with the SAME
+    mode for the same reason, and the tool definitions precede the system
+    prompt on the wire, so a review in a different notes mode cannot share
+    this prefix whatever this function does. Two reviews in the same mode
+    always do. `external` (the default, and every mode reachable while
+    #572's `NOTES_MODE_ENABLED` kill switch is off) renders the pre-#522
+    block byte for byte.
     """
     blocks: list[dict[str, Any]] = [{"type": "text", "text": REVIEW_GUIDANCE_BLOCK}]
-
-    standing_text = render_standing_instructions_block(instructions_text)
-    if standing_text is not None:
-        blocks.append({"type": "text", "text": standing_text})
-
-    intensity_text = render_markup_intensity_block(markup_intensity)
-    if intensity_text is not None:
-        blocks.append({"type": "text", "text": intensity_text})
-
-    guidance_text = render_toaster_guidance_block(toaster_guidance, notes_mode=notes_mode)
-    if guidance_text is not None:
-        blocks.append({"type": "text", "text": guidance_text})
 
     blocks.append(
         {"type": "text", "text": render_binary_decision_overlay_block(notes_mode)}
@@ -2611,6 +2580,40 @@ def assemble_system_blocks(
         }
     )
     return blocks
+
+
+def render_request_control_text(
+    *,
+    instructions_text: str = "",
+    markup_intensity: str = "medium",
+    toaster_guidance: str = "",
+    notes_mode: str = "external",
+) -> str:
+    """The per-review control layer (issue #148), as ONE text: [standing
+    instructions] -> [markup intensity, unless medium] -> [toaster guidance],
+    each absent rather than empty, joined by a blank line. `""` when the
+    review carries none of the three.
+
+    These are the blocks `assemble_system_blocks` and
+    `review_spine._assemble_opf_system_blocks` used to put AHEAD of the
+    playbook. They are trusted, first-party text -- the deployment's
+    administrator (issue #483), the reviewer's dial (issue #54) and the
+    reviewer's own typed words (issue #398) -- so, as before, none of them
+    is wrapped in `_delimited_block`'s untrusted-input warning. They are the
+    SAME bytes in both passes of one review, and they are request-specific,
+    which is exactly why they now follow the counterparty document instead
+    of preceding the cached prefix: see `assemble_system_blocks`.
+
+    Order is the precedence ladder's reading order, unchanged from the
+    system-prompt slot they came from: the more specific a layer, the later
+    it reads, so the reviewer's own typed words still read last of the three.
+    """
+    parts = [
+        render_standing_instructions_block(instructions_text),
+        render_markup_intensity_block(markup_intensity),
+        render_toaster_guidance_block(toaster_guidance, notes_mode=notes_mode),
+    ]
+    return "\n\n".join(part for part in parts if part is not None)
 
 
 def render_system_prompt(system_blocks: list[dict[str, Any]]) -> str:
@@ -2767,24 +2770,97 @@ RENDERED_HEADING_MARKER = "## "
 RENDERED_BLOCK_MARKER_PATTERN = re.compile(r"^\[p\d{4,}\][ \t]*")
 
 
+# ---------------------------------------------------------------------------
+# Role suffixes (issue #148). Everything a pass sends AFTER the counterparty
+# document: the only part of the two requests that differs by role. The
+# reviewer's tasking is new with that issue -- before it, the primary's role
+# was implicit in the shared system prompt, and the critic's tasking sat
+# FIRST in its user message, ahead of the document, which made the document
+# block a different byte offset (and a different cache entry) in each pass.
+# Trusted text after the untrusted block widens the injection surface: a
+# forged closing delimiter plus a forged guidance block inside the document
+# can now imitate this layout. That residual is recorded in
+# docs/threat-model.md ("Residual since issue #148").
+# ---------------------------------------------------------------------------
+
+REVIEWER_TASKING_BLOCK = (
+    "YOUR ROLE ON THIS REVIEW: you are the first reviewer. Review the "
+    "counterparty document shown to you above against the playbook in the "
+    "system prompt, and report your review through the output contract with "
+    '"role" set to "reviewer". A senior reviewer reads your output after you '
+    'and has the last word; "critic_delta" is that reviewer\'s record, so '
+    "leave it null."
+)
+
+
+def primary_role_suffix(
+    *,
+    retrieved_precedent: list[dict[str, Any]],
+    request_control_text: str = "",
+) -> str:
+    """The primary pass's role suffix (issue #148): [the per-review control
+    layer, `render_request_control_text`] -> [retrieved precedent, when
+    non-empty -- see `render_retrieved_precedent_delimited_block`, issue
+    #582] -> `REVIEWER_TASKING_BLOCK`. Never empty, so the cached-document
+    builder always has a non-empty second block to emit."""
+    parts = [request_control_text] if request_control_text.strip() else []
+    precedent_block = render_retrieved_precedent_delimited_block(retrieved_precedent)
+    if precedent_block is not None:
+        parts.append(precedent_block)
+    parts.append(REVIEWER_TASKING_BLOCK)
+    return "\n\n".join(parts)
+
+
+def critic_role_suffix(
+    *,
+    primary_output: dict[str, Any],
+    request_control_text: str = "",
+    with_document: bool = True,
+) -> str:
+    """The critic pass's role suffix (issue #148): [the per-review control
+    layer -- the SAME bytes the primary's suffix opened with] -> the critic
+    tasking -> the primary reviewer's full structured output, delimited.
+
+    WHICH tasking is chosen by `with_document` -- whether a
+    `COUNTERPARTY_DOCUMENT` block precedes this suffix: `CRITIC_TASKING_BLOCK`
+    when one does, `CRITIC_TASKING_BLOCK_NO_DOCUMENT` when one does not. The
+    tasking asserts the document is "shown to you above" and refuses any
+    objection not grounded in it, so emitting it over a prompt with no
+    document block would forbid every objection and silence the adversarial
+    pass on exactly the largest documents. A prompt constant that speaks
+    about a data block is a promise about that block; the assembler that can
+    drop the block owns keeping the promise true.
+
+    The tasking reads before `PRIMARY_REVIEWER_OUTPUT` deliberately: the
+    critic is told to re-derive its issues from the document FIRST and only
+    then compare them with the first reviewer's, so the first reviewer's
+    answer is the last thing it reads, after the instruction not to anchor
+    on it."""
+    parts = [request_control_text] if request_control_text.strip() else []
+    parts.append(CRITIC_TASKING_BLOCK if with_document else CRITIC_TASKING_BLOCK_NO_DOCUMENT)
+    parts.append(
+        _delimited_block("PRIMARY_REVIEWER_OUTPUT", json.dumps(primary_output, sort_keys=True))
+    )
+    return "\n\n".join(parts)
+
+
 def assemble_user_prompt_primary(
     *,
     retrieved_precedent: list[dict[str, Any]],
     doc_text: str = "",
+    request_control_text: str = "",
 ) -> str:
-    """Primary-pass user prompt: retrieved precedent (when non-empty; omitted
-    entirely otherwise -- see `render_retrieved_precedent_delimited_block`,
-    issue #582) + the FULL counterparty document text, block-id marked.
+    """Primary-pass user prompt, as ONE string (the capability-False path):
+    the FULL counterparty document text, block-id marked, then the role
+    suffix (`primary_role_suffix`). The same content, in the same order, as
+    the cached block list `assemble_user_content_primary` builds for a
+    caching model -- the document first, so that whether a model caches
+    never changes what it reads or in what order.
 
-    Issue #627 removed the last two blocks of the original #29 manifest.
-    `STANDARD_FORM_DIFF` and `ANCHORED_CLAUSES` had been permanently empty
-    since issue #380 retired the standard-form diff, and were composed anyway
-    -- as empty delimited slots -- purely to keep the assembled prompt SHAPE
-    unchanged. The hard cutover rewrites that shape, so the rationale is
-    spent: a block that advertises a data source and shows it empty is prompt
-    noise, and the same absent-or-populated doctrine that governs
-    `render_toaster_guidance_block`, `render_floor_block` and
-    `render_retrieved_precedent_delimited_block` now governs these too --
+    Issue #627 removed the last two blocks of the original #29 manifest
+    (`STANDARD_FORM_DIFF` / `ANCHORED_CLAUSES`, permanently empty since issue
+    #380): a block that advertises a data source and shows it empty is
+    prompt noise, so the absent-or-populated doctrine governs these too --
     permanently absent.
 
     Issue #625 deleted the size-gated section-outline alternative: there is
@@ -2792,51 +2868,45 @@ def assemble_user_prompt_primary(
     document too large for `MAX_INPUT_TOKENS` never reaches this assembler's
     output at all -- `run_primary_pass`'s step-14 gate fails it closed as
     `document_too_large` before any model call."""
-    blocks = []
-    precedent_block = render_retrieved_precedent_delimited_block(retrieved_precedent)
-    if precedent_block is not None:
-        blocks.append(precedent_block)
-    blocks.append(_delimited_block("COUNTERPARTY_DOCUMENT", doc_text))
-    return "\n\n".join(blocks)
+    return "\n\n".join(
+        (
+            _delimited_block("COUNTERPARTY_DOCUMENT", doc_text),
+            primary_role_suffix(
+                retrieved_precedent=retrieved_precedent,
+                request_control_text=request_control_text,
+            ),
+        )
+    )
 
 
 def assemble_user_prompt_critic(
     *,
     primary_output: dict[str, Any],
     doc_text: str = "",
+    request_control_text: str = "",
 ) -> str:
-    """Critic-pass user prompt: the critic tasking (issue #618, trusted
-    instruction text, first and undelimited), then the delimited data blocks
-    -- the counterparty document + the primary reviewer's full structured
-    output. No retrieved precedent (primary-only), and, since issue #627, no
+    """Critic-pass user prompt, as ONE string (the capability-False path):
+    the counterparty document the primary pass read, then the critic's role
+    suffix (`critic_role_suffix` -- the per-review control layer, the critic
+    tasking, the primary reviewer's full structured output). No retrieved
+    precedent (primary-only), and, since issue #627, no
     `STANDARD_FORM_DIFF`/`ANCHORED_CLAUSES` slots: see
     `assemble_user_prompt_primary` for why those two are gone from BOTH
     passes rather than one.
 
-    WHICH tasking is chosen by whether a document block is actually
-    composed: `CRITIC_TASKING_BLOCK` when one is,
-    `CRITIC_TASKING_BLOCK_NO_DOCUMENT` when one is not. The tasking asserts
-    the document is "shown to you below" and refuses any objection not
-    grounded in it, so emitting it over a prompt with no document block
-    would forbid every objection and silence the adversarial pass on exactly
-    the largest documents. A prompt constant that speaks about a data block
-    is a promise about that block; the assembler that can drop the block
-    owns keeping the promise true.
-
     `doc_text` (issue #618, default `""`): the SAME document string the
     primary pass reviewed, rendered through the SAME
     `_delimited_block("COUNTERPARTY_DOCUMENT", ...)` the primary uses -- one
-    tag, one rendering, one untrusted warning, both passes. Ahead of
-    `PRIMARY_REVIEWER_OUTPUT` deliberately: the tasking above asks the critic
-    to ground every objection in the document FIRST and object SECOND, so the
-    evidence is what it reads first.
+    tag, one rendering, one untrusted warning, both passes. Issue #148 put it
+    FIRST, ahead of the tasking: it is the second prompt-cache breakpoint,
+    and the critic can only read the primary's cache entry for it if the two
+    requests agree byte for byte up to its end.
 
     Empty `doc_text` OMITS the block entirely rather than composing an empty
     labelled slot that advertises a document and shows none -- the same
     absent-or-populated doctrine as `render_toaster_guidance_block`,
     `render_floor_block` and `render_retrieved_precedent_delimited_block`
-    (issue #582). Callers that pass no document therefore get the
-    pre-#618 block sequence unchanged.
+    (issue #582) -- and selects the no-document tasking.
 
     There is deliberately NO reduced-fidelity fallback here: a document too
     large to send to the critic fails closed as `document_too_large` in
@@ -2844,15 +2914,14 @@ def assemble_user_prompt_critic(
     quietly critiquing a review of a document the critic never read. Issue
     #625 made that the primary pass's rule too.
     """
-    blocks = [
-        CRITIC_TASKING_BLOCK if doc_text else CRITIC_TASKING_BLOCK_NO_DOCUMENT,
-    ]
-    if doc_text:
-        blocks.append(_delimited_block("COUNTERPARTY_DOCUMENT", doc_text))
-    blocks.append(
-        _delimited_block("PRIMARY_REVIEWER_OUTPUT", json.dumps(primary_output, sort_keys=True))
+    suffix = critic_role_suffix(
+        primary_output=primary_output,
+        request_control_text=request_control_text,
+        with_document=bool(doc_text),
     )
-    return "\n\n".join(blocks)
+    if not doc_text:
+        return suffix
+    return "\n\n".join((_delimited_block("COUNTERPARTY_DOCUMENT", doc_text), suffix))
 
 
 def estimate_user_content_tokens(user_content: "str | list[dict[str, Any]]") -> int:  # noqa: UP037
@@ -2900,13 +2969,11 @@ def assembled_prompt_tokens(
 # own doctrine: a structural, Anthropic-message-API-shaped content-block
 # list a caller/test can assert directly, never prose to parse.
 #
-# `critic_review_pass.py` already does `import primary_review_pass as pp`
-# (issue #82), so `pp.build_document_cached_user_content` is reachable from
-# it without any new import -- the seam issue #568's Scope asks for a future
-# consumer (the critic pass itself, the OPF Floor judge, a re-quote call --
-# all explicitly out of THIS issue's scope) to build on. Not called from
-# `run_critic_pass` here: issue #568's own "Out of scope" list is explicit
-# that what any pass READS does not change in this issue.
+# Issue #148 made the critic pass the second consumer issue #568 built this
+# seam for: `assemble_user_content_critic` sends the SAME cached document
+# block the primary just wrote, so within one review the critic reads the
+# primary's cache entry for the playbook AND the document, and only its role
+# suffix is billed in full.
 # ---------------------------------------------------------------------------
 
 
@@ -2971,6 +3038,7 @@ def assemble_user_content_primary(
     retrieved_precedent: list[dict[str, Any]],
     doc_text: str = "",
     prompt_caching_enabled: bool = False,
+    request_control_text: str = "",
 ) -> "str | list[dict[str, Any]]":  # noqa: UP037
     """The primary-pass user content `run_primary_pass` sends to
     `model_client.invoke()` (issue #568).
@@ -2979,42 +3047,69 @@ def assemble_user_content_primary(
 
     - `prompt_caching_enabled=False` (the default -- a capability-False
       model per #562's descriptor): returns `assemble_user_prompt_primary`'s
-      unmodified plain-string output -- a straight passthrough, not a
-      reimplementation, so this path is byte-identical to every call
-      before issue #568 (that function's own callers, and its own tests,
-      are untouched).
+      plain-string output -- a straight passthrough, not a reimplementation.
     - `prompt_caching_enabled=True`: returns
       `build_document_cached_user_content`'s block list -- the cached
-      document block FIRST, and the retrieved-precedent text (when
-      non-empty; omitted entirely otherwise -- see
-      `render_retrieved_precedent_delimited_block`, issue #582) (this
-      call's "pass-specific instruction") as the second, uncached block,
-      per the issue's ordering discipline. With retrieval dormant that
-      second half is empty, and the list is the cached block ALONE (issue
-      #627 fix round 1) -- never a block with empty `text`, which the
-      Anthropic messages API rejects.
+      document block FIRST, and `primary_role_suffix` (the per-review
+      control layer, any retrieved precedent, the reviewer tasking) as the
+      second, uncached block.
 
-    Issue #625 removed the third condition this used to carry -- the
-    section-outline branch had no stable document prefix worth caching, and
-    that branch no longer exists.
+    Both paths carry the same text in the same order (issue #148): the
+    document, then the role suffix. The suffix is never empty -- it always
+    ends with `REVIEWER_TASKING_BLOCK` -- so the Anthropic messages API's
+    refusal of an empty text block (issue #627 fix round 1) cannot be hit.
     """
     if not prompt_caching_enabled:
         return assemble_user_prompt_primary(
             retrieved_precedent=retrieved_precedent,
             doc_text=doc_text,
+            request_control_text=request_control_text,
         )
-    precedent_block = render_retrieved_precedent_delimited_block(retrieved_precedent)
-    # Issue #627: with the two permanently-empty manifest blocks gone, the
-    # pass-specific half can now be genuinely EMPTY -- retrieval is dormant
-    # (docs/rag-dormant.md), so on every review reachable today this is "".
-    # `build_document_cached_user_content` then returns the cached document
-    # block ALONE rather than trailing an empty text block the Anthropic
-    # messages API would reject (fix round 1 -- see that function's own
-    # "WHY THE SECOND BLOCK IS CONDITIONAL"), and `append_user_content_
-    # suffix` starts a fresh block for a retry correction so the cached
-    # prefix is still never rewritten.
-    pass_specific_text = precedent_block if precedent_block is not None else ""
-    return build_document_cached_user_content(doc_text, pass_specific_text)
+    return build_document_cached_user_content(
+        doc_text,
+        primary_role_suffix(
+            retrieved_precedent=retrieved_precedent,
+            request_control_text=request_control_text,
+        ),
+    )
+
+
+def assemble_user_content_critic(
+    *,
+    primary_output: dict[str, Any],
+    doc_text: str = "",
+    prompt_caching_enabled: bool = False,
+    request_control_text: str = "",
+) -> "str | list[dict[str, Any]]":  # noqa: UP037
+    """The critic-pass user content `critic_review_pass.run_critic_pass`
+    sends (issue #148) -- the critic's mirror of
+    `assemble_user_content_primary`.
+
+    - `prompt_caching_enabled=False`: `assemble_user_prompt_critic`'s plain
+      string.
+    - `prompt_caching_enabled=True` and a document to send:
+      `build_document_cached_user_content(doc_text, critic_role_suffix(...))`
+      -- the document block byte-identical to the one the primary pass sent
+      and cached, so the critic's request matches the primary's through the
+      end of that block and reads both cache breakpoints the primary wrote.
+    - No document (`doc_text == ""`): there is no document block to cache,
+      so the plain string is returned whatever the capability -- the
+      no-document tasking followed by the primary's output.
+    """
+    if not prompt_caching_enabled or not doc_text:
+        return assemble_user_prompt_critic(
+            primary_output=primary_output,
+            doc_text=doc_text,
+            request_control_text=request_control_text,
+        )
+    return build_document_cached_user_content(
+        doc_text,
+        critic_role_suffix(
+            primary_output=primary_output,
+            request_control_text=request_control_text,
+            with_document=True,
+        ),
+    )
 
 
 def append_user_content_suffix(
@@ -3482,8 +3577,11 @@ def validate_model_response(
     Returns (True, parsed_dict) on success, (False, error_message) on
     failure -- either invalid JSON or schema-invalid JSON.
 
-    Five normalizations run before the strict jsonschema check, all
-    narrowly scoped so the "never best-effort patch malformed JSON"
+    Issue #148 adds a step (0) ahead of them: the model-facing-only `role`
+    discriminator is dropped (`model_output_schema.
+    strip_model_facing_only_fields`), since the full artifact does not
+    declare it. Five normalizations then run before the strict jsonschema
+    check, all narrowly scoped so the "never best-effort patch malformed JSON"
     invariant still holds for model-judgment content: (1)
     `_extract_json_object` unwraps a prose/markdown-fence wrapper the model
     may put around its JSON (real models -- e.g. Claude via OpenRouter --
@@ -3561,6 +3659,13 @@ def validate_model_response(
     except ModelResponseContractViolation as exc:
         return False, f"invalid_response_contract: {exc}"
     schema = load_output_schema(schema_path)
+    # Issue #148: the `role` discriminator exists only in the model-facing
+    # projection (the full artifact does not declare it, and forbids unknown
+    # top-level keys), so it is dropped before the full-schema check -- the
+    # inverse of the stamping below. Never validated against the pass: the
+    # pipeline knows which pass it ran, and a wrong or missing value is no
+    # reason to buy a retry (issue #157's doubled bill).
+    _mos.strip_model_facing_only_fields(parsed)
     _stamp_pipeline_envelope(
         parsed,
         issue_provenance=issue_provenance,
@@ -3956,18 +4061,18 @@ def run_primary_pass(
     `model_client.ModelPolicyViolation` on a forbidden inference-profile
     prefix).
 
-    `toaster_guidance` (issue #398, default `""`) and `instructions_text`
-    (issue #483, default `""`) are threaded straight into
-    `assemble_system_blocks` -- see that function's docstring for the
-    precedence contract. Both empty reproduces today's behavior exactly.
-    `markup_intensity` (issue #54, default `"medium"`) is threaded the same
-    way, for the same reason: a v1 review whose row records `light` or
-    `heavy` must actually tell the model so. `medium` adds nothing.
+    `toaster_guidance` (issue #398, default `""`), `instructions_text`
+    (issue #483, default `""`) and `markup_intensity` (issue #54, default
+    `"medium"`) are the per-review control layer: rendered by
+    `render_request_control_text` and sent in the role suffix AFTER the
+    counterparty document (issue #148) -- never in the system prompt, which
+    is the request-independent prefix every review of the playbook shares.
+    See `assemble_system_blocks` for why. All three at their defaults add
+    nothing.
 
     `system_blocks_override` (issue #479, default `None`): when given, these
     Anthropic-message-API-shaped blocks are sent VERBATIM instead of the
-    ones `assemble_system_blocks(playbook, toaster_guidance, instructions_text)`
-    would build -- the OPF digest-mode seam
+    ones `assemble_system_blocks(playbook, notes_mode)` would build -- the OPF digest-mode seam
     (`scripts/review_spine.py`'s `_assemble_opf_system_blocks`, composed
     from `scripts/review_knowledge.py::resolve_knowledge`), which reads its
     knowledge from an OPF document rather than a v1 playbook dict and
@@ -4075,27 +4180,29 @@ def run_primary_pass(
     system_blocks = (
         system_blocks_override
         if system_blocks_override is not None
-        else assemble_system_blocks(
-            playbook,
-            toaster_guidance,
-            instructions_text,
-            notes_mode=notes_mode,
-            markup_intensity=markup_intensity,
-        )
+        else assemble_system_blocks(playbook, notes_mode=notes_mode)
     )
     system_prompt_text = render_system_prompt(system_blocks)
     # Issue #568: the SECOND prompt-cache breakpoint, on the document itself
     # -- resolved from the SAME model_capabilities #562 already plumbed
     # above. `assemble_user_content_primary` returns
-    # `assemble_user_prompt_primary`'s unmodified plain string whenever
-    # caching would not help (capability False), and issue #568's cached
-    # two-block form only when it would -- see that function's own
-    # docstring.
+    # `assemble_user_prompt_primary`'s plain string whenever caching would
+    # not help (capability False), and issue #568's cached two-block form
+    # only when it would -- see that function's own docstring.
+    # Issue #148: the per-review control layer rides in the role suffix,
+    # after the document -- the SAME text `critic_review_pass.run_critic_pass`
+    # renders from the same three arguments.
     prompt_caching_enabled = bool((model_capabilities or {}).get("prompt_caching"))
     user_content = assemble_user_content_primary(
         retrieved_precedent=retrieved_precedent,
         doc_text=doc_text,
         prompt_caching_enabled=prompt_caching_enabled,
+        request_control_text=render_request_control_text(
+            instructions_text=instructions_text,
+            markup_intensity=markup_intensity,
+            toaster_guidance=toaster_guidance,
+            notes_mode=notes_mode,
+        ),
     )
 
     # Issue #144: the gate counts the schemas this call will carry, not just

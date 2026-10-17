@@ -166,11 +166,17 @@ def check_ac1_artifact_complete() -> list[str]:
             "  AC1 FAIL: models.critic.role must be 'adversarial_critic'.\n"
             f"  Got: {critic.get('role')!r}"
         )
-    if critic.get("model_id") == primary.get("model_id") and primary.get("model_id"):
+    # Issue #148 (ADR 0001 item 3) REVERSED the old "the critic must be a
+    # DIFFERENT model to decorrelate blind spots" rule: ADR 0001 already
+    # retired decorrelation as the reason for the second pass (the critic is
+    # the senior reviewer, at least as capable as the reviewer), and the two
+    # passes now share one byte-identical prompt prefix, whose cache entry
+    # belongs to one model. The default therefore pins the SAME model on both.
+    if primary.get("model_id") and critic.get("model_id") != primary.get("model_id"):
         failures.append(
-            "  AC1 FAIL: models.critic.model_id must be DIFFERENT from "
-            "models.primary.model_id.  The critic is a deliberately different model "
-            "to decorrelate blind spots — they must not be the same model ID."
+            "  AC1 FAIL: models.critic.model_id must EQUAL models.primary.model_id "
+            "by default (issue #148): one model on both passes, so the critic reads "
+            "the prompt cache the reviewer wrote."
         )
     rc_critic = critic.get("request_contract", {})
     if "temperature" not in rc_critic.get("omit_sampling_params", []):

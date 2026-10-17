@@ -1016,6 +1016,19 @@ class ReleaseActivityTests(AdminDashboardTestBase):
         `_CRITIC_RATE_PASSES` documents has to be the split that is used."""
         from src import reviews as reviews_module
 
+        # Issue #148: the Bedrock defaults now put ONE model (Opus 4.8) on both
+        # passes, so the shipped constants price the two slots identically
+        # and could not show the split. Pin the reviewer slot to the pre-#148
+        # Sonnet 4.6 rates -- the per-pass split a split pair produces in
+        # production (the OpenRouter path prices an admin's two models apart).
+        for name, value in (
+            ("PRIMARY_INPUT_RATE_USD_PER_MILLION", 3.30),
+            ("PRIMARY_OUTPUT_RATE_USD_PER_MILLION", 16.50),
+        ):
+            patcher = mock.patch.object(reviews_module, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
         ledger = self._seed_ledger_table()
         self._ledger_pass(ledger, "r-split", "primary", 40_000, 4_000)
         self._ledger_pass(ledger, "r-split", "critic", 20_000, 2_000)

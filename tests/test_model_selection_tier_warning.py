@@ -5,6 +5,11 @@ non-blocking `warnings: ["critic_below_reviewer_tier"]` when the critic's
 resolved tier is below the reviewer's, and a fresh deployment's defaults put
 the stronger model on the critic on both targets.
 
+Issue #148 moved the defaults to ONE model on both passes (the stronger one,
+so the critic is still at least as capable), and added the non-blocking
+`split_models_lose_cache_reuse` warning to every pair that resolves to two
+different models -- the within-review prompt-cache reuse needs one model.
+
 moto-mocked DynamoDB only -- no live AWS, no network.
 
 Exit codes: 0 = all tests pass, 1 = one or more tests failed.
@@ -52,6 +57,7 @@ HIGH_ID = "anthropic/claude-sonnet-4.6"  # tier "High"
 BUDGET_ID = "deepseek/deepseek-v4-pro"  # tier "Budget"
 
 WARNING = "critic_below_reviewer_tier"
+SPLIT = "split_models_lose_cache_reuse"
 
 TIER_RANK = {"Budget": 0, "Good": 1, "High": 2, "Highest": 3}
 
@@ -107,7 +113,7 @@ class TestTierWarning(unittest.TestCase):
         response = self._post(HIGHEST_ID, HIGH_ID)
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(body["warnings"], [WARNING])
+        self.assertEqual(body["warnings"], [WARNING, SPLIT])
         # Non-blocking: the selection was stored and is in force.
         self.assertEqual(body["effective_primary_model_id"], HIGHEST_ID)
         self.assertEqual(body["effective_critic_model_id"], HIGH_ID)
@@ -117,15 +123,23 @@ class TestTierWarning(unittest.TestCase):
     def test_critic_above_reviewer_does_not_warn(self):
         response = self._post(HIGH_ID, HIGHEST_ID)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["warnings"], [])
+        # Issue #148: no tier warning, but a split pair loses cache reuse.
+        self.assertEqual(response.json()["warnings"], [SPLIT])
 
     def test_equal_tiers_do_not_warn(self):
         response = self._post(HIGHEST_ID, "openai/gpt-5.6-sol")
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["warnings"], [])
+        self.assertEqual(response.json()["warnings"], [SPLIT])
+
+    def test_one_model_on_both_passes_does_not_warn(self):
+        for model_id in (HIGHEST_ID, HIGH_ID):
+            with self.subTest(model_id=model_id):
+                response = self._post(model_id, model_id)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["warnings"], [])
 
     def test_budget_critic_over_high_reviewer_warns(self):
-        self.assertEqual(self._post(HIGH_ID, BUDGET_ID).json()["warnings"], [WARNING])
+        self.assertEqual(self._post(HIGH_ID, BUDGET_ID).json()["warnings"], [WARNING, SPLIT])
 
     def test_fresh_defaults_do_not_warn(self):
         got = self.client.get("/api/admin/model-selection").json()
@@ -133,28 +147,35 @@ class TestTierWarning(unittest.TestCase):
 
 
 class TestDefaultsPutTheStrongerModelOnTheCritic(unittest.TestCase):
+    """Issue #136 put the stronger model on the critic; issue #148 put the
+    reviewer on the SAME model, so the critic's tier equals the reviewer's
+    (ADR 0001's "at least as capable") and the critic is still the strongest
+    model in the catalogue."""
+
     def test_openrouter_default_critic_tier_at_least_reviewer(self):
         policy = _load(OPENROUTER_POLICY)
         tier_by_id = {e["model_id"]: e["tier"] for e in policy["selectable"]}
         primary = policy["models"]["primary"]["model_id"]
         critic = policy["models"]["critic"]["model_id"]
-        self.assertGreater(TIER_RANK[tier_by_id[critic]], TIER_RANK[tier_by_id[primary]])
+        self.assertGreaterEqual(TIER_RANK[tier_by_id[critic]], TIER_RANK[tier_by_id[primary]])
         self.assertEqual(critic, HIGHEST_ID)
-        self.assertEqual(primary, HIGH_ID)
+        self.assertEqual(primary, HIGHEST_ID)
 
     def test_openrouter_resolvers_follow_the_pins(self):
         with patch.dict(
             os.environ, {"OPENROUTER_PRIMARY_MODEL_ID": "", "OPENROUTER_CRITIC_MODEL_ID": ""}
         ):
-            self.assertEqual(model_client.openrouter_primary_model_id(), HIGH_ID)
+            self.assertEqual(model_client.openrouter_primary_model_id(), HIGHEST_ID)
             self.assertEqual(model_client.openrouter_critic_model_id(), HIGHEST_ID)
 
-    def test_bedrock_default_critic_is_opus_and_reviewer_is_sonnet(self):
+    def test_bedrock_default_is_opus_on_both_passes(self):
         policy = _load(BEDROCK_POLICY)
         self.assertIn("opus", policy["models"]["critic"]["model_id"])
-        self.assertIn("sonnet", policy["models"]["primary"]["model_id"])
+        self.assertEqual(
+            policy["models"]["primary"]["model_id"], policy["models"]["critic"]["model_id"]
+        )
         self.assertIn("opus", model_client.critic_model_id())
-        self.assertIn("sonnet", model_client.primary_model_id())
+        self.assertEqual(model_client.primary_model_id(), model_client.critic_model_id())
 
 
 if __name__ == "__main__":

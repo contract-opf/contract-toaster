@@ -821,9 +821,7 @@ _NARRATION_NOTE = (
 
 
 def _system_prompt_for(mode: str) -> str:
-    blocks = primary_review_pass.assemble_system_blocks(
-        {"topics": []}, "", "", notes_mode=mode
-    )
+    blocks = primary_review_pass.assemble_system_blocks({"topics": []}, notes_mode=mode)
     return primary_review_pass.render_system_prompt(blocks)
 
 

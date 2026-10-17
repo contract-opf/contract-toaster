@@ -244,7 +244,10 @@ class TestNothingElseMoved(unittest.TestCase):
                     doc_text="short",
                 )
             ),
-            ["RETRIEVED_PRECEDENT", "COUNTERPARTY_DOCUMENT"],
+            # Issue #148: the document leads -- it is the prompt-cache
+            # breakpoint both passes share; per-document precedent follows
+            # in the role suffix.
+            ["COUNTERPARTY_DOCUMENT", "RETRIEVED_PRECEDENT"],
         )
 
     def test_block_content_is_unchanged(self):
@@ -270,7 +273,7 @@ class TestNothingElseMoved(unittest.TestCase):
         """`cache_control` belongs on the final SYSTEM block. This issue
         touches user-prompt assembly only, and a change that moved the
         breakpoint would silently multiply cost on every review."""
-        blocks = pp.assemble_system_blocks({"playbook_id": "x"}, "", "")
+        blocks = pp.assemble_system_blocks({"playbook_id": "x"})
         with_cache = [b for b in blocks if b.get("cache_control")]
         self.assertEqual(len(with_cache), 1)
         self.assertIs(with_cache[0], blocks[-1])

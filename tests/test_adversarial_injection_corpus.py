@@ -321,13 +321,7 @@ def test_the_critic_targeted_payload_is_marked_on_its_way_to_the_second_model(
 def test_no_payload_reaches_the_system_prompt(failures: list) -> None:
     """Nothing in the system prompt is marked, because nothing there is
     supposed to be counterparty-authored. This asserts that stays true."""
-    system_text = pp.render_system_prompt(
-        pp.assemble_system_blocks(
-            playbook={},
-            toaster_guidance="",
-            instructions_text="",
-        )
-    )
+    system_text = pp.render_system_prompt(pp.assemble_system_blocks(playbook={}))
     for name, payload in PAYLOADS.items():
         if payload["marker"] in system_text:
             failures.append(f"[{name}] payload text reached the SYSTEM prompt")

@@ -19,30 +19,26 @@ intensity as an explicit enum wire field, hard cutover from prose guidance.
      `tests/test_review_api_84.py`'s fixture verbatim.
 
   2. THE PROMPT, AS ASSEMBLED, ON BOTH REVIEW PATHS. The block is rendered
-     by `primary_review_pass.render_markup_intensity_block` and sits
-     immediately BEFORE the toaster-guidance block -- so the reviewer's own
-     typed words still read last, the precedence #495's prose sentence
-     established -- in each of the two assemblers that emit that block:
-     `review_spine._assemble_opf_system_blocks` (an OPF-governed review,
-     where it lands ahead of every `compose_opf_system_blocks` knowledge
-     block) and `primary_review_pass.assemble_system_blocks` (a registry-v1
-     review, where it lands after the standing-instructions block -- the
-     exact slot the ticket describes). It is asserted over the ASSEMBLED
-     blocks, not over `compose_opf_system_blocks`' output: the ticket's
-     "inside `compose_opf_system_blocks`, after standing instructions, before
-     toaster guidance" cannot exist, because the OPF assembler appends the
-     knowledge blocks AFTER the toaster-guidance block (review finding 1 on
-     this issue). `heavy` and `light` render exactly once; `medium` and
-     no-level are byte-identical to each other AND to golden sha256 pins
-     captured from the UNTOUCHED tree (commit 54597b6) for both assemblers,
-     bare and with standing instructions + toaster guidance. The knowledge
-     blocks themselves are pinned untouched. An unknown level raises rather
-     than rendering nothing. And for the v1 path -- live for any playbook
-     without an activated OPF artifact -- the block is asserted on the system
-     prompt `run_primary_pass` and `run_critic_pass` ACTUALLY SEND (fake
-     model client), not just on the assembler: a row that records `heavy`
-     while the model is told nothing is the exact transparency failure
-     section 3 exists to prevent (review finding 2 on this issue).
+     by `primary_review_pass.render_markup_intensity_block` and sits after
+     the standing-instructions block and immediately BEFORE the
+     toaster-guidance block -- so the reviewer's own typed words still read
+     last, the precedence #495's prose sentence established. Since issue
+     #148 that sequence is `primary_review_pass.render_request_control_text`,
+     sent by BOTH passes on BOTH review paths in the role suffix, after the
+     counterparty document -- never in the system prompt, which is the
+     prefix every review of the playbook shares (a per-review dial ahead of
+     the cached playbook would re-bill it on every review). `heavy` and
+     `light` render exactly once; `medium` and no-level are byte-identical
+     (nothing at all); the system prompts of both assemblers are pinned to
+     golden sha256 values captured on the UNTOUCHED tree (commit 54597b6)
+     and do not move with the dial. The knowledge blocks themselves are
+     pinned untouched. An unknown level raises rather than rendering
+     nothing. And for the v1 path -- live for any playbook without an
+     activated OPF artifact -- the block is asserted on the prompt
+     `run_primary_pass` and `run_critic_pass` ACTUALLY SEND (fake model
+     client), not just on the renderer: a row that records `heavy` while
+     the model is told nothing is the exact transparency failure section 3
+     exists to prevent (review finding 2 on this issue).
 
   3. THE TRANSPARENCY RULE, across the language boundary. The SPA shows the
      sentence under its control (`frontend/src/toaster/browning.ts`,
@@ -53,8 +49,8 @@ intensity as an explicit enum wire field, hard cutover from prose guidance.
      impossible.
 
   4. THREADING. Source-level assertions that the value reaches every hop
-     (`pipeline_runner` -> `review_spine` -> both assemblers and both
-     passes), same shape as `tests/test_notes_mode_plumbing.py`: a value that
+     (`pipeline_runner` -> `review_spine` -> the leakage-corpus instruction
+     blocks and both passes), same shape as `tests/test_notes_mode_plumbing.py`: a value that
      stops at the database is not plumbing. And that it does NOT enter
      `review_knowledge` / `opf_prompt`: it is an outer control block like
      toaster guidance, not knowledge, so it is deliberately absent from
@@ -69,6 +65,7 @@ Run standalone: `.venv/bin/python tests/test_review_routes_markup_intensity_54.p
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -76,6 +73,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TESTS_DIR = REPO_ROOT / "tests"
@@ -136,30 +134,28 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # intensity block is still composed nowhere in them, and the V1 pins did NOT
 # move.
 #
+# RE-SCOPED for issue #148 (2026-10-16): the per-review control layer --
+# standing instructions, this dial, the toaster guidance -- left the system
+# prompt for both passes' role suffix, so the system prompt no longer varies
+# with any of them and the three "with standing instructions + guidance"
+# pins have no subject any more; they were removed. The three BARE pins did
+# NOT move: a review with none of the three gets the same system prompt it
+# always did.
+#
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
-# for the acme-university 0.5 gold fixture, bare and with standing
-# instructions. The markup-intensity block is NOT composed there, so no
-# markup level may ever move these.
+# for the acme-university 0.5 gold fixture. The markup-intensity block is NOT
+# composed there, so no markup level may ever move it.
 GOLDEN_KNOWLEDGE_BARE_SHA256 = "e9919779116f06b2164aa0d89b54cc38a5e0935eec300b53568801487a625630"
-GOLDEN_KNOWLEDGE_WITH_INSTRUCTIONS_SHA256 = (
-    "377333883b850a4cb03ce77568f4db64dab0ab1242e188b1c314813e7fcd5c8f"
-)
-# The ASSEMBLED OPF prompt (`review_spine._assemble_opf_system_blocks` over
-# `resolve_knowledge` of the same fixture): sha256 of the blocks' texts joined
-# with "\n\n", bare, and with STANDING_INSTRUCTIONS + TOASTER_GUIDANCE.
+# The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
+# over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
+# joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
     "f8d2199d4a3674da9d011cf1d85ce2a5797a5f55ab07e14eb65d1ccfe4d80166"
 )
-GOLDEN_OPF_ASSEMBLED_FULL_SHA256 = (
-    "4fbf69855bf8e77ee958e1040e01693b4dccac0fb8bcd82d9e27de8ca69cc64f"
-)
-# The ASSEMBLED v1 prompt (`primary_review_pass.assemble_system_blocks` over
-# V1_PLAYBOOK), same two shapes.
+# The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
+# over V1_PLAYBOOK).
 GOLDEN_V1_ASSEMBLED_BARE_SHA256 = (
     "1c7ba6c74adda6ed8b1ed162ee26e14a88161e9236c492be0f64ecad29d6ecac"
-)
-GOLDEN_V1_ASSEMBLED_FULL_SHA256 = (
-    "d5b83c0b3a5969e841ce9a5347f25dcaf25ffa09a02bbeb1e7e4b1f1c4069aee"
 )
 
 
@@ -256,6 +252,14 @@ class TestTheRoute(ReviewApiTestBase):
         self.assertNotIn("markup_intensity", self._execution_input(review_id))
 
     def test_light_and_heavy_are_persisted_on_row_and_submission_and_returned(self):
+        # Two submissions held at once, never settled. Since issue #148 put the
+        # reviewer on the critic's Opus rate a worst-case reservation is $11.06,
+        # so the $20/day default admits one in flight; raise the ceiling the
+        # way an operator would (RUNBOOK -> Adjusting the daily spend ceiling).
+        with patch.dict(os.environ, {"DAILY_SPEND_CAP_USD_CENTS": "5000"}):
+            self._light_and_heavy_round_trip()
+
+    def _light_and_heavy_round_trip(self):
         for level in ("light", "heavy"):
             owner = f"user-{level}"
             resp = self._post(owner, level, body_text=f"{level} document")
@@ -340,102 +344,97 @@ class TestTheResolver(unittest.TestCase):
 
 
 class TestTheOpfPrompt(unittest.TestCase):
+    """Issue #148: the dial is per-review control text, so it is NOT in the
+    system prompt -- whose bytes every review of the playbook shares, so the
+    digest's cache entry survives reviews at different intensities -- but in
+    `primary_review_pass.render_request_control_text`, which both passes send
+    after the counterparty document, between the standing instructions and
+    the reviewer's own typed guidance."""
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.doc = opf_load.load_opf(FIXTURE_PATH)
 
-    def _knowledge(self, instructions_text: str = "") -> "review_knowledge.ReviewKnowledge":  # noqa: UP037
-        return review_knowledge.resolve_knowledge(
+    def _system(self) -> list[str]:
+        knowledge = review_knowledge.resolve_knowledge(
             bundle_v2={"opf": self.doc, "overrides": None},
             policy=None,
             declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
             accept_empty_posture=True,
-            instructions_text=instructions_text,
         )
+        return _texts(review_spine._assemble_opf_system_blocks(knowledge))
 
-    def _assembled(
+    def _control(
         self, level: str | None = None, instructions_text: str = "", guidance: str = ""
-    ) -> list[str]:
+    ) -> str:
         kwargs = {} if level is None else {"markup_intensity": level}
-        return _texts(
-            review_spine._assemble_opf_system_blocks(
-                self._knowledge(instructions_text), guidance, **kwargs
-            )
+        return pp.render_request_control_text(
+            instructions_text=instructions_text, toaster_guidance=guidance, **kwargs
         )
 
-    def test_heavy_renders_exactly_once_immediately_before_toaster_guidance(self):
-        texts = self._assembled(
+    def test_heavy_renders_exactly_once_between_standing_instructions_and_guidance(self):
+        control = self._control(
             "heavy", instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE
         )
-        indices = _intensity_indices(texts)
-        self.assertEqual(len(indices), 1, f"expected exactly one intensity block, got {indices}")
-        i = indices[0]
-        self.assertEqual(texts[i], _expected_block("heavy"))
+        self.assertEqual(control.count(_expected_block("heavy")), 1)
         # Fixed wording, and the wording the SPA used to send for Dark.
-        self.assertIn("Push hard", texts[i])
-        # Exactly once ACROSS the whole prompt too, not just as a block start.
-        self.assertEqual("\n\n".join(texts).count(pp.MARKUP_INTENSITY_SENTENCES["heavy"]), 1)
-        # Directly after the objective block, directly BEFORE the reviewer's
-        # own words -- the toaster-guidance block is the very next one.
-        self.assertEqual(i, 1)
-        self.assertIn("<TOASTER_GUIDANCE>", texts[i + 1])
-        self.assertIn(TOASTER_GUIDANCE, texts[i + 1])
-        # And ahead of every knowledge block: standing instructions (composed
-        # into the Guidance slot) and the Context block both come later.
-        standing = [k for k, t in enumerate(texts) if STANDING_INSTRUCTIONS in t]
-        self.assertEqual(len(standing), 1)
-        self.assertGreater(standing[0], i + 1)
-        context = [k for k, t in enumerate(texts) if opf_prompt.OUR_ENTITIES_KEY in t]
-        self.assertEqual(len(context), 1)
-        self.assertGreater(context[0], standing[0])
+        self.assertIn("Push hard", control)
+        self.assertEqual(control.count(pp.MARKUP_INTENSITY_SENTENCES["heavy"]), 1)
+        # After the standing instructions, directly BEFORE the reviewer's own
+        # words -- the toaster-guidance block is the very next one.
+        at = control.index(_expected_block("heavy"))
+        self.assertLess(control.index(STANDING_INSTRUCTIONS), at)
+        self.assertTrue(
+            control[at + len(_expected_block("heavy")) :].lstrip("\n").startswith(
+                "PER-REVIEW GUIDANCE"
+            )
+        )
+        self.assertIn(TOASTER_GUIDANCE, control)
 
-    def test_without_guidance_it_still_sits_where_guidance_would_have(self):
-        texts = self._assembled("heavy")
-        indices = _intensity_indices(texts)
-        self.assertEqual(indices, [1])
-        self.assertNotIn("<TOASTER_GUIDANCE>", "\n\n".join(texts))
-        # Next block is the output-contract overlay, exactly as when no
-        # guidance is present on the untouched tree.
-        self.assertEqual(texts[2], pp.render_binary_decision_overlay_block("external"))
+    def test_the_system_prompt_never_carries_the_dial(self):
+        """Whatever the level, the guidance or the standing instructions, the
+        OPF system prompt is the one golden prefix: byte-identical to the bare
+        prompt pinned on the untouched tree."""
+        system = self._system()
+        self.assertEqual(_intensity_indices(system), [])
+        self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, "\n\n".join(system))
+        self.assertEqual(_sha256(system), GOLDEN_OPF_ASSEMBLED_BARE_SHA256)
 
     def test_light_renders_the_flag_and_footnote_block_exactly_once(self):
-        texts = self._assembled("light")
-        indices = _intensity_indices(texts)
-        self.assertEqual(len(indices), 1)
-        self.assertEqual(texts[indices[0]], _expected_block("light"))
-        self.assertIn("flag and footnote", texts[indices[0]])
-        self.assertIn("Floor", texts[indices[0]])
+        control = self._control("light")
+        self.assertEqual(control, _expected_block("light"))
+        self.assertIn("flag and footnote", control)
+        self.assertIn("Floor", control)
 
     def test_the_two_levels_render_different_prompts(self):
-        self.assertNotEqual(self._assembled("light"), self._assembled("heavy"))
+        self.assertNotEqual(self._control("light"), self._control("heavy"))
 
-    def test_medium_is_byte_identical_to_no_level_and_to_the_golden_pins(self):
-        bare = self._assembled()
-        medium = self._assembled("medium")
-        self.assertEqual(bare, medium)
-        self.assertEqual(_intensity_indices(medium), [])
-        self.assertEqual(_sha256(bare), GOLDEN_OPF_ASSEMBLED_BARE_SHA256)
-
-        full = self._assembled(instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE)
-        full_medium = self._assembled(
-            "medium", instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE
+    def test_medium_is_byte_identical_to_no_level(self):
+        self.assertEqual(self._control(), "")
+        self.assertEqual(self._control("medium"), "")
+        full = self._control(instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE)
+        self.assertEqual(
+            full,
+            self._control(
+                "medium", instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE
+            ),
         )
-        self.assertEqual(full, full_medium)
-        self.assertEqual(_sha256(full), GOLDEN_OPF_ASSEMBLED_FULL_SHA256)
+        self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, full)
 
     def test_the_knowledge_blocks_are_untouched(self):
         """The block is an outer control block, like toaster guidance -- NOT
         composed into `compose_opf_system_blocks` and therefore not part of
         `ReviewKnowledge.content_hash()`. The knowledge blocks must still
-        hash exactly as they did on the untouched tree."""
+        hash exactly as they did on the untouched tree. Since issue #148 the
+        composer takes no standing instructions either (they moved to the
+        role suffix with the dial), so there is one knowledge pin, not two."""
         bare = opf_prompt.compose_opf_system_blocks(self.doc)
         self.assertEqual(_sha256(bare), GOLDEN_KNOWLEDGE_BARE_SHA256)
-        with_instr = opf_prompt.compose_opf_system_blocks(
-            self.doc, instructions_text=STANDING_INSTRUCTIONS
-        )
-        self.assertEqual(_sha256(with_instr), GOLDEN_KNOWLEDGE_WITH_INSTRUCTIONS_SHA256)
         self.assertEqual(_intensity_indices(bare), [])
-        self.assertEqual(_intensity_indices(with_instr), [])
+        self.assertNotIn(
+            "instructions_text",
+            inspect.signature(opf_prompt.compose_opf_system_blocks).parameters,
+        )
 
     def test_medium_block_is_absent_not_empty(self):
         self.assertIsNone(pp.render_markup_intensity_block("medium"))
@@ -447,10 +446,10 @@ class TestTheOpfPrompt(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pp.render_markup_intensity_block(invalid)
             with self.assertRaises(ValueError):
-                self._assembled(invalid)
+                self._control(invalid)
 
     def test_it_is_deterministic(self):
-        self.assertEqual(self._assembled("heavy"), self._assembled("heavy"))
+        self.assertEqual(self._control("heavy"), self._control("heavy"))
 
 
 # ---------------------------------------------------------------------------
@@ -468,56 +467,21 @@ class TestTheV1Prompt(unittest.TestCase):
     assembles its own blocks (`primary_review_pass.assemble_system_blocks`,
     inside each pass). Before the hard cutover a Light/Dark v1 review got
     the sentence through `toaster_guidance`, which reaches both paths; the
-    wire field has to reach both paths too."""
+    wire field has to reach both paths too -- since issue #148 in the role
+    suffix, after the document, on both."""
 
-    def _assembled(
-        self, level: str | None = None, instructions_text: str = "", guidance: str = ""
-    ) -> list[str]:
-        kwargs = {} if level is None else {"markup_intensity": level}
-        return _texts(pp.assemble_system_blocks(V1_PLAYBOOK, guidance, instructions_text, **kwargs))
-
-    def test_heavy_sits_after_standing_instructions_and_before_toaster_guidance(self):
-        """The exact slot the ticket's item 4 describes -- it exists on this
-        path, and the block takes it."""
-        texts = self._assembled(
-            "heavy", instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE
-        )
-        indices = _intensity_indices(texts)
-        self.assertEqual(len(indices), 1, f"expected exactly one intensity block, got {indices}")
-        i = indices[0]
-        self.assertEqual(texts[i], _expected_block("heavy"))
-        self.assertEqual("\n\n".join(texts).count(pp.MARKUP_INTENSITY_SENTENCES["heavy"]), 1)
-        self.assertIn("<STANDING_INSTRUCTIONS>", texts[i - 1])
-        self.assertIn("<TOASTER_GUIDANCE>", texts[i + 1])
-
-    def test_light_renders_exactly_once(self):
-        texts = self._assembled("light")
-        indices = _intensity_indices(texts)
-        self.assertEqual(len(indices), 1)
-        self.assertEqual(texts[indices[0]], _expected_block("light"))
-
-    def test_medium_is_byte_identical_to_no_level_and_to_the_golden_pins(self):
-        bare = self._assembled()
-        self.assertEqual(bare, self._assembled("medium"))
-        self.assertEqual(_intensity_indices(bare), [])
-        self.assertEqual(_sha256(bare), GOLDEN_V1_ASSEMBLED_BARE_SHA256)
-
-        full = self._assembled(instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE)
-        self.assertEqual(
-            full,
-            self._assembled(
-                "medium", instructions_text=STANDING_INSTRUCTIONS, guidance=TOASTER_GUIDANCE
-            ),
-        )
-        self.assertEqual(_sha256(full), GOLDEN_V1_ASSEMBLED_FULL_SHA256)
+    def test_the_system_prompt_never_carries_the_dial(self):
+        system = _texts(pp.assemble_system_blocks(V1_PLAYBOOK))
+        self.assertEqual(_intensity_indices(system), [])
+        self.assertEqual(_sha256(system), GOLDEN_V1_ASSEMBLED_BARE_SHA256)
 
     def test_an_unknown_level_raises_here_too(self):
         with self.assertRaises(ValueError):
-            self._assembled("dark")
+            pp.render_request_control_text(markup_intensity="dark")
 
     # -- what the passes ACTUALLY SEND ------------------------------------
 
-    def _sent_primary_system_prompt(self, **kwargs: Any) -> str:
+    def _sent_primary_call(self, **kwargs: Any) -> dict[str, Any]:
         client = model_client.FakeBedrockClient(
             {PRIMARY_MODEL_ID: [_load_fixture_text("primary_request_change_valid.json")]}
         )
@@ -533,9 +497,9 @@ class TestTheV1Prompt(unittest.TestCase):
             **kwargs,
         )
         self.assertTrue(client.calls, "run_primary_pass made no model call.")
-        return client.calls[0]["system_prompt"]
+        return client.calls[0]
 
-    def _sent_critic_system_prompt(self, **kwargs: Any) -> str:
+    def _sent_critic_call(self, **kwargs: Any) -> dict[str, Any]:
         client = model_client.FakeBedrockClient(
             {CRITIC_MODEL_ID: [_load_fixture_text("critic_drop_i1_accept_valid.json")]}
         )
@@ -547,30 +511,45 @@ class TestTheV1Prompt(unittest.TestCase):
             model_client=client,
             model_id=CRITIC_MODEL_ID,
             ledger_write=ledger.append,
+            doc_text="Section 8 text.",
             **kwargs,
         )
         self.assertTrue(client.calls, "run_critic_pass made no model call.")
-        return client.calls[0]["system_prompt"]
+        return client.calls[0]
 
     def test_a_heavy_v1_review_tells_both_passes_so(self):
-        for sent in (
-            self._sent_primary_system_prompt(markup_intensity="heavy", toaster_guidance=TOASTER_GUIDANCE),
-            self._sent_critic_system_prompt(markup_intensity="heavy", toaster_guidance=TOASTER_GUIDANCE),
+        for call in (
+            self._sent_primary_call(markup_intensity="heavy", toaster_guidance=TOASTER_GUIDANCE),
+            self._sent_critic_call(markup_intensity="heavy", toaster_guidance=TOASTER_GUIDANCE),
         ):
+            sent = call["user_prompt"]
             self.assertEqual(sent.count(_expected_block("heavy")), 1)
-            # Reviewer's words still last: the block precedes the guidance.
+            # After the shared document prefix (issue #148)...
+            self.assertLess(sent.index("</COUNTERPARTY_DOCUMENT>"), sent.index(pp.MARKUP_INTENSITY_INTRO))
+            # ...and the reviewer's words still last: the block precedes the guidance.
             self.assertLess(sent.index(pp.MARKUP_INTENSITY_INTRO), sent.index(TOASTER_GUIDANCE))
+            self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, call["system_prompt"])
 
     def test_a_medium_v1_review_tells_neither_pass_anything(self):
-        for sent in (
-            self._sent_primary_system_prompt(),
-            self._sent_primary_system_prompt(markup_intensity="medium"),
-            self._sent_critic_system_prompt(),
-            self._sent_critic_system_prompt(markup_intensity="medium"),
-        ):
-            self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, sent)
-        self.assertEqual(self._sent_primary_system_prompt(), self._sent_primary_system_prompt(markup_intensity="medium"))
-        self.assertEqual(self._sent_critic_system_prompt(), self._sent_critic_system_prompt(markup_intensity="medium"))
+        calls = (
+            self._sent_primary_call(),
+            self._sent_primary_call(markup_intensity="medium"),
+            self._sent_critic_call(),
+            self._sent_critic_call(markup_intensity="medium"),
+        )
+        for call in calls:
+            self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, call["system_prompt"])
+            self.assertNotIn(pp.MARKUP_INTENSITY_INTRO, call["user_prompt"])
+        self.assertEqual(calls[0]["user_prompt"], calls[1]["user_prompt"])
+        self.assertEqual(calls[2]["user_prompt"], calls[3]["user_prompt"])
+
+    def test_the_system_prompt_is_the_same_at_every_level(self):
+        """Issue #148: the dial moves the role suffix, never the cached prefix."""
+        prompts = {
+            level: self._sent_primary_call(markup_intensity=level)["system_prompt"]
+            for level in ("light", "medium", "heavy")
+        }
+        self.assertEqual(len(set(prompts.values())), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -624,13 +603,21 @@ class TestItIsThreadedEndToEnd(unittest.TestCase):
         self.assertIn('payload.get("markup_intensity")', runner)
         self.assertIn("markup_intensity=markup_intensity", runner)
         spine = self._source("scripts", "review_spine.py")
-        # Four hops out of `run_review`: the OPF assembler, the v1
-        # leakage-corpus assembly, the primary pass, the critic pass.
+        # Issue #148: three hops out of `run_review` -- the leakage-corpus
+        # instruction blocks, the primary pass, the critic pass -- plus the
+        # helper's own call into the control-layer renderer. The OPF
+        # assembler no longer takes the dial: it builds the shared prefix.
         self.assertEqual(spine.count("markup_intensity=markup_intensity"), 4)
+        self.assertNotIn(
+            "markup_intensity",
+            spine[spine.index("def _assemble_opf_system_blocks(") : spine.index(
+                "def leakage_scan_instruction_blocks("
+            )],
+        )
         # Each call body is sliced to its own closing paren at its own
-        # indentation (the assembler call sits one level deeper).
+        # indentation (the corpus call sits one level deeper).
         for call, closer in (
-            ("_assemble_opf_system_blocks(", "\n        )"),
+            ("leakage_scan_instruction_blocks(", "\n        )"),
             ("primary_review_pass.run_primary_pass(", "\n    )"),
             ("critic_review_pass.run_critic_pass(", "\n    )"),
         ):

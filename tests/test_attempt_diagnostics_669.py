@@ -108,6 +108,7 @@ import pipeline_runner as pr  # noqa: E402
 # builder, canned responses and DynamoDB/S3 fakes, rather than a second
 # copy of all of it.
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
+from fake_model_queues import seeded_by_model  # noqa: E402
 
 MODEL_RESPONSES_DIR = REPO_ROOT / "tests" / "fixtures" / "model_responses"
 PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
@@ -190,10 +191,10 @@ def _client_with_critic_exhaustion(primary_response: str, critic_response: str) 
     production failure (`c01c243c`, the issue's own evidence) whose cause
     could not be recovered from production at all."""
     return model_client.FakeBedrockClient(
-        {
-            model_client.openrouter_primary_model_id(): [primary_response],
-            model_client.openrouter_critic_model_id(): [critic_response, critic_response],
-        }
+        seeded_by_model(
+            (model_client.openrouter_primary_model_id(), [primary_response]),
+            (model_client.openrouter_critic_model_id(), [critic_response, critic_response]),
+        )
     )
 
 
@@ -205,13 +206,13 @@ def _client_with_primary_retry(primary_response: str, critic_response: str) -> A
     wiring), kept local so neither file's helper is load-bearing for the
     other's assertions."""
     return model_client.FakeBedrockClient(
-        {
-            model_client.openrouter_primary_model_id(): [
-                _fixture("schema_invalid_missing_issues.json"),
-                primary_response,
-            ],
-            model_client.openrouter_critic_model_id(): [critic_response],
-        }
+        seeded_by_model(
+            (
+                model_client.openrouter_primary_model_id(),
+                [_fixture("schema_invalid_missing_issues.json"), primary_response],
+            ),
+            (model_client.openrouter_critic_model_id(), [critic_response]),
+        )
     )
 
 

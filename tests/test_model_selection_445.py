@@ -267,11 +267,12 @@ class TestShippedDefaults(ModelSelectionTestBase):
     the code reads would restate the fixture rather than check the behaviour.
     """
 
-    def test_the_primary_default_resolves_to_sonnet_4_6(self):
-        """Issue #136 (ADR 0001) swapped the pair: the cheaper model is the
-        reviewer default, because the critic has the last word."""
+    def test_the_primary_default_resolves_to_the_critics_model(self):
+        """Issue #136 (ADR 0001) put the stronger model on the critic; issue
+        #148 put the reviewer on the SAME model, so the two passes share one
+        prompt cache. [WAS, #136 until #148: the cheaper Sonnet 4.6.]"""
         with _no_env_overrides():
-            self.assertEqual(model_client.openrouter_primary_model_id(), SONNET_46)
+            self.assertEqual(model_client.openrouter_primary_model_id(), OPUS_5)
 
     def test_the_primary_default_reaches_the_pipeline_resolver(self):
         """The id an actual review would run on, through the same entry point
@@ -279,7 +280,7 @@ class TestShippedDefaults(ModelSelectionTestBase):
         touched the picker) rather than no DynamoDB handle at all."""
         with _no_env_overrides():
             resolved = model_settings.resolve_openrouter_model_ids(self.ddb)
-        self.assertEqual(resolved["primary"], SONNET_46)
+        self.assertEqual(resolved["primary"], OPUS_5)
         self.assertEqual(resolved["critic"], OPUS_5)
 
     def test_the_critic_default_is_the_stronger_model(self):
@@ -920,14 +921,15 @@ class TestSpendReservationTracksTheSelection(ModelSelectionTestBase):
 
     def test_the_bedrock_target_ignores_the_selection_entirely(self):
         """MODEL_PROVIDER unset is the AWS target, which has no admin-selection
-        concept at all -- its documented $8.84 worst case (ARCHITECTURE.md ->
-        Cost shape, at MAX_INPUT_TOKENS=175_000 and the issue-#658 worst-case
-        output budget of 32_000 over three attempts per pass) must not move."""
+        concept at all -- its documented $11.06 worst case (ARCHITECTURE.md ->
+        Cost shape, at MAX_INPUT_TOKENS=175_000, the issue-#658 worst-case
+        output budget of 32_000 over three attempts per pass, and both passes
+        on Opus 4.8 since issue #148) must not move."""
         model_settings.set_model_selection(DEAREST_ID, DEAREST_ID, ADMIN, self.ddb)
         os.environ.pop("MODEL_PROVIDER", None)
         with _no_env_overrides():
             self.assertEqual(
-                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 884
+                reviews.compute_worst_case_reservation_usd_cents(self.ddb), 1106
             )
 
 
@@ -1045,7 +1047,9 @@ class TestConsistencyLintScope(unittest.TestCase):
         """Scoping the gate to the pins must not have made it toothless."""
         lint = self._lint_module()
         openrouter = lint.load_json(lint.OPENROUTER_POLICY_PATH)
-        openrouter["models"]["primary"]["model_id"] = "anthropic/claude-opus-5"
+        # Issue #148: both pins are Opus now, so the divergence is a Sonnet
+        # reviewer against Bedrock's Opus one -- a family mismatch.
+        openrouter["models"]["primary"]["model_id"] = SONNET_46
         failures = lint.check_consistency(
             lint.load_json(lint.BEDROCK_POLICY_PATH), openrouter
         )

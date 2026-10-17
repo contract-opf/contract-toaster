@@ -109,6 +109,7 @@ import pipeline_runner as pr  # noqa: E402, I001
 from critic_final_result import critic_keeps  # noqa: E402
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
+from fake_model_queues import seeded_by_model  # noqa: E402
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000099"
 
@@ -325,7 +326,7 @@ def _fake_client(primary_response: str, critic_response: str) -> Any:
     primary_id = model_client_module.openrouter_primary_model_id()
     critic_id = model_client_module.openrouter_critic_model_id()
     return model_client_module.FakeBedrockClient(
-        {primary_id: [primary_response], critic_id: [critic_response]}
+        seeded_by_model((primary_id, [primary_response]), (critic_id, [critic_response]))
     )
 
 
@@ -546,11 +547,11 @@ class TestRunRealPipeline(unittest.TestCase):
         primary_id = model_client_module.openrouter_primary_model_id()
         critic_id = model_client_module.openrouter_critic_model_id()
         client = model_client_module.FakeBedrockClient(
-            {
-                primary_id: [json.dumps(flag_only_issue), json.dumps(flag_only_issue)],
+            seeded_by_model(
+                (primary_id, [json.dumps(flag_only_issue), json.dumps(flag_only_issue)]),
                 # Issue #138: the critic restates the flag-only issue it keeps.
-                critic_id: [critic_keeps(flag_only_issue)],
-            }
+                (critic_id, [critic_keeps(flag_only_issue)]),
+            )
         )
         reviews_table = FakeReviewsTable()
         s3 = FakeS3({f"uploads/user-1/{REVIEW_ID}/in.docx": docx_bytes})

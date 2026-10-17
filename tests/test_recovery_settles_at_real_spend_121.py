@@ -44,9 +44,14 @@ the REAL production writer (`invocation_ledger.make_ledger_write` +
 BOTH PASS NAMES, because `_actual_cents_from_ledger` BRANCHES on that exact
 field and routes the two into SEPARATE rate slots, which
 `reviews._active_provider_rates` resolves independently and at genuinely
-different rates (5.50/27.50 against 3.30/16.50 per million on the Bedrock
-constants this suite runs at; the OpenRouter path resolves the two roles
-independently too). A restart that strands a review after its critic pass
+different rates whenever the two passes run on different models (the
+OpenRouter path resolves the two roles independently, so an admin's split
+selection prices them apart). Since issue #148 the Bedrock DEFAULTS put one
+model on both passes, so the shipped constants price the two slots
+identically; this suite therefore pins the reviewer slot to the pre-#148
+Sonnet 4.6 regional rates (3.30/16.50 against the critic's 5.50/27.50) --
+the rate split a split pair produces in production -- so the bucket
+assignment stays observable. A restart that strands a review after its critic pass
 is precisely the scenario this ticket exists for, and a fixture holding
 only the primary variant would leave the critic slot populated by no test
 in the repo -- an inverted, swapped, summed-into-one-slot or dropped bucket
@@ -131,6 +136,16 @@ class TestRecoverySettlesAtRealSpend(recovery62.RecoveryFixture):
     six-review world."""
 
     def setUp(self) -> None:
+        # Issue #148: distinct per-pass rates (see the module docstring) --
+        # applied before any reservation is taken, so reserve and settle see
+        # the same table.
+        for name, value in (
+            ("PRIMARY_INPUT_RATE_USD_PER_MILLION", 3.30),
+            ("PRIMARY_OUTPUT_RATE_USD_PER_MILLION", 16.50),
+        ):
+            patcher = patch.object(reviews, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         super().setUp()
         self.ddb.create_table(
             TableName=MODEL_INVOCATIONS_TABLE,

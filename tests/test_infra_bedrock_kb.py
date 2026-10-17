@@ -389,10 +389,14 @@ def check_g_reconciled_least_privilege() -> list[str]:
         "pipeline-stack.ts does NOT grant bedrock:InvokeModel on a wildcard foundation-model/* resource",
         f"Found: {pipeline_wildcard}" if pipeline_wildcard else "",
     )
+    # Issue #148: both passes run on Opus 4.8, so the grant names only the
+    # Opus ARN; the reviewer's former Sonnet ARN is gone (Check G in
+    # tests/test_pipeline_stack.py cross-checks the constants against the
+    # model policy).
     failures += _assert(
         bool(re.search(r"anthropic\.claude-opus", pipeline_text))
-        and bool(re.search(r"anthropic\.claude-sonnet", pipeline_text)),
-        "pipeline-stack.ts scopes bedrock:InvokeModel to the reviewer (Sonnet) and critic (Opus) model ARNs",
+        and not re.search(r"anthropic\.claude-sonnet", pipeline_text),
+        "pipeline-stack.ts scopes bedrock:InvokeModel to the reviewer/critic (Opus) model ARN and no other",
     )
 
     # G6: the reconciled invariant statement itself must be documented

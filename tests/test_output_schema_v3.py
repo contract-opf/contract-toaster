@@ -621,6 +621,10 @@ def test_a_projection_compliant_response_round_trips_through_the_full_schema(fai
         "block_ops": copy.deepcopy(VALID_BLOCK_OPS),
         "critic_delta": None,
         "verdict_summary": None,
+        # Issue #148: the model-facing `role` discriminator -- forced by the
+        # projection, and dropped by `validate_model_response` before the
+        # full schema (which does not declare it) ever sees the response.
+        "role": mos.ROLE_REVIEWER,
     }
     projection_errors = _errors(emitted, projected)
     if projection_errors:

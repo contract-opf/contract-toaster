@@ -74,7 +74,8 @@ Verifies:
 Exit codes: 0 = all checks pass, 1 = one or more checks failed.
 """
 
-import re  # noqa: I001
+import json  # noqa: I001
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -365,10 +366,25 @@ def check_g_least_privilege_bedrock() -> list[str]:
         bool(re.search(r"bedrock:InvokeModel", pipeline_text)),
         "pipeline-stack.ts grants bedrock:InvokeModel to the pipeline task role",
     )
+    # Issue #148: the CDK model-id constants mirror models.primary /
+    # models.critic in the Bedrock model policy -- the grant must name exactly
+    # the models the pinned roles call, so a re-pin that moves the policy file
+    # but not this stack (or vice versa) fails here.
+    policy_models = json.loads(
+        _read(REPO_ROOT / "model-policy" / "bedrock-us-east-1.json")
+    )["models"]
+    for role, const in (("primary", "PRIMARY_MODEL_ID"), ("critic", "CRITIC_MODEL_ID")):
+        match = re.search(rf"const {const} = '([^']+)';", pipeline_text)
+        pinned = policy_models[role]["model_id"]
+        failures += _assert(
+            match is not None and match.group(1) == pinned,
+            f"pipeline-stack.ts {const} matches model-policy models.{role} ({pinned})",
+            f"pipeline-stack.ts has {match.group(1) if match else None!r}",
+        )
     failures += _assert(
-        bool(re.search(r"anthropic\.claude-opus", pipeline_text))
-        and bool(re.search(r"anthropic\.claude-sonnet", pipeline_text)),
-        "pipeline-stack.ts scopes bedrock:InvokeModel to the reviewer (Sonnet) and critic (Opus) model ARNs",
+        not re.search(r"anthropic\.claude-sonnet", pipeline_text),
+        "pipeline-stack.ts grants bedrock:InvokeModel on no model the pinned roles do not call "
+        "(no Sonnet ARN since issue #148)",
     )
 
     # No other infra file should grant bedrock:InvokeModel scoped to the

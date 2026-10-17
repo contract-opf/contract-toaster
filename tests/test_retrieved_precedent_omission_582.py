@@ -153,7 +153,8 @@ def test_render_retrieved_precedent_delimited_block_returns_none_when_empty(
 
 # ---------------------------------------------------------------------------
 # 2. Non-empty precedent list -- the block must compose EXACTLY as before,
-#    in the same position, still untrusted-marked. A future retrieval
+#    still untrusted-marked (since issue #148 after the document, in the
+#    role suffix). A future retrieval
 #    revival must need no prompt change (docs/rag-dormant.md §5.3).
 # ---------------------------------------------------------------------------
 
@@ -174,9 +175,13 @@ def test_nonempty_precedent_still_composes_the_block_plain_string(failures: list
             "[2b] The non-empty RETRIEVED_PRECEDENT block must still render the "
             "precedent clause content verbatim."
         )
+    # Issue #148: the document leads (it is the prompt-cache breakpoint both
+    # passes share, and the capability-False string now carries the same
+    # order as the cached block list); retrieved precedent is per-document,
+    # so it follows in the role suffix.
     required_tags_in_order = [
-        "<RETRIEVED_PRECEDENT>",
         "<COUNTERPARTY_DOCUMENT>",
+        "<RETRIEVED_PRECEDENT>",
     ]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):

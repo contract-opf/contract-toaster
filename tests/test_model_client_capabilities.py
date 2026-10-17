@@ -66,7 +66,9 @@ if str(BACKEND_SRC) not in sys.path:
 import model_client as mc  # noqa: E402
 
 _BEDROCK_PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
-_BEDROCK_CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
+# Issue #148: one model on both passes by default, so the critic pin is the
+# same id as the primary's.
+_BEDROCK_CRITIC_MODEL_ID = "anthropic.claude-opus-4-8"
 _BEDROCK_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 _BEDROCK_UNKNOWN_MODEL_ID = "anthropic.claude-haiku-4-1"
 
@@ -80,13 +82,16 @@ _BEDROCK_UNKNOWN_MODEL_ID = "anthropic.claude-haiku-4-1"
 # the wrong reason -- as an unlisted id, not as a pin whose capability fields
 # are absent/corrected.
 _OPENROUTER_PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
+# The never-measured Sonnet 4.6 id: a role pin until issue #148 put both
+# passes on opus-5, a `selectable` entry declaring no capability since. The
+# fail-closed assertion below stands on it either way -- absence is absence.
 _OPENROUTER_CRITIC_MODEL_ID = "anthropic/claude-sonnet-4.6"
 # Must be an id that is ONLY in `selectable` -- not also a role pin -- or
 # `openrouter_model_capabilities` returns from its role loop and the
 # selectable scan this constant exists to exercise never runs. That is what
 # happened silently once issue #604 repinned the primary to opus-5, which
-# this constant used to name. The role pins today are opus-5 (primary),
-# sonnet-4.6 (critic), deepseek-v4-pro (preflight) and sonnet-5 (cover_note),
+# this constant used to name. The role pins today are opus-5 (primary AND
+# critic, issue #148), deepseek-v4-pro (preflight) and sonnet-5 (cover_note),
 # so gpt-5.6-sol is selectable-only and declares `structured_outputs: true`.
 _OPENROUTER_SELECTABLE_MODEL_ID = "openai/gpt-5.6-sol"
 _OPENROUTER_UNKNOWN_MODEL_ID = "some-provider/unlisted-model"
@@ -183,7 +188,7 @@ class TestBedrockCapabilities(unittest.TestCase):
 
 
 class TestOpenRouterCapabilities(unittest.TestCase):
-    def test_pinned_critic_is_all_false(self) -> None:
+    def test_never_measured_sonnet_4_6_is_all_false(self) -> None:
         # model-policy/openrouter.json's pricing verification for the critic id
         # predates the capability check and never confirmed it -- absent, not a
         # guess. This is the fail-closed half of the pair, and after the owner

@@ -19,8 +19,11 @@ ONE bounded structured-output retry; if the retry also fails,
 
 This module deliberately reuses #81's `primary_review_pass.py` for the
 system-prompt assembly (guidance + binary overlay + playbook -- identical
-for both passes per the #29/#30 manifest), the critic user-prompt
-assembler (`assemble_user_prompt_critic`), the output-schema validation
+for both passes per the #29/#30 manifest), the critic user-content
+assembler (`assemble_user_content_critic` -- since issue #148 the SAME
+cached document block the primary sends, followed by the critic's role
+suffix, so the two requests are byte-identical up to that suffix), the
+model-facing tool schema (one projection, both passes), the output-schema validation
 (`validate_model_response`), and the token-count heuristic
 (`estimate_tokens`) rather than duplicating them -- there is exactly one
 prompt-manifest assembler and one schema validator for both passes, per
@@ -311,15 +314,18 @@ def run_critic_pass(
     prefix), identically to the primary pass.
 
     `toaster_guidance` (issue #398, default `""`) and `instructions_text`
-    (issue #483, epic #481, default `""`) are threaded through to the
-    SHARED `pp.assemble_system_blocks` exactly as the primary pass does, so
-    the critic's self-check reasons over the same per-review guidance, the
-    same standing instructions, and the same judged-NL Floor obligations the
-    primary pass saw -- the critic can therefore catch a Floor violation, or
-    a guidance/instructions conflict, the primary pass missed.
+    (issue #483, epic #481, default `""`) are rendered by the SHARED
+    `pp.render_request_control_text` exactly as the primary pass renders
+    them, so the critic's self-check reasons over the same per-review
+    guidance and the same standing instructions the primary pass saw, and
+    (through the shared `pp.assemble_system_blocks`) the same judged-NL Floor
+    obligations -- the critic can therefore catch a Floor violation, or a
+    guidance/instructions conflict, the primary pass missed.
     `markup_intensity` (issue #54, default `"medium"`) rides the same seam
     for the same reason: the critic judges the primary's markup against the
-    intensity the reviewer actually asked for. `medium` adds nothing.
+    intensity the reviewer actually asked for. `medium` adds nothing. Since
+    issue #148 all three follow the counterparty document, in the role
+    suffix, rather than preceding the cached prefix.
 
     `doc_text` (issue #618, default `""`): the counterparty document text
     the PRIMARY pass reviewed, verbatim -- `scripts/review_spine.py::
@@ -438,22 +444,30 @@ def run_critic_pass(
     system_blocks = (
         system_blocks_override
         if system_blocks_override is not None
-        else pp.assemble_system_blocks(
-            playbook,
-            toaster_guidance,
-            instructions_text,
-            notes_mode=notes_mode,
-            markup_intensity=markup_intensity,
-        )
+        else pp.assemble_system_blocks(playbook, notes_mode=notes_mode)
     )
     system_prompt_text = pp.render_system_prompt(system_blocks)
-    # Issue #143: same capability read as run_primary_pass's -- decides only
+    # Issue #143: same capability read as run_primary_pass's -- decides
     # whether the system blocks go to `invoke()` as a list (cache breakpoint
-    # intact) or as the rendered string.
+    # intact) or as the rendered string, and (issue #148) whether the user
+    # content is the cached document block plus this pass's role suffix.
     prompt_caching_enabled = bool((model_capabilities or {}).get("prompt_caching"))
-    user_prompt = pp.assemble_user_prompt_critic(
+    # Issue #148: the critic's request is byte-identical to the primary's up
+    # to the end of the document block -- same tool schema, same system
+    # blocks, same cached document block -- so on the primary's model it
+    # reads both cache breakpoints the primary just wrote. Everything
+    # role-specific (the per-review control layer, which both suffixes open
+    # with; the critic tasking; the primary's output) follows the document.
+    user_prompt = pp.assemble_user_content_critic(
         primary_output=primary_output,
         doc_text=doc_text,
+        prompt_caching_enabled=prompt_caching_enabled,
+        request_control_text=pp.render_request_control_text(
+            instructions_text=instructions_text,
+            markup_intensity=markup_intensity,
+            toaster_guidance=toaster_guidance,
+            notes_mode=notes_mode,
+        ),
     )
     # Issue #267: same projection as the primary pass -- assemble_system_blocks
     # is the single shared seam, so this hash is identical to the primary
@@ -530,7 +544,12 @@ def run_critic_pass(
         # Issue #144: bound before the call for the same reason as
         # run_primary_pass's `attempt_user_prompt` -- the ledger write in
         # `finally` must estimate what THIS attempt sent.
-        attempt_user_prompt = user_prompt + pp.render_retry_correction_block(correction)
+        # Issue #148: `append_user_content_suffix`, as in run_primary_pass, so
+        # a retry correction on the cached block-list form never rewrites the
+        # cached document block.
+        attempt_user_prompt = pp.append_user_content_suffix(
+            user_prompt, pp.render_retry_correction_block(correction)
+        )
         try:
             # Issue #418: same "only when set" kwarg-threading as
             # run_primary_pass -- see that function's identical comment.
@@ -705,11 +724,10 @@ def run_critic_pass(
                     ),
                     # Issue #568: same seam as the primary pass -- prompt-cache
                     # usage the provider reported for THIS attempt, if any.
-                    # The critic pass never sends issue #568's cached-document
-                    # content itself (out of this issue's scope), but the
-                    # SYSTEM-side breakpoint (issue #30) is shared with the
-                    # primary pass, so a cache hit there can still show up
-                    # here.
+                    # Since issue #148 the critic sends the primary's own
+                    # cached document block too, so on the primary's model
+                    # this is where the within-review saving shows up: the
+                    # playbook AND the document read from cache.
                     cache_read_input_tokens=(actual_usage or {}).get("cache_read_input_tokens"),
                     cache_creation_input_tokens=(actual_usage or {}).get(
                         "cache_creation_input_tokens"

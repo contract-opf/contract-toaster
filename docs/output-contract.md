@@ -229,6 +229,15 @@ of how that result differs from the primary's**:
 `issue_id` always names the **primary's** `issue_key` as it appears in the primary's output — never a key
 from the critic's own `issues`, which it numbers from `I1` in its own response.
 
+**The `role` discriminator (issue #148).** The model-facing tool schema — the SAME bytes in both passes,
+so the critic's request can reuse the reviewer's prompt cache — carries one field the artifact does not:
+a required top-level `role`, `"reviewer"` or `"critic"`, which each pass's role suffix (after the
+document) tells the model to set. It is model-facing only, like the stamped `schema_version` /
+`provenance` in reverse: `validate_model_response` drops it before the full-schema check
+(`model_output_schema.strip_model_facing_only_fields`), and a wrong or missing value is never a
+rejection — the pipeline knows which pass it ran, and a new rejectable shape on the reviewer would buy a
+retry for nothing (issue #157).
+
 **What the schema cannot say, and where it is enforced.** "Every primary issue has exactly one disposition"
 is a statement about two responses, which a response-local draft-07 schema cannot express. It is enforced
 by `critic_review_pass.critic_delta_rejection`, reported under the ordinary `schema_invalid` token, so a
@@ -960,18 +969,19 @@ reviews at different intensities can be told apart afterwards. It is the closed-
 multipart field `markup_intensity` on `POST /api/reviews` (`backend/src/reviews.py` →
 `MARKUP_INTENSITIES`, `resolve_markup_intensity`), mirroring `notes_mode`'s plumbing exactly:
 
-| `markup_intensity` | What the model is told (system block, `scripts/primary_review_pass.py::render_markup_intensity_block`) | Recorded |
+| `markup_intensity` | What the model is told (block in the role suffix, `scripts/primary_review_pass.py::render_markup_intensity_block`) | Recorded |
 |---|---|---|
 | `light` | Flag and footnote issues rather than editing them; edit only where the document breaches the Floor | on the review row, the submission's execution input, `GET /api/reviews/{id}`, the list view (History chip) |
-| `medium` (default; absent, blank) | **Nothing** — no block at all. A medium review's system prompt is byte-identical to the prompt composed before this field existed | nothing — absent from the row and the payload, never a placeholder; `GET` projects `null` |
+| `medium` (default; absent, blank) | **Nothing** — no block at all | nothing — absent from the row and the payload, never a placeholder; `GET` projects `null` |
 | `heavy` | Mark up every open point the playbook gives room on; prefer our positions throughout | as `light` |
 
 Any other value is a `400` with `detail` `"markup_intensity must be one of: light, medium, heavy."`,
 refused before the file is read — a typo is a loud refusal, never a silent downgrade. The block's
 wording is fixed and deterministic per level, sits immediately before the reviewer's own
-`toaster_guidance` block on both review paths (`primary_review_pass.assemble_system_blocks` for a
-registry-v1 review, after the standing-instructions block; `review_spine._assemble_opf_system_blocks`
-for an OPF review, ahead of the knowledge blocks) so the reviewer's typed words read last, and is
+`toaster_guidance` block and after the standing-instructions block on both review paths
+(`primary_review_pass.render_request_control_text`, sent in both passes' role suffix after the
+counterparty document since issue #148 — never in the system prompt, whose bytes every review of the
+playbook shares) so the reviewer's typed words read last, and is
 the same string the toaster shows under its Light/Medium/Dark
 control (`frontend/src/toaster/browning.ts`, the control's `dark` is the wire's `heavy`): what the
 reviewer reads is what the model is told. **Hard cutover** (owner decision Q3 on the 2026-09-05

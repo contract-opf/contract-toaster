@@ -18,7 +18,10 @@
  * contract against the playbook, and the Critic, the senior reviewer, reads
  * the contract, the playbook and the reviewer's proposed changes and has the
  * last word: its result is the final review. There is no "use one model for
- * both" option to offer, so don't add one.
+ * both" option to offer, so don't add one: picking the same model in both
+ * dropdowns is how that is done, and it is the policy default (issue #148 --
+ * the critic then reuses the reviewer's prompt cache; a split pair shows the
+ * server's `split_models_lose_cache_reuse` warning).
  *
  * THE DEFAULT IS MARKED, NOT DUPLICATED (issue #604). There is no separate
  * "Default: <id>" pseudo-option above the catalogue any more — the policy pin
@@ -150,8 +153,9 @@ export interface ModelSelectionSettings {
   critic_source: ModelSource;
   updated_at: string;
   updated_by: string;
-  /** Non-blocking advisories about the resolved pair (issue #136). Absent on
-   * an older server. Only codes in `SELECTION_WARNING_COPY` are rendered. */
+  /** Non-blocking advisories about the resolved pair (issues #136, #148).
+   * Absent on an older server. Only codes in `SELECTION_WARNING_COPY` are
+   * rendered. */
   warnings?: string[];
 }
 
@@ -180,6 +184,11 @@ const ROLE_DESCRIPTION: Record<Role, string> = {
 const SELECTION_WARNING_COPY: Record<string, string> = {
   critic_below_reviewer_tier:
     "The critic is a lower tier than the reviewer. Your choice is saved, but the critic has the last word and reads the reviewer's work, so it should be at least as capable.",
+  // Issue #148: the default runs one model on both passes so the critic can
+  // reuse the reviewer's prompt cache (the playbook and the contract). A
+  // cache entry belongs to one model, so a split pair loses that.
+  split_models_lose_cache_reuse:
+    "The reviewer and the critic are different models. Your choice is saved, but the critic can no longer reuse the reviewer's cached playbook and contract within a review, so each review costs more and takes longer.",
 };
 
 /**
@@ -702,7 +711,7 @@ export default function AdminModel({
           {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
           <form onSubmit={handleSaveModels} className="ct-stack">
             <p>
-              Every review runs twice, on two models you pick separately.
+              Every review runs twice, and you pick the model for each pass separately.
             </p>
             <p data-testid="admin-model-role-primary-description">
               <strong>{ROLE_LABEL.primary}</strong> — {ROLE_DESCRIPTION.primary}
@@ -714,6 +723,11 @@ export default function AdminModel({
               The critic should be at least as capable as the reviewer: it reads the
               reviewer&apos;s work and has the final say, so a weaker critic limits the
               quality of the redline.
+            </p>
+            <p data-testid="admin-model-cache-reuse-note">
+              By default both passes run on the same model, so the critic reuses the
+              reviewer&apos;s cached playbook and contract. Picking two different models
+              loses that reuse within each review.
             </p>
 
             <CtBanner variant="muted" data-testid="admin-model-tier-caveat">

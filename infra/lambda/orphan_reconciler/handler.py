@@ -93,8 +93,10 @@ MAX_RETRIES_PER_PASS = 1
 # reservation must price. Mirror of reviews.py's constant of the same name.
 MAX_TRUNCATION_RETRIES_PER_PASS = 1
 REGIONAL_PRICING_PREMIUM = 1.10
-PRIMARY_INPUT_RATE_USD_PER_MILLION = 3.30
-PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 16.50
+# Issue #148: the reviewer runs on the critic's model (Opus 4.8) by default,
+# so both passes are priced at the Opus regional rate. Mirror of reviews.py.
+PRIMARY_INPUT_RATE_USD_PER_MILLION = 5.50
+PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 27.50
 CRITIC_INPUT_RATE_USD_PER_MILLION = 5.50
 CRITIC_OUTPUT_RATE_USD_PER_MILLION = 27.50
 
@@ -174,8 +176,9 @@ def _release_reservation(review_id: str, submission: dict[str, Any]) -> None:
 
     Issue #189 fix: this previously only set a `reservation_released` flag
     on the submission row and never touched daily_spend.reserved_usd_cents,
-    so a dead execution's worst-case reservation ($8.84 today -- 3 attempts
-    x 175K in + 3 attempts x 32K out per pass, since issue #137 raised
+    so a dead execution's worst-case reservation ($11.06 today -- 3 attempts
+    x 175K in + 3 attempts x 32K out per pass, both passes on Opus since
+    issue #148; $8.84 with the Sonnet reviewer after issue #137 raised
     MAX_INPUT_TOKENS to 175_000; $8.71 at issue #144's 170_000; $6.86 after issue #658 raised the output
     budget and gave truncation its own attempt; $2.46 before that, $2.11
     before issue #625 raised MAX_INPUT_TOKENS to 100_000 -- per-model

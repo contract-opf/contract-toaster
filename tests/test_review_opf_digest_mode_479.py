@@ -368,8 +368,9 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
         # GUIDANCE -> CONTEXT (issue #479's own AC), located by each
         # block's distinguishing intro text among the primary pass's own
         # sent system prompt. The toaster-guidance block (v1-shared control
-        # block, not one of the five OPF-specific ones) precedes all of
-        # them.
+        # block, not one of the five OPF-specific ones) is NOT in the system
+        # prompt since issue #148: it rides in the role suffix, after the
+        # document, so the system prompt is the same for every review.
         primary_call = fake_client.calls[0]
         system_prompt_text = primary_call["system_prompt"]
 
@@ -380,8 +381,8 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
         standing_idx = system_prompt_text.find("STANDING_INSTRUCTIONS")
         context_idx = system_prompt_text.find('"perspective"')
 
-        self.assertGreater(guidance_idx, -1, "toaster guidance block missing")
-        self.assertGreater(binding_idx, guidance_idx, "BINDING must follow toaster guidance")
+        self.assertEqual(guidance_idx, -1, "toaster guidance must not be in the system prompt")
+        self.assertGreater(binding_idx, -1, "BINDING block missing")
         self.assertGreater(digest_idx, binding_idx, "DIGEST must follow BINDING")
         # No policy AND no standing instructions were passed -- the OPF
         # GUIDANCE slot is entirely absent, per "a block is absent or it
@@ -390,10 +391,17 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
         self.assertEqual(standing_idx, -1)
         self.assertGreater(context_idx, digest_idx, "CONTEXT must follow DIGEST")
 
-        # toaster_guidance threaded through to BOTH passes unchanged.
+        # toaster_guidance threaded through to BOTH passes unchanged -- in
+        # the role suffix, after the document (issue #148).
         critic_call = fake_client.calls[1]
-        self.assertIn("Prefer mutual indemnification caps.", primary_call["system_prompt"])
-        self.assertIn("Prefer mutual indemnification caps.", critic_call["system_prompt"])
+        for call in (primary_call, critic_call):
+            sent = call["user_prompt"]
+            self.assertIn("Prefer mutual indemnification caps.", sent)
+            self.assertLess(
+                sent.index("</COUNTERPARTY_DOCUMENT>"),
+                sent.index("Prefer mutual indemnification caps."),
+            )
+        self.assertEqual(primary_call["system_prompt"], critic_call["system_prompt"])
 
     def test_all_five_blocks_present_compose_in_posture_binding_digest_guidance_context_order(
         self,
@@ -453,10 +461,13 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
         self.assertLess(guidance_idx, context_idx, "GUIDANCE must precede CONTEXT")
 
     def test_standing_instructions_compose_into_the_guidance_slot(self):
-        # Issue #479 DECISION rule 2: the operator's standing instructions
-        # ride into the SAME Guidance slot #483 established for the v1
-        # path -- after the policy's WEIGHTED GUIDANCE block (when one
-        # exists) and before CONTEXT, never overriding BINDING/Floor.
+        # Issue #479 DECISION rule 2 put the operator's standing instructions
+        # into the OPF Guidance slot. Issue #148 moved them, on BOTH paths,
+        # out of the system prompt and into the per-review control layer each
+        # pass sends after the document: the system prompt is the prefix every
+        # review of the playbook shares, and an admin-editable text ahead of
+        # the cached digest re-billed it. They still never override
+        # BINDING/Floor, and still read before the reviewer's own guidance.
         doc = _load_opf_doc(FULL_FIXTURE_PATH)
         bundle = _opf_bundle(doc)
         docx_bytes = _build_docx_bytes()
@@ -473,36 +484,34 @@ class TestOpfDigestModeRunReview(unittest.TestCase):
             }
         )
 
+        instructions = "Prefer a 12-month term unless the counterparty is a state university."
         result = review_spine.run_review(
             docx_bytes, bundle, fake_client, review_id="opf-479-18", policy=policy,
-            instructions_text="Prefer a 12-month term unless the counterparty is a state university.",
+            instructions_text=instructions,
+            toaster_guidance="Prefer mutual indemnification caps.",
         )
 
         self.assertEqual(result["status"], "OK", result)
-        system_prompt_text = fake_client.calls[0]["system_prompt"]
-
-        self.assertIn(
-            "Prefer a 12-month term unless the counterparty is a state university.",
-            system_prompt_text,
-        )
-        self.assertIn("STANDING_INSTRUCTIONS", system_prompt_text)
-        # Precedence copy present (single-source constant reused from
-        # primary_review_pass, per #483 AC3 -- never duplicated here).
-        self.assertIn(
-            "standing instructions from the deployment's administrator", system_prompt_text
-        )
-
-        digest_idx = system_prompt_text.find("clause.indemnification")
-        guidance_idx = system_prompt_text.find("WEIGHTED GUIDANCE")
-        standing_idx = system_prompt_text.find("STANDING_INSTRUCTIONS")
-        context_idx = system_prompt_text.find('"perspective"')
-
-        self.assertLess(digest_idx, guidance_idx, "DIGEST must precede the policy GUIDANCE block")
-        self.assertLess(guidance_idx, standing_idx, "policy GUIDANCE must precede STANDING_INSTRUCTIONS")
-        self.assertLess(standing_idx, context_idx, "STANDING_INSTRUCTIONS must precede CONTEXT")
-
-        critic_call = fake_client.calls[1]
-        self.assertIn("STANDING_INSTRUCTIONS", critic_call["system_prompt"])
+        for call in fake_client.calls[:2]:  # primary, critic
+            system_prompt_text = call["system_prompt"]
+            sent = call["user_prompt"]
+            self.assertNotIn(instructions, system_prompt_text)
+            self.assertNotIn("STANDING_INSTRUCTIONS", system_prompt_text)
+            self.assertIn(instructions, sent)
+            # Precedence copy present (single-source constant reused from
+            # primary_review_pass, per #483 AC3 -- never duplicated here).
+            self.assertIn("standing instructions from the deployment's administrator", sent)
+            # The policy's WEIGHTED GUIDANCE stays knowledge, in the system
+            # prompt, after the digest.
+            digest_idx = system_prompt_text.find("clause.indemnification")
+            guidance_idx = system_prompt_text.find("WEIGHTED GUIDANCE")
+            self.assertGreater(digest_idx, -1)
+            self.assertLess(digest_idx, guidance_idx, "DIGEST must precede the policy GUIDANCE block")
+            # After the document, before the reviewer's own words.
+            doc_end = sent.index("</COUNTERPARTY_DOCUMENT>")
+            standing_idx = sent.index("STANDING_INSTRUCTIONS")
+            self.assertLess(doc_end, standing_idx)
+            self.assertLess(standing_idx, sent.index("PER-REVIEW GUIDANCE"))
 
     def test_empty_floor_composes_no_binding_block_and_never_calls_the_floor_judge(self):
         doc = _load_opf_doc(EMPTY_FLOOR_FIXTURE_PATH)  # posture present, floor invariants=[]
@@ -1141,11 +1150,14 @@ class TestLoadPlaybookBundleResolution(RealActivationTestCase):
         self.assertEqual(result["status"], "OK", result)
         self.assertEqual(result["decision"], "REQUEST_CHANGE")
         self.assertTrue(result.get("redline_bytes"))
-        system_prompt_text = fake_client.calls[0]["system_prompt"]
-        self.assertIn("STANDING_INSTRUCTIONS", system_prompt_text)
+        # Issue #148: the standing instructions reach the model in the role
+        # suffix after the document, not in the system prompt.
+        sent_prompt_text = fake_client.calls[0]["user_prompt"]
+        self.assertIn("STANDING_INSTRUCTIONS", sent_prompt_text)
         self.assertIn(
-            "Educational-affiliation agreements default toward ACCEPT.", system_prompt_text
+            "Educational-affiliation agreements default toward ACCEPT.", sent_prompt_text
         )
+        self.assertNotIn("STANDING_INSTRUCTIONS", fake_client.calls[0]["system_prompt"])
 
         # Lineage: the review row's OPF identity comes off the SAME
         # activated artifact (issue #479 step 5).

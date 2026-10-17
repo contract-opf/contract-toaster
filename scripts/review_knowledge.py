@@ -32,13 +32,14 @@ rules are the ONLY candidate; when it has none, there is nothing
 prescriptive at all, and no flag can make that a review -- that refusal has
 no remedy parameter.
 
-Standing instructions (issue #482/#483) are composed into the SAME Guidance
-slot as the policy's `should`-rules once one of the three candidates above
-has already satisfied this rule -- see `resolve_knowledge`'s
-`instructions_text` param below. They are NOT a fourth candidate this rule
-checks: `resolve_knowledge` never inspects `instructions_text` when deciding
-whether to refuse, so a bundle with no posture, no digest and no policy
-rules still refuses even when standing instructions are present.
+Standing instructions (issue #482/#483) are NOT a fourth candidate this
+rule checks, and since issue #148 they are not part of this module's blocks
+at all: they are per-review control text both passes send after the
+counterparty document (`primary_review_pass.render_request_control_text`),
+so `system_blocks()` stays the same bytes -- and the same prompt-cache
+entry -- for every review of the playbook. A bundle with no posture, no
+digest and no policy rules still refuses whatever instructions the review
+carries.
 
 An empty `posture` in playbook mode is NOT "nothing prescriptive" by
 itself: the digest is real, hashed, corpus-derived precedent (issue #479
@@ -226,7 +227,6 @@ def resolve_knowledge(
     declared_mode: str,
     accept_stub_basis: bool = False,
     accept_empty_posture: bool = False,
-    instructions_text: str = "",
     entity_roster: Optional[Sequence[str]] = None,  # noqa: UP045
 ) -> ReviewKnowledge:
     """Resolve one review's knowledge, or refuse.
@@ -237,24 +237,16 @@ def resolve_knowledge(
     becomes a silently corpus-less review that still records a governing
     playbook.
 
-    `instructions_text` (issue #479/#482/#483, default `""`): the playbook's
-    resolved standing instructions, already resolved once by the caller
-    (`backend/src/reviews.py`) and threaded read-only through
-    `scripts/review_spine.py::run_review`. Composed into the SAME position
-    `opf_prompt.compose_opf_system_blocks` composes the policy's `should`-rule
-    Guidance block -- see that function's own docstring. Included in
-    `content_hash()`/`lineage_record()` for free, since both are functions of
-    `self.blocks`, which now includes it.
-
     `entity_roster` (issue #678, optional): the deployment's admin-managed
     roster of our own legal entity names, resolved by the caller
     (`backend/src/pipeline_runner.py` from `backend/src/entity_roster.py`)
     and threaded read-only into `opf_prompt.compose_opf_system_blocks`,
     which unions it with the playbook's `perspective.party` into one flat
-    recognition set. Like `instructions_text` it lands in
-    `content_hash()`/`lineage_record()` for free, since both are functions
-    of `self.blocks` -- so two reviews run under different rosters do not
-    collide on one prompt hash.
+    recognition set. It lands in `content_hash()`/`lineage_record()` for
+    free, since both are functions of `self.blocks` -- so two reviews run
+    under different rosters do not collide on one prompt hash. (The roster
+    is deployment configuration, not per-review input, so it does not vary
+    the shared prefix between reviews -- issue #148.)
 
     Raises `KnowledgeRefusal` per the module docstring, or
     `opf_prompt.PromptCompositionError` when a declared playbook-mode document
@@ -356,7 +348,6 @@ def resolve_knowledge(
         overrides,
         policy=policy,
         mode=declared_mode,
-        instructions_text=instructions_text,
         entity_roster=entity_roster,
         omissions_out=omissions,
     )
