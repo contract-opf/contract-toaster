@@ -1451,6 +1451,10 @@ def run_review(
     # sentence: `hard_ledger.settled_verdict_summary` rebuilds the summary
     # from it once stage 5 has said what it actually delivered.
     pre_ledger_reconciled = reconciled
+    # Issue #164: the asserted entries' standard language, which stage 5's
+    # pen rules do not judge -- neither the ledger's own insertion nor the
+    # critic's faithful copy `enforce` lets stand in for it.
+    ledger_standards: list[str] = []
     if ledger:
         evaluated = hard_ledger.evaluate_ledger(
             ledger,
@@ -1459,6 +1463,7 @@ def run_review(
             judge_verdicts=judge_verdicts,
         )
         reconciled, hard_ledger_record = hard_ledger.enforce(reconciled, evaluated, block_map)
+        ledger_standards = hard_ledger.standard_texts(evaluated)
 
     # Stage 5: leakage-gated redline generation (issue #26/#83). `redline_docx_bytes`
     # (computed at stage 1 above) is the original upload when there was
@@ -1498,6 +1503,7 @@ def run_review(
             # is judged by identical rules rather than a second divergent
             # resolution.
             pen_rules_bundle=primary_review_pass.resolve_pen_rules_bundle(playbook),
+            ledger_standards=ledger_standards,
         )
     else:
         redline_result = redline_generate.generate_redline(
@@ -1520,10 +1526,10 @@ def run_review(
     findings = [] if leakage_blocked else reconciled.get("issues", [])
 
     # Issue #147: stage 4.5 recorded the ledger insertions it HANDED to
-    # stage 5, and stage 5 gates each one like any other edit -- the pen
-    # rules (for an OPF review, `playbooks/pen-rules.defaults.json`'s
-    # `max_chars` and `must_not_introduce`), the change-set rollback, the
-    # batch gates -- so it can refuse one. The record, and the counts-only
+    # stage 5, and stage 5 gates each one like any other edit -- a compile
+    # failure of its op, the batch gates; never the pen rules, which do not
+    # judge the playbook's own standard language (issue #164) -- so it can
+    # refuse one. The record, and the counts-only
     # sentence in the summary, are re-derived here from the issue keys whose
     # edits the delivered document actually carries, so neither (nor the
     # receipt line read off the record) ever claims an insertion the

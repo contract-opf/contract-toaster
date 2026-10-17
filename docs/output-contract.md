@@ -343,10 +343,16 @@ what code does with it.
   a fixed reason sentence) plus an `insert_block_after` op carrying the manifest's `fallback_language`,
   anchored after a block the critic named only when that block is under the clause's own heading, else at
   the end of the clause's section, else at the end of the nearest present section in template order.
-  That op is an ordinary edit: stage 5 gates it exactly like the critic's own, and can refuse it (an OPF
-  review's pen rules are `playbooks/pen-rules.defaults.json`'s, so a standard over 1,500 characters or
-  with a `must_not_introduce` phrase is refused). An entry with no standard language, whose clause's
-  standard another edit already proposes, or whose insertion stage 5 refused, is flag-only: its issue
+  That op is an ordinary edit: stage 5 gates it like the critic's own -- except the pen rules, which bound
+  model-drafted language and so do not judge the playbook's own standard (#164; a standard over 1,500
+  characters or with a `must_not_introduce` phrase is inserted), nor an insertion of the critic's that is
+  a faithful copy of it (the same `text_fold` comparison the dedupe below makes) -- and can refuse it by
+  a compile failure of the op (an anchor in a table cell, `block_op_unsupported_in_table`), which leaves
+  it out of the delivered document, or by a batch-level gate, which withholds the whole document. An entry
+  with no standard language, whose clause's standard another asserted rule already inserts or the
+  critic's own transcript already inserts on an issue that inserts nothing else (a copy beside language
+  the critic drafted itself never counts, so the ledger inserts its own and the document may then carry
+  the standard twice), or whose insertion stage 5 refused, is flag-only: its issue
   authors no delivered edit, and in a notes mode with internal content its internal note rides on an
   inserting issue's footnote (the clause's own first), naming its own section — for a refused
   insertion, saying it did not pass the redline's checks and was not inserted. The decision is forced to
@@ -358,8 +364,7 @@ what code does with it.
   delivered document carries: the sentence is rebuilt after stage 5 from the settled record (below). The
   review is `DONE`; there is no manual-review outcome (#133). It is not `DONE` when nothing is delivered
   (a REQUEST_CHANGE with no delivered document never is, #584): a refused insertion that was the review's
-  only edit ends it `ERROR` / `block_edits_not_applied`, with the refused standard in
-  `analysis_report.changes_not_applied`, and a review whose only ledger entries have no standard language
+  only edit ends it `ERROR` / `block_edits_not_applied`, and a review whose only ledger entries have no standard language
   delivers no document, which the runner ends `ERROR` / `redline_not_persisted`.
 - **The record.** `hard_ledger` on the result (and the analysis artifact, and `get_review_detail`) is
   `{entries: [{rule_id, clause_id, status, reason, predicate, block_id, span_sha256, inserted,
