@@ -67,9 +67,18 @@ Each gold fixture is a JSON file with:
         "decision": "ACCEPT" | "REQUEST_CHANGE" | null,   # checked iff present
         "min_issues": <int>,                              # checked iff present
         "max_issues": <int>,                               # checked iff present
-        "edits_must_apply": <bool>                          # default true
+        "edits_must_apply": <bool>,                         # default true
                                                             # (v2 spelling:
                                                             #  quotes_must_locate)
+        "issues": [                                       # checked iff present
+          {"playbook_topic_id": "<id>", "section_ref": "<ref>",
+           "hard": <bool>},                               # hard: default false
+          ...
+        ],
+        "redline_inserts": {                              # checked iff present
+          "include": ["<text the redline must insert>", ...],
+          "exclude": ["<text the redline must not insert>", ...]
+        }
       }
     }
 
@@ -119,6 +128,29 @@ and checks the fixture's `expected` block against the actual `ReviewResult`:
     leakage gate from any other fail-closed path that lands on the same
     terminal status, so a fixture proving leakage blocking must pin the
     reason, not just the status.
+
+  - **Issue precision and recall** (issue #141): `expected.issues` is the
+    gold answer -- the multiset of `(playbook_topic_id, section_ref)` the
+    final findings must carry, nothing more and nothing less. A finding the
+    answer does not list is a false positive, a listed issue the findings
+    lack is a false negative, and either fails the case. An entry marked
+    `"hard": true` is a hard rejection; missing one is also counted as a
+    missed hard rejection, the metric whose target is zero.
+  - **Redline-patch correctness** (issue #141): every
+    `expected.redline_inserts.include` string must be inserted (inside a
+    `<w:ins>`) by the delivered redline, and no `.exclude` string may be.
+    This is the anchoring check for ADR 0001: a case whose primary pass
+    proposes the wrong words and whose critic corrects them lists the
+    critic's words under `include` and the primary's under `exclude`, so a
+    pipeline that ships the primary's text fails it.
+
+`aggregate_metrics` turns the per-case counts into the gold-set metrics
+`docs/evaluation.md` defines (decision accuracy, issue precision and recall,
+missed hard rejections, redline-patch correctness), and `check_floors`
+compares them with `REGRESSION_FLOORS` -- the documented floor, recorded in
+`docs/evaluation.md` → "Critic-wins regression gate (issue #141)" beside the
+pre-ADR-0001 baseline. `tests/test_eval_gate_critic_wins.py` pins the two
+together.
 
 A JSON file in a scored `fixtures_dir` that does NOT carry
 `"schema": "llm-native-v1"` is not an eval_harness case -- `score_case`
@@ -174,7 +206,9 @@ from __future__ import annotations
 import io
 import json
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -367,9 +401,56 @@ def build_fake_model_client(
 
 @dataclass
 class CaseResult:
+    """One case's verdict plus the counts `aggregate_metrics` sums (issue
+    #141). `scored` is False for a skipped (non-eval_harness) fixture, whose
+    counts stay zero and which `aggregate_metrics` leaves out entirely."""
+
     case_id: str
     passed: bool
     reasons: list[str] = field(default_factory=list)
+    scored: bool = False
+    decision_correct: bool = False
+    true_positives: int = 0
+    false_positives: int = 0
+    false_negatives: int = 0
+    hard_expected: int = 0
+    hard_missed: int = 0
+    redline_checks: int = 0
+    redline_checks_passed: int = 0
+
+
+_W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def redline_inserted_texts(redline_bytes: bytes | None) -> list[str]:
+    """The text each body paragraph of a delivered redline INSERTS: per
+    `<w:p>`, every `<w:t>` under a `<w:ins>`, joined in document order.
+    Deleted text (`<w:delText>`) and unchanged runs are not included, so "the
+    redline carries X" means the redline proposes X, not merely that X is
+    somewhere in the document."""
+    if not redline_bytes:
+        return []
+    with zipfile.ZipFile(io.BytesIO(redline_bytes)) as archive:
+        # The redline is the pipeline's own output, written from a document
+        # this harness built, not an uploaded file.
+        root = ET.fromstring(archive.read("word/document.xml"))  # noqa: S314
+    inserted: list[str] = []
+    for paragraph in root.iter(f"{_W_NS}p"):
+        text = "".join(
+            node.text or ""
+            for ins in paragraph.iter(f"{_W_NS}ins")
+            for node in ins.iter(f"{_W_NS}t")
+        )
+        if text:
+            inserted.append(text)
+    return inserted
+
+
+def _issue_identity(issue: dict[str, Any]) -> tuple[Any, Any]:
+    # The identity reconciliation itself joins the two passes on
+    # (scripts/reconciliation.py `_issue_key`): what the issue is about and
+    # where, never the response-local `issue_key`.
+    return (issue.get("playbook_topic_id"), issue.get("section_ref"))
 
 
 def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
@@ -403,16 +484,34 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
         # straight out of run_review. One malformed fixture must not abort
         # scoring of every other fixture in the run; record this as a FAIL
         # for this case alone and keep going.
+        #
+        # Issue #141: the case still counts in the gold-set metrics, as a
+        # wrong decision that found nothing -- every expected issue missed,
+        # every redline check failed -- so a crash can never improve them.
+        gold = expected.get("issues") or []
+        redline_expectation = expected.get("redline_inserts") or {}
+        redline_checks = len(redline_expectation.get("include") or []) + len(
+            redline_expectation.get("exclude") or []
+        )
         return CaseResult(
             case_id=case.case_id,
             passed=False,
             reasons=[f"run_review raised {type(exc).__name__}: {exc}"],
+            scored=True,
+            false_negatives=len(gold),
+            hard_expected=sum(1 for issue in gold if issue.get("hard")),
+            hard_missed=sum(1 for issue in gold if issue.get("hard")),
+            redline_checks=redline_checks,
         )
 
     reasons: list[str] = []
     passed = True
+    counts = CaseResult(case_id=case.case_id, passed=True, scored=True)
 
     expected_status = expected.get("status", "OK")
+    counts.decision_correct = result.get("status") == expected_status and (
+        "decision" not in expected or result.get("decision") == expected["decision"]
+    )
     if result.get("status") != expected_status:
         passed = False
         reasons.append(
@@ -470,7 +569,134 @@ def score_case(case: GoldCase, playbook: dict[str, Any]) -> CaseResult:
                 f"(reason={entry.get('reason')!r}, section_ref={entry.get('section_ref')!r})"
             )
 
-    return CaseResult(case_id=case.case_id, passed=passed, reasons=reasons)
+    if "issues" in expected:
+        # Issue #141: precision and recall against the case's gold answer.
+        gold = expected["issues"]
+        wanted = Counter(_issue_identity(issue) for issue in gold)
+        found = Counter(_issue_identity(issue) for issue in findings)
+        matched = wanted & found
+        counts.true_positives = sum(matched.values())
+        counts.false_positives = sum((found - wanted).values())
+        counts.false_negatives = sum((wanted - found).values())
+        for key in sorted((found - wanted).elements(), key=repr):
+            passed = False
+            reasons.append(f"unexpected issue (false positive): {key!r}")
+        for key in sorted((wanted - found).elements(), key=repr):
+            passed = False
+            reasons.append(f"expected issue not in findings (false negative): {key!r}")
+        hard_wanted = Counter(_issue_identity(issue) for issue in gold if issue.get("hard"))
+        counts.hard_expected = sum(hard_wanted.values())
+        counts.hard_missed = sum((hard_wanted - found).values())
+
+    redline_expectation = expected.get("redline_inserts")
+    if redline_expectation is not None:
+        # Issue #141: the anchoring check -- whose words the redline inserts.
+        inserted = redline_inserted_texts(result.get("redline_bytes"))
+        for text in redline_expectation.get("include") or []:
+            counts.redline_checks += 1
+            if any(text in paragraph for paragraph in inserted):
+                counts.redline_checks_passed += 1
+            else:
+                passed = False
+                reasons.append(f"the redline does not insert the expected text: {text!r}")
+        for text in redline_expectation.get("exclude") or []:
+            counts.redline_checks += 1
+            if any(text in paragraph for paragraph in inserted):
+                passed = False
+                reasons.append(f"the redline inserts text it must not: {text!r}")
+            else:
+                counts.redline_checks_passed += 1
+
+    counts.passed = passed
+    counts.reasons = reasons
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# Gold-set metrics and the regression floor (issue #141).
+# ---------------------------------------------------------------------------
+
+#: The documented floor every metric must meet on the gold set
+#: (docs/evaluation.md → "Critic-wins regression gate (issue #141)", which
+#: `tests/test_eval_gate_critic_wins.py` pins against this dict). The harness
+#: is offline and deterministic -- the canned answers are known -- so any
+#: drop below 1.0 is a regression in the pipeline, not model noise.
+#: `missed_hard_rejections` is a ceiling, not a floor: zero, per the
+#: document's "zero new missed hard rejections".
+REGRESSION_FLOORS: dict[str, float] = {
+    "decision_accuracy": 1.0,
+    "issue_precision": 1.0,
+    "issue_recall": 1.0,
+    "missed_hard_rejections": 0,
+    "redline_patch_correctness": 1.0,
+}
+
+
+@dataclass(frozen=True)
+class GoldSetMetrics:
+    cases_scored: int
+    decision_accuracy: float
+    issue_precision: float
+    issue_recall: float
+    hard_rejections_expected: int
+    missed_hard_rejections: int
+    redline_patch_correctness: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "cases_scored": self.cases_scored,
+            "decision_accuracy": self.decision_accuracy,
+            "issue_precision": self.issue_precision,
+            "issue_recall": self.issue_recall,
+            "hard_rejections_expected": self.hard_rejections_expected,
+            "missed_hard_rejections": self.missed_hard_rejections,
+            "redline_patch_correctness": self.redline_patch_correctness,
+        }
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    # An empty denominator means nothing could go wrong: no flag to be false,
+    # no issue to miss, no redline check to fail.
+    return 1.0 if denominator == 0 else numerator / denominator
+
+
+def aggregate_metrics(results: list[CaseResult]) -> GoldSetMetrics:
+    """Sum the scored cases' counts into the gold-set metrics. Skipped
+    (non-eval_harness) fixtures are left out."""
+    scored = [r for r in results if r.scored]
+    tp = sum(r.true_positives for r in scored)
+    fp = sum(r.false_positives for r in scored)
+    fn = sum(r.false_negatives for r in scored)
+    return GoldSetMetrics(
+        cases_scored=len(scored),
+        decision_accuracy=_ratio(sum(1 for r in scored if r.decision_correct), len(scored)),
+        issue_precision=_ratio(tp, tp + fp),
+        issue_recall=_ratio(tp, tp + fn),
+        hard_rejections_expected=sum(r.hard_expected for r in scored),
+        missed_hard_rejections=sum(r.hard_missed for r in scored),
+        redline_patch_correctness=_ratio(
+            sum(r.redline_checks_passed for r in scored),
+            sum(r.redline_checks for r in scored),
+        ),
+    )
+
+
+def check_floors(
+    metrics: GoldSetMetrics, floors: dict[str, float] | None = None
+) -> list[str]:
+    """Every way `metrics` misses the documented floor, as one line each;
+    empty when the gold set meets it."""
+    floors = REGRESSION_FLOORS if floors is None else floors
+    values = metrics.as_dict()
+    breaches: list[str] = []
+    for name, floor in floors.items():
+        value = values[name]
+        if name == "missed_hard_rejections":
+            if value > floor:
+                breaches.append(f"{name} = {value}, above the ceiling of {floor}")
+        elif value < floor:
+            breaches.append(f"{name} = {value:.4f}, below the floor of {floor}")
+    return breaches
 
 
 def score_all(
@@ -493,6 +719,9 @@ def run_harness_gate_for_playbook(entry, quiet: bool = False) -> bool:
     results = score_all(fixtures_dir=entry.fixtures_dir, playbook_path=entry.playbook_path)
     failed = [r for r in results if not r.passed]
 
+    metrics = aggregate_metrics(results)
+    breaches = check_floors(metrics)
+
     if not quiet:
         print(f"Evaluation harness [{entry.playbook_id}]: scored {len(results)} fixture(s).")
         for r in results:
@@ -500,8 +729,17 @@ def run_harness_gate_for_playbook(entry, quiet: bool = False) -> bool:
             print(f"  [{status}] {r.case_id}")
             for reason in r.reasons:
                 print(f"      {reason}")
+        print(
+            f"  metrics [{entry.playbook_id}]: "
+            + ", ".join(
+                f"{name}={value:.4f}" if isinstance(value, float) else f"{name}={value}"
+                for name, value in metrics.as_dict().items()
+            )
+        )
+        for breach in breaches:
+            print(f"  [FLOOR] {breach}")
 
-    ok = not failed
+    ok = not failed and not breaches
     if not quiet:
         print("PASS" if ok else "FAIL", f"[{entry.playbook_id}]\n")
     return ok

@@ -108,6 +108,18 @@
     "decision": "REQUEST_CHANGE",
     "min_issues": 1,
     "max_issues": 1,
-    "quotes_must_locate": true
+    "quotes_must_locate": true,
+    "issues": [
+      {
+        "playbook_topic_id": "limitation-of-liability",
+        "section_ref": "sec-8"
+      }
+    ],
+    "redline_inserts": {
+      "include": [
+        "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth."
+      ],
+      "exclude": []
+    }
   }
 }

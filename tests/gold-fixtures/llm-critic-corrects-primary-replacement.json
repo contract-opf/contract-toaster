@@ -1,0 +1,135 @@
+{
+  "case_id": "llm-critic-corrects-primary-replacement",
+  "schema": "llm-native-v1",
+  "provenance": "synthetic",
+  "description": "Issue #141 anchoring check (ADR 0001): the primary pass flags the uncapped Section 8 correctly but proposes the wrong replacement (a fees-paid cap, not the standard position); the critic keeps the issue, REVISEs the replacement to the standard cap and records the override. The delivered redline must insert the critic's words and must not insert the primary's.",
+  "document": {
+    "clauses": [
+      {
+        "heading": "8. Limitation on Liability",
+        "text": "Each party's liability under this Agreement shall be unlimited."
+      }
+    ]
+  },
+  "model_responses": {
+    "primary": [
+      {
+        "decision": "REQUEST_CHANGE",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [
+          {
+            "section_ref": "sec-8",
+            "section_title": "Limitation on Liability",
+            "counterparty_change_summary": "Counterparty removed the liability cap from Section 8.",
+            "decision": "REQUEST_CHANGE",
+            "external_rationale_for_footnote": "Section 8 must retain the standard aggregate liability cap.",
+            "playbook_topic_id": "limitation-of-liability",
+            "internal_precedent_citation": null,
+            "provenance": "model",
+            "issue_key": "I1",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
+          }
+        ],
+        "critic_delta": null,
+        "verdict_summary": "One issue identified in Section 8 requiring attention before your organization can accept this draft.",
+        "block_patches": [
+          {
+            "block_id": "p0001",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "Each party's liability under this Agreement shall be unlimited.",
+                "issue_key": "I1"
+              },
+              {
+                "op": "insert",
+                "text": "Each party's liability under this Agreement shall be limited to the fees paid in the twelve months before the claim arose.",
+                "issue_key": "I1"
+              }
+            ]
+          }
+        ],
+        "block_ops": []
+      }
+    ],
+    "critic": [
+      {
+        "decision": "REQUEST_CHANGE",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [
+          {
+            "section_ref": "sec-8",
+            "section_title": "Limitation on Liability",
+            "counterparty_change_summary": "Counterparty removed the liability cap from Section 8.",
+            "decision": "REQUEST_CHANGE",
+            "external_rationale_for_footnote": "Section 8 must retain the standard aggregate liability cap.",
+            "playbook_topic_id": "limitation-of-liability",
+            "internal_precedent_citation": null,
+            "provenance": "model",
+            "issue_key": "I1",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
+          }
+        ],
+        "critic_delta": {
+          "dispositions": [
+            {
+              "issue_id": "I1",
+              "disposition": "REVISE",
+              "reason": "Right issue, wrong cap: the replacement must restore the standard position."
+            }
+          ],
+          "overrides": [
+            {
+              "issue_id": "I1",
+              "field": "replacement_text",
+              "primary_value": "Each party's liability under this Agreement shall be limited to the fees paid in the twelve months before the claim arose.",
+              "critic_value": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+              "reason": "Right issue, wrong cap: the replacement must restore the standard position."
+            }
+          ]
+        },
+        "verdict_summary": "One issue identified in Section 8 requiring attention before your organization can accept this draft.",
+        "block_patches": [
+          {
+            "block_id": "p0001",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "Each party's liability under this Agreement shall be unlimited.",
+                "issue_key": "I1"
+              },
+              {
+                "op": "insert",
+                "text": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+                "issue_key": "I1"
+              }
+            ]
+          }
+        ],
+        "block_ops": []
+      }
+    ]
+  },
+  "expected": {
+    "status": "OK",
+    "decision": "REQUEST_CHANGE",
+    "min_issues": 1,
+    "max_issues": 1,
+    "issues": [
+      {
+        "playbook_topic_id": "limitation-of-liability",
+        "section_ref": "sec-8"
+      }
+    ],
+    "redline_inserts": {
+      "include": [
+        "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth."
+      ],
+      "exclude": [
+        "Each party's liability under this Agreement shall be limited to the fees paid in the twelve months before the claim arose."
+      ]
+    }
+  }
+}

@@ -171,6 +171,23 @@
     "decision": "REQUEST_CHANGE",
     "min_issues": 2,
     "max_issues": 2,
-    "quotes_must_locate": true
+    "quotes_must_locate": true,
+    "issues": [
+      {
+        "playbook_topic_id": "limitation-of-liability",
+        "section_ref": "sec-8"
+      },
+      {
+        "playbook_topic_id": "indemnification",
+        "section_ref": "sec-10"
+      }
+    ],
+    "redline_inserts": {
+      "include": [
+        "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+        "Neither party shall bear responsibility for defending or compensating the other party for third-party claims arising under this Agreement, except as expressly and narrowly set forth in Section 8."
+      ],
+      "exclude": []
+    }
   }
 }

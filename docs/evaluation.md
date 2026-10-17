@@ -132,6 +132,44 @@ A legal-behavior release is a **bundle**: playbook hash, prompt hash, canonical 
 8. **Detector-correctness gate (deterministic; runs without the model).** The hard-rejection detectors are run in isolation over the diff and must pass three checks — see [§Detector-correctness gate](#detector-correctness-gate) below. This is the deterministic backstop that makes the C1 false-positive class a permanent regression rather than a tuning problem.
 9. **CI evaluation spend budget.** The harness invokes Bedrock (both passes, multiple stochastic runs), which would otherwise spend *outside* the per-review daily ceiling. CI Bedrock spend is therefore routed through the same reservation/ledger (or a separate, explicitly-budgeted CI ceiling), surfaced on the cost dashboard, and the gold-set size × stochastic-run count is **capped against a documented budget**; the harness `log`s and fails loudly when it would exceed it rather than silently truncating coverage. (Closes the cost-control hole where CI eval bypassed the `$20/day` ceiling.)
 
+### Critic-wins regression gate (issue #141)
+
+ADR 0001 (issue #138) made the critic's result the final review. This gate proves the change did not lower the quality bar. `scripts/eval_harness.py` scores every `llm-native-v1` gold case in `tests/gold-fixtures/` and sums the cases into the metrics above, as `aggregate_metrics` computes them:
+
+- **Decision accuracy**: the share of cases whose status and decision match the case's `expected` block.
+- **Issue precision and recall**: each case's `expected.issues` lists the `(playbook_topic_id, section_ref)` pairs the final findings must carry. An extra finding is a false positive and a missing one is a false negative.
+- **Missed hard rejections**: expected issues marked `"hard": true` that are absent from the findings. This is a ceiling of zero, not a floor.
+- **Redline-patch correctness**: the share of `expected.redline_inserts` checks that hold. Each `include` string must appear inside a `<w:ins>` of the delivered redline, and no `exclude` string may.
+
+Four gold cases test the critic against a primary pass that is wrong. All are synthetic, so the de-identification sign-off does not apply.
+
+| Case | The primary pass | The critic | What the gold answer requires |
+|---|---|---|---|
+| `llm-critic-corrects-primary-replacement` | flags the right clause but proposes the wrong replacement | REVISEs the replacement and records the override | the redline inserts the critic's words and not the primary's (the anchoring check) |
+| `llm-critic-drops-primary-over-flag` | over-flags a near-miss | DROPs the issue | ACCEPT with no issue (precision) |
+| `llm-critic-adds-primary-miss` | misses an issue | raises it with its own edit | the critic's issue and its insert (recall) |
+| `llm-critic-drop-of-hard-rejection-retained` | raises a hard rejection | DROPs it | the issue is retained and the review requests changes (guard 1) |
+
+The floor is `REGRESSION_FLOORS` in `scripts/eval_harness.py`, and `tests/test_eval_gate_critic_wins.py` fails when the gold set drops below it. That test also checks that the floor and the critic-wins column below match the code and the harness's measured output. The harness runs offline: every case replays recorded responses through `FakeBedrockClient`, so the outcome is deterministic and any score below 1.0 is a pipeline regression, not model noise. These numbers measure the mechanical contract only, not a real model's judgement; that remains the live, human-executed gate.
+
+| Metric | Floor | Pre-ADR baseline (`3fdf927`) | Critic wins (#138) |
+|---|---|---|---|
+| `cases_scored` | — | 10 | 10 |
+| `decision_accuracy` | 1.0 | 0.8000 | 1.0000 |
+| `issue_precision` | 1.0 | 0.8333 | 1.0000 |
+| `issue_recall` | 1.0 | 0.8333 | 1.0000 |
+| `missed_hard_rejections` | 0 (ceiling) | 0 | 0 |
+| `redline_patch_correctness` | 1.0 | 0.4286 | 1.0000 |
+
+The baseline is commit `3fdf927`, the last commit before #138 landed. To reproduce it, extract that tree with `git archive`, copy in the current `scripts/eval_harness.py` and the `tests/gold-fixtures/llm-*.json` cases, and run `python3 scripts/eval_harness.py --playbook-id synthetic-generic`. The four baseline failures are:
+
+- The anchoring case shipped the primary's words, because the redline was compiled from the primary's patches.
+- In the precision case the over-flag survived and its edit shipped, because the critic could not remove an issue.
+- In the recall case the critic's issue was lost, because the old merger read critic additions only from the deprecated `critic_delta.added_issues` and never from the critic's own `issues`.
+- The leakage case ended as `ERROR_MANUAL_REVIEW_REQUIRED`. Issue #133 later renamed that status to `ERROR`, so this miss is a renamed status, not a quality difference.
+
+Hard-rejection recall was already monotonic before ADR 0001, and it still is.
+
 ### Eval harness rate-limiting and quota-aware scheduling
 
 The eval harness invokes Bedrock at a volume — 39 cases × 2 passes × multiple stochastic runs at ~60K tokens/call — that can exhaust the on-demand TPM quota for Opus 4.8 — the critic since issue #136, and the reviewer too since issue #148 — if CI runners are not coordinated. Exhausting quota causes `ThrottlingException` retries, extends the multi-hour CI run, and (without a proper alarm split) fires the "Bedrock errors > 0" alarm with noise. To prevent this:
