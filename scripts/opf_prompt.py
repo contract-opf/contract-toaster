@@ -629,15 +629,18 @@ def _digest_clause_block(clause: dict) -> str:
 
     # The digest caps each list; its totals are uncapped. Say what the cap
     # left out rather than let the model read a partial list as the whole one.
+    # Each noun carries its own plural: the head noun of "opening not signed
+    # as proposed" is not the phrase's last word.
     hidden = []
-    for total_field, shown, noun in (
-        ("n_variants_total", _texts_shown(variants), "signed variant"),
-        ("n_refused_total", len(refused), "refused ask"),
-        ("n_changed_openings_total", len(openings), "opening not signed as proposed"),
+    for total_field, shown, singular, plural in (
+        ("n_variants_total", _texts_shown(variants), "signed variant", "signed variants"),
+        ("n_refused_total", len(refused), "refused ask", "refused asks"),
+        ("n_changed_openings_total", len(openings),
+         "opening not signed as proposed", "openings not signed as proposed"),
     ):
         total = _count(clause.get(total_field), total_field, where)
         if total is not None and total > shown:
-            hidden.append(f"{total - shown} more {noun}{'' if total - shown == 1 else 's'}")
+            hidden.append(f"{total - shown} more {singular if total - shown == 1 else plural}")
     if hidden:
         lines.append(f"\n({', '.join(hidden)} on record, not shown here.)")
     return "\n".join(lines)

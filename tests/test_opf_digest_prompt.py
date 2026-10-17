@@ -20,10 +20,13 @@ the `opf_terminology` renames were deleted with it).
  5. EMPTY LISTS render nothing, not an empty header; the openings-not-signed
     list renders with its to-standard and struck counts.
  6. A CAPPED LIST SAYS SO: when the digest lists fewer entries than its
-    uncapped total, the block states how many more are on record.
+    uncapped total, the block states how many more are on record -- for
+    each of the three capped lists, in the singular and the plural.
  7. NO DIGEST => REFUSE.
  8. THE INTRO says precedent, not instruction; refused asks and unsigned
     openings are never replacement language; a label is an index to check.
+ 9. DATES RENDER: a digest that carries them (conformance vector 002) states
+    the corpus's signed span and each variant's most recent signing.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -45,6 +48,12 @@ import opf_prompt  # noqa: E402
 FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 NO_DIGEST_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
+VECTOR_002 = (
+    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "002-variants-refused-and-exclusions.json"
+)
+VECTOR_003 = (
+    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "003-cap-totals-and-summary.json"
+)
 VECTOR_009 = (
     REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "009-standard-parts-and-owner-label.json"
 )
@@ -189,6 +198,37 @@ def check_6_capped_list_says_so() -> list[str]:
         failures.append("  a capped signed-variant list does not say how many more are on record")
     if "not shown here" in _clause_section(_digest_block(_doc()), "clause.governing-law"):
         failures.append("  an uncapped clause claims entries not shown")
+
+    # The plural signed-variant wording, from real engine output: conformance
+    # vector 003 lists 5 of limitation of liability's 7 signed variants.
+    capped = _clause_section(_digest_block(_vector_doc(VECTOR_003)), "clause.limitation_of_liability")
+    expected = "(2 more signed variants on record, not shown here.)"
+    if expected not in capped:
+        failures.append(f"  vector 003's capped signed-variant list does not say {expected!r}: "
+                        f"{_line_containing(capped, 'not shown here')!r}")
+
+    # All three capped lists at once. The engine applies one top_n to
+    # signed_variants, refused_asks and changed_openings alike
+    # (playbook_engine/digest.py `_build_digest_at`), so a digest listing 1
+    # refused ask of several lists at most 1 signed variant too: cap every
+    # list in the clause the same way, or the asserted line is one no real
+    # digest can produce. The head noun of an opening is "opening", not the
+    # phrase's last word.
+    for extra_refused, extra_openings, expected in (
+        (3, 2, "(1 more signed variant, 3 more refused asks, "
+               "2 more openings not signed as proposed on record, not shown here.)"),
+        (1, 1, "(1 more signed variant, 1 more refused ask, "
+               "1 more opening not signed as proposed on record, not shown here.)"),
+    ):
+        doc = _doc()
+        clause = next(c for c in doc["digest"]["clauses"] if c["id"] == "clause.indemnification")
+        clause["signed_variants"] = clause["signed_variants"][:1]  # what top_n=1 would leave
+        clause["n_refused_total"] = len(clause["refused_asks"]) + extra_refused
+        clause["n_changed_openings_total"] = len(clause["changed_openings"]) + extra_openings
+        section = _clause_section(_digest_block(doc), "clause.indemnification")
+        if expected not in section:
+            failures.append(f"  capped indemnification lists do not say {expected!r}: "
+                            f"{_line_containing(section, 'not shown here')!r}")
     return failures
 
 
@@ -230,6 +270,19 @@ def check_8_intro() -> list[str]:
     return failures
 
 
+def check_9_dates_render() -> list[str]:
+    failures: list[str] = []
+    block = _digest_block(_vector_doc(VECTOR_002))
+    corpus = "From 8 deals (7 signed), signed between 2024-06-30 and 2025-Q4."
+    if corpus not in block:
+        failures.append(f"  a dated corpus does not render {corpus!r}")
+    assignment = _clause_section(block, "clause.assignment")
+    variant = _line_containing(assignment, "to an affiliate, without consent")
+    if "signed in 3 deals, most recently 2025-Q4," not in variant:
+        failures.append(f"  a dated variant does not say when it was most recently signed: {variant!r}")
+    return failures
+
+
 def main() -> int:
     checks = [
         ("1", "the engine's NDA example renders the #129 facts", check_1_nda_example),
@@ -240,6 +293,7 @@ def main() -> int:
         ("6", "a capped list says how many more are on record", check_6_capped_list_says_so),
         ("7", "no digest => refuse to compose", check_7_no_digest_refuses),
         ("8", "the intro frames precedent as an index, never instruction", check_8_intro),
+        ("9", "a dated digest states its signed span and each variant's latest signing", check_9_dates_render),
     ]
     ok = True
     for code, name, fn in checks:

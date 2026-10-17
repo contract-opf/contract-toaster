@@ -149,8 +149,10 @@ promotion) → #90 (curation). Note #89's own title carries the requirements tha
   third-party in origin.
 - Positive and negative precedent must not commingle in one top-K context — #60 built
   `document_type` and `corpus_polarity` for this; honour them.
-- Retrieval must never become policy. The digest keeps `historical_stance` descriptive
-  precisely so the playbook stays evidence; retrieved precedent is subject to the same rule.
+- Retrieval must never become policy. The digest (digest_version 4) renders precedent as
+  facts only (counts, the signed or proposed wording, a citation), and its one judged value,
+  the `vs_standard` label, is an index to check, never an instruction, precisely so the
+  playbook stays evidence; retrieved precedent is subject to the same rule.
 
 ## 6. Alternative: commit to no-RAG
 
