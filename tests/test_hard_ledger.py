@@ -21,11 +21,14 @@ deterministic presence rule and only recommends on a judged one, every
 predicate kind, the insertion anchor's branches (a block the critic names
 outside the clause never places the insertion, whether it CLEARED or
 ASSERTed), the counts-only sentences with a count of one and of two, and the
-internal footnote. And stage 5's say: a fallback the OPF pen-rule defaults
-refuse (over `max_chars`, or a `must_not_introduce` phrase) is counted
-flag-only by the record, the summary and the hosted internal note when
-another edit is delivered, and -- the pinned outcome -- ends the review
-`ERROR` / `block_edits_not_applied` when it was the only edit.
+internal footnote. And stage 5's say (issue #164): the OPF pen-rule
+defaults (`max_chars`, `must_not_introduce`) do not gate the playbook's own
+standard, so a ledger-only review whose standard is over 1,500 characters or
+carries a banned phrase still delivers it, while model-drafted text in the
+same review is still refused; a critic restoration that copies the standard
+word for word shares that exemption when it stands in for the ledger's own
+insertion, and never stands in beside language the critic drafted itself; an
+insertion stage 5 rolls out through another gate is noted as not inserted.
 
 ## Fixture reachability
 
@@ -1158,95 +1161,367 @@ def test_every_asserted_rule_on_one_clause_reaches_an_internal_footnote() -> Non
 
 
 # ---------------------------------------------------------------------------
-# Stage 5 can refuse the insertion: everything reported is what it delivered
+# Issue #164: the pen rules do not gate the playbook's own standard language
 # ---------------------------------------------------------------------------
 
 
-def _refusal(result: dict[str, Any]) -> dict[str, Any]:
-    """The one `changes_not_applied` entry of a refused ledger insertion."""
+def _long_term_edit_response(docx_bytes: bytes, ledger: list[dict[str, Any]], insert: str) -> str:
+    """`_term_edit_response` with a MODEL-DRAFTED insertion of `insert` in
+    place of "sixty (60)" -- the critic's own language, which the pen rules
+    still judge."""
+    body = json.loads(_term_edit_response(docx_bytes, ledger))
+    (segment,) = [s for s in body["block_patches"][0]["segments"] if s["op"] == "insert"]
+    segment["text"] = insert
+    return json.dumps(body)
+
+
+def _pen_refusal(result: dict[str, Any], section: str) -> dict[str, Any]:
+    """The one `changes_not_applied` entry, for a pen-refused issue in `section`."""
     not_applied = (result.get("analysis_report") or {}).get("changes_not_applied") or []
     assert [(c["section_ref"], c["reason"]) for c in not_applied] == [
-        ("Indemnification", "derived_replacement_text_rejected")
+        (section, "derived_replacement_text_rejected")
     ], not_applied
     return not_applied[0]
 
 
-def test_a_refused_insertion_beside_another_edit_is_counted_flag_only() -> None:
-    """Stage 5 gates the ledger's insertion like every other edit, and an OPF
-    review's pen rules are the toaster defaults (`max_chars` 1500,
-    `must_not_introduce` "perpetual" ...), which apply to the playbook's own
-    standard language too. A standard that fails them is refused while the
-    critic's ordinary Term edit is delivered: the review is DONE /
-    REQUEST_CHANGE, and the record, the summary and the hosted internal note
-    all say flagged only -- none claims an insertion the delivered document
-    lacks."""
+def test_a_ledger_only_review_inserts_a_standard_the_pen_rules_would_refuse() -> None:
+    """Issue #164. An OPF review's pen rules are the toaster defaults
+    (`max_chars` 1500, `must_not_introduce` "perpetual" ...), which bound
+    language a MODEL drafts. The ledger's fallback is the playbook's own
+    `our_standard.text`, inserted by code, so they do not gate it: a review
+    whose only edit is that insertion -- a standard over 1,500 characters, or
+    one carrying a banned phrase -- delivers it, DONE / REQUEST_CHANGE,
+    counted inserted by the record and the summary. (Before #164 the pen
+    rules refused it and the review ended ERROR / block_edits_not_applied
+    with the protection undelivered.)"""
     import replacement_text_enforcement as rte
 
-    assert len(LONG_STANDARD) > 1500
-    for standard, failure in (
-        (LONG_STANDARD, rte.MAX_CHARS_EXCEEDED),
-        (BANNED_PHRASE_STANDARD, rte.MUST_NOT_INTRODUCE_VIOLATION),
-    ):
+    defaults = rte.resolve_pen_rules(None, "clause.indemnification")
+    assert len(LONG_STANDARD) > defaults["max_chars"] == 1500, defaults
+    assert "perpetual" in [entry["phrase"] for entry in defaults["must_not_introduce"]], defaults
+    for standard in (LONG_STANDARD, BANNED_PHRASE_STANDARD):
         doc = _opf_doc(INDEMNITY_CONDITION, standard=standard)
         assert _fallback(doc) == standard
         docx_bytes = _docx(with_indemnity=False)
         result, _client = _run(
             docx_bytes,
-            [_term_edit_response(docx_bytes, [_assert()]), _verdict(JUDGED_RULE)],
+            [_response(critic=True, ledger=[_assert()]), _verdict(JUDGED_RULE)],
+            doc=doc,
+            notes_mode="internal",
+        )
+        assert result["status"] == "OK", (result.get("status"), result.get("reason"))
+        assert result["decision"] == "REQUEST_CHANGE"
+        assert [f["provenance"] for f in result["findings"]] == [f"ledger:{RULE_ID}"]
+        redline = result["redline_bytes"]
+        assert redline, "the ledger's insertion was not delivered"
+        assert _in_order(_texts(redline, "word/document.xml"), DEFINITIONS, standard, CONFIDENTIALITY)
+        assert standard.split(". ")[0] in _inserted_texts(redline), "standard is not a tracked insertion"
+        not_applied = (result.get("analysis_report") or {}).get("changes_not_applied") or []
+        assert not_applied == [], not_applied
+        record = result["hard_ledger"]
+        assert record["asserted"] == 1 and record["inserted"] == 1, record
+        entry = _entry(result)
+        assert entry["inserted"] is True, entry
+        assert entry["anchor_block_id"] == _block_id(docx_bytes, "Definitions"), entry
+        assert result["summary"] == (
+            "Changes are requested: 1 required protection was not found in the agreement "
+            "and is asserted in the redline."
+        ), result["summary"]
+        footnotes = _texts(redline, "word/footnotes.xml")
+        assert "its standard language was inserted" in footnotes, footnotes
+        assert "did not pass the redline's checks" not in footnotes, footnotes
+
+
+def test_model_drafted_text_is_still_pen_checked_beside_a_ledger_insertion() -> None:
+    """Issue #164's other half: the exemption is the ledger's alone. In the
+    same review as a ledger insertion of an over-long standard, the critic's
+    own edit -- over 1,500 characters, or carrying "perpetual" -- is still
+    refused by the pen rules (`max_chars_exceeded` /
+    `must_not_introduce_violation`) and never reaches the document, while the
+    ledger's standard is delivered."""
+    import replacement_text_enforcement as rte
+
+    long_insert = " ".join(
+        f"sixty (60) days' written notice, clause {n}, delivered to the other party's notice address"
+        for n in range(1, 25)
+    )
+    assert len(long_insert) > 1500
+    for insert, failure in (
+        (long_insert, rte.MAX_CHARS_EXCEEDED),
+        ("sixty (60), and this right is perpetual,", rte.MUST_NOT_INTRODUCE_VIOLATION),
+    ):
+        doc = _opf_doc(INDEMNITY_CONDITION, standard=LONG_STANDARD)
+        docx_bytes = _docx(with_indemnity=False)
+        result, _client = _run(
+            docx_bytes,
+            [_long_term_edit_response(docx_bytes, [_assert()], insert), _verdict(JUDGED_RULE)],
             doc=doc,
             notes_mode="internal",
         )
         assert result["status"] == "OK", (failure, result.get("status"), result.get("reason"))
         assert result["decision"] == "REQUEST_CHANGE"
         redline = result["redline_bytes"]
-        assert redline, "the critic's own edit was not delivered"
-        assert "sixty (60)" in _inserted_texts(redline)
-        assert "indemnify" not in _texts(redline, "word/document.xml"), "refused text delivered"
-        assert _refusal(result)["patch_reasons"][0]["reason"] == failure
+        assert redline, "the ledger's insertion was not delivered"
+        document = _texts(redline, "word/document.xml")
+        assert LONG_STANDARD.split(". ")[0] in _inserted_texts(redline)
+        assert "sixty (60)" not in document, "the refused model-drafted edit was delivered"
+        assert TERM in document, "the refused edit's deletion was not rolled back"
+        assert _pen_refusal(result, "Term and Termination")["patch_reasons"][0]["reason"] == failure
         record = result["hard_ledger"]
-        assert record["asserted"] == 1 and record["inserted"] == 0, record
-        entry = _entry(result)
-        assert entry["status"] == hl.STATUS_ASSERTED, entry
-        assert entry["inserted"] is False and entry["anchor_block_id"] is None, entry
-        assert entry["issue_key"] == "I2", entry
-        assert result["summary"] == (
-            f"{TERM_SUMMARY} 1 required protection was not found in the agreement and is "
-            "flagged only; no standard language was inserted for it."
-        ), result["summary"]
-        footnotes = _texts(redline, "word/footnotes.xml")
-        assert (
-            f"Hard-rejection ledger entry for Indemnification: Hard-rejection ledger rule "
-            f"{RULE_ID} was not proven present: the second review did not find it in the "
-            "agreement; its standard language did not pass the redline's checks and was not "
-            "inserted, so it is flagged only."
-        ) in footnotes, footnotes
-        assert "its standard language was inserted" not in footnotes
+        assert record["asserted"] == 1 and record["inserted"] == 1, record
+        assert _entry(result)["issue_key"] == "I2"
 
 
-def test_a_refused_insertion_that_is_the_only_edit_ends_the_review_in_error() -> None:
-    """PINNED OUTCOME: when the refused insertion was the review's only edit,
-    there is no document to carry the assertion, and a REQUEST_CHANGE with
-    no delivered document is never DONE (#584). Stage 5 ends the review
-    `ERROR` / `block_edits_not_applied` -- no decision, no document, no
-    summary -- with the refused standard listed in
-    `analysis_report.changes_not_applied` for the attorney, and the record
-    counts the entry asserted, not inserted."""
-    doc = _opf_doc(INDEMNITY_CONDITION, standard=LONG_STANDARD)
-    docx_bytes = _docx(with_indemnity=False)
-    result, _client = _run(
-        docx_bytes, [_response(critic=True, ledger=[_assert()]), _verdict(JUDGED_RULE)], doc=doc
+def test_only_ledger_provenance_is_exempt_from_the_pen_rules() -> None:
+    """`redline_generate.ledger_issue_keys` names exactly the issues whose
+    provenance is the ledger's -- never a model's, a detector's, the Floor's
+    or a retained primary's, and never an issue without a key."""
+    import redline_generate as rg
+
+    issues = [
+        {"issue_key": "I1", "provenance": "model"},
+        {"issue_key": "I2", "provenance": f"ledger:{RULE_ID}"},
+        {"issue_key": "I3", "provenance": "critic-added"},
+        {"issue_key": "I4", "provenance": "detector:no-uncapped-liability"},
+        {"issue_key": "I5", "provenance": "floor:no-uncapped-liability"},
+        {"issue_key": "I6", "provenance": "primary-retained"},
+        {"issue_key": "I7"},
+        {"issue_key": "", "provenance": "ledger:OTHER"},
+        {"issue_key": "I8", "provenance": "ledger:OTHER-001"},
+        "not an issue",
+    ]
+    assert rg.ledger_issue_keys(issues) == {"I2", "I8"}
+    # No model can carry the marker: the output schema's provenance pattern
+    # admits no `ledger:` value.
+    import re
+
+    schema = json.loads((REPO_ROOT / "playbooks" / "output-schema-v3.json").read_text(encoding="utf-8"))
+    pattern = schema["definitions"]["Issue"]["properties"]["provenance"]["pattern"]
+    assert re.match(pattern, f"ledger:{RULE_ID}") is None, pattern
+    assert re.match(pattern, "ledger:ind-004") is None, pattern
+
+
+def test_a_rolled_back_ledger_insertion_is_noted_as_not_inserted() -> None:
+    """Stage 5 can still refuse the ledger's insertion through a gate other
+    than the pen rules (a compile failure of its op, after which it is rolled
+    out of the compile). Its hosted internal note then
+    says it did not pass the redline's checks -- never that it was inserted."""
+    import redline_generate as rg
+
+    note = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_INSERTED)
+    issues = [
+        {
+            "issue_key": "I2",
+            "provenance": f"ledger:{RULE_ID}",
+            "section_ref": "Indemnification",
+            rg.INTERNAL_RATIONALE_FIELD: note,
+        }
+    ]
+    insertion = {
+        "op": "insert_block_after",
+        "anchor_block_id": "b0001",
+        "new_text": LONG_STANDARD,
+        "issue_key": "I2",
+    }
+    proven = {"blocks": [], "block_ops": [insertion], "by_issue": {"I2": {}}}
+    working = {"blocks": [], "block_ops": [], "by_issue": {}}
+    assert rg._ledger_flag_only_notes(issues, proven, proven) == []
+    (rolled_back,) = rg._ledger_flag_only_notes(issues, working, proven)
+    assert rolled_back["text"].endswith(rg._LEDGER_REFUSED_OUTCOME), rolled_back
+    assert rg._LEDGER_INSERTED_OUTCOME not in rolled_back["text"], rolled_back
+
+
+def _restoration_response(
+    docx_bytes: bytes,
+    ledger: list[dict[str, Any]],
+    standard: str,
+    drafted: str | None = None,
+) -> str:
+    """A critic final result whose own issue `I1` restores the clause's
+    standard WORD FOR WORD -- an `insert_block_after` under Confidentiality
+    carrying `standard` -- beside its ledger dispositions. With `drafted`,
+    the same issue also drafts language of its own: it replaces "thirty
+    (30)" in the Term paragraph with `drafted`."""
+    issue = {
+        "issue_key": "I1",
+        "section_ref": "Indemnification",
+        "section_title": "Indemnification",
+        "counterparty_change_summary": "The mutual indemnification clause was deleted.",
+        "decision": "REQUEST_CHANGE",
+        "external_rationale_for_footnote": "Our standard indemnification clause must be restored.",
+        "playbook_topic_id": "clause.indemnification",
+        "internal_precedent_citation": None,
+        "provenance": "critic-added",
+    }
+    patches = []
+    if drafted is not None:
+        patches.append(
+            {
+                "block_id": _block_id(docx_bytes, "Term and Termination"),
+                "segments": [
+                    {"op": "keep", "text": "Either party may terminate for convenience on "},
+                    {"op": "delete", "text": "thirty (30)", "issue_key": "I1"},
+                    {"op": "insert", "text": drafted, "issue_key": "I1"},
+                    {"op": "keep", "text": " days' written notice."},
+                ],
+            }
+        )
+    restoration = {
+        "op": "insert_block_after",
+        "anchor_block_id": _block_id(docx_bytes, "Confidentiality"),
+        "new_text": standard,
+        "issue_key": "I1",
+    }
+    return json.dumps(
+        {
+            "decision": "REQUEST_CHANGE",
+            "confidence_state": "OK",
+            "confidence_band": None,
+            "issues": [issue],
+            "block_patches": patches,
+            "block_ops": [restoration],
+            "verdict_summary": "The indemnification clause must be restored.",
+            "critic_delta": {"dispositions": [], "overrides": [], "ledger_dispositions": ledger},
+        }
     )
-    assert result["status"] == "ERROR", result.get("status")
-    assert result["reason"] == "block_edits_not_applied", result.get("reason")
-    assert result["decision"] is None and result["redline_bytes"] is None
-    assert result["summary"] is None
-    assert result["analysis_report"]["reason"] == "block_edits_not_applied"
-    assert _refusal(result)["patch_reasons"][0]["reason"] == "max_chars_exceeded"
-    assert [f["provenance"] for f in result["findings"]] == [f"ledger:{RULE_ID}"]
-    record = result["hard_ledger"]
-    assert record["asserted"] == 1 and record["inserted"] == 0, record
-    entry = _entry(result)
-    assert entry["inserted"] is False and entry["anchor_block_id"] is None, entry
+
+
+def test_a_critic_copy_of_a_standard_the_pen_rules_would_refuse_is_delivered() -> None:
+    """Issue #164, through the dedupe. The critic ASSERTs the entry and
+    restores the playbook's own standard word for word; `enforce` lets that
+    copy stand in for its own insertion (`OUTCOME_COVERED`), so the copy must
+    share the ledger's pen-rule exemption -- otherwise a standard over 1,500
+    characters, or one carrying "perpetual", is refused on the critic's
+    issue and a review with no other edit ends ERROR /
+    block_edits_not_applied with the protection undelivered. It is
+    delivered, once, and no pen refusal is listed: the one entry in
+    `changes_not_applied` is the ledger's own issue, which authors no edit
+    of its own because the critic's copy covered it."""
+    import html
+
+    for standard in (LONG_STANDARD, BANNED_PHRASE_STANDARD):
+        doc = _opf_doc(INDEMNITY_CONDITION, standard=standard)
+        docx_bytes = _docx(with_indemnity=False)
+        result, _client = _run(
+            docx_bytes,
+            [_restoration_response(docx_bytes, [_assert()], standard), _verdict(JUDGED_RULE)],
+            doc=doc,
+            notes_mode="internal",
+        )
+        assert result["status"] == "OK", (result.get("status"), result.get("reason"))
+        assert result["decision"] == "REQUEST_CHANGE"
+        not_applied = (result.get("analysis_report") or {}).get("changes_not_applied") or []
+        assert [(c["section_ref"], c["reason"]) for c in not_applied] == [
+            ("Indemnification", "legacy_unlabelled_flag_only")
+        ], not_applied
+        assert not_applied[0]["external_rationale_for_footnote"] == (
+            "This protection was not found in the agreement and must be added."
+        ), not_applied
+        redline = result["redline_bytes"]
+        assert redline, "the restored standard was not delivered"
+        assert html.unescape(_inserted_texts(redline)).count(standard) == 1, "standard not delivered once"
+        assert _in_order(_texts(redline, "word/document.xml"), CONFIDENTIALITY, standard, TERM)
+        record = result["hard_ledger"]
+        entry = _entry(result)
+        assert entry["status"] == hl.STATUS_ASSERTED and entry["issue_key"] == "I2", entry
+        # The ledger inserted nothing of its own: the critic's copy covered it.
+        assert record["asserted"] == 1 and record["inserted"] == 0, record
+        assert entry["inserted"] is False, entry
+        assert "already proposed by another edit in this review" in _texts(
+            redline, "word/footnotes.xml"
+        )
+
+
+def test_a_copy_beside_drafted_language_never_stands_in_for_the_ledger() -> None:
+    """A critic copy of the standard whose issue ALSO drafts language of its
+    own could be rolled back over that language -- here a "perpetual" the pen
+    rules refuse, which takes the whole change set, copy included. Such a
+    copy never covers: the ledger inserts its own (exempt) copy, so the
+    protection is delivered, once, and the review is DONE while the
+    critic's issue is listed as not applied."""
+    import html
+
+    import replacement_text_enforcement as rte
+
+    for standard in (LONG_STANDARD, BANNED_PHRASE_STANDARD):
+        doc = _opf_doc(INDEMNITY_CONDITION, standard=standard)
+        docx_bytes = _docx(with_indemnity=False)
+        response = _restoration_response(
+            docx_bytes, [_assert()], standard, drafted="sixty (60), and this right is perpetual,"
+        )
+        result, _client = _run(
+            docx_bytes, [response, _verdict(JUDGED_RULE)], doc=doc, notes_mode="internal"
+        )
+        assert result["status"] == "OK", (result.get("status"), result.get("reason"))
+        assert result["decision"] == "REQUEST_CHANGE"
+        refusal = _pen_refusal(result, "Indemnification")
+        assert refusal["patch_reasons"][0]["reason"] == rte.MUST_NOT_INTRODUCE_VIOLATION, refusal
+        redline = result["redline_bytes"]
+        assert redline, "the ledger's insertion was not delivered"
+        assert html.unescape(_inserted_texts(redline)).count(standard) == 1
+        document = _texts(redline, "word/document.xml")
+        assert TERM in document and "perpetual," not in document.replace(standard, "")
+        record = result["hard_ledger"]
+        assert record["asserted"] == 1 and record["inserted"] == 1, record
+        assert _entry(result)["issue_key"] == "I2"
+
+
+def test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules() -> None:
+    """The unit view of the two tests above. `enforce` lets a critic
+    insertion stand in for its own only when it folds equal to the standard
+    AND its issue inserts nothing but ledger standards; and
+    `redline_generate.pen_checked_text_by_issue` leaves exactly such copies
+    out of an issue's pen-checked text, judging everything else it drafts."""
+    import redline_generate as rg
+
+    block_map = _block_map(_docx(with_indemnity=False))
+    standard = "Each party shall indemnify the other."
+    copy = {"op": "insert_block_after", "anchor_block_id": "b0001", "issue_key": "I1"}
+
+    def enforce(*ops: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        reconciled = {
+            "decision": "REQUEST_CHANGE",
+            "issues": [{"issue_key": "I1", "provenance": "model"}],
+            "block_ops": list(ops),
+            "verdict_summary": "One clause needs work.",
+        }
+        result, record = hl.enforce(reconciled, [_asserted("IND-004")], block_map)
+        assert record is not None
+        return result, record
+
+    # A faithful copy (whitespace and quotes fold) on an issue of its own: covered.
+    _result, record = enforce({**copy, "new_text": "  Each party  shall indemnify the other. "})
+    assert record["inserted"] == 0, record
+    # The same copy beside language the issue drafts itself: not covered.
+    result, record = enforce(
+        {**copy, "new_text": standard},
+        {**copy, "new_text": "And this right is perpetual."},
+    )
+    assert record["inserted"] == 1, record
+    assert [op["issue_key"] for op in result["block_ops"]] == ["I1", "I1", "I2"]
+    # A near copy is the critic's own language: not covered.
+    _result, record = enforce({**copy, "new_text": standard + " Forever."})
+    assert record["inserted"] == 1, record
+    assert hl.standard_texts([_asserted("IND-004"), {**_asserted("X"), "status": hl.STATUS_CLEARED}]) == [
+        standard
+    ]
+
+    proven = {
+        "blocks": [],
+        "block_ops": [
+            {**copy, "new_text": standard},
+            {**copy, "new_text": "And this right is perpetual.", "issue_key": "I2"},
+            {**copy, "new_text": standard, "issue_key": "I2"},
+            {**copy, "new_text": standard + " Forever.", "issue_key": "I3"},
+        ],
+    }
+    assert rg.pen_checked_text_by_issue(proven, [standard]) == {
+        "I1": "",
+        "I2": "And this right is perpetual.",
+        "I3": standard + " Forever.",
+    }
+    # With no standards, the pen rules judge the derived text unchanged.
+    assert rg.pen_checked_text_by_issue(proven) == rg.derived_replacement_text_by_issue(proven)
 
 
 def test_settle_keeps_only_delivered_insertions() -> None:
@@ -1367,8 +1642,13 @@ TESTS = [
     test_the_internal_footnote_names_the_rule_and_the_reason,
     test_a_rule_with_no_standard_language_never_claims_an_insertion,
     test_every_asserted_rule_on_one_clause_reaches_an_internal_footnote,
-    test_a_refused_insertion_beside_another_edit_is_counted_flag_only,
-    test_a_refused_insertion_that_is_the_only_edit_ends_the_review_in_error,
+    test_a_ledger_only_review_inserts_a_standard_the_pen_rules_would_refuse,
+    test_model_drafted_text_is_still_pen_checked_beside_a_ledger_insertion,
+    test_only_ledger_provenance_is_exempt_from_the_pen_rules,
+    test_a_rolled_back_ledger_insertion_is_noted_as_not_inserted,
+    test_a_critic_copy_of_a_standard_the_pen_rules_would_refuse_is_delivered,
+    test_a_copy_beside_drafted_language_never_stands_in_for_the_ledger,
+    test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules,
     test_settle_keeps_only_delivered_insertions,
     test_delivered_issue_keys_are_only_those_of_a_delivered_document,
     test_redline_generate_restates_the_ledger_sentences_exactly,

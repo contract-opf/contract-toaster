@@ -45,8 +45,8 @@ fails or cannot be evaluated
 DOCUMENT (`enforce`): the manifest's `fallback_language` is inserted as an
 ordinary `insert_block_after` block op, attributed to a pipeline-built issue
 with provenance `ledger:<rule_id>`, so it then passes every stage-5 gate the
-critic's own edits pass (leakage scan, block proof, pen rules, projection
-proofs, OOXML scan, round trip). It is placed by code (`insertion_anchor`):
+critic's own edits pass (leakage scan, block proof, projection proofs, OOXML
+scan, round trip) -- except the pen rules (issue #164). It is placed by code (`insertion_anchor`):
 after a block the critic named only when that block sits under the clause's
 own heading (the same `_heading_matches` binding clearance uses), otherwise
 at the end of the clause's own section, otherwise at the end of the nearest
@@ -54,22 +54,39 @@ present section in template order -- a block the critic named anywhere else
 never decides where it goes. The review lands `DONE` / `REQUEST_CHANGE`;
 there is no manual-review status (#133).
 
-Stage 5 can still REFUSE the insertion -- for an OPF review the pen rules
-are `playbooks/pen-rules.defaults.json`'s, whose `max_chars` and
-`must_not_introduce` apply to the playbook's own standard language like any
-other replacement text. `enforce` runs before stage 5, so what it records is
-what it HANDED to stage 5; `settle` re-derives the record's `inserted`
-flags, anchors and count from the issue keys whose edits the delivered
-document actually carries, and `settled_verdict_summary` re-derives the
-counts-only sentence from that record. A refused insertion is therefore
-counted flag-only everywhere -- the record, `verdict_summary`, the receipt
--- and, in a notes mode with internal content, its hosted internal note
-says it was not inserted (`redline_generate._ledger_flag_only_notes`). When
-the refused insertion was the review's only edit there is no document to
-carry the assertion: stage 5 ends the review `ERROR` /
-`block_edits_not_applied`, the refused insertion listed in
-`analysis_report.changes_not_applied` for the attorney (a REQUEST_CHANGE
-with no delivered document is never `DONE`, #584).
+The pen rules (`max_chars`, `must_not_introduce`; for an OPF review
+`playbooks/pen-rules.defaults.json`'s) do NOT gate the insertion (issue
+#164): they bound language a MODEL drafted, and the fallback language is the
+playbook's own standard, inserted by code. Gating it refused any standard
+over 1,500 characters or carrying a banned phrase, and a review whose only
+edit was that insertion ended `ERROR` with the protection undelivered.
+`redline_generate.ledger_issue_keys` names the exempt issues by their
+pipeline-stamped provenance. The critic's faithful copy of a standard shares
+the exemption (`standard_texts`, passed to stage 5 as `ledger_standards`):
+`enforce` lets such a copy stand in for its own insertion
+(`OUTCOME_COVERED`) only when the copy's issue proposes no language but
+ledger standards (`_covering_insert_texts`), so a covering copy can never be
+pen-refused, alone or with its change set. Every other model-drafted
+language in the same review is still pen-checked.
+
+Stage 5 can still REFUSE the insertion: a compile failure of its op (an
+anchor the compiler cannot insert after, such as a paragraph in a table cell
+-- `redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE`), which
+leaves it out of the delivered document (an issue hosting other notes is
+then rolled out of the compile so they re-host); or a batch-level gate
+(projection proofs, OOXML scan, round trip), which withholds the whole
+document. `enforce` runs before stage 5, so what
+it records is what it HANDED to stage 5; `settle` re-derives the record's
+`inserted` flags, anchors and count from the issue keys whose edits the
+delivered document actually carries, and `settled_verdict_summary`
+re-derives the counts-only sentence from that record. A refused insertion
+is therefore counted flag-only everywhere -- the record, `verdict_summary`,
+the receipt -- and, in a notes mode with internal content, its hosted
+internal note says it was not inserted
+(`redline_generate._ledger_flag_only_notes`). When the refused insertion was
+the review's only edit there is no document to carry the assertion: the
+review ends `ERROR` / `block_edits_not_applied`, never `DONE` (a
+REQUEST_CHANGE with no delivered document is never `DONE`, #584).
 
 A wholly deleted clause therefore cannot vanish from a review because
 neither model noticed it: the critic must dispose of every entry explicitly
@@ -723,18 +740,70 @@ def insertion_anchor(entry: dict[str, Any], block_map: dict[str, Any]) -> str | 
     return ordered[-1][1]
 
 
-def _existing_insert_texts(reconciled: dict[str, Any]) -> list[str]:
-    texts: list[str] = []
+def standard_texts(evaluated: Iterable[dict[str, Any]] | None) -> list[str]:
+    """The playbook's own standard language (the manifest's
+    `fallback_language`) of every ASSERTED entry, in ledger order.
+
+    Stage 5's pen rules do not judge these texts (issue #164): they bound
+    language a model drafted, and these are the playbook's signed
+    `our_standard.text`. `redline_generate.generate_redline_from_blocks`
+    takes them as `ledger_standards` and leaves out of every issue's
+    pen-checked text each insertion that IS one of them (compared in
+    `text_fold`'s folded form, the comparison `enforce`'s dedupe uses) --
+    so the critic's faithful copy of a standard, which `enforce` lets stand
+    in for the ledger's own insertion (`OUTCOME_COVERED`), shares that
+    exemption."""
+    return [
+        entry["fallback_language"]
+        for entry in evaluated or ()
+        if isinstance(entry, dict)
+        and entry.get("status") == STATUS_ASSERTED
+        and isinstance(entry.get("fallback_language"), str)
+        and entry["fallback_language"].strip()
+    ]
+
+
+def _insert_texts_by_issue(reconciled: dict[str, Any]) -> dict[Any, list[str]]:
+    """`issue_key -> every text the critic's transcript inserts for it`
+    (whole-block `insert_block_after` ops and `insert` segments alike)."""
+    texts: dict[Any, list[str]] = {}
     for block_op in reconciled.get("block_ops") or []:
         if isinstance(block_op, dict) and block_op.get("op") == "insert_block_after":
-            texts.append(str(block_op.get("new_text") or ""))
+            texts.setdefault(block_op.get("issue_key"), []).append(
+                str(block_op.get("new_text") or "")
+            )
     for patch in reconciled.get("block_patches") or []:
         if not isinstance(patch, dict):
             continue
         for segment in patch.get("segments") or []:
             if isinstance(segment, dict) and segment.get("op") == "insert":
-                texts.append(str(segment.get("text") or ""))
+                texts.setdefault(segment.get("issue_key"), []).append(
+                    str(segment.get("text") or "")
+                )
     return texts
+
+
+def _covering_insert_texts(reconciled: dict[str, Any], standards: Iterable[str]) -> set[str]:
+    """The folded texts of the critic's insertions that may stand in for
+    the ledger's own insertion of the same standard (`OUTCOME_COVERED`).
+
+    An insertion qualifies only when it is a faithful copy of a ledger
+    standard (folded-equal) AND every insertion its issue authors is one
+    too. Stage 5 pen-checks an issue's change set as a whole and rolls it
+    back as a whole, and it does not judge a ledger standard's copy
+    (`standard_texts`, issue #164) -- so such an issue offers the pen rules
+    nothing to refuse, and its copy can be refused only as the ledger's own
+    insertion could be (a compile failure). A copy inside an issue that
+    also drafts language of its own could be rolled back over THAT
+    language; it never covers, and the ledger inserts its own copy
+    instead."""
+    folded_standards = {text_fold.fold_text(text) for text in standards}
+    covering: set[str] = set()
+    for texts in _insert_texts_by_issue(reconciled).values():
+        folded = [text_fold.fold_text(text) for text in texts]
+        if folded and all(text in folded_standards for text in folded):
+            covering.update(folded)
+    return covering
 
 
 def _reserved_issue_keys(reconciled: dict[str, Any]) -> set[str]:
@@ -770,14 +839,17 @@ def _next_issue_key(taken: set[str]) -> str:
 #: What `enforce` did about an asserted entry's language (`internal_note`).
 OUTCOME_INSERTED = "inserted"
 #: Not inserted again: another asserted rule on the same clause, or the
-#: critic's own transcript, already proposes that clause's standard language.
+#: critic's own transcript (an issue proposing nothing but ledger standards,
+#: `_covering_insert_texts`), already proposes that clause's standard language.
 #: Worded as PROPOSED, never as delivered: stage 5 may still refuse the edit
-#: that carries it, and this note does not know whether it did.
+#: that carries it (a compile failure; never the pen rules, issue #164), and
+#: this note does not know whether it did.
 OUTCOME_COVERED = "covered"
 #: Not inserted: the rule has no standard language (or the document no block).
 OUTCOME_FLAG_ONLY = "flag_only"
-#: Handed to stage 5 as an insertion, which a stage-5 gate refused (pen
-#: rules, change-set rollback). Never chosen by `enforce`, which runs before
+#: Handed to stage 5 as an insertion, which a stage-5 gate refused (a
+#: compile failure of its op; never the pen rules, which do not judge the
+#: ledger's insertion, issue #164). Never chosen by `enforce`, which runs before
 #: stage 5: `redline_generate._ledger_flag_only_notes` swaps an inserting
 #: issue's `OUTCOME_INSERTED` sentence for this one when its insertion is
 #: not in the compiled document (it restates both sentences, to stay free of
@@ -882,8 +954,17 @@ def enforce(
     `fallback_language` -- an `insert_block_after` block op carrying it at
     `insertion_anchor`. The insertion is skipped (the issue stays, flag-only)
     when an earlier asserted entry already inserted for the same clause, or
-    when an existing insertion in the critic's own transcript already carries
-    that language: one clause's standard is never inserted twice. Any
+    when an insertion in the critic's own transcript already carries that
+    language and its issue proposes no language but ledger standards
+    (`_covering_insert_texts`): the ledger never inserts one clause's
+    standard twice. That critic copy shares the ledger's pen-rule exemption
+    (`standard_texts`, issue #164), so it can be refused only as the
+    ledger's own insertion could be. A copy whose issue also drafts language
+    of its own never covers -- stage 5 could roll it back over that
+    language -- so the ledger inserts its own copy, and the delivered
+    document can then carry the standard twice (the critic's copy as well,
+    when its change set passes): a duplicate, never a missing protection.
+    Any
     asserted entry forces `decision="REQUEST_CHANGE"` and is counted in
     `verdict_summary` by `ledger_summary_note` -- inserted and flag-only
     entries counted apart -- replacing the summary of a
@@ -901,7 +982,7 @@ def enforce(
     issues = [dict(issue) for issue in reconciled.get("issues") or [] if isinstance(issue, dict)]
     block_ops = [dict(op) for op in reconciled.get("block_ops") or [] if isinstance(op, dict)]
     taken = _reserved_issue_keys(reconciled)
-    existing_inserts = [text_fold.fold_text(text) for text in _existing_insert_texts(reconciled)]
+    existing_inserts = _covering_insert_texts(reconciled, standard_texts(evaluated))
     inserted_clauses: set[str] = set()
 
     entries: list[dict[str, Any]] = []
@@ -989,9 +1070,8 @@ def settle(record: dict[str, Any], delivered_issue_keys: Iterable[Any]) -> dict[
     mutated).
 
     `enforce` runs before stage 5 and records the insertions it handed to
-    it. Stage 5 gates each one like any other edit -- for an OPF review the
-    pen rules are `playbooks/pen-rules.defaults.json`'s, so the playbook's
-    own standard language can fail `max_chars` or `must_not_introduce` --
+    it. Stage 5 gates each one like any other edit -- except the pen rules,
+    which do not judge the playbook's own standard language (issue #164) --
     and may refuse it. An entry stays `inserted` only when its issue is one
     of `delivered_issue_keys` (`redline_generate.delivered_issue_keys`: the
     issues whose edits the delivered document carries, empty when stage 5

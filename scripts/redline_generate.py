@@ -78,6 +78,7 @@ import io
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable, Optional  # noqa: UP035
 
@@ -96,6 +97,7 @@ import footnote_audience  # noqa: E402
 import leakage_scan  # noqa: E402
 import ooxml_util  # noqa: E402
 import replacement_text_enforcement as _rte  # noqa: E402
+import text_fold  # noqa: E402
 import upload_validation  # noqa: E402
 
 # NOTE (issue #626): `scripts/redline_block_apply.py` is NOT imported here.
@@ -1194,6 +1196,40 @@ def pure_deletion_issue_keys(proven: dict[str, Any]) -> set:
     }
 
 
+def pen_checked_text_by_issue(
+    proven: dict[str, Any], ledger_standards: Iterable[str] = ()
+) -> dict[Any, str]:
+    """The text stage 5's pen rules judge for each issue in `proven`: its
+    derived replacement text (`derived_replacement_text_by_issue`) with every
+    insertion that is a faithful copy of one of `ledger_standards` left out
+    (issue #164).
+
+    `ledger_standards` is `hard_ledger.standard_texts`: the playbook's own
+    `our_standard.text` for each asserted hard-rejection ledger entry. The
+    pen rules bound language a MODEL drafted; a copy of a signed standard is
+    not that, and `hard_ledger.enforce` lets the critic's copy stand in for
+    the ledger's own (exempt) insertion of it, so judging the copy would
+    gate the same protection through the dedupe. A copy is an insertion
+    whose `text_fold.fold_text` equals a standard's -- the comparison
+    `enforce` makes. An issue whose every insertion is such a copy maps to
+    the empty string (nothing of its own to judge); every other issue maps
+    to its derived text exactly as before, or to the join of the insertions
+    left once the copies are out."""
+    derived = derived_replacement_text_by_issue(proven)
+    folded_standards = {text_fold.fold_text(text) for text in ledger_standards or ()}
+    if not folded_standards:
+        return derived
+    pen_texts: dict[Any, str] = {}
+    for issue_key, texts in _insert_texts_by_issue(proven).items():
+        own = [text for text in texts if text_fold.fold_text(text) not in folded_standards]
+        pen_texts[issue_key] = (
+            derived.get(issue_key, "")
+            if len(own) == len(texts)
+            else DERIVED_REPLACEMENT_TEXT_JOIN.join(own)
+        )
+    return pen_texts
+
+
 def _transcript_has_edits(proven: dict[str, Any]) -> bool:
     """Whether `proven` still carries anything a writer could apply. A block
     whose ops are all `keep` is not an edit (`_pair_ops_into_edits` yields
@@ -1627,6 +1663,34 @@ def delivered_issue_keys(result: dict[str, Any]) -> set:
     return set(result.get(DELIVERED_ISSUE_KEYS_KEY) or ())
 
 
+def ledger_issue_keys(issues: list[dict[str, Any]]) -> set:
+    """The issue keys of the hard-rejection ledger's pipeline-built issues
+    (provenance `ledger:<rule_id>`, issue #147), which the pen rules do not
+    judge (issue #164): their edit inserts the playbook's own standard
+    language, not model-drafted text.
+
+    Provenance is the trustworthy marker here because no model can set it:
+    `playbooks/output-schema-v3.json`'s `provenance` pattern admits no
+    `ledger:` value, `reconciliation.reconcile` stamps every model issue's
+    provenance itself, and `hard_ledger.enforce` gives each ledger issue a
+    fresh key no model issue, block op or transcript segment already names
+    (`hard_ledger._reserved_issue_keys`) -- so the only edit a ledger key
+    authors is the ledger's own insertion."""
+    keys: set = set()
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        provenance = issue.get("provenance")
+        issue_key = issue.get("issue_key")
+        if (
+            isinstance(provenance, str)
+            and provenance.startswith(_LEDGER_PROVENANCE_PREFIX)
+            and issue_key
+        ):
+            keys.add(issue_key)
+    return keys
+
+
 def _ledger_flag_only_notes(
     issues: list[dict[str, Any]],
     working: dict[str, Any],
@@ -1652,7 +1716,8 @@ def _ledger_flag_only_notes(
     and the counts-only `verdict_summary`.
 
     A ledger issue whose insertion `proven` carries but `working` does not
-    -- refused by the pen rules, or rolled back with its change set -- was
+    -- rolled out of the compile after its op failed to compile (the pen
+    rules never judge it, issue #164) -- was
     noted as inserted before stage 5 ran. Its hosted note says instead that
     its standard language did not pass the redline's checks and was not
     inserted (`_LEDGER_REFUSED_OUTCOME`), so the delivered document never
@@ -1805,6 +1870,7 @@ def generate_redline_from_blocks(
     date: Any = None,
     notes_mode: str = "external",
     pen_rules_bundle: Optional[dict[str, Any]] = None,  # noqa: UP045
+    ledger_standards: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Block-mode (v3) analogue of `generate_redline` -- issue #626.
 
@@ -1885,7 +1951,16 @@ def generate_redline_from_blocks(
     from `proven["by_issue"]`, never by the string, and reaches the report
     with the same #585 labelling (`FLAG_ONLY_MODE_NONE` /
     `FLAG_ONLY_RETRY_EXHAUSTED` / the legacy fallback) the quote path gives
-    it.
+    it. Nor are they run over a hard-rejection ledger issue
+    (`ledger_issue_keys`, issue #164): its insertion is the playbook's own
+    standard language, not model-drafted text, and it passes every other
+    gate in this function. For the same reason an insertion of any issue
+    that IS one of `ledger_standards` (`hard_ledger.standard_texts`: the
+    asserted entries' standard language, compared in `text_fold`'s folded
+    form, as `hard_ledger.enforce` compares it when it lets the critic's
+    copy stand in for its own) is left out of that issue's pen-checked text
+    (`pen_checked_text_by_issue`); an issue left with no text of its own is
+    not judged at all.
 
     ## Notes mode
 
@@ -2052,12 +2127,33 @@ def generate_redline_from_blocks(
     # either empty or the compiler's own `[Intentionally omitted.]` (issue
     # #646), and neither is language a topic's pen rules may judge. The test
     # is the transcript's SHAPE, never the string.
+    #
+    # Issue #164: a hard-rejection ledger issue is not judged by them either.
+    # Its only edit is the playbook's own `our_standard.text` (the manifest's
+    # `fallback_language`), inserted by code -- not language a model drafted,
+    # which is what `max_chars` and `must_not_introduce` bound. Gating it
+    # refused a long or banned-phrase-bearing standard and, when it was the
+    # review's only edit, ended the review `ERROR` with the required
+    # protection undelivered. It still passes every other stage-5 gate --
+    # the leakage scan above, the block proof, the projection proofs, the
+    # OOXML scan and the round trip -- and every model-drafted issue in the
+    # same review is still pen-checked. Nor is the critic's faithful copy of
+    # a ledger standard: `hard_ledger.enforce` lets it stand in for the
+    # ledger's own insertion (`OUTCOME_COVERED`), so judging it would gate the
+    # same protection through the dedupe. Each such insertion is left out of
+    # its issue's pen-checked text; whatever else the issue drafts is judged.
     pure_deletions = pure_deletion_issue_keys(proven)
+    ledger_keys = ledger_issue_keys(issues)
+    pen_texts = pen_checked_text_by_issue(proven, ledger_standards)
     pen_failures: dict[Any, Any] = {}
     checkable = [
-        issues_by_key[issue_key]
+        {**issues_by_key[issue_key], "proposed_replacement_text": pen_texts[issue_key]}
         for issue_key, text in derived.items()
-        if text and issue_key in issues_by_key and issue_key not in pure_deletions
+        if text
+        and issue_key in issues_by_key
+        and issue_key not in pure_deletions
+        and issue_key not in ledger_keys
+        and pen_texts.get(issue_key)
     ]
     if checkable:
         for issue, result in _rte.check_issues_replacement_text(checkable, pen_rules_bundle):
