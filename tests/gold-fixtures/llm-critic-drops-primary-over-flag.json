@@ -1,0 +1,99 @@
+{
+  "case_id": "llm-critic-drops-primary-over-flag",
+  "schema": "llm-native-v1",
+  "provenance": "synthetic",
+  "description": "Issue #141 precision check (ADR 0001): a still-non-exclusive Section 11 is a near-miss; the primary pass over-flags it and the critic DROPs that issue (it is not a hard-rejection rule id, so guard 1 does not retain it). The final review must ACCEPT with no issues and no edit.",
+  "document": {
+    "clauses": [
+      {
+        "heading": "11. Exclusivity",
+        "text": "This Agreement is non-exclusive. Institution remains free to enter into similar arrangements with other parties at any time during the term."
+      }
+    ]
+  },
+  "model_responses": {
+    "primary": [
+      {
+        "decision": "REQUEST_CHANGE",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [
+          {
+            "section_ref": "sec-11",
+            "section_title": "Exclusivity",
+            "counterparty_change_summary": "Counterparty restated the exclusivity clause.",
+            "decision": "REQUEST_CHANGE",
+            "external_rationale_for_footnote": "The exclusivity clause must state the standard position.",
+            "playbook_topic_id": "exclusivity",
+            "internal_precedent_citation": null,
+            "provenance": "model",
+            "issue_key": "I1",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
+          }
+        ],
+        "critic_delta": null,
+        "verdict_summary": "One issue identified in Section 11 requiring attention before your organization can accept this draft.",
+        "block_patches": [
+          {
+            "block_id": "p0001",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "This Agreement is non-exclusive. Institution remains free to enter into similar arrangements with other parties at any time during the term.",
+                "issue_key": "I1"
+              },
+              {
+                "op": "insert",
+                "text": "Either party may engage other counterparties at any time during the term.",
+                "issue_key": "I1"
+              }
+            ]
+          }
+        ],
+        "block_ops": []
+      }
+    ],
+    "critic": [
+      {
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": {
+          "dispositions": [
+            {
+              "issue_id": "I1",
+              "disposition": "DROP",
+              "reason": "The clause already states the standard non-exclusive position."
+            }
+          ],
+          "overrides": [
+            {
+              "issue_id": "I1",
+              "field": "decision",
+              "primary_value": "REQUEST_CHANGE",
+              "critic_value": "ACCEPT",
+              "reason": "The clause already states the standard non-exclusive position."
+            }
+          ]
+        },
+        "verdict_summary": "No changes identified relative to your standard positions.",
+        "block_patches": [],
+        "block_ops": []
+      }
+    ]
+  },
+  "expected": {
+    "status": "OK",
+    "decision": "ACCEPT",
+    "min_issues": 0,
+    "max_issues": 0,
+    "issues": [],
+    "redline_inserts": {
+      "include": [],
+      "exclude": [
+        "Either party may engage other counterparties at any time during the term."
+      ]
+    }
+  }
+}

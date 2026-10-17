@@ -44,6 +44,7 @@
     "status": "OK",
     "decision": "ACCEPT",
     "min_issues": 0,
-    "max_issues": 0
+    "max_issues": 0,
+    "issues": []
   }
 }

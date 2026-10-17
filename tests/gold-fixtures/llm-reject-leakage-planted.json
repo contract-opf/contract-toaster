@@ -106,6 +106,7 @@
   "expected": {
     "status": "ERROR",
     "reason": "leakage_detected",
-    "max_issues": 0
+    "max_issues": 0,
+    "issues": []
   }
 }

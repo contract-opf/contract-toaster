@@ -119,6 +119,13 @@ EXPECTED_PORTED_CASE_IDS = {
     "llm-reject-uncapped-liability",
     "llm-reject-multi-issue-interaction",
     "llm-reject-leakage-planted",
+    # Issue #141: the critic-wins gold cases (primary wrong, critic right),
+    # scored under the same contract; tests/test_eval_gate_critic_wins.py
+    # gates the gold-set metrics they feed.
+    "llm-critic-corrects-primary-replacement",
+    "llm-critic-drops-primary-over-flag",
+    "llm-critic-adds-primary-miss",
+    "llm-critic-drop-of-hard-rejection-retained",
 }
 
 

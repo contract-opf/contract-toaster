@@ -1,0 +1,100 @@
+{
+  "case_id": "llm-critic-drop-of-hard-rejection-retained",
+  "schema": "llm-native-v1",
+  "provenance": "synthetic",
+  "description": "Issue #141 hard-rejection recall check (ADR 0001 guard 1): the primary pass raises the preserve-liability-cap hard rejection and the critic DROPs it. A critic may add a hard rejection but never remove one, so the final review must still REQUEST_CHANGE and carry the issue (provenance primary-retained). A retained issue ships without the primary's edit (issue #138), so the flag-only finding is expected and edits_must_apply is false.",
+  "document": {
+    "clauses": [
+      {
+        "heading": "8. Limitation on Liability",
+        "text": "Each party's liability under this Agreement shall be unlimited."
+      }
+    ]
+  },
+  "model_responses": {
+    "primary": [
+      {
+        "decision": "REQUEST_CHANGE",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [
+          {
+            "section_ref": "sec-8",
+            "section_title": "Limitation on Liability",
+            "counterparty_change_summary": "Counterparty removed the liability cap from Section 8.",
+            "decision": "REQUEST_CHANGE",
+            "external_rationale_for_footnote": "Section 8 must retain the standard aggregate liability cap.",
+            "playbook_topic_id": "preserve-liability-cap",
+            "internal_precedent_citation": null,
+            "provenance": "model",
+            "issue_key": "I1",
+            "replacement_scope_note": "The clause states the opposite position outright, so the correct term cannot be reached by a local repair."
+          }
+        ],
+        "critic_delta": null,
+        "verdict_summary": "One issue identified in Section 8 requiring attention before your organization can accept this draft.",
+        "block_patches": [
+          {
+            "block_id": "p0001",
+            "segments": [
+              {
+                "op": "delete",
+                "text": "Each party's liability under this Agreement shall be unlimited.",
+                "issue_key": "I1"
+              },
+              {
+                "op": "insert",
+                "text": "$150,000 mutual aggregate liability cap; mutual exclusion of consequential, special, punitive, incidental, and indirect damages; no implied warranties beyond those expressly set forth.",
+                "issue_key": "I1"
+              }
+            ]
+          }
+        ],
+        "block_ops": []
+      }
+    ],
+    "critic": [
+      {
+        "decision": "ACCEPT",
+        "confidence_state": "OK",
+        "confidence_band": null,
+        "issues": [],
+        "critic_delta": {
+          "dispositions": [
+            {
+              "issue_id": "I1",
+              "disposition": "DROP",
+              "reason": "The critic does not stand behind this issue."
+            }
+          ],
+          "overrides": [
+            {
+              "issue_id": "I1",
+              "field": "decision",
+              "primary_value": "REQUEST_CHANGE",
+              "critic_value": "ACCEPT",
+              "reason": "The critic does not stand behind this issue."
+            }
+          ]
+        },
+        "verdict_summary": "No changes identified relative to your standard positions.",
+        "block_patches": [],
+        "block_ops": []
+      }
+    ]
+  },
+  "expected": {
+    "status": "OK",
+    "decision": "REQUEST_CHANGE",
+    "min_issues": 1,
+    "max_issues": 1,
+    "edits_must_apply": false,
+    "issues": [
+      {
+        "playbook_topic_id": "preserve-liability-cap",
+        "section_ref": "sec-8",
+        "hard": true
+      }
+    ]
+  }
+}
