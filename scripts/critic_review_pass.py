@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, Optional  # noqa: UP035
 
@@ -51,6 +52,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
         sys.path.insert(0, str(_dir))
 
 import config as _config  # noqa: E402
+import hard_ledger as _hard_ledger  # noqa: E402
 import model_client as _model_client  # noqa: E402
 import model_output_schema as _mos  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
@@ -134,6 +136,10 @@ def _issue_key_sort(key: str) -> tuple[int, str]:
 CRITIC_DELTA_DISPOSITION_MISSING = "critic_delta_disposition_missing"
 CRITIC_DELTA_DISPOSITION_REPEATED = "critic_delta_disposition_repeated"
 CRITIC_DELTA_KEPT_WITHOUT_COUNTERPART = "critic_delta_kept_without_counterpart"
+#: Issue #147: a hard-rejection ledger entry with no disposition, or with more
+#: than one, in `critic_delta.ledger_dispositions`.
+CRITIC_DELTA_LEDGER_DISPOSITION_MISSING = "critic_delta_ledger_disposition_missing"
+CRITIC_DELTA_LEDGER_DISPOSITION_REPEATED = "critic_delta_ledger_disposition_repeated"
 
 
 def critic_delta_rejection(
@@ -142,6 +148,7 @@ def critic_delta_rejection(
     schema: dict[str, Any],
     *,
     location_sink: Callable[[str], None] | None = None,
+    hard_ledger_rule_ids: Sequence[str] = (),
 ) -> str | None:
     """`"schema_invalid: <detail>"` when the critic's `critic_delta` does not
     account for the first reviewer's issues, else `None` (issue #137, ADR 0001
@@ -191,6 +198,16 @@ def critic_delta_rejection(
     with the fixed `CRITIC_DELTA_*` token(s) of the check(s) that fired,
     joined with ";" in the same order as the message -- the ledger's
     `schema_error_location` for this attempt. Never an interpolated key.
+
+    `hard_ledger_rule_ids` (issue #147, default empty): the hard-rejection
+    ledger's rule ids (`hard_ledger.ledger_rule_ids`). Two more rejections,
+    the ledger's half of the same contract: a ledger entry with NO
+    disposition in `critic_delta.ledger_dispositions`, and one disposed of
+    more than once (`hard_ledger.disposition_problems`). They apply on an
+    ACCEPT too -- the ledger does not depend on the first reviewer having
+    raised anything. The rule ids interpolated are the playbook's own
+    identifiers, never document or model prose. A disposition naming a rule
+    id the ledger does not hold is ignored, like an unknown `issue_id`.
     """
     critic_delta_def = (schema.get("definitions") or {}).get("CriticDelta") or {}
     if "dispositions" not in (critic_delta_def.get("properties") or {}):
@@ -242,6 +259,23 @@ def critic_delta_rejection(
             "behind is a DROP"
         )
         checks.append(CRITIC_DELTA_KEPT_WITHOUT_COUNTERPART)
+    if hard_ledger_rule_ids:
+        ledger_missing, ledger_repeated = _hard_ledger.disposition_problems(
+            hard_ledger_rule_ids, response
+        )
+        if ledger_missing:
+            problems.append(
+                "critic_delta.ledger_dispositions has no disposition for hard-rejection "
+                f"ledger rule(s) {', '.join(ledger_missing)} -- every ledger entry needs "
+                "exactly one (CLEARED with block_id and span, or ASSERT)"
+            )
+            checks.append(CRITIC_DELTA_LEDGER_DISPOSITION_MISSING)
+        if ledger_repeated:
+            problems.append(
+                "critic_delta.ledger_dispositions disposes of ledger rule(s) "
+                f"{', '.join(ledger_repeated)} more than once"
+            )
+            checks.append(CRITIC_DELTA_LEDGER_DISPOSITION_REPEATED)
     if not problems:
         return None
     if location_sink is not None:
@@ -271,6 +305,7 @@ def run_critic_pass(
     block_map: dict[str, Any] | None = None,
     cancel_checkpoint: Callable[[], None] | None = None,
     attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
+    hard_ledger: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the adversarial critic pass end-to-end (data-flow step 16, critic
     half).
@@ -389,8 +424,20 @@ def run_critic_pass(
     -- see that function's docstring. `scripts/review_spine.py::run_review`
     passes the SAME composed blocks and hash to both passes, so primary and
     critic always read identical OPF knowledge.
+
+    `hard_ledger` (issue #147, default `None`): the hard-rejection ledger
+    `hard_ledger.build_ledger` opened before either pass ran. Non-empty, it
+    is rendered into the critic's role suffix
+    (`hard_ledger.render_critic_ledger_block`), and every entry must carry
+    exactly one `critic_delta.ledger_dispositions` entry -- checked by
+    `critic_delta_rejection` inside this pass's bounded retry, so a missing
+    one costs the informed retry first and, repeated, ends the review as
+    `critic_schema_invalid`. Empty or `None` changes nothing: the prompt is
+    byte-identical to a review with no ledger.
     """
     _model_client.enforce_single_region_native_model_id(model_id)
+    ledger_entries = list(hard_ledger or ())
+    ledger_rule_ids = _hard_ledger.ledger_rule_ids(ledger_entries)
 
     # Issue #562: same plumbed capability descriptor as run_primary_pass --
     # see that function's identical comment. Issue #567 (below) is now a
@@ -468,6 +515,7 @@ def run_critic_pass(
             toaster_guidance=toaster_guidance,
             notes_mode=notes_mode,
         ),
+        hard_ledger_text=_hard_ledger.render_critic_ledger_block(ledger_entries),
     )
     # Issue #267: same projection as the primary pass -- assemble_system_blocks
     # is the single shared seam, so this hash is identical to the primary
@@ -593,6 +641,7 @@ def run_critic_pass(
                     parsed_or_error,
                     pp.load_output_schema(output_schema_path),
                     location_sink=schema_locations.append,
+                    hard_ledger_rule_ids=ledger_rule_ids,
                 )
                 if post_validation_rejection is None:
                     post_validation_rejection = pp._reject_block_transcript(

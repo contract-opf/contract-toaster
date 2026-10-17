@@ -34,8 +34,15 @@ KEEP_REASON = "Same issue and the same edit; compliant with the playbook positio
 
 # A strict-mode provider emits every property of an object it emits at all
 # (`model_output_schema._force_all_properties_required_in_place`), so the
-# three deprecated CriticDelta arrays ride along empty.
-_DEPRECATED_EMPTY = {"added_issues": [], "contested_replacements": [], "rationale_objections": []}
+# three deprecated CriticDelta arrays ride along empty -- and so, since issue
+# #147, does `ledger_dispositions` (empty on a review with no hard-rejection
+# ledger, which is every review these helpers build).
+_STRICT_EMPTY_ARRAYS = {
+    "added_issues": [],
+    "contested_replacements": [],
+    "rationale_objections": [],
+    "ledger_dispositions": [],
+}
 
 
 def critic_keeps(
@@ -67,7 +74,7 @@ def critic_keeps(
     if dispositions or schema_enforced:
         delta: dict[str, Any] | None = {"dispositions": dispositions, "overrides": []}
         if schema_enforced:
-            delta.update(copy.deepcopy(_DEPRECATED_EMPTY))
+            delta.update(copy.deepcopy(_STRICT_EMPTY_ARRAYS))
     else:
         delta = None
     body["critic_delta"] = delta

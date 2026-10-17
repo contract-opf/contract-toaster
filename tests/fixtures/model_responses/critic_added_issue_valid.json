@@ -27,6 +27,7 @@
       }
     ],
     "overrides": [],
+    "ledger_dispositions": [],
     "added_issues": [
       {
         "issue_key": "I9",

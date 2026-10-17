@@ -307,7 +307,7 @@
       "properties": {
         "dispositions": {
           "type": "array",
-          "description": "NEW in issue #137 (ADR 0001 amendment 2026-09-17). The critic's explicit disposition for EVERY issue the first reviewer raised -- one entry per first-reviewer issue_key (issue_id is the FIRST REVIEWER's issue_key as it appears in the first reviewer's output, never a key from the critic's own issues list), no exceptions. KEEP = the critic reaches the same issue and the same edit. REVISE = the same issue, but the critic changed its replacement text, rationale or decision (an overrides entry records what changed). DROP = the critic does not stand behind the issue. A first-reviewer issue with no disposition is a schema failure: scripts/critic_review_pass.py checks it against the first reviewer's output, which a response-local JSON Schema cannot see. Hard-ledger dispositions (CLEARED / ASSERT) are added by issue #147.",
+          "description": "NEW in issue #137 (ADR 0001 amendment 2026-09-17). The critic's explicit disposition for EVERY issue the first reviewer raised -- one entry per first-reviewer issue_key (issue_id is the FIRST REVIEWER's issue_key as it appears in the first reviewer's output, never a key from the critic's own issues list), no exceptions. KEEP = the critic reaches the same issue and the same edit. REVISE = the same issue, but the critic changed its replacement text, rationale or decision (an overrides entry records what changed). DROP = the critic does not stand behind the issue. A first-reviewer issue with no disposition is a schema failure: scripts/critic_review_pass.py checks it against the first reviewer's output, which a response-local JSON Schema cannot see. Hard-ledger dispositions (CLEARED / ASSERT) are a separate array, ledger_dispositions (issue #147).",
           "items": {
             "type": "object",
             "required": ["issue_id", "disposition", "reason"],
@@ -325,6 +325,43 @@
                 "minLength": 1,
                 "maxLength": 8000,
                 "description": "One line saying why. LENGTH BUDGET (issue #674 classes): FREE-PROSE, 8000 -- the class bound (see verdict_summary and critic_objection). It is INTERNAL audit text that lands in no layout of its own (no delivered-document footnote, no result-view cell), so no destination justifies a layout-class cap; 'one line' is what the critic tasking asks for, not a ceiling the validator enforces. NOT MEASURED -- no live run has populated it yet."
+              }
+            }
+          }
+        },
+        "ledger_dispositions": {
+          "type": "array",
+          "description": "NEW in issue #147 (ADR 0001 amendment 2026-09-17, item 1: hard-rejection recall is enforced outside both models). The critic's explicit disposition for EVERY entry of the hard-rejection ledger listed in its tasking -- one entry per ledger rule_id, no exceptions; an ACCEPT carries them too. CLEARED = the critic found the required protection: block_id names the paragraph and span copies the exact words that establish it. ASSERT = the protection is missing or inadequate: block_id optionally names the paragraph where it belongs. scripts/hard_ledger.py clears an entry ONLY when the block id resolves, the span is found in that block's own text, and the rule's deterministic test passes on it; anything else is treated as ASSERT, and code inserts the playbook's standard language for every asserted entry. A ledger rule with no disposition is a schema failure, checked against the ledger by scripts/critic_review_pass.py, which a response-local JSON Schema cannot see. Empty or absent when the review has no ledger.",
+          "items": {
+            "type": "object",
+            "required": ["rule_id", "disposition", "reason"],
+            "additionalProperties": false,
+            "properties": {
+              "rule_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "The ledger entry's rule id, copied verbatim from the HARD-REJECTION LEDGER block of the tasking."
+              },
+              "disposition": {
+                "type": "string",
+                "enum": ["CLEARED", "ASSERT"]
+              },
+              "block_id": {
+                "type": "string",
+                "maxLength": 64,
+                "description": "The code-assigned id of the paragraph the span is in (CLEARED), or of the paragraph where the protection belongs (ASSERT), copied verbatim from the document. Empty when there is none."
+              },
+              "span": {
+                "type": "string",
+                "maxLength": 8000,
+                "description": "CLEARED only: the exact words of the block_id paragraph that establish the protection, copied verbatim. Code re-finds it in the document's own text and evaluates the rule's test on the document's characters, never on this copy; it is never forwarded or persisted. LENGTH BUDGET (issue #674 classes): FREE-PROSE, 8000 -- the class bound Segment.text sits in, and for the same reason: it is a transcription of the document's own words, sized by the protection's wording rather than by anything the model chooses. Empty for ASSERT."
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000,
+                "description": "One line saying why. LENGTH BUDGET (issue #674 classes): FREE-PROSE, 8000 -- the same class bound as dispositions[].reason. INTERNAL audit text the critic's own reasoning lives in; scripts/hard_ledger.py records a controlled reason token instead and never forwards this text. NOT MEASURED -- no live run has populated it yet."
               }
             }
           }

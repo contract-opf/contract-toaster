@@ -271,6 +271,9 @@ interface ReviewDetail {
   // or no critic delta.
   confidence_band?: string | null;
   critic_delta?: CriticDelta | null;
+  // Issue #147: the hard-rejection ledger record's counts, for the receipt's
+  // counts-only line (`toaster/receipt.ts`). Null/absent with no ledger.
+  hard_ledger?: { asserted?: number; inserted?: number; cleared?: number } | null;
   // The per-review free-text instructions this review was submitted with
   // (issue #431). Recorded on the reviews row at submission and projected
   // by backend/src/reviews.py's get_review_detail; null/absent on a review

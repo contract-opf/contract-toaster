@@ -3109,6 +3109,12 @@ def get_review_detail(
         "confidence_band": item.get("confidence_band"),
         "issues": analysis.get("findings") if analysis is not None else None,
         "critic_delta": analysis.get("critic_delta") if analysis is not None else None,
+        # Issue #147: the hard-rejection ledger record, read off the analysis
+        # artifact like `critic_delta` above (it is never a row attribute).
+        # Ids, reason tokens, counts and hashes only -- no clause or model
+        # text -- so the receipt can print its counts-only line. None for a
+        # review with no ledger, and for one with no artifact.
+        "hard_ledger": analysis.get("hard_ledger") if analysis is not None else None,
         # The RESPONSE key stays `verdict_summary` (the documented public
         # field name, and the model-output vocabulary docs/output-contract.md
         # specifies) but the DynamoDB ATTRIBUTE it reads is `summary`.

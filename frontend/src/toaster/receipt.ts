@@ -81,6 +81,10 @@ export interface ReceiptSource {
   // this field is simply absent until then, and the receipt must render
   // correctly either way.
   requote?: { attempted?: number; recovered?: number; still_failed?: number } | null;
+  // Issue #147: the hard-rejection ledger record (`scripts/hard_ledger.py`
+  // `enforce`), projected by `get_review_detail` off the analysis artifact.
+  // Only its counts are read here. Absent or null on a review with no ledger.
+  hard_ledger?: { asserted?: number; inserted?: number; cleared?: number } | null;
 }
 
 export interface ReceiptLine {
@@ -410,6 +414,38 @@ function requoteLine(requote?: ReceiptSource['requote']): string | null {
 }
 
 /**
+ * Issue #147: one counts-only line for the hard-rejection ledger -- the
+ * required protections code could not prove present, which the redline
+ * therefore asserts with the playbook's standard language. Prints nothing
+ * when nothing was asserted (an all-cleared ledger is not news).
+ *
+ * `inserted` counts only insertions the DELIVERED document carries: the
+ * spine settles the record after the redline stage (`hard_ledger.settle`),
+ * which can refuse an insertion like any other edit. With none delivered
+ * the line says flagged only and never mentions an insertion.
+ *
+ * ESCAPED TEXT ONLY, like `criticLine`: two counts and fixed nouns. Never a
+ * rule id, a clause title or any clause text -- the rule id and its reason
+ * live in the internal footnote of the delivered document, not on a slip
+ * someone pastes into a deal thread.
+ */
+function ledgerLine(ledger?: ReceiptSource['hard_ledger']): string | null {
+  const asserted = typeof ledger?.asserted === 'number' ? ledger.asserted : 0;
+  if (asserted <= 0) {
+    return null;
+  }
+  const inserted = typeof ledger?.inserted === 'number' ? ledger.inserted : 0;
+  const head = `${plural(asserted, 'required protection')} not found`;
+  if (inserted >= asserted) {
+    return `${head} — standard language inserted.`;
+  }
+  if (inserted <= 0) {
+    return `${head} — flagged only, no standard language inserted.`;
+  }
+  return `${head} — standard language inserted for ${inserted}, ${plural(asserted - inserted, 'protection')} flagged only.`;
+}
+
+/**
  * The receipt, line by line. Only lines whose source exists are returned.
  *
  * `playbookName` is passed in rather than looked up here: the display name
@@ -459,6 +495,7 @@ export function receiptLines(
   const clauses = clausesTouched(review.issues);
   push('clauses', 'Clauses touched', clauses === null ? null : String(clauses));
   pushWrap('critic-delta', criticLine(review.critic_delta, review.confidence_band));
+  pushWrap('hard-ledger', ledgerLine(review.hard_ledger));
 
   lines.push({ id: 'rule-3', ...RULE });
 
