@@ -802,6 +802,33 @@ def _opf_standard_texts(opf_doc: dict[str, Any]) -> list[str]:
     return texts
 
 
+def _opf_manifest_texts(opf_doc: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """`(statements, fallback languages)` of every OPF 0.5 hard-rule manifest
+    rule (`manifest.hard_rules[]`), read DIRECTLY (issue #163): since
+    `opf_prompt._manifest_block` composes the manifest into the shared prefix,
+    a text found only in the manifest reaches the model, so the corpus cannot
+    rely on the manifest being a faithful derivation of the Floor -- this repo
+    does not re-derive it (`opf_injection_scan.py`, "Why `evidence` and
+    `digest` are walked wholesale"). A statement is internal strategy (blocked
+    everywhere, like a Floor invariant's); a fallback language is our standard
+    (allowlisted for replacement text: the hard-rejection ledger inserts it).
+    `x_*` keys are never read, as the renderer strips them."""
+    statements: list[str] = []
+    fallbacks: list[str] = []
+    manifest = opf_doc.get("manifest")
+    rules = manifest.get("hard_rules") if isinstance(manifest, dict) else None
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, dict):
+            continue
+        statement = rule.get("statement")
+        if isinstance(statement, str) and statement:
+            statements.append(statement)
+        fallback = rule.get("fallback_language")
+        if isinstance(fallback, str) and fallback.strip():
+            fallbacks.append(fallback)
+    return statements, fallbacks
+
+
 def _without_public_vocabulary(
     grams: list[str], vocabulary: set[str]
 ) -> list[str]:
@@ -982,30 +1009,47 @@ class ConfidentialCorpus:
         openly asked for, exactly like a v1 topic's `our_standard` (see
         `from_playbook`'s own docstring for why that one is allowlisted).
 
-        The OPF 0.5 `manifest` and `dossiers` (playbook-engine#228) are
-        covered BY DERIVATION, not read (issue #128). Every text field they
-        carry is a selection of something this corpus already reads: a hard
-        rule's `statement` and a dossier floor rule's `statement` /
-        `rationale` are the Floor invariant's (blocked above);
-        `fallback_language` and a dossier's `our_standard.parts[].text` are
-        our standard (allowlisted); a dossier excerpt's `opening` / `signed`
-        is a whole precedent text from `evidence.precedent[]` (blocked), or
-        our standard itself (allowlisted part by part). Two reasons this is
-        enough, given that `opf_injection_scan.py` notes the toaster cannot
-        guarantee those sections are evidence-derived: neither section is
-        composed into any prompt today (`opf_prompt` never reads them), so a
-        text found ONLY there cannot reach the model to be leaked by it; and
+        The OPF 0.5 `manifest` (playbook-engine#228) is READ DIRECTLY since
+        issue #163, which composes it into the shared prefix
+        (`opf_prompt._manifest_block`): each hard rule's `statement` joins
+        `playbook_ngrams` (blocked everywhere, like the Floor invariant it
+        is derived from) and its `fallback_language` joins
+        `standard_clause_ngrams` (our standard, allowlisted for replacement
+        text -- the hard-rejection ledger inserts it as one), via
+        `_opf_manifest_texts`. Reading it rather than trusting the
+        derivation matters once it reaches the model: this repo does not
+        re-derive the manifest from the Floor (`opf_injection_scan.py`
+        notes the toaster cannot guarantee a derived section is faithful),
+        so a statement found ONLY in the manifest would otherwise reach the
+        model unguarded. The rest of the composed block -- its intro, and
+        each rule's clause, presence and test lines -- is covered by
+        `system_blocks` below at sentence granularity (check 1), so a model
+        echoing a rendered rule line is blocked even though the predicate's
+        phrases alone are not grams.
+
+        The `dossiers` are still covered BY DERIVATION, not read (issue
+        #128): a dossier floor rule's `statement` / `rationale` are the
+        Floor invariant's (blocked above); its `our_standard.parts[].text`
+        is our standard (allowlisted); an excerpt's `opening` / `signed` is
+        a whole precedent text from `evidence.precedent[]` (blocked), or our
+        standard itself (allowlisted part by part). That is enough because
+        the dossiers are composed into no prompt today, so a text found ONLY
+        there cannot reach the model to be leaked by it; and
         `tests/test_leakage_opf_precedent_128.py` pins the derivation on the
         gold fixture, the engine's NDA example and every conformance vector
         (008 exercises every field). When dossiers are wired into a prompt
-        (#40), this builder must read them directly. Deliberate exclusions,
-        never added on either path: `vs_standard` (its `reason`,
-        `part_reasons` and addition `summary` -- the same reasoning as the
-        `reason` above); a hard rule's `condition` (match phrases and
-        patterns -- contract vocabulary a faithful review must be free to
-        use) and `permissible_proof` (the Floor's `x_permissible_proof`
-        extension; `opf_prompt._binding_block` renders only an invariant's
-        id, statement and rationale); and identifiers and titles (rule/clause/precedent ids
+        (#40), this builder must read them directly, as it now reads the
+        manifest. Deliberate exclusions, never added on either path:
+        `vs_standard` (its `reason`, `part_reasons` and addition `summary`
+        -- the same reasoning as the `reason` above); a hard rule's
+        `condition` (match phrases and patterns -- contract vocabulary a
+        faithful review must be free to use, and must be free to quote from
+        the contract under review; the manifest block renders the phrases,
+        never the `numeric_bound` regex) and `permissible_proof` (the
+        Floor's `x_permissible_proof` extension, which no block renders:
+        `opf_prompt._binding_block` renders only an invariant's id,
+        statement and rationale, and `_manifest_block` leaves it out); and
+        identifiers and titles (rule/clause/precedent ids
         and public clause vocabulary, see below).
 
         Also covers `posture.system_prompt` (issue #479 fix round 2):
@@ -1060,6 +1104,19 @@ class ConfidentialCorpus:
         playbook_ngrams.extend(_opf_digest_precedent_texts(opf_doc))
         playbook_ngrams.extend(_opf_evidence_precedent_texts(opf_doc))
         standard_clause_ngrams.extend(_opf_standard_texts(opf_doc))
+
+        # Issue #163: the manifest, read directly. Only what the lists above
+        # do not already hold is added, so an engine-built manifest -- whose
+        # statements ARE the Floor's -- leaves the corpus byte-identical.
+        manifest_statements, manifest_fallbacks = _opf_manifest_texts(opf_doc)
+        playbook_ngrams.extend(
+            text for text in dict.fromkeys(manifest_statements) if text not in playbook_ngrams
+        )
+        standard_clause_ngrams.extend(
+            text
+            for text in dict.fromkeys(manifest_fallbacks)
+            if text not in standard_clause_ngrams
+        )
 
         # Issue #616: drop the grams that are only this document's own public
         # clause vocabulary before they become blocked content. The UNFILTERED

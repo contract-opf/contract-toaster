@@ -231,6 +231,18 @@ def _evidence_clauses(opf_doc: dict[str, Any]) -> list[dict[str, Any]]:
     return [clause for clause in clauses or [] if isinstance(clause, dict)]
 
 
+def clause_titles(opf_doc: dict[str, Any] | None) -> dict[str, str]:
+    """`{evidence clause id: public title}` -- the clause vocabulary a manifest
+    rule's `clause_id` (and a `cross_reference` condition's) resolves to."""
+    if not isinstance(opf_doc, dict):
+        return {}
+    return {
+        clause["id"]: clause["title"]
+        for clause in _evidence_clauses(opf_doc)
+        if isinstance(clause.get("id"), str) and isinstance(clause.get("title"), str)
+    }
+
+
 def build_ledger(opf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     """One `UNPROVEN_HARD_REJECTION` entry per manifest rule with
     `required_presence` true, in manifest (Floor) order. Empty for a document
@@ -248,11 +260,7 @@ def build_ledger(opf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(manifest, dict):
         return []
     clauses = _evidence_clauses(opf_doc)
-    titles = {
-        clause["id"]: clause.get("title")
-        for clause in clauses
-        if isinstance(clause.get("id"), str) and isinstance(clause.get("title"), str)
-    }
+    titles = clause_titles(opf_doc)
     sections = [
         {"clause_id": clause["id"], "title": clause["title"], "order": order}
         for clause in clauses
@@ -275,7 +283,8 @@ def build_ledger(opf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
         condition = rule.get("condition")
         reference_title = None
         if isinstance(condition, dict) and condition.get("type") == "cross_reference":
-            reference_title = titles.get(condition.get("clause_id"))
+            reference = condition.get("clause_id")
+            reference_title = titles.get(reference) if isinstance(reference, str) else None
         fallback = rule.get("fallback_language")
         ledger.append(
             {
@@ -332,7 +341,17 @@ def _quoted_list(values: Iterable[str]) -> str:
 
 
 def _condition_description(entry: dict[str, Any]) -> str:
-    condition = entry.get("condition")
+    return describe_condition(entry.get("condition"), entry.get("reference_title"))
+
+
+def describe_condition(condition: Any, reference_title: str | None = None) -> str:
+    """A hard rule's `condition` in words: what the clause's own text must
+    show. Shared by the critic's ledger tasking (role suffix) and the
+    hard-rule manifest block `opf_prompt` composes into the shared prefix
+    (#163), so the two say the same thing about the same rule. A
+    `numeric_bound`'s `pattern` (a playbook-signed regex) is never rendered:
+    the bound and its unit are. `reference_title` is a `cross_reference`
+    target's public clause title (`clause_titles`)."""
     if not isinstance(condition, dict):
         return "the clause must show the protection is present"
     kind = condition.get("type")
@@ -350,7 +369,7 @@ def _condition_description(entry: dict[str, Any]) -> str:
             bounds.append(f"at most {condition['max']}{suffix}")
         return "every such number the clause states must be " + " and ".join(bounds)
     if kind == "cross_reference":
-        title = entry.get("reference_title") or condition.get("clause_id") or "the other clause"
+        title = reference_title or condition.get("clause_id") or "the other clause"
         return f'the clause must refer to the "{title}" clause by name'
     return "the clause must show the protection is present"
 
