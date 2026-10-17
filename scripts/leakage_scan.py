@@ -45,7 +45,8 @@ Scanned fields (per the output-contract.md scope table):
     overrides[] entry's reason, primary_value, critic_value -- plus, on an
     entry the reconciler computed, the added lines of its rendered edit
     records (primary_edits, critic_edits, and the two values) and its
-    primary_issue / critic_issue, each scanned as an issue
+    primary_issue / critic_issue, each scanned as an issue; and the
+    section_ref locator the reconciler stamps on every override (issue #140)
 
   Issue #132 writes every critic disagreement into an internal footnote of
   the delivered `.docx` (`redline_generate._critic_delta_internal_notes`),
@@ -461,15 +462,23 @@ _FIELD_CHANNELS: dict[str, str] = {
     # rendered edit records whose added lines are model prose (see
     # `OVERRIDE_SOURCE_COMPUTED`). A computed entry's `primary_issue` /
     # `critic_issue` reuses the bare per-issue names, exactly as an
-    # `added_issues[]` entry does. None of them is rendered into the
-    # delivered `.docx`; all of them reach the review's owner, so all of them
-    # are judged on the strict external ruleset.
+    # `added_issues[]` entry does. All of them reach the review's owner, and
+    # since issue #140 the override records are what the internal footnotes
+    # of the delivered `.docx` explain (`redline_generate
+    # ._critic_delta_internal_notes`), so all of them are judged on the
+    # strict external ruleset -- rendering into an internal footnote never
+    # relaxes it.
     "critic_delta.dispositions.reason": CHANNEL_EXTERNAL,
     "critic_delta.overrides.reason": CHANNEL_EXTERNAL,
     "critic_delta.overrides.primary_value": CHANNEL_EXTERNAL,
     "critic_delta.overrides.critic_value": CHANNEL_EXTERNAL,
     "critic_delta.overrides.primary_edits": CHANNEL_EXTERNAL,
     "critic_delta.overrides.critic_edits": CHANNEL_EXTERNAL,
+    # Issue #140: the locator `reconciliation.reconcile` stamps on every
+    # override record, which each internal-footnote note names. Copied off a
+    # model-authored issue's `section_ref`, so scanned like the #132
+    # locators above.
+    "critic_delta.overrides.section_ref": CHANNEL_EXTERNAL,
     # Scanned outside `scan_model_output`, by its own pass:
     # `backend/src/review_routes.py` calls `LeakageScanner.scan` directly on
     # the cover-note draft. Enumerated here anyway -- this table is the
@@ -1793,6 +1802,10 @@ def _scan_critic_delta_audit_record(
       - a computed override's `primary_issue` / `critic_issue` -- scanned as
         an issue (`_scan_issue_fields`), so a primary issue the critic
         dropped is held to the same scan it met when it was final.
+      - every override's `section_ref` (issue #140) -- the locator the
+        reconciler copies off an issue and the internal footnotes name, so
+        it is scanned like the #132 locators: last, so a review that already
+        blocked on a prose field still reports that field.
     """
     for entry in critic_delta.get("dispositions") or []:
         if not isinstance(entry, dict):
@@ -1842,6 +1855,18 @@ def _scan_critic_delta_audit_record(
             if outcome is not None:
                 outcome.field_name = f"critic_delta.overrides.{issue_key}.{outcome.field_name}"
                 return outcome
+
+    for entry in critic_delta.get("overrides") or []:
+        if not isinstance(entry, dict):
+            continue
+        outcome = _scan_text_field(
+            entry.get("section_ref"),
+            scanner,
+            "critic_delta.overrides.section_ref",
+            current_counterparty_name,
+        )
+        if outcome is not None:
+            return outcome
 
     return None
 

@@ -1350,38 +1350,173 @@ def _build_analysis_report(
     return report
 
 
+#: `critic_delta.overrides[].change` on an entry `reconciliation.reconcile`
+#: COMPUTED (`CHANGE_DROPPED` / `CHANGE_ADDED` / `CHANGE_REPLACED`), restated
+#: so this module stays free of the reconciler's import, as the ledger
+#: constants below are. `tests/test_critic_delta_internal_footnotes_132.py`
+#: pins each equal to the reconciler's own.
+_OVERRIDE_CHANGE_DROPPED = "dropped"
+_OVERRIDE_CHANGE_ADDED = "added"
+_OVERRIDE_CHANGE_REPLACED = "replaced"
+
+#: How a critic-stated override's `field` (the v3 schema's enum) is named in
+#: its note. An unknown value is named "issue" rather than echoed: the
+#: field is a schema token, never prose to quote.
+_OVERRIDE_FIELD_WORDS = {
+    "replacement_text": "replacement text",
+    "rationale": "rationale",
+    "decision": "decision",
+}
+
+#: The note a primary hard rejection that guard 1 retained opens with (issue
+#: #140). The critic left it out of its final issues; the rule put it back.
+RETAINED_HARD_REJECTION_NOTE = "Reviewer's hard rejection retained by rule (the critic omitted it)"
+
+
+def _override_kind(entry: dict[str, Any]) -> str:
+    """`"dropped"`, `"retained"`, `"added"` or `"override"` -- which of the
+    receipt's counts (`frontend/src/toaster/receipt.ts`, `overrideCounts`)
+    and which internal-note wording an override record falls under. Only a
+    COMPUTED entry can be dropped, retained or added; every critic-stated
+    entry, and a computed `replaced`, is an override."""
+    if entry.get("source") == leakage_scan.OVERRIDE_SOURCE_COMPUTED:
+        change = entry.get("change")
+        if change == _OVERRIDE_CHANGE_DROPPED:
+            return "retained" if entry.get("retained") is True else "dropped"
+        if change == _OVERRIDE_CHANGE_ADDED:
+            return "added"
+    return "override"
+
+
+def _rendered_override_records(critic_delta: Any) -> list[dict[str, Any]]:
+    """The override records `_critic_delta_internal_notes` explains, one per
+    note, in `critic_delta.overrides` order -- each record shown ONCE.
+
+    `reconciliation.reconcile` can record one change twice: a critic that
+    REVISEs an issue's wording states the override itself AND the reconciler
+    computes a `replaced` entry off the two transcripts; a critic that DROPs
+    an issue states a `decision` override AND the reconciler computes a
+    `dropped` one. The computed entry is the one kept -- its values are
+    derived from the edits the two passes actually authored, not from the
+    critic's account of them -- so dropped here are:
+
+      - a critic-stated entry on an issue the reconciler recorded as
+        dropped (the drop, or the retention, says it);
+      - a critic-stated `replacement_text` entry on an issue the reconciler
+        recorded as `replaced`. Its `reason` is carried onto the computed
+        entry (as `stated_reason`), since that is the critic's own reason for
+        that very change and a computed entry's may be a fixed sentence.
+
+    The receipt's counts line applies the same two rules, so "N overrides"
+    on the slip is the number of override notes in the document."""
+    if not isinstance(critic_delta, dict):
+        return []
+    entries = [entry for entry in critic_delta.get("overrides") or [] if isinstance(entry, dict)]
+    computed = [
+        entry for entry in entries if entry.get("source") == leakage_scan.OVERRIDE_SOURCE_COMPUTED
+    ]
+    dropped_ids = {
+        entry.get("issue_id")
+        for entry in computed
+        if entry.get("change") == _OVERRIDE_CHANGE_DROPPED and isinstance(entry.get("issue_id"), str)
+    }
+    replaced_ids = {
+        entry.get("issue_id")
+        for entry in computed
+        if entry.get("change") == _OVERRIDE_CHANGE_REPLACED
+        and isinstance(entry.get("issue_id"), str)
+    }
+    stated_text_reasons: dict[str, str] = {}
+    records: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry.get("source") != leakage_scan.OVERRIDE_SOURCE_COMPUTED:
+            issue_id = entry.get("issue_id")
+            if isinstance(issue_id, str) and issue_id in dropped_ids:
+                continue
+            if (
+                isinstance(issue_id, str)
+                and issue_id in replaced_ids
+                and entry.get("field") == "replacement_text"
+            ):
+                reason = entry.get("reason")
+                if isinstance(reason, str) and reason.strip():
+                    stated_text_reasons.setdefault(issue_id, reason)
+                continue
+        records.append(entry)
+    return [
+        {**entry, "stated_reason": stated_text_reasons[entry["issue_id"]]}
+        if entry.get("source") == leakage_scan.OVERRIDE_SOURCE_COMPUTED
+        and entry.get("change") == _OVERRIDE_CHANGE_REPLACED
+        and entry.get("issue_id") in stated_text_reasons
+        else entry
+        for entry in records
+    ]
+
+
+def _describe_rendered_edits(record: Any) -> str:
+    """A computed override's rendered edit record (`reconciliation
+    ._render_edits`) as note prose: the ADDED text of each edit, quoted, in
+    order. Only the `+` lines are rendered -- the model's own writing, which
+    `leakage_scan._scan_rendered_edit_record` scanned. A `-` line is the
+    document's own words and is never scanned, so it is never quoted here
+    either: an edit that only removes text is described, not quoted."""
+    added: list[str] = []
+    removes = False
+    for line in record.split("\n") if isinstance(record, str) else []:
+        if line.startswith(leakage_scan.RENDERED_EDIT_ADDED_PREFIX):
+            text = line[len(leakage_scan.RENDERED_EDIT_ADDED_PREFIX) :].strip()
+            if text:
+                added.append(text)
+        elif line.startswith(leakage_scan.RENDERED_EDIT_REMOVED_PREFIX):
+            removes = True
+    if added:
+        return " ".join(f"“{text}”" for text in added)
+    if removes:
+        return "a deletion only, with no new text."
+    return "no edit (a flag only)."
+
+
+def _quoted_value(value: Any) -> str:
+    """A critic-stated override's `primary_value` / `critic_value`, quoted;
+    a blank one says so rather than printing an empty pair of quotes."""
+    text = value.strip() if isinstance(value, str) else ""
+    return f"“{text}”" if text else "nothing."
+
+
 def _critic_delta_internal_notes(critic_delta: Any) -> list[dict[str, Any]]:
-    """Every critic disagreement in `critic_delta`, explained in full, as
-    `{"section_ref", "text"}` entries -- the fulsome half of the
-    owner's 2026-09-16 decision on #96 (issue #132; the receipt's counts-only
-    line is the brief half).
+    """Every critic override in `critic_delta.overrides`, explained in full,
+    as `{"section_ref", "text"}` entries -- the fulsome half of the owner's
+    2026-09-16 decision on #96 (issue #132), presented as OVERRIDES since
+    issue #140: under ADR 0001 the critic has the last word, so what the
+    attorney needs is what the reviewer proposed, what the critic changed it
+    to, and why -- not a dispute left open. The deprecated
+    `contested_replacements` / `rationale_objections` / `added_issues` arrays
+    are no longer rendered: every change they described is an override
+    record (`reconciliation.reconcile`'s guard 2).
 
-    One entry per disagreement, in a fixed order -- every contested
-    replacement, then every rationale objection, then every critic-added
-    issue, each in its array's own order:
+    One note per record of `_rendered_override_records`, in its order:
 
-      - a contested replacement names its section, the reviewer's text, the
-        critic's objection and, when the critic offered one, the critic's
-        suggested text;
-      - a rationale objection names its section and the objection;
-      - a critic-added issue names its section and why the critic added it
-        (its `external_rationale_for_footnote`, then its
-        `internal_rationale_for_footnote` when it carries one).
+      - an override (a critic-stated entry, or a computed `replaced`):
+        "Critic override on the <field> for <section>. Reviewer proposed: …
+        Critic replaced with: … Reason: …";
+      - a dropped issue: the same, the critic's side reading "nothing (the
+        critic dropped the issue)";
+      - a critic-added issue: "Critic added an issue the reviewer did not
+        raise, at <section>.", then the same three parts, the reviewer's
+        side reading "nothing (the reviewer did not raise it)", the reason its
+        `external_rationale_for_footnote` then its
+        `internal_rationale_for_footnote` when it carries one;
+      - a hard rejection guard 1 retained: `RETAINED_HARD_REJECTION_NOTE`,
+        its section, and the critic's stated reason for omitting it.
 
-    Every text names its own section, because the entry may be HOSTED on a
-    footnote that belongs to a different section (see `_host_critic_notes`)
-    and must never read as a statement about the clause it hangs on.
-
-    The wording is neutral about whose text shipped ("the reviewer's text",
-    "the critic's suggested text") rather than calling one of them the
-    proposal: ADR 0001 hands the critic the last word, and these entries
-    must stay true on both sides of that cutover.
+    Every text names its own section (the `section_ref` the reconciler
+    stamps on each record), because the entry may be HOSTED on a footnote
+    that belongs to a different section (see `_host_critic_notes`) and must
+    never read as a statement about the clause it hangs on.
 
     The texts are UNMARKED here; `_joined_footnote_text` wraps each one in
     `footnote_audience.mark_internal_footnote`, the one place an internal
-    note is ever built. An entry with nothing to say -- a blank objection, a
-    critic-added issue with no rationale -- contributes nothing, never a
-    bracket with no explanation in it.
+    note is ever built.
 
     Rendered, never generated: the critic delta exists on every two-pass
     review regardless of notes mode, so nothing here asks a model for
@@ -1389,92 +1524,71 @@ def _critic_delta_internal_notes(critic_delta: Any) -> list[dict[str, Any]]:
     decision (`_notes_mode_includes_internal_content`).
 
     Every field read here passes the leakage gate before anything compiles
-    (`leakage_scan._scan_critic_delta_fields`, run by
-    `generate_redline_from_blocks` over the whole reconciled result), each
-    on the channel `leakage_scan._FIELD_CHANNELS` declares for it:
-
-      - EXTERNAL: `contested_replacements[]`' `section_ref`,
-        `primary_replacement_text`, `critic_objection` and
-        `critic_suggested_replacement`; `rationale_objections[]`'
-        `section_ref` and `objection`; `added_issues[]`' `section_ref`,
-        `section_title` and `external_rationale_for_footnote`.
-      - INTERNAL: `added_issues[]`' `internal_rationale_for_footnote`, the
-        one internal-bound field, which the never-acceptable checks
-        (system-prompt leakage, excessive precedent quotation) still block.
-
-    A field added to these texts must be added to that walk and that table
-    first: `primary_replacement_text` and the locators had only ever reached
-    the result payload, and were unscanned until this renderer needed them.
+    (`leakage_scan._scan_critic_delta_audit_record`, run by
+    `generate_redline_from_blocks` over the whole reconciled result), on the
+    EXTERNAL channel `leakage_scan._FIELD_CHANNELS` declares for it --
+    `overrides[]`' `reason`, `primary_value`, `critic_value`, `section_ref`
+    and, on a computed entry, the added lines of its edit records, and its
+    `critic_issue` scanned as an issue (whose
+    `internal_rationale_for_footnote` alone is internal-bound, still blocked
+    by the never-acceptable checks). A field added to these texts must be
+    added to that walk and that table first.
     """
-    if not isinstance(critic_delta, dict):
-        return []
-
-    def clean(value: Any) -> str:
-        return value.strip() if isinstance(value, str) else ""
-
     notes: list[dict[str, Any]] = []
-
-    for entry in critic_delta.get("contested_replacements") or []:
-        objection = clean(entry.get("critic_objection"))
-        if not objection:
-            continue
-        section = clean(entry.get("section_ref"))
-        parts = [
-            f"Critic disagreement on the replacement text for "
-            f"{section or 'an unnamed section'}."
-        ]
-        reviewer_text = clean(entry.get("primary_replacement_text"))
-        if reviewer_text:
-            parts.append(f"Reviewer's text: “{reviewer_text}”")
-        parts.append(f"Critic's objection: {objection}")
-        suggested = clean(entry.get("critic_suggested_replacement"))
-        if suggested:
-            parts.append(f"Critic's suggested text: “{suggested}”")
-        notes.append({"section_ref": section, "text": " ".join(parts)})
-
-    for entry in critic_delta.get("rationale_objections") or []:
-        objection = clean(entry.get("objection"))
-        if not objection:
-            continue
-        section = clean(entry.get("section_ref"))
-        notes.append(
-            {
-                "section_ref": section,
-                "text": (
-                    f"Critic objection to the rationale for "
-                    f"{section or 'an unnamed section'}: {objection}"
-                ),
-            }
-        )
-
-    for issue in critic_delta.get("added_issues") or []:
-        if not isinstance(issue, dict):
-            continue
-        reasons = [
-            text
-            for text in (
-                clean(issue.get("external_rationale_for_footnote")),
-                clean(issue.get(INTERNAL_RATIONALE_FIELD)),
-            )
-            if text
-        ]
-        if not reasons:
-            continue
-        section = clean(issue.get("section_ref"))
-        title = clean(issue.get("section_title"))
+    for entry in _rendered_override_records(critic_delta):
+        section = entry.get("section_ref")
+        section = section.strip() if isinstance(section, str) else ""
         where = section or "an unnamed section"
-        if title and title != section:
-            where = f"{where} ({title})"
-        notes.append(
-            {
-                "section_ref": section,
-                "text": (
-                    f"Critic added an issue the first review did not raise, at "
-                    f"{where}: {' '.join(reasons)}"
-                ),
-            }
-        )
+        reason = entry.get("stated_reason") or entry.get("reason")
+        reason = reason.strip() if isinstance(reason, str) else ""
+        kind = _override_kind(entry)
+        computed = entry.get("source") == leakage_scan.OVERRIDE_SOURCE_COMPUTED
 
+        if kind == "retained":
+            text = f"{RETAINED_HARD_REJECTION_NOTE}, at {where}."
+            if reason:
+                text += f" Critic's reason for omitting it: {reason}"
+            notes.append({"section_ref": section, "text": text})
+            continue
+
+        if kind == "added":
+            issue = entry.get("critic_issue")
+            issue = issue if isinstance(issue, dict) else {}
+            reasons = [
+                value.strip()
+                for value in (
+                    issue.get("external_rationale_for_footnote"),
+                    issue.get(INTERNAL_RATIONALE_FIELD),
+                )
+                if isinstance(value, str) and value.strip()
+            ]
+            replaced_with = _describe_rendered_edits(entry.get("critic_edits"))
+            reason = " ".join(reasons) or reason
+            text = (
+                f"Critic added an issue the reviewer did not raise, at {where}. "
+                f"Reviewer proposed: nothing (the reviewer did not raise it). "
+                f"Critic replaced with: {replaced_with}"
+            )
+        else:
+            if kind == "dropped":
+                what = "the issue"
+                proposed = _describe_rendered_edits(entry.get("primary_edits"))
+                replaced_with = "nothing (the critic dropped the issue)."
+            elif computed:
+                what = "the replacement text"
+                proposed = _describe_rendered_edits(entry.get("primary_value"))
+                replaced_with = _describe_rendered_edits(entry.get("critic_value"))
+            else:
+                what = f"the {_OVERRIDE_FIELD_WORDS.get(entry.get('field'), 'issue')}"
+                proposed = _quoted_value(entry.get("primary_value"))
+                replaced_with = _quoted_value(entry.get("critic_value"))
+            text = (
+                f"Critic override on {what} for {where}. Reviewer proposed: {proposed} "
+                f"Critic replaced with: {replaced_with}"
+            )
+        if reason:
+            text += f" Reason: {reason}"
+        notes.append({"section_ref": section, "text": text})
     return notes
 
 
@@ -1782,9 +1896,9 @@ def generate_redline_from_blocks(
     footnote body, external first, with the internal half still behind
     `INTERNAL_FOOTNOTE_PREFIX` -- nothing is dropped.
 
-    In the same two modes (`internal`/`both`) every critic disagreement in
+    In the same two modes (`internal`/`both`) every critic override in
     `reconciled_result["critic_delta"]` is explained inside an internal
-    footnote (issue #132): `_critic_delta_internal_notes` words each one,
+    footnote (issues #132, #140): `_critic_delta_internal_notes` words each one,
     `_host_critic_notes` picks the footnote it rides on, and
     `_joined_footnote_text` appends it behind its own `[INTERNAL NOTE: ...]`
     marking. Internal footnotes are the only channel it reaches: `none` and
@@ -1953,8 +2067,8 @@ def generate_redline_from_blocks(
     dropped: set = set(pen_failures)
     changeset_failures: dict[Any, list[dict[str, Any]]] = {}
     edit_failures: dict[Any, list[dict[str, Any]]] = {}
-    # Issue #132: in a notes mode that carries internal content, every
-    # critic disagreement is explained inside an internal footnote. Every
+    # Issues #132/#140: in a notes mode that carries internal content, every
+    # critic override is explained inside an internal footnote. Every
     # field rendered was leakage-scanned by the gate at the top of this
     # function, before anything compiled (`leakage_scan.
     # _scan_critic_delta_fields`), on the channel `leakage_scan.

@@ -1,39 +1,58 @@
 /**
- * receipt-critic-line-96.test.tsx — issue #96 (Option B, owner decision
- * 2026-09-16): the receipt's brief, counts-only critic-delta/confidence-band
- * line.
+ * receipt-critic-line-96.test.tsx — the receipt's brief, counts-only critic
+ * line: issue #96 (Option B, owner decision 2026-09-16), presented as
+ * OVERRIDES since issue #140 (ADR 0001 — the critic has the last word, so
+ * the slip counts what the critic changed, not what it contested).
  *
- * Locks in three things against the real `receiptLines()`:
+ * Locks in, against the real `receiptLines()`:
  *
- *   1. A detail with a non-empty `critic_delta` prints the counts line —
- *      for ANY of the three `_CRITIC_DELTA_KEYS`
- *      (`scripts/reconciliation.py`), including a delta whose only content
- *      is `rationale_objections`. That variant is the one the band cannot
- *      cover: `reconciliation.py` sets `has_critic_delta` from all three
- *      but excludes `rationale_objections` from `critic_contests_output`,
- *      so a rationale-only objection off an OK primary yields a non-empty
- *      delta with a NULL band, and a line keyed on the other two counts
- *      would go silent about a critic that did object.
- *   2. An empty delta and an OK (null) confidence band print NOTHING — no
- *      stray "Critic:" line, no empty row.
- *   3. The line contains no objection prose or derived clause text — only
- *      counts, the literal nouns "replacement"/"issue"/"rationale
- *      objection", and the `confidence_band` wire token.
- *      `docs/output-contract.md` -> "Critic-delta presentation" is where
- *      `critic_objection` / `critic_suggested_replacement` /
- *      `rationale_objections[].objection` belong; never on a printed slip.
+ *   1. A review whose `critic_delta.overrides` records changes prints one
+ *      counts line — "Critic: 3 overrides, 1 issue added, 1 dropped, 1 hard
+ *      rejection retained · confidence OK" — counted the way the internal
+ *      footnotes explain them, so a change the critic stated AND the
+ *      reconciler computed is one override, and a drop is a drop, not also
+ *      an override.
+ *   2. A delta with nothing changed (KEEP dispositions only — every review
+ *      the reviewer raised an issue on carries those) and an OK (null) band
+ *      prints NOTHING; a non-OK band alone prints the band.
+ *   3. The deprecated contest arrays are not counted: the "contested"
+ *      framing is gone.
+ *   4. The line contains no reviewer text, critic text or reason — only
+ *      counts, fixed words and the `confidence_band` wire token.
  *
- * Fixture fidelity: every `critic_delta` below is the merged record shape
- * `scripts/reconciliation.py` actually emits (lists of dicts keyed
- * `section_ref` / `critic_objection` / `objection`, per
- * `playbooks/output-schema-v3.json` -> `definitions.CriticDelta`), carried
- * to the client by `backend/src/reviews.py::get_review_detail` off the
- * analysis artifact. `tests/test_critic_delta_carrythrough_96.py` pins that
- * same shape against a real `review_spine.run_review` run, so these two
- * files cannot drift apart silently.
+ * Fixture fidelity: the main fixture is NOT hand-built. It is the real
+ * `scripts/reconciliation.py::reconcile` output for the synthetic review in
+ * `tests/test_critic_delta_internal_footnotes_132.py`, written to
+ * `tests/fixtures/critic_delta_overrides_140.json` by that test's
+ * `--write-receipt-fixture`; its part 11 fails when reconcile's output and
+ * this file drift, and pins `expected_note_counts` to the number of
+ * internal-footnote notes of each kind the renderer writes for it. The
+ * smaller fixtures below are edits of those real records (same keys, same
+ * tokens), each reachable from `reconcile`: a computed `added` / `dropped`
+ * / `replaced` entry, or one the critic stated itself.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { receiptLines, type ReceiptSource } from '../toaster/receipt';
+
+interface ReconcilerFixture {
+  critic_delta: { overrides: Record<string, unknown>[] };
+  confidence_band: string | null;
+  expected_note_counts: { override: number; added: number; dropped: number; retained: number };
+}
+
+const FIXTURE = JSON.parse(
+  fs.readFileSync(
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../tests/fixtures/critic_delta_overrides_140.json',
+    ),
+    'utf8',
+  ),
+) as ReconcilerFixture;
+const REAL_OVERRIDES = FIXTURE.critic_delta.overrides;
 
 const BASE: ReceiptSource = {
   review_id: 'r-1',
@@ -45,119 +64,158 @@ function criticLineText(review: ReceiptSource): string | undefined {
   return receiptLines(review).find((line) => line.id === 'critic-delta')?.value;
 }
 
-describe('the receipt critic-delta / confidence-band line (issue #96)', () => {
-  it('prints counts for a non-empty critic_delta with no band', () => {
-    const review: ReceiptSource = {
-      ...BASE,
-      critic_delta: {
-        contested_replacements: [{ critic_objection: 'ignored' }],
-        added_issues: [{ id: 'a' }, { id: 'b' }],
-      },
-    };
-    expect(criticLineText(review)).toBe('Critic: 1 replacement contested, 2 issues added');
-  });
+/** The real records whose (source, change) match — so each small fixture is
+ *  a subset of what reconcile actually emitted, never an invented shape. */
+function realRecords(
+  predicate: (entry: Record<string, unknown>) => boolean,
+): Record<string, unknown>[] {
+  const found = REAL_OVERRIDES.filter(predicate);
+  expect(found.length).toBeGreaterThan(0);
+  return found;
+}
 
-  it('prints the band alone when the delta is empty but the band is non-OK', () => {
-    const review: ReceiptSource = {
-      ...BASE,
-      critic_delta: { contested_replacements: [], added_issues: [], rationale_objections: [] },
-      confidence_band: 'MANUAL_REVIEW_REQUIRED',
-    };
-    expect(criticLineText(review)).toBe('Critic: confidence MANUAL_REVIEW_REQUIRED');
-  });
+const computed = (change: string) => (entry: Record<string, unknown>) =>
+  entry.source === 'computed' && entry.change === change;
 
-  it('prints counts and the trimmed band together', () => {
+describe('the receipt critic line counts overrides (issues #96, #140)', () => {
+  it("prints the real reconciler record's counts, matching the internal notes", () => {
+    const counts = FIXTURE.expected_note_counts;
+    // The fixture is the one the footnote test pins; this is what it holds.
+    expect(counts).toEqual({ override: 3, added: 1, dropped: 1, retained: 1 });
     const review: ReceiptSource = {
       ...BASE,
-      critic_delta: {
-        contested_replacements: [{ critic_objection: 'x' }, { critic_objection: 'y' }],
-        added_issues: [{ id: 'a' }],
-      },
-      confidence_band: 'LOW_CONFIDENCE',
+      critic_delta: FIXTURE.critic_delta,
+      confidence_band: FIXTURE.confidence_band,
     };
     expect(criticLineText(review)).toBe(
-      'Critic: 2 replacements contested, 1 issue added · confidence LOW',
+      `Critic: ${counts.override} overrides, ${counts.added} issue added, ` +
+        `${counts.dropped} dropped, ${counts.retained} hard rejection retained · confidence OK`,
     );
   });
 
-  it('prints a rationale-objection-only delta, which carries no band at all', () => {
-    // The producible state a counts line keyed on the other two keys would
-    // miss entirely: `reconciliation.py` emits this delta (has_critic_delta
-    // is true) while `critic_contests_output` is false, so `confidence_band`
-    // stays null off an OK primary.
-    const review: ReceiptSource = {
-      ...BASE,
-      critic_delta: {
-        contested_replacements: [],
-        added_issues: [],
-        rationale_objections: [
-          { section_ref: '4', objection: 'The external rationale misstates the clause.' },
-        ],
-      },
-      confidence_band: null,
-    };
-    const text = criticLineText(review) ?? '';
-    expect(text).toBe('Critic: 1 rationale objection');
-    expect(text).not.toContain('misstates');
+  it('counts a change the critic stated AND the reconciler computed once', () => {
+    const replaced = realRecords(computed('replaced'));
+    const issueId = replaced[0].issue_id;
+    const stated = realRecords(
+      (entry) =>
+        entry.source === 'critic' &&
+        entry.issue_id === issueId &&
+        entry.field === 'replacement_text',
+    );
+    expect(
+      criticLineText({ ...BASE, critic_delta: { overrides: [...stated, ...replaced] } }),
+    ).toBe('Critic: 1 override · confidence OK');
   });
 
-  it('counts all three delta keys together, pluralised', () => {
-    const review: ReceiptSource = {
-      ...BASE,
-      critic_delta: {
-        contested_replacements: [{ section_ref: '8', critic_objection: 'x' }],
-        added_issues: [{ section_ref: '12' }, { section_ref: '13' }],
-        rationale_objections: [
-          { section_ref: '4', objection: 'a' },
-          { section_ref: '5', objection: 'b' },
-        ],
-      },
-      confidence_band: 'LOW_CONFIDENCE',
-    };
-    expect(criticLineText(review)).toBe(
-      'Critic: 1 replacement contested, 2 issues added, 2 rationale objections · confidence LOW',
+  it("counts a drop as a drop, not also as the critic's stated decision override", () => {
+    const dropped = realRecords((entry) => computed('dropped')(entry) && entry.retained === false);
+    const stated = realRecords(
+      (entry) => entry.source === 'critic' && entry.issue_id === dropped[0].issue_id,
+    );
+    expect(
+      criticLineText({ ...BASE, critic_delta: { overrides: [...stated, ...dropped] } }),
+    ).toBe('Critic: 1 dropped · confidence OK');
+  });
+
+  it('names a retained hard rejection, never as dropped', () => {
+    const retained = realRecords((entry) => computed('dropped')(entry) && entry.retained === true);
+    expect(criticLineText({ ...BASE, critic_delta: { overrides: retained } })).toBe(
+      'Critic: 1 hard rejection retained · confidence OK',
     );
   });
 
-  it('prints nothing for an empty delta and an OK (null) band', () => {
-    const review: ReceiptSource = {
-      ...BASE,
-      critic_delta: { contested_replacements: [], added_issues: [], rationale_objections: [] },
-      confidence_band: null,
-    };
-    expect(criticLineText(review)).toBeUndefined();
+  it('pluralises, and trims the band token', () => {
+    const added = realRecords(computed('added'));
+    const rationale = realRecords(
+      (entry) => entry.source === 'critic' && entry.field === 'rationale',
+    );
+    expect(
+      criticLineText({
+        ...BASE,
+        critic_delta: { overrides: [...added, ...added, rationale[0]] },
+        confidence_band: 'LOW_CONFIDENCE',
+      }),
+    ).toBe('Critic: 1 override, 2 issues added · confidence LOW');
+  });
+
+  it('prints the band alone when the critic changed nothing but the band is non-OK', () => {
+    expect(
+      criticLineText({
+        ...BASE,
+        critic_delta: {
+          dispositions: [{ issue_id: 'I1', disposition: 'KEEP', reason: 'Kept.' }],
+          overrides: [],
+        },
+        confidence_band: 'MANUAL_REVIEW_REQUIRED',
+      }),
+    ).toBe('Critic: confidence MANUAL_REVIEW_REQUIRED');
+  });
+
+  it('prints nothing for a KEEP-only delta and an OK (null) band', () => {
+    expect(
+      criticLineText({
+        ...BASE,
+        critic_delta: {
+          dispositions: [{ issue_id: 'I1', disposition: 'KEEP', reason: 'Kept.' }],
+          overrides: [],
+        },
+        confidence_band: null,
+      }),
+    ).toBeUndefined();
   });
 
   it('prints nothing when critic_delta and confidence_band are both absent', () => {
     expect(criticLineText(BASE)).toBeUndefined();
   });
 
-  it('never carries objection prose or derived clause text', () => {
-    const review: ReceiptSource = {
+  it('no longer counts the deprecated contest arrays', () => {
+    const text = criticLineText({
       ...BASE,
       critic_delta: {
-        contested_replacements: [
-          {
-            critic_objection: 'Drifts from the playbook position on liability caps.',
-            critic_suggested_replacement: 'Company shall indemnify Counterparty for...',
-          },
-        ],
-        added_issues: [],
-        rationale_objections: [
-          { section_ref: '4', objection: 'Over-flags a boilerplate notices clause.' },
-        ],
+        overrides: [],
+        contested_replacements: [{ section_ref: '8', critic_objection: 'x' }],
+        added_issues: [{ section_ref: '12' }],
+        rationale_objections: [{ section_ref: '4', objection: 'y' }],
       },
+    });
+    expect(text).toBeUndefined();
+  });
+
+  it('never carries reviewer text, critic text or a reason', () => {
+    const review: ReceiptSource = {
+      ...BASE,
+      critic_delta: FIXTURE.critic_delta,
       confidence_band: 'ERROR_MANUAL_REVIEW_REQUIRED',
     };
     const text = criticLineText(review) ?? '';
     expect(text).not.toBe('');
-    expect(text).not.toContain('Drifts');
-    expect(text).not.toContain('playbook position');
-    expect(text).not.toContain('indemnify');
-    expect(text).not.toContain('Over-flags');
-    expect(text).not.toContain('boilerplate');
+    const prose = new Set<string>();
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string' && value.length > 12) {
+        prose.add(value);
+      } else if (Array.isArray(value)) {
+        value.forEach(collect);
+      } else if (value && typeof value === 'object') {
+        Object.values(value).forEach(collect);
+      }
+    };
+    REAL_OVERRIDES.forEach((entry) =>
+      ['primary_value', 'critic_value', 'reason', 'primary_issue', 'critic_issue'].forEach(
+        (key) => collect(entry[key]),
+      ),
+    );
+    expect(prose.size).toBeGreaterThan(0);
+    for (const value of prose) {
+      for (const line of value.split('\n')) {
+        const fragment = line.replace(/^[-+] /, '').slice(0, 24);
+        if (fragment.length >= 8) {
+          expect(text).not.toContain(fragment);
+        }
+      }
+    }
     expect(text).toBe(
-      'Critic: 1 replacement contested, 1 rationale objection · confidence ERROR_MANUAL_REVIEW_REQUIRED',
+      'Critic: 3 overrides, 1 issue added, 1 dropped, 1 hard rejection retained · ' +
+        'confidence ERROR_MANUAL_REVIEW_REQUIRED',
     );
   });
 });

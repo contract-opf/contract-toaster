@@ -28,7 +28,8 @@ And it keeps the schema-conformance guard (`[7]`, issue #627 lineage): the
 result `reconcile()` stamps with `SCHEMA_VERSION` must validate against that
 schema, EXCEPT for the pipeline-owned extensions #138 documents, which are
 stripped first and nothing else: a `primary-retained` provenance, the
-`source` tag on a critic override, and the computed override entries.
+`source` tag and (issue #140) the stamped `section_ref` on a critic
+override, and the computed override entries.
 
 Run with: python3 tests/test_reconciliation_confidence_merge.py
 Exit codes: 0 = pass, 1 = fail
@@ -236,7 +237,8 @@ def _without_pipeline_extensions(result: dict[str, Any]) -> dict[str, Any]:
 
       * an issue's `primary-retained` provenance (not a value any model may
         emit, so the model-facing pattern does not admit it);
-      * the `source` tag on a critic-authored override;
+      * the `source` tag on a critic-authored override, and the
+        `section_ref` the reconciler stamps on it (issue #140);
       * the computed override entries (`source="computed"`), whose shape
         carries both versions of a whole issue.
     """
@@ -251,6 +253,7 @@ def _without_pipeline_extensions(result: dict[str, Any]) -> dict[str, Any]:
             if entry.get("source") == recon.OVERRIDE_SOURCE_COMPUTED:
                 continue
             entry.pop("source", None)
+            entry.pop("section_ref", None)
             kept.append(entry)
         delta["overrides"] = kept
     return stripped

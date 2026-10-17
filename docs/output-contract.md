@@ -225,7 +225,7 @@ of how that result differs from the primary's**:
 | `dispositions[]` | One `{issue_id, disposition, reason}` per **primary** issue, no exceptions. `disposition` is `KEEP` (same issue, same edit), `REVISE` (same issue, the critic changed its replacement text, rationale or decision) or `DROP` (the critic does not stand behind it). The prompt asks for a one-line `reason`; the cap is the free-prose class bound, 8000 (see [Length budgets](#length-budgets-issue-674)). |
 | `overrides[]` | One `{issue_id, field, primary_value, critic_value, reason}` per respect in which the critic changed a primary issue. `field` is `replacement_text`, `rationale` or `decision` (a `DROP` is a change of decision). `primary_value`, `critic_value` and `reason` are each ≤ 8000 characters, the free-prose class bound. Empty when the critic changed nothing. |
 | `ledger_dispositions[]` | **New in issue #147.** One `{rule_id, disposition, block_id?, span?, reason}` per entry of the **hard-rejection ledger** the critic's tasking lists, no exceptions — an ACCEPT carries them too, and the array is empty or absent only when the review has no ledger. `disposition` is `CLEARED` (the critic found the required protection: `block_id` names the paragraph and `span` copies the exact words that establish it) or `ASSERT` (missing or inadequate: `block_id` may name the paragraph where it belongs). `block_id` and `span` are optional, and an empty string means none (`span` ≤ 8000, the free-prose class Segment.text sits in; `rule_id` and `block_id` are copied ids). The critic's claim is never trusted: see [The hard-rejection ledger](#the-hard-rejection-ledger-issue-147) below. |
-| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The prompt still asks the critic to fill them, and since issue #138 the reconciler forwards them verbatim (it no longer merges from them) for the consumers that still read them: the receipt's counts, the internal footnotes (#132) and the leakage scan. The artifact marks each `DEPRECATED`. |
+| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The prompt still asks the critic to fill them, and since issue #138 the reconciler forwards them verbatim (it no longer merges from them) for the consumers that still read them: the download gate's indicator and the leakage scan. Since issue #140 the receipt's counts and the internal footnotes read `overrides[]` instead (see [Critic-delta presentation](#critic-delta-presentation)). The artifact marks each `DEPRECATED`. |
 
 `issue_id` always names the **primary's** `issue_key` as it appears in the primary's output — never a key
 from the critic's own `issues`, which it numbers from `I1` in its own response.
@@ -292,9 +292,14 @@ none of which a model may emit and none of which the model-facing schema admits:
   `replaced` entry's values render each side's edits as a *rendered edit record*: exactly one line per edit,
   `- removed text` or `+ added text`, each edit's whitespace folded so a line break inside it cannot start an
   unprefixed line; a `dropped` entry also carries `primary_issue`, `primary_edits` and `retained`, an `added`
-  entry `critic_issue` and `critic_edits`. This record is internal audit content: it reaches the analysis
-  artifact and `get_review_detail`'s `critic_delta` verbatim, and no attorney-facing layout yet — so every
-  model-authored text in it passes the leakage scan first (see
+  entry `critic_issue` and `critic_edits`. **Every entry, the critic's own included, also carries
+  `section_ref` (issue #140)**: the section the issue sits at in the final review when the critic kept it
+  (its paired critic issue's), else the primary's own — `null` for a critic-stated entry whose `issue_id`
+  names no primary issue. This record is internal audit content: it reaches the analysis artifact and
+  `get_review_detail`'s `critic_delta` verbatim, the receipt's counts line and, in the `internal`/`both`
+  notes modes, the delivered document's internal footnotes (see
+  [Critic-delta presentation](#critic-delta-presentation)) — so every model-authored text in it, the
+  stamped `section_ref` included, passes the leakage scan first (see
   [Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose)).
 
 **Fails closed, never primary-only.** No critic result, a failed critic pass, or a critic result that leaves a
@@ -662,26 +667,37 @@ the delta indicator visible.
 > [The critic's final result](#the-critics-final-result-issue-137-adr-0001)), and the add-only arrays
 > stay, deprecated, for one release — so every normative rule in this document keyed to the
 > `contested_replacements` shape still applies byte for byte: the reconcile ticket (#138) made the
-> critic's result final but forwards the deprecated arrays verbatim, and retiring them belongs to the
-> receipt/footnotes follow-up that moves those surfaces onto `overrides`.
+> critic's result final but forwards the deprecated arrays verbatim. **Issue #140 moved the receipt line
+> and the internal footnotes onto `overrides`** (below); the download gate still keys on the deprecated
+> arrays exactly as before.
 
-**The receipt's own mirror (issue #96) is counts-only, never these badges' prose.** The provenance
+**The receipt's own mirror (issues #96, #140) is counts-only, never these badges' prose.** The provenance
 slip (`frontend/src/toaster/receipt.ts`, `criticLine`) prints at most one brief line — e.g. "Critic:
-2 replacements contested, 1 issue added, 1 rationale objection · confidence LOW" — built ONLY from
-the lengths of **all three** `critic_delta` arrays (`contested_replacements`, `added_issues`,
-`rationale_objections`) and the `confidence_band` wire token. It never includes `critic_objection`,
-`rationale_objections[].objection`, `critic_suggested_replacement`, or any other field carrying
-model prose or derived clause text — those stay on the badges below, which render only in the app,
-never on a slip someone can paste into a deal thread. A count is omitted from the line when its
-array is empty, so the line names only what the critic actually did.
+3 overrides, 1 issue added, 1 dropped · confidence OK" — built ONLY from controlled tokens on each
+`critic_delta.overrides[]` record (`source`, `change`, `retained`, `issue_id`, `field`) and the
+`confidence_band` wire token. Under ADR 0001 the critic decides rather than contests, so since issue #140
+the line counts the critic's decisions:
 
-All three arrays are counted, not just the two that move the band: the
-[merge rule](#critic-delta-confidence-merge-rule) deliberately does **not** degrade
-`confidence_state` for a rationale objection alone, so a critic that only objected to the primary's
-rationale produces a non-empty `critic_delta` with a **null** band — a state the line must still
-disclose. The line is absent entirely only when there is nothing to disclose at all: all three
-arrays empty (or `critic_delta` null) **and** an OK/null band, matching every other receipt line's
-"absent, never invented" rule.
+| Count | Records counted |
+|---|---|
+| `N overrides` | each critic-stated override, and each computed `replaced` entry — except a critic-stated entry on an issue the reconciler recorded as dropped, and a critic-stated `replacement_text` entry on an issue it recorded as `replaced` (the reconciler records one change twice there; it is counted once) |
+| `N issues added` | each computed `added` entry |
+| `N dropped` | each computed `dropped` entry with `retained: false` |
+| `N hard rejections retained` | each computed `dropped` entry with `retained: true` — a primary hard rejection guard 1 put back |
+
+These are exactly the notes the [internal footnotes](#internal-footnote-explanation-issue-132) write, so
+"N overrides" on the slip is N override notes in the document
+(`tests/test_critic_delta_internal_footnotes_132.py` part 11 pins the receipt's vitest fixture to the real
+reconciler's output and to the renderer's note counts). A count is omitted when it is zero. The line never
+includes `primary_value`, `critic_value`, `reason` or any other field carrying model prose or derived
+clause text — those stay in the internal footnotes, never on a slip someone can paste into a deal thread.
+The deprecated `contested_replacements` / `added_issues` / `rationale_objections` arrays are not counted.
+
+The band reads `OK` when there are counts and `confidence_band` is null (the reconciler writes a null band
+for exactly an OK one), and the band alone prints when nothing changed but the band is non-OK. The line is
+absent entirely only when there is nothing to disclose at all: no override record of any kind (a delta of
+`KEEP` dispositions alone — which every review the reviewer raised an issue on carries — changed nothing)
+**and** an OK/null band, matching every other receipt line's "absent, never invented" rule.
 
 **A leakage-blocked review reaches the receipt with no delta to print.** `critic_delta` is a carrier
 of scannable model prose — `contested_replacements[].critic_objection`,
@@ -701,50 +717,68 @@ The receipt line is the brief half of the owner's 2026-09-16 decision on #96; th
 the delivered `.docx`, and **only** in a review whose notes mode carries internal content
 (`internal` or `both` — see
 [Which rationale becomes a footnote](#which-rationale-becomes-a-footnote-the-reviews-notes-mode-issue-522-epic-519-item-d)).
-There, `scripts/redline_generate.py::generate_redline_from_blocks` explains every critic
-disagreement inside an internal footnote, each behind its **own** `[INTERNAL NOTE: …]` marking
-(`footnote_audience.mark_internal_footnote`), appended after the host issue's own footnote text:
+There, `scripts/redline_generate.py::generate_redline_from_blocks` explains every critic **override**
+inside an internal footnote, each behind its **own** `[INTERNAL NOTE: …]` marking
+(`footnote_audience.mark_internal_footnote`), appended after the host issue's own footnote text.
 
-| Delta entry | What the internal note says |
+**Overrides, not contests (issue #140).** #132 shipped this as an explanation of the critic's
+*disagreements* — the deprecated `contested_replacements` / `rationale_objections` / `added_issues`
+arrays. Under ADR 0001 the critic has the last word, so the notes now read
+`critic_delta.overrides[]`, the reconciler's record of every respect in which the final review differs
+from the reviewer's, and the deprecated arrays are no longer rendered. One note per record, in
+`overrides` order, each change shown once (`redline_generate._rendered_override_records`: a critic-stated
+entry on an issue the reconciler recorded as dropped, or a critic-stated `replacement_text` entry on one
+it recorded as `replaced`, is not shown again — the computed entry is, with the critic's stated reason):
+
+| Override record | What the internal note says |
 |---|---|
-| `contested_replacements[]` | its `section_ref`, the reviewer's text (`primary_replacement_text`), the critic's objection (`critic_objection`) and, when present, the critic's suggested text (`critic_suggested_replacement`) |
-| `rationale_objections[]` | its `section_ref` and the `objection` |
-| `added_issues[]` | its `section_ref` (and `section_title`) and why the critic added it — its `external_rationale_for_footnote`, then its `internal_rationale_for_footnote` when it has one |
+| critic-stated (`field` `replacement_text` / `rationale` / `decision`) | "Critic override on the <field> for <section>. Reviewer proposed: “…” Critic replaced with: “…” Reason: …" — `primary_value`, `critic_value`, `reason` |
+| computed `replaced` | the same, each side the text its edits ADD (the `+` lines of the rendered edit record); the reason is the critic's stated `replacement_text` reason when it gave one, else the computed `reason` |
+| computed `dropped` | "Critic override on the issue for <section>. Reviewer proposed: “…” Critic replaced with: nothing (the critic dropped the issue). Reason: …" — the reviewer's added text from `primary_edits`, the critic's disposition reason |
+| computed `dropped`, `retained: true` | "Reviewer's hard rejection retained by rule (the critic omitted it), at <section>." and the critic's reason for omitting it |
+| computed `added` | "Critic added an issue the reviewer did not raise, at <section>. Reviewer proposed: nothing … Critic replaced with: … Reason: …" — the reason is the critic issue's `external_rationale_for_footnote`, then its `internal_rationale_for_footnote` when it has one |
+
+`<section>` is the `section_ref` the reconciler stamps on every record; a record with none (a
+critic-stated override naming an issue the reviewer never raised) names "an unnamed section". Only the
+text an edit **adds** is quoted: a `-` line of a rendered edit record is the document's own removed words,
+which the leakage scan deliberately does not read, so a deletion-only edit is described ("a deletion
+only"), never quoted.
 
 **Where a note is anchored.** A footnote can only hang on a tracked insertion, so a note rides on the
 footnote of the first issue (in `issues` order) that both edits the note's `section_ref` and
-inserts text. When no such issue exists — the usual case for a critic-added issue, which carries no
-edits of its own under the add-only merge — it rides on the first footnote in the document, and
+inserts text. When no such issue exists — the usual case for a dropped issue, a retained flag-only hard
+rejection, or a critic-added flag-only issue — it rides on the first footnote in the document, and
 names its own section so it never reads as a remark about its host. A host whose edits all fail to
 compile is rolled out (nothing of it landed) and its notes are re-hosted on one that did. A
 document with no tracked insertion at all has nowhere to anchor a footnote, so it carries no note;
-the disagreement still reaches the reviewer through `critic_delta` on the result.
+the override still reaches the reviewer through `critic_delta` on the result.
 
 **Internal footnotes are its only channel.** In `none` and `external` nothing of the delta reaches
 the document, and in no mode is any of it written into the body or the unmarked external half of a
 footnote.
 
 **Every rendered field is leakage-scanned first.** The leakage gate
-(`scripts/leakage_scan.py::_scan_critic_delta_fields`) runs over the whole reconciled result before
-anything is compiled, and a block there produces no document at all. Each field in the table above is
-scanned on the channel `_FIELD_CHANNELS` declares for it, which rendering does not change:
+(`scripts/leakage_scan.py::_scan_critic_delta_fields` and `_scan_critic_delta_audit_record`) runs over the
+whole reconciled result before anything is compiled, and a block there produces no document at all. Each
+rendered field is scanned on the channel `_FIELD_CHANNELS` declares for it, which rendering does not
+change:
 
 | Rendered field | Channel |
 |---|---|
-| `contested_replacements[].section_ref`, `.primary_replacement_text`, `.critic_objection`, `.critic_suggested_replacement` | `external` |
-| `rationale_objections[].section_ref`, `.objection` | `external` |
-| `added_issues[].section_ref`, `.section_title`, `.external_rationale_for_footnote` | `external` |
-| `added_issues[].internal_rationale_for_footnote` | `internal` — still blocked by the never-acceptable checks (system-prompt leakage, excessive precedent quotation) |
+| `overrides[].reason`, `.primary_value`, `.critic_value` (on a computed entry, the `+` lines of its rendered edit records, and of `.primary_edits` / `.critic_edits`) | `external` |
+| `overrides[].section_ref` (stamped by the reconciler, issue #140) | `external` |
+| `dispositions[].reason` (a computed `dropped` entry's reason) | `external` |
+| a computed `added` entry's `critic_issue.external_rationale_for_footnote` | `external` |
+| a computed `added` entry's `critic_issue.internal_rationale_for_footnote` | `internal` — still blocked by the never-acceptable checks (system-prompt leakage, excessive precedent quotation) |
 
-`primary_replacement_text` and the four locators were added to the scan by this issue: before it they
-reached only the result payload, and none of them was scanned.
-`primary_replacement_text` is replacement-text class, like `critic_suggested_replacement`
-([Leakage scan scope](#leakage-scan-scope--all-human-surfaced-model-prose)).
+The stamped `section_ref` was added to the scan by issue #140, as the #132 locators were before it: it
+names the section in a document-bound note. The deprecated arrays' fields are still scanned exactly as
+before (they still reach the review's owner), though nothing renders them now.
 
 The delta exists on every two-pass review, so this is rendering, never generation — nothing asks a
 model for more text in these modes. Both rendering modes stay unreachable while #572's
 `NOTES_MODE_ENABLED` kill switch is off. `tests/test_critic_delta_internal_footnotes_132.py` asserts
-all of this on the delivered bytes, including a system-prompt n-gram planted in each rendered field.
+all of this on the delivered bytes, including a system-prompt n-gram planted in each rendered source.
 
 ### Contested-replacement badge
 
@@ -1173,9 +1207,10 @@ as its response keys — the rename is a storage-layer fact, not an API one. See
 | `critic_delta.contested_replacements[].section_ref`, `critic_delta.rationale_objections[].section_ref`, `critic_delta.added_issues[].section_ref` / `.section_title` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes, where each note names its section (#132) | Yes (locators — see below) | `external` |
 | `critic_delta.added_issues[]` | Admin view; reviewer detail view; internal `.docx` footnotes in the `internal`/`both` notes modes (#132) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
 | `critic_delta.dispositions[].reason` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes | `external` |
-| `critic_delta.overrides[].reason`, and a critic-stated override's `.primary_value` / `.critic_value` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes (the two values are replacement-text class when the entry's `field` is `replacement_text`) | `external` |
-| A computed override's `.primary_value` / `.critic_value` / `.primary_edits` / `.critic_edits` (rendered edit records) | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes — every line except a `- removed text` line, the `+ ` prefix stripped (replacement-text class, like the insert segment each restates) | `external` |
-| A computed override's `.primary_issue` / `.critic_issue` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
+| `critic_delta.overrides[].reason`, and a critic-stated override's `.primary_value` / `.critic_value` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138); internal `.docx` footnotes in the `internal`/`both` notes modes (#140) | Yes (the two values are replacement-text class when the entry's `field` is `replacement_text`) | `external` |
+| A computed override's `.primary_value` / `.critic_value` / `.primary_edits` / `.critic_edits` (rendered edit records) | The analysis artifact and `get_review_detail`'s `critic_delta` (#138); their `+` lines in internal `.docx` footnotes in the `internal`/`both` notes modes (#140) | Yes — every line except a `- removed text` line, the `+ ` prefix stripped (replacement-text class, like the insert segment each restates) | `external` |
+| A computed override's `.primary_issue` / `.critic_issue` | The analysis artifact and `get_review_detail`'s `critic_delta` (#138); an `added` entry's `critic_issue` rationales in internal `.docx` footnotes (#140) | Yes (each scanned as a primary issue) | `external` (per field, as above) |
+| `critic_delta.overrides[].section_ref` (stamped by the reconciler) | The analysis artifact and `get_review_detail`'s `critic_delta`; internal `.docx` footnotes in the `internal`/`both` notes modes, where each note names its section (#140) | Yes (a locator — see below) | `external` |
 | `cover_note_draft` | The cover-note card in the finished review's panel / History expanded row; copied into the reviewer's own email client and sent to the counterparty | Yes | `external` |
 | `internal_precedent_citation` | Retained only in confidential audit storage; never rendered in UI | n/a (stripped) | n/a |
 
@@ -1195,7 +1230,9 @@ prose fields (a review that already blocked on a prose field still reports that 
 gram blocks only when it occurs *whole* inside the locator, so a rule description or standard
 clause longer than the locator cannot match it. A primary issue's `section_ref` / `section_title`
 are not scanned, and #132 renders neither into the document: a note's host is chosen by comparing
-with them, never by quoting them.
+with them, never by quoting them. Issue #140 moved the notes onto the override record, whose
+`section_ref` the reconciler copies off an issue onto every entry; that stamped copy is what a note
+names, so it is the copy that is scanned (last of all, after the rest of the audit record).
 
 The reconciler's audit record (issue #138) is scanned after every field above, on the same reasoning
 as `rationale_objections`: it reaches the review's owner, and since #138 it is the *only* place the
