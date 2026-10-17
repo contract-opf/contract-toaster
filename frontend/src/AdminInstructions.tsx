@@ -106,7 +106,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
-import { GUIDANCE_PRECEDENCE_COPY } from './guidancePrecedenceCopy';
+import { GUIDANCE_PRECEDENCE_COPY, UNCOVERED_CLAUSES_HINT_COPY } from './guidancePrecedenceCopy';
 import { CtBanner, CtButton, CtCard, CtField, CtProgress, CtToolbar } from './ui/react';
 
 // ---------------------------------------------------------------------------
@@ -411,7 +411,7 @@ export default function AdminInstructions({
                 <form className="ct-stack" noValidate onSubmit={handleSave}>
                   <CtField
                     label="Standing instructions for this contract type (optional)"
-                    hint={`These apply to every review run with this playbook. They ${GUIDANCE_PRECEDENCE_COPY} The instructions box on the Review screen still wins for a single review. Leave blank to let the playbook speak for itself.`}
+                    hint={`These apply to every review run with this playbook. They ${GUIDANCE_PRECEDENCE_COPY} The instructions box on the Review screen still wins for a single review. ${UNCOVERED_CLAUSES_HINT_COPY} Leave blank to let the playbook speak for itself.`}
                   >
                     <textarea
                       data-testid="admin-instructions-text"

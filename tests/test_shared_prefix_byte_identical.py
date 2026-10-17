@@ -452,6 +452,13 @@ class TestBothRequestsShareThePrefix(_EnvTestCase):
         self._assert_shared_prefix(primary, critic)
         system_text = json_dumps(primary["messages"][0]["content"])
         self.assertIn(json.dumps(opf_prompt.DIGEST_INTRO)[1:-1], system_text)
+        # Issue #158: the silent-playbook default is part of the shared
+        # prefix -- once, in the system blocks both passes send byte for
+        # byte (asserted above), and nowhere in either role suffix.
+        paragraph = json.dumps(opf_prompt.SILENT_PLAYBOOK_DEFAULT)[1:-1]
+        for request in (primary, critic):
+            self.assertEqual(json_dumps(request["messages"][0]["content"]).count(paragraph), 1)
+            self.assertEqual(json_dumps(request).count(paragraph), 1)
 
 
 # ---------------------------------------------------------------------------

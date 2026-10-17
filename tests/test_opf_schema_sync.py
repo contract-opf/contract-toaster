@@ -205,6 +205,19 @@ _CONTRACT: list[tuple[str, str, object]] = [
      ["n_deals", "n_signed", "first_signed", "last_signed"]),
     ("properties.digest.properties.corpus.properties.n_deals", "type_is", _COUNT),
     ("properties.digest.properties.corpus.properties.n_signed", "type_is", _COUNT),
+    # opf_prompt._uncovered_line (issue #158): the closing no-precedent line
+    # renders each entry's label and the taxonomy id an issue on it cites.
+    # Required (an absent list is recorded, not read as "full coverage"),
+    # a list, and each entry's two strings, exactly.
+    ("properties.digest.required", "superset_of", ["uncovered_clause_types"]),
+    ("properties.digest.properties.uncovered_clause_types", "type_is", "array"),
+    ("properties.digest.properties.uncovered_clause_types.items.required", "superset_of",
+     ["taxonomy_id", "label"]),
+    ("properties.digest.properties.uncovered_clause_types.items.additionalProperties", "equals", False),
+    ("properties.digest.properties.uncovered_clause_types.items.properties", "keys_exactly",
+     ["taxonomy_id", "label"]),
+    ("properties.digest.properties.uncovered_clause_types.items.properties.taxonomy_id", "type_is", "string"),
+    ("properties.digest.properties.uncovered_clause_types.items.properties.label", "type_is", "string"),
     ("properties.digest.properties.clauses", "array_of", {"digestClause"}),
     # Every field opf_prompt._digest_clause_block renders. additionalProperties
     # false is what makes "these are the digest" true: opened up, the engine

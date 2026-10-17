@@ -152,15 +152,23 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # indented lines under its label (the fixture's one rule has none); with the
 # manifest block removed the knowledge hash is still e9919779....
 #
+# RE-CAPTURED for issue #158 (2026-10-17): the digest block now states
+# coverage -- each clause heading gains "— precedent in N of M deal(s)", one
+# closing no-precedent line names `uncovered_clause_types`, and DIGEST_INTRO
+# carries `opf_prompt.SILENT_PLAYBOOK_DEFAULT` -- a DELIBERATE prompt change
+# owned by #158. With exactly those three additions stripped back out, both
+# OPF pins reproduce their previous values (29cf2549... and fc2010d4...),
+# checked when this was re-captured. The V1 pin did NOT move (no digest).
+#
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
 # for the acme-university 0.5 gold fixture. The markup-intensity block is NOT
 # composed there, so no markup level may ever move it.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "29cf2549f5343afa41006894497e8d7fcc7a0e1bd23cf6dd47d8af9e5da8278a"
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "49a9e6c13066eebaa8bb4f0fd9e477d9c9abeddbeb486c659c81cc7456e6b2b5"
 # The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
 # over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
 # joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "fc2010d445760099af2c68f2681f53f10721d572ef1ec847aaa2f920ba0d3184"
+    "6d00584b76c14e85062d2398556cd6321677a4472b1253a22c2aac901357af61"
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).

@@ -25,3 +25,18 @@
 export const GUIDANCE_PRECEDENCE_COPY =
   "govern over the playbook's positions wherever the two conflict — but never over rules " +
   'the playbook marks as hard requirements, which nothing can override.';
+
+/**
+ * The standing-instructions editor's one line on clauses the playbook does
+ * not cover (issue #158): the instructions can set the direction for them,
+ * and that is all it says. What the reviewer does there without them is the
+ * OPF prompt's own default, `SILENT_PLAYBOOK_DEFAULT` in
+ * `scripts/opf_prompt.py`, which yields to the standing instructions. This
+ * line deliberately does not describe that default: the editor renders for
+ * every playbook, and a v1 playbook's prompt does not carry it, so a
+ * description would be false there -- and would go stale whenever the
+ * default's wording changes. Per issue #484's rule it cross-references the
+ * constant rather than restating it. Change the two together.
+ */
+export const UNCOVERED_CLAUSES_HINT_COPY =
+  'They can also set the direction for clauses this playbook has little or no precedent for.';

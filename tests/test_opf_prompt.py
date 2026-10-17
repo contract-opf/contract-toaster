@@ -44,6 +44,26 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    reconcile -- and the fixed recognition sentence
    (`opf_prompt.OUR_ENTITIES_NOTE`) is rendered exactly once, beside the
    list, with no variants field.
+9. (issue #158) Coverage: on the gold fixture AND the engine's public NDA
+   example, every clause heading reads `precedent in <n_deals> of
+   <corpus.n_deals> deals`, and the closing no-precedent line names exactly
+   the fixture's `uncovered_clause_types` ids, in order. An empty list
+   renders no line (and changes nothing else); a malformed one is omitted
+   and RECORDED, never silently.
+10. (issue #158) The silent-playbook paragraph
+   (`opf_prompt.SILENT_PLAYBOOK_DEFAULT`) is composed exactly once, inside
+   the digest block's intro, ahead of the first clause -- so ahead of the
+   contract, which travels in the user message (the request-level
+   byte-identical shared prefix is tests/test_shared_prefix_byte_identical.py)
+   -- and is the same bytes for two different playbooks: it carries no
+   request-specific value.
+11. (issue #158) The citation rule: the paragraph tells the model an issue
+   raised on no precedent carries `internal_precedent_citation: null` and
+   cites an uncovered type by its taxonomy id; both values are accepted by
+   the active v3 output contract; docs/output-contract.md states the rule.
+
+Every check also runs under pytest (`test_*` wrappers at the bottom; issue
+#158 touched this file, so it converted per pytest.ini's convergence rule).
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -64,6 +84,7 @@ for _dir in (SCRIPTS_DIR, BACKEND_SRC):
         sys.path.insert(0, str(_dir))
 
 import config  # noqa: E402
+import jsonschema  # noqa: E402
 import model_client  # noqa: E402
 import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
@@ -74,6 +95,10 @@ import opf_prompt  # noqa: E402
 # tests/test_opf_digest_prompt.py, not here.
 FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
 FIXTURE_02_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
+# The engine's public OPF 0.5 example (three uncovered clause types).
+NDA_EXAMPLE_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
+OUTPUT_SCHEMA_V3_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"
+OUTPUT_CONTRACT_DOC = REPO_ROOT / "docs" / "output-contract.md"
 
 
 def _load_fixture() -> dict:
@@ -467,21 +492,253 @@ def check_7_no_unbacked_tool_reference() -> list[str]:
     return failures
 
 
+def _digest_of(doc: dict) -> str:
+    """The Digest block, found by its intro (position is not identity)."""
+    (block,) = [b for b in opf_prompt.compose_opf_system_blocks(doc) if b.startswith(opf_prompt.DIGEST_INTRO)]
+    return block
+
+
+def _uncovered_ids(line: str) -> list[str]:
+    """The taxonomy ids the closing line names, in order: the parenthesised
+    token closing each comma-separated item."""
+    body = line[len(opf_prompt.UNCOVERED_LINE_LEAD):].rstrip(".")
+    return [item.rsplit("(", 1)[1].rstrip(")") for item in body.split(", ")]
+
+
+def check_9_coverage_heading_and_uncovered_line() -> list[str]:
+    failures: list[str] = []
+    for path in (FIXTURE_PATH, NDA_EXAMPLE_PATH):
+        doc = opf_load.load_opf(path)
+        digest = doc["digest"]
+        corpus_n = digest["corpus"]["n_deals"]
+        block = _digest_of(doc)
+        lines = block.splitlines()
+
+        for clause in digest["clauses"]:
+            deals = "deal" if corpus_n == 1 else "deals"
+            expected = (
+                f"## {clause['title']}  [clause_id: {clause['id']}] — "
+                f"precedent in {clause['n_deals']} of {corpus_n} {deals}"
+            )
+            if expected not in lines:
+                failures.append(f"  [9] {path.name}: heading not {expected!r}")
+
+        expected_ids = [e["taxonomy_id"] for e in digest["uncovered_clause_types"]]
+        if not expected_ids:
+            failures.append(f"  [9] {path.name}: fixture has no uncovered types; the check would be vacuous")
+            continue
+        uncovered = [line for line in lines if line.startswith(opf_prompt.UNCOVERED_LINE_LEAD)]
+        if len(uncovered) != 1:
+            failures.append(f"  [9] {path.name}: expected one no-precedent line, got {len(uncovered)}")
+            continue
+        if lines[-1] != uncovered[0]:
+            failures.append(f"  [9] {path.name}: the no-precedent line is not after the last clause")
+        if _uncovered_ids(uncovered[0]) != expected_ids:
+            failures.append(
+                f"  [9] {path.name}: no-precedent ids {_uncovered_ids(uncovered[0])} != fixture {expected_ids}"
+            )
+        for entry in digest["uncovered_clause_types"]:
+            if f"{entry['label']} ({entry['taxonomy_id']})" not in uncovered[0]:
+                failures.append(f"  [9] {path.name}: {entry['taxonomy_id']!r} not rendered with its label")
+
+    # An empty list is omitted, not an empty header -- and changes nothing
+    # else: the block is the populated one minus exactly its closing line.
+    doc = _load_fixture()
+    populated = _digest_of(doc)
+    doc["digest"]["uncovered_clause_types"] = []
+    empty = _digest_of(doc)
+    if opf_prompt.UNCOVERED_LINE_LEAD.strip() in empty:
+        failures.append("  [9] an empty uncovered_clause_types still rendered the no-precedent line")
+    if populated != empty + "\n\nRecognised clause types with no precedent in this playbook: Insurance (insurance).":
+        failures.append("  [9] emptying uncovered_clause_types changed more than the closing line")
+
+    # Malformed: omitted AND recorded (fail-soft, never silent).
+    for value, kind in (
+        ("insurance", "uncovered_clause_types — value is a str"),
+        (None, "uncovered_clause_types — absent"),
+        ([{"label": "Insurance"}], "uncovered clause type — entry carries no taxonomy_id"),
+    ):
+        doc = _load_fixture()
+        if value is None:
+            del doc["digest"]["uncovered_clause_types"]
+        else:
+            doc["digest"]["uncovered_clause_types"] = value
+        omissions: dict = {}
+        blocks = opf_prompt.compose_opf_system_blocks(doc, omissions_out=omissions)
+        if any(opf_prompt.UNCOVERED_LINE_LEAD.strip() in b for b in blocks):
+            failures.append(f"  [9] malformed uncovered_clause_types ({value!r}) still rendered a line")
+        if not any(k.startswith(kind) for k in omissions):
+            failures.append(f"  [9] malformed uncovered_clause_types ({value!r}) was not recorded: {sorted(omissions)}")
+
+    # A label-less entry still names its id (the citable part).
+    doc = _load_fixture()
+    doc["digest"]["uncovered_clause_types"] = [{"taxonomy_id": "insurance"}]
+    if not _digest_of(doc).endswith(f"\n\n{opf_prompt.UNCOVERED_LINE_LEAD}insurance."):
+        failures.append("  [9] a label-less uncovered entry did not render by its taxonomy_id")
+
+    # One deal in the corpus reads in the singular. A clause cannot appear in
+    # more deals than the corpus holds, so the clause under test drops to 1.
+    doc = _load_fixture()
+    doc["digest"]["corpus"]["n_deals"] = 1
+    doc["digest"]["clauses"][0]["n_deals"] = 1
+    if "precedent in 1 of 1 deal\n" not in _digest_of(doc):
+        failures.append("  [9] a one-deal corpus does not read 'of 1 deal'")
+    return failures
+
+
+def check_10_silent_playbook_paragraph_once_before_contract() -> list[str]:
+    failures: list[str] = []
+    paragraph = opf_prompt.SILENT_PLAYBOOK_DEFAULT
+    composed = {}
+    for path in (FIXTURE_PATH, NDA_EXAMPLE_PATH):
+        doc = opf_load.load_opf(path)
+        blocks = opf_prompt.compose_opf_system_blocks(doc)
+        joined = "\n".join(blocks)
+        composed[path.name] = joined
+        if joined.count(paragraph) != 1:
+            failures.append(f"  [10] {path.name}: paragraph composed {joined.count(paragraph)} times, not once")
+            continue
+        digest = _digest_of(doc)
+        if not digest.startswith(opf_prompt.DIGEST_INTRO) or paragraph not in opf_prompt.DIGEST_INTRO:
+            failures.append(f"  [10] {path.name}: paragraph is not inside the digest intro")
+        if digest.index(paragraph) > digest.index("\n## "):
+            failures.append(f"  [10] {path.name}: paragraph does not precede the first clause")
+        if "\n## " in paragraph or "[clause_id:" in paragraph:
+            failures.append("  [10] paragraph carries a clause heading")
+    # No request-specific value: two different playbooks compose the same
+    # paragraph bytes (it is a module constant, not a template).
+    if any(ch.isdigit() for ch in paragraph):
+        failures.append("  [10] paragraph carries a number -- a request-specific value?")
+    for must in ("silent or thin", "not treat that silence as acceptance or as rejection",
+                 "standing instructions", "they govern"):
+        if must not in paragraph:
+            failures.append(f"  [10] paragraph does not say {must!r}")
+    # Issue #484's rule for the admin hint: cross-reference, never restate.
+    # The frontend constant names this one, and this module names it back.
+    hint_copy = (REPO_ROOT / "frontend" / "src" / "guidancePrecedenceCopy.ts").read_text(encoding="utf-8")
+    if "export const UNCOVERED_CLAUSES_HINT_COPY" not in hint_copy or "SILENT_PLAYBOOK_DEFAULT" not in hint_copy:
+        failures.append("  [10] the standing-instructions hint does not cross-reference SILENT_PLAYBOOK_DEFAULT")
+    if "UNCOVERED_CLAUSES_HINT_COPY" not in (SCRIPTS_DIR / "opf_prompt.py").read_text(encoding="utf-8"):
+        failures.append("  [10] opf_prompt.py does not cross-reference the admin hint constant")
+    return failures
+
+
+def check_11_citation_rule() -> list[str]:
+    failures: list[str] = []
+    paragraph = opf_prompt.SILENT_PLAYBOOK_DEFAULT
+    for must in ("internal_precedent_citation is null", "playbook_topic_id is the id shown in parentheses",
+                 "never in the external one"):
+        if must not in paragraph:
+            failures.append(f"  [11] paragraph does not say {must!r}")
+
+    # What the prompt asks for is what the active v3 contract accepts: a
+    # null citation and every uncovered taxonomy id as a playbook_topic_id.
+    issue_props = json.loads(OUTPUT_SCHEMA_V3_PATH.read_text(encoding="utf-8"))["definitions"]["Issue"]["properties"]
+    try:
+        jsonschema.validate(None, issue_props["internal_precedent_citation"])
+    except jsonschema.ValidationError as exc:
+        failures.append(f"  [11] v3 refuses a null internal_precedent_citation: {exc.message}")
+    for path in (FIXTURE_PATH, NDA_EXAMPLE_PATH):
+        for entry in opf_load.load_opf(path)["digest"]["uncovered_clause_types"]:
+            try:
+                jsonschema.validate(entry["taxonomy_id"], issue_props["playbook_topic_id"])
+            except jsonschema.ValidationError as exc:
+                failures.append(f"  [11] v3 refuses uncovered id {entry['taxonomy_id']!r}: {exc.message}")
+
+    doc_text = OUTPUT_CONTRACT_DOC.read_text(encoding="utf-8")
+    if "### Issues the playbook has no precedent for" not in doc_text:
+        failures.append("  [11] docs/output-contract.md has no section on the no-precedent citation rule")
+    else:
+        section = doc_text.split("### Issues the playbook has no precedent for", 1)[1].split("\n#", 1)[0]
+        for must in ("`internal_precedent_citation`", "`null`", "`playbook_topic_id`",
+                     "`uncovered_clause_types`", "`taxonomy_id`", "SILENT_PLAYBOOK_DEFAULT"):
+            if must not in section:
+                failures.append(f"  [11] the output-contract section does not name {must}")
+    return failures
+
+
+# --- pytest entry points (pytest.ini: a touched test converts) --------------
+
+
+def test_1_block_order_and_determinism() -> None:
+    failures = check_1_block_order_and_determinism()
+    assert not failures, "\n".join(failures)
+
+
+def test_2_exclusions_sentinel() -> None:
+    failures = check_2_exclusions_sentinel()
+    assert not failures, "\n".join(failures)
+
+
+def test_3_rubric_byte_identical() -> None:
+    failures = check_3_rubric_byte_identical()
+    assert not failures, "\n".join(failures)
+
+
+def test_4_no_debrand_leak() -> None:
+    failures = check_4_no_debrand_leak()
+    assert not failures, "\n".join(failures)
+
+
+def test_5_wholesale_evidence_is_retired() -> None:
+    failures = check_5_wholesale_evidence_is_retired()
+    assert not failures, "\n".join(failures)
+
+
+def test_6_context_block_only_when_present() -> None:
+    failures = check_6_context_block_only_when_present()
+    assert not failures, "\n".join(failures)
+
+
+def test_7_no_unbacked_tool_reference() -> None:
+    failures = check_7_no_unbacked_tool_reference()
+    assert not failures, "\n".join(failures)
+
+
+def test_8_recognition_set_folds_legal_form_variants() -> None:
+    failures = check_8_recognition_set_folds_legal_form_variants()
+    assert not failures, "\n".join(failures)
+
+
+def test_9_coverage_heading_and_uncovered_line() -> None:
+    failures = check_9_coverage_heading_and_uncovered_line()
+    assert not failures, "\n".join(failures)
+
+
+def test_10_silent_playbook_paragraph_once_before_contract() -> None:
+    failures = check_10_silent_playbook_paragraph_once_before_contract()
+    assert not failures, "\n".join(failures)
+
+
+def test_11_citation_rule() -> None:
+    failures = check_11_citation_rule()
+    assert not failures, "\n".join(failures)
+
+
 def main() -> int:
+    """Runs the same `test_*` entry points pytest collects (issue #111: a
+    test the runner never references is a test no gate runs)."""
     checks = [
-        ("1", "block order + determinism from the slice-1 fixture", check_1_block_order_and_determinism),
-        ("2", "exclusion list -- sentinels never leak into any block", check_2_exclusions_sentinel),
-        ("3", "posture.rubric present vs absent -> byte-identical output", check_3_rubric_byte_identical),
-        ("4", "no tenant-brand strings in composed output", check_4_no_debrand_leak),
-        ("5", "wholesale evidence retired: bulk must not reach the prompt", check_5_wholesale_evidence_is_retired),
-        ("6", "Context block appears only when perspective/de_minimis present", check_6_context_block_only_when_present),
-        ("7", "no unbacked tool reference, under both structured-output states", check_7_no_unbacked_tool_reference),
-        ("8", "recognition set folds legal-form variants; fixed sentence rendered once", check_8_recognition_set_folds_legal_form_variants),
+        ("1", "block order + determinism from the slice-1 fixture", test_1_block_order_and_determinism),
+        ("2", "exclusion list -- sentinels never leak into any block", test_2_exclusions_sentinel),
+        ("3", "posture.rubric present vs absent -> byte-identical output", test_3_rubric_byte_identical),
+        ("4", "no tenant-brand strings in composed output", test_4_no_debrand_leak),
+        ("5", "wholesale evidence retired: bulk must not reach the prompt", test_5_wholesale_evidence_is_retired),
+        ("6", "Context block appears only when perspective/de_minimis present", test_6_context_block_only_when_present),
+        ("7", "no unbacked tool reference, under both structured-output states", test_7_no_unbacked_tool_reference),
+        ("8", "recognition set folds legal-form variants; fixed sentence rendered once", test_8_recognition_set_folds_legal_form_variants),
+        ("9", "coverage heading + no-precedent line (issue #158)", test_9_coverage_heading_and_uncovered_line),
+        ("10", "silent-playbook paragraph once, before the contract (issue #158)", test_10_silent_playbook_paragraph_once_before_contract),
+        ("11", "no-precedent citation rule in prompt, v3 contract and docs (issue #158)", test_11_citation_rule),
     ]
 
     overall_pass = True
     for code, name, fn in checks:
-        failures = fn()
+        try:
+            fn()
+            failures: list[str] = []
+        except AssertionError as exc:
+            failures = str(exc).splitlines() or ["  (assertion failed)"]
         status = "PASS" if not failures else "FAIL"
         print(f"Check {code}: {name} ... {status}")
         for line in failures:
