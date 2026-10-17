@@ -108,6 +108,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
+import src.pipeline_runner as pipeline_runner  # noqa: E402
 import src.playbook_upload as playbook_upload  # noqa: E402
 import src.playbook_versions as playbook_versions  # noqa: E402
 import src.review_routes as review_routes  # noqa: E402
@@ -283,11 +284,16 @@ class PreflightVocabularyTestBase(unittest.TestCase):
             BillingMode="PAY_PER_REQUEST",
         )
 
-        # The resolver's in-process artifact cache outlives a single test in
+        # The resolver's in-process artifact caches outlive a single test in
         # this process; cleared here so each test observes the state IT set
-        # up. (Its keying is itself under test -- see
-        # `TestActiveVersionCache`.)
+        # up. (Their keying is itself under test -- see
+        # `TestActiveVersionCache`.) That includes the runner's validated-OPF
+        # cache (#127) underneath the resolver: it is keyed on the
+        # content-addressed storage key, which an earlier test installing the
+        # same fixture shares, and a hit only HEADs the object -- so left
+        # populated, the first lookup here would issue no S3 GET at all.
         review_routes._AGREEMENT_TYPE_CACHE.clear()
+        pipeline_runner._clear_opf_cache()
 
         self.registry_path = REPO_ROOT / "playbooks" / "registry.json"
         self.app = FastAPI()
