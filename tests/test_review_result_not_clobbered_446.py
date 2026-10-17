@@ -108,6 +108,7 @@ from moto import mock_aws  # noqa: E402
 
 import synthetic_form_paragraphs as sfp_module  # noqa: E402
 import model_client as model_client_module  # noqa: E402
+from fake_model_queues import seeded_by_model  # noqa: E402
 from critic_final_result import critic_keeps  # noqa: E402
 import pipeline_runner as pr  # noqa: E402
 import reviews  # noqa: E402
@@ -335,10 +336,10 @@ def _fake_model_client() -> Any:
     primary_id = model_client_module.openrouter_primary_model_id()
     critic_id = model_client_module.openrouter_critic_model_id()
     return model_client_module.FakeBedrockClient(
-        {
-            primary_id: [_primary_request_change_response()],
-            critic_id: [_critic_no_delta_response()],
-        }
+        seeded_by_model(
+            (primary_id, [_primary_request_change_response()]),
+            (critic_id, [_critic_no_delta_response()]),
+        )
     )
 
 

@@ -3,6 +3,8 @@
  * screen names the two passes Reviewer and Critic with the ADR's role copy,
  * tells the admin the critic should be at least as capable as the reviewer,
  * and renders a server `warnings` array inline — without blocking the save.
+ * Issue #148: it also says the default runs one model on both passes, and
+ * renders the server's split-model warning when the pair differs.
  *
  * The submit control is waited for by awaited state (found, then enabled),
  * never by a fixed number of flushes.
@@ -165,6 +167,31 @@ describe('AdminModel / #136 — Reviewer and Critic roles', () => {
 
     expect(screen.queryByTestId('admin-model-selection-warning')).toBeNull();
     expect(body).not.toHaveTextContent('onerror');
+  });
+});
+
+describe('AdminModel / #148 — one model on both passes shares the prompt cache', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('says the default runs both passes on one model and what a split pair gives up', async () => {
+    stubFetch({ get: selection({ default_primary: selection().default_critic }) });
+    render(<AdminModel />);
+    const note = await screen.findByTestId('admin-model-cache-reuse-note');
+
+    expect(note).toHaveTextContent(/by default both passes run on the same model/i);
+    expect(note).toHaveTextContent(/two different models loses that reuse/i);
+  });
+
+  it('renders the split-model warning the server returns for a split pair, as fixed copy', async () => {
+    stubFetch({ get: selection({ warnings: ['split_models_lose_cache_reuse'] }) });
+    render(<AdminModel />);
+
+    const warning = await screen.findByTestId('admin-model-selection-warning');
+    expect(warning).toHaveTextContent(/reviewer and the critic are different models/i);
+    expect(warning).toHaveTextContent(/cached playbook and contract/i);
+    expect(warning).not.toHaveTextContent('split_models_lose_cache_reuse');
   });
 });
 

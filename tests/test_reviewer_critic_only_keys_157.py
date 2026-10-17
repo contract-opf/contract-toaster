@@ -199,6 +199,9 @@ def _strict_minimal_reviewer_response(critic_delta: Any) -> dict[str, Any]:
     """
     body = _with_critic_delta(_reviewer_response(), critic_delta)
     body.pop("schema_version", None)
+    # Issue #148: the shared tool schema's `role` discriminator, which the
+    # strict projection forces like every property.
+    body["role"] = mos.ROLE_REVIEWER
     projected = mos.project_output_schema_for_provider()
     issue_def = projected["definitions"]["Issue"]
     issue_properties = issue_def.get("properties") or {}

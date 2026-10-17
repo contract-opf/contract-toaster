@@ -350,9 +350,8 @@ def _composed_system_blocks(doc: dict[str, Any]) -> list[dict[str, Any]]:
         declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
         accept_empty_posture=True,
         accept_stub_basis=True,
-        instructions_text="",
     )
-    return review_spine._assemble_opf_system_blocks(knowledge, "")
+    return review_spine._assemble_opf_system_blocks(knowledge)
 
 
 def _response_citing(topic_ids: list[str]) -> str:

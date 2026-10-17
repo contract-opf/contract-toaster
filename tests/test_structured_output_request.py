@@ -148,6 +148,12 @@ def _unstamp(parsed: dict[str, Any]) -> dict[str, Any]:
     if isinstance(critic_delta, dict):
         for added in critic_delta.get("added_issues") or []:
             added.pop("provenance", None)
+    # Issue #148: the pipeline also DROPS the model-facing `role`
+    # discriminator before validating (`model_output_schema.
+    # strip_model_facing_only_fields`), so the inverse puts it back -- the
+    # one shared tool schema requires it. A critic's answer is the one
+    # carrying a `critic_delta` object.
+    unstamped["role"] = "critic" if isinstance(critic_delta, dict) else "reviewer"
     return unstamped
 
 
@@ -242,7 +248,8 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
         # from `required`) -- the stamped-field removal this test's name
         # refers to.
         # Issue #627: v3 added the two top-level edit carriers, which the
-        # same rule forces required.
+        # same rule forces required. Issue #148 added the model-facing
+        # `role` discriminator, required in both projections.
         self.assertEqual(
             set(self.schema["required"]),
             {
@@ -254,6 +261,7 @@ class TestProjectOutputSchemaForProvider(unittest.TestCase):
                 "block_ops",
                 "critic_delta",
                 "verdict_summary",
+                "role",
             },
         )
 

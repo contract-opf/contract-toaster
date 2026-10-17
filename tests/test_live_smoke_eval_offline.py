@@ -274,8 +274,17 @@ class _ScriptedClient:
         # the second invoke() call finds an empty queue).
         primary_texts = primary_text if isinstance(primary_text, list) else [primary_text]
         critic_texts = critic_text if isinstance(critic_text, list) else [critic_text]
-        self._queues = {primary_id: list(primary_texts), critic_id: list(critic_texts)}
-        self._usage_by_model = {primary_id: _PRIMARY_USAGE, critic_id: _CRITIC_USAGE}
+        # Issue #148: the policy default runs ONE model on both passes, so the
+        # two ids may be the same key. Each queue therefore carries its usage
+        # with each response, and a shared id gets the primary's entries
+        # first -- the primary pass runs first -- then the critic's.
+        self._queues: dict[str, list[tuple[str, dict[str, int]]]] = {}
+        self._queues.setdefault(primary_id, []).extend(
+            (text, _PRIMARY_USAGE) for text in primary_texts
+        )
+        self._queues.setdefault(critic_id, []).extend(
+            (text, _CRITIC_USAGE) for text in critic_texts
+        )
         self.last_usage: Optional[dict[str, int]] = None  # noqa: UP045
         self.last_served_model: Optional[str] = None  # noqa: UP045
         self.last_generation_id: Optional[str] = None  # noqa: UP045
@@ -311,8 +320,8 @@ class _ScriptedClient:
         queue = self._queues.get(model_id)
         if not queue:
             raise AssertionError(f"_ScriptedClient: no scripted response for model_id={model_id!r}")
-        text = queue.pop(0)
-        self.last_usage = dict(self._usage_by_model[model_id])
+        text, usage = queue.pop(0)
+        self.last_usage = dict(usage)
         self.calls.append({"model_id": model_id, "tool_spec": tool_spec})
         return text
 
@@ -431,18 +440,20 @@ def _part_1_matrix_report(lse, tmp_path: Path, failures: list[str]) -> None:
             f"{meta.get('critic_model_id')!r}"
         )
 
+    # Issue #148: the reviewer pin is the critic's model (Opus 5, $5/$25).
     expected_primary_cost = (
-        _PRIMARY_USAGE["input_tokens"] * 3.0 + _PRIMARY_USAGE["output_tokens"] * 15.0
+        _PRIMARY_USAGE["input_tokens"] * 5.0 + _PRIMARY_USAGE["output_tokens"] * 25.0
     ) / 1_000_000
     expected_critic_cost = (
         _CRITIC_USAGE["input_tokens"] * 5.0 + _CRITIC_USAGE["output_tokens"] * 25.0
     ) / 1_000_000
     # Issue #420 fix round 2, finding 3: `cost_usd` is now FULL precision
     # (live_smoke_eval.compute_actual_usd_from_usage), not quantized to
-    # whole cents -- this fixture's own cost is $0.013750 exactly (primary
-    # 1000 x $3/M + 200 x $15/M = $0.006; critic 800 x $5/M + 150 x $25/M =
-    # $0.007750; the roles' rates swapped with issue #136), which the pre-fix rounded `cost_usd` reported as $0.01 (a
-    # 31.7% understatement). `expected_cost_cents` is kept too -- it is what
+    # whole cents -- this fixture's own cost is $0.017750 exactly (primary
+    # 1000 x $5/M + 200 x $25/M = $0.010; critic 800 x $5/M + 150 x $25/M =
+    # $0.007750; issue #148 put the reviewer on the critic's model -- it was
+    # $0.013750 with the $3/$15 Sonnet reviewer, which the pre-fix rounded
+    # `cost_usd` reported as $0.01, a 31.7% understatement). `expected_cost_cents` is kept too -- it is what
     # the SEPARATE `cost_usd_cents` field (the settlement-equivalent
     # whole-cent figure) must still equal.
     expected_cost_usd = expected_primary_cost + expected_critic_cost
@@ -1554,7 +1565,7 @@ def main() -> int:
 
     # Issue #420 fix round 1, finding 2: Part 1's cost/rate assertions
     # hand-compute expected values against the model-policy pins (5.0/25.0
-    # primary, 3.0/15.0 critic) -- but the code under test resolves rates
+    # on both passes since issue #148) -- but the code under test resolves rates
     # via reviews._active_provider_rates(None) ->
     # model_settings.resolve_openrouter_model_ids(None), which honors
     # OPENROUTER_PRIMARY_MODEL_ID / OPENROUTER_CRITIC_MODEL_ID (documented

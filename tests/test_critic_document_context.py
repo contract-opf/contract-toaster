@@ -254,10 +254,25 @@ def test_tasking_block_reaches_the_sent_critic_prompt(failures: list[str]) -> No
         )
         return
 
-    if user_prompt.index(pp.CRITIC_TASKING_BLOCK) != 0:
+    # Issue #148: the tasking moved from the head of the prompt to the role
+    # suffix -- AFTER the document (the second prompt-cache breakpoint, which
+    # must be the same bytes at the same offset as the primary's) and still
+    # BEFORE the primary's output, so the critic is told not to anchor on the
+    # first reviewer's answer before it reads that answer.
+    tasking_at = user_prompt.index(pp.CRITIC_TASKING_BLOCK)
+    if not user_prompt.startswith(pp._delimited_block("COUNTERPARTY_DOCUMENT", SYNTHETIC_DOC_TEXT)):
         failures.append(
-            "[2c] The tasking must come FIRST, ahead of every delimited data block -- "
-            "the critic has to know what it is doing before it reads the material."
+            "[2c] The document block must come FIRST (issue #148): it is the cache "
+            "breakpoint both passes share, so nothing role-specific may precede it."
+        )
+    if not (
+        user_prompt.index("</COUNTERPARTY_DOCUMENT>")
+        < tasking_at
+        < user_prompt.index("<PRIMARY_REVIEWER_OUTPUT>")
+    ):
+        failures.append(
+            "[2c] The tasking must sit between the document and the primary's output -- "
+            "after the shared prefix, before the answer it tells the critic not to anchor on."
         )
 
     # It is trusted instruction, so it must NOT sit inside an untrusted
@@ -321,7 +336,7 @@ def test_tasking_states_there_is_no_minimum_number_of_findings(failures: list[st
 
 # The two sentences that make the tasking a claim ABOUT the document block,
 # rather than a claim the prompt can honour with or without one.
-_ASSERTS_A_DOCUMENT_IS_PRESENT = "counterparty document shown to you below"
+_ASSERTS_A_DOCUMENT_IS_PRESENT = "counterparty document shown to you above"
 _FORBIDS_OBJECTIONS_UNGROUNDED_IN_THE_DOCUMENT = (
     "An objection you cannot ground in the document text shown to you is an "
     "objection you must not raise."
@@ -335,7 +350,7 @@ def test_the_tasking_variant_follows_whether_a_document_is_actually_present(
     about that block, and the assembler that can drop the block owns keeping
     it true. Emitting the document-bearing tasking over a prompt with no
     `COUNTERPARTY_DOCUMENT` would tell the critic a document is "shown to you
-    below" when none is, and then forbid any objection it cannot ground in
+    above" when none is, and then forbid any objection it cannot ground in
     that absent text -- forbidding, read literally, EVERY objection. That
     silences the adversarial pass entirely, and it would do so invisibly:
     the pass still runs, still returns schema-valid output, and simply stops
@@ -348,10 +363,12 @@ def test_the_tasking_variant_follows_whether_a_document_is_actually_present(
         primary_output=_primary_output(),
     )
 
-    if not with_doc.startswith(pp.CRITIC_TASKING_BLOCK):
+    if pp.CRITIC_TASKING_BLOCK not in with_doc or not with_doc.startswith(
+        pp._delimited_block("COUNTERPARTY_DOCUMENT", SYNTHETIC_DOC_TEXT)
+    ):
         failures.append(
-            "[2m] With a document block composed, the prompt must open with the "
-            "document-bearing tasking (CRITIC_TASKING_BLOCK)."
+            "[2m] With a document block composed, the prompt must open with that block "
+            "(issue #148) and carry the document-bearing tasking (CRITIC_TASKING_BLOCK)."
         )
     if not without_doc.startswith(pp.CRITIC_TASKING_BLOCK_NO_DOCUMENT):
         failures.append(

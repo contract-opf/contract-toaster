@@ -590,7 +590,7 @@ def _run_review_with_model_output(
 class ProductionCorpusPopulatesCheckOneTestCase(unittest.TestCase):
     def setUp(self):
         self.bundle = _load_bundle()
-        self.blocks = pp.assemble_system_blocks(self.bundle, "", "")
+        self.blocks = pp.assemble_system_blocks(self.bundle)
         self.prompt_text = pp.render_system_prompt(self.blocks)
         self.planted = _a_sentence_from(pp.REVIEW_GUIDANCE_BLOCK)
         # The planted string is a verbatim piece of the prompt that was
@@ -666,7 +666,7 @@ class DemonstratedInjectionBlockedTestCase(unittest.TestCase):
         self.assertIn(
             self.planted,
             pp.render_system_prompt(
-                pp.assemble_system_blocks(bundle, "", "", notes_mode="internal")
+                pp.assemble_system_blocks(bundle, notes_mode="internal")
             ),
         )
 
@@ -731,11 +731,14 @@ class ShortGuidanceCannotDisableCheckOneTestCase(unittest.TestCase):
 
     def _corpus_with_guidance(self, guidance: str) -> ls.ConfidentialCorpus:
         """Exactly `review_spine`'s production call shape: the composed
-        blocks for this guidance, and `[toaster_guidance, instructions_text]`
-        as the exempt texts."""
+        blocks plus (issue #148) the per-review control layer that carries
+        this guidance, and `[toaster_guidance, instructions_text]` as the
+        exempt texts."""
         return ls.ConfidentialCorpus.from_playbook(
             self.bundle,
-            system_blocks=pp.assemble_system_blocks(self.bundle, guidance, ""),
+            system_blocks=review_spine.leakage_scan_instruction_blocks(
+                pp.assemble_system_blocks(self.bundle), toaster_guidance=guidance
+            ),
             system_prompt_exempt_texts=[guidance, ""],
         )
 
@@ -866,7 +869,7 @@ class CheckOneExemptionsTestCase(unittest.TestCase):
     are the three exemptions that keep the tightening honest."""
 
     def test_a_faithful_replacement_text_is_not_self_blocked(self):
-        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK, "", "")
+        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK)
         corpus = _synthetic_corpus(system_blocks=blocks)
 
         # The standard clause is in the prompt (it is in the projected
@@ -894,7 +897,9 @@ class CheckOneExemptionsTestCase(unittest.TestCase):
             "For this review, insist on a ninety-day cure period in every "
             "termination provision, and use exactly that wording."
         )
-        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK, guidance, "")
+        blocks = review_spine.leakage_scan_instruction_blocks(
+            pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK), toaster_guidance=guidance
+        )
         corpus = _synthetic_corpus(
             system_blocks=blocks, system_prompt_exempt_texts=[guidance, ""]
         )
@@ -910,7 +915,7 @@ class CheckOneExemptionsTestCase(unittest.TestCase):
         also derived into check 1, a leak of it would start reporting as
         `system_prompt_leakage` and every runbook/diagnostic keyed on the
         old category would quietly mislead."""
-        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK, "", "")
+        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK)
         corpus = _synthetic_corpus(system_blocks=blocks)
         outcome = ls.scan_model_output(
             _model_output_with(verdict_summary=_PLAYBOOK_NGRAM), corpus
@@ -932,7 +937,7 @@ class CheckOneExemptionsTestCase(unittest.TestCase):
         """The exemptions above remove the playbook-derived text, so what is
         left -- and what this tightening is FOR -- is the instruction text
         that no other category covers."""
-        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK, "", "")
+        blocks = pp.assemble_system_blocks(_SYNTHETIC_PLAYBOOK)
         corpus = _synthetic_corpus(system_blocks=blocks)
         overlay_sentence = _a_sentence_from(pp.BINARY_DECISION_OVERLAY_BLOCK)
         self.assertIn(overlay_sentence, corpus.system_prompt_ngrams)
@@ -962,9 +967,8 @@ class OpfBuilderTestCase(unittest.TestCase):
             declared_mode=review_knowledge.MODE_PLAYBOOK_DIGEST,
             accept_empty_posture=True,
             accept_stub_basis=True,
-            instructions_text="",
         )
-        self.blocks = review_spine._assemble_opf_system_blocks(knowledge, "")
+        self.blocks = review_spine._assemble_opf_system_blocks(knowledge)
 
     def test_the_pre_521_call_shape_yields_an_empty_check_one_corpus(self):
         legacy = ls.ConfidentialCorpus.from_opf_document(self.doc, overrides=None)

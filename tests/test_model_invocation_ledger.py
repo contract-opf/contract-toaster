@@ -86,6 +86,7 @@ import primary_review_pass as pp  # noqa: E402
 # fixture builder, canned responses, and DynamoDB/S3 fakes rather than
 # duplicating them.
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
+from fake_model_queues import seeded_by_model  # noqa: E402
 
 MODEL_RESPONSES_DIR = REPO_ROOT / "tests" / "fixtures" / "model_responses"
 PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
@@ -645,10 +646,10 @@ def _fake_client_with_primary_retry(primary_response: str, critic_response: str)
     primary_id = model_client.openrouter_primary_model_id()
     critic_id = model_client.openrouter_critic_model_id()
     return model_client.FakeBedrockClient(
-        {
-            primary_id: [_fixture("schema_invalid_missing_issues.json"), primary_response],
-            critic_id: [critic_response],
-        }
+        seeded_by_model(
+            (primary_id, [_fixture("schema_invalid_missing_issues.json"), primary_response]),
+            (critic_id, [critic_response]),
+        )
     )
 
 

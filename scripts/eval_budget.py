@@ -70,8 +70,9 @@ CI_EVAL_MONTHLY_CAP_USD = 1000.00
 # before it executes, so the harness can refuse BEFORE spending rather than
 # after (docs/evaluation.md -> "fails loudly ... rather than silently
 # truncating coverage"). Derived from the per-run cost derivation in
-# evaluation.md: ~$205 uncached / 39 cases / 5 runs ~= $1.05/case-run;
-# rounded up slightly for a conservative (fail-loud-early) estimate.
+# evaluation.md: since issue #148 both passes run on Opus 4.8, so one
+# case-run is 2 x (60K x $5.50/M + 8K x $27.50/M) = $1.10 exactly (~$215
+# uncached for 39 cases x 5 runs). It was ~$1.05 rounded up before #148.
 ESTIMATED_COST_PER_CASE_RUN_USD = 1.10
 
 DEFAULT_LEDGER_PATH = REPO_ROOT / ".ci-eval-ledger.json"

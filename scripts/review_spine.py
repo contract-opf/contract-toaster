@@ -101,23 +101,21 @@ as `unnormalizable_input` above, never raised. A v1 bundle (no
 `opf_bundle_v2` key) takes none of this: every branch below is exactly
 byte-identical to before this issue.
 
-`instructions_text` (issue #479 DECISION, 2026-08-04) is threaded into
-`review_knowledge.resolve_knowledge` for an OPF-governed review -- composed
-into the SAME Guidance slot #483 established for the v1 path, rather than
-as a separate outer control block -- so it is part of `knowledge
-.system_blocks()`, not `_assemble_opf_system_blocks`'s own wrapper below.
-`toaster_guidance` remains an outer control block for BOTH paths (v1 and
-OPF alike): it is the per-review, most-specific layer, and stays composed
-identically to the v1 path per `primary_review_pass.render_toaster_guidance_block`.
-`markup_intensity` (issue #54) is an outer control block for both paths the
-same way -- rendered by `primary_review_pass.render_markup_intensity_block`
-immediately BEFORE the toaster-guidance block in each assembler (none at all
-for `medium`), so the reviewer's own typed words still read last. It is NOT
-part of `knowledge.system_blocks()` / `content_hash()`: the ticket's "after
-standing instructions, before toaster guidance" slot cannot exist inside
-`compose_opf_system_blocks`, whose blocks this assembler appends AFTER the
-guidance block; the level is recorded on the review row and the execution
-input instead, which is where the audit distinction lives.
+`instructions_text`, `markup_intensity` (issue #54) and `toaster_guidance`
+(issue #398) are the per-review control layer, and since issue #148 they are
+handled identically on BOTH paths: neither assembler composes them into the
+system prompt any more. Each pass renders them with
+`primary_review_pass.render_request_control_text` -- standing instructions,
+then the markup-intensity block (none for `medium`), then the toaster
+guidance, so the reviewer's own typed words still read last -- and sends
+them in its role suffix, after the counterparty document. The system prompt
+is therefore the same bytes for every review of the same playbook, and the
+digest's cache entry survives reviews that carry different guidance. None
+of the three is part of `knowledge.system_blocks()` / `content_hash()`; the
+standing instructions' own hash and the markup level are recorded on the
+review row and the execution input, which is where the audit distinction
+lives. (Issue #479's DECISION composed `instructions_text` into the OPF
+Guidance slot; #148 reversed that, for the cache.)
 
 ## Address repair: removed from this pipeline (issues #627/#628)
 
@@ -476,29 +474,32 @@ def document_text_for_review(paragraphs: list[dict[str, Any]]) -> str:
 
 def _assemble_opf_system_blocks(
     knowledge: "review_knowledge.ReviewKnowledge",  # noqa: UP037
-    toaster_guidance: str,
     notes_mode: str = "external",
-    markup_intensity: str = "medium",
 ) -> list[dict[str, Any]]:
     """The OPF digest-mode system blocks: the same output-contract control
-    blocks every v1 review sends (`primary_review_pass.REVIEW_GUIDANCE_BLOCK`,
-    the optional markup-intensity block (issue #54), the optional
-    toaster-guidance block, `BINARY_DECISION_OVERLAY_BLOCK` --
-    none of these describe playbook CONTENT, only the response shape, so
-    they apply unchanged regardless of knowledge mode) followed by
+    blocks every v1 review sends (the review-objective block and
+    `BINARY_DECISION_OVERLAY_BLOCK` -- neither describes playbook CONTENT,
+    only the review's objective and the response shape, so they apply
+    unchanged regardless of knowledge mode) followed by
     `knowledge.system_blocks()` -- POSTURE, BINDING, DIGEST, GUIDANCE,
     CONTEXT, in that fixed order (`opf_prompt.compose_opf_system_blocks`'s
-    own contract; the operator's standing instructions are already
-    composed INTO the Guidance slot by `resolve_knowledge`, not appended
-    here -- see this module's own docstring "OPF digest-mode governance"
-    section), each present-or-absent per that function's "a block is
+    own contract), each present-or-absent per that function's "a block is
     absent or it has content" doctrine.
 
+    REQUEST-INDEPENDENT BY CONSTRUCTION (issue #148). Both passes send these
+    blocks verbatim, and every review of the same playbook artifact sends
+    the same bytes: the per-review control layer -- standing instructions,
+    the markup-intensity dial, the toaster guidance -- is rendered by
+    `primary_review_pass.render_request_control_text` inside each pass and
+    sent after the counterparty document, never here. Anthropic keys a
+    cache hit on an exact byte prefix (tools -> system -> messages), so a
+    per-review value in this list would re-bill the digest on every review.
+
     `knowledge.system_blocks()` is appended LAST, so its own cache_control
-    (on ITS last block) remains the single cache breakpoint for the whole
-    prompt -- mirroring the v1 path's `assemble_system_blocks`, which also
-    puts the sole cache_control on its own last (playbook) block. The v1
-    path's judged-NL Floor block (`render_floor_block`, sourced from
+    (on ITS last block) remains the single system-side cache breakpoint --
+    mirroring the v1 path's `assemble_system_blocks`, which also puts the
+    sole cache_control on its own last (playbook) block. The v1 path's
+    judged-NL Floor block (`render_floor_block`, sourced from
     `playbook["hard_rejections"]`) has no OPF analogue here: an OPF
     document's Floor invariants are already part of `knowledge`'s own
     BINDING block (`opf_prompt.resolve_floor_invariants`) as the soft,
@@ -507,33 +508,20 @@ def _assemble_opf_system_blocks(
     `floor_judge.judge_floor_invariants` (run once per review by
     `run_review` below, not per pass).
 
-    `notes_mode` (issues #516/#522, default `"external"`) reaches the same
-    two mode-conditional blocks the v1 path's
-    `primary_review_pass.assemble_system_blocks` gates on it: the
-    toaster-guidance block's deviation-narration clause, and the
-    output-contract block's `internal_rationale_for_footnote` key. Threaded
-    because an OPF review renders footnotes through the SAME notes-mode
-    renderer a v1 review does (`footnote_audience.
-    footnote_texts_for_notes_mode`) -- left mode-blind here, an OPF review
-    in `internal`/`both` would carry the renderer with no producer for it,
-    which is the defect this pairing exists to close. `external` (the
-    default, and every mode reachable while #572's `NOTES_MODE_ENABLED`
-    kill switch is off) reproduces the pre-#522 blocks byte for byte.
-
-    `markup_intensity` (issue #54, default `"medium"`) is rendered by
-    `primary_review_pass.render_markup_intensity_block` as its own
-    fixed-wording block in the SAME slot the v1 assembler gives it:
-    immediately BEFORE the toaster-guidance block, so the reviewer's own
-    typed words read last. It is deliberately an outer control block here
-    -- not composed into `knowledge.system_blocks()` -- see the module
-    docstring's "OPF digest-mode governance" section for why. `medium` (the
-    default) renders no block, so a medium review's prompt is byte-identical
-    to before the parameter existed (pinned in
-    `tests/test_review_routes_markup_intensity_54.py`).
+    `notes_mode` (issues #516/#522, default `"external"`) reaches the
+    output-contract block's `internal_rationale_for_footnote` key, as on the
+    v1 path. It is a property of the output contract rather than of the
+    request -- the tool schema varies with it too, ahead of this list on the
+    wire -- so it stays in the shared prefix; see
+    `primary_review_pass.assemble_system_blocks`. `external` (the default,
+    and every mode reachable while #572's `NOTES_MODE_ENABLED` kill switch
+    is off) reproduces the pre-#522 blocks byte for byte.
     """
     # Issues #675/#677: the objective block is RENDERED with this review's
     # perspective, so the prompt states who we act for in the same block that
-    # states what the review is for -- one objective, not two.
+    # states what the review is for -- one objective, not two. The
+    # perspective is the playbook artifact's own, so this block is the same
+    # bytes for every review of it.
     _perspective = ((getattr(knowledge, "opf_doc", None) or {}).get("perspective") or {})
     blocks: list[dict[str, Any]] = [
         {
@@ -542,24 +530,46 @@ def _assemble_opf_system_blocks(
                 party=str(_perspective.get("party") or ""),
                 counterparty_type=str(_perspective.get("counterparty_type") or ""),
             ),
-        }
-    ]
-    intensity_text = primary_review_pass.render_markup_intensity_block(markup_intensity)
-    if intensity_text is not None:
-        blocks.append({"type": "text", "text": intensity_text})
-    guidance_text = primary_review_pass.render_toaster_guidance_block(
-        toaster_guidance, notes_mode=notes_mode
-    )
-    if guidance_text is not None:
-        blocks.append({"type": "text", "text": guidance_text})
-    blocks.append(
+        },
         {
             "type": "text",
             "text": primary_review_pass.render_binary_decision_overlay_block(notes_mode),
-        }
-    )
+        },
+    ]
     blocks.extend(knowledge.system_blocks())
     return blocks
+
+
+def leakage_scan_instruction_blocks(
+    system_blocks: list[dict[str, Any]],
+    *,
+    instructions_text: str = "",
+    markup_intensity: str = "medium",
+    toaster_guidance: str = "",
+    notes_mode: str = "external",
+) -> list[dict[str, Any]]:
+    """The instruction text the leakage scan's check-1 (system-prompt)
+    corpus is derived from: the composed system blocks, plus -- when the
+    review carries any -- the per-review control layer
+    (`primary_review_pass.render_request_control_text`) as one further block.
+
+    Issue #148 moved that layer (standing instructions, markup intensity,
+    toaster guidance) out of the system prompt and into both passes' role
+    suffix, after the document. Its fixed instruction text is still prompt
+    text the model reads, so it stays in the check-1 derivation exactly as it
+    was when it lived in the system blocks; the operator-authored halves are
+    exempted by the caller, as before (`system_prompt_exempt_texts`). One
+    function, so `run_review` and the tests that pin the corpus compose it
+    the same way."""
+    request_control_text = primary_review_pass.render_request_control_text(
+        instructions_text=instructions_text,
+        markup_intensity=markup_intensity,
+        toaster_guidance=toaster_guidance,
+        notes_mode=notes_mode,
+    )
+    if not request_control_text:
+        return list(system_blocks)
+    return [*system_blocks, {"type": "text", "text": request_control_text}]
 
 
 def _floor_perspective_note(
@@ -907,23 +917,25 @@ def run_review(
     `toaster_guidance` (issue #398, default `""`): the optional per-review
     free-text instructions threaded from POST /api/reviews
     (backend/src/reviews.py -> backend/src/pipeline_runner.py). Passed
-    unchanged to BOTH the primary and critic passes (see
-    primary_review_pass.assemble_system_blocks's precedence contract:
-    on conflict with the playbook, this guidance governs, but it never
-    reaches the judged-NL Floor). Empty is today's behavior.
+    unchanged to BOTH the primary and critic passes, which render it with
+    `primary_review_pass.render_request_control_text` into the role suffix
+    after the counterparty document (issue #148) -- on conflict with the
+    playbook this guidance governs, but it never reaches the judged-NL
+    Floor. Empty is today's behavior.
 
     `instructions_text` (issue #483/#482, epic #481, default `""`): the
     playbook's resolved standing-instructions text, resolved once at
     submission time by backend/src/reviews.py and threaded read-only
-    through backend/src/pipeline_runner.py -- never re-resolved here. For a
-    v1 bundle, passed unchanged to BOTH the primary and critic passes; see
-    primary_review_pass.assemble_system_blocks's precedence contract for
-    where it sits relative to toaster_guidance and the playbook. For an
-    OPF-governed bundle (issue #479 DECISION, 2026-08-04), composed into
-    `review_knowledge.resolve_knowledge`'s Guidance slot instead -- see this
-    module's own docstring "OPF digest-mode governance" section. Empty is
-    today's behavior either way -- byte-identical prompts to before this
-    param existed.
+    through backend/src/pipeline_runner.py -- never re-resolved here.
+    Passed unchanged to BOTH the primary and critic passes on BOTH paths
+    (v1 and OPF alike), which render it with
+    `primary_review_pass.render_request_control_text` into the role suffix
+    after the counterparty document, ahead of the markup-intensity and
+    toaster-guidance blocks (issue #148). It used to sit in the system
+    prompt (and, for an OPF bundle, inside `knowledge.system_blocks()`'s
+    Guidance slot), where an admin's edit -- or any review carrying none --
+    changed the bytes ahead of the cached playbook block. Empty adds
+    nothing.
 
     `entity_roster` (issue #678, optional): the deployment's admin-managed
     roster of OUR OWN legal entity names -- organisation-scoped
@@ -942,7 +954,7 @@ def run_review(
     `notes_mode` (issue #520, epic #519 item A, default `"external"`): this
     review's declared footnote audience -- `"none" | "external" |
     "internal" | "both"`. Threaded into the primary and critic prompt
-    assembly (item B), into the leakage corpus's system-block derivation
+    assembly (item B), into the leakage corpus's system-prompt derivation
     below (it selects which toaster-guidance intro variant is composed), and
     into every `redline_generate.generate_redline` call site -- which is
     where #513's conditional internal-notes export marker reads it, and
@@ -955,15 +967,12 @@ def run_review(
     `markup_intensity` (issue #54, default `"medium"`): the reviewer's
     closed-vocabulary markup dial (`light | medium | heavy`), read out of
     the execution payload by `backend/src/pipeline_runner.py` exactly as
-    `notes_mode` is and threaded read-only to BOTH review paths -- into
-    `_assemble_opf_system_blocks` for an OPF-governed review, and into
-    `primary_review_pass.run_primary_pass` / `critic_review_pass.
-    run_critic_pass` (-> `primary_review_pass.assemble_system_blocks`) for a
-    registry-v1 review -- where `primary_review_pass.
-    render_markup_intensity_block` renders it as its own fixed-wording
-    system block immediately before the toaster-guidance block (none at all
-    for `medium`, so the default prompt is byte-identical to before the
-    parameter existed). It replaces the prose sentence the SPA used to
+    `notes_mode` is and threaded read-only into `primary_review_pass.
+    run_primary_pass` / `critic_review_pass.run_critic_pass` on both review
+    paths -- where `primary_review_pass.render_markup_intensity_block`
+    renders it as its own fixed-wording block immediately before the
+    toaster-guidance block, in the role suffix after the counterparty
+    document (issue #148; none at all for `medium`). It replaces the prose sentence the SPA used to
     prepend to `toaster_guidance` for the dial (hard cutover, owner decision
     Q3 on the 2026-09-05 audit); a review whose row records `light` or
     `heavy` tells the model so on whichever path it runs.
@@ -1063,7 +1072,12 @@ def run_review(
                 # that: only a row that actually recorded the acceptance
                 # satisfies the gate.
                 accept_stub_basis=bool(opf_bundle_v2.get("accepted_stub_basis", False)),
-                instructions_text=instructions_text,
+                # Issue #148: `instructions_text` is deliberately NOT passed
+                # here any more. It is per-playbook, admin-editable text, and
+                # composed into `knowledge.system_blocks()` it sat ahead of
+                # the cached digest; both passes now render it in their role
+                # suffix after the document instead (`primary_review_pass.
+                # render_request_control_text`), as on the v1 path.
                 # Issue #678: the deployment's roster of OUR legal entity
                 # names, resolved once per review by
                 # `backend/src/pipeline_runner.py` and unioned with the
@@ -1075,12 +1089,7 @@ def run_review(
             return _terminal(status=STATUS_ERROR, reason=REASON_OPF_KNOWLEDGE_REFUSED)
         except opf_prompt.PromptCompositionError:
             return _terminal(status=STATUS_ERROR, reason=REASON_OPF_DIGEST_MISSING)
-        opf_system_blocks = _assemble_opf_system_blocks(
-            knowledge,
-            toaster_guidance,
-            notes_mode=notes_mode,
-            markup_intensity=markup_intensity,
-        )
+        opf_system_blocks = _assemble_opf_system_blocks(knowledge, notes_mode=notes_mode)
         opf_playbook_hash = knowledge.content_hash()
         floor_invariants = opf_prompt.resolve_floor_invariants(
             knowledge.opf_doc or {}, knowledge.overrides
@@ -1116,13 +1125,14 @@ def run_review(
         review_system_blocks = (
             opf_system_blocks
             if opf_system_blocks is not None
-            else primary_review_pass.assemble_system_blocks(
-                playbook,
-                toaster_guidance,
-                instructions_text,
-                notes_mode=notes_mode,
-                markup_intensity=markup_intensity,
-            )
+            else primary_review_pass.assemble_system_blocks(playbook, notes_mode=notes_mode)
+        )
+        review_system_blocks = leakage_scan_instruction_blocks(
+            review_system_blocks,
+            instructions_text=instructions_text,
+            markup_intensity=markup_intensity,
+            toaster_guidance=toaster_guidance,
+            notes_mode=notes_mode,
         )
         system_prompt_exempt_texts = [toaster_guidance, instructions_text]
         if opf_bundle_v2 is not None:

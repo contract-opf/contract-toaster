@@ -20,11 +20,12 @@ that exists and behaves as documented.
 ## What this test asserts (mirrors the issue's acceptance criteria)
 
   1. Prompt-fixture tests: with standing instructions set, both primary and
-     critic system prompts contain the block with the intro + text, sitting
-     strictly between the fixed guidance block and the toaster-guidance
-     block (epic precedence: Floor > per-review > standing > playbook); with
-     empty text the block is absent entirely; the cache breakpoint stays on
-     the final (playbook) block regardless.
+     critic prompts contain the block with the intro + text, sitting
+     strictly before the toaster-guidance block (epic precedence: Floor >
+     per-review > standing > playbook); with empty text the block is absent
+     entirely; the cache breakpoint stays on the final (playbook) block
+     regardless. Since issue #148 the block lives in the per-review control
+     layer both passes send after the document, never in the system prompt.
   2. E2E (mock model): a review run with instructions v2 records v2 on the
      reviews row (lineage, issue #482) AND the SAME v2 text reaches the
      model via `backend/src/pipeline_runner.py::run_real_pipeline` reading
@@ -111,80 +112,78 @@ def test_standing_instructions_block_absent_when_empty(failures: list[str]) -> N
 
     playbook = _sample_playbook()
     blocks_default_arg = pp.assemble_system_blocks(playbook)
-    blocks_explicit_empty = pp.assemble_system_blocks(playbook, "", "")
-    if [b["text"] for b in blocks_default_arg] != [b["text"] for b in blocks_explicit_empty]:
+    if pp.render_request_control_text() != pp.render_request_control_text(instructions_text=""):
         failures.append(
-            "[1d] assemble_system_blocks(playbook) (no instructions_text arg) vs "
-            "assemble_system_blocks(playbook, '', '') must be byte-identical."
+            "[1d] render_request_control_text() (no instructions_text arg) vs "
+            "instructions_text='' must be byte-identical."
         )
     if any("STANDING_INSTRUCTIONS" in b["text"] for b in blocks_default_arg):
-        failures.append("[1e] With no instructions_text supplied, no block may mention STANDING_INSTRUCTIONS at all.")
+        failures.append("[1e] The system blocks may never mention STANDING_INSTRUCTIONS (issue #148).")
 
 
 def test_standing_instructions_block_present_and_states_precedence(failures: list[str]) -> None:
+    """Issue #148: the block is per-review control text, so it lives in the
+    role suffix both passes send after the document -- never in the system
+    blocks, whose bytes (and prompt-cache entry) every review of the playbook
+    shares."""
     playbook = _sample_playbook()
     instructions_text = "Always flag auto-renewal clauses longer than 12 months."
-    blocks = pp.assemble_system_blocks(playbook, "", instructions_text)
-    blocks_empty = pp.assemble_system_blocks(playbook)
+    blocks = pp.assemble_system_blocks(playbook)
 
-    if len(blocks) != len(blocks_empty) + 1:
-        failures.append(
-            f"[2a] Supplying instructions_text must add exactly one system block "
-            f"relative to no standing instructions; got {len(blocks)} vs {len(blocks_empty)}."
-        )
+    if any(instructions_text in b["text"] for b in blocks):
+        failures.append("[2a] Standing instructions must NOT be in the system blocks (issue #148).")
 
-    matches = [b for b in blocks if instructions_text in b["text"]]
-    if len(matches) != 1:
-        failures.append(f"[2b] Expected exactly one system block containing the instructions_text verbatim; found {len(matches)}.")
+    control = pp.render_request_control_text(instructions_text=instructions_text)
+    if control.count(instructions_text) != 1:
+        failures.append("[2b] Expected the instructions_text verbatim, once, in the control layer.")
         return
-    standing_block = matches[0]
+    if control != pp.render_standing_instructions_block(instructions_text):
+        failures.append("[2b] With only instructions supplied, the control layer is that block alone.")
 
-    if "<STANDING_INSTRUCTIONS>" not in standing_block["text"] or "</STANDING_INSTRUCTIONS>" not in standing_block["text"]:
+    if "<STANDING_INSTRUCTIONS>" not in control or "</STANDING_INSTRUCTIONS>" not in control:
         failures.append("[2c] Standing-instructions block must wrap the text in <STANDING_INSTRUCTIONS> tags.")
 
     if blocks[0]["text"] != pp.REVIEW_GUIDANCE_BLOCK:
-        failures.append("[2d] Block 0 must remain the fixed review-guidance block even when instructions_text is supplied.")
-    if blocks[1] is not standing_block and blocks[1]["text"] != standing_block["text"]:
-        failures.append("[2e] Standing-instructions block must sit immediately after the fixed guidance block (index 1) when no toaster_guidance is present.")
+        failures.append("[2d] Block 0 must remain the fixed review-guidance block.")
+    if not control.startswith(pp.STANDING_INSTRUCTIONS_INTRO):
+        failures.append("[2e] The control layer must open with the standing-instructions block.")
 
     if any("cache_control" in b for b in blocks[:-1]):
-        failures.append("[2f] No block before the last may carry cache_control, even with instructions_text present.")
+        failures.append("[2f] No block before the last may carry cache_control.")
     if blocks[-1].get("cache_control") != {"type": "ephemeral"}:
-        failures.append("[2g] The last (playbook) block must still carry cache_control, unaffected by instructions_text.")
+        failures.append("[2g] The last (playbook) block must still carry cache_control.")
     if json.loads(blocks[-1]["text"]) != pp.project_playbook_for_prompt(playbook):
-        failures.append("[2h] The last block must still be the projected playbook JSON, unaffected by instructions_text.")
+        failures.append("[2h] The last block must still be the projected playbook JSON.")
 
 
 def test_standing_instructions_sits_before_toaster_guidance(failures: list[str]) -> None:
     """Epic #481 precedence ladder: Floor > per-review guidance > standing
     instructions > playbook -- the more SPECIFIC per-review layer reads
-    LATER (nearer the binary-decision overlay), so standing instructions
-    must sit strictly BEFORE the toaster-guidance block when both are
-    present."""
+    LATER, so standing instructions must sit strictly BEFORE the
+    toaster-guidance block when both are present (since issue #148, in the
+    control layer both passes send after the document)."""
     playbook = _sample_playbook()
     instructions_text = "Standing instructions: never accept unlimited liability."
     guidance_text = "Per-review note: reconfirm the notice period this quarter."
-    blocks = pp.assemble_system_blocks(playbook, guidance_text, instructions_text)
+    control = pp.render_request_control_text(
+        instructions_text=instructions_text, toaster_guidance=guidance_text
+    )
 
-    standing_matches = [i for i, b in enumerate(blocks) if instructions_text in b["text"]]
-    guidance_matches = [i for i, b in enumerate(blocks) if guidance_text in b["text"]]
-    if len(standing_matches) != 1 or len(guidance_matches) != 1:
+    if control.count(instructions_text) != 1 or control.count(guidance_text) != 1:
         failures.append(
-            f"[3a] Expected exactly one block each for standing instructions and toaster guidance; "
-            f"got {len(standing_matches)} and {len(guidance_matches)}."
+            "[3a] Expected exactly one occurrence each of the standing instructions and the "
+            "toaster guidance in the control layer."
         )
         return
-    if standing_matches[0] >= guidance_matches[0]:
-        failures.append(
-            f"[3b] Standing-instructions block (index {standing_matches[0]}) must sit BEFORE the "
-            f"toaster-guidance block (index {guidance_matches[0]})."
-        )
+    if control.index(instructions_text) >= control.index(guidance_text):
+        failures.append("[3b] Standing instructions must sit BEFORE the toaster-guidance block.")
+    blocks = pp.assemble_system_blocks(playbook)
     if blocks[0]["text"] != pp.REVIEW_GUIDANCE_BLOCK:
-        failures.append("[3c] Block 0 must remain the fixed review-guidance block with both blocks present.")
+        failures.append("[3c] Block 0 must remain the fixed review-guidance block.")
     if blocks[-1].get("cache_control") != {"type": "ephemeral"}:
-        failures.append("[3d] The last (playbook) block must still carry cache_control with both blocks present.")
+        failures.append("[3d] The last (playbook) block must still carry cache_control.")
     if any("cache_control" in b for b in blocks[:-1]):
-        failures.append("[3e] No block before the last may carry cache_control with both blocks present.")
+        failures.append("[3e] No block before the last may carry cache_control.")
 
 
 def test_standing_instructions_precedence_copy_matches_epic_wording(failures: list[str]) -> None:
@@ -234,8 +233,14 @@ def test_run_primary_pass_threads_instructions_text_into_system_prompt(failures:
     if len(client.calls) != 1:
         failures.append(f"[5a] Expected exactly 1 model invocation; got {len(client.calls)}")
         return
-    if instructions_text not in client.calls[0]["system_prompt"]:
-        failures.append("[5b] run_primary_pass must thread instructions_text into the ACTUAL system prompt text sent to the model.")
+    call = client.calls[0]
+    user = call["user_prompt"]
+    if (
+        instructions_text in call["system_prompt"]
+        or instructions_text not in user
+        or user.index(instructions_text) < user.index("</COUNTERPARTY_DOCUMENT>")
+    ):
+        failures.append("[5b] run_primary_pass must send instructions_text to the model, after the document (issue #148).")
 
 
 def test_run_critic_pass_threads_instructions_text_into_system_prompt(failures: list[str]) -> None:
@@ -253,14 +258,21 @@ def test_run_critic_pass_threads_instructions_text_into_system_prompt(failures: 
         model_client=client,
         model_id=critic_id,
         ledger_write=lambda record: None,
+        doc_text="Some document text.",
         instructions_text=instructions_text,
     )
 
     if len(client.calls) != 1:
         failures.append(f"[6a] Expected exactly 1 critic model invocation; got {len(client.calls)}")
         return
-    if instructions_text not in client.calls[0]["system_prompt"]:
-        failures.append("[6b] run_critic_pass must thread instructions_text into the system prompt too -- the critic self-check must see the same standing instructions the primary pass saw.")
+    call = client.calls[0]
+    user = call["user_prompt"]
+    if (
+        instructions_text in call["system_prompt"]
+        or instructions_text not in user
+        or user.index(instructions_text) < user.index("</COUNTERPARTY_DOCUMENT>")
+    ):
+        failures.append("[6b] run_critic_pass must send instructions_text too, after the document -- the critic self-check must see the same standing instructions the primary pass saw.")
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +308,12 @@ def test_run_review_threads_instructions_text_into_both_passes(failures: list[st
         failures.append(f"[7b] Expected exactly 2 model invocations (primary + critic); got {len(client.calls)}")
         return
     for call in client.calls:
-        if instructions_text not in call["system_prompt"]:
-            failures.append(f"[7c] Expected instructions_text verbatim in the {call['model_id']} system prompt; not found.")
-        if pp.STANDING_INSTRUCTIONS_INTRO not in call["system_prompt"]:
-            failures.append(f"[7d] Expected the standing-instructions precedence copy in the {call['model_id']} system prompt.")
+        if instructions_text not in call["user_prompt"]:
+            failures.append(f"[7c] Expected instructions_text verbatim in the {call['model_id']} prompt; not found.")
+        if pp.STANDING_INSTRUCTIONS_INTRO not in call["user_prompt"]:
+            failures.append(f"[7d] Expected the standing-instructions precedence copy in the {call['model_id']} prompt.")
+        if "STANDING_INSTRUCTIONS" in call["system_prompt"]:
+            failures.append(f"[7c] The {call['model_id']} system prompt must not carry them (issue #148).")
 
     # Default (no instructions_text) run over the SAME document must never
     # mention STANDING_INSTRUCTIONS at all -- byte-identical-in-spirit to
@@ -309,8 +323,8 @@ def test_run_review_threads_instructions_text_into_both_passes(failures: list[st
     )
     review_spine.run_review(docx_bytes, bundle, baseline_client, review_id="spine-483-baseline")
     for call in baseline_client.calls:
-        if "STANDING_INSTRUCTIONS" in call["system_prompt"]:
-            failures.append(f"[7e] The no-instructions baseline run's {call['model_id']} system prompt must not mention STANDING_INSTRUCTIONS at all.")
+        if "STANDING_INSTRUCTIONS" in call["system_prompt"] + str(call["user_prompt"]):
+            failures.append(f"[7e] The no-instructions baseline run's {call['model_id']} prompt must not mention STANDING_INSTRUCTIONS at all.")
 
 
 # ---------------------------------------------------------------------------
@@ -391,12 +405,12 @@ def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(fail
     # OpenRouter-form ids before calling run_review).
     primary_id = model_client_module.openrouter_primary_model_id()
     critic_id = model_client_module.openrouter_critic_model_id()
-    client = model_client_module.FakeBedrockClient(
-        {
-            primary_id: [_primary_accept_response()],
-            critic_id: [_critic_accept_response()],
-        }
-    )
+    # Issue #148: the policy default is ONE model on both passes, so the two
+    # ids may be the same key -- one queue, primary's answer first.
+    responses: dict[str, list[str]] = {}
+    responses.setdefault(primary_id, []).append(_primary_accept_response())
+    responses.setdefault(critic_id, []).append(_critic_accept_response())
+    client = model_client_module.FakeBedrockClient(responses)
     docx_bytes = _build_draft_docx(sfp_module, {})
     s3 = FakeS3({upload_pointer: docx_bytes})
 
@@ -412,10 +426,10 @@ def test_e2e_v2_instructions_recorded_in_lineage_and_reach_the_model_prompt(fail
         failures.append(f"[8e] Expected exactly 2 model invocations (primary + critic); got {len(client.calls)}")
         return
     for call in client.calls:
-        if v2["text"] not in call["system_prompt"]:
-            failures.append(f"[8f] Expected v2's exact standing-instructions text in the {call['model_id']} system prompt; not found.")
-        if pp.STANDING_INSTRUCTIONS_INTRO not in call["system_prompt"]:
-            failures.append(f"[8g] Expected the standing-instructions precedence copy in the {call['model_id']} system prompt.")
+        if v2["text"] not in call["user_prompt"]:
+            failures.append(f"[8f] Expected v2's exact standing-instructions text in the {call['model_id']} prompt; not found.")
+        if pp.STANDING_INSTRUCTIONS_INTRO not in call["user_prompt"]:
+            failures.append(f"[8g] Expected the standing-instructions precedence copy in the {call['model_id']} prompt.")
 
 
 # ---------------------------------------------------------------------------

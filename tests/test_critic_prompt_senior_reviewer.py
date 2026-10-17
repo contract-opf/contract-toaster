@@ -21,8 +21,10 @@ drives -- never on a constant standing in for it:
 
   1. The user prompt carries the document text, the first reviewer's full
      output (its issues AND its block transcript), and the sceptical-review
-     instruction, in the order derive-then-compare: the instruction precedes
-     both data blocks, and the document precedes the first reviewer's output.
+     instruction, in the order derive-then-compare: the document first (since
+     issue #148 it is the prompt-cache breakpoint both passes share), then the
+     instruction, then the first reviewer's output -- so the instruction still
+     precedes the answer it tells the critic not to anchor on.
   2. The sceptical instruction states the phrase this ticket fixes: re-derive
      every issue from the document and the playbook FIRST, compare SECOND,
      override where the first reviewer is wrong, weak, or non-compliant with
@@ -188,14 +190,17 @@ def test_the_prompt_carries_document_playbook_and_primary_output(
     if projected not in system:
         failures.append("[1f] the critic's system prompt does not carry the projected playbook knowledge")
 
-    # Order: instruction, THEN the document, THEN the first reviewer's output --
-    # derive first, compare second.
+    # Order (issue #148): the document, THEN the instruction, THEN the first
+    # reviewer's output. The document leads because it is the prompt-cache
+    # breakpoint both passes share; the instruction still precedes the
+    # answer it tells the critic not to anchor on -- derive first, compare
+    # second.
     at_instruction = user.find(_flat(pp.CRITIC_SCEPTICAL_INSTRUCTION)[:60])
     at_document = user.find("<COUNTERPARTY_DOCUMENT>")
     at_primary = user.find("<PRIMARY_REVIEWER_OUTPUT>")
-    if not (0 <= at_instruction < at_document < at_primary):
+    if not (0 <= at_document < at_instruction < at_primary):
         failures.append(
-            "[1g] the order must be: sceptical instruction, document, first reviewer's output "
+            "[1g] the order must be: document, sceptical instruction, first reviewer's output "
             f"(offsets {at_instruction}, {at_document}, {at_primary})"
         )
 
@@ -246,8 +251,15 @@ def test_the_role_is_the_senior_reviewer_with_the_last_word(
         failures.append("[3b] the prompt still frames the critic as the #618 'adversarial second reader'")
     if "adversarial" not in flat:
         failures.append("[3c] the re-review must still be called adversarial -- it is not a second primary")
-    if not c.critic_call["user_prompt"].startswith(pp.CRITIC_TASKING_BLOCK):
-        failures.append("[3d] the role must open the user prompt, ahead of every data block")
+    user = c.critic_call["user_prompt"]
+    at_role = user.find(pp.CRITIC_TASKING_BLOCK)
+    if not (
+        0 <= user.find("</COUNTERPARTY_DOCUMENT>") < at_role < user.find("<PRIMARY_REVIEWER_OUTPUT>")
+    ):
+        failures.append(
+            "[3d] the role must open the critic's role suffix: after the shared document "
+            "block (issue #148), ahead of the first reviewer's output"
+        )
 
 
 # ---------------------------------------------------------------------------

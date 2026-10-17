@@ -598,6 +598,12 @@ _TIER_RANK = {"budget": 0, "good": 1, "high": 2, "highest": 3}
 
 CRITIC_BELOW_REVIEWER_TIER_WARNING = "critic_below_reviewer_tier"
 
+# Issue #148: the two passes are built byte-identical up to a role suffix so
+# the critic reads the prompt cache the reviewer just wrote (the playbook and
+# the document). A cache entry belongs to one model, so a pair resolved to two
+# different models gives that reuse up -- worth saying, never worth blocking.
+SPLIT_MODELS_LOSE_CACHE_REUSE_WARNING = "split_models_lose_cache_reuse"
+
 
 def _tier_rank(policy: dict[str, Any], model_id: str) -> int | None:
     for entry in model_client.openrouter_selectable_models(policy):
@@ -611,13 +617,22 @@ def _selection_warnings(policy: dict[str, Any], effective: dict[str, str]) -> li
 
     The critic has the last word, so one ranked BELOW the reviewer is worth
     flagging -- but an admin may have a reason, so this never blocks a save.
-    Only fires when both resolved ids carry a known tier.
+    That one only fires when both resolved ids carry a known tier.
+
+    Issue #148: a pair resolved to two DIFFERENT models also gets
+    `SPLIT_MODELS_LOSE_CACHE_REUSE_WARNING` -- the policy default is one model
+    on both passes so the critic can reuse the reviewer's prompt cache, and a
+    split pair cannot. Compared on the resolved ids, so it fires whether the
+    split came from an admin selection, an env override or the policy itself.
     """
+    warnings: list[str] = []
     reviewer = _tier_rank(policy, effective["primary"])
     critic = _tier_rank(policy, effective["critic"])
     if reviewer is not None and critic is not None and critic < reviewer:
-        return [CRITIC_BELOW_REVIEWER_TIER_WARNING]
-    return []
+        warnings.append(CRITIC_BELOW_REVIEWER_TIER_WARNING)
+    if effective["primary"] != effective["critic"]:
+        warnings.append(SPLIT_MODELS_LOSE_CACHE_REUSE_WARNING)
+    return warnings
 
 
 def _selection_source(role: str, stored_id: str, effective_id: str) -> str:
@@ -725,8 +740,10 @@ def set_model_selection(
     Stores the instance-wide primary and critic model choice, taking effect on
     the next review with no redeploy (`pipeline_runner` resolves it per review,
     not at import). Either role may be passed "" or null to revert THAT role to
-    the policy default; the two are always set together, and there is no option
-    to use one model for both passes.
+    the policy default; the two are always set together. Choosing the same id
+    for both is how one model runs both passes -- the policy default since
+    issue #148, which the non-blocking `split_models_lose_cache_reuse`
+    warning flags a departure from.
 
     Raises HTTPException(403) for a non-admin caller, 400 for a non-string or
     non-selectable id, or 400 when this deployment has no settings store.

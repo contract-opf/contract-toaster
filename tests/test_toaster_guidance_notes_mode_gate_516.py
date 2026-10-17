@@ -290,24 +290,31 @@ def test_only_the_narration_clause_varies_by_mode(failures: list[str]) -> None:
             failures.append(f"[4f-{label}] The guidance text itself must still be present regardless of mode.")
 
 
+def _sent(call: dict) -> str:
+    """Everything one model call carried -- the system prompt AND the user
+    message. Since issue #148 the guidance block rides in the user message's
+    role suffix, so a check over the system prompt alone would pass
+    vacuously."""
+    return f"{call['system_prompt']}\n{call['user_prompt']}"
+
+
 def test_assemble_system_blocks_threads_notes_mode_to_the_guidance_block(failures: list[str]) -> None:
     """Not just the pure render function -- the composed assembly caller
-    (`assemble_system_blocks`) must actually pass its own `notes_mode`
-    argument through, since that is the seam both passes call."""
-    playbook = _sample_playbook()
-    external_blocks = pp.assemble_system_blocks(
-        playbook, _CONFLICTING_GUIDANCE, "", notes_mode="external"
+    must actually pass its own `notes_mode` argument through, since that is
+    the seam both passes call. Since issue #148 that caller is
+    `render_request_control_text` (the guidance left the system blocks for
+    both passes' role suffix)."""
+    external_text = pp.render_request_control_text(
+        toaster_guidance=_CONFLICTING_GUIDANCE, notes_mode="external"
     )
-    internal_blocks = pp.assemble_system_blocks(
-        playbook, _CONFLICTING_GUIDANCE, "", notes_mode="internal"
+    internal_text = pp.render_request_control_text(
+        toaster_guidance=_CONFLICTING_GUIDANCE, notes_mode="internal"
     )
-    external_text = pp.render_system_prompt(external_blocks)
-    internal_text = pp.render_system_prompt(internal_blocks)
 
     if "say you did so" in external_text:
-        failures.append("[5a] assemble_system_blocks(notes_mode='external') must not carry the narration instruction.")
+        failures.append("[5a] render_request_control_text(notes_mode='external') must not carry the narration instruction.")
     if "say you did so" not in internal_text:
-        failures.append("[5b] assemble_system_blocks(notes_mode='internal') must still carry the narration instruction.")
+        failures.append("[5b] render_request_control_text(notes_mode='internal') must still carry the narration instruction.")
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +344,7 @@ def test_run_primary_pass_gates_narration_by_notes_mode(failures: list[str]) -> 
     )
     if len(external_client.calls) != 1:
         failures.append(f"[6a] Expected exactly 1 model invocation; got {len(external_client.calls)}")
-    elif "say you did so" in external_client.calls[0]["system_prompt"]:
+    elif "say you did so" in _sent(external_client.calls[0]):
         failures.append(
             "[6b] run_primary_pass(notes_mode='external') sent a system prompt that still "
             "instructs the model to narrate a guidance conflict into a counterparty-facing field."
@@ -359,7 +366,7 @@ def test_run_primary_pass_gates_narration_by_notes_mode(failures: list[str]) -> 
     )
     if len(internal_client.calls) != 1:
         failures.append(f"[6c] Expected exactly 1 model invocation; got {len(internal_client.calls)}")
-    elif "say you did so" not in internal_client.calls[0]["system_prompt"]:
+    elif "say you did so" not in _sent(internal_client.calls[0]):
         failures.append(
             "[6d] run_primary_pass(notes_mode='internal') should still carry the narration "
             "instruction -- item B only gates when internal notes are off."
@@ -393,7 +400,7 @@ def test_run_critic_pass_gates_narration_by_notes_mode(failures: list[str]) -> N
     )
     if not external_client.calls:
         failures.append("[7a] Expected at least 1 critic model invocation.")
-    elif "say you did so" in external_client.calls[0]["system_prompt"]:
+    elif "say you did so" in _sent(external_client.calls[0]):
         failures.append(
             "[7b] run_critic_pass(notes_mode='external') sent a system prompt that still "
             "instructs the model to narrate a guidance conflict into a counterparty-facing field."
@@ -444,7 +451,7 @@ def test_end_to_end_redline_carries_no_narration_in_default_mode(failures: list[
     # -- Prompt-level cause, asserted on the SAME run that produced the
     #    document below. --------------------------------------------------
     for call in fake_client.calls:
-        if "say you did so" in call["system_prompt"]:
+        if "say you did so" in _sent(call):
             failures.append(
                 f"[8c] The {call['model_id']} system prompt for this default-mode run must not "
                 "instruct narration of the guidance conflict into a counterparty-facing field."

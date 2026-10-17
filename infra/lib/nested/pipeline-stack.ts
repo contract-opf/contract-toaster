@@ -56,14 +56,19 @@ const MAX_SECTIONS = 200; // max sections considered per document
 const TOP_K = 8; // top-K retrieved precedents per section
 const MAX_RETRIES = 1; // max_retries_per_pass -- one bounded structured-output retry
 
-// Primary (reviewer) / critic review model IDs (model-policy/bedrock-us-east-1.json;
-// issue #136 put Sonnet on the reviewer and Opus on the critic, ADR 0001).
+// Primary (reviewer) / critic review model IDs -- mirrors of models.primary /
+// models.critic in model-policy/bedrock-us-east-1.json (tests/test_pipeline_stack.py
+// Check G cross-checks them). Issue #148 (ADR 0001 item 3) put BOTH passes on
+// the critic's model, Opus 4.8, so the critic reads the prompt cache the
+// reviewer wrote; issue #136's reviewer pin (Sonnet 4.6) is no longer called
+// by any role, so its grant is gone rather than kept for rollback -- a
+// rollback re-pins the policy file and this constant together.
 // Single-region native IDs only -- never a global./us./eu./apac. prefixed
 // cross-region inference profile (see ARCHITECTURE.md -> Model-selection
 // policy). pipelineReviewRole's bedrock:InvokeModel grant is scoped to
-// EXACTLY these two model ARNs -- never a foundation-model/* wildcard --
-// per the issue #59/#60 reconciliation (see Check G below).
-const PRIMARY_MODEL_ID = 'anthropic.claude-sonnet-4-6';
+// EXACTLY the distinct model ARNs these name -- never a foundation-model/*
+// wildcard -- per the issue #59/#60 reconciliation (see Check G below).
+const PRIMARY_MODEL_ID = 'anthropic.claude-opus-4-8';
 const CRITIC_MODEL_ID = 'anthropic.claude-opus-4-8';
 
 /** Maximum plausible review duration (execution-level timeout backstop). */
@@ -135,9 +140,9 @@ const MAX_CONCURRENT_EXECUTIONS = 5;
  *
  * RECONCILED least-privilege invariant (issue #59 Check G x issue #60):
  * pipelineReviewRole's bedrock:InvokeModel grant is scoped to EXACTLY the
- * reviewer (Sonnet) and critic (Opus) review model ARNs — never a
+ * reviewer and critic review model ARNs (both Opus 4.8 since #148) — never a
  * foundation-model/* wildcard. pipelineReviewRole remains the ONLY role
- * anywhere in this infra tree granted bedrock:InvokeModel on those two
+ * anywhere in this infra tree granted bedrock:InvokeModel on those
  * model ARNs, and the ONLY role granted bedrock:Retrieve /
  * bedrock:RetrieveAndGenerate. Issue #60's `corpusKnowledgeBaseRole`
  * (data-stack.ts, assumed by bedrock.amazonaws.com) separately holds
@@ -208,15 +213,16 @@ export class PipelineStack extends cdk.NestedStack {
         sid: 'BedrockInvokeModel',
         effect: iam.Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
-        // Scoped to EXACTLY the reviewer (Sonnet) and critic (Opus) review
-        // model ARNs -- never a foundation-model/* wildcard. This is the
-        // ARN-scoped reconciliation of issue #59 Check G against issue #60's
-        // KB service role, which separately holds InvokeModel scoped ONLY to
-        // the embedding-model ARN (data-stack.ts corpusKnowledgeBaseRole).
-        resources: [
-          `arn:aws:bedrock:us-east-1::foundation-model/${PRIMARY_MODEL_ID}`,
-          `arn:aws:bedrock:us-east-1::foundation-model/${CRITIC_MODEL_ID}`,
-        ],
+        // Scoped to EXACTLY the review model ARN(s) the pinned roles call --
+        // since issue #148 one ARN, Opus 4.8, which both the reviewer and the
+        // critic use (the Set drops the duplicate) -- never a
+        // foundation-model/* wildcard. This is the ARN-scoped reconciliation
+        // of issue #59 Check G against issue #60's KB service role, which
+        // separately holds InvokeModel scoped ONLY to the embedding-model ARN
+        // (data-stack.ts corpusKnowledgeBaseRole).
+        resources: [...new Set([PRIMARY_MODEL_ID, CRITIC_MODEL_ID])].map(
+          (modelId) => `arn:aws:bedrock:us-east-1::foundation-model/${modelId}`,
+        ),
       }),
     );
     this.pipelineReviewRole.addToPolicy(

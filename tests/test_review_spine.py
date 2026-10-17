@@ -383,6 +383,9 @@ def _primary_request_change_response_schema_enforced(docx_bytes: bytes) -> str:
     """
     return json.dumps(
         {
+            # Issue #148: the shared tool schema's `role` discriminator --
+            # strict mode forces every property, so the reviewer says so.
+            "role": "reviewer",
             "decision": "REQUEST_CHANGE",
             "confidence_state": "OK",
             "confidence_band": None,

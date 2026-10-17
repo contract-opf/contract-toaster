@@ -160,6 +160,9 @@ class TestReasoningAllowanceLookup(unittest.TestCase):
             # so live tests exercise the same request shape.
             "anthropic/claude-haiku-4.5",
             "openai/gpt-5.6-luna",
+            # Issue #148 moved the reviewer pin off Sonnet 4.6; its selectable
+            # entry keeps the allowance it carried as that pin.
+            "anthropic/claude-sonnet-4.6",
         }
         non_reasoning_ids = [
             e["model_id"] for e in policy["selectable"] if e["model_id"] not in pinned

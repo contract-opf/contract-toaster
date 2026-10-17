@@ -196,11 +196,12 @@ MAX_TRUNCATION_RETRIES_PER_PASS = 1
 # = 96,000, while any document over ~44,800 estimated tokens -- the ~80-page
 # agreement this issue exists to enable -- rides the shipped policy's
 # declared 128,000 on all three attempts = 384,000. In dollars that is
-# ~$8.04 reserved against ~$19.56 actual at the OpenRouter pins (~$8.84 vs
-# ~$21.52 at the Bedrock rates), i.e. 2.43x, ALWAYS in the direction of
-# reserving less (2.85x at the pre-#144 100_000-token input cap). Two
-# concurrent submissions therefore reserve ~$17.69, are both admitted under
-# a $20/day ceiling, and can settle at ~$43.03.
+# ~$10.05 reserved against ~$24.45 actual at the OpenRouter pins (~$11.06 vs
+# ~$26.90 at the Bedrock rates; both passes on Opus since issue #148 -- it
+# was ~$8.04 / ~$8.84 with the Sonnet reviewer), i.e. 2.43x, ALWAYS in the
+# direction of reserving less (2.85x at the pre-#144 100_000-token input
+# cap). A $20/day ceiling therefore admits ONE such reservation at a time
+# (two before #148), which can settle at ~$26.90.
 # `settle_spend` reconciles each reservation against real ledgered usage the
 # moment its review ends -- so the counter converges on actual spend and the
 # excess cannot compound beyond the reviews in flight -- but the ceiling
@@ -222,20 +223,21 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # $2.46 after issue #625 raised MAX_INPUT_TOKENS to 100_000, $6.86
 # after issue #658 raised the output budget and added a truncation
 # attempt, $8.71 after issue #144 raised MAX_INPUT_TOKENS to 170_000, and
-# $8.84 since issue #137 raised it to 175_000 -- $8.84 is the current
+# $8.84 since issue #137 raised it to 175_000, and $11.06 since issue #148
+# priced the reviewer at the critic's Opus rate -- $11.06 is the current
 # figure), which
 # 429'd the third review of any day against the $20/day default cap.
 #
 # These figures mirror model-policy/bedrock-us-east-1.json's
 # models.primary/models.critic cost_per_million_{input,output}_usd (the
-# direct-API base rates: $5/$25 Opus, $3/$15 Sonnet) with the ~10%
-# regional-endpoint surcharge documented in docs/design-notes.md -> Model
-# selection & governance applied ($5.50/$27.50 Opus, $3.30/$16.50 Sonnet) --
-# the SAME regional rates ARCHITECTURE.md's Cost shape unit-economics table
-# cites for its $8.84 worst-case/review arithmetic -- 3 attempts x 175K in +
-# 3 attempts x 32K out, per pass (issues #658, #144, #137). That table
-# lists $8.71 (pre-#137), $6.86 (pre-#144), $2.46 (pre-#658) and $2.11
-# (pre-#625) as history only. They cannot be loaded
+# direct-API base rates: $5/$25 Opus on both passes since issue #148) with
+# the ~10% regional-endpoint surcharge documented in docs/design-notes.md ->
+# Model selection & governance applied ($5.50/$27.50 Opus) -- the SAME
+# regional rates ARCHITECTURE.md's Cost shape unit-economics table cites for
+# its $11.06 worst-case/review arithmetic -- 3 attempts x 175K in + 3
+# attempts x 32K out, per pass (issues #658, #144, #137, #148). That table
+# lists $8.84 (pre-#148, Sonnet reviewer), $8.71 (pre-#137), $6.86
+# (pre-#144), $2.46 (pre-#658) and $2.11 (pre-#625) as history only. They cannot be loaded
 # directly from model-policy/*.json at runtime: this module ships inside the
 # backend container (backend/Dockerfile COPYs only src/, built from the
 # backend/ directory as its Docker context) and infra/lambda/persist/
@@ -247,8 +249,11 @@ PASSES_PER_REVIEW = 2  # primary + adversarial (critic)
 # mirrored copy, so a policy change that isn't mirrored here fails CI rather
 # than silently drifting.
 REGIONAL_PRICING_PREMIUM = 1.10  # ~10% regional-endpoint surcharge (docs/design-notes.md)
-PRIMARY_INPUT_RATE_USD_PER_MILLION = 3.30  # Sonnet 4.6 input, regional rate (reviewer, issue #136)
-PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 16.50  # Sonnet 4.6 output, regional rate
+# Issue #148: the reviewer default is the critic's model (Opus 4.8), so the
+# reviewer pass is priced at the Opus rate too. [WAS, issue #136 until #148:
+# Sonnet 4.6, $3.30/$16.50.]
+PRIMARY_INPUT_RATE_USD_PER_MILLION = 5.50  # Opus 4.8 input, regional rate (reviewer, issue #148)
+PRIMARY_OUTPUT_RATE_USD_PER_MILLION = 27.50  # Opus 4.8 output, regional rate
 CRITIC_INPUT_RATE_USD_PER_MILLION = 5.50  # Opus 4.8 input, regional rate (critic, issue #136)
 CRITIC_OUTPUT_RATE_USD_PER_MILLION = 27.50  # Opus 4.8 output, regional rate
 
@@ -610,8 +615,9 @@ def _active_provider_rates(
     see that file's own `_comment`). Any other value (including unset, the
     AWS/Bedrock target's default) returns the existing hardcoded Bedrock
     regional-rate constants, UNCHANGED -- this branch must never perturb
-    the Bedrock path's documented $8.84 worst case (issue #189; the
-    figure is $8.84 since issue #137 raised MAX_INPUT_TOKENS to 175_000 --
+    the Bedrock path's documented $11.06 worst case (issue #189; the
+    figure is $11.06 since issue #148 priced the reviewer at the critic's
+    Opus rate, $8.84 since issue #137 raised MAX_INPUT_TOKENS to 175_000 --
     it was $8.71 at issue #144's 170_000, $6.86 after issue #658 raised
     the output budget from a flat 8_000 and gave truncation its own
     attempt, $2.46 before that, and $2.11 before issue #625 raised
@@ -671,12 +677,14 @@ def compute_worst_case_reservation_usd_cents(dynamodb_resource: Any = None) -> i
     use -- and the attempt count includes truncation's own retry allowance,
     which the pre-#658 formula silently under-reserved.
 
-    Each pass (primary/Sonnet reviewer, critic/Opus since issue #136) is
-    priced at ITS OWN model's rate rather than a single blended "most
-    expensive tier" rate applied to both passes (see the constants above for
-    why that overshot 4.6x). Both passes share the same token caps, so the
-    #136 role swap left the total unchanged (884 cents Bedrock, 804
-    OpenRouter pins).
+    Each pass (primary/reviewer, critic) is priced at ITS OWN model's rate
+    rather than a single blended "most expensive tier" rate applied to both
+    passes (see the constants above for why that overshot 4.6x). Both passes
+    share the same token caps; since issue #148 they also share one model
+    by default (Opus), so the policy pins price both alike (1106 cents
+    Bedrock, 1005 OpenRouter pins; 884 / 804 with the pre-#148 Sonnet
+    reviewer). An admin's split selection on the OpenRouter path is still
+    priced per pass.
 
     The rate table itself is provider-aware AND selection-aware
     (`_active_provider_rates`, issues #268 and #445):
@@ -1912,7 +1920,8 @@ def resolve_notes_mode(value: str | None) -> str:
 # on the review row only when it is NOT the default, projected back by
 # `get_review_detail` and the list view, and rendered by
 # `scripts/primary_review_pass.py::render_markup_intensity_block` as its own fixed-wording
-# system block. HARD CUTOVER (owner decision Q3): the SPA no longer sends the
+# block (sent after the document in both passes' role suffix since issue #148,
+# never in the shared system prompt). HARD CUTOVER (owner decision Q3): the SPA no longer sends the
 # sentence as guidance at all.
 # ---------------------------------------------------------------------------
 

@@ -24,9 +24,9 @@ documented.
      toaster-guidance block is OMITTED entirely when `toaster_guidance` is
      empty (default empty = today's behavior, byte-identical prompt) and,
      when present, states explicit precedence ("GOVERNS" over conflicting
-     playbook positions, but never over the Floor), sits strictly between
-     the fixed guidance block and the playbook block, and never carries
-     `cache_control`.
+     playbook positions, but never over the Floor). Since issue #148 it is
+     never in the system blocks at all: it rides in both passes' role
+     suffix (`render_request_control_text`), after the document.
   2. `render_floor_block` / `assemble_system_blocks`: the judged-NL Floor
      block is OMITTED when the playbook carries no `hard_rejections`, and
      -- independently of `toaster_guidance`, a SEPARATE axis -- present
@@ -36,7 +36,8 @@ documented.
      sole `cache_control` carrier regardless of how many conditional blocks
      precede it.
   3. `run_primary_pass` / `run_critic_pass` thread `toaster_guidance` into
-     the ACTUAL system prompt text sent to the injected `FakeBedrockClient`
+     the ACTUAL prompt text (since issue #148 the user message, after the
+     document) sent to the injected `FakeBedrockClient`
      (not just into `assemble_system_blocks` in isolation) -- the critic
      pass sees it too, so its self-check can catch a guidance conflict (or
      a Floor violation) the primary pass missed.
@@ -44,7 +45,7 @@ documented.
      scenario over the IDENTICAL input document flips the decision
      ACCEPT -> REQUEST_CHANGE between a no-guidance run and a
      conflicting-guidance run, and the guidance text + explicit precedence
-     wording are verified present in the system prompt actually sent to
+     wording are verified present in the prompt actually sent to
      BOTH the primary and critic model calls on the guidance-present run,
      and absent on the no-guidance run.
   5. A must-not-Floor violation (AC2) yields a REQUEST_CHANGE issue with a
@@ -149,52 +150,55 @@ def test_toaster_guidance_block_absent_when_empty(failures: list[str]) -> None:
 
     playbook = _sample_playbook()
     blocks_default_arg = pp.assemble_system_blocks(playbook)
-    blocks_explicit_empty = pp.assemble_system_blocks(playbook, "")
-    if [b["text"] for b in blocks_default_arg] != [b["text"] for b in blocks_explicit_empty]:
+    if pp.render_request_control_text() != pp.render_request_control_text(toaster_guidance=""):
         failures.append(
-            "[1c] assemble_system_blocks(playbook) (no toaster_guidance arg) vs "
-            "assemble_system_blocks(playbook, '') must be byte-identical -- "
-            "'default empty = today's behavior' per the issue's Scope."
+            "[1c] render_request_control_text() (no toaster_guidance arg) vs "
+            "toaster_guidance='' must be byte-identical -- 'default empty = "
+            "today's behavior' per the issue's Scope."
         )
     if any("TOASTER_GUIDANCE" in b["text"] for b in blocks_default_arg):
         failures.append("[1d] With no toaster_guidance supplied, no block may mention TOASTER_GUIDANCE at all.")
 
 
 def test_toaster_guidance_block_present_and_states_precedence(failures: list[str]) -> None:
+    """Issue #148 moved the guidance out of the system prompt: the system
+    blocks are the request-independent prefix every review of the playbook
+    shares, and the guidance rides in both passes' role suffix instead
+    (`render_request_control_text`). The block itself -- its precedence
+    wording and its Floor carve-out -- is unchanged."""
     playbook = _sample_playbook()
     guidance_text = "Reject any change to the notice period, even a one-day extension."
-    blocks = pp.assemble_system_blocks(playbook, guidance_text)
-    blocks_empty = pp.assemble_system_blocks(playbook, "")
+    blocks = pp.assemble_system_blocks(playbook)
 
-    if len(blocks) != len(blocks_empty) + 1:
+    if any(guidance_text in b["text"] for b in blocks):
+        failures.append("[2a] The toaster guidance must NOT be in the system blocks (issue #148).")
+
+    control = pp.render_request_control_text(toaster_guidance=guidance_text)
+    if control.count(guidance_text) != 1:
         failures.append(
-            f"[2a] Supplying toaster_guidance must add exactly one system block "
-            f"relative to no guidance; got {len(blocks)} vs {len(blocks_empty)}."
+            "[2b] Expected the toaster_guidance text verbatim, once, in the per-review "
+            "control layer."
         )
-
-    guidance_matches = [b for b in blocks if guidance_text in b["text"]]
-    if len(guidance_matches) != 1:
-        failures.append(f"[2b] Expected exactly one system block containing the toaster_guidance text verbatim; found {len(guidance_matches)}.")
         return
-    guidance_block = guidance_matches[0]
+    if control != pp.render_toaster_guidance_block(guidance_text):
+        failures.append("[2b] With only guidance supplied, the control layer is the guidance block alone.")
 
-    if "GOVERNS" not in guidance_block["text"]:
+    if "GOVERNS" not in control:
         failures.append("[2c] Toaster-guidance block must state explicit precedence ('GOVERNS') over conflicting playbook positions.")
-    if "Floor" not in guidance_block["text"] or "NOT" not in guidance_block["text"].upper():
+    if "Floor" not in control or "NOT" not in control.upper():
         failures.append("[2d] Toaster-guidance block must explicitly say it does NOT reach/override the Floor.")
 
     if blocks[0]["text"] != pp.REVIEW_GUIDANCE_BLOCK:
-        failures.append("[2e] Block 0 must remain the fixed review-guidance block even when toaster_guidance is supplied.")
-    guidance_index = blocks.index(guidance_block)
-    if guidance_index <= 0 or guidance_index >= len(blocks) - 1:
-        failures.append(f"[2f] Toaster-guidance block must sit strictly between the fixed guidance block and the playbook block; got index {guidance_index} of {len(blocks)}.")
+        failures.append("[2e] Block 0 must remain the fixed review-guidance block.")
+    if pp.render_request_control_text() != "":
+        failures.append("[2f] No guidance, no instructions, medium intensity: the control layer must be empty.")
 
     if any("cache_control" in b for b in blocks[:-1]):
-        failures.append("[2g] No block before the last may carry cache_control, even with toaster_guidance present.")
+        failures.append("[2g] No block before the last may carry cache_control.")
     if blocks[-1].get("cache_control") != {"type": "ephemeral"}:
-        failures.append("[2h] The last (playbook) block must still carry cache_control, unaffected by toaster_guidance.")
+        failures.append("[2h] The last (playbook) block must still carry cache_control.")
     if json.loads(blocks[-1]["text"]) != pp.project_playbook_for_prompt(playbook):
-        failures.append("[2i] The last block must still be the projected playbook JSON, unaffected by toaster_guidance.")
+        failures.append("[2i] The last block must still be the projected playbook JSON.")
 
 
 # ---------------------------------------------------------------------------
@@ -294,8 +298,9 @@ def test_floor_block_present_and_unwaivable(failures: list[str]) -> None:
 
 # ---------------------------------------------------------------------------
 # 3. run_primary_pass / run_critic_pass actually thread toaster_guidance
-#    into the system prompt TEXT sent to the model (integration, not just
-#    the pure assemble_system_blocks unit checks above).
+#    into the prompt TEXT sent to the model (integration, not just the pure
+#    unit checks above). Since issue #148 it rides in the user message's role
+#    suffix, after the document -- never in the system prompt.
 # ---------------------------------------------------------------------------
 
 
@@ -319,8 +324,12 @@ def test_run_primary_pass_threads_toaster_guidance_into_system_prompt(failures: 
     if len(client.calls) != 1:
         failures.append(f"[5a] Expected exactly 1 model invocation; got {len(client.calls)}")
         return
-    if guidance not in client.calls[0]["system_prompt"]:
-        failures.append("[5b] run_primary_pass must thread toaster_guidance into the ACTUAL system prompt text sent to the model.")
+    call = client.calls[0]
+    if guidance in call["system_prompt"]:
+        failures.append("[5b] The guidance must not be in the system prompt (issue #148).")
+    user = call["user_prompt"]
+    if guidance not in user or user.index(guidance) < user.index("</COUNTERPARTY_DOCUMENT>"):
+        failures.append("[5b] run_primary_pass must send toaster_guidance to the model, after the document.")
 
 
 def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: list[str]) -> None:
@@ -338,14 +347,19 @@ def test_run_critic_pass_threads_toaster_guidance_into_system_prompt(failures: l
         model_client=client,
         model_id=critic_id,
         ledger_write=lambda record: None,
+        doc_text="Some document text.",
         toaster_guidance=guidance,
     )
 
     if len(client.calls) != 1:
         failures.append(f"[6a] Expected exactly 1 critic model invocation; got {len(client.calls)}")
         return
-    if guidance not in client.calls[0]["system_prompt"]:
-        failures.append("[6b] run_critic_pass must thread toaster_guidance into the system prompt too -- the critic self-check must see the same per-review guidance the primary pass saw.")
+    call = client.calls[0]
+    user = call["user_prompt"]
+    if guidance in call["system_prompt"] or guidance not in user or user.index(
+        guidance
+    ) < user.index("</COUNTERPARTY_DOCUMENT>"):
+        failures.append("[6b] run_critic_pass must send toaster_guidance too, after the document -- the critic self-check must see the same per-review guidance the primary pass saw.")
 
 
 # ---------------------------------------------------------------------------
@@ -467,10 +481,10 @@ def test_run_review_toaster_guidance_flips_accept_to_request_change(failures: li
         failures.append(f"[7e] Expected exactly 2 model invocations (primary + critic) on the guidance-present run; got {len(request_change_client.calls)}")
     else:
         for call in request_change_client.calls:
-            if guidance not in call["system_prompt"]:
-                failures.append(f"[7f] Expected the toaster_guidance text verbatim in the {call['model_id']} system prompt; not found.")
-            if "GOVERNS" not in call["system_prompt"]:
-                failures.append(f"[7g] Expected explicit precedence wording ('GOVERNS') in the {call['model_id']} system prompt.")
+            if guidance not in call["user_prompt"]:
+                failures.append(f"[7f] Expected the toaster_guidance text verbatim in the {call['model_id']} prompt; not found.")
+            if "GOVERNS" not in call["user_prompt"]:
+                failures.append(f"[7g] Expected explicit precedence wording ('GOVERNS') in the {call['model_id']} prompt.")
 
 
 # ---------------------------------------------------------------------------

@@ -52,7 +52,7 @@ Before issue #400, `scripts/eval_harness.py` scored gold fixtures against the re
 
 ### Live smoke on the test tier
 
-Live testing runs on cheap models until the owner declares testing over; only then do live runs move to the production pins (Sonnet 4.6 reviewer, Opus 5 critic). Every live run spends real money, so plan each one. `model-policy/openrouter.json` lists two test-tier `selectable` entries, probed on 2026-10-06 against the production ZDR provider block (its `_comment` records the probes):
+Live testing runs on cheap models until the owner declares testing over; only then do live runs move to the production pins (Opus 5 on both the reviewer and the critic pass since issue #148). Every live run spends real money, so plan each one. `model-policy/openrouter.json` lists two test-tier `selectable` entries, probed on 2026-10-06 against the production ZDR provider block (its `_comment` records the probes):
 
 | Model | Use | ≈ $/review, uncached |
 |---|---|---|
@@ -134,15 +134,15 @@ A legal-behavior release is a **bundle**: playbook hash, prompt hash, canonical 
 
 ### Eval harness rate-limiting and quota-aware scheduling
 
-The eval harness invokes Bedrock at a volume — 39 cases × 2 passes × multiple stochastic runs at ~60K tokens/call — that can exhaust the on-demand TPM quota for Opus 4.8 — the critic since issue #136 — if CI runners are not coordinated. Exhausting quota causes `ThrottlingException` retries, extends the multi-hour CI run, and (without a proper alarm split) fires the "Bedrock errors > 0" alarm with noise. To prevent this:
+The eval harness invokes Bedrock at a volume — 39 cases × 2 passes × multiple stochastic runs at ~60K tokens/call — that can exhaust the on-demand TPM quota for Opus 4.8 — the critic since issue #136, and the reviewer too since issue #148 — if CI runners are not coordinated. Exhausting quota causes `ThrottlingException` retries, extends the multi-hour CI run, and (without a proper alarm split) fires the "Bedrock errors > 0" alarm with noise. To prevent this:
 
-- **Serialize critic-pass (Opus 4.8) calls.** The harness issues **one Opus Bedrock call at a time** per CI runner. The granted quota for Opus 4.8 in `us-east-1` is `40,000 TPM` (see `model-policy/bedrock-us-east-1.json`). Each critic call consumes ~75,000 tokens (70K input + 5K output, uncached) — more than a single minute's quota — so even one concurrent runner can throttle if it issues calls back-to-back without a delay. The harness uses a **token-bucket rate limiter** seeded from `model-policy/bedrock-us-east-1.json → max_eval_parallelism.critic_rate_limit_tpm`.
+- **Serialize Opus 4.8 calls — both passes.** The harness issues **one Opus Bedrock call at a time** per CI runner, reviewer and critic alike (since issue #148 both passes run on Opus 4.8 and draw on one quota). The granted quota for Opus 4.8 in `us-east-1` is `40,000 TPM` (see `model-policy/bedrock-us-east-1.json`). Each critic call consumes ~75,000 tokens (70K input + 5K output, uncached) — more than a single minute's quota — so even one concurrent runner can throttle if it issues calls back-to-back without a delay. The harness uses a **token-bucket rate limiter** seeded from `model-policy/bedrock-us-east-1.json → max_eval_parallelism.critic_rate_limit_tpm`.
 
-- **Reviewer-pass (Sonnet 4.6) calls.** The reviewer quota is higher (`100,000 TPM`). Reviewer calls are also token-bucket limited but may overlap with the previous case's critic call. The harness uses `max_eval_parallelism.primary_rate_limit_tpm` (the wire name for the reviewer role) from the policy artifact.
+- **Reviewer-pass calls share that bucket.** `max_eval_parallelism.primary_rate_limit_tpm` (the wire name for the reviewer role) records the same `40,000 TPM` as the critic's: it is ONE quota, so reviewer calls go through the same token bucket and never overlap a critic call. [WAS, issue #136 until #148: a Sonnet 4.6 reviewer on its own `100,000 TPM` quota, overlapping the previous case's critic call.]
 
 - **Max CI parallelism (`max_eval_parallelism`).** The `model-policy/bedrock-us-east-1.json` artifact records `max_eval_parallelism.max_runners = 1` under the current `40,000 TPM` Opus quota. If the account quota is increased (via an AWS Service Quotas request), update `max_runners` and `critic_rate_limit_tpm` accordingly. CI should not launch more parallel eval runners than `max_runners`.
 
-- **Prompt-cache hit rate optimization.** Serializing calls (one in-flight Opus call at a time) also **maximizes prompt-cache hit rate** on back-to-back stochastic runs: the playbook block (~30,000 tokens) cached on the first run is still warm for the second and third runs — calls are sequenced within the cache TTL window per model. A cached run consumes ~38,000 input tokens instead of ~60,000 — roughly a 37% reduction — compressing the eval wall-clock time on the Opus quota from ~219 min to ~132 min (the Opus critic call is 75K tokens uncached, 45K cached; before issue #136 moved Opus off the 68K primary call these were ~199 and ~111 min) (derivation in `model-policy/bedrock-us-east-1.json → review_throughput_ceiling`). Note: caches are per-model; the Opus critic cache cannot serve Sonnet reviewer calls and vice versa — serialization is applied independently per model.
+- **Prompt-cache hit rate optimization.** Serializing calls (one in-flight Opus call at a time) also **maximizes prompt-cache hit rate** on back-to-back stochastic runs: the playbook block (~30,000 tokens) cached on the first run is still warm for the second and third runs — calls are sequenced within the cache TTL window per model. A cached run consumes ~38,000 input tokens instead of ~60,000 — roughly a 37% reduction — and, since issue #148's shared prefix, running a case's critic straight after its reviewer lets the critic read the reviewer's cached playbook AND document. On the one shared Opus quota a 3-run gate takes ~418 min uncached and ~243 min warm (143K Opus tokens per case uncached, ~83K warm: on Bedrock only the system + document prefix is cached, reviewer to critic, so the playbook does not carry across cases; derivation in `model-policy/bedrock-us-east-1.json → max_eval_parallelism`). Note: caches are per-model, which is why both passes now run on one model.
 
 - **Per-run cache-hit metrics recorded.** The harness records a **per-run cache-hit rate** (and per-model cache-hit count) in the eval run summary, derived from the `usage.cache_read_input_tokens` field returned by Bedrock on each call. This lets actual savings be measured against the estimated 37% token reduction and provides evidence for quarterly recertification that the caching structure is functioning as expected. A run where the hit rate is unexpectedly zero (outside the first cold run) should be investigated as a possible cache-structure regression. On the DTS/OpenRouter target the same ledger columns (`cache_read_input_tokens` / `cache_creation_input_tokens`) are filled from OpenRouter's `usage.prompt_tokens_details.cached_tokens` / `.cache_write_tokens`, which OpenRouter reports only because every request sends `"usage": {"include": true}` (issue #143); only `anthropic/claude-opus-5` declares `prompt_caching` in `model-policy/openrouter.json` (live-probed 2026-09-16), so a model without that declaration correctly shows no cache columns at all.
 
@@ -163,21 +163,23 @@ CI eval spend is **not** routed through the production `$20/day` spend ledger. S
 | Per-run (full stochastic gate) | **$200/run** | Upper bound for a 39-case × 3–5 stochastic-run gate at uncached pricing; a cached run at ~37% savings lands around $70–$130 |
 | Monthly aggregate | **$1,000/month** | Bounds how many full gates can fire in a month without a manual increase; typically well under this at the expected release cadence |
 
-**Per-run cost derivation.** A full stochastic gate (39 cases × 5 stochastic runs, serialized, uncached worst-case): each case requires one reviewer pass (Sonnet 4.6, ~60K tokens input + ~8K output) and one critic pass (Opus 4.8, ~60K + ~8K; issue #136 swapped the two, which leaves the total unchanged because both are costed at the same token basis). At the Bedrock rates from ARCHITECTURE.md (Opus ~$5.50/M input, ~$27.50/M output; Sonnet ~$3.30/M input, ~$16.50/M output) and 5 stochastic runs:
+**Per-run cost derivation.** A full stochastic gate (39 cases × 5 stochastic runs, serialized, uncached worst-case): each case requires one reviewer pass and one critic pass, both on Opus 4.8 since issue #148, each costed at ~60K tokens input + ~8K output. At the Bedrock rates from ARCHITECTURE.md (Opus ~$5.50/M input, ~$27.50/M output) and 5 stochastic runs:
 
 ```
-Opus:    39 × 5 × (60K × $5.50/M + 8K × $27.50/M)  ≈  $128
-Sonnet:  39 × 5 × (60K × $3.30/M + 8K × $16.50/M)  ≈  $ 77
-Total uncached worst-case                             ≈  $205
+Reviewer (Opus): 39 × 5 × (60K × $5.50/M + 8K × $27.50/M)  ≈  $107
+Critic   (Opus): 39 × 5 × (60K × $5.50/M + 8K × $27.50/M)  ≈  $107
+Total uncached worst-case                                    ≈  $215
 ```
+
+That is $1.10 per case-run, which is exactly `scripts/eval_budget.py`'s `ESTIMATED_COST_PER_CASE_RUN_USD`. (The figures this block carried before issue #148 — $128 + $77 = $205, a Sonnet 4.6 reviewer — did not match their own formula, which gives $107 + $64 = $172.)
 
 With prompt-cache hits (37% token reduction on back-to-back stochastic runs — see [Eval harness rate-limiting](#eval-harness-rate-limiting-and-quota-aware-scheduling)):
 
 ```
-Cached estimate:  $205 × ~0.65                       ≈  $133
+Cached estimate:  $215 × ~0.65                       ≈  $140
 ```
 
-A single-run gate (no stochastic repeats): ~$41 uncached, ~$27 with cache. The **$200/run cap** clears the 5-run uncached worst-case and any stochastic rounding; the **$1,000/month cap** allows ~5 full stochastic gates per month before requiring a manual cap increase. The harness **fails loudly** (exits non-zero, emits a clear budget-exceeded error) if a planned run would exceed the CI eval ceiling — it never silently truncates coverage by skipping cases to stay under budget, because truncated coverage defeats the gate.
+A single-run gate (no stochastic repeats): ~$43 uncached, ~$28 with cache. The **$200/run cap** clears the default 3-run gate (~$129 uncached) with room for stochastic rounding, but NOT a 5-run gate planned at uncached pricing (~$215): `scripts/eval_budget.py` refuses that one before it spends, and a 5-run gate needs the documented cap-raise process; the **$1,000/month cap** allows ~5 full stochastic gates per month before requiring a manual cap increase. The harness **fails loudly** (exits non-zero, emits a clear budget-exceeded error) if a planned run would exceed the CI eval ceiling — it never silently truncates coverage by skipping cases to stay under budget, because truncated coverage defeats the gate.
 
 **Wall-clock.** A full 5-run stochastic gate is **~2–4 hours wall-clock** (39 cases × 5 runs × ~2 min/case serialized at `max_eval_parallelism = 1`, with prompt-cache warming reducing later runs). A smoke-subset every-change run (≤ 10 cases, no stochastic repeats) is **~15–25 min**. CI pipelines should allocate at least 4.5 hours for a full gate and 30 minutes for an every-change smoke run.
 

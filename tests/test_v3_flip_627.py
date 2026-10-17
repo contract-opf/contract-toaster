@@ -450,23 +450,29 @@ def test_no_v2_field_instruction_survives_in_the_critic_user_prompt(
         # deleting the duty: the critic contests the EDIT, which is joined to
         # its issue by `issue_key`, and reports it in the SAME channel.
         #
-        # Measured over the TASKING REGION only -- the prompt text ahead of the
-        # first delimited data block. The primary's JSON is embedded further
-        # down and carries `issue_key`/`block_patches`/`block_ops` of its own,
-        # so a whole-prompt search would report these as instructed even if the
-        # tasking never mentioned them (it does not, before this change).
+        # Measured over the TASKING REGION only -- the undelimited prompt text
+        # between the end of the document block (issue #148 put the document
+        # FIRST, as the shared prompt-cache breakpoint; the no-document
+        # variant has none, so the region starts at the top) and the next
+        # delimited data block, the primary's output. That JSON carries
+        # `issue_key`/`block_patches`/`block_ops` of its own, so a whole-prompt
+        # search would report these as instructed even if the tasking never
+        # mentioned them (it does not, before this change).
+        doc_end = prompt.find("</COUNTERPARTY_DOCUMENT>")
+        region_start = doc_end + len("</COUNTERPARTY_DOCUMENT>") if doc_end >= 0 else 0
+        rest = prompt[region_start:]
         offsets = [
             offset
-            for offset in (prompt.find(pp.UNTRUSTED_BLOCK_WARNING), prompt.find("\n<"))
+            for offset in (rest.find(pp.UNTRUSTED_BLOCK_WARNING), rest.find("\n<"))
             if offset >= 0
         ]
         if not offsets:
             failures.append(
-                f"[11f] the {label} critic prompt composes no delimited data block at all, "
-                f"so the tasking region cannot be isolated."
+                f"[11f] the {label} critic prompt composes no delimited data block after the "
+                f"tasking, so the tasking region cannot be isolated."
             )
             continue
-        tasking = prompt[: min(offsets)]
+        tasking = rest[: min(offsets)]
 
         for needle, why in (
             ('"issue_key"', "the join between an authored edit and the issue that authored it"),

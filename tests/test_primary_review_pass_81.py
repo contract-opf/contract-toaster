@@ -260,9 +260,11 @@ def test_primary_user_prompt_block_order_full_doc(failures: list[str]) -> None:
         doc_text="Section 8. Aggregate liability shall not exceed $75,000.",
     )
 
+    # Issue #148: the document leads (the shared prompt-cache breakpoint);
+    # per-document precedent follows in the role suffix.
     required_tags_in_order = [
-        "<RETRIEVED_PRECEDENT>",
         "<COUNTERPARTY_DOCUMENT>",
+        "<RETRIEVED_PRECEDENT>",
     ]
     positions = [prompt.find(tag) for tag in required_tags_in_order]
     if any(pos == -1 for pos in positions):

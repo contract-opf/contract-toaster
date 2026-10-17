@@ -22,9 +22,11 @@ This test proves:
      reservation from `model-policy/openrouter.json`'s
      `cost_per_million_{input,output}_usd` rates; the Bedrock path (default /
      any other value) is byte-for-byte unchanged (still the documented
-     Bedrock worst case -- $8.84 / 884 cents since issue #137 raised
-     MAX_INPUT_TOKENS to 175_000, per ARCHITECTURE.md -> Cost shape, the
-     authority for every cost figure in this repo; it was $8.71 / 871 cents
+     Bedrock worst case -- $11.06 / 1106 cents since issue #148 put the
+     reviewer on the critic's Opus rate ($8.84 / 884 cents with the Sonnet
+     reviewer, after issue #137 raised MAX_INPUT_TOKENS to 175_000), per
+     ARCHITECTURE.md -> Cost shape, the authority for every cost figure in
+     this repo; it was $8.71 / 871 cents
      at issue #144's 170_000, $6.86 / 686 cents
      at 100_000 after issue #658 raised the worst-case output budget to
      32_000, $2.46 / 246 cents between issue #625 raising MAX_INPUT_TOKENS
@@ -267,11 +269,12 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
     def test_bedrock_path_unchanged_by_default(self):
         """No MODEL_PROVIDER (or any value other than 'openrouter') must
         still reserve the documented Bedrock worst case (ARCHITECTURE.md ->
-        Cost shape: $8.84 / 884 cents at MAX_INPUT_TOKENS=175_000 and the
-        issue-#658 worst-case output budget of 32_000, over three attempts
-        per pass) -- this branch must not disturb the AWS target."""
+        Cost shape: $11.06 / 1106 cents at MAX_INPUT_TOKENS=175_000, the
+        issue-#658 worst-case output budget of 32_000 over three attempts
+        per pass, and both passes on Opus 4.8 since issue #148) -- this
+        branch must not disturb the AWS target."""
         _clear_model_provider()
-        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 884)
+        self.assertEqual(_reviews_module.compute_worst_case_reservation_usd_cents(), 1106)
 
     def test_openrouter_reservation_uses_openrouter_json_rates(self):
         """MODEL_PROVIDER=openrouter must price the reservation from
@@ -302,7 +305,7 @@ class TestOpenRouterReservationPricingBranch(unittest.TestCase):
         actual_cents = _reviews_module.compute_worst_case_reservation_usd_cents()
         self.assertEqual(actual_cents, expected_cents)
         self.assertNotEqual(
-            actual_cents, 884,
+            actual_cents, 1106,
             "Must diverge from the Bedrock worst case, not silently reuse it.",
         )
 

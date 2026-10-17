@@ -170,14 +170,16 @@ class TestPolicyDeclaresCaching(unittest.TestCase):
     def test_the_declaration_records_its_probe_date(self) -> None:
         policy = mc.load_openrouter_policy()
         # The note travels with the model id, not the role: issue #136 moved
-        # opus-5 from models.primary to models.critic.
-        (pin,) = [
+        # opus-5 from models.primary to models.critic, and issue #148 put it
+        # on BOTH roles -- each pin carries the same probe record.
+        pins = [
             e
             for e in policy["models"].values()
             if isinstance(e, dict) and e.get("model_id") == OPUS_5
         ]
-        note = pin.get("prompt_caching_note", "")
-        self.assertIn("2026-09-16", note)
+        self.assertEqual({p["role"] for p in pins}, {"primary_reviewer", "adversarial_critic"})
+        for pin in pins:
+            self.assertIn("2026-09-16", pin.get("prompt_caching_note", ""))
 
     def test_no_unprobed_id_declares_it(self) -> None:
         # Only Opus 5 (2026-09-16) and the Haiku 4.5 test tier (2026-10-06)

@@ -48,8 +48,9 @@ def critic_keeps(
     or dict) with a KEEP disposition for each of its issues.
 
     `schema_enforced` mirrors a capability-True provider: the deprecated
-    CriticDelta arrays are present (empty) and an ACCEPT still carries a
-    `critic_delta` object. `verdict_summary`, when given, replaces the first
+    CriticDelta arrays are present (empty), an ACCEPT still carries a
+    `critic_delta` object, and the answer carries `"role": "critic"` (issue
+    #148's discriminator, which strict mode forces). `verdict_summary`, when given, replaces the first
     reviewer's (the critic writes its own; leaving it None keeps the first
     reviewer's words, which a critic that agrees may well repeat).
     """
@@ -70,6 +71,11 @@ def critic_keeps(
     else:
         delta = None
     body["critic_delta"] = delta
+    # Issue #148: the shared tool schema's `role` discriminator. A strict
+    # provider forces it on every answer, so a schema-enforced critic says
+    # "critic"; a restated answer that carried the reviewer's role does too.
+    if schema_enforced or "role" in body:
+        body["role"] = "critic"
     if verdict_summary is not None:
         body["verdict_summary"] = verdict_summary
     return json.dumps(body)

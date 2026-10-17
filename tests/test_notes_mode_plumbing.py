@@ -106,15 +106,15 @@ class TestItReachesThePromptSeam(unittest.TestCase):
     """A value that stops at the database is not plumbing."""
 
     def test_assemble_system_blocks_accepts_the_mode(self):
-        blocks = pp.assemble_system_blocks(PLAYBOOK, "", "", notes_mode="internal")
+        blocks = pp.assemble_system_blocks(PLAYBOOK, notes_mode="internal")
         self.assertTrue(blocks, "assembly returned no blocks")
 
     def test_the_default_is_external_and_changes_nothing(self):
         """Item A must be a no-op. If `external` and the default ever diverge,
         this landed a behaviour change while claiming not to."""
-        default = pp.render_system_prompt(pp.assemble_system_blocks(PLAYBOOK, "", ""))
+        default = pp.render_system_prompt(pp.assemble_system_blocks(PLAYBOOK))
         external = pp.render_system_prompt(
-            pp.assemble_system_blocks(PLAYBOOK, "", "", notes_mode="external")
+            pp.assemble_system_blocks(PLAYBOOK, notes_mode="external")
         )
         self.assertEqual(default, external)
 
@@ -132,7 +132,7 @@ class TestItReachesThePromptSeam(unittest.TestCase):
         """
         rendered = {
             mode: pp.render_system_prompt(
-                pp.assemble_system_blocks(PLAYBOOK, "", "", notes_mode=mode)
+                pp.assemble_system_blocks(PLAYBOOK, notes_mode=mode)
             )
             for mode in ("none", "external", "internal", "both")
         }

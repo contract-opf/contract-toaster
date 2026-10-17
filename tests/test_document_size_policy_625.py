@@ -557,7 +557,9 @@ def test_shipped_prompts_never_describe_outline_mode(failures: list[str]) -> Non
 # of this case: every token the serialized schema grows by must be matched
 # by raising MAX_INPUT_TOKENS by the same amount, or [8c] fails. Issue #137
 # grew it 9,318 -> 11,057 tokens (assembled 169,316 -> 171,055), which is
-# why the cap is 175,000 (~3,900 tokens of headroom), not 170,000.
+# why the cap is 175,000 (~3,900 tokens of headroom), not 170,000. Issue
+# #148's `role` discriminator grew it again, 11,057 -> 11,210 (assembled
+# 171,208), inside that headroom (3,792 left).
 # ---------------------------------------------------------------------------
 
 

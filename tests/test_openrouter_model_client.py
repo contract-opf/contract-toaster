@@ -56,7 +56,8 @@ SECRET_PROMPT = "CONFIDENTIAL clause: liability capped at $150,000."
 # The current policy-pinned ids (model-policy/openrouter.json). Tests below
 # that are NOT exercising the policy-pin assertion itself use these so they
 # stay focused on transport behavior instead of tripping the new check.
-PRIMARY_MODEL_ID = "anthropic/claude-sonnet-4.6"  # issue #136: the cheaper reviewer default
+# Issue #148: one model on both passes by default -- the critic's.
+PRIMARY_MODEL_ID = "anthropic/claude-opus-5"
 NO_ALLOWANCE_MODEL_ID = "anthropic/claude-sonnet-5"
 CRITIC_MODEL_ID = "anthropic/claude-opus-5"  # issue #604 off 4.8; #136 made it the critic
 
