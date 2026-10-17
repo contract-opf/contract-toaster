@@ -61,16 +61,36 @@ const FULL = {
     { clause_id: 'c-1', source_quote: 'two' },
     { clause_id: 'c-2', source_quote: 'three' },
   ],
-  // Issue #96: real field names AND the real merged item shape
-  // (`get_review_detail`'s actual projection, produced by
-  // `scripts/reconciliation.py`'s `critic_delta_record` — a list of dicts,
-  // never bare ids), not the `contested_issue_ids` key this fixture carried
-  // before #96, which no writer has ever produced.
+  // Issues #96/#140: real field names AND the real merged record shape
+  // (`get_review_detail`'s actual projection of
+  // `scripts/reconciliation.py::reconcile`'s `critic_delta.overrides` — a
+  // computed `replaced` entry and a computed `added` one; the full real
+  // record is pinned in receipt-critic-line-96.test.tsx).
   critic_delta: {
-    contested_replacements: [
-      { section_ref: '8', critic_objection: 'Drifts from the playbook position.' },
+    overrides: [
+      {
+        source: 'computed',
+        change: 'replaced',
+        issue_id: 'I1',
+        critic_issue_key: 'I1',
+        section_ref: '8',
+        field: 'replacement_text',
+        primary_value: '+ Drifts from the playbook position.',
+        critic_value: '+ Holds the playbook position.',
+        reason: 'Revised the wording.',
+      },
+      {
+        source: 'computed',
+        change: 'added',
+        issue_id: null,
+        critic_issue_key: 'I2',
+        section_ref: '12',
+        field: 'decision',
+        primary_value: '',
+        critic_value: 'REQUEST_CHANGE',
+        reason: 'Raised by the critic; the reviewer did not raise it.',
+      },
     ],
-    added_issues: [{ section_ref: '12', playbook_topic_id: 'indemnity-mutual' }],
   },
   confidence_band: 'LOW_CONFIDENCE',
 };
@@ -155,10 +175,10 @@ describe('the receipt prints only what the review actually recorded', () => {
     // distinct-anchor count, which is why it is not simply the issue count.
     expect(paper.querySelector('[data-receipt-line="issues"]')?.textContent).toContain('3');
     expect(paper.querySelector('[data-receipt-line="clauses"]')?.textContent).toContain('2');
-    // Issue #96: the critic-delta/confidence-band line — counts only, no
-    // objection prose.
+    // Issues #96/#140: the critic-override/confidence-band line — counts
+    // only, no reviewer or critic text.
     expect(paper.querySelector('[data-receipt-line="critic-delta"]')?.textContent).toBe(
-      'Critic: 1 replacement contested, 1 issue added · confidence LOW',
+      'Critic: 1 override, 1 issue added · confidence LOW',
     );
   });
 

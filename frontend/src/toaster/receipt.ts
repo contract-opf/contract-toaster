@@ -50,14 +50,18 @@ export interface ReceiptSource {
   critic_model_id?: string | null;
   toaster_guidance?: string | null;
   issues?: unknown;
-  // Issue #96: field names match `get_review_detail`'s real projection --
-  // `critic_delta.contested_replacements` / `.added_issues` /
-  // `.rationale_objections` (`scripts/reconciliation.py`'s merged shape,
-  // whose `_CRITIC_DELTA_KEYS` are exactly these three), not the
-  // `contested_issue_ids` key this interface carried before #96, which no
-  // writer has ever produced (`scripts/review_spine.py::run_review` never
-  // set `critic_delta` on its result at all until #96 wired it through).
+  // Issue #140: the receipt reads ONLY `critic_delta.overrides`, the
+  // reconciler's record of every respect in which the critic's final result
+  // differs from the reviewer's (`scripts/reconciliation.py::reconcile`,
+  // guard 2; projected verbatim by `get_review_detail` off the analysis
+  // artifact). The deprecated `contested_replacements` / `added_issues` /
+  // `rationale_objections` arrays still ride on the wire for one release
+  // (the download gate in ReviewSubmission.tsx still keys on two of them),
+  // so they stay typed here -- the receipt counts none of them, nor the
+  // `dispositions` (a KEEP changes nothing).
   critic_delta?: {
+    overrides?: unknown;
+    dispositions?: unknown;
     contested_replacements?: unknown;
     added_issues?: unknown;
     rationale_objections?: unknown;
@@ -222,63 +226,139 @@ function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
+/** One `critic_delta.overrides[]` record, as far as the receipt reads it:
+ *  four controlled tokens, never a value or a reason. */
+interface OverrideRecord {
+  source?: unknown;
+  change?: unknown;
+  retained?: unknown;
+  issue_id?: unknown;
+  field?: unknown;
+}
+
+/** The counts the receipt prints, one per kind of override record. */
+interface OverrideCounts {
+  overrides: number;
+  added: number;
+  dropped: number;
+  retained: number;
+}
+
 /**
- * Issue #96 (Option B, owner decision 2026-09-16): one brief, counts-only
- * line surfacing the adversarial critic's delta and the merged confidence
- * band on the printed receipt -- e.g. "Critic: 2 replacements contested, 1
- * issue added · confidence LOW". Renders whenever there is something to
- * disclose: `critic_delta` carries a contested replacement, an added issue
- * or a rationale objection, OR `confidenceBand` is non-null (never-OK, per
- * docs/output-contract.md -> "Confidence band" -- absent/null IS the OK
- * case, same convention every other field on this row follows).
+ * Issue #140: `critic_delta.overrides` counted the way the internal footnotes
+ * explain it (`scripts/redline_generate.py::_rendered_override_records`), so
+ * "N overrides" on the slip is the number of override notes in the
+ * document.
  *
- * ALL THREE `_CRITIC_DELTA_KEYS` are counted, not just the two that degrade
- * the band. `scripts/reconciliation.py` sets `has_critic_delta` (and so
- * emits a non-null `critic_delta`) from any of the three, but excludes
- * `rationale_objections` from `critic_contests_output` -- so a critic that
- * only objects to the primary's RATIONALE produces a non-empty delta with a
- * null band, and counting only the other two would print nothing at all
- * about a critic that did in fact object.
+ * A COMPUTED record (`source: "computed"`, built by
+ * `scripts/reconciliation.py::reconcile`) is `added` (the critic raised an
+ * issue the reviewer did not), `dropped` (the reverse -- `retained: true`
+ * when it was a hard rejection guard 1 put back), or `replaced` (a kept
+ * issue whose edits differ). Every other record is the critic's own
+ * statement of a change. The reconciler can record one change twice, so two
+ * of the critic's are not counted again: one on an issue the reconciler
+ * recorded as dropped (the drop says it), and a `replacement_text` one on an
+ * issue it recorded as `replaced` (that entry says it).
+ */
+function overrideCounts(overrides: unknown): OverrideCounts {
+  const counts: OverrideCounts = { overrides: 0, added: 0, dropped: 0, retained: 0 };
+  if (!Array.isArray(overrides)) {
+    return counts;
+  }
+  const records = overrides.filter(
+    (entry): entry is OverrideRecord => typeof entry === 'object' && entry !== null,
+  );
+  const computed = records.filter((entry) => entry.source === 'computed');
+  const idsWith = (change: string): Set<string> =>
+    new Set(
+      computed
+        .filter((entry) => entry.change === change && typeof entry.issue_id === 'string')
+        .map((entry) => entry.issue_id as string),
+    );
+  const droppedIds = idsWith('dropped');
+  const replacedIds = idsWith('replaced');
+  for (const entry of records) {
+    if (entry.source === 'computed') {
+      if (entry.change === 'added') {
+        counts.added += 1;
+      } else if (entry.change === 'dropped') {
+        if (entry.retained === true) {
+          counts.retained += 1;
+        } else {
+          counts.dropped += 1;
+        }
+      } else {
+        counts.overrides += 1;
+      }
+      continue;
+    }
+    const id = typeof entry.issue_id === 'string' ? entry.issue_id : null;
+    if (id !== null && droppedIds.has(id)) {
+      continue;
+    }
+    if (id !== null && replacedIds.has(id) && entry.field === 'replacement_text') {
+      continue;
+    }
+    counts.overrides += 1;
+  }
+  return counts;
+}
+
+/**
+ * Issue #96 (Option B, owner decision 2026-09-16), presented as OVERRIDES
+ * since issue #140: one brief, counts-only line surfacing what the critic
+ * changed and the confidence band on the printed receipt -- e.g. "Critic: 3
+ * overrides, 1 issue added, 1 dropped · confidence OK". Under ADR 0001 the
+ * critic has the last word, so the line counts the critic's decisions, not
+ * contests: each kind of `critic_delta.overrides` record (`overrideCounts`),
+ * a count omitted when it is zero.
+ *
+ * Renders whenever there is something to disclose: an override of any kind,
+ * OR a non-null `confidenceBand` (never-OK, per docs/output-contract.md ->
+ * "Confidence band" -- absent/null IS the OK case, the same convention every
+ * other field on this row follows). With counts and no band, the band reads
+ * "OK" -- the review that carries a delta went through the reconciler, which
+ * writes a null band for exactly an OK one. A delta whose only content is
+ * KEEP dispositions (every review the reviewer raised an issue on) prints
+ * nothing: the critic changed nothing.
  *
  * ESCAPED TEXT ONLY (CLAUDE.md's "no document excerpt in a message" hard
- * rule, applied here). This line prints ONLY: a count, one of the literal
- * nouns "replacement"/"issue"/"rationale objection", and the literal
- * `confidence_band` wire token (with its `_CONFIDENCE`
- * suffix trimmed for brevity, e.g. `LOW_CONFIDENCE` -> `LOW`) -- never
- * `critic_objection` (the critic's own prose), never
- * `rationale_objections[].objection`, never
- * `critic_suggested_replacement` (derived clause text), and never
- * `verdict_summary`. Those stay exactly where docs/output-contract.md's
- * "Critic-delta presentation" already puts them: the in-app result view's
- * contested-replacement badges, never a printed slip someone pastes into a
- * deal thread.
+ * rule, applied here). This line prints ONLY counts, the literal nouns
+ * "override"/"issue"/"hard rejection", the literal words "added"/"dropped"/
+ * "retained", and the literal `confidence_band` wire token (its
+ * `_CONFIDENCE` suffix trimmed for brevity, e.g. `LOW_CONFIDENCE` -> `LOW`).
+ * `overrideCounts` reads four controlled tokens off each record and never a
+ * `primary_value`, `critic_value` or `reason` -- the reviewer's and the
+ * critic's text and the critic's prose stay in the internal footnotes
+ * (docs/output-contract.md -> "Internal-footnote explanation"), never on a
+ * printed slip someone pastes into a deal thread.
  */
 function criticLine(
   criticDelta: ReceiptSource['critic_delta'],
   confidenceBand?: string | null,
 ): string | null {
-  const contested = count(criticDelta?.contested_replacements) ?? 0;
-  const added = count(criticDelta?.added_issues) ?? 0;
-  const objected = count(criticDelta?.rationale_objections) ?? 0;
+  const counts = overrideCounts(criticDelta?.overrides);
   const parts: string[] = [];
-  if (contested > 0) {
-    parts.push(`${plural(contested, 'replacement')} contested`);
+  if (counts.overrides > 0) {
+    parts.push(plural(counts.overrides, 'override'));
   }
-  if (added > 0) {
-    parts.push(`${plural(added, 'issue')} added`);
+  if (counts.added > 0) {
+    parts.push(`${plural(counts.added, 'issue')} added`);
   }
-  if (objected > 0) {
-    parts.push(plural(objected, 'rationale objection'));
+  if (counts.dropped > 0) {
+    parts.push(`${counts.dropped} dropped`);
+  }
+  if (counts.retained > 0) {
+    parts.push(`${plural(counts.retained, 'hard rejection')} retained`);
   }
   if (parts.length === 0 && !confidenceBand) {
     return null;
   }
-  const countsPart = parts.length > 0 ? parts.join(', ') : null;
-  const bandWord = confidenceBand ? confidenceBand.replace(/_CONFIDENCE$/, '') : null;
-  if (countsPart && bandWord) {
-    return `Critic: ${countsPart} · confidence ${bandWord}`;
+  const bandWord = confidenceBand ? confidenceBand.replace(/_CONFIDENCE$/, '') : 'OK';
+  if (parts.length === 0) {
+    return `Critic: confidence ${bandWord}`;
   }
-  return countsPart ? `Critic: ${countsPart}` : `Critic: confidence ${bandWord as string}`;
+  return `Critic: ${parts.join(', ')} · confidence ${bandWord}`;
 }
 
 /**

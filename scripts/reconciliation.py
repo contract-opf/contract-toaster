@@ -43,11 +43,17 @@ Amendment):
     primary and absent from the critic is `dropped`, one present in the
     critic and absent from the primary is `added`, and a matched pair whose
     authored edits differ is `replaced`. Every entry carries both versions,
-    so nothing the primary said is lost from the audit record. The critic's
+    so nothing the primary said is lost from the audit record. Every entry,
+    the critic's own included, is also stamped with the `section_ref` it
+    concerns (issue #140): the section the issue sits at in the final
+    review when the critic kept it, else the primary's -- so the internal
+    footnotes can name each override's own section, which a critic-stated
+    entry does not carry. The critic's
     `dispositions` and the deprecated `added_issues` /
     `contested_replacements` / `rationale_objections` arrays are forwarded
-    verbatim for the consumers that still read them (receipt, internal
-    footnotes, leakage scan). Every one of these fields reaches the review's
+    verbatim for the consumers that still read them (the download gate's
+    indicator, the leakage scan; since issue #140 the receipt and the
+    internal footnotes read `overrides`). Every one of these fields reaches the review's
     owner (the analysis artifact, `get_review_detail`), so every
     model-authored text in them is walked by `leakage_scan
     .scan_model_output` before anything is persisted -- including the
@@ -129,8 +135,9 @@ CHANGE_ADDED = "added"
 CHANGE_REPLACED = "replaced"
 
 # The deprecated CriticDelta arrays (playbooks/output-schema-v3.json marks each
-# DEPRECATED), forwarded verbatim for the receipt, the #132 internal footnotes
-# and the leakage scan, which still read them.
+# DEPRECATED), forwarded verbatim for the download gate's indicator and the
+# leakage scan, which still read them (the receipt and the internal footnotes
+# read `overrides` since issue #140).
 _DEPRECATED_DELTA_KEYS = ("added_issues", "contested_replacements", "rationale_objections")
 
 # Fixed, document-free reasons for a computed override the critic gave no
@@ -586,6 +593,19 @@ def reconcile(
     paired_critic = set(pairs.values())
 
     raw_delta = critic_result.get("critic_delta") or {}
+    # Issue #140: every override record names the section it concerns, so
+    # the internal footnotes can say where each override sits. A critic
+    # entry names only the primary's `issue_id`; the section is that issue's
+    # place in the FINAL review (its paired critic issue's) when the critic
+    # kept it, else the primary's own. A locator the leakage scan walks
+    # (`critic_delta.overrides.section_ref`) before anything renders it.
+    override_sections: dict[str, Any] = {}
+    for p_index, p_issue in enumerate(primary_issues):
+        p_key = p_issue.get("issue_key")
+        if not isinstance(p_key, str):
+            continue
+        located = critic_issues[pairs[p_index]] if p_index in pairs else p_issue
+        override_sections.setdefault(p_key, located.get("section_ref"))
     disposition_reasons = {
         entry.get("issue_id"): entry.get("reason")
         for entry in raw_delta.get("dispositions") or []
@@ -637,6 +657,7 @@ def reconcile(
                     "change": CHANGE_DROPPED,
                     "issue_id": p_key,
                     "critic_issue_key": None,
+                    "section_ref": p_issue.get("section_ref"),
                     "field": "decision",
                     "primary_value": str(p_issue.get("decision") or "REQUEST_CHANGE"),
                     "critic_value": "DROP",
@@ -661,6 +682,7 @@ def reconcile(
                     "change": CHANGE_REPLACED,
                     "issue_id": p_key,
                     "critic_issue_key": c_key,
+                    "section_ref": c_issue.get("section_ref"),
                     "field": "replacement_text",
                     "primary_value": p_rendered,
                     "critic_value": _render_edits(critic_edits.get(c_key, []) if c_key else []),
@@ -677,6 +699,7 @@ def reconcile(
                 "change": CHANGE_ADDED,
                 "issue_id": None,
                 "critic_issue_key": c_key,
+                "section_ref": c_issue.get("section_ref"),
                 "field": "decision",
                 "primary_value": "",
                 "critic_value": str(c_issue.get("decision") or "REQUEST_CHANGE"),
@@ -739,7 +762,15 @@ def reconcile(
             dict(entry) for entry in raw_delta.get("dispositions") or [] if isinstance(entry, dict)
         ],
         "overrides": [
-            {**entry, "source": OVERRIDE_SOURCE_CRITIC}
+            {
+                **entry,
+                "source": OVERRIDE_SOURCE_CRITIC,
+                "section_ref": (
+                    override_sections.get(entry["issue_id"])
+                    if isinstance(entry.get("issue_id"), str)
+                    else None
+                ),
+            }
             for entry in raw_delta.get("overrides") or []
             if isinstance(entry, dict)
         ]
