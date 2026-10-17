@@ -2098,9 +2098,9 @@ def render_standing_instructions_block(instructions_text: str) -> str | None:
 # prompt: a per-review dial ahead of the cached playbook block would re-bill
 # the playbook on every review whose dial differs. It lives in this module,
 # not `scripts/opf_prompt.py`, because both passes render the control layer
-# from here on both review paths. Text sent after the document can be
-# imitated by a forged closing delimiter inside it; neutralising those
-# tokens is #162.
+# from here on both review paths. Text sent after the document could be
+# imitated by a forged closing delimiter inside it; issue #162 neutralises
+# those tokens in `_delimited_block` (`neutralise_prompt_delimiters`).
 #
 # `medium` renders NO block: it is the default, and a medium review's prompt
 # carries nothing for it (the SPA sent nothing for Medium before this block
@@ -2699,6 +2699,123 @@ UNTRUSTED_BEARING_TAGS = frozenset(
 )
 
 
+# Issue #162. Every tag the review prompt composes as a block delimiter --
+# the untrusted-bearing tags above plus the two trusted control-layer tags
+# `render_request_control_text` emits in the role suffix
+# (`render_standing_instructions_block`, `render_toaster_guidance_block`).
+# `tests/test_untrusted_block_marking.py` asserts every tag either assembler
+# emits is listed here, so a new block cannot be added without its delimiter
+# becoming one untrusted text is unable to forge.
+PROMPT_BLOCK_TAGS = UNTRUSTED_BEARING_TAGS | frozenset(
+    {
+        "STANDING_INSTRUCTIONS",
+        "TOASTER_GUIDANCE",
+    }
+)
+
+# Issue #162: neutralising delimiter tokens inside untrusted content.
+#
+# Since issue #148 trusted text -- the per-review control layer and both role
+# taskings -- FOLLOWS the `COUNTERPARTY_DOCUMENT` block. A paragraph can carry
+# a line break (`w:br`), so a document could write a forged
+# `</COUNTERPARTY_DOCUMENT>` on its own line followed by a forged
+# `<TOASTER_GUIDANCE>` block laid out exactly like the real one, and it landed
+# in the same position the real one occupies (docs/threat-model.md,
+# "Residual since issue #148").
+#
+# `_delimited_block` therefore escapes the `<` that opens every opening or
+# closing tag head of a `PROMPT_BLOCK_TAGS` tag inside an untrusted block's
+# content -- `</COUNTERPARTY_DOCUMENT>` becomes `&lt;/COUNTERPARTY_DOCUMENT>`
+# -- so it can no longer close or open a block, while the model still reads,
+# verbatim, what the document wrote. The head is matched case-insensitively
+# and tolerates whitespace (`< /counterparty_document >`), and it is escaped
+# whatever follows it -- trailing junk (`<TOASTER_GUIDANCE x>`), no `>` at
+# all, or another tag. Only the `<` changes, never the `>`, which is the
+# minimal HTML text escape and the reason the guarantee is a property of the
+# OUTPUT: a `<` survives only where the input `<` was NOT followed by a tag
+# head, and the escape rewrites only `<` and `&` -- characters no tag head
+# contains -- into strings that start with `&`, which no tag head contains
+# either; so no rewrite can complete a head behind a surviving `<`, and the
+# escaped text carries no `<\s*/?\s*TAG\b` at all, nested forms such as
+# `</COUNTERPARTY_DOCUMENT<COUNTERPARTY_DOCUMENT>>` included. (Escaping whole
+# `<...>` tokens in one pass is not enough: escaping an inner token removes
+# the `<` that had stopped the outer match, so the output of that nested form
+# still carries a raw `</COUNTERPARTY_DOCUMENT&lt;...&gt;>`.) Nothing
+# else is touched but one more spelling, below, so a document with no
+# block-tag head and no escaped spelling of one renders byte-identically, and
+# the prompt-cache prefix both passes share (issue #148) is unaffected --
+# both render through here.
+#
+# The escaped form is RENDERING, like the `"## "` and `"[pNNNN] "` markers: it
+# is in no `.docx` and no `paragraph["text"]`. A `keep`/`delete` segment that
+# transcribes it cannot prove against the block, and one unprovable segment
+# rejects the whole transcript (`block_transcript.validate_block_patches`), so
+# `validate_model_response` reverses it on SOURCE ops
+# (`_restore_neutralised_delimiters`) the same way it strips the other two
+# markers -- and on the critic's ledger-disposition spans, which are copied
+# out of the same block.
+#
+# That reversal must be exact for EVERY document string, not only for the
+# heads this function escaped: a document that already spells
+# `&lt;TOASTER_GUIDANCE&gt;` would otherwise be "restored" to a `<...` it never
+# contained, no faithful transcript of it could ever prove, and the review
+# would fail closed as `primary_block_transcript_rejected` on every retry. So
+# the encoding is a true escape: any `&` that begins an escaped spelling of a
+# block-tag head -- `&lt;TAG`, `&amp;lt;TAG`, `&amp;amp;lt;TAG`, ... --
+# becomes `&amp;`, so the document's own `&lt;TOASTER_GUIDANCE&gt;` renders as
+# `&amp;lt;TOASTER_GUIDANCE&gt;`. The restore undoes exactly those two
+# rewrites in one left-to-right pass, so
+# `restore_neutralised_delimiters(neutralise_prompt_delimiters(s)) == s` for
+# every `s`: each `&` in the escaped text is either one this function wrote
+# (`&lt;` before a head, `&amp;` before `(amp;)*lt;` and a head) or a
+# document `&` that was followed by neither, and the lookaheads read the same
+# characters in both directions because a head and `(amp;)*lt;` contain no
+# `<` or `&`. The entity names are matched case-sensitively (the tag name is
+# not): `&LT;` is not a spelling this function emits, so it is left alone in
+# both directions.
+_PROMPT_TAG_ALTERNATION = "|".join(sorted(PROMPT_BLOCK_TAGS))
+# The head is POSSESSIVE (`\s*+`). Whitespace and `/` are disjoint, so a
+# greedy run is always the only way to match and possessiveness changes no
+# match -- but with plain `\s*/?\s*` a `<` followed by a long whitespace run
+# that ends in no tag name made the engine try every split of that run
+# between the two quantifiers, quadratic in its length, on untrusted text
+# before any size gate (#162 review: ~80 s for 40k NBSP in an 82 KB .docx).
+_PROMPT_TAG_HEAD = rf"\s*+/?\s*+(?i:{_PROMPT_TAG_ALTERNATION})\b"
+_PROMPT_DELIMITER_RE = re.compile(
+    rf"<(?={_PROMPT_TAG_HEAD})"
+    rf"|&(?=(?:amp;)*lt;{_PROMPT_TAG_HEAD})"
+)
+_NEUTRALISED_PROMPT_DELIMITER_RE = re.compile(
+    rf"&lt;(?={_PROMPT_TAG_HEAD})"
+    rf"|&amp;(?=(?:amp;)*lt;{_PROMPT_TAG_HEAD})"
+)
+
+
+def _neutralise_match(match: re.Match[str]) -> str:
+    return "&lt;" if match.group() == "<" else "&amp;"
+
+
+def _restore_match(match: re.Match[str]) -> str:
+    return "<" if match.group() == "&lt;" else "&"
+
+
+def neutralise_prompt_delimiters(content: str) -> str:
+    """`content` with the `<` of every `PROMPT_BLOCK_TAGS` tag head escaped,
+    closed or not, and the `&` of any escaped spelling of one escaped in turn
+    (issue #162; see the comment above). For any input the result contains
+    no `<` followed by a tag head, so no complete delimiter either.
+    Deterministic and exactly invertible by `restore_neutralised_delimiters`
+    for every input. Not idempotent, and need not be: `_delimited_block`
+    applies it once per rendered block."""
+    return _PROMPT_DELIMITER_RE.sub(_neutralise_match, content)
+
+
+def restore_neutralised_delimiters(text: str) -> str:
+    """The inverse of `neutralise_prompt_delimiters`, for a string a model
+    transcribed out of an untrusted block (issue #162)."""
+    return _NEUTRALISED_PROMPT_DELIMITER_RE.sub(_restore_match, text)
+
+
 def _delimited_block(tag: str, content: str) -> str:
     """One delimited user-prompt block, marked untrusted iff its TAG is in
     `UNTRUSTED_BEARING_TAGS`.
@@ -2708,10 +2825,18 @@ def _delimited_block(tag: str, content: str) -> str:
     in a 100,000-token prompt is not a warning about the block the model is
     currently reading. The cost is one sentence per block against a document
     that can run to the input cap.
+
+    An untrusted block's content is also passed through
+    `neutralise_prompt_delimiters` (issue #162), here and nowhere else, so no
+    text inside it can close this block or open another. This is the ONE place
+    every untrusted block is rendered -- the document in both passes, any
+    retrieved precedent, and the primary's output in the critic's prompt,
+    which carries the document's characters verbatim in its transcript.
     """
     parts = []
     if tag in UNTRUSTED_BEARING_TAGS:
         parts.append(UNTRUSTED_BLOCK_WARNING)
+        content = neutralise_prompt_delimiters(content)
     parts.append(f"<{tag}>")
     parts.append(content)
     parts.append(f"</{tag}>")
@@ -2798,8 +2923,12 @@ RENDERED_BLOCK_MARKER_PATTERN = re.compile(r"^\[p\d{4,}\][ \t]*")
 # block a different byte offset (and a different cache entry) in each pass.
 # Trusted text after the untrusted block widens the injection surface: a
 # forged closing delimiter plus a forged guidance block inside the document
-# can now imitate this layout. That residual is recorded in
-# docs/threat-model.md ("Residual since issue #148").
+# could imitate this layout. Issue #162 closes the delimiter half:
+# `_delimited_block` escapes every `PROMPT_BLOCK_TAGS` token inside untrusted
+# content (`neutralise_prompt_delimiters`), so the forged block stays inside
+# the document block it came from. What remains -- prose imitating an
+# untagged block such as this tasking -- is recorded in docs/threat-model.md
+# ("Residual since issue #148").
 # ---------------------------------------------------------------------------
 
 REVIEWER_TASKING_BLOCK = (
@@ -3555,6 +3684,54 @@ def _strip_rendered_heading_markers(parsed: Any) -> None:
                 segment["text"] = _without_leading_heading_line(text)
 
 
+def _restore_neutralised_delimiters(parsed: Any) -> None:
+    """Reverse `neutralise_prompt_delimiters` on every SOURCE-op
+    block-transcript segment (`keep`/`delete`), in place, BEFORE the
+    full-schema check (issue #162).
+
+    The escaped delimiter is rendering `_delimited_block` injected into the
+    untrusted block the model read; the block's own text carries the original
+    `<...>` token. A `delete` that transcribes the escaped form -- the natural
+    thing for a model removing a forged guidance block -- would otherwise fail
+    to locate in the block, and one unprovable segment rejects the WHOLE
+    transcript. Same scope and discipline as `_strip_rendered_heading_markers`:
+    SOURCE ops only, because an `insert` (and a `block_ops` `new_text`) is
+    language the model authors, and rewriting it would be editing model
+    judgment.
+
+    The critic's `critic_delta.ledger_dispositions[].span` is the other
+    transcription out of the same block: a CLEARED span is copied word for
+    word from what the critic read, and `hard_ledger._locate_span` re-finds
+    it in the block's own text. Unreversed, a span over a paragraph that
+    carries a block-tag head never locates, counts as ASSERT, and code
+    inserts fallback language over a protection the document has. It is
+    reversed here, beside the segments, because `hard_ledger` deliberately
+    does not import this module.
+    """
+    if not isinstance(parsed, dict):
+        return
+    for patch in parsed.get("block_patches") or []:
+        if not isinstance(patch, dict):
+            continue
+        for segment in patch.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            if segment.get("op") not in _block_transcript.SOURCE_OPS:
+                continue
+            text = segment.get("text")
+            if isinstance(text, str):
+                segment["text"] = restore_neutralised_delimiters(text)
+    delta = parsed.get("critic_delta")
+    if not isinstance(delta, dict):
+        return
+    for disposition in delta.get("ledger_dispositions") or []:
+        if not isinstance(disposition, dict):
+            continue
+        span = disposition.get("span")
+        if isinstance(span, str):
+            disposition["span"] = restore_neutralised_delimiters(span)
+
+
 # How much of a rejected instance a DEBUG-ONLY diagnostic carries (issue
 # #643). A schema failure can land on a whole `block_patches` entry, whose
 # instance is the model's entire transcript for that block -- and a pass may
@@ -3633,7 +3810,12 @@ def validate_model_response(
     is load-bearing since issue #642 moved the heading ABOVE the block marker
     (`"## Heading\n[pNNNN] body"`): both patterns are anchored at `^`, so
     stripping the block marker first would not match a value that copied the
-    heading line too, and the marker would survive into the transcript. And
+    heading line too, and the marker would survive into the transcript.
+    (3a) `_restore_neutralised_delimiters` (issue #162) reverses, on every
+    transcribed `keep`/`delete` segment and every critic ledger-disposition
+    `span`, the escaped block delimiter `_delimited_block` renders inside
+    untrusted content -- the same kind of pipeline rendering as the two
+    markers. And
     (4) `_denullify_unrepresentable_issue_fields`
     (issue #567 fix round 3) strips a field the projected provider
     schema forced to be nullable back to absent, the shape the full schema
@@ -3714,6 +3896,9 @@ def validate_model_response(
     # the block marker that introduces the body.
     _strip_rendered_heading_markers(parsed)
     _strip_rendered_block_markers(parsed)
+    # Issue #162: a transcribed escaped delimiter is rendering too. Not
+    # anchored, so its position relative to the two strips above is free.
+    _restore_neutralised_delimiters(parsed)
     _denullify_unrepresentable_issue_fields(parsed)
     try:
         jsonschema.validate(instance=parsed, schema=schema)
