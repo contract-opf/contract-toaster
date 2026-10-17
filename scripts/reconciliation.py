@@ -11,7 +11,8 @@ docs/adr/0001-critic-has-the-last-word.md (including its 2026-09-17
 Amendment):
 
   - **The critic's result is the final review.** `issues`, `decision`,
-    `confidence_state` and `verdict_summary` are the critic's, and the
+    `confidence_state` and `verdict_summary` are the critic's (the summary
+    amended only by guard 1, below), and the
     `block_patches` / `block_ops` forwarded to the redline stage are the
     CRITIC's transcript -- so the words that ship are the critic's, and every
     stage-5 gate (leakage scan, block-transcript proof, apply, pen rules,
@@ -31,7 +32,11 @@ Amendment):
     before. Either forces `decision="REQUEST_CHANGE"`. A retained issue is
     FLAG-ONLY: its edits belong to the primary's transcript, which is not
     forwarded, and lifting them out of it would be the merge the Amendment
-    forbids.
+    forbids. Either addition is also named in `verdict_summary` by a fixed
+    sentence carrying only counts (`guard_one_summary_note`, issue #156):
+    it replaces the summary of a critic that concluded ACCEPT -- whose
+    no-change prose the forced REQUEST_CHANGE overturned -- and is appended
+    to the summary of a critic that requested changes itself.
   - **Guard 2 -- every override is recorded.** `critic_delta.overrides` is
     the critic's own `overrides` (tagged `source="critic"`) plus a diff
     COMPUTED here (tagged `source="computed"`): an issue present in the
@@ -426,6 +431,36 @@ def kept_issue_keys_without_counterpart(
     ]
 
 
+def guard_one_summary_note(retained_count: int, appended_fire_count: int) -> str | None:
+    """The fixed sentence that names what guard 1 added to the final review
+    (issue #156), or None when it added nothing.
+
+    Guard 1 can force `REQUEST_CHANGE` on a critic that concluded ACCEPT, and
+    the critic's `verdict_summary` then explains a decision the review no
+    longer has ("No changes identified." over a REQUEST_CHANGE). This sentence
+    is deterministic -- no model call -- and carries only COUNTS: no clause
+    text, no rule id, no rule description, no markup, so it is escaped text by
+    construction and has nothing for the leakage gate (which still scans it,
+    as `verdict_summary`) to find."""
+    parts: list[str] = []
+    if retained_count > 0:
+        one = retained_count == 1
+        parts.append(
+            f"{retained_count} playbook hard rejection{'' if one else 's'} from the "
+            f"first review {'was' if one else 'were'} retained after the second "
+            f"review dropped {'it' if one else 'them'}"
+        )
+    if appended_fire_count > 0:
+        one = appended_fire_count == 1
+        parts.append(
+            f"{appended_fire_count} playbook Floor invariant{'' if one else 's'} "
+            f"{'was' if one else 'were'} judged violated"
+        )
+    if not parts:
+        return None
+    return "Changes are requested: " + "; ".join(parts) + "."
+
+
 def reconcile(
     *,
     primary_result: dict[str, Any],
@@ -456,6 +491,10 @@ def reconcile(
     judge's `floor_judge.floor_fires`) -- monotonic, appended when the final
     list does not already carry one with the same (topic, section_ref), and
     forcing `decision="REQUEST_CHANGE"`.
+
+    When guard 1 retains an issue or appends a fire, `verdict_summary` names
+    it (`guard_one_summary_note`): the critic's summary is replaced when the
+    critic concluded ACCEPT, appended to when it requested changes.
 
     `hard_rejection_rule_ids` (see `hard_rejection_rule_ids()`): EACH primary
     issue whose `playbook_topic_id` is one of these and which pairs with no
@@ -615,6 +654,7 @@ def reconcile(
     # ---- Guard 1: monotonic hard rejections, then detector fires. Both are
     # flag-only here and both force REQUEST_CHANGE below.
     seen_keys = {_issue_key(issue) for issue in final_issues}
+    appended_fires = 0
     for p_issue in retained:
         kept = dict(p_issue)
         kept["provenance"] = PROVENANCE_PRIMARY_RETAINED
@@ -629,12 +669,30 @@ def reconcile(
                 _with_response_issue_key(dict(fire), final_issues, reserved_keys)
             )
             seen_keys.add(fire_identity)
+            appended_fires += 1
 
     decision = (
         "REQUEST_CHANGE"
         if critic_result.get("decision") == "REQUEST_CHANGE" or final_issues
         else "ACCEPT"
     )
+
+    # Issue #156: the summary must not contradict a guard-1 addition. A critic
+    # that concluded ACCEPT wrote a no-change summary, which the forced
+    # REQUEST_CHANGE has overturned, so the fixed sentence replaces it; a
+    # critic that requested changes itself keeps its summary, with the
+    # sentence appended. Nothing added -> the critic's summary, untouched.
+    verdict_summary = critic_result.get("verdict_summary")
+    guard_note = guard_one_summary_note(len(retained), appended_fires)
+    if guard_note is not None:
+        if (
+            critic_result.get("decision") == "REQUEST_CHANGE"
+            and isinstance(verdict_summary, str)
+            and verdict_summary.strip()
+        ):
+            verdict_summary = f"{verdict_summary.rstrip()} {guard_note}"
+        else:
+            verdict_summary = guard_note
 
     # The critic's own band is final (the #265 degrade rule is retired).
     confidence_state = critic_result.get("confidence_state") or "OK"
@@ -674,7 +732,7 @@ def reconcile(
         "confidence_band": confidence_band,
         "issues": final_issues,
         "critic_delta": critic_delta_record if has_critic_delta else None,
-        "verdict_summary": critic_result.get("verdict_summary"),
+        "verdict_summary": verdict_summary,
         **block_carriers,
     }
 

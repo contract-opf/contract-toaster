@@ -266,6 +266,14 @@ none of which a model may emit and none of which the model-facing schema admits:
   `critic_delta.added_issues` entry uses, and forces `REQUEST_CHANGE`. The rule is per issue: a primary that
   raises one hard rule in two sections, and a critic that keeps one and drops the other, leaves the dropped
   one retained.
+- **The guard-1 summary sentence (issue #156).** When `reconcile` retains a hard rejection or appends a
+  detector fire, `verdict_summary` names it in a fixed, deterministic sentence that carries only counts —
+  e.g. `Changes are requested: 1 playbook hard rejection from the first review was retained after the second
+  review dropped it.` — never clause text, a rule id or a rule description
+  (`reconciliation.guard_one_summary_note`). It **replaces** the summary of a critic that concluded ACCEPT,
+  so a forced `REQUEST_CHANGE` never ships under "No changes identified."; it is **appended** to the summary
+  of a critic that requested changes itself. The sentence is leakage-scanned as `verdict_summary` like any
+  other summary.
 - **`critic_delta.overrides[].source`.** `critic` on the critic's own override records (forwarded as
   emitted), `computed` on the diff `reconcile` adds. A computed entry carries `change` (`dropped` — the
   primary raised it, the critic did not; `added` — the reverse; `replaced` — a matched issue whose authored
