@@ -58,10 +58,12 @@ non-RAG depth path is already designed** and is not the same as "no depth."
   summaries. The wholesale alternative "measured ~1M tokens on a real corpus and cannot
   reach a model at all."
 - **The index.** Depth comes from exact keys, not similarity: per-clause critic dossiers
-  selected deterministically from the rule ids the reviewer, the hard-rejection ledger and
-  the anomaly detectors name, and appended by orchestration (#40). OPF 0.5 ships those
-  dossiers precomputed (`dossiers`, with the hard-rule `manifest`), so #40 selects rather
-  than builds them. An earlier design served
+  selected deterministically from the rule ids the reviewer and the open hard-rejection
+  ledger name, and appended by orchestration to the critic's role suffix (#40,
+  `scripts/critic_dossiers.py`; a pre-critic anomaly source does not exist yet, since the
+  Floor judge runs after the critic). OPF 0.5 ships those dossiers precomputed
+  (`dossiers`, with the hard-rule `manifest`), so #40 selects rather than builds them, and
+  sends each whole. An earlier design served
   the same keys through a model-callable `lookup_clause_evidence` tool; it was never wired
   into a request and was retired in #161.
 
@@ -97,29 +99,39 @@ remaining steps are cost without benefit.
 
 This is the step most likely to be skipped, and it is the one that matters.
 
-Today **four of six `ConfidentialCorpus` lists are empty in production**:
+When this section was written, **four of six `ConfidentialCorpus` lists were empty in
+production**; since #40 `precedent_verbatim_spans` and `internal_precedent_ids` no longer
+are:
 
 | List | Production | Why |
 |---|---|---|
 | `system_prompt_ngrams` | empty (#521 populates it) | not passed by `review_spine.py:482`/`:486` |
 | `playbook_ngrams` | 4 entries | derived from the playbook |
 | `standard_clause_ngrams` | 3 entries | derived from the playbook |
-| `internal_precedent_ids` | empty | `from_opf_document` hardcodes `[]` (`leakage_scan.py:341`) |
+| `internal_precedent_ids` | the dossier precedent ids (#40) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`) |
 | `counterparty_names` | empty | not passed |
-| `precedent_verbatim_spans` | empty | not passed |
+| `precedent_verbatim_spans` | the dossier excerpts (#40) | `from_opf_document` reads every dossier excerpt's whole `opening` / `signed` text that is not our standard |
 
-So leakage checks **3** (`citation_leakage`) and **4** (`precedent_verbatim_spans`) are
-**dormant by construction** — there is no corpus in the model's context to leak. Both are
-pure list iteration with no heuristic fallback (`leakage_scan.py:422`, `:470`).
+Leakage check **3** (`citation_leakage`) is **live, for the dossiers' precedent ids
+only**: the critic receives each selected dossier whole, ids included, and check 3
+blocks an external field that cites one. `counterparty_names` is still empty, although
+the digest's citations in both passes' prompts name each deal by its `document_id`, which
+no check-3 list holds (#172).
+Check **4** (`precedent_verbatim_spans`)
+is **live, for the critic dossiers only**: retrieval is off, but since #40 the critic
+receives whole precedent excerpts (texts a counterparty wrote or signed), and check 4 is
+the only check that guards them on the internal channel. It blocks an internal note that
+copies a whole excerpt; it does not block a part-quotation or a paraphrase, nor a digest
+precedent text that is in no dossier (#171). Both checks are pure list iteration with no heuristic fallback.
 
-Reviving retrieval makes both **load-bearing again, immediately**, and interacts with the
-notes-mode epic:
+Reviving retrieval makes both **load-bearing for retrieved text, immediately**, and
+interacts with the notes-mode epic:
 
 - The 2026-08-09 owner decision permits `citation_leakage` **internally** — internal notes
   may name past counterparties. Its stated safety argument is that check 4 prevents
-  "permit citation" from becoming "dump the corpus." **Check 4 cannot currently do that
-  job.** Today that is harmless because there is no corpus; with retrieval on it is a live
-  hole.
+  "permit citation" from becoming "dump the corpus." **Check 4 does that job only for the
+  texts it holds, and only against whole-text copying.** Today it holds the dossier
+  excerpts; retrieved text would be a new, unguarded corpus.
 - Therefore: **`counterparty_names`, `internal_precedent_ids` and `precedent_verbatim_spans`
   must be populated from the retrieved text before internal notes ship with retrieval on.**
   #521 records this coupling as a blocking prerequisite. See also #574.

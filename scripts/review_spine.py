@@ -146,6 +146,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
     if str(_dir) not in sys.path:
         sys.path.insert(0, str(_dir))
 
+import critic_dossiers  # noqa: E402
 import critic_review_pass  # noqa: E402
 import extraction_normalization_stage  # noqa: E402
 import floor_judge  # noqa: E402
@@ -751,6 +752,7 @@ def _terminal(
     floor_judgment: Optional[dict[str, Any]] = None,  # noqa: UP045
     normalization_notes: Optional[str] = None,  # noqa: UP045
     critic_attempts: Optional[int] = None,  # noqa: UP045
+    critic_dossiers_record: Optional[dict[str, Any]] = None,  # noqa: UP045
 ) -> dict[str, Any]:
     """A fail-closed ReviewResult: no decision, no redline, no findings --
     per ARCHITECTURE.md/docs/output-contract.md, the ERROR status must never carry an
@@ -780,7 +782,13 @@ def _terminal(
     bigger output budget. So the count separates a critic that was merely
     unreadable throughout (baseline) from one that ALSO ran out of output
     room on the way (above baseline) -- which is an output-sizing lead
-    (issue #658), a different investigation from the reason token's."""
+    (issue #658), a different investigation from the reason token's.
+
+    `critic_dossiers_record` (issue #40): `critic_dossiers.audit_record` --
+    which critic dossiers were selected, sent and dropped. Set on every
+    terminal reached after the critic pass was composed, so a review that
+    fails closed still says what the critic was shown. Clause ids and
+    counts only."""
     result: dict[str, Any] = {
         "status": status,
         "decision": None,
@@ -798,6 +806,8 @@ def _terminal(
         result["normalization_notes"] = normalization_notes
     if critic_attempts is not None:
         result["critic_attempts"] = critic_attempts
+    if critic_dossiers_record is not None:
+        result["critic_dossiers"] = critic_dossiers_record
     return result
 
 
@@ -1054,6 +1064,9 @@ def run_review(
     # OPF document whose manifest demands no presence, in which case nothing
     # below changes.
     ledger: list[dict[str, Any]] = []
+    # Issue #40: the validated OPF document the critic dossiers are selected
+    # from (`knowledge.opf_doc`); None for a v1 bundle, which has none.
+    dossier_opf_doc: Optional[dict[str, Any]] = None  # noqa: UP045
     if opf_bundle_v2 is not None:
         try:
             # Issue #127: `knowledge_memo` rides only on a bundle
@@ -1112,6 +1125,7 @@ def run_review(
         floor_perspective_note = _floor_perspective_note(knowledge.opf_doc, entity_roster)
         opf_knowledge_lineage = knowledge.lineage_record()
         ledger = hard_ledger.build_ledger(knowledge.opf_doc)
+        dossier_opf_doc = knowledge.opf_doc
     ledger_rule_ids = hard_ledger.ledger_rule_ids(ledger)
 
     # Leakage-scan corpus (issue #73), built AFTER system-block assembly
@@ -1262,6 +1276,23 @@ def run_review(
             normalization_notes=normalization_notes,
         )
 
+    # Stage 2.5 (issue #40): critic dossier selection, by orchestration and
+    # not by a model tool call. Reviewer rule ids (the reviewer's
+    # `playbook_topic_id`s) union open hard-ledger rule ids, resolved to the
+    # OPF document's own engine-built dossiers, one per clause, stable order,
+    # at most `critic_dossiers.MAX_DOSSIERS`, each used whole. The critic pass
+    # bounds the set again against its `max_input_tokens` gate. Deterministic
+    # anomaly rule ids are not a source: the only deterministic detector
+    # left, the Floor judge (stage 3.5), runs after the critic (#170). Empty for a v1 review
+    # (no OPF document), which leaves the critic prompt byte-identical.
+    dossier_selection = (
+        critic_dossiers.select_dossiers(
+            dossier_opf_doc, primary_result.get("response"), ledger
+        )
+        if opf_bundle_v2 is not None
+        else critic_dossiers.DossierSelection()
+    )
+
     # Stage 3: adversarial critic pass (issue #82) -- only ever invoked
     # after a successful primary pass (ARCHITECTURE.md: never a silent
     # single-pass DONE, and never a wasted call when the primary already
@@ -1306,7 +1337,21 @@ def run_review(
         # explicitly; the pass renders the ledger into its role suffix and
         # holds it to that inside its bounded retry.
         hard_ledger=ledger,
+        # Issue #40: the selected dossiers, appended after the reviewer's
+        # output in the critic's role suffix.
+        dossiers=dossier_selection.dossiers,
     )
+    # Issue #40: the audit record -- what was selected, what the critic pass
+    # actually sent, what was dropped over the cap or the budget. Absent
+    # (never a null placeholder) for a review with no OPF document.
+    critic_dossiers_record: Optional[dict[str, Any]] = None  # noqa: UP045
+    if opf_bundle_v2 is not None:
+        sent_report = critic_result.get("dossiers") or {}
+        critic_dossiers_record = critic_dossiers.audit_record(
+            dossier_selection,
+            sent_clause_ids=sent_report.get("sent", list(dossier_selection.clause_ids)),
+            dropped_over_budget=sent_report.get("dropped_over_budget") or (),
+        )
 
     # Stage 3.5: OPF Floor coverage (issue #479 "what to build" item 3):
     # `scripts/floor_judge.py` (issue #285) was implemented and tested but
@@ -1393,6 +1438,7 @@ def run_review(
                 detail={"unjudged_count": len(judgment.unjudged)},
                 floor_judgment=floor_judgment_report,
                 normalization_notes=normalization_notes,
+                critic_dossiers_record=critic_dossiers_record,
             )
         detector_fires = floor_judge.floor_fires(judgment)
         judge_verdicts = list(judgment.verdicts)
@@ -1434,6 +1480,7 @@ def run_review(
             detail=two_pass,
             normalization_notes=normalization_notes,
             critic_attempts=two_pass.get("attempts"),
+            critic_dossiers_record=critic_dossiers_record,
         )
     reconciled = two_pass["result"]
 
@@ -1683,4 +1730,7 @@ def run_review(
     # `confidence_band`.
     if hard_ledger_record is not None:
         result["hard_ledger"] = hard_ledger_record
+    # Issue #40: clause ids and counts only, so it survives a leakage block.
+    if critic_dossiers_record is not None:
+        result["critic_dossiers"] = critic_dossiers_record
     return result

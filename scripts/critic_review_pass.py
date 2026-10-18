@@ -52,6 +52,7 @@ for _dir in (BACKEND_SRC_DIR, SCRIPTS_DIR):
         sys.path.insert(0, str(_dir))
 
 import config as _config  # noqa: E402
+import critic_dossiers as _critic_dossiers  # noqa: E402
 import hard_ledger as _hard_ledger  # noqa: E402
 import model_client as _model_client  # noqa: E402
 import model_output_schema as _mos  # noqa: E402
@@ -306,6 +307,7 @@ def run_critic_pass(
     cancel_checkpoint: Callable[[], None] | None = None,
     attempt_diagnostic_write: Optional[Callable[[dict[str, Any]], None]] = None,  # noqa: UP045
     hard_ledger: Sequence[dict[str, Any]] | None = None,
+    dossiers: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the adversarial critic pass end-to-end (data-flow step 16, critic
     half).
@@ -434,6 +436,20 @@ def run_critic_pass(
     one costs the informed retry first and, repeated, ends the review as
     `critic_schema_invalid`. Empty or `None` changes nothing: the prompt is
     byte-identical to a review with no ledger.
+
+    `dossiers` (issue #40, default `None`): the critic dossiers
+    `critic_dossiers.select_dossiers` chose after the reviewer pass, in
+    their stable order, each the engine's own object. Rendered WHOLE after
+    the first reviewer's output (`pp.render_critic_dossiers_block`). The set
+    is bounded by the same `max_input_tokens` gate as everything else here:
+    when the dossiers would put the prompt over it, whole dossiers are
+    dropped from the END of the order until it fits
+    (`critic_dossiers.fit_to_budget`) -- never one cut -- and only if the
+    prompt is still over with none left does the pass fail closed as
+    `document_too_large`, exactly as before. Every result carries
+    `"dossiers": {"sent": [...], "dropped_over_budget": [...]}` (clause ids
+    only). Empty or `None` changes nothing: the prompt is byte-identical to
+    a review with no dossiers.
     """
     _model_client.enforce_single_region_native_model_id(model_id)
     ledger_entries = list(hard_ledger or ())
@@ -505,18 +521,44 @@ def run_critic_pass(
     # reads both cache breakpoints the primary just wrote. Everything
     # role-specific (the per-review control layer, which both suffixes open
     # with; the critic tasking; the primary's output) follows the document.
-    user_prompt = pp.assemble_user_content_critic(
-        primary_output=primary_output,
-        doc_text=doc_text,
-        prompt_caching_enabled=prompt_caching_enabled,
-        request_control_text=pp.render_request_control_text(
-            instructions_text=instructions_text,
-            markup_intensity=markup_intensity,
-            toaster_guidance=toaster_guidance,
-            notes_mode=notes_mode,
-        ),
-        hard_ledger_text=_hard_ledger.render_critic_ledger_block(ledger_entries),
+    request_control_text = pp.render_request_control_text(
+        instructions_text=instructions_text,
+        markup_intensity=markup_intensity,
+        toaster_guidance=toaster_guidance,
+        notes_mode=notes_mode,
     )
+    hard_ledger_text = _hard_ledger.render_critic_ledger_block(ledger_entries)
+
+    def _user_content(selected: Sequence[dict[str, Any]]) -> "str | list[dict[str, Any]]":  # noqa: UP037
+        return pp.assemble_user_content_critic(
+            primary_output=primary_output,
+            doc_text=doc_text,
+            prompt_caching_enabled=prompt_caching_enabled,
+            request_control_text=request_control_text,
+            hard_ledger_text=hard_ledger_text,
+            dossier_text=pp.render_critic_dossiers_block(
+                _critic_dossiers.render_dossier_lines(selected)
+            ),
+        )
+
+    # Issue #40: the dossier SET is bounded by the step-14 gate below. Whole
+    # dossiers come off the end of the stable order until the prompt fits;
+    # with none selected this is the one assembly it always was.
+    sent_dossiers, dossiers_dropped_over_budget = _critic_dossiers.fit_to_budget(
+        list(dossiers or ()),
+        lambda selected: pp.assembled_prompt_tokens(
+            system_blocks,
+            _user_content(selected),
+            tool_spec=tool_spec,
+            output_schema=output_schema,
+        )
+        <= max_input_tokens,
+    )
+    dossier_report = {
+        "sent": [dossier.get("clause_id") for dossier in sent_dossiers],
+        "dropped_over_budget": dossiers_dropped_over_budget,
+    }
+    user_prompt = _user_content(sent_dossiers)
     # Issue #267: same projection as the primary pass -- assemble_system_blocks
     # is the single shared seam, so this hash is identical to the primary
     # pass's for the same playbook.
@@ -543,6 +585,7 @@ def run_critic_pass(
             "reason": "document_too_large",
             "assembled_tokens": assembled_tokens,
             "max_input_tokens": max_input_tokens,
+            "dossiers": dossier_report,
         }
 
     attempts_allowed = 1 + max_retries
@@ -677,6 +720,8 @@ def run_critic_pass(
                     "status": "OK",
                     "response": parsed_or_error,
                     "attempts": attempt,
+                    # Issue #40: which dossiers this pass actually sent.
+                    "dossiers": dossier_report,
                     # Issue #514, same seam as the primary pass: what the
                     # provider served on the attempt that produced THIS
                     # result. Absent, never a null placeholder, when the
@@ -827,4 +872,5 @@ def run_critic_pass(
         "reason": retry_exhausted_reason(last_error),
         "attempts": attempts_allowed,
         "last_error": last_error,
+        "dossiers": dossier_report,
     }
