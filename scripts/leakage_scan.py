@@ -140,14 +140,38 @@ What guards them:
     fills `internal_precedent_ids` from each dossier excerpt's
     `precedent_id` and each `omitted_precedent_ids` entry
     (`_opf_dossier_precedent_ids`), so an external footnote that cites a
-    past deal by id is blocked as `internal-precedent-id`.
+    past deal by id is blocked as `internal-precedent-id`. Since #172 it
+    also holds every deal `document_id` the digest citations and the
+    `evidence.precedent[]` records carry (`_opf_deal_document_ids`). The
+    prompt names a deal by that slug on two paths: the digest's citations
+    in both passes' prompts (`opf_prompt._fmt_cite`,
+    `[<document_id>@<version> ...]`), and engine-written Floor-invariant
+    rationale prose, which `opf_prompt._binding_block` prints verbatim in
+    both passes' shared prefix and each critic dossier's `floor_rules`
+    carries again (the engine's NDA example's liability-cap rationale
+    names three deals by slug, unbracketed). A slug can name the
+    counterparty, so an external field that echoes one is blocked the same
+    way. The walk does not read Floor rationale: a deal that prose names
+    is covered because it has an `evidence.precedent[]` record, not
+    because a digest citation renders it, and
+    `tests/test_leakage_deal_document_ids_172.py` [1] pins that every
+    `corpus.documents[]` id named anywhere in the composed prompt or the
+    dossiers is held. That is a token match: it blocks the slug as
+    rendered (whole token, case-folded) and only that, not the
+    counterparty name the slug spells. Our standard's `source_ref` (the
+    tenant's own template) is not a deal and is not added. The ticket's
+    alternative, an opaque alias in place of the slug in the prompt, was
+    not taken: it changes both passes' byte-identical shared prefix, a
+    per-review alias defeats prompt-cache reuse, and the citation is the
+    location an operator resolves an entry to (#173 -- the digest citations, the
+    Floor rationale in the shared prefix and the dossiers' `floor_rules`).
   * Internal channel (`internal_rationale_for_footnote`): check 2 is skipped
     there, so `from_opf_document` also makes each dossier excerpt's whole
     `opening` / `signed` text -- unless it is our standard -- a check-4
     `precedent_verbatim_spans` entry. An internal note that copies a whole
     excerpt the critic was sent is blocked on every channel. Check 3 is
     skipped there too, by design: an internal note may cite the deal it
-    reasons from by its precedent id.
+    reasons from by its precedent id or its document id.
 
 What does not:
 
@@ -157,14 +181,27 @@ What does not:
     note is its backstop.
   * A digest precedent text that is in no dossier is not a span: on the
     internal channel nothing blocks it (#171).
+  * A deal `document_id` de-slugged back into the plain counterparty name
+    (`theta-logistics` restated as `Theta Logistics`, `ThetaLogistics` or
+    `theta_logistics`) is a different token, so check 3 passes it on the
+    external channel too: `counterparty_names` is empty and nothing else
+    holds the name. It is the likeliest way a slug leaks; only aliasing
+    every slug the prompt renders (#173), or a populated `counterparty_names`,
+    would close it.
+  * The reverse: a slug is uploader-controlled text (`minLength: 1`), so one
+    that is a single ordinary word, or that spells a party's name or
+    domain, fails closed on any external field that uses that word. The
+    #208 current-counterparty exemption reaches the slugs (`_slug_key`), so
+    naming the party on THIS review is never blocked; a past counterparty
+    whose slug is an ordinary word still is (#173 removes it).
 
 `counterparty_names` (check 3's other list) is still empty in production:
-no builder or production caller populates it. That is NOT because no
-prompt names a past deal: the digest's citations name each deal by its
-`document_id` (`opf_prompt._fmt_cite`, `[<document_id>@<version> ...]`, in
-both passes' prompts, pre-dating #40), a slug that can identify the
-counterparty, and no check-3 list holds those ids (#172). A dossier carries no
-document id.
+no builder or production caller populates it, and that still matters. A
+past deal the prompt names is named by its `document_id`, in a digest
+citation or in Floor rationale prose (the shared prefix's Binding block
+and a dossier's `floor_rules`), and since #172 those ids are
+`internal_precedent_ids` (above) -- the slug token only, so the plain
+name it spells is unguarded (above).
 
 **Coupling to record, load-bearing:** a field IS internal-bound
 (`internal_rationale_for_footnote`, #522), and check 3 permits precedent
@@ -172,10 +209,13 @@ citations on that channel. Checks 3 and 4 must be revisited before
 precedent retrieval is ever re-enabled, and before any prompt carries a
 precedent id or counterparty name from a source other than the dossiers:
 the external channel's safety against citation rests on every id the
-prompt carries being in `internal_precedent_ids` (today, exactly the
-dossiers'), and the internal channel's safety against whole-excerpt
-quotation rests on check 4 above. All of the internal channel is latent
-while #572's `NOTES_MODE_ENABLED` kill switch is off.
+prompt carries being in `internal_precedent_ids` (today, the dossiers'
+precedent ids and every deal `document_id` the digest citations and
+`evidence.precedent[]` records carry, #172; a deal Floor rationale names
+is held only because it has a precedent record, not because any
+citation renders it), and the internal channel's safety against
+whole-excerpt quotation rests on check 4 above. All of the internal
+channel is latent while #572's `NOTES_MODE_ENABLED` kill switch is off.
 
 ## Check 1 is populated from the prompt actually composed (issue #521)
 
@@ -285,6 +325,13 @@ _PUNCTUATION_VARIANTS[0x2018] = "'"
 _PUNCTUATION_VARIANTS[0x2019] = "'"
 _PUNCTUATION_VARIANTS[0x201C] = '"'
 _PUNCTUATION_VARIANTS[0x201D] = '"'
+
+
+def _slug_key(text: str) -> str:
+    """`_normalize`, with runs of hyphens, underscores and whitespace read as
+    one space -- so a deal slug (`beta-industries`) and the counterparty name
+    it was made from ("Beta Industries") compare equal (#172)."""
+    return re.sub(r"[-_\s]+", " ", _normalize(text)).strip()
 
 
 def _normalize(text: str) -> str:
@@ -1015,6 +1062,69 @@ def _opf_dossier_precedent_ids(opf_doc: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(i for i in candidates if isinstance(i, str) and i.strip()))
 
 
+def _ref_document_id(ref: Any) -> Any:
+    """A citation ref's `document_id`, or None when the ref is not an object."""
+    return ref.get("document_id") if isinstance(ref, dict) else None
+
+
+def _opf_deal_document_ids(opf_doc: dict[str, Any]) -> list[str]:
+    """Every past deal's `document_id` the OPF document carries (issue #172):
+    the digest 4 citations both passes' prompts render
+    (`opf_prompt._fmt_cite`, `[<document_id>@<version> §<path>]`) on each
+    signed variant, collapsed-equivalent exemplar, refused ask and opening
+    not signed as proposed, and every `evidence.precedent[]` record's own
+    `document_id` and the refs of its signed text, opening and refused asks.
+
+    A `document_id` is a filename-derived slug that can name the
+    counterparty, so `from_opf_document` makes each one a check-3
+    `internal_precedent_ids` entry beside the dossiers' precedent ids:
+    blocked on the external channel (a footnote sent to the counterparty
+    must not cite another deal), permitted on the internal one, exactly as
+    check 3's table says. The precedent record is read as well as the
+    digest for the same fail-closed reason as #128: the digest is capped,
+    the record is not, and a larger list fails closed. It is also what
+    holds the deals engine-written Floor rationale names in prose
+    (`opf_prompt._binding_block` prints it in both passes' shared prefix,
+    and a dossier's `floor_rules` carries it again): nothing here reads
+    that prose, so such a deal is held because it has a precedent record.
+
+    NOT read: our standard's `source_ref` and `baseline.template_ref`. They
+    cite the tenant's own template (`[template@template §7]`), not a deal,
+    and a check-3 entry for a generic template slug would block any external
+    note that uses the word."""
+    candidates: list[Any] = []
+    digest = opf_doc.get("digest")
+    clauses = digest.get("clauses") if isinstance(digest, dict) else None
+    for clause in clauses if isinstance(clauses, list) else []:
+        if not isinstance(clause, dict):
+            continue
+        for field_name in ("signed_variants", "refused_asks", "changed_openings"):
+            entries = clause.get(field_name)
+            for entry in entries if isinstance(entries, list) else []:
+                if not isinstance(entry, dict):
+                    continue
+                candidates.append(_ref_document_id(entry.get("ref")))
+                exemplars = entry.get("exemplars")
+                for exemplar in exemplars if isinstance(exemplars, list) else []:
+                    if isinstance(exemplar, dict):
+                        candidates.append(_ref_document_id(exemplar.get("ref")))
+    evidence = opf_doc.get("evidence")
+    records = evidence.get("precedent") if isinstance(evidence, dict) else None
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        candidates.append(record.get("document_id"))
+        for key in ("signed_text", "opening_text"):
+            text = record.get(key)
+            if isinstance(text, dict):
+                candidates.append(_ref_document_id(text.get("ref")))
+        asks = record.get("refused_asks")
+        for ask in asks if isinstance(asks, list) else []:
+            if isinstance(ask, dict):
+                candidates.append(_ref_document_id(ask.get("ref")))
+    return list(dict.fromkeys(i for i in candidates if isinstance(i, str) and i.strip()))
+
+
 def _without_public_vocabulary(
     grams: list[str], vocabulary: set[str]
 ) -> list[str]:
@@ -1237,8 +1347,15 @@ class ConfidentialCorpus:
         `omitted_precedent_ids` entry is a check-3 `internal_precedent_ids`
         entry (`_opf_dossier_precedent_ids`): the critic receives those ids
         with the dossier, so an external field that cites one is blocked,
-        and an internal note may cite one. Deliberate exclusions, never
-        added on either path:
+        and an internal note may cite one. Every deal `document_id` the
+        digest citations and `evidence.precedent[]` carry joins that list
+        after them (`_opf_deal_document_ids`, issue #172): the digest
+        renders each citation as `[<document_id>@<version> ...]` in both
+        passes' prompts, Floor rationale prose (the shared prefix and the
+        dossiers' `floor_rules`) names deals by the same slug, and the slug
+        can name the counterparty. Our
+        standard's `source_ref` (our own template) is not added. Deliberate
+        exclusions, never added on either path:
         `vs_standard` (its `reason`, `part_reasons` and addition `summary`
         -- the same reasoning as the `reason` above); a hard rule's
         `condition` (match phrases and patterns -- contract vocabulary a
@@ -1382,7 +1499,13 @@ class ConfidentialCorpus:
             ),
             playbook_ngrams=blocked_playbook_ngrams,
             standard_clause_ngrams=blocked_standard_clause_ngrams,
-            internal_precedent_ids=_opf_dossier_precedent_ids(opf_doc),
+            # Dossier precedent ids (#40), then every deal document_id the
+            # digest citations and the precedent record carry (#172).
+            internal_precedent_ids=list(
+                dict.fromkeys(
+                    _opf_dossier_precedent_ids(opf_doc) + _opf_deal_document_ids(opf_doc)
+                )
+            ),
             counterparty_names=list(counterparty_names or []),
             precedent_verbatim_spans=verbatim_spans,
         )
@@ -1517,7 +1640,10 @@ class LeakageScanner:
         #    Permitted on the internal channel: an internal note may name a
         #    past counterparty and cite a specific past deal. Since issue #40
         #    `internal_precedent_ids` holds the critic dossiers' precedent ids
-        #    (`from_opf_document`), so an internal note may cite one;
+        #    and, since #172, every deal `document_id` the digest citations
+        #    and `evidence.precedent[]` records carry -- the slugs the digest
+        #    citations and Floor rationale prose render (`from_opf_document`)
+        #    -- so an internal note may cite one;
         #    `counterparty_names` is still empty in production (module
         #    docstring, "Checks 3 and 4 are live for the critic dossiers").
         #    Revisit both before retrieval is ever re-enabled.
@@ -1535,9 +1661,18 @@ class LeakageScanner:
                 return ScanResult(
                     blocked=True, category=CATEGORY_CITATION, rule_id="counterparty-name"
                 )
-            match = self._find_ngram_match(
-                raw_text, norm_text, self._corpus.internal_precedent_ids
-            )
+            # The #208 exemption reaches the deal slugs too (#172 review): a
+            # slug that names the counterparty on THIS review (compared with
+            # hyphens/underscores read as spaces, so `beta-industries`
+            # matches "Beta Industries") is its own name, not a leak.
+            # `prec.<hex>` ids can never equal a name, so they are unaffected.
+            precedent_ids = self._corpus.internal_precedent_ids
+            if current_counterparty_name:
+                slug_current = _slug_key(current_counterparty_name)
+                precedent_ids = [
+                    ident for ident in precedent_ids if _slug_key(ident) != slug_current
+                ]
+            match = self._find_ngram_match(raw_text, norm_text, precedent_ids)
             if match is not None:
                 return ScanResult(
                     blocked=True,
