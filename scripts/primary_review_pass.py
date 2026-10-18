@@ -2887,8 +2887,9 @@ def render_retrieved_precedent_delimited_block(
 #: whole (`critic_dossiers.render_dossier_lines`), never a summary of one.
 CRITIC_DOSSIERS_INTRO = (
     "CRITIC DOSSIERS (precedent facts, descriptive, not prescriptive).\n"
-    "One dossier per clause that the first reviewer raised an issue on or that the "
-    "hard-rejection ledger names, exactly as the playbook built it, one JSON object per "
+    "One dossier per clause that the first reviewer raised an issue on, that the "
+    "hard-rejection ledger names, or whose hard rule a deterministic check found the "
+    "agreement's clause does not meet, each exactly as the playbook built it, one JSON object per "
     "line: the clause's id and title, our standard in its parts, the signed Floor rules "
     "for the clause, and up to two whole precedent excerpts (what a past deal opened "
     "with, what it signed, and how that compares with our standard). Use them to check "

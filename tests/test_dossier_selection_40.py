@@ -51,9 +51,12 @@ What this pins, end to end through the real `review_spine.run_review` with a
       is permitted. The composed prompts are grepped for those ids: the
       critic's carries exactly the selected dossiers', the reviewer's none.
 
-Deterministic anomaly rule ids are NOT a source: the Floor judge, the only
-deterministic detector left, runs after the critic (follow-up: pre-critic
-anomaly source for dossier selection).
+The third source, deterministic anomaly rule ids (a non-presence manifest
+predicate the document's clause fails, checked by code before either pass),
+is pinned in `tests/test_dossier_anomaly_170.py` (issue #170). No document
+selected from here carries such a rule (vector 008, which does, is read only
+for a dossier's omitted precedent ids), so every selection below is the
+ledger's and the reviewer's.
 
 ## Fixture reachability
 
