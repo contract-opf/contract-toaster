@@ -50,6 +50,7 @@ import {
 import { canonicalStatus, describeOutcome } from '../outcome';
 import type { PreflightResult } from '../preflight';
 import { browningSetting, type BrowningLevel } from '../toaster/browning';
+import { criticDeltaCounts } from '../toaster/criticDelta';
 import { receiptLines, receiptText, type ReceiptSource } from '../toaster/receipt';
 import type { ActionHandlers, PreferenceHandlers } from './connect';
 import { connectActions, connectPreferences } from './connect';
@@ -87,6 +88,9 @@ export interface ReviewDetailLike extends ReceiptSource {
   progress_stage?: string | null;
   confidence_band?: string | null;
   critic_delta?: {
+    /** Issue #167: what the console counts (`toaster/criticDelta.ts`). */
+    overrides?: unknown;
+    dispositions?: unknown;
     contested_replacements?: { critic_objection?: string | null; critic_suggested_replacement?: string | null }[] | null;
     added_issues?: unknown[] | null;
     contested_issue_ids?: unknown;
@@ -487,12 +491,35 @@ function projectResult(
   }
   const delta = detail.critic_delta;
   if (delta) {
-    const contested = delta.contested_replacements ?? [];
-    const added = delta.added_issues ?? [];
-    result.criticContested = contested.length;
-    result.criticAdded = added.length;
+    // Issue #167: counted off `critic_delta.overrides` the way the receipt
+    // counts them (#140), through the module the download gate uses, so the
+    // indicator renders exactly when `ReviewSubmission`'s gate is in force.
+    // Each override count is supplied only when non-zero, as the receipt
+    // omits a zero. Only when the overrides record nothing are the deprecated
+    // arrays read FOR THESE COUNTS, as before, while they still ride on the
+    // wire. The objection lines below are not counts: they still read
+    // `contested_replacements` verbatim, whatever the overrides record (the
+    // output contract's "Contested-replacement badge" rule).
+    const counts = criticDeltaCounts(delta);
+    if (counts.fromOverrides) {
+      if (counts.overrides > 0) {
+        result.criticOverrides = counts.overrides;
+      }
+      if (counts.added > 0) {
+        result.criticAdded = counts.added;
+      }
+      if (counts.dropped > 0) {
+        result.criticDropped = counts.dropped;
+      }
+      if (counts.retained > 0) {
+        result.criticRetained = counts.retained;
+      }
+    } else {
+      result.criticContested = counts.contested;
+      result.criticAdded = counts.added;
+    }
     const details: string[] = [];
-    for (const item of contested) {
+    for (const item of delta.contested_replacements ?? []) {
       if (item.critic_objection) {
         details.push(`Critic flagged this replacement: ${item.critic_objection}`);
       }

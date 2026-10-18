@@ -172,6 +172,7 @@ import {
   type ReviewSubmissionCallbacks,
 } from './orbit-diner/projection';
 import { copyReceipt as copyOrbitReceipt, saveReceipt as saveOrbitReceipt } from './orbit-diner/receipt';
+import { criticDeltaHasContent } from './toaster/criticDelta';
 import {
   composeGuidance,
   DEFAULT_BROWNING,
@@ -230,7 +231,13 @@ interface ContestedReplacement {
   critic_suggested_replacement?: string | null;
 }
 
+// Issue #167: `overrides` is what the download gate keys on (via
+// `toaster/criticDelta.ts`); the deprecated arrays are read only as a
+// fallback when the overrides record nothing, while they still ride on the
+// wire.
 interface CriticDelta {
+  overrides?: unknown;
+  dispositions?: unknown;
   contested_replacements?: ContestedReplacement[] | null;
   added_issues?: unknown[] | null;
 }
@@ -1332,19 +1339,16 @@ export function explainFailure(detail: FailureFacts): FailureExplanation | null 
   );
 }
 
-// A critic delta is "present" (and must gate the download) when it carries at
-// least one contested replacement or one critic-added issue
-// (docs/output-contract.md -> "Download gate — delta indicator must be visible
-// before download"). A null critic_delta, or one with empty lists, does not
-// gate.
-function criticDeltaHasContent(delta: CriticDelta | null | undefined): boolean {
-  if (!delta) {
-    return false;
-  }
-  const contested = delta.contested_replacements ?? [];
-  const added = delta.added_issues ?? [];
-  return contested.length > 0 || added.length > 0;
-}
+// A critic delta is "present" (and must gate the download) when it records
+// any change -- `criticDeltaHasContent` in `toaster/criticDelta.ts` (issue
+// #167): any `critic_delta.overrides` record of any kind (an override, a
+// critic-added issue, a drop, a hard rejection put back), or, only when the
+// overrides record nothing, a deprecated contested replacement or
+// critic-added issue (docs/output-contract.md -> "Download gate — delta
+// indicator must be visible before download"). A null critic_delta, one with
+// empty lists, or one carrying only KEEP dispositions does not gate. The
+// console's indicator counts the same delta through the same module
+// (`orbit-diner/projection.ts`), so the two cannot disagree.
 
 // Issue #592: "a"/"an" for the classifier's type guess. NOT a fixed
 // vocabulary: known_agreement_types() (scripts/preflight_pass.py) is built

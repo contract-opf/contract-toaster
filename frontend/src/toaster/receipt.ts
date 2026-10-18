@@ -36,6 +36,7 @@
  * whole point of this artifact is that it can be trusted at a glance.
  */
 import { resolveOutcome, OUTCOME_CHIPS } from '../outcome';
+import { overrideCounts } from './criticDelta';
 
 export interface ReceiptSource {
   review_id?: string | null;
@@ -56,9 +57,10 @@ export interface ReceiptSource {
   // guard 2; projected verbatim by `get_review_detail` off the analysis
   // artifact). The deprecated `contested_replacements` / `added_issues` /
   // `rationale_objections` arrays still ride on the wire for one release
-  // (the download gate in ReviewSubmission.tsx still keys on two of them),
-  // so they stay typed here -- the receipt counts none of them, nor the
-  // `dispositions` (a KEEP changes nothing).
+  // (the download gate and the console read two of them, but only as a
+  // fallback when the overrides record nothing -- issue #167,
+  // `criticDelta.ts`), so they stay typed here -- the receipt counts none of
+  // them, nor the `dispositions` (a KEEP changes nothing).
   critic_delta?: {
     overrides?: unknown;
     dispositions?: unknown;
@@ -224,84 +226,6 @@ function clausesTouched(issues: unknown): number | null {
  *  agree with it. */
 function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
-
-/** One `critic_delta.overrides[]` record, as far as the receipt reads it:
- *  four controlled tokens, never a value or a reason. */
-interface OverrideRecord {
-  source?: unknown;
-  change?: unknown;
-  retained?: unknown;
-  issue_id?: unknown;
-  field?: unknown;
-}
-
-/** The counts the receipt prints, one per kind of override record. */
-interface OverrideCounts {
-  overrides: number;
-  added: number;
-  dropped: number;
-  retained: number;
-}
-
-/**
- * Issue #140: `critic_delta.overrides` counted the way the internal footnotes
- * explain it (`scripts/redline_generate.py::_rendered_override_records`), so
- * "N overrides" on the slip is the number of override notes in the
- * document.
- *
- * A COMPUTED record (`source: "computed"`, built by
- * `scripts/reconciliation.py::reconcile`) is `added` (the critic raised an
- * issue the reviewer did not), `dropped` (the reverse -- `retained: true`
- * when it was a hard rejection guard 1 put back), or `replaced` (a kept
- * issue whose edits differ). Every other record is the critic's own
- * statement of a change. The reconciler can record one change twice, so two
- * of the critic's are not counted again: one on an issue the reconciler
- * recorded as dropped (the drop says it), and a `replacement_text` one on an
- * issue it recorded as `replaced` (that entry says it).
- */
-function overrideCounts(overrides: unknown): OverrideCounts {
-  const counts: OverrideCounts = { overrides: 0, added: 0, dropped: 0, retained: 0 };
-  if (!Array.isArray(overrides)) {
-    return counts;
-  }
-  const records = overrides.filter(
-    (entry): entry is OverrideRecord => typeof entry === 'object' && entry !== null,
-  );
-  const computed = records.filter((entry) => entry.source === 'computed');
-  const idsWith = (change: string): Set<string> =>
-    new Set(
-      computed
-        .filter((entry) => entry.change === change && typeof entry.issue_id === 'string')
-        .map((entry) => entry.issue_id as string),
-    );
-  const droppedIds = idsWith('dropped');
-  const replacedIds = idsWith('replaced');
-  for (const entry of records) {
-    if (entry.source === 'computed') {
-      if (entry.change === 'added') {
-        counts.added += 1;
-      } else if (entry.change === 'dropped') {
-        if (entry.retained === true) {
-          counts.retained += 1;
-        } else {
-          counts.dropped += 1;
-        }
-      } else {
-        counts.overrides += 1;
-      }
-      continue;
-    }
-    const id = typeof entry.issue_id === 'string' ? entry.issue_id : null;
-    if (id !== null && droppedIds.has(id)) {
-      continue;
-    }
-    if (id !== null && replacedIds.has(id) && entry.field === 'replacement_text') {
-      continue;
-    }
-    counts.overrides += 1;
-  }
-  return counts;
 }
 
 /**

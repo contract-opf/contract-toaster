@@ -51,9 +51,11 @@ Amendment):
     entry does not carry. The critic's
     `dispositions` and the deprecated `added_issues` /
     `contested_replacements` / `rationale_objections` arrays are forwarded
-    verbatim for the consumers that still read them (the download gate's
-    indicator, the leakage scan; since issue #140 the receipt and the
-    internal footnotes read `overrides`). Every one of these fields reaches the review's
+    verbatim for the consumers that still read them (the leakage scan, and
+    the download gate and its indicator's counts only as a fallback when
+    `overrides` record nothing -- issue #167 -- while the indicator's
+    objection lines still read `contested_replacements` verbatim; since
+    issue #140 the receipt and the internal footnotes read `overrides`). Every one of these fields reaches the review's
     owner (the analysis artifact, `get_review_detail`), so every
     model-authored text in them is walked by `leakage_scan
     .scan_model_output` before anything is persisted -- including the
@@ -135,9 +137,12 @@ CHANGE_ADDED = "added"
 CHANGE_REPLACED = "replaced"
 
 # The deprecated CriticDelta arrays (playbooks/output-schema-v3.json marks each
-# DEPRECATED), forwarded verbatim for the download gate's indicator and the
-# leakage scan, which still read them (the receipt and the internal footnotes
-# read `overrides` since issue #140).
+# DEPRECATED), forwarded verbatim for the leakage scan, which still reads them,
+# for the download gate and its indicator's counts, which read them only as a
+# fallback when `overrides` record nothing (issue #167), and for the
+# indicator's objection lines, which still read `contested_replacements`
+# verbatim (the receipt and the internal footnotes read `overrides` since
+# issue #140).
 _DEPRECATED_DELTA_KEYS = ("added_issues", "contested_replacements", "rationale_objections")
 
 # Fixed, document-free reasons for a computed override the critic gave no

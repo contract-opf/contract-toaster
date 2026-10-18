@@ -24,6 +24,9 @@
  *     already requires the object to be total; this walks the union so a member
  *     wired to the WRONG handler fails too.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { COVER_NOTE_FAILURE_COPY } from '../coverNote';
 import { INTERNAL_NOTES_DISCLOSURE } from '../notesMode';
@@ -43,6 +46,22 @@ import {
 import type { Action, Playbook, Status } from '../orbit-diner/types';
 
 // --- fixtures --------------------------------------------------------------
+
+// Issue #167: the real `reconcile()` output the receipt test (#140) pins.
+const RECONCILER_FIXTURE = JSON.parse(
+  fs.readFileSync(
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../tests/fixtures/critic_delta_overrides_140.json',
+    ),
+    'utf8',
+  ),
+) as {
+  critic_delta: { overrides: Record<string, unknown>[] };
+  expected_note_counts: { override: number; added: number; dropped: number; retained: number };
+};
+const REAL_OVERRIDES = RECONCILER_FIXTURE.critic_delta.overrides;
+const REAL_NOTE_COUNTS = RECONCILER_FIXTURE.expected_note_counts;
 
 const PLAYBOOKS: Playbook[] = [
   { playbook_id: 'nda', display_name: 'NDA', status: 'active' },
@@ -518,6 +537,75 @@ describe('result', () => {
     );
     expect(model.result?.issueCount).toBeUndefined();
     expect(model.result?.criticContested).toBeUndefined();
+  });
+
+  // Issue #167: the reconciler writes `critic_delta.overrides` on every
+  // two-pass review, and the deprecated arrays are retired after one release.
+  // The console counts the overrides the way the receipt does (#140), and
+  // reads the deprecated arrays only when the overrides record nothing.
+  describe('critic delta counted off `overrides` (issue #167)', () => {
+    const resultFor = (critic_delta: ReviewDetailLike['critic_delta']) =>
+      toReviewModel(baseState({ reviewId: 'r-1', detail: detailOf({ critic_delta }) })).result;
+
+    it('counts a delta carrying ONLY the real reconciler overrides record', () => {
+      // `tests/fixtures/critic_delta_overrides_140.json` is written by
+      // `reconcile()` itself; its `expected_note_counts` is what the internal
+      // footnotes render, and the console must count the same.
+      const result = resultFor({ overrides: REAL_OVERRIDES });
+      expect(result).toMatchObject({
+        criticOverrides: REAL_NOTE_COUNTS.override,
+        criticAdded: REAL_NOTE_COUNTS.added,
+        criticDropped: REAL_NOTE_COUNTS.dropped,
+        criticRetained: REAL_NOTE_COUNTS.retained,
+      });
+      // Overrides are authoritative: no deprecated "contested" count.
+      expect(result?.criticContested).toBeUndefined();
+    });
+
+    it.each([
+      ['a computed added issue', [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }], { criticAdded: 1 }],
+      ['a computed drop', [{ source: 'computed', change: 'dropped', issue_id: 'I4', field: 'decision', retained: false }], { criticDropped: 1 }],
+      ['a hard rejection put back', [{ source: 'computed', change: 'dropped', issue_id: 'I3', field: 'decision', retained: true }], { criticRetained: 1 }],
+      ['a computed replacement', [{ source: 'computed', change: 'replaced', issue_id: 'I2', field: 'replacement_text' }], { criticOverrides: 1 }],
+      ['a change the critic stated itself', [{ source: 'critic', issue_id: 'I1', field: 'rationale' }], { criticOverrides: 1 }],
+    ])('counts %s alone, and only that kind', (_label, overrides, expected) => {
+      const result = resultFor({ overrides });
+      expect(result).toMatchObject(expected);
+      for (const key of ['criticOverrides', 'criticAdded', 'criticDropped', 'criticRetained'] as const) {
+        if (!(key in expected)) {
+          expect(result?.[key]).toBeUndefined();
+        }
+      }
+    });
+
+    it('does not add the deprecated arrays to the counts of overrides that record a change, but keeps the objection lines', () => {
+      const result = resultFor({
+        overrides: [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }],
+        added_issues: [{}],
+        contested_replacements: [{ critic_objection: 'Too aggressive.' }],
+      });
+      expect(result?.criticAdded).toBe(1);
+      expect(result?.criticContested).toBeUndefined();
+      // Only the counts fall back: the "Contested-replacement badge" lines
+      // still read `contested_replacements` verbatim while the arrays exist.
+      expect(result?.criticDetails).toEqual(['Critic flagged this replacement: Too aggressive.']);
+    });
+
+    it('falls back to the deprecated arrays when the overrides record nothing', () => {
+      const result = resultFor({
+        overrides: [],
+        contested_replacements: [{ critic_objection: 'Too aggressive.' }],
+        added_issues: [{}, {}],
+      });
+      expect(result).toMatchObject({ criticContested: 1, criticAdded: 2 });
+      expect(result?.criticOverrides).toBeUndefined();
+    });
+
+    it('counts nothing for a KEEP-only delta', () => {
+      const result = resultFor({ overrides: [], dispositions: [{ issue_id: 'I1', disposition: 'KEEP' }] });
+      expect(result?.criticOverrides).toBeUndefined();
+      expect(result?.criticAdded || result?.criticContested || result?.criticDetails).toBeFalsy();
+    });
   });
 
   it('carries the safe failure table and suppresses the unclassified token', () => {

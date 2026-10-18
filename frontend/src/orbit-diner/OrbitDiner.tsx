@@ -782,11 +782,25 @@ export function OrbitDiner({
         {/* Truthiness, not presence: a delta of zero contested and zero added
             is a review the critic had nothing to say about, and announcing an
             empty indicator would train the reader to ignore a real one. */}
+        {/* Issue #167: the override counts join the condition, so a delta
+            carrying only `critic_delta.overrides` still surfaces the
+            indicator the download gate is waiting on. */}
         {(m.result.criticContested ||
           m.result.criticAdded ||
+          m.result.criticOverrides ||
+          m.result.criticDropped ||
+          m.result.criticRetained ||
           m.result.criticDetails) && (
           <div data-testid="review-critic-delta">
             <dl className="od-result-facts">
+              {m.result.criticOverrides != null && (
+                <>
+                  <dt>Overridden by the critic</dt>
+                  <dd data-testid="critic-overrides">
+                    {m.result.criticOverrides}
+                  </dd>
+                </>
+              )}
               {m.result.criticContested != null && (
                 <>
                   <dt>Contested by the critic</dt>
@@ -798,6 +812,22 @@ export function OrbitDiner({
                   <dt>Added by the critic</dt>
                   <dd data-testid="critic-added-issues">
                     {m.result.criticAdded}
+                  </dd>
+                </>
+              )}
+              {m.result.criticDropped != null && (
+                <>
+                  <dt>Dropped by the critic</dt>
+                  <dd data-testid="critic-dropped-issues">
+                    {m.result.criticDropped}
+                  </dd>
+                </>
+              )}
+              {m.result.criticRetained != null && (
+                <>
+                  <dt>Hard rejections retained</dt>
+                  <dd data-testid="critic-retained-rejections">
+                    {m.result.criticRetained}
                   </dd>
                 </>
               )}
