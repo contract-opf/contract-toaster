@@ -1691,6 +1691,27 @@ def ledger_issue_keys(issues: list[dict[str, Any]]) -> set:
     return keys
 
 
+def _proposes_ledger_protection(
+    proven: dict[str, Any], ledger_keys: set, ledger_standards: Iterable[str] = ()
+) -> bool:
+    """Whether `proven` inserts a hard-rejection ledger protection, by
+    either of its two carriers (issue #165): the ledger's own insertion (an
+    edit authored by one of `ledger_keys`), or the critic's faithful copy of
+    an asserted standard that `hard_ledger.enforce` let stand in for it
+    (`OUTCOME_COVERED`) -- an insertion of any issue whose `text_fold`
+    folded form equals one of `ledger_standards`', the comparison `enforce`
+    and `pen_checked_text_by_issue` make. Read before stage 5 compiles, so
+    it names what was PROPOSED; the caller decides whether it landed."""
+    folded_standards = {text_fold.fold_text(text) for text in ledger_standards or ()}
+    for issue_key, texts in _insert_texts_by_issue(proven).items():
+        for text in texts:
+            if not (text or "").strip():
+                continue
+            if issue_key in ledger_keys or text_fold.fold_text(text) in folded_standards:
+                return True
+    return False
+
+
 def _ledger_flag_only_notes(
     issues: list[dict[str, Any]],
     working: dict[str, Any],
@@ -1717,7 +1738,9 @@ def _ledger_flag_only_notes(
 
     A ledger issue whose insertion `proven` carries but `working` does not
     -- rolled out of the compile after its op failed to compile (the pen
-    rules never judge it, issue #164) -- was
+    rules never judge it, issue #164; the compile loop rolls it out even
+    when it hosts nothing, issue #165, since its own footnote has no
+    `<w:ins>` to hang on) -- was
     noted as inserted before stage 5 ran. Its hosted note says instead that
     its standard language did not pass the redline's checks and was not
     inserted (`_LEDGER_REFUSED_OUTCOME`), so the delivered document never
@@ -1980,7 +2003,15 @@ def generate_redline_from_blocks(
     `external` render none of it, and nothing of it is written into the
     body. A host whose edits all fail to compile is rolled out and its
     notes re-hosted, so a compile failure on one clause does not lose the
-    explanation of a dispute about another.
+    explanation of a dispute about another. So is a hard-rejection ledger
+    issue whose insertion failed to compile (issue #165): its own internal
+    note then re-hosts as flag-only (`_ledger_flag_only_notes`), so its
+    rule id still reaches the internal footnotes; with no insertion left to
+    host it (the other edits are pure deletions) the review fails closed as
+    `REASON_BLOCK_EDITS_NOT_APPLIED` rather than deliver it unnoted. The
+    same holds when the protection's carrier was the critic's copy standing
+    in for the ledger's insertion (`OUTCOME_COVERED`) and that copy failed
+    to compile (`_proposes_ledger_protection` names both carriers).
 
     The export marker
     (issue #513) is injected iff this notes mode carries internal content,
@@ -2144,6 +2175,8 @@ def generate_redline_from_blocks(
     # its issue's pen-checked text; whatever else the issue drafts is judged.
     pure_deletions = pure_deletion_issue_keys(proven)
     ledger_keys = ledger_issue_keys(issues)
+    # Read twice: here and by the issue #165 guard after the compile loop.
+    ledger_standards = tuple(ledger_standards or ())
     pen_texts = pen_checked_text_by_issue(proven, ledger_standards)
     pen_failures: dict[Any, Any] = {}
     checkable = [
@@ -2258,7 +2291,23 @@ def generate_redline_from_blocks(
             # footnote on, so those notes were silently lost. Rolling it out
             # changes nothing in the document (none of it landed) and lets
             # the next compile re-host its notes on an issue that did.
-            stranded = {issue_key for issue_key in fresh if issue_key in hosted}
+            #
+            # Issue #165: the same holds for a hard-rejection ledger issue
+            # whose insertion did not compile, even when it hosts nothing.
+            # Its own internal footnote hangs on that `<w:ins>`, so with
+            # nothing landed its rule id would reach no footnote at all.
+            # Rolled out, the next compile treats it as flag-only
+            # (`_ledger_flag_only_notes`, which says its standard language
+            # was not inserted) and hosts its note on an issue that did
+            # insert. With no other insertion left to host it -- no other
+            # edit, or deletions only -- the review ends `ERROR` /
+            # `block_edits_not_applied`, the ledger record still naming it.
+            stranded = {
+                issue_key
+                for issue_key in fresh
+                if issue_key in hosted
+                or (issue_key in ledger_keys and _notes_mode_includes_internal_content(notes_mode))
+            }
             if not stranded:
                 break
             dropped |= stranded
@@ -2275,6 +2324,33 @@ def generate_redline_from_blocks(
         }
 
     docx_bytes = compile_result["docx_bytes"] if compile_result is not None else None
+
+    # Issue #165: a ledger issue whose insertion failed to compile was
+    # rolled out above so its note re-hosts on another insertion; so was
+    # the critic's copy standing in for that insertion (`OUTCOME_COVERED`)
+    # when it failed while hosting the covered entry's note, which then
+    # re-hosts the same way. When the final compile inserts nothing at all
+    # -- the other delivered edits are pure deletions -- that note has no
+    # `<w:ins>` to ride on, and the document would be delivered with the
+    # refused protection named in no footnote. The ledger's own issue need
+    # not have failed for this: under the dedupe it authored no edit, and
+    # only the critic's copy did. So the guard keys on the protection
+    # having been PROPOSED by either carrier (`_proposes_ledger_protection`)
+    # -- with nothing inserted at all, none of it landed. In a notes mode
+    # with internal content that is never delivered silently: the review
+    # fails closed below (`ERROR` / `block_edits_not_applied`), the ledger
+    # record still naming the rule.
+    if (
+        docx_bytes is not None
+        and _notes_mode_includes_internal_content(notes_mode)
+        and _proposes_ledger_protection(proven, ledger_keys, ledger_standards)
+        and not any(
+            (text or "").strip()
+            for texts in _insert_texts_by_issue(working).values()
+            for text in texts or []
+        )
+    ):
+        docx_bytes = None
 
     if docx_bytes is not None and _notes_mode_includes_internal_content(notes_mode):
         # Marker only: no patches, no footnote texts (issue #626 --
@@ -2391,8 +2467,10 @@ def generate_redline_from_blocks(
             **({"flag_only": all_flag_only} if all_flag_only else {}),
         }
 
-    # Something was tried and none of it landed -- a human needs to see why.
-    # No "decision" key: a SYSTEM status is never a legal decision.
+    # Something was tried and none of it landed -- or, issue #165, a refused
+    # ledger insertion's note had no insertion left to ride on -- so a human
+    # needs to see why. No "decision" key: a SYSTEM status is never a legal
+    # decision.
     return {
         "status": STATUS_ERROR,
         "reason": REASON_BLOCK_EDITS_NOT_APPLIED,

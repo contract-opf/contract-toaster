@@ -364,7 +364,9 @@ what code does with it.
   delivered document carries: the sentence is rebuilt after stage 5 from the settled record (below). The
   review is `DONE`; there is no manual-review outcome (#133). It is not `DONE` when nothing is delivered
   (a REQUEST_CHANGE with no delivered document never is, #584): a refused insertion that was the review's
-  only edit ends it `ERROR` / `block_edits_not_applied`, and a review whose only ledger entries have no standard language
+  only edit ends it `ERROR` / `block_edits_not_applied` (as does one beside deletions alone in a notes mode
+  with internal content, since no insertion is left to carry its internal note, #165 -- whether stage 5
+  refused the ledger's own insertion or the critic's copy that stood in for it), and a review whose only ledger entries have no standard language
   delivers no document, which the runner ends `ERROR` / `redline_not_persisted`.
 - **The record.** `hard_ledger` on the result (and the analysis artifact, and `get_review_detail`) is
   `{entries: [{rule_id, clause_id, status, reason, predicate, block_id, span_sha256, inserted,

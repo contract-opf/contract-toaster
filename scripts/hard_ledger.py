@@ -72,8 +72,14 @@ language in the same review is still pen-checked.
 Stage 5 can still REFUSE the insertion: a compile failure of its op (an
 anchor the compiler cannot insert after, such as a paragraph in a table cell
 -- `redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE`), which
-leaves it out of the delivered document (an issue hosting other notes is
-then rolled out of the compile so they re-host); or a batch-level gate
+leaves it out of the delivered document. In a notes mode with internal
+content its issue is then rolled out of the compile (issue #165), so the
+next compile re-hosts its own note -- and any other note it was hosting --
+on an issue that did insert; with no insertion left to host it (no other
+edit, or deletions only) the review ends `ERROR` (below), the record still
+naming the rule -- likewise when the critic's copy standing in for the
+insertion (`OUTCOME_COVERED`) is the op that failed to compile. Or a
+batch-level gate
 (projection proofs, OOXML scan, round trip), which withholds the whole
 document. `enforce` runs before stage 5, so what
 it records is what it HANDED to stage 5; `settle` re-derives the record's

@@ -29,6 +29,11 @@ same review is still refused; a critic restoration that copies the standard
 word for word shares that exemption when it stands in for the ledger's own
 insertion, and never stands in beside language the critic drafted itself; an
 insertion stage 5 rolls out through another gate is noted as not inserted.
+And issue #165: an insertion that fails to compile (a table-cell anchor) is
+rolled out so its rule id re-hosts on another insertion's internal footnote,
+or, with no insertion left to host it (no other edit, or deletions only) in a
+notes mode with internal content, the review fails closed -- whether that
+insertion was the ledger's own or the critic's copy standing in for it.
 
 ## Fixture reachability
 
@@ -1331,6 +1336,200 @@ def test_a_rolled_back_ledger_insertion_is_noted_as_not_inserted() -> None:
     assert rg._LEDGER_INSERTED_OUTCOME not in rolled_back["text"], rolled_back
 
 
+TABLE_INDEMNITY = "Indemnity obligations are set out in the schedule."
+
+
+def _table_indemnity_docx() -> bytes:
+    """A synthetic agreement whose Indemnification section is a one-cell
+    table that does not meet the rule's test. `insertion_anchor` places the
+    fallback after the section's last block -- the cell's paragraph, which
+    the production block map heads "Indemnification" -- and a whole-block op
+    on a table-cell paragraph is a per-edit compile failure
+    (`redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE`)."""
+    table = (
+        "<w:tbl><w:tr><w:tc>"
+        f"<w:p><w:r><w:t>{TABLE_INDEMNITY}</w:t></w:r></w:p>"
+        "</w:tc></w:tr></w:tbl>"
+    )
+    body = (
+        _heading_p("Definitions")
+        + _body_p(DEFINITIONS)
+        + _heading_p("Confidentiality")
+        + _body_p(CONFIDENTIALITY)
+        + _heading_p("Indemnification")
+        + table
+        + _heading_p("Term and Termination")
+        + _body_p(TERM)
+        + _heading_p("Governing Law")
+        + _body_p(GOVERNING_LAW)
+    )
+    return _build_docx_bytes(body)
+
+
+def test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed() -> None:
+    """Issue #165. The ledger's insertion hits a per-edit compile failure
+    (its anchor is a table-cell paragraph), so it lands nothing and has no
+    `<w:ins>` for its own internal footnote. It is rolled out of the compile
+    like a stranded host, and its note -- rule id, reason, and that the
+    standard language was NOT inserted -- re-hosts on the critic's own
+    insertion. Before #165 it hosted nothing, so it was never rolled out and
+    its rule id reached no footnote. With no insertion left to host it --
+    no other edit, or only pure deletions -- the review fails closed in a
+    notes mode with internal content (ERROR / block_edits_not_applied), the
+    record still naming the rule; external mode renders no internal note,
+    so it delivers the deletions. The same holds when the protection's
+    carrier is the critic's copy standing in for the ledger's insertion
+    (`OUTCOME_COVERED`) and that copy is the op refused at the cell."""
+    import redline_block_apply
+
+    docx_bytes = _table_indemnity_docx()
+    cell = _block_id(docx_bytes, "Indemnification")
+    assert _block_map(docx_bytes)[cell]["text"] == TABLE_INDEMNITY
+    refused_note = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_REFUSED)
+
+    result, _client = _run(
+        docx_bytes,
+        [_term_edit_response(docx_bytes, [_assert()]), _verdict(JUDGED_RULE)],
+        notes_mode="internal",
+    )
+    assert result["status"] == "OK", (result.get("status"), result.get("reason"))
+    assert result["decision"] == "REQUEST_CHANGE"
+    redline = result["redline_bytes"]
+    assert "sixty (60)" in _inserted_texts(redline), "the critic's own edit was not delivered"
+    assert _fallback(_opf_doc()) not in _texts(redline, "word/document.xml")
+    footnotes = _texts(redline, "word/footnotes.xml")
+    assert f"Hard-rejection ledger entry for Indemnification: {refused_note}" in footnotes, footnotes
+    assert "its standard language was inserted" not in footnotes, footnotes
+    entry = _entry(result)
+    assert (entry["inserted"], entry["anchor_block_id"], entry["issue_key"]) == (False, None, "I2")
+    assert result["hard_ledger"]["inserted"] == 0
+    not_applied = (result.get("analysis_report") or {}).get("changes_not_applied") or []
+    assert [(c["section_ref"], c["reason"]) for c in not_applied] == [
+        ("Indemnification", redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE)
+    ], not_applied
+    assert result["summary"] == (
+        f"{TERM_SUMMARY} 1 required protection was not found in the agreement and is "
+        "flagged only; no standard language was inserted for it."
+    ), result["summary"]
+
+    # External mode renders no internal note at all; the document is the same.
+    external, _client = _run(
+        docx_bytes,
+        [_term_edit_response(docx_bytes, [_assert()]), _verdict(JUDGED_RULE)],
+    )
+    assert external["status"] == "OK", (external.get("status"), external.get("reason"))
+    assert "Hard-rejection ledger" not in _texts(external["redline_bytes"], "word/footnotes.xml")
+    assert "sixty (60)" in _inserted_texts(external["redline_bytes"])
+
+    # The dedupe path: the critic's faithful copy of the standard covers the
+    # ledger's own insertion (`OUTCOME_COVERED`) and then fails to compile
+    # at the same cell. The covered entry's note still reaches the footnotes
+    # on the Term edit.
+    body = json.loads(_term_edit_response(docx_bytes, [_assert()]))
+    copy = json.loads(_restoration_response(docx_bytes, [_assert()], _fallback(_opf_doc())))
+    (copy_issue,) = copy["issues"]
+    (copy_op,) = copy["block_ops"]
+    copy_issue["issue_key"] = copy_op["issue_key"] = "I3"
+    copy_op["anchor_block_id"] = cell
+    body["issues"].append(copy_issue)
+    body["block_ops"].append(copy_op)
+    covered, _client = _run(
+        docx_bytes, [json.dumps(body), _verdict(JUDGED_RULE)], notes_mode="internal"
+    )
+    assert covered["status"] == "OK", (covered.get("status"), covered.get("reason"))
+    covered_note = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_COVERED)
+    assert covered_note in _texts(covered["redline_bytes"], "word/footnotes.xml")
+    assert _entry(covered)["inserted"] is False
+
+    # The dedupe path beside deletions alone: the critic's copy stands in
+    # for the ledger's insertion and is refused at the cell, and the only
+    # other edit is a pure deletion. The ledger's own issue never failed --
+    # it authored no edit -- yet no insertion is left to host the covered
+    # entry's note, so a notes mode with internal content fails closed
+    # rather than deliver the deletion with the rule id in no footnote.
+    covered_deletion = json.loads(_term_edit_response(docx_bytes, [_assert()]))
+    (covered_patch,) = covered_deletion["block_patches"]
+    covered_patch["segments"] = [
+        segment for segment in covered_patch["segments"] if segment["op"] != "insert"
+    ]
+    covered_deletion["issues"].append(copy_issue)
+    covered_deletion["block_ops"].append(copy_op)
+    for mode in ("internal", "both"):
+        refused_copy, _client = _run(
+            docx_bytes, [json.dumps(covered_deletion), _verdict(JUDGED_RULE)], notes_mode=mode
+        )
+        assert (refused_copy["status"], refused_copy.get("reason")) == (
+            "ERROR",
+            "block_edits_not_applied",
+        ), (mode, refused_copy.get("status"), refused_copy.get("reason"))
+        assert not refused_copy.get("redline_bytes"), mode
+        entry = _entry(refused_copy)
+        assert (entry["status"], entry["inserted"]) == (hl.STATUS_ASSERTED, False), (mode, entry)
+        assert refused_copy["hard_ledger"]["inserted"] == 0, mode
+        not_applied = (refused_copy.get("analysis_report") or {}).get("changes_not_applied") or []
+        assert (
+            "Indemnification",
+            redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE,
+        ) in [(c["section_ref"], c["reason"]) for c in not_applied], (mode, not_applied)
+    # External mode carries no internal note to lose: the deletion ships.
+    covered_external, _client = _run(
+        docx_bytes, [json.dumps(covered_deletion), _verdict(JUDGED_RULE)]
+    )
+    assert covered_external["status"] == "OK", (
+        covered_external.get("status"),
+        covered_external.get("reason"),
+    )
+    assert covered_external["redline_bytes"]
+    assert _fallback(_opf_doc()) not in _texts(covered_external["redline_bytes"], "word/document.xml")
+    assert _entry(covered_external)["inserted"] is False
+
+    # Deletions only beside the refusal: a footnote hangs only on a
+    # `<w:ins>`, so nothing can host the note and the review fails closed
+    # rather than deliver the deletion with the rule id in no footnote.
+    deletion = json.loads(_term_edit_response(docx_bytes, [_assert()]))
+    (term_patch,) = deletion["block_patches"]
+    term_patch["segments"] = [
+        segment for segment in term_patch["segments"] if segment["op"] != "insert"
+    ]
+    deletions_only, _client = _run(
+        docx_bytes, [json.dumps(deletion), _verdict(JUDGED_RULE)], notes_mode="internal"
+    )
+    assert (deletions_only["status"], deletions_only.get("reason")) == (
+        "ERROR",
+        "block_edits_not_applied",
+    ), deletions_only
+    assert not deletions_only.get("redline_bytes")
+    entry = _entry(deletions_only)
+    assert (entry["status"], entry["inserted"]) == (hl.STATUS_ASSERTED, False), entry
+    assert deletions_only["hard_ledger"]["inserted"] == 0
+    not_applied = (deletions_only.get("analysis_report") or {}).get("changes_not_applied") or []
+    assert [(c["section_ref"], c["reason"]) for c in not_applied] == [
+        ("Indemnification", redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE)
+    ], not_applied
+    # External mode carries no internal note to lose: the deletion ships.
+    deletions_external, _client = _run(
+        docx_bytes, [json.dumps(deletion), _verdict(JUDGED_RULE)]
+    )
+    assert deletions_external["status"] == "OK", (
+        deletions_external.get("status"),
+        deletions_external.get("reason"),
+    )
+    assert deletions_external["redline_bytes"]
+    assert _entry(deletions_external)["inserted"] is False
+
+    # Nothing else to host it: the review fails closed, the rule recorded.
+    alone, _client = _run(
+        docx_bytes,
+        [_response(critic=True, ledger=[_assert()]), _verdict(JUDGED_RULE)],
+        notes_mode="internal",
+    )
+    assert (alone["status"], alone.get("reason")) == ("ERROR", "block_edits_not_applied"), alone
+    assert not alone.get("redline_bytes")
+    entry = _entry(alone)
+    assert (entry["status"], entry["inserted"]) == (hl.STATUS_ASSERTED, False), entry
+    assert alone["hard_ledger"]["asserted"] == 1 and alone["hard_ledger"]["inserted"] == 0
+
+
 def _restoration_response(
     docx_bytes: bytes,
     ledger: list[dict[str, Any]],
@@ -1646,6 +1845,7 @@ TESTS = [
     test_model_drafted_text_is_still_pen_checked_beside_a_ledger_insertion,
     test_only_ledger_provenance_is_exempt_from_the_pen_rules,
     test_a_rolled_back_ledger_insertion_is_noted_as_not_inserted,
+    test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed,
     test_a_critic_copy_of_a_standard_the_pen_rules_would_refuse_is_delivered,
     test_a_copy_beside_drafted_language_never_stands_in_for_the_ledger,
     test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules,
