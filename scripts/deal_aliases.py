@@ -58,7 +58,10 @@ hard-rule manifest, the critic's ledger tasking and a dossier's
 prompt still renders -- in a statement, the posture prose, or a rationale
 after aliasing, in any case or dash form -- stays in check 3
 (`leakage_scan._opf_unaliased_slugs`, which matches with check 3's own
-normalisation), unless it is a single word or number (below).
+normalisation), unless it is a single word or number (below) or, since
+#175, it spells word for word one of the document's own public clause
+names, separators aside (`limitation-of-liability`;
+`leakage_scan._is_public_clause_phrase_slug`).
 
 ## Ordinary-word slugs
 

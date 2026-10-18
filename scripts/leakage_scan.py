@@ -198,11 +198,15 @@ What does not:
     `counterparty_names` would be the list to hold it. Engine output names
     a deal by its exact slug, which `deal_aliases.alias_text` replaces
     whatever the slug spells.
-  * The reverse still fails closed: a slug with a separator that spells a
-    phrase the prompt's prose uses as a phrase (a deal whose slug
-    is `limitation-of-liability`, on the NDA example, whose posture prose
-    says it) is held, and blocks that phrase in every external field
-    (follow-up: tell a hyphenated phrase from a multi-token deal slug).
+  * The reverse still fails closed, narrowly: a slug with a separator that
+    spells a hyphenated phrase the prompt's prose uses (a deal slugged
+    `in-house` or `non-material`, on the NDA example, whose posture prose
+    says both) is held, and blocks that phrase in every external field
+    (follow-up: tell an ordinary hyphenated phrase from a multi-token deal
+    slug). A slug that spells one of the document's own public clause names
+    (`limitation-of-liability`, which that posture prose also says) is not
+    held (#175, `_is_public_clause_phrase_slug`): it names a clause, not a
+    party, and naming clauses is what a review does.
   * A span blocks the whole text wherever it appears, including where the
     live contract under review happens to carry that same wording: an
     internal note that quotes the live clause verbatim is then blocked on
@@ -1108,6 +1112,45 @@ def _is_single_token_slug(slug: str) -> bool:
     return _SINGLE_TOKEN_SLUG.fullmatch(_normalize(slug)) is not None
 
 
+#: Every run of non-word characters or underscores (#175): read as one space
+#: by `_clause_phrase_key`. One character class and one quantifier, so a
+#: substitution is linear in the text.
+_CLAUSE_PHRASE_SEPARATORS = re.compile(r"[\W_]+")
+
+
+def _clause_phrase_key(text: str) -> str:
+    """`_normalize`, with every run of separators -- hyphens, underscores,
+    whitespace and any other punctuation -- read as one space (issue #175):
+    so a deal slug (`limitation-of-liability`), a taxonomy id
+    (`limitation_of_liability`) and the label a clause is published under
+    ("Limitation of Liability", "Dispute Resolution & Venue") compare equal
+    when they spell the same words. Wider than `_slug_key`, which keeps
+    other punctuation, because the strings compared here are clause names,
+    which use `&` and `/` between their words."""
+    return _CLAUSE_PHRASE_SEPARATORS.sub(" ", _normalize(text)).strip()
+
+
+def _is_public_clause_phrase_slug(slug: str, phrase_keys: set[str]) -> bool:
+    """True when `slug` spells, word for word, one of the document's own
+    public clause names (issue #175): its `_clause_phrase_key` is the key of
+    an `_opf_public_vocabulary` entry. `phrase_keys` is that key set
+    (`_opf_clause_phrase_keys`).
+
+    A whole-string test, like `_without_public_vocabulary`'s rule 1: a slug
+    that merely CONTAINS a clause name (`limitation-of-liability-acme`) is
+    not one."""
+    key = _clause_phrase_key(slug)
+    return bool(key) and key in phrase_keys
+
+
+def _opf_clause_phrase_keys(opf_doc: dict[str, Any]) -> set[str]:
+    """The `_clause_phrase_key` of every string `_opf_public_vocabulary`
+    returns for `opf_doc` (issue #175)."""
+    keys = {_clause_phrase_key(term) for term in _opf_public_vocabulary(opf_doc)}
+    keys.discard("")
+    return keys
+
+
 def _opf_unaliased_slugs(
     opf_doc: dict[str, Any], overrides: dict[str, Any] | None = None
 ) -> list[str]:
@@ -1145,15 +1188,38 @@ def _opf_unaliased_slugs(
     by an author in a form aliasing leaves, is rendered and not held
     (`counterparty_names`, empty in production, is the list that would hold
     it). A slug with a separator, or that mixes letters and digits, is
-    still held wherever it occurs, so one that spells a hyphenated phrase the prose uses
-    (`limitation-of-liability`) still fails closed on that phrase.
+    still held wherever it occurs -- unless it spells one of the document's
+    own public clause names (below).
+
+    A slug that spells a public clause name is skipped too (issue #175):
+    one whose words, separators aside, are a taxonomy `id` or `label`, or a
+    clause `title` or `taxonomy_id`, of this same document
+    (`_is_public_clause_phrase_slug` over `_opf_public_vocabulary`, the
+    #616 vocabulary). Held, `limitation-of-liability` -- which the engine's
+    NDA posture prose writes as "limitation-of-liability clause" -- blocked
+    that phrase in every external field, the #264/#616 false positive: you
+    cannot review a contract without naming its clauses. Such a slug names
+    a clause, not a party, so it is not a citation leak, and the deal's
+    alias is still held. `_without_public_vocabulary` itself is not applied:
+    its whole-gram test compares `_normalize`d strings, where a hyphenated
+    slug never equals the spaced label, and its token-count rule reads a
+    hyphenated slug as one word, so it would drop every slug held here,
+    `theta-logistics` included. A slug that merely contains a clause name,
+    or that spells some other hyphenated phrase the prose uses (the NDA
+    posture's `non-material`, `in-house`), is still held and still fails
+    closed on that phrase (follow-up: tell an ordinary hyphenated phrase
+    from a multi-token deal slug).
 
     Contract wording (precedent texts, our standard, fallback language,
     excerpts) is NOT read: a slug that is an ordinary word occurs there as
     that word, not as a deal's name."""
     aliases = deal_aliases.alias_map(opf_doc)
+    phrase_keys = _opf_clause_phrase_keys(opf_doc)
     slugs = [
-        slug for slug in deal_aliases.deal_document_ids(opf_doc) if not _is_single_token_slug(slug)
+        slug
+        for slug in deal_aliases.deal_document_ids(opf_doc)
+        if not _is_single_token_slug(slug)
+        and not _is_public_clause_phrase_slug(slug, phrase_keys)
     ]
     if not slugs:
         return []
@@ -1198,9 +1264,11 @@ def _opf_deal_ids(
     unless rendered: the model never reads one, so it cannot restate one
     (de-slugged or not). A single-word or single-number slug is never held,
     rendered or not (`_opf_unaliased_slugs`), so a past deal whose slug is
-    an ordinary word (`nda`, `agreement`) does not block that word; a slug
-    with a separator that spells a phrase the prompt's prose uses still
-    blocks that phrase. Our standard's `source_ref` (the tenant's own
+    an ordinary word (`nda`, `agreement`) does not block that word, nor
+    (#175) does one that spells a public clause name of the document
+    (`limitation-of-liability`) block that phrase; a slug with a separator
+    that spells some other phrase the prompt's prose uses still blocks that
+    phrase. Our standard's `source_ref` (the tenant's own
     template) is never aliased and never added."""
     aliases = deal_aliases.alias_map(opf_doc)
     ordered = sorted(aliases.values())
@@ -1441,7 +1509,8 @@ class ConfidentialCorpus:
         names deals by the same alias, so neither renders a slug that can
         name the counterparty; a slug is added only where the prompt still
         renders one, in any case or dash form, and only one that is not a
-        single word or number, which would hold the ordinary word
+        single word or number, which would hold the ordinary word, nor
+        (#175) one that spells a public clause name of the document
         (`_opf_unaliased_slugs`, matched with check 3's own
         normalisation). Since the Binding block
         and the dossiers render the rationale aliased, each aliased
@@ -1612,7 +1681,7 @@ class ConfidentialCorpus:
             # Dossier precedent ids (#40), then every deal's alias -- the
             # only name either pass's prompt gives a deal since #173 -- and
             # any slug authored prose still renders that is not a single
-            # word or number (`_opf_deal_ids`).
+            # word or number nor a public clause name (`_opf_deal_ids`).
             internal_precedent_ids=list(
                 dict.fromkeys(
                     _opf_dossier_precedent_ids(opf_doc) + _opf_deal_ids(opf_doc, overrides)
@@ -1775,7 +1844,8 @@ class LeakageScanner:
                 )
             # The #208 exemption reaches a held deal slug too (#172 review;
             # since #173 only a slug authored prose still renders, and that
-            # is not a single word or number, is held): a slug that names
+            # is not a single word or number nor (#175) a public clause
+            # name, is held): a slug that names
             # the counterparty on THIS review (compared with
             # hyphens/underscores read as spaces, so `beta-industries`
             # matches "Beta Industries") is its own name, not a leak.

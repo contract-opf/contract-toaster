@@ -43,7 +43,9 @@ What this pins:
       Agreement"), `liability`, `confidentiality`, and `30` where an
       owner-authored Floor addition says "30 days" -- while its alias still
       blocks; a slug with a separator that the prose uses as a phrase
-      (`limitation-of-liability`) is still held, deliberately. And
+      (`in-house`) is still held, deliberately (one that spells a public
+      clause name, `limitation-of-liability`, is not since #175:
+      `tests/test_leakage_slug_clause_phrase_175.py`). And
       the deliberate choice for engine rationale: a one-word slug is
       replaced by its alias there even when it is an ordinary word (with
       `liability`, "A $50,000 deal-NN cap ... limitation-of-deal-NN"), and
@@ -73,7 +75,7 @@ What this pins:
     to fix.
   * [4]'s ordinary-word slugs each rename one deal's `document_id` everywhere
     it occurs (`delta-ventures` -> `delta`, `nda`, `agreement`, `liability`,
-    `confidentiality`, `30`, `limitation-of-liability`), with no other edit:
+    `confidentiality`, `30`, `in-house`), with no other edit:
     `document_id` is uploader-controlled text the 0.5 schema constrains only
     to `minLength: 1`, so a deal filed as `NDA.docx` produces `nda`. The
     prose that uses each word is the engine's own, unedited; the number's is
@@ -562,13 +564,17 @@ def test_a_separated_slug_the_prose_uses_as_a_phrase_is_still_held() -> None:
     """The deliberate other side of the single-token rule: a slug with a
     separator is held wherever the prompt's prose renders it, so one that
     spells a phrase the engine's posture prose uses fails closed on that
-    phrase (follow-up: tell a hyphenated phrase from a multi-token slug)."""
-    doc = _renamed("limitation-of-liability")
-    assert "limitation-of-liability clause" in doc["posture"]["system_prompt"]
+    phrase (follow-up: tell an ordinary hyphenated phrase from a multi-token
+    slug). Since #175 a slug that spells one of the document's own public
+    clause names (`limitation-of-liability`) is not held
+    (`tests/test_leakage_slug_clause_phrase_175.py`); `in-house` is no
+    clause name."""
+    doc = _renamed("in-house")
+    assert "in-house" in doc["posture"]["system_prompt"]
     corpus = _corpus(doc)
-    assert "limitation-of-liability" in corpus.internal_precedent_ids
+    assert "in-house" in corpus.internal_precedent_ids
     outcome = leakage_scan.scan_model_output(
-        _output(_issue(**{_EXTERNAL: "A limitation-of-liability clause must exclude this breach."})), corpus
+        _output(_issue(**{_EXTERNAL: "Our in-house counsel must approve this breach carve-out."})), corpus
     )
     assert outcome.blocked and outcome.rule_id == "internal-precedent-id", outcome
 
