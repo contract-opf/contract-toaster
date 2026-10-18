@@ -110,7 +110,7 @@ are:
 | `standard_clause_ngrams` | 3 entries | derived from the playbook |
 | `internal_precedent_ids` | the dossier precedent ids (#40) and every deal `document_id` (#172) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`), then every deal `document_id` the digest citations and `evidence.precedent[]` carry (`_opf_deal_document_ids`) |
 | `counterparty_names` | empty | not passed |
-| `precedent_verbatim_spans` | the dossier excerpts (#40) | `from_opf_document` reads every dossier excerpt's whole `opening` / `signed` text that is not our standard |
+| `precedent_verbatim_spans` | the dossier excerpts (#40) and the digest precedent texts (#171) | `from_opf_document` reads every dossier excerpt's whole `opening` / `signed` text, then every digest signed variant, collapsed exemplar, refused ask and changed opening, that is not our standard |
 
 Leakage check **3** (`citation_leakage`) is **live, for the dossiers' precedent ids and
 the deals' `document_id`s**: the critic receives each selected dossier whole, ids
@@ -125,11 +125,12 @@ the slug as rendered, and only that: `counterparty_names` is still empty, so the
 counterparty name de-slugged into plain words (`Theta Logistics` for `theta-logistics`)
 passes (#173).
 Check **4** (`precedent_verbatim_spans`)
-is **live, for the critic dossiers only**: retrieval is off, but since #40 the critic
-receives whole precedent excerpts (texts a counterparty wrote or signed), and check 4 is
-the only check that guards them on the internal channel. It blocks an internal note that
-copies a whole excerpt; it does not block a part-quotation or a paraphrase, nor a digest
-precedent text that is in no dossier (#171). Both checks are pure list iteration with no heuristic fallback.
+is **live, for the critic dossiers and the digest only**: retrieval is off, but since #40
+the critic receives whole precedent excerpts (texts a counterparty wrote or signed), both
+passes read the digest's precedent texts verbatim in the shared prefix, and check 4 is the
+only check that guards either on the internal channel. It blocks an internal note that
+copies a whole excerpt or a whole digest precedent text, in a dossier or not (#171); it
+does not block a part-quotation or a paraphrase. Both checks are pure list iteration with no heuristic fallback.
 
 Reviving retrieval makes both **load-bearing for retrieved text, immediately**, and
 interacts with the notes-mode epic:
@@ -138,7 +139,7 @@ interacts with the notes-mode epic:
   may name past counterparties. Its stated safety argument is that check 4 prevents
   "permit citation" from becoming "dump the corpus." **Check 4 does that job only for the
   texts it holds, and only against whole-text copying.** Today it holds the dossier
-  excerpts; retrieved text would be a new, unguarded corpus.
+  excerpts and the digest precedent texts; retrieved text would be a new, unguarded corpus.
 - Therefore: **`counterparty_names`, `internal_precedent_ids` and `precedent_verbatim_spans`
   must be populated from the retrieved text before internal notes ship with retrieval on.**
   #521 records this coupling as a blocking prerequisite. See also #574.

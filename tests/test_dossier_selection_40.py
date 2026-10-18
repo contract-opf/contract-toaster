@@ -642,6 +642,21 @@ def _excerpt_texts(doc: dict[str, Any]) -> list[str]:
     return texts
 
 
+def _digest_texts(doc: dict[str, Any]) -> list[str]:
+    """Every digest clause's signed-variant, collapsed-exemplar, refused-ask
+    and changed-opening `text` that is not one of the digest's own standard
+    parts, in clause order, deduplicated (issue #171)."""
+    clauses = doc["digest"]["clauses"]
+    standard = {p["text"] for c in clauses for p in (c.get("our_standard") or {}).get("parts") or []}
+    texts: list[str] = []
+    for clause in clauses:
+        for entry in clause.get("signed_variants") or []:
+            texts.extend([entry["text"]] if "text" in entry else [e["text"] for e in entry["exemplars"]])
+        texts.extend(e["text"] for e in clause.get("refused_asks") or [])
+        texts.extend(e["text"] for e in clause.get("changed_openings") or [])
+    return [t for t in dict.fromkeys(texts) if t not in standard]
+
+
 def _dossier_precedent_ids(doc: dict[str, Any]) -> list[str]:
     """Every dossier excerpt's `precedent_id`, then that dossier's
     `omitted_precedent_ids`, in dossier order, deduplicated."""
@@ -668,8 +683,14 @@ def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
         # Everything but checks 3 and 4 is the derivation, byte for byte ...
         assert dataclasses.replace(
             with_dossiers, precedent_verbatim_spans=[], internal_precedent_ids=[]
-        ) == dataclasses.replace(derived, internal_precedent_ids=[]), path.name
-        assert derived.precedent_verbatim_spans == [], path.name
+        ) == dataclasses.replace(
+            derived, precedent_verbatim_spans=[], internal_precedent_ids=[]
+        ), path.name
+        # ... without dossiers check 4 holds the digest's precedent texts
+        # alone (issue #171, `tests/test_leakage_digest_spans_171.py`) ...
+        digest = _digest_texts(doc)
+        assert digest, path.name
+        assert derived.precedent_verbatim_spans == digest, path.name
         # ... check 3 holds every dossier precedent id, then the deal
         # document ids the digest cites (#172, which a document without
         # dossiers carries alone) ...
@@ -678,9 +699,11 @@ def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
         assert derived.internal_precedent_ids == deal_ids, path.name
         assert with_dossiers.internal_precedent_ids == _dossier_precedent_ids(doc) + deal_ids, path.name
         assert _dossier_precedent_ids(doc), path.name
-        # ... and check 4 holds each excerpt's whole text, never our standard.
+        # ... and check 4 holds each excerpt's whole text first, then each
+        # digest text no excerpt already holds, never our standard.
         spans = with_dossiers.precedent_verbatim_spans
-        assert spans == _excerpt_texts(doc), path.name
+        excerpts = _excerpt_texts(doc)
+        assert spans == excerpts + [t for t in digest if t not in excerpts], path.name
         assert spans, path.name
         assert not set(spans) & set(with_dossiers.standard_clause_ngrams), path.name
 

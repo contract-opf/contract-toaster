@@ -167,20 +167,21 @@ What guards them:
     Floor rationale in the shared prefix and the dossiers' `floor_rules`).
   * Internal channel (`internal_rationale_for_footnote`): check 2 is skipped
     there, so `from_opf_document` also makes each dossier excerpt's whole
-    `opening` / `signed` text -- unless it is our standard -- a check-4
-    `precedent_verbatim_spans` entry. An internal note that copies a whole
-    excerpt the critic was sent is blocked on every channel. Check 3 is
-    skipped there too, by design: an internal note may cite the deal it
-    reasons from by its precedent id or its document id.
+    `opening` / `signed` text, and (#171) each digest 4 precedent text --
+    signed variant, collapsed exemplar, refused ask, changed opening, which
+    both passes read verbatim in the shared prefix -- unless it is our
+    standard, a check-4 `precedent_verbatim_spans` entry. An internal note
+    that copies a whole excerpt the critic was sent, or a whole digest
+    precedent text, is blocked on every channel. Check 3 is skipped there
+    too, by design: an internal note may cite the deal it reasons from by
+    its precedent id or its document id.
 
 What does not:
 
   * Check 4 matches a WHOLE span (containment), so an internal note that
     quotes part of an excerpt, or paraphrases one, passes. That is the same
     residual as paraphrase, below, and the attorney reading the internal
-    note is its backstop.
-  * A digest precedent text that is in no dossier is not a span: on the
-    internal channel nothing blocks it (#171).
+    note is its backstop. The same holds for a digest text.
   * A deal `document_id` de-slugged back into the plain counterparty name
     (`theta-logistics` restated as `Theta Logistics`, `ThetaLogistics` or
     `theta_logistics`) is a different token, so check 3 passes it on the
@@ -194,6 +195,14 @@ What does not:
     #208 current-counterparty exemption reaches the slugs (`_slug_key`), so
     naming the party on THIS review is never blocked; a past counterparty
     whose slug is an ordinary word still is (#173 removes it).
+  * A span blocks the whole text wherever it appears, including where the
+    live contract under review happens to carry that same wording: an
+    internal note that quotes the live clause verbatim is then blocked on
+    the internal channel as `precedent-verbatim-span`, exactly as check 2
+    already blocks it on the external one. That false positive fails
+    closed rather than leaking; the dossier excerpts' spans have carried
+    it since #40, and like all of the internal channel it is latent while
+    #572's `NOTES_MODE_ENABLED` kill switch is off.
 
 `counterparty_names` (check 3's other list) is still empty in production:
 no builder or production caller populates it, and that still matters. A
@@ -214,8 +223,9 @@ precedent ids and every deal `document_id` the digest citations and
 `evidence.precedent[]` records carry, #172; a deal Floor rationale names
 is held only because it has a precedent record, not because any
 citation renders it), and the internal channel's safety against
-whole-excerpt quotation rests on check 4 above. All of the internal
-channel is latent while #572's `NOTES_MODE_ENABLED` kill switch is off.
+quoting a whole dossier excerpt or a whole digest precedent text rests
+on check 4 above. All of the internal channel is latent while #572's
+`NOTES_MODE_ENABLED` kill switch is off.
 
 ## Check 1 is populated from the prompt actually composed (issue #521)
 
@@ -906,7 +916,9 @@ def _opf_digest_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
     """Every precedent text a digest 4 clause carries into the prompt (issue
     #128): signed variants (and the collapsed equivalent entry's exemplars),
     refused asks and openings not signed as proposed -- never our standard,
-    which is `_opf_standard_texts`'."""
+    which is `_opf_standard_texts`'. `from_opf_document` makes each a check-2
+    gram and (issue #171) a check-4 `precedent_verbatim_spans` entry, the
+    only one of the two that runs on the internal channel."""
     texts: list[str] = []
     digest = opf_doc.get("digest")
     clauses = digest.get("clauses") if isinstance(digest, dict) else None
@@ -1341,7 +1353,11 @@ class ConfidentialCorpus:
         not our standard is ALSO a `precedent_verbatim_spans` entry (check
         4, every channel), after any caller-supplied spans: the critic
         receives those excerpts whole, and an internal note that copies one
-        whole is blocked. A part of an excerpt, or a paraphrase, is not
+        whole is blocked. Each digest 4 precedent text
+        (`_opf_digest_precedent_texts`) that is not our standard follows
+        them (issue #171) -- both passes read it verbatim in the shared
+        prefix, in a dossier or not -- through the same #616 filter. A part
+        of an excerpt or a digest text, or a paraphrase, is not blocked
         (see the module docstring, "Checks 3 and 4 are live for the critic
         dossiers"). Each excerpt's `precedent_id` and each
         `omitted_precedent_ids` entry is a check-3 `internal_precedent_ids`
@@ -1474,14 +1490,25 @@ class ConfidentialCorpus:
         # block an ordinary verdict_summary that names the clause, on every
         # channel, under `precedent-verbatim-span` -- the #616 false positive
         # back under a different rule id (#40 review).
+        #
+        # Issue #171: the digest 4 precedent texts join them on the same
+        # terms. The digest sits in BOTH passes' shared prefix
+        # (`opf_prompt._digest_clause_block`), so each signed variant (and
+        # collapsed exemplar), refused ask and changed opening reaches both
+        # passes verbatim whether or not any dossier carries it; before this, a
+        # digest text found in no dossier was only a check-2 gram, and an
+        # internal note could copy it whole. Same #616 filter, never our
+        # standard, after the dossier excerpts so an engine-built document's
+        # spans list the excerpts first and add only what no excerpt holds.
         verbatim_spans = list(precedent_verbatim_spans or [])
-        verbatim_spans.extend(
-            text
-            for text in dict.fromkeys(
-                _without_public_vocabulary(dossier_excerpts, vocabulary)
+        for candidates in (dossier_excerpts, _opf_digest_precedent_texts(opf_doc)):
+            verbatim_spans.extend(
+                text
+                for text in dict.fromkeys(
+                    _without_public_vocabulary(candidates, vocabulary)
+                )
+                if text not in verbatim_spans and text not in standard_clause_ngrams
             )
-            if text not in verbatim_spans and text not in standard_clause_ngrams
-        )
         blocked_playbook_ngrams = _without_public_vocabulary(
             playbook_ngrams, vocabulary
         )
