@@ -34,6 +34,10 @@ rolled out so its rule id re-hosts on another insertion's internal footnote,
 or, with no insertion left to host it (no other edit, or deletions only) in a
 notes mode with internal content, the review fails closed -- whether that
 insertion was the ledger's own or the critic's copy standing in for it.
+And issue #168 (did not reproduce; regression test only): a critic copy of
+the standard that the pen rules refuse with its change set never left the
+clause delivered by neither path -- the ledger's fallback is inserted and
+its rule id reaches the internal footnotes.
 
 ## Fixture reachability
 
@@ -1665,6 +1669,91 @@ def test_a_copy_beside_drafted_language_never_stands_in_for_the_ledger() -> None
         assert _entry(result)["issue_key"] == "I2"
 
 
+def test_a_pen_refused_critic_copy_leaves_the_fallback_inserted_and_noted() -> None:
+    """Issue #168 (reported unverified; it does not reproduce on this tree).
+    The report: the critic's own edit proposes our standard, the ledger
+    counts the entry covered and inserts nothing, the pen rules then refuse
+    the critic's edit -- and the required clause is delivered by neither.
+
+    The critic copy here is word for word the standard, so on its own it
+    WOULD cover (the control run: nothing inserted by the ledger, the
+    "already proposed" note). Beside language the critic drafted that the
+    pen rules refuse -- a banned phrase, or text over `max_chars` -- the
+    pen rules roll the whole change set back, copy included. Never both,
+    never neither: the ledger's own fallback is the one copy delivered, the
+    record counts it inserted, and the rule id reaches the internal
+    footnotes with the INSERTED sentence, never the COVERED or REFUSED
+    one. Seeded with a standard the pen rules pass and the two they would
+    refuse, against both pen-rule failures."""
+    import html
+
+    import footnote_audience
+    import replacement_text_enforcement as rte
+
+    long_drafted = " ".join(
+        f"sixty (60) days' written notice, clause {n}, delivered to the other party's notice address"
+        for n in range(1, 25)
+    )
+    assert len(long_drafted) > 1500
+    drafted_cases = (
+        ("sixty (60), and this right is perpetual,", rte.MUST_NOT_INTRODUCE_VIOLATION),
+        (long_drafted, rte.MAX_CHARS_EXCEEDED),
+    )
+    inserted_note = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_INSERTED)
+    covered_note = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_COVERED)
+    refused_note = hl.internal_note(RULE_ID, hl.REASON_CRITIC_ASSERTED, hl.OUTCOME_REFUSED)
+    default_standard = _fallback(_opf_doc(INDEMNITY_CONDITION))
+
+    # Control: the same copy alone on its issue covers the entry.
+    docx_bytes = _docx(with_indemnity=False)
+    alone, _client = _run(
+        docx_bytes,
+        [_restoration_response(docx_bytes, [_assert()], default_standard), _verdict(JUDGED_RULE)],
+        notes_mode="internal",
+    )
+    assert alone["status"] == "OK", (alone.get("status"), alone.get("reason"))
+    assert alone["hard_ledger"]["inserted"] == 0, alone["hard_ledger"]
+    assert covered_note in _texts(alone["redline_bytes"], "word/footnotes.xml")
+
+    for standard in (default_standard, LONG_STANDARD, BANNED_PHRASE_STANDARD):
+        doc = _opf_doc(INDEMNITY_CONDITION, standard=standard)
+        for drafted, failure in drafted_cases:
+            label = (len(standard), failure)
+            docx_bytes = _docx(with_indemnity=False)
+            response = _restoration_response(docx_bytes, [_assert()], standard, drafted=drafted)
+            result, _client = _run(
+                docx_bytes, [response, _verdict(JUDGED_RULE)], doc=doc, notes_mode="internal"
+            )
+            assert result["status"] == "OK", (label, result.get("status"), result.get("reason"))
+            assert result["decision"] == "REQUEST_CHANGE", label
+            # The critic's covering-shaped edit was refused by the pen rules ...
+            refusal = _pen_refusal(result, "Indemnification")
+            assert refusal["patch_reasons"][0]["reason"] == failure, (label, refusal)
+            redline = result["redline_bytes"]
+            assert redline, (label, "neither the critic nor the ledger delivered the clause")
+            document = _texts(redline, "word/document.xml")
+            assert TERM in document and "sixty (60)" not in document, label
+            # ... and the ledger's fallback is delivered instead: once, never both.
+            assert html.unescape(_inserted_texts(redline)).count(standard) == 1, label
+            entry = _entry(result)
+            assert (entry["status"], entry["inserted"], entry["issue_key"]) == (
+                hl.STATUS_ASSERTED,
+                True,
+                "I2",
+            ), (label, entry)
+            assert result["hard_ledger"]["inserted"] == 1, (label, result["hard_ledger"])
+            (ledger_finding,) = [
+                f for f in result["findings"] if f.get("provenance") == f"ledger:{RULE_ID}"
+            ]
+            assert ledger_finding["internal_rationale_for_footnote"] == inserted_note, label
+            footnotes = _texts(redline, "word/footnotes.xml")
+            assert footnote_audience.INTERNAL_FOOTNOTE_PREFIX + inserted_note in footnotes, (
+                label,
+                footnotes[:600],
+            )
+            assert covered_note not in footnotes and refused_note not in footnotes, label
+
+
 def test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules() -> None:
     """The unit view of the two tests above. `enforce` lets a critic
     insertion stand in for its own only when it folds equal to the standard
@@ -1848,6 +1937,7 @@ TESTS = [
     test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed,
     test_a_critic_copy_of_a_standard_the_pen_rules_would_refuse_is_delivered,
     test_a_copy_beside_drafted_language_never_stands_in_for_the_ledger,
+    test_a_pen_refused_critic_copy_leaves_the_fallback_inserted_and_noted,
     test_only_a_pure_copy_of_a_standard_covers_and_escapes_the_pen_rules,
     test_settle_keeps_only_delivered_insertions,
     test_delivered_issue_keys_are_only_those_of_a_delivered_document,
