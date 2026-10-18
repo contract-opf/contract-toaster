@@ -34,6 +34,9 @@ rolled out so its rule id re-hosts on another insertion's internal footnote,
 or, with no insertion left to host it (no other edit, or deletions only) in a
 notes mode with internal content, the review fails closed -- whether that
 insertion was the ledger's own or the critic's copy standing in for it.
+And issue #169: that refused insertion's `analysis_report.changes_not_applied`
+row says in fixed copy that the standard language could not be inserted,
+never the issue's own "has been inserted".
 And issue #168 (did not reproduce; regression test only): a critic copy of
 the standard that the pen rules refuse with its change set never left the
 clause delivered by neither path -- the ledger's fallback is inserted and
@@ -1534,6 +1537,106 @@ def test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed()
     assert alone["hard_ledger"]["asserted"] == 1 and alone["hard_ledger"]["inserted"] == 0
 
 
+def _ledger_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """The `changes_not_applied` rows for the ledger's own issue (`I2`, the
+    one fresh key `hard_ledger.enforce` gives it beside the critic's `I1`),
+    found by the section and the fixed summary only a ledger issue carries."""
+    not_applied = (result.get("analysis_report") or {}).get("changes_not_applied") or []
+    return [
+        row
+        for row in not_applied
+        if row["section_ref"] == "Indemnification"
+        and row["counterparty_change_summary"] == hl._CHANGE_SUMMARY
+    ]
+
+
+def test_a_ledger_insertion_that_fails_to_compile_is_not_reported_as_inserted() -> None:
+    """Issue #169 (reproduced before the fix). The ledger issue's own
+    `external_rationale_for_footnote` says its standard language "has been
+    inserted". When stage 5 refuses that insertion (a table-cell anchor,
+    `block_op_unsupported_in_table`), the issue is listed under
+    `analysis_report.changes_not_applied` -- and before #169 that row kept
+    the claim, so the report stated a change the document does not carry.
+    The row now carries fixed copy saying the standard language could not
+    be inserted, in every notes mode, whether the document is delivered
+    beside another edit or the review ends ERROR with nothing to deliver.
+    A non-ledger issue refused the same way keeps its own rationale, and a
+    delivered ledger insertion lists no row at all."""
+    import redline_block_apply
+    import redline_generate as rg
+
+    assert rg._LEDGER_NOT_INSERTED_RATIONALE == hl._EXTERNAL_RATIONALE_NOT_INSERTED
+    assert "could not be inserted" in hl._EXTERNAL_RATIONALE_NOT_INSERTED
+    assert "has been inserted" in hl._EXTERNAL_RATIONALE_INSERTED
+
+    docx_bytes = _table_indemnity_docx()
+    cell = _block_id(docx_bytes, "Indemnification")
+    beside_term = [_term_edit_response(docx_bytes, [_assert()]), _verdict(JUDGED_RULE)]
+    alone = [_response(critic=True, ledger=[_assert()]), _verdict(JUDGED_RULE)]
+    cases = [
+        ("external, beside the Term edit", beside_term, {}, "OK"),
+        ("internal, beside the Term edit", beside_term, {"notes_mode": "internal"}, "OK"),
+        ("both, beside the Term edit", beside_term, {"notes_mode": "both"}, "OK"),
+        ("internal, the only edit", alone, {"notes_mode": "internal"}, "ERROR"),
+        ("external, the only edit", alone, {}, "ERROR"),
+    ]
+    for label, responses, kwargs, status in cases:
+        result, _client = _run(docx_bytes, list(responses), **kwargs)
+        assert result["status"] == status, (label, result.get("status"), result.get("reason"))
+        assert _entry(result)["inserted"] is False, label
+        rows = _ledger_rows(result)
+        assert [row["reason"] for row in rows] == [
+            redline_block_apply.REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE
+        ], (label, rows)
+        (row,) = rows
+        assert row["external_rationale_for_footnote"] == hl._EXTERNAL_RATIONALE_NOT_INSERTED, (
+            label,
+            row,
+        )
+        assert "has been inserted" not in json.dumps(
+            result.get("analysis_report")
+        ), (label, result.get("analysis_report"))
+        # The issue itself is unchanged: only the not-applied row is reworded.
+        (ledger_finding,) = [
+            f for f in result["findings"] if f["provenance"] == f"ledger:{RULE_ID}"
+        ]
+        assert ledger_finding["external_rationale_for_footnote"] == hl._EXTERNAL_RATIONALE_INSERTED
+
+    # A model issue refused at the same cell keeps its own rationale: the
+    # critic's copy of the standard (`OUTCOME_COVERED`, so the ledger's own
+    # issue authors no edit and its row, if any, is the flag-only wording).
+    body = json.loads(_term_edit_response(docx_bytes, [_assert()]))
+    copy = json.loads(_restoration_response(docx_bytes, [_assert()], _fallback(_opf_doc())))
+    (copy_issue,) = copy["issues"]
+    (copy_op,) = copy["block_ops"]
+    copy_issue["issue_key"] = copy_op["issue_key"] = "I3"
+    copy_op["anchor_block_id"] = cell
+    body["issues"].append(copy_issue)
+    body["block_ops"].append(copy_op)
+    covered, _client = _run(
+        docx_bytes, [json.dumps(body), _verdict(JUDGED_RULE)], notes_mode="internal"
+    )
+    assert covered["status"] == "OK", (covered.get("status"), covered.get("reason"))
+    not_applied = (covered.get("analysis_report") or {}).get("changes_not_applied") or []
+    model_rows = [
+        row for row in not_applied if row["counterparty_change_summary"] != hl._CHANGE_SUMMARY
+    ]
+    assert [row["external_rationale_for_footnote"] for row in model_rows] == [
+        copy_issue["external_rationale_for_footnote"]
+    ], not_applied
+    for row in _ledger_rows(covered):
+        assert row["external_rationale_for_footnote"] == hl._EXTERNAL_RATIONALE_FLAG_ONLY, row
+
+    # A delivered ledger insertion is applied, so it lists no row at all.
+    delivered, _client = _run(
+        _docx(with_indemnity=False),
+        [_response(critic=True, ledger=[_assert()]), _verdict(JUDGED_RULE)],
+        notes_mode="internal",
+    )
+    assert delivered["status"] == "OK" and _entry(delivered)["inserted"] is True
+    assert _ledger_rows(delivered) == [], delivered.get("analysis_report")
+
+
 def _restoration_response(
     docx_bytes: bytes,
     ledger: list[dict[str, Any]],
@@ -1935,6 +2038,7 @@ TESTS = [
     test_only_ledger_provenance_is_exempt_from_the_pen_rules,
     test_a_rolled_back_ledger_insertion_is_noted_as_not_inserted,
     test_a_ledger_insertion_that_fails_to_compile_is_re_hosted_or_fails_closed,
+    test_a_ledger_insertion_that_fails_to_compile_is_not_reported_as_inserted,
     test_a_critic_copy_of_a_standard_the_pen_rules_would_refuse_is_delivered,
     test_a_copy_beside_drafted_language_never_stands_in_for_the_ledger,
     test_a_pen_refused_critic_copy_leaves_the_fallback_inserted_and_noted,

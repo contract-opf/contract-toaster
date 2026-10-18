@@ -348,7 +348,9 @@ what code does with it.
   characters or with a `must_not_introduce` phrase is inserted), nor an insertion of the critic's that is
   a faithful copy of it (the same `text_fold` comparison the dedupe below makes) -- and can refuse it by
   a compile failure of the op (an anchor in a table cell, `block_op_unsupported_in_table`), which leaves
-  it out of the delivered document, or by a batch-level gate, which withholds the whole document. An entry
+  it out of the delivered document -- its `analysis_report.changes_not_applied` row then carries fixed
+  copy saying the standard language could not be inserted, never the issue's own "has been inserted"
+  (#169) -- or by a batch-level gate, which withholds the whole document. An entry
   with no standard language, whose clause's standard another asserted rule already inserts or the
   critic's own transcript already inserts on an issue that inserts nothing else (a copy beside language
   the critic drafted itself never counts, so the ledger inserts its own and the document may then carry
@@ -951,7 +953,9 @@ redline `.docx`. It contains:
 - `changes_not_applied`: an array of the issue entries (from the model's structured output) that
   could not be patched, each carrying `section_ref`, `section_title`, `counterparty_change_summary`,
   `proposed_replacement_text`, and `external_rationale_for_footnote` so the attorney has everything
-  needed to apply the change manually.
+  needed to apply the change manually. A hard-rejection ledger issue whose insertion did not compile is
+  the one entry whose `external_rationale_for_footnote` is not its issue's own: that says the standard
+  language "has been inserted", so the row carries fixed copy saying it could not be inserted (#169).
 - `normalization_notes` (un-normalizable path only): the analysis note from the normalization pass
   describing what could not be resolved.
 - `reason_detail` (un-normalizable path only, issue #100; **absent, never a null placeholder, on

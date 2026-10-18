@@ -218,6 +218,14 @@ _EXTERNAL_RATIONALE_INSERTED = (
 _EXTERNAL_RATIONALE_FLAG_ONLY = (
     "This protection was not found in the agreement and must be added."
 )
+#: Issue #169: an inserting ledger issue's `analysis_report.changes_not_applied`
+#: row when stage 5 refused its insertion (a compile failure), in place of
+#: `_EXTERNAL_RATIONALE_INSERTED`, which would claim a change the document
+#: lacks. `redline_generate._LEDGER_NOT_INSERTED_RATIONALE` restates it.
+_EXTERNAL_RATIONALE_NOT_INSERTED = (
+    "This protection was not found in the agreement. The standard language "
+    "could not be inserted, so it must be added."
+)
 _SECTION_FALLBACK_TITLE = "Required protection"
 
 _TOPIC_ID_PATTERN = re.compile(r"^[a-z0-9_]+(?:[-.][a-z0-9_]+)*$")
