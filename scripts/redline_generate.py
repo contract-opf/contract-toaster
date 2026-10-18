@@ -848,6 +848,7 @@ def _flag_only_entry(
     reason: str,
     *,
     patch_reasons: "Optional[list[dict[str, Any]]]" = None,  # noqa: UP037, UP045
+    rationale: "Optional[str]" = None,  # noqa: UP037, UP045
 ) -> dict[str, Any]:
     """One `flag_only` entry -- the shape BOTH redline paths produce and
     every consumer of `flag_only` reads (`{new_text, rationale, reason,
@@ -863,11 +864,18 @@ def _flag_only_entry(
     There is no address key on this entry. Issue #628 deleted the quote
     machinery that used to carry one, and inventing an address from a block
     transcript would report a span the model never named. `patch_reasons`
-    is present only on a `REASON_ISSUE_CHANGESET_FAILED` entry.
+    is present only on an entry whose edits were attempted and refused.
+
+    `rationale` replaces the issue's own `external_rationale_for_footnote`
+    when that would misstate the outcome: a hard-rejection ledger issue's
+    says its standard language "has been inserted", so a refused insertion
+    carries `_LEDGER_NOT_INSERTED_RATIONALE` instead (issue #169).
     """
     entry: dict[str, Any] = {
         "new_text": issue.get("proposed_replacement_text") or "",
-        "rationale": issue.get("external_rationale_for_footnote"),
+        "rationale": (
+            rationale if rationale is not None else issue.get("external_rationale_for_footnote")
+        ),
         "reason": reason,
         "_source_issue": issue,
     }
@@ -1644,6 +1652,16 @@ _LEDGER_REFUSED_OUTCOME = (
     "inserted, so it is flagged only."
 )
 
+#: Issue #169: the external rationale a ledger issue's
+#: `analysis_report.changes_not_applied` row carries when its insertion did
+#: not compile -- `hard_ledger._EXTERNAL_RATIONALE_NOT_INSERTED`, restated
+#: like the sentences above. The issue's own rationale says the standard
+#: language "has been inserted", which that row must never claim.
+_LEDGER_NOT_INSERTED_RATIONALE = (
+    "This protection was not found in the agreement. The standard language "
+    "could not be inserted, so it must be added."
+)
+
 #: Issue #147: the result key `generate_redline_from_blocks` lists the issue
 #: keys whose edits the delivered document carries under. Read through
 #: `delivered_issue_keys`, never directly.
@@ -2391,12 +2409,21 @@ def generate_redline_from_blocks(
     all_flag_only: list[dict[str, Any]] = []
     for issue in issues:
         issue_key = issue.get("issue_key")
+        # Issue #169: a ledger issue that reaches a failure branch below
+        # authored an insertion that did not land, so its row must not keep
+        # the issue's own "has been inserted" rationale. Fixed copy only --
+        # no rule id, no clause text. (The pen rules never judge a ledger
+        # issue, #164, so it never reaches `pen_failures`.)
+        refused_rationale = (
+            _LEDGER_NOT_INSERTED_RATIONALE if issue_key in ledger_keys else None
+        )
         if issue_key in changeset_failures:
             all_flag_only.append(
                 _flag_only_entry(
                     issue,
                     REASON_ISSUE_CHANGESET_FAILED,
                     patch_reasons=changeset_failures[issue_key],
+                    rationale=refused_rationale,
                 )
             )
         elif issue_key in edit_failures:
@@ -2405,6 +2432,7 @@ def generate_redline_from_blocks(
                     issue,
                     edit_failures[issue_key][0]["reason"],
                     patch_reasons=edit_failures[issue_key],
+                    rationale=refused_rationale,
                 )
             )
         elif issue_key in pen_failures:
