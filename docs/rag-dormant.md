@@ -124,7 +124,8 @@ never enters a prompt. With no slug in the citations or the engine's rationale, 
 de-slugged into a plain name (`Theta Logistics` for `theta-logistics`) is no longer a path.
 A slug authored prose still renders is held too, but never a single-word or single-number
 slug, so a past deal whose slug is an ordinary word (`nda`, `agreement`) does not block that
-word; the cost is that a one-word party name an author writes into a statement or the
+word, and (#175) never a slug that spells one of the document's own public clause names
+(`limitation-of-liability`), so naming that clause is not blocked either; the cost is that a one-word party name an author writes into a statement or the
 posture prose is not held (`docs/threat-model.md`, "Deal-slug false positives").
 `counterparty_names` is still empty, so a party name a precedent text carries as contract
 wording (a signed parties recital) is held by no list on its own.
