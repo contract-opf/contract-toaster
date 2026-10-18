@@ -108,22 +108,26 @@ are:
 | `system_prompt_ngrams` | empty (#521 populates it) | not passed by `review_spine.py:482`/`:486` |
 | `playbook_ngrams` | 4 entries | derived from the playbook |
 | `standard_clause_ngrams` | 3 entries | derived from the playbook |
-| `internal_precedent_ids` | the dossier precedent ids (#40) and every deal `document_id` (#172) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`), then every deal `document_id` the digest citations and `evidence.precedent[]` carry (`_opf_deal_document_ids`) |
+| `internal_precedent_ids` | the dossier precedent ids (#40) and every deal's alias (#173, in place of #172's slugs) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`), then the alias of every deal `corpus.documents[]`, the digest citations and `evidence.precedent[]` carry (`_opf_deal_ids`, `scripts/deal_aliases.py`) |
 | `counterparty_names` | empty | not passed |
 | `precedent_verbatim_spans` | the dossier excerpts (#40) and the digest precedent texts (#171) | `from_opf_document` reads every dossier excerpt's whole `opening` / `signed` text, then every digest signed variant, collapsed exemplar, refused ask and changed opening, that is not our standard |
 
 Leakage check **3** (`citation_leakage`) is **live, for the dossiers' precedent ids and
-the deals' `document_id`s**: the critic receives each selected dossier whole, ids
-included, and the prompt names each deal by its `document_id` on two paths, the
-digest's citations in both passes' prompts and engine-written Floor rationale prose
-(printed verbatim in both passes' shared prefix and carried again in each dossier's
-`floor_rules`); since #172 `internal_precedent_ids` holds both, so check 3 blocks an
-external field that echoes one. The deal ids come from the digest citations and the
-`evidence.precedent[]` walk; nothing reads the Floor rationale, so a deal only that
-prose names is held because it has a precedent record. It is a token match and blocks
-the slug as rendered, and only that: `counterparty_names` is still empty, so the same
-counterparty name de-slugged into plain words (`Theta Logistics` for `theta-logistics`)
-passes (#173).
+the deals' aliases**: the critic receives each selected dossier whole, ids included, and
+since #173 the prompt names each past deal by an opaque alias (`deal-03`), never by its
+`document_id` slug, on both paths that name one: the digest's citations in both passes'
+prompts and engine-written Floor rationale prose (in both passes' shared prefix and again
+in each dossier's `floor_rules`, aliased by exact token replacement). `internal_precedent_ids`
+holds the aliases, so check 3 blocks an external field that echoes one; the alias-to-slug
+map an operator resolves a citation with (`python3 scripts/deal_aliases.py <playbook>`)
+never enters a prompt. With no slug in the citations or the engine's rationale, a slug
+de-slugged into a plain name (`Theta Logistics` for `theta-logistics`) is no longer a path.
+A slug authored prose still renders is held too, but never a single-word or single-number
+slug, so a past deal whose slug is an ordinary word (`nda`, `agreement`) does not block that
+word; the cost is that a one-word party name an author writes into a statement or the
+posture prose is not held (`docs/threat-model.md`, "Deal-slug false positives").
+`counterparty_names` is still empty, so a party name a precedent text carries as contract
+wording (a signed parties recital) is held by no list on its own.
 Check **4** (`precedent_verbatim_spans`)
 is **live, for the critic dossiers and the digest only**: retrieval is off, but since #40
 the critic receives whole precedent excerpts (texts a counterparty wrote or signed), both

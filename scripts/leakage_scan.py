@@ -140,31 +140,32 @@ What guards them:
     fills `internal_precedent_ids` from each dossier excerpt's
     `precedent_id` and each `omitted_precedent_ids` entry
     (`_opf_dossier_precedent_ids`), so an external footnote that cites a
-    past deal by id is blocked as `internal-precedent-id`. Since #172 it
-    also holds every deal `document_id` the digest citations and the
-    `evidence.precedent[]` records carry (`_opf_deal_document_ids`). The
-    prompt names a deal by that slug on two paths: the digest's citations
-    in both passes' prompts (`opf_prompt._fmt_cite`,
-    `[<document_id>@<version> ...]`), and engine-written Floor-invariant
-    rationale prose, which `opf_prompt._binding_block` prints verbatim in
-    both passes' shared prefix and each critic dossier's `floor_rules`
-    carries again (the engine's NDA example's liability-cap rationale
-    names three deals by slug, unbracketed). A slug can name the
-    counterparty, so an external field that echoes one is blocked the same
-    way. The walk does not read Floor rationale: a deal that prose names
-    is covered because it has an `evidence.precedent[]` record, not
-    because a digest citation renders it, and
-    `tests/test_leakage_deal_document_ids_172.py` [1] pins that every
-    `corpus.documents[]` id named anywhere in the composed prompt or the
-    dossiers is held. That is a token match: it blocks the slug as
-    rendered (whole token, case-folded) and only that, not the
-    counterparty name the slug spells. Our standard's `source_ref` (the
-    tenant's own template) is not a deal and is not added. The ticket's
-    alternative, an opaque alias in place of the slug in the prompt, was
-    not taken: it changes both passes' byte-identical shared prefix, a
-    per-review alias defeats prompt-cache reuse, and the citation is the
-    location an operator resolves an entry to (#173 -- the digest citations, the
-    Floor rationale in the shared prefix and the dossiers' `floor_rules`).
+    past deal by id is blocked as `internal-precedent-id`. Since #173 it
+    also holds the opaque alias of every past deal (`_opf_deal_ids`,
+    `scripts/deal_aliases.py`), the only name either pass's prompt gives a
+    deal: the digest citations (`opf_prompt._fmt_cite`,
+    `[<alias>@<version> ...]`), engine-written Floor-invariant rationale in
+    both passes' shared prefix (`opf_prompt._binding_block`) and the same
+    rationale in each critic dossier's `floor_rules`
+    (`critic_dossiers.select_dossiers`) all name a deal by its alias, never
+    by its `document_id` slug (#172 held the slugs themselves). An alias
+    echoed into an external field is blocked the same way; the alias-to-slug
+    map that resolves it to a corpus location never enters a prompt
+    (`deal_aliases.resolution_map`). A slug is held only where the prompt
+    still renders one, in any case or dash form -- the posture prose, a
+    Floor or manifest statement, or a variant spelling in a rationale that
+    exact-token aliasing leaves (`_opf_unaliased_slugs`, matched with check
+    3's own normalisation) -- and only a slug that is not a single word or
+    a single number (`_is_single_token_slug`): `nda`, `agreement` or
+    `liability` occurs in that prose as the ordinary word, which cannot be
+    told from a deal's name, so holding it would block the word in every
+    external field (the engine's own NDA example renders all three).
+    `tests/test_deal_aliases_173.py` pins that no `corpus.documents[]` id
+    appears anywhere in either pass's request, and
+    `tests/test_leakage_deal_document_ids_172.py` [1] that every deal name
+    the composed prompt or the dossiers carry is held. Our standard's
+    `source_ref` (the tenant's own template) is not a deal and is neither
+    aliased nor added.
   * Internal channel (`internal_rationale_for_footnote`): check 2 is skipped
     there, so `from_opf_document` also makes each dossier excerpt's whole
     `opening` / `signed` text, and (#171) each digest 4 precedent text --
@@ -182,19 +183,26 @@ What does not:
     quotes part of an excerpt, or paraphrases one, passes. That is the same
     residual as paraphrase, below, and the attorney reading the internal
     note is its backstop. The same holds for a digest text.
-  * A deal `document_id` de-slugged back into the plain counterparty name
-    (`theta-logistics` restated as `Theta Logistics`, `ThetaLogistics` or
-    `theta_logistics`) is a different token, so check 3 passes it on the
-    external channel too: `counterparty_names` is empty and nothing else
-    holds the name. It is the likeliest way a slug leaks; only aliasing
-    every slug the prompt renders (#173), or a populated `counterparty_names`,
-    would close it.
-  * The reverse: a slug is uploader-controlled text (`minLength: 1`), so one
-    that is a single ordinary word, or that spells a party's name or
-    domain, fails closed on any external field that uses that word. The
-    #208 current-counterparty exemption reaches the slugs (`_slug_key`), so
-    naming the party on THIS review is never blocked; a past counterparty
-    whose slug is an ordinary word still is (#173 removes it).
+  * The counterparty's name itself, where a precedent text carries it as
+    contract wording (a signed parties recital names the party; the
+    engine's NDA example has one), reaches the prompt verbatim: check 2
+    blocks the whole text, but the name alone is held by no list --
+    `counterparty_names` is empty. Aliasing (#173) closed the other path,
+    a deal slug restated as the plain name, because no citation or
+    engine-written rationale renders a slug any more.
+  * A single-word or single-number deal slug that authored prose writes in
+    a form exact-token aliasing leaves -- a one-word party name (`acme`)
+    in a Floor statement or the posture prose, or `Acme` in a rationale --
+    reaches the prompt and is not held (`_opf_unaliased_slugs` skips such
+    slugs, because `nda` or `agreement` written there is the ordinary word);
+    `counterparty_names` would be the list to hold it. Engine output names
+    a deal by its exact slug, which `deal_aliases.alias_text` replaces
+    whatever the slug spells.
+  * The reverse still fails closed: a slug with a separator that spells a
+    phrase the prompt's prose uses as a phrase (a deal whose slug
+    is `limitation-of-liability`, on the NDA example, whose posture prose
+    says it) is held, and blocks that phrase in every external field
+    (follow-up: tell a hyphenated phrase from a multi-token deal slug).
   * A span blocks the whole text wherever it appears, including where the
     live contract under review happens to carry that same wording: an
     internal note that quotes the live clause verbatim is then blocked on
@@ -205,12 +213,11 @@ What does not:
     #572's `NOTES_MODE_ENABLED` kill switch is off.
 
 `counterparty_names` (check 3's other list) is still empty in production:
-no builder or production caller populates it, and that still matters. A
-past deal the prompt names is named by its `document_id`, in a digest
-citation or in Floor rationale prose (the shared prefix's Binding block
-and a dossier's `floor_rules`), and since #172 those ids are
-`internal_precedent_ids` (above) -- the slug token only, so the plain
-name it spells is unguarded (above).
+no builder or production caller populates it, and that still matters. Since
+#173 a past deal the prompt names is named by its alias (above), which is an
+`internal_precedent_ids` entry, but a precedent text that carries the
+party's name as contract wording reaches the prompt and the name alone is
+unguarded (above).
 
 **Coupling to record, load-bearing:** a field IS internal-bound
 (`internal_rationale_for_footnote`, #522), and check 3 permits precedent
@@ -219,10 +226,11 @@ precedent retrieval is ever re-enabled, and before any prompt carries a
 precedent id or counterparty name from a source other than the dossiers:
 the external channel's safety against citation rests on every id the
 prompt carries being in `internal_precedent_ids` (today, the dossiers'
-precedent ids and every deal `document_id` the digest citations and
-`evidence.precedent[]` records carry, #172; a deal Floor rationale names
-is held only because it has a precedent record, not because any
-citation renders it), and the internal channel's safety against
+precedent ids and every deal's alias, #173 -- the alias map covers every
+deal `corpus.documents[]`, the digest citations and `evidence.precedent[]`
+name, and the same map rewrites the citations and the Floor rationale, so
+a deal is never rendered under a name the list lacks), and the internal
+channel's safety against
 quoting a whole dossier excerpt or a whole digest precedent text rests
 on check 4 above. All of the internal channel is latent while #572's
 `NOTES_MODE_ENABLED` kill switch is off.
@@ -298,6 +306,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import deal_aliases  # noqa: E402
 import model_output_schema  # noqa: E402
 import opf_prompt  # noqa: E402
 import review_knowledge  # noqa: E402
@@ -1008,7 +1017,9 @@ def _opf_dossier_texts(
     same reasoning `_opf_manifest_texts` gives for the manifest.
 
     Blocked: each listed Floor rule's `statement` and `rationale` (internal
-    strategy, like the Floor invariant it is), and each excerpt's `opening` /
+    strategy, like the Floor invariant it is; the rationale also as the
+    critic reads it, each deal slug swapped for its alias, #173), and each
+    excerpt's `opening` /
     `signed` (a whole precedent text) -- unless it IS this dossier's own
     standard (its `our_standard` text, or one of its parts), which a deal
     that opened with or signed our standard carries. Our standard: every
@@ -1025,6 +1036,7 @@ def _opf_dossier_texts(
     blocked: list[str] = []
     standards: list[str] = []
     excerpts: list[str] = []
+    aliases = deal_aliases.alias_map(opf_doc)
     section = opf_doc.get("dossiers")
     for dossier in section.values() if isinstance(section, dict) else []:
         if not isinstance(dossier, dict):
@@ -1039,6 +1051,13 @@ def _opf_dossier_texts(
                     value = rule.get(key)
                     if isinstance(value, str) and value:
                         blocked.append(value)
+                # Issue #173: the critic reads the rationale with each deal
+                # slug swapped for its alias (`critic_dossiers.select_dossiers`).
+                rationale = rule.get("rationale")
+                if isinstance(rationale, str) and rationale:
+                    aliased = deal_aliases.alias_text(rationale, aliases)
+                    if aliased != rationale:
+                        blocked.append(aliased)
         for excerpt in dossier.get("excerpts") or []:
             if not isinstance(excerpt, dict):
                 continue
@@ -1074,67 +1093,118 @@ def _opf_dossier_precedent_ids(opf_doc: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(i for i in candidates if isinstance(i, str) and i.strip()))
 
 
-def _ref_document_id(ref: Any) -> Any:
-    """A citation ref's `document_id`, or None when the ref is not an object."""
-    return ref.get("document_id") if isinstance(ref, dict) else None
+#: One run of letters, or one run of digits, after `_normalize` (#173 review):
+#: a slug of this shape is spelled exactly like an ordinary word or number.
+#: Fixed character classes and one quantifier, so a match is linear in the slug.
+_SINGLE_TOKEN_SLUG = re.compile(r"[^\W\d_]+|\d+")
 
 
-def _opf_deal_document_ids(opf_doc: dict[str, Any]) -> list[str]:
-    """Every past deal's `document_id` the OPF document carries (issue #172):
-    the digest 4 citations both passes' prompts render
-    (`opf_prompt._fmt_cite`, `[<document_id>@<version> §<path>]`) on each
-    signed variant, collapsed-equivalent exemplar, refused ask and opening
-    not signed as proposed, and every `evidence.precedent[]` record's own
-    `document_id` and the refs of its signed text, opening and refused asks.
+def _is_single_token_slug(slug: str) -> bool:
+    """True when `slug`, normalised as check 3 normalises it, is a single
+    word (`nda`, `agreement`, `liability`, a one-word party name such as
+    `acme`) or a single number (`50`), with no separator and no mix of
+    letters and digits. Such a slug cannot be told from the ordinary word or
+    number it spells, so `_opf_unaliased_slugs` never holds it."""
+    return _SINGLE_TOKEN_SLUG.fullmatch(_normalize(slug)) is not None
 
-    A `document_id` is a filename-derived slug that can name the
-    counterparty, so `from_opf_document` makes each one a check-3
-    `internal_precedent_ids` entry beside the dossiers' precedent ids:
-    blocked on the external channel (a footnote sent to the counterparty
-    must not cite another deal), permitted on the internal one, exactly as
-    check 3's table says. The precedent record is read as well as the
-    digest for the same fail-closed reason as #128: the digest is capped,
-    the record is not, and a larger list fails closed. It is also what
-    holds the deals engine-written Floor rationale names in prose
-    (`opf_prompt._binding_block` prints it in both passes' shared prefix,
-    and a dossier's `floor_rules` carries it again): nothing here reads
-    that prose, so such a deal is held because it has a precedent record.
 
-    NOT read: our standard's `source_ref` and `baseline.template_ref`. They
-    cite the tenant's own template (`[template@template §7]`), not a deal,
-    and a check-3 entry for a generic template slug would block any external
-    note that uses the word."""
-    candidates: list[Any] = []
-    digest = opf_doc.get("digest")
-    clauses = digest.get("clauses") if isinstance(digest, dict) else None
-    for clause in clauses if isinstance(clauses, list) else []:
-        if not isinstance(clause, dict):
-            continue
-        for field_name in ("signed_variants", "refused_asks", "changed_openings"):
-            entries = clause.get(field_name)
-            for entry in entries if isinstance(entries, list) else []:
-                if not isinstance(entry, dict):
-                    continue
-                candidates.append(_ref_document_id(entry.get("ref")))
-                exemplars = entry.get("exemplars")
-                for exemplar in exemplars if isinstance(exemplars, list) else []:
-                    if isinstance(exemplar, dict):
-                        candidates.append(_ref_document_id(exemplar.get("ref")))
-    evidence = opf_doc.get("evidence")
-    records = evidence.get("precedent") if isinstance(evidence, dict) else None
-    for record in records if isinstance(records, list) else []:
-        if not isinstance(record, dict):
-            continue
-        candidates.append(record.get("document_id"))
-        for key in ("signed_text", "opening_text"):
-            text = record.get(key)
-            if isinstance(text, dict):
-                candidates.append(_ref_document_id(text.get("ref")))
-        asks = record.get("refused_asks")
-        for ask in asks if isinstance(asks, list) else []:
-            if isinstance(ask, dict):
-                candidates.append(_ref_document_id(ask.get("ref")))
-    return list(dict.fromkeys(i for i in candidates if isinstance(i, str) and i.strip()))
+def _opf_unaliased_slugs(
+    opf_doc: dict[str, Any], overrides: dict[str, Any] | None = None
+) -> list[str]:
+    """The deal slugs the prompt still renders after aliasing that check 3
+    can tell from ordinary prose (issue #173): each `document_id`
+    (`deal_aliases.deal_document_ids`) that is NOT a single word or a single
+    number (`_is_single_token_slug`) and that occurs, in ANY case or dash
+    form, as a whole token in prose the prompt renders -- the posture prose
+    (resolved as `_posture_block` resolves it, override first), each Floor
+    invariant's `statement` and its `rationale` as the Binding block renders
+    it, after aliasing (genesis and `overrides.floor_additions`), each
+    manifest hard rule's `statement`, and each dossier `floor_rules[]`
+    statement and rationale as the critic reads it, after aliasing. Empty on
+    the engine's own examples, whose slugs appear only in citations and in
+    Floor rationale as exact tokens, which are aliased.
+
+    Matched by check 3's own rule, not `deal_aliases.alias_text`'s: both
+    sides go through `_normalize` (case-fold, NFKC, dash-fold) and the slug
+    must stand as a whole token (`_contains_token`). `alias_text` replaces
+    only the exact, case-sensitive slug, so a variant an author wrote
+    (`Theta-Logistics`, `THETA-LOGISTICS`, a non-breaking hyphen) survives
+    aliasing and is rendered; reading the rationale after aliasing with
+    check 3's normalisation is what keeps every such variant held, as #172
+    held it.
+
+    A single-word or single-number slug is skipped (#173 review). Matched
+    case-folded against this prose, it holds the ordinary word: a deal whose
+    slug is `nda` is held because the engine's liability-cap rationale says
+    "mutual NDA" (case-sensitive aliasing leaves it), `agreement` because a
+    Floor and a manifest statement say "this Agreement", and `liability` or
+    `confidentiality` because the statements and posture use the word -- and
+    each then blocks that word in every external field, ending the review
+    in ERROR. Nothing here can tell that word from a one-word party name
+    (`acme`), so the residual is the other way round: such a name, written
+    by an author in a form aliasing leaves, is rendered and not held
+    (`counterparty_names`, empty in production, is the list that would hold
+    it). A slug with a separator, or that mixes letters and digits, is
+    still held wherever it occurs, so one that spells a hyphenated phrase the prose uses
+    (`limitation-of-liability`) still fails closed on that phrase.
+
+    Contract wording (precedent texts, our standard, fallback language,
+    excerpts) is NOT read: a slug that is an ordinary word occurs there as
+    that word, not as a deal's name."""
+    aliases = deal_aliases.alias_map(opf_doc)
+    slugs = [
+        slug for slug in deal_aliases.deal_document_ids(opf_doc) if not _is_single_token_slug(slug)
+    ]
+    if not slugs:
+        return []
+    texts: list[Any] = []
+    posture_prose, _posture_source = review_knowledge._posture_prose(opf_doc, overrides)
+    texts.append(posture_prose)
+    for invariant in opf_prompt.resolve_floor_invariants(opf_doc, overrides):
+        if isinstance(invariant, dict):
+            texts.append(invariant.get("statement"))
+            rationale = invariant.get("rationale")
+            if isinstance(rationale, str):
+                texts.append(deal_aliases.alias_text(rationale, aliases))
+    statements, _fallbacks = _opf_manifest_texts(opf_doc)
+    texts.extend(statements)
+    section = opf_doc.get("dossiers")
+    for dossier in section.values() if isinstance(section, dict) else []:
+        for rule in (dossier.get("floor_rules") or []) if isinstance(dossier, dict) else []:
+            if isinstance(rule, dict):
+                texts.append(rule.get("statement"))
+                rationale = rule.get("rationale")
+                if isinstance(rationale, str):
+                    texts.append(deal_aliases.alias_text(rationale, aliases))
+    rendered = [_normalize(text) for text in texts if isinstance(text, str) and text]
+    return [
+        slug for slug in slugs if any(_contains_token(text, _normalize(slug)) for text in rendered)
+    ]
+
+
+def _opf_deal_ids(
+    opf_doc: dict[str, Any], overrides: dict[str, Any] | None = None
+) -> list[str]:
+    """The check-3 ids that stand for past deals (issue #173, replacing
+    #172's slugs): the alias of every deal the document carries
+    (`deal_aliases.alias_map`, in alias order) -- the only name the digest
+    citations and Floor rationale give a deal in either pass's prompt --
+    then any slug the prompt still renders verbatim
+    (`_opf_unaliased_slugs`).
+
+    An alias echoed into an external field is blocked as
+    `internal-precedent-id` and permitted on the internal channel, exactly
+    as the slug was under #172. The slugs themselves are no longer held
+    unless rendered: the model never reads one, so it cannot restate one
+    (de-slugged or not). A single-word or single-number slug is never held,
+    rendered or not (`_opf_unaliased_slugs`), so a past deal whose slug is
+    an ordinary word (`nda`, `agreement`) does not block that word; a slug
+    with a separator that spells a phrase the prompt's prose uses still
+    blocks that phrase. Our standard's `source_ref` (the tenant's own
+    template) is never aliased and never added."""
+    aliases = deal_aliases.alias_map(opf_doc)
+    ordered = sorted(aliases.values())
+    return list(dict.fromkeys([*ordered, *_opf_unaliased_slugs(opf_doc, overrides)]))
 
 
 def _without_public_vocabulary(
@@ -1363,13 +1433,19 @@ class ConfidentialCorpus:
         `omitted_precedent_ids` entry is a check-3 `internal_precedent_ids`
         entry (`_opf_dossier_precedent_ids`): the critic receives those ids
         with the dossier, so an external field that cites one is blocked,
-        and an internal note may cite one. Every deal `document_id` the
-        digest citations and `evidence.precedent[]` carry joins that list
-        after them (`_opf_deal_document_ids`, issue #172): the digest
-        renders each citation as `[<document_id>@<version> ...]` in both
-        passes' prompts, Floor rationale prose (the shared prefix and the
-        dossiers' `floor_rules`) names deals by the same slug, and the slug
-        can name the counterparty. Our
+        and an internal note may cite one. Every past deal's alias joins
+        that list after them (`_opf_deal_ids`, issue #173, replacing #172's
+        slugs): the digest renders each citation as
+        `[<alias>@<version> ...]` in both passes' prompts and Floor
+        rationale prose (the shared prefix and the dossiers' `floor_rules`)
+        names deals by the same alias, so neither renders a slug that can
+        name the counterparty; a slug is added only where the prompt still
+        renders one, in any case or dash form, and only one that is not a
+        single word or number, which would hold the ordinary word
+        (`_opf_unaliased_slugs`, matched with check 3's own
+        normalisation). Since the Binding block
+        and the dossiers render the rationale aliased, each aliased
+        rationale is a `playbook_ngrams` entry beside its source text. Our
         standard's `source_ref` (our own template) is not added. Deliberate
         exclusions, never added on either path:
         `vs_standard` (its `reason`, `part_reasons` and addition `summary`
@@ -1426,6 +1502,7 @@ class ConfidentialCorpus:
         if posture_prose:
             playbook_ngrams.append(posture_prose)
 
+        deal_alias_map = deal_aliases.alias_map(opf_doc)
         for invariant in opf_prompt.resolve_floor_invariants(opf_doc, overrides):
             statement = invariant.get("statement")
             if statement:
@@ -1433,6 +1510,12 @@ class ConfidentialCorpus:
             rationale = invariant.get("rationale")
             if rationale:
                 playbook_ngrams.append(rationale)
+                # Issue #173: the Binding block renders the rationale with
+                # each deal slug swapped for its alias, so that rendering is
+                # the gram a model would echo; the source text stays too.
+                aliased = deal_aliases.alias_text(rationale, deal_alias_map)
+                if aliased != rationale:
+                    playbook_ngrams.append(aliased)
 
         playbook_ngrams.extend(_opf_digest_precedent_texts(opf_doc))
         playbook_ngrams.extend(_opf_evidence_precedent_texts(opf_doc))
@@ -1526,11 +1609,13 @@ class ConfidentialCorpus:
             ),
             playbook_ngrams=blocked_playbook_ngrams,
             standard_clause_ngrams=blocked_standard_clause_ngrams,
-            # Dossier precedent ids (#40), then every deal document_id the
-            # digest citations and the precedent record carry (#172).
+            # Dossier precedent ids (#40), then every deal's alias -- the
+            # only name either pass's prompt gives a deal since #173 -- and
+            # any slug authored prose still renders that is not a single
+            # word or number (`_opf_deal_ids`).
             internal_precedent_ids=list(
                 dict.fromkeys(
-                    _opf_dossier_precedent_ids(opf_doc) + _opf_deal_document_ids(opf_doc)
+                    _opf_dossier_precedent_ids(opf_doc) + _opf_deal_ids(opf_doc, overrides)
                 )
             ),
             counterparty_names=list(counterparty_names or []),
@@ -1667,10 +1752,10 @@ class LeakageScanner:
         #    Permitted on the internal channel: an internal note may name a
         #    past counterparty and cite a specific past deal. Since issue #40
         #    `internal_precedent_ids` holds the critic dossiers' precedent ids
-        #    and, since #172, every deal `document_id` the digest citations
-        #    and `evidence.precedent[]` records carry -- the slugs the digest
-        #    citations and Floor rationale prose render (`from_opf_document`)
-        #    -- so an internal note may cite one;
+        #    and, since #173, every past deal's alias -- the only name the
+        #    digest citations and Floor rationale prose give a deal
+        #    (`from_opf_document`; #172 held the slugs) -- so an internal
+        #    note may cite one;
         #    `counterparty_names` is still empty in production (module
         #    docstring, "Checks 3 and 4 are live for the critic dossiers").
         #    Revisit both before retrieval is ever re-enabled.
@@ -1688,11 +1773,14 @@ class LeakageScanner:
                 return ScanResult(
                     blocked=True, category=CATEGORY_CITATION, rule_id="counterparty-name"
                 )
-            # The #208 exemption reaches the deal slugs too (#172 review): a
-            # slug that names the counterparty on THIS review (compared with
+            # The #208 exemption reaches a held deal slug too (#172 review;
+            # since #173 only a slug authored prose still renders, and that
+            # is not a single word or number, is held): a slug that names
+            # the counterparty on THIS review (compared with
             # hyphens/underscores read as spaces, so `beta-industries`
             # matches "Beta Industries") is its own name, not a leak.
-            # `prec.<hex>` ids can never equal a name, so they are unaffected.
+            # `prec.<hex>` ids and deal aliases can never equal a name, so
+            # they are unaffected.
             precedent_ids = self._corpus.internal_precedent_ids
             if current_counterparty_name:
                 slug_current = _slug_key(current_counterparty_name)

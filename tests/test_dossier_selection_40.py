@@ -29,7 +29,10 @@ What this pins, end to end through the real `review_spine.run_review` with a
       nothing and is only counted, and a ledger entry that is no longer open
       selects nothing;
   [4] at most 24: the engine's NDA example (26 dossiers) with every clause
-      named sends 24 and records the two it dropped over the cap;
+      named sends 24 and records the two it dropped over the cap; each is
+      the engine's own canonical JSON except that the one dossier whose
+      `floor_rules` rationale names deals carries their aliases in place of
+      the slugs (#173, `tests/test_deal_aliases_173.py`);
   [5] under a tight budget the critic pass drops WHOLE dossiers from the end
       and the audit trail records them; with no room for any, it fails
       closed as `document_too_large` exactly as before;
@@ -121,6 +124,7 @@ os.environ.setdefault("PLAYBOOKS_TABLE", "playbooks-test")
 
 import critic_dossiers as cd  # noqa: E402
 import critic_review_pass  # noqa: E402
+import deal_aliases  # noqa: E402
 import hard_ledger as hl  # noqa: E402
 import leakage_scan  # noqa: E402
 import model_client  # noqa: E402
@@ -452,9 +456,18 @@ def test_the_set_is_capped_at_24_and_the_overflow_is_recorded() -> None:
     assert selection.clause_ids == tuple(clause_ids[:24]), selection.clause_ids
     assert selection.dropped_over_cap == tuple(clause_ids[24:]), selection.dropped_over_cap
     lines = cd.render_dossier_lines(selection.dossiers)
+    # Whole, as the engine emitted it -- except that a deal slug in a
+    # `floor_rules` rationale is swapped for its alias (#173): the NDA
+    # example's liability-cap rationale names three deals.
+    aliases = deal_aliases.alias_map(doc)
+    aliased = 0
     for line, clause_id in zip(lines, selection.clause_ids, strict=True):
-        assert line == opf_canonicalize.canonicalize(doc["dossiers"][clause_id])
-        assert json.loads(line) == doc["dossiers"][clause_id]
+        engine = doc["dossiers"][clause_id]
+        expected = deal_aliases.alias_dossier(engine, aliases)
+        aliased += expected is not engine
+        assert line == opf_canonicalize.canonicalize(expected)
+        assert json.loads(line) == expected
+    assert aliased == 1, aliased
     record = cd.audit_record(selection)
     assert record["selected"] == clause_ids[:24] and record["dropped_over_cap"] == clause_ids[24:]
 
@@ -691,10 +704,10 @@ def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
         digest = _digest_texts(doc)
         assert digest, path.name
         assert derived.precedent_verbatim_spans == digest, path.name
-        # ... check 3 holds every dossier precedent id, then the deal
-        # document ids the digest cites (#172, which a document without
-        # dossiers carries alone) ...
-        deal_ids = leakage_scan._opf_deal_document_ids(doc)
+        # ... check 3 holds every dossier precedent id, then each deal's
+        # alias (#173, in place of #172's slugs; a document without dossiers
+        # carries them alone) ...
+        deal_ids = leakage_scan._opf_deal_ids(doc)
         assert deal_ids, path.name
         assert derived.internal_precedent_ids == deal_ids, path.name
         assert with_dossiers.internal_precedent_ids == _dossier_precedent_ids(doc) + deal_ids, path.name
@@ -842,7 +855,7 @@ def test_a_dossier_precedent_id_cited_in_an_external_field_is_blocked() -> None:
     assert omitted in vector_corpus.internal_precedent_ids, vector_corpus.internal_precedent_ids
     assert vector_corpus.internal_precedent_ids == _dossier_precedent_ids(
         vector_doc
-    ) + leakage_scan._opf_deal_document_ids(vector_doc)
+    ) + leakage_scan._opf_deal_ids(vector_doc)
     _assert_cited_id_blocked_externally_and_allowed_internally(vector_corpus, omitted)
 
 

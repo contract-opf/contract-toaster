@@ -54,6 +54,13 @@ Each dossier is used WHOLE, exactly as the engine emitted it (2026-10-17
 amendment): the engine already bounds every dossier normatively (a budget of
 `max(1000, 3 x tokens(our_standard.text))`, dropping whole parts, never
 cutting one), so this module never truncates, rewrites or filters a dossier.
+The one exception is a token swap, not a rewrite (issue #173): engine-written
+Floor rationale in a dossier's `floor_rules` can name past deals by their
+`document_id` slug, and each such slug is replaced by its opaque alias by
+exact token replacement (`deal_aliases.alias_dossier`) -- the same alias the
+shared prefix's Binding block and digest citations use -- with every other
+byte of the dossier kept. A dossier whose rationale names no deal is the
+document's own object, untouched.
 It renders each as its canonical JSON (`opf_canonicalize.canonicalize`, the
 engine's own form), one per line. The toaster's other bound is on the SET:
 the critic pass's existing `max_input_tokens` assertion. When the dossiers
@@ -84,6 +91,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import deal_aliases  # noqa: E402
 import opf_canonicalize  # noqa: E402
 
 #: The cap on the selected SET (issue #40). Never a cap on any one dossier.
@@ -205,8 +213,10 @@ def select_dossiers(
     (`hard_ledger.anomaly_rule_ids`), one per clause, ledger first, then
     anomaly, then reviewer, each group sorted by clause id, at most
     `max_dossiers`. Each selected dossier is the document's own object,
-    untouched. An empty selection for a document without dossiers (a v1
-    review never calls this)."""
+    untouched, unless its `floor_rules` rationale names a deal, when it is a
+    copy with each such slug swapped for its alias (#173,
+    `deal_aliases.alias_dossier`). An empty selection for a document without
+    dossiers (a v1 review never calls this)."""
     dossiers = _dossiers(opf_doc)
     anomaly_ids = [rule_id for rule_id in anomaly_rule_ids or () if isinstance(rule_id, str)]
     if not dossiers:
@@ -234,8 +244,9 @@ def select_dossiers(
         sources[clause_id] = SOURCE_REVIEWER
 
     kept, over_cap = ordered[: max(0, max_dossiers)], ordered[max(0, max_dossiers) :]
+    aliases = deal_aliases.alias_map(opf_doc)
     return DossierSelection(
-        dossiers=tuple(dossiers[clause_id] for clause_id in kept),
+        dossiers=tuple(deal_aliases.alias_dossier(dossiers[clause_id], aliases) for clause_id in kept),
         clause_ids=tuple(kept),
         sources={clause_id: sources[clause_id] for clause_id in kept},
         dropped_over_cap=tuple(over_cap),
