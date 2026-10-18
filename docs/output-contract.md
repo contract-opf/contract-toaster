@@ -225,7 +225,7 @@ of how that result differs from the primary's**:
 | `dispositions[]` | One `{issue_id, disposition, reason}` per **primary** issue, no exceptions. `disposition` is `KEEP` (same issue, same edit), `REVISE` (same issue, the critic changed its replacement text, rationale or decision) or `DROP` (the critic does not stand behind it). The prompt asks for a one-line `reason`; the cap is the free-prose class bound, 8000 (see [Length budgets](#length-budgets-issue-674)). |
 | `overrides[]` | One `{issue_id, field, primary_value, critic_value, reason}` per respect in which the critic changed a primary issue. `field` is `replacement_text`, `rationale` or `decision` (a `DROP` is a change of decision). `primary_value`, `critic_value` and `reason` are each ≤ 8000 characters, the free-prose class bound. Empty when the critic changed nothing. |
 | `ledger_dispositions[]` | **New in issue #147.** One `{rule_id, disposition, block_id?, span?, reason}` per entry of the **hard-rejection ledger** the critic's tasking lists, no exceptions — an ACCEPT carries them too, and the array is empty or absent only when the review has no ledger. `disposition` is `CLEARED` (the critic found the required protection: `block_id` names the paragraph and `span` copies the exact words that establish it) or `ASSERT` (missing or inadequate: `block_id` may name the paragraph where it belongs). `block_id` and `span` are optional, and an empty string means none (`span` ≤ 8000, the free-prose class Segment.text sits in; `rule_id` and `block_id` are copied ids). The critic's claim is never trusted: see [The hard-rejection ledger](#the-hard-rejection-ledger-issue-147) below. |
-| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The prompt still asks the critic to fill them, and since issue #138 the reconciler forwards them verbatim (it no longer merges from them) for the consumers that still read them: the download gate's indicator and the leakage scan. Since issue #140 the receipt's counts and the internal footnotes read `overrides[]` instead (see [Critic-delta presentation](#critic-delta-presentation)). The artifact marks each `DEPRECATED`. |
+| `added_issues[]`, `contested_replacements[]`, `rationale_objections[]` | **Deprecated, kept for one release.** The prompt still asks the critic to fill them, and since issue #138 the reconciler forwards them verbatim (it no longer merges from them) for the consumers that still read them: the leakage scan; the download gate and the counts of the console's critic-delta indicator, only as a fallback when `overrides[]` records nothing (issue #167); and the indicator's objection lines ([Contested-replacement badge](#contested-replacement-badge)), which still read `contested_replacements` verbatim. Since issue #140 the receipt's counts and the internal footnotes read `overrides[]` instead, and since issue #167 so do the gate and the indicator's counts (see [Critic-delta presentation](#critic-delta-presentation) and [Download gate](#download-gate--delta-indicator-must-be-visible-before-download)). The artifact marks each `DEPRECATED`. |
 
 `issue_id` always names the **primary's** `issue_key` as it appears in the primary's output — never a key
 from the critic's own `issues`, which it numbers from `I1` in its own response.
@@ -675,8 +675,11 @@ the delta indicator visible.
 > stay, deprecated, for one release — so every normative rule in this document keyed to the
 > `contested_replacements` shape still applies byte for byte: the reconcile ticket (#138) made the
 > critic's result final but forwards the deprecated arrays verbatim. **Issue #140 moved the receipt line
-> and the internal footnotes onto `overrides`** (below); the download gate still keys on the deprecated
-> arrays exactly as before.
+> and the internal footnotes onto `overrides`** (below), and **issue #167 moved the download gate and
+> the console indicator's counts onto `overrides[]`**: the deprecated arrays are read for those counts
+> only as a fallback when the overrides record nothing. The indicator's objection lines (the
+> [Contested-replacement badge](#contested-replacement-badge)) still read `contested_replacements`
+> verbatim while the arrays exist.
 
 **The receipt's own mirror (issues #96, #140) is counts-only, never these badges' prose.** The provenance
 slip (`frontend/src/toaster/receipt.ts`, `criticLine`) prints at most one brief line — e.g. "Critic:
@@ -814,14 +817,21 @@ issue and the adversarial critic caught it).
 
 ### Download gate — delta indicator must be visible before download
 
-A result view that contains **any** critic delta (one or more contested replacements **or** one
-or more critic-added issues) must not present the download affordance until the delta indicator
-is visible in the rendered view. Concretely:
+A result view that contains **any** critic delta (one or more `critic_delta.overrides[]`
+records of any kind) must not present the download affordance until the delta indicator is
+visible in the rendered view. Concretely:
 
-- If `critic_delta` is non-null and `critic_delta.contested_replacements` is non-empty or
-  `critic_delta.added_issues` is non-empty, the result view must render the critic-delta
-  indicator section **above** the download button, in the normal document flow, so the attorney
-  cannot reach the download without scrolling past or acknowledging the indicator.
+- If `critic_delta` is non-null and its `overrides[]` record at least one change — an override,
+  a critic-added issue, a dropped issue, or a hard rejection guard 1 put back, counted as the
+  receipt counts them (issue #167, `frontend/src/toaster/criticDelta.ts`) — the result view must
+  render the critic-delta indicator section **above** the download button, in the normal
+  document flow, so the attorney cannot reach the download without scrolling past or
+  acknowledging the indicator. While the deprecated arrays still ride on the wire, a delta whose
+  `overrides[]` record nothing falls back to them: a non-empty `contested_replacements` or
+  `added_issues` gates the same way. The two are never added together. The gate
+  (`ReviewSubmission.tsx`) and the console's indicator (`orbit-diner/projection.ts`) count the
+  delta through the same module, so they cannot disagree.
+- A delta whose only content is KEEP `dispositions[]` records no change and does not gate.
 - The indicator is not a blocking modal or a legal-hold gate — it is a **visual surfacing
   requirement** (same philosophy as the confidence band). The attorney retains full agency to
   download; the rule is that the indicator is never hidden below the download affordance.

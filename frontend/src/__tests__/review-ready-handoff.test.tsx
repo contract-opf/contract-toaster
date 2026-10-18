@@ -23,6 +23,9 @@
  *
  * Fully offline: Amplify auth is mocked and fetch is stubbed per test.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ReviewSubmission from '../ReviewSubmission';
@@ -365,6 +368,84 @@ describe('completion handoff — the download gate is not bypassed', () => {
     await waitFor(() =>
       expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'),
     );
+  });
+});
+
+// Issue #167: the reconciler writes `critic_delta.overrides` on every two-pass
+// review (`scripts/reconciliation.py::reconcile`, guard 2), and the deprecated
+// `contested_replacements` / `added_issues` arrays are retired after one
+// release. A delta carrying ONLY overrides must still gate the automatic save.
+// The first fixture is `reconcile()`'s own output, written to
+// `tests/fixtures/critic_delta_overrides_140.json` by
+// tests/test_critic_delta_internal_footnotes_132.py; the single-kind ones
+// are edits of its records, one per branch of the count.
+const RECONCILER_OVERRIDES = (
+  JSON.parse(
+    fs.readFileSync(
+      path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../../../tests/fixtures/critic_delta_overrides_140.json',
+      ),
+      'utf8',
+    ),
+  ) as { critic_delta: { overrides: unknown[] } }
+).critic_delta.overrides;
+
+describe('completion handoff — the gate keys on `critic_delta.overrides` (issue #167)', () => {
+  it.each([
+    ['the real reconciler overrides record', RECONCILER_OVERRIDES],
+    ['a computed added issue alone', [{ source: 'computed', change: 'added', issue_id: null, field: 'decision' }]],
+    ['a computed drop alone', [{ source: 'computed', change: 'dropped', issue_id: 'I4', field: 'decision', retained: false }]],
+    ['a hard rejection put back alone', [{ source: 'computed', change: 'dropped', issue_id: 'I3', field: 'decision', retained: true }]],
+    ['a computed replacement alone', [{ source: 'computed', change: 'replaced', issue_id: 'I2', field: 'replacement_text' }]],
+    ['a change the critic stated itself alone', [{ source: 'critic', issue_id: 'I1', field: 'rationale' }]],
+  ])('a delta carrying only overrides (%s) shows the indicator and suppresses the automatic save', async (_label, overrides) => {
+    const fetchMock = stubFetch(doneRoutes({ dispositions: [], overrides }));
+
+    await submitAndReachResult();
+
+    await screen.findByTestId('review-critic-delta');
+    expect(screen.getByTestId('review-ready-announcement').textContent).toContain(
+      'adversarial critic flagged this review',
+    );
+    expect(fetchedPaths(fetchMock)).not.toContain('/api/reviews/rev-448/output');
+    expect(anchorClickSpy).not.toHaveBeenCalled();
+  });
+
+  it('the indicator renders each override count the receipt prints for the real record', async () => {
+    stubFetch(doneRoutes({ dispositions: [], overrides: RECONCILER_OVERRIDES }));
+
+    await submitAndReachResult();
+
+    await screen.findByTestId('review-critic-delta');
+    // tests/fixtures/critic_delta_overrides_140.json -> expected_note_counts.
+    expect(screen.getByTestId('critic-overrides').textContent).toBe('3');
+    expect(screen.getByTestId('critic-added-issues').textContent).toBe('1');
+    expect(screen.getByTestId('critic-dropped-issues').textContent).toBe('1');
+    expect(screen.getByTestId('critic-retained-rejections').textContent).toBe('1');
+  });
+
+  it('a KEEP-only delta with empty overrides does not gate the automatic save', async () => {
+    const fetchMock = stubFetch(
+      doneRoutes({ dispositions: [{ issue_id: 'I1', disposition: 'KEEP' }], overrides: [] }),
+    );
+
+    await submitAndReachResult();
+
+    expect(screen.queryByTestId('review-critic-delta')).toBeNull();
+    await waitFor(() =>
+      expect(fetchedPaths(fetchMock)).toContain('/api/reviews/rev-448/output'),
+    );
+  });
+
+  it('still gates on the deprecated arrays while the overrides record nothing', async () => {
+    const fetchMock = stubFetch(doneRoutes({ overrides: [], added_issues: [{ topic: 'indemnity' }] }));
+
+    await submitAndReachResult();
+
+    await screen.findByTestId('review-critic-delta');
+    expect(fetchedPaths(fetchMock)).not.toContain('/api/reviews/rev-448/output');
+    expect(anchorClickSpy).not.toHaveBeenCalled();
   });
 });
 

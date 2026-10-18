@@ -102,6 +102,16 @@ export interface Result {
   issueCount?: number;
   criticContested?: number;
   criticAdded?: number;
+  /**
+   * Issue #167: the `critic_delta.overrides` counts, each present only when
+   * non-zero -- an override (a replaced edit or a change the critic stated),
+   * an issue the critic dropped, a hard rejection the critic dropped and
+   * guard 1 put back. `criticAdded` is shared; `criticContested` is the
+   * deprecated-array fallback only.
+   */
+  criticOverrides?: number;
+  criticDropped?: number;
+  criticRetained?: number;
   criticDetails?: string[];
   /**
    * The quiet meta line (issue #492 redesign item 3, wired through in #733):
