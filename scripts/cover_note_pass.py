@@ -171,6 +171,31 @@ def build_edit_digest(issues: Any) -> list[dict[str, str]]:
     return digest
 
 
+def scanned_digest_texts(issues: Any, verdict_summary: str | None = None) -> list[str]:
+    """The texts the cover-note prompt carries that the review's own leakage
+    gate scanned on the external channel: each digest entry's
+    `counterparty_change_summary` and `external_rationale_for_footnote`, and
+    the verdict summary (issue #174).
+
+    `backend/src/review_routes.py::post_review_cover_note` narrows its
+    leakage corpus by these (`leakage_scan.without_names_the_document_
+    carries`): a held past counterparty's name one of them carries was
+    already let through to the counterparty, because the document under
+    review carries it -- on a repeat negotiation it is the counterparty's own
+    name -- so the draft may repeat it. The digest's `label` is left out: a
+    reviewer issue's `section_title` / `section_ref` is model-written and
+    no scan covers it, so it must not widen what the draft may say."""
+    texts = [
+        text
+        for entry in build_edit_digest(issues)
+        for text in (entry["summary"], entry["rationale"])
+        if text
+    ]
+    if isinstance(verdict_summary, str) and verdict_summary.strip():
+        texts.append(verdict_summary)
+    return texts
+
+
 def render_cover_note_user_prompt(issues: Any, verdict_summary: str | None = None) -> str:
     """The complete user-turn prompt: the delimited, untrusted-marked digest
     of `issues` (see `build_edit_digest`), plus `verdict_summary` if the row

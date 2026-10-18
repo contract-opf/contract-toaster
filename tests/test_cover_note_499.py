@@ -950,6 +950,89 @@ class TestLeakageScanGatesTheDraft(CoverNoteRouteTestBase):
         self.assertIn("cover_note_draft", row)
 
 
+class TestLeakageCorpusIsNarrowedByTheDeliveredTexts(CoverNoteRouteTestBase):
+    """Issue #174: the review's own gate lets a held past counterparty's name
+    through when the document under review carries it (a repeat negotiation),
+    so a delivered finding may name this counterparty. The cover-note corpus
+    is narrowed the same way, over the scanned external texts the draft is
+    written from, so a draft repeating that name is not blocked -- while a
+    name only an unscanned, model-written section label carries still is."""
+
+    _CURRENT = "Beta Industries"
+    _OTHER = "Delta Ventures"
+
+    def setUp(self) -> None:
+        super().setUp()
+        planted_corpus = leakage_scan.ConfidentialCorpus(
+            counterparty_names=["beta industries", "delta ventures"],
+        )
+        self.app.dependency_overrides[
+            review_routes.get_cover_note_leakage_corpus_resolver
+        ] = lambda: (lambda playbook_id: planted_corpus)
+
+    def _issues(self, **fields: Any) -> list[dict[str, Any]]:
+        return [{**KNOWN_ISSUES[0], **fields}]
+
+    def test_a_name_a_delivered_finding_carries_is_not_blocked(self):
+        self._seed_done_review(
+            "review-174-own",
+            "owner-174-own",
+            issues=self._issues(
+                counterparty_change_summary=f"{self._CURRENT} removed the liability cap."
+            ),
+        )
+        self._set_cover_note_client(
+            FakeCoverNoteModelClient(
+                [f"Attached is our markup. We restored {self._CURRENT}' liability cap."]
+            )
+        )
+        resp = self._butter("owner-174-own", "review-174-own")
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+    def test_a_name_the_verdict_summary_carries_is_not_blocked(self):
+        self._seed_done_review("review-174-summary", "owner-174-summary")
+        self._reviews_table().items["review-174-summary"]["summary"] = (
+            f"{self._CURRENT}'s draft needs a liability cap."
+        )
+        self._set_cover_note_client(
+            FakeCoverNoteModelClient([f"Attached is our markup for {self._CURRENT}."])
+        )
+        resp = self._butter("owner-174-summary", "review-174-summary")
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+    def test_another_past_name_still_blocks(self):
+        self._seed_done_review(
+            "review-174-other",
+            "owner-174-other",
+            issues=self._issues(
+                counterparty_change_summary=f"{self._CURRENT} removed the liability cap."
+            ),
+        )
+        self._set_cover_note_client(
+            FakeCoverNoteModelClient(
+                [f"Attached is our markup. As {self._OTHER} agreed, we restored the cap."]
+            )
+        )
+        resp = self._butter("owner-174-other", "review-174-other")
+        self.assertEqual(resp.status_code, 502)
+        self.assertNotIn(self._OTHER, resp.text)
+        self.assertNotIn("cover_note_draft", self._reviews_table().items["review-174-other"])
+
+    def test_a_name_only_a_section_label_carries_still_blocks(self):
+        self._seed_done_review(
+            "review-174-label",
+            "owner-174-label",
+            issues=self._issues(section_title=f"{self._OTHER} liability terms"),
+        )
+        self._set_cover_note_client(
+            FakeCoverNoteModelClient(
+                [f"Attached is our markup. We restored the {self._OTHER} liability cap."]
+            )
+        )
+        resp = self._butter("owner-174-label", "review-174-label")
+        self.assertEqual(resp.status_code, 502)
+
+
 # -- (5) no send capability anywhere in this response shape ------------------
 
 

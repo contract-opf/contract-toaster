@@ -183,19 +183,29 @@ What does not:
     quotes part of an excerpt, or paraphrases one, passes. That is the same
     residual as paraphrase, below, and the attorney reading the internal
     note is its backstop. The same holds for a digest text.
-  * The counterparty's name itself, where a precedent text carries it as
-    contract wording (a signed parties recital names the party; the
-    engine's NDA example has one), reaches the prompt verbatim: check 2
-    blocks the whole text, but the name alone is held by no list --
-    `counterparty_names` is empty. Aliasing (#173) closed the other path,
-    a deal slug restated as the plain name, because no citation or
-    engine-written rationale renders a slug any more.
+  * A past counterparty's name a precedent text carries as contract
+    wording (a signed parties recital names the party; the engine's NDA
+    example has two) reaches the prompt verbatim, and since #174 is held on
+    its own only where the document records who that party was: OPF 0.5
+    carries no plain party-name field (OPF-SPEC §3.5.4), so
+    `_opf_past_counterparty_names` reads the deal slugs and the
+    entity-registry aliases (`counterparty_ref.alias`) and holds each one a
+    rendered precedent text names. A name the playbook carries under no slug
+    or alias -- a deal filed as `acme-nda-2024`, or a party a misconfigured
+    `known_entities` list left un-pseudonymised -- is not held: check 2
+    blocks the whole text, and the name alone is the residual. So is a
+    one-word name (`Beta`, a recital's defined short name), which the #616
+    filter drops because it cannot be told from the ordinary word.
+    Aliasing (#173) closed the other path, a deal slug restated as the
+    plain name, because no citation or engine-written rationale renders a
+    slug any more.
   * A single-word or single-number deal slug that authored prose writes in
     a form exact-token aliasing leaves -- a one-word party name (`acme`)
     in a Floor statement or the posture prose, or `Acme` in a rationale --
     reaches the prompt and is not held (`_opf_unaliased_slugs` skips such
-    slugs, because `nda` or `agreement` written there is the ordinary word);
-    `counterparty_names` would be the list to hold it. Engine output names
+    slugs, because `nda` or `agreement` written there is the ordinary word),
+    and `counterparty_names` drops a one-word name for the same reason
+    (#174). Engine output names
     a deal by its exact slug, which `deal_aliases.alias_text` replaces
     whatever the slug spells.
   * The reverse still fails closed, narrowly: a slug with a separator that
@@ -206,7 +216,13 @@ What does not:
     slug). A slug that spells one of the document's own public clause names
     (`limitation-of-liability`, which that posture prose also says) is not
     held (#175, `_is_public_clause_phrase_slug`): it names a clause, not a
-    party, and naming clauses is what a review does.
+    party, and naming clauses is what a review does. Since #174 the same
+    class reaches precedent wording: a multi-token slug that spells an
+    ordinary phrase a rendered precedent text uses (`press-release`,
+    `state-of-new-york`) is held as a counterparty name and blocks that
+    phrase externally, unless our own standard uses it too or the document
+    under review carries it (`_opf_past_counterparty_names`,
+    `without_names_the_document_carries`; same follow-up).
   * A span blocks the whole text wherever it appears, including where the
     live contract under review happens to carry that same wording: an
     internal note that quotes the live clause verbatim is then blocked on
@@ -216,12 +232,34 @@ What does not:
     it since #40, and like all of the internal channel it is latent while
     #572's `NOTES_MODE_ENABLED` kill switch is off.
 
-`counterparty_names` (check 3's other list) is still empty in production:
-no builder or production caller populates it, and that still matters. Since
-#173 a past deal the prompt names is named by its alias (above), which is an
-`internal_precedent_ids` entry, but a precedent text that carries the
-party's name as contract wording reaches the prompt and the name alone is
-unguarded (above).
+`counterparty_names` (check 3's other list) is populated since #174: on an
+OPF review `from_opf_document` holds every past counterparty's name a
+rendered precedent text carries, where a deal slug or a
+`counterparty_ref.alias` records it (above), so an external field that
+repeats one is blocked as `counterparty-name` and an internal note may name
+one. A held name is matched in the form the prompt renders it: one held
+de-slugged (`hollis varga`) also blocks "Hollis-Varga" and `hollis_varga`
+(`_counterparty_name_match`). The current counterparty's own name is not
+blocked where the review's own text carries it: the #208 exemption drops a
+held name contained in `current_counterparty_name`, and, because no
+production caller supplies that name, `review_spine.run_review` also drops
+each held name the document under review itself carries
+(`without_names_the_document_carries`) -- on a repeat negotiation that name
+is the counterparty's own. The cover-note route narrows its corpus the same
+way, over the delivered findings' scanned external texts and the verdict
+summary the draft is written from (`backend/src/review_routes.py`).
+
+Two residuals follow, both recorded in docs/threat-model.md ("Past
+counterparties' names"). Fail-open: the narrowing cannot tell which role a
+name plays, so a past counterparty the document under review names in any
+role (an affiliate, a guarantor, a recited prior agreement) is dropped too,
+and an external field may then cite that party's past deal ("As Delta
+Ventures signed before ...") -- which does disclose the past deal to this
+counterparty. Fail-closed: a cover-note draft that names the current
+counterparty where no delivered external text does is blocked (a quiet,
+retryable 502); the draft's system prompt forbids names, and its only other
+source for one is a model-written section label, which no scan covers and
+which is therefore not used to narrow.
 
 **Coupling to record, load-bearing:** a field IS internal-bound
 (`internal_rationale_for_footnote`, #522), and check 3 permits precedent
@@ -298,6 +336,7 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import sys
 import unicodedata
@@ -1186,8 +1225,8 @@ def _opf_unaliased_slugs(
     in ERROR. Nothing here can tell that word from a one-word party name
     (`acme`), so the residual is the other way round: such a name, written
     by an author in a form aliasing leaves, is rendered and not held
-    (`counterparty_names`, empty in production, is the list that would hold
-    it). A slug with a separator, or that mixes letters and digits, is
+    (`counterparty_names` holds a party's name only from a rendered
+    precedent text, and never a one-word one, #174). A slug with a separator, or that mixes letters and digits, is
     still held wherever it occurs -- unless it spells one of the document's
     own public clause names (below).
 
@@ -1273,6 +1312,210 @@ def _opf_deal_ids(
     aliases = deal_aliases.alias_map(opf_doc)
     ordered = sorted(aliases.values())
     return list(dict.fromkeys([*ordered, *_opf_unaliased_slugs(opf_doc, overrides)]))
+
+
+def _opf_counterparty_ref_aliases(opf_doc: dict[str, Any]) -> list[str]:
+    """Every `evidence.precedent[].counterparty_ref.alias`, in record order,
+    deduplicated (issue #174): the engine's entity-registry alias for a
+    deal's counterparty (`Counterparty-<n>`), which the engine writes into
+    that deal's clause text in place of the party's name when the playbook
+    was compiled with a `known_entities` list (OPF-SPEC §3.5.4). It is the
+    only party field OPF 0.5 carries: the spec says the producer's
+    configured party names are not in the document, and the reverse map
+    stays in the engine's restricted sidecar."""
+    aliases: list[str] = []
+    evidence = opf_doc.get("evidence")
+    records = evidence.get("precedent") if isinstance(evidence, dict) else None
+    for record in records if isinstance(records, list) else []:
+        ref = record.get("counterparty_ref") if isinstance(record, dict) else None
+        alias = ref.get("alias") if isinstance(ref, dict) else None
+        if isinstance(alias, str) and alias.strip():
+            aliases.append(alias.strip())
+    return list(dict.fromkeys(aliases))
+
+
+def _opf_past_counterparty_names(opf_doc: dict[str, Any]) -> list[str]:
+    """The past counterparties' names a precedent text puts in the prompt
+    (issue #174), for check 3's `counterparty_names`.
+
+    A digest 4 precedent text, and a dossier excerpt, is contract wording
+    a past deal signed or proposed, and a parties recital in it names the
+    party ("... by and between AlphaCorp Holdings, Inc. and Beta Industries,
+    LLC" on the engine's NDA example). Both passes read the digest verbatim
+    and the critic reads the excerpts, so a model can repeat that name in an
+    external field; check 2 blocks only the whole text and check 4 only the
+    whole span. OPF 0.5 carries no field holding a party's plain name, so
+    the names are read from the document's own records of who its past
+    counterparties were:
+
+      - each `counterparty_ref.alias` (`_opf_counterparty_ref_aliases`), the
+        party identifier the engine writes into the clause text of a
+        pseudonymised playbook, held as written (`Counterparty-2`);
+      - each deal `document_id` (`deal_aliases.deal_document_ids`), the
+        record the deal aliases are made from, held de-slugged
+        (`_slug_key`: `beta-industries` -> `beta industries`): a slug filed
+        under the party's name spells that name.
+
+    A candidate is held only when all of these hold, so that a name is held
+    where the prompt carries it as a party's name and nowhere else (the
+    #264/#616 false-positive class):
+
+      1. it occurs as a whole token, compared with hyphens, underscores and
+         whitespace read as one space (`_slug_key`), in a digest precedent
+         text or a dossier excerpt -- the precedent wording the prompt
+         renders. A deal slug that is not the bare party name
+         (`acme-nda-2024`) never does, and is not held;
+      2. it survives the #616 filter (`_without_public_vocabulary`, applied
+         to the de-slugged form): a single word (`delta`, `acme`) or a
+         number cannot be told from the ordinary word, and a whole public
+         clause name is the document's own vocabulary -- as is one that
+         spells a clause name separators aside
+         (`_is_public_clause_phrase_slug`, #175);
+      3. it does not occur in our own standard (each digest and dossier
+         `our_standard` part, and each manifest `fallback_language`): our
+         template names no past counterparty, so a phrase it uses ("Mutual
+         Non-Disclosure Agreement", "Receiving Party") is ordinary contract
+         vocabulary even when a deal slug spells it;
+      4. it is not part of our own name (`perspective.party`).
+
+    Check 3 matches a held name under the same folding it was selected
+    with (`_counterparty_name_match`), so `hollis varga`, held because a
+    recital says "Hollis-Varga LP", blocks "Hollis-Varga" as rendered.
+
+    The current counterparty's own name is not blocked where the review's
+    own text carries it: `LeakageScanner.scan` exempts a held name contained
+    in `current_counterparty_name` (#208), and `without_names_the_document_
+    carries` drops one the document under review itself carries -- and with
+    it one the document names in any other role, the fail-open residual
+    that function records.
+
+    Residual, fail-closed: a deal slug with a separator that spells an
+    ordinary phrase a rendered precedent text uses, which neither our
+    standard nor the document under review uses (`press-release`,
+    `state-of-new-york`), is held and blocks that phrase in an external
+    field -- the class `_opf_unaliased_slugs` records for prose (follow-up:
+    tell an ordinary hyphenated phrase from a multi-token deal slug).
+    Residual, fail-open: a party's name the document records under no slug
+    or alias, and a one-word name, are not held (module docstring)."""
+    _blocked, dossier_standards, dossier_excerpts = _opf_dossier_texts(opf_doc)
+    rendered = [
+        _slug_key(text) for text in [*_opf_digest_precedent_texts(opf_doc), *dossier_excerpts]
+    ]
+    if not rendered:
+        return []
+    _statements, fallbacks = _opf_manifest_texts(opf_doc)
+    ours = [
+        _slug_key(text)
+        for text in [*_opf_standard_texts(opf_doc), *fallbacks, *dossier_standards]
+    ]
+    perspective = opf_doc.get("perspective")
+    party = perspective.get("party") if isinstance(perspective, dict) else None
+    party_key = _slug_key(party) if isinstance(party, str) else ""
+    vocabulary = _opf_public_vocabulary(opf_doc)
+    phrase_keys = _opf_clause_phrase_keys(opf_doc)
+
+    aliases = _opf_counterparty_ref_aliases(opf_doc)
+    alias_keys = {_slug_key(alias) for alias in aliases}
+    candidates = [(alias, alias) for alias in aliases]
+    candidates.extend(
+        (slug, _slug_key(slug))
+        for slug in deal_aliases.deal_document_ids(opf_doc)
+        # A slug that IS a party alias is held in the alias's own form.
+        if _slug_key(slug) not in alias_keys
+    )
+
+    held: list[str] = []
+    for candidate, gram in candidates:
+        key = _slug_key(candidate)
+        if (
+            not key
+            or not _without_public_vocabulary([key], vocabulary)
+            or _is_public_clause_phrase_slug(candidate, phrase_keys)
+            or (party_key and _contains_token(party_key, key))
+            or not any(_contains_token(text, key) for text in rendered)
+            or any(_contains_token(text, key) for text in ours)
+        ):
+            continue
+        held.append(gram)
+    return list(dict.fromkeys(held))
+
+
+def _counterparty_name_match(text: str, names: list[str]) -> str | None:
+    """The first of `names` that `text` carries, as check 3 matches a
+    counterparty name -- the one matcher both the scan and
+    `without_names_the_document_carries` use, so the two never disagree.
+
+    A name is matched as a whole token (`_contains_token`), raw and
+    `_normalize`d, as every corpus gram is. A name held in the de-slugged
+    form `_opf_past_counterparty_names` selects it in -- one that is its own
+    `_slug_key`, carrying no hyphen or underscore (`hollis varga`, read from
+    the slug `hollis-varga`) -- is also matched against the text with
+    hyphens, underscores and whitespace read as one space (#174 review): it
+    was selected because a rendered recital spells it under that folding
+    ("Hollis-Varga LP"), so it must block the form the prompt renders, and
+    `beta_industries` or `Beta-Industries` too. A name held as written with
+    a separator in it (an entity-registry alias, `Counterparty-2`) is not
+    folded, so the alias does not match "the counterparty 2 business days".
+    `_slug_key` is a single linear-time substitution."""
+    norm_text = _normalize(text)
+    folded_text: str | None = None
+    for gram in names:
+        gram = gram.strip()
+        if not gram:
+            continue
+        norm_gram = _normalize(gram)
+        if _contains_token(text, gram) or _contains_token(norm_text, norm_gram):
+            return gram
+        if _slug_key(gram) == norm_gram:
+            if folded_text is None:
+                folded_text = _slug_key(text)
+            if _contains_token(folded_text, norm_gram):
+                return gram
+    return None
+
+
+def without_names_the_document_carries(
+    corpus: ConfidentialCorpus, document_texts: list[Any]
+) -> ConfidentialCorpus:
+    """`corpus` without the `counterparty_names` the given texts carry
+    (issue #174): on a review, the document under review's own paragraphs;
+    on the cover note, the delivered findings' scanned external texts the
+    draft is written from (`backend/src/review_routes.py`).
+
+    This is what keeps the current counterparty's own name unblocked on a
+    repeat negotiation: `from_opf_document` holds a past counterparty's name
+    read from a precedent recital, and when the document under review is
+    from that same party, a summary that names the party it reviews must not
+    end in ERROR. The #208 exemption (`current_counterparty_name`) covers
+    the same case only when a caller supplies the name, which no production
+    caller does.
+
+    It is not only the counterparty's own name it drops. Nothing here can
+    tell which role a name plays in the document, so a past counterparty the
+    document under review names in any other role (an affiliate, a
+    guarantor, a prior agreement it recites) is dropped too, and an external
+    field may then name that party -- including as a past deal ("As Delta
+    Ventures signed before ..."), which discloses the past deal to this
+    counterparty. That residual is fail-open and deliberate: a check that
+    blocked the name the document under review itself uses would end every
+    repeat negotiation that names its own counterparty in ERROR
+    (docs/threat-model.md, "Past counterparties' names").
+
+    Matched exactly as check 3 matches (`_counterparty_name_match`), one
+    text at a time. Every other list is unchanged, and a corpus with no
+    names, or with none to drop, is returned as is."""
+    names = corpus.counterparty_names
+    if not names:
+        return corpus
+    texts = [text for text in document_texts if isinstance(text, str) and text]
+    kept = [
+        name
+        for name in names
+        if not any(_counterparty_name_match(text, [name]) for text in texts)
+    ]
+    if len(kept) == len(names):
+        return corpus
+    return dataclasses.replace(corpus, counterparty_names=kept)
 
 
 def _without_public_vocabulary(
@@ -1530,6 +1773,13 @@ class ConfidentialCorpus:
         ids and public clause vocabulary, see below; the dossiers' precedent
         ids are check 3's, above).
 
+        `counterparty_names` (issue #174): after any caller-supplied names,
+        every past counterparty's name a rendered precedent text carries --
+        a deal slug de-slugged, or a `counterparty_ref.alias` as written --
+        that is neither one word, a public clause name, our own standard's
+        wording nor our own name (`_opf_past_counterparty_names`). Check 3
+        blocks it externally and permits it internally.
+
         Also covers `posture.system_prompt` (issue #479 fix round 2):
         `scripts/opf_prompt.py::_posture_block` renders it VERBATIM as the
         first composed block of every OPF prompt both model passes read --
@@ -1687,7 +1937,14 @@ class ConfidentialCorpus:
                     _opf_dossier_precedent_ids(opf_doc) + _opf_deal_ids(opf_doc, overrides)
                 )
             ),
-            counterparty_names=list(counterparty_names or []),
+            # Issue #174: after any caller-supplied names, each past
+            # counterparty's name a precedent text puts in the prompt (a
+            # parties recital), read from the document's own party records.
+            counterparty_names=list(
+                dict.fromkeys(
+                    [*(counterparty_names or []), *_opf_past_counterparty_names(opf_doc)]
+                )
+            ),
             precedent_verbatim_spans=verbatim_spans,
         )
 
@@ -1754,7 +2011,9 @@ class LeakageScanner:
         rejection rule ids/descriptions -- confidential internal reasoning)
         is still checked regardless.
 
-        `current_counterparty_name` -- when given, this name is excluded
+        `current_counterparty_name` -- when given, this name, and any held
+        name it contains as a whole token (#174, compared with hyphens,
+        underscores and whitespace read as one space), is excluded
         from the counterparty-name citation check (issue #208): for repeat
         negotiations, the pipeline knows who the current upload is from, and
         mentioning the current counterparty's own name in a human-surfaced
@@ -1825,19 +2084,29 @@ class LeakageScanner:
         #    digest citations and Floor rationale prose give a deal
         #    (`from_opf_document`; #172 held the slugs) -- so an internal
         #    note may cite one;
-        #    `counterparty_names` is still empty in production (module
-        #    docstring, "Checks 3 and 4 are live for the critic dossiers").
+        #    since #174 `counterparty_names` holds each past counterparty's
+        #    name a rendered precedent text carries (module docstring,
+        #    "Checks 3 and 4 are live for the critic dossiers").
         #    Revisit both before retrieval is ever re-enabled.
         if not internal_channel:
             counterparty_ngrams = self._corpus.counterparty_names
             if current_counterparty_name:
-                norm_current = _normalize(current_counterparty_name)
+                # A held name that is the current counterparty's name, or
+                # part of it, is its own name (#208). Contained, not equal
+                # (#174): a name held from a past deal's slug
+                # (`beta industries`) is part of the name a caller supplies
+                # ("Beta Industries, LLC"), compared with hyphens,
+                # underscores and whitespace read as one space.
+                slug_current = _slug_key(current_counterparty_name)
                 counterparty_ngrams = [
                     gram
                     for gram in counterparty_ngrams
-                    if _normalize(gram) != norm_current
+                    if not _contains_token(slug_current, _slug_key(gram))
                 ]
-            match = self._find_ngram_match(raw_text, norm_text, counterparty_ngrams)
+            # Matched under the folding the names were selected with (#174
+            # review): a name held de-slugged (`hollis varga`) also blocks the
+            # hyphenated form a recital renders ("Hollis-Varga").
+            match = _counterparty_name_match(raw_text, counterparty_ngrams)
             if match is not None:
                 return ScanResult(
                     blocked=True, category=CATEGORY_CITATION, rule_id="counterparty-name"

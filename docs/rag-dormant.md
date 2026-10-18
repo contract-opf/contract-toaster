@@ -109,7 +109,7 @@ are:
 | `playbook_ngrams` | 4 entries | derived from the playbook |
 | `standard_clause_ngrams` | 3 entries | derived from the playbook |
 | `internal_precedent_ids` | the dossier precedent ids (#40) and every deal's alias (#173, in place of #172's slugs) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`), then the alias of every deal `corpus.documents[]`, the digest citations and `evidence.precedent[]` carry (`_opf_deal_ids`, `scripts/deal_aliases.py`) |
-| `counterparty_names` | empty | not passed |
+| `counterparty_names` | each past counterparty's name a rendered precedent text carries (#174) | `from_opf_document` reads every deal slug (de-slugged) and every `evidence.precedent[].counterparty_ref.alias`, and holds each one a digest precedent text or dossier excerpt names, minus one-word names, public clause names, our standard's wording and our own name (`_opf_past_counterparty_names`); `review_spine` then drops each the document under review carries, and the cover-note route each its delivered findings' scanned texts carry |
 | `precedent_verbatim_spans` | the dossier excerpts (#40) and the digest precedent texts (#171) | `from_opf_document` reads every dossier excerpt's whole `opening` / `signed` text, then every digest signed variant, collapsed exemplar, refused ask and changed opening, that is not our standard |
 
 Leakage check **3** (`citation_leakage`) is **live, for the dossiers' precedent ids and
@@ -127,8 +127,9 @@ slug, so a past deal whose slug is an ordinary word (`nda`, `agreement`) does no
 word, and (#175) never a slug that spells one of the document's own public clause names
 (`limitation-of-liability`), so naming that clause is not blocked either; the cost is that a one-word party name an author writes into a statement or the
 posture prose is not held (`docs/threat-model.md`, "Deal-slug false positives").
-`counterparty_names` is still empty, so a party name a precedent text carries as contract
-wording (a signed parties recital) is held by no list on its own.
+Since #174 `counterparty_names` holds a party name a precedent text carries as contract
+wording (a signed parties recital) where a deal slug or a `counterparty_ref.alias` records
+it; a name recorded under neither, and a one-word name, is held by no list on its own.
 Check **4** (`precedent_verbatim_spans`)
 is **live, for the critic dossiers and the digest only**: retrieval is off, but since #40
 the critic receives whole precedent excerpts (texts a counterparty wrote or signed), both

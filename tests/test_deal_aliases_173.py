@@ -36,7 +36,10 @@ What this pins:
   [4] Check 3 holds the aliases in place of the slugs: an alias echoed into
       an external field blocks as `internal-precedent-id` (and passes with
       check 3 emptied), and is permitted internally; a slug and its
-      de-slugged name no longer block. A one-word or one-number slug never
+      de-slugged name are no longer check-3 ids (since #174 the plain name
+      is a `counterparty_names` entry where a precedent recital the prompt
+      quotes carries it: `tests/test_leakage_counterparty_names_174.py`).
+      A one-word or one-number slug never
       blocks the ordinary word it spells, including where the prompt's own
       prose uses that word -- `nda` (the liability-cap rationale says
       "mutual NDA"), `agreement` (a Floor and a manifest statement say "this
@@ -449,13 +452,18 @@ def test_check_3_holds_the_aliases_in_place_of_the_slugs() -> None:
             assert not leakage_scan.scan_model_output(
                 _output(_issue(**{_INTERNAL: echoed})), corpus
             ).blocked, echoed
-        # The slug and its de-slugged name are not held: the model never
-        # read either, and holding them is what made an ordinary-word slug
-        # block that word (#172's residuals).
+        # The slug and its de-slugged name are not check-3 ids: the model
+        # never read the slug, and holding slugs is what made an
+        # ordinary-word slug block that word (#172's residuals). Since #174
+        # the plain name IS held where a precedent text the prompt quotes
+        # names the party (a recital), as a `counterparty_names` entry --
+        # so it is checked here with that list emptied, and
+        # `tests/test_leakage_counterparty_names_174.py` pins that list.
+        without_names = dataclasses.replace(corpus, counterparty_names=[])
         name = slug.replace("-", " ").title()
         for said in (f"As agreed with {slug}, we keep it.", f"We ask {name} to keep it."):
             assert not leakage_scan.scan_model_output(
-                _output(_issue(**{_EXTERNAL: said})), corpus
+                _output(_issue(**{_EXTERNAL: said})), without_names
             ).blocked, said
 
 
