@@ -160,15 +160,24 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # OPF pins reproduce their previous values (29cf2549... and fc2010d4...),
 # checked when this was re-captured. The V1 pin did NOT move (no digest).
 #
+# RE-CAPTURED for issue #173 (2026-10-18): the prompt names each past deal by
+# an opaque alias (`deal_aliases`) instead of its `document_id` slug -- in the
+# digest citations and the Floor rationale -- and DIGEST_INTRO's citation
+# sentence says the document is an opaque reference. A DELIBERATE prompt
+# change owned by #173. With every alias mapped back to its slug
+# (`deal_aliases.resolution_map`) and that one clause removed, both OPF pins
+# reproduce their previous values (49a9e6c1... and 6d00584b...), checked
+# when this was re-captured. The V1 pin did NOT move (no digest).
+#
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
 # for the acme-university 0.5 gold fixture. The markup-intensity block is NOT
 # composed there, so no markup level may ever move it.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "49a9e6c13066eebaa8bb4f0fd9e477d9c9abeddbeb486c659c81cc7456e6b2b5"
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "99c25df7b17cc89d3d631417672d7b367a0fe05abf26f97a76f13513da4ad182"
 # The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
 # over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
 # joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "6d00584b76c14e85062d2398556cd6321677a4472b1253a22c2aac901357af61"
+    "90494a9456c245dea48c197f269d2a07faa756c60a42511ff48542e014ea0af9"
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).

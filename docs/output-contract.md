@@ -1354,7 +1354,10 @@ standard. They must **never** disclose:
 
 Any reference to corpus precedent is **internal-audit-only** and is **stripped from the generated
 `.docx` footnotes**. `internal_precedent_citation` is retained only in retention-governed confidential
-storage. The **leakage scan** (a distinct pipeline step — see scope table above and
+storage. On an OPF review a citation the model copies from the digest names the deal by its opaque
+alias (`[deal-03@2 §7]`, issue #173), never by its `document_id`; an auditor resolves the alias to
+its corpus location with `python3 scripts/deal_aliases.py <playbook.opf.json>` for the playbook
+version the review's lineage records. The **leakage scan** (a distinct pipeline step — see scope table above and
 [docs/threat-model.md → Model output leakage](threat-model.md#model-output-leakage)) blocks the classes
 listed in `output_format.citation_rules.forbid_in_external_output` across all human-surfaced fields;
 a positive detection fails the review (`ERROR` / `leakage_detected`) rather than emitting a

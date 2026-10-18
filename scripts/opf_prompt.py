@@ -91,7 +91,10 @@ the same bytes -- and the same cache entry -- for every review of the
 playbook. Note `evidence` is NOT among
 them any more:
 the digest is the projection of it that reaches the model, and nothing reads
-the full evidence section into a prompt. Every other top-level section --
+the full evidence section into a prompt. (Since issue #173 the deal ids in
+`corpus.documents[]` and the `evidence.precedent[]` refs ARE read, by
+`deal_aliases.alias_map`, but only to name each deal by an opaque alias in
+the digest citations and the Floor rationale; no slug is rendered.) Every other top-level section --
 `posture.rubric` (excised from the schema entirely per engine #178, but this
 function does not validate its input, so a caller-constructed dict carrying
 it is simply never looked at), `posture.generation` (interview transcript),
@@ -175,6 +178,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import deal_aliases  # noqa: E402
 import entity_normalize  # noqa: E402
 import hard_ledger  # noqa: E402
 
@@ -378,7 +382,8 @@ DIGEST_INTRO = (
     "omitted, with a more protective, less protective or no effect for us. Additions no "
     "part covers are marked +, - or 0 the same way.\n"
     "- Every count is of distinct deals. A citation [document@version §clause] names "
-    "where the entry was signed or proposed.\n"
+    "where the entry was signed or proposed; the document is an opaque "
+    "reference, never the other party's name.\n"
     "Each quoted entry is a summary of at most 300 characters ending on a sentence "
     "boundary, not necessarily the whole clause: do not present it as quoted in full "
     "from the corpus.\n"
@@ -440,6 +445,12 @@ def _fmt_cite(ref: Any, where: str) -> str:
 
     Dropping the citation strands the entry: DIGEST_INTRO tells the model each
     entry names where it was signed or proposed, and an uncited entry does not.
+
+    `doc` is never a deal's `document_id` (issue #173): `_digest_block` hands
+    this the digest with each deal ref already swapped for its opaque alias
+    (`deal_aliases.alias_digest`), which an operator or auditor resolves back
+    to the corpus location with `deal_aliases.resolution_map`, kept out of
+    every prompt. Our standard's template ref is not a deal and renders as is.
     """
     if ref is None:
         _omit("citation — entry has no ref, so it reaches the model ungrounded, with no corpus location an operator or auditor can resolve it to", where)
@@ -798,7 +809,11 @@ def _digest_block(opf_doc: dict) -> str:
             "The digest is the model-facing knowledge; without it the review would run "
             "on model judgement alone while lineage still recorded a governing playbook."
         )
-    digest = _strip_x_keys(digest)
+    # Issue #173: every deal `document_id` a citation names becomes its
+    # opaque alias before anything renders it (`deal_aliases`), so no slug
+    # reaches the model through `_fmt_cite`. A function of the document, so
+    # the block stays the same bytes for every review of this version.
+    digest = deal_aliases.alias_digest(_strip_x_keys(digest), deal_aliases.alias_map(opf_doc))
     corpus_n_deals = _corpus_n_deals(digest)
     body = "\n\n".join(
         _digest_clause_block(c, corpus_n_deals) for c in digest["clauses"] if isinstance(c, dict)
@@ -921,6 +936,13 @@ def _binding_block(
 
     lines = [BINDING_INTRO]
     index = 0
+    # Issue #173: engine-written rationale names deals by slug in prose;
+    # each slug is swapped for its alias by exact token replacement
+    # (`deal_aliases.alias_text`), the rest of the text untouched. The map
+    # is the genesis document's, so an `overrides.floor_additions`
+    # rationale is aliased the same way. The statement is not aliased: see
+    # `deal_aliases`' module docstring.
+    aliases = deal_aliases.alias_map(opf_doc)
     for invariant in invariants:
         index += 1
         invariant_id = invariant.get("id", "")
@@ -936,7 +958,7 @@ def _binding_block(
             )
         line = f"{index}. [floor:{invariant_id}] {statement}"
         if rationale:
-            line += f" (Rationale: {rationale})"
+            line += f" (Rationale: {deal_aliases.alias_text(rationale, aliases)})"
         lines.append(line)
     for rule in must_rules:
         index += 1

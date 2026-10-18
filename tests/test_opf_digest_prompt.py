@@ -43,6 +43,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import deal_aliases  # noqa: E402
 import opf_prompt  # noqa: E402
 
 FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
@@ -103,7 +104,9 @@ def check_1_nda_example() -> list[str]:
         failures.append(f"  California variant lacks 'signed as proposed in 2': {california!r}")
     if "reached from our standard" in california:
         failures.append("  California variant claims a concession the digest does not record")
-    if "[beta-industries@4 §21]" not in new_york:
+    # Cited by the deal's opaque alias, never its slug (issue #173).
+    alias = deal_aliases.alias_map(_doc(NDA_EXAMPLE))["beta-industries"]
+    if f"[{alias}@4 §21]" not in new_york or "beta-industries" in new_york:
         failures.append("  New York variant lost its citation")
     return failures
 
@@ -148,7 +151,8 @@ def check_4_labels_are_an_index() -> list[str]:
     block = _digest_block(_doc())
     indemnification = _clause_section(block, "clause.indemnification")
     judged = _line_containing(indemnification, "prompt notice and reasonable cooperation")
-    if not judged.startswith("  - [less protective of us] ") or "[fixture-college@2 §8.1]" not in judged:
+    alias = deal_aliases.alias_map(_doc())["fixture-college"]  # issue #173
+    if not judged.startswith("  - [less protective of us] ") or f"[{alias}@2 §8.1]" not in judged:
         failures.append(f"  judged variant lacks its label or citation: {judged!r}")
     if "Judged difference: Conditions our indemnity on prompt notice and cooperation." not in indemnification:
         failures.append("  judged variant lacks its one-sentence reason")
@@ -183,7 +187,8 @@ def check_5_lists() -> list[str]:
     if "Asked for and refused (never replacement language):" not in indemnification:
         failures.append("  indemnification's refused ask is not rendered")
     opening = _line_containing(indemnification, "neither party shall indemnify")
-    if "— 1 deal, ended at our standard in 1 [acme-nursing-school@1 §7]" not in opening:
+    alias = deal_aliases.alias_map(_doc())["acme-nursing-school"]  # issue #173
+    if f"— 1 deal, ended at our standard in 1 [{alias}@1 §7]" not in opening:
         failures.append(f"  changed opening lacks its counts or citation: {opening!r}")
     return failures
 
