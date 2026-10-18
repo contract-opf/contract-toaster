@@ -2410,7 +2410,15 @@ async def post_review_cover_note(
         # `served_model_id` are read, so a positive detection short-circuits
         # into the `except` block below with nothing about the blocked
         # draft persisted or returned.
-        leakage_corpus = leakage_corpus_resolver(item.get("playbook_id"))
+        # Issue #174: narrowed like the review's own gate. A held past
+        # counterparty's name a delivered, scanned external text already
+        # carries was let through because the document under review carries
+        # it (the counterparty's own name, on a repeat negotiation), so the
+        # draft written from those texts may repeat it.
+        leakage_corpus = leakage_scan.without_names_the_document_carries(
+            leakage_corpus_resolver(item.get("playbook_id")),
+            cover_note_pass.scanned_digest_texts(issues, item.get("summary")),
+        )
         scan_result = leakage_scan.LeakageScanner(leakage_corpus).scan(
             draft,
             field_name="cover_note_draft",

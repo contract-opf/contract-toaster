@@ -381,20 +381,30 @@ def test_the_template_slug_does_not_block_an_external_note() -> None:
 
 
 def test_the_current_counterpartys_own_name_is_never_blocked() -> None:
-    """#172 review, amended by #173: on a review of the counterparty a deal's
-    slug was made from, naming that party (as its slug or its plain name) in
-    an external field is not a leak -- and since #173 neither is held at all,
-    because the prompt never renders a slug. Every deal's alias still blocks,
-    the current counterparty's included: an alias is never a name, so the
-    #208 exemption cannot reach it."""
+    """#172 review, amended by #173 and #174: on a review of the
+    counterparty a deal's slug was made from, naming that party (as its slug
+    or its plain name) in an external field is not a leak. Since #173 no
+    slug is held, because the prompt never renders one. Since #174 the plain
+    name IS held when a precedent text the prompt quotes names the party
+    (the engine's NDA example's recital names Beta Industries, LLC), so it
+    -- and the slug, which spells it with a hyphen -- blocks on a review of
+    another party -- and the #208 exemption still
+    reaches it on a review of that party
+    (`tests/test_leakage_counterparty_names_174.py`). Every deal's alias
+    still blocks, the current counterparty's included: an alias is never a
+    name, so the #208 exemption cannot reach it."""
     doc = _load(NDA_EXAMPLE)
     corpus = _corpus(doc)
     aliases = deal_aliases.alias_map(doc)
     current = sorted(aliases)[0]
     name = current.replace("-", " ").replace("_", " ").title()
+    assert current == "beta-industries" and "beta industries" in corpus.counterparty_names
     for said in (f"As agreed with {current}, we keep a US state.", f"We ask {name} to keep a US state."):
         issue = _issue(**{_EXTERNAL: said})
-        assert not leakage_scan.scan_model_output(_output(issue), corpus).blocked, said
+        # Both forms: the held name is matched under the folding it was
+        # selected with, so the slug's hyphenated spelling blocks as well.
+        outcome = leakage_scan.scan_model_output(_output(issue), corpus)
+        assert outcome.blocked and outcome.rule_id == "counterparty-name", (said, outcome)
         assert not leakage_scan.scan_model_output(
             _output(issue), corpus, current_counterparty_name=name
         ).blocked, said

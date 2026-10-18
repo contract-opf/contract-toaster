@@ -1200,6 +1200,25 @@ def run_review(
             normalization_notes=normalized["analysis_report"].get("normalization_notes"),
         )
     draft_paragraphs = normalized["paragraphs"]  # [{"heading": ..., "text": ...}, ...]
+    # Issue #174: a past counterparty's name the corpus holds (read from a
+    # precedent recital) is not blocked where the document under review
+    # itself carries it -- on a repeat negotiation it is this counterparty's
+    # own name, and no production caller passes `current_counterparty_name`.
+    # A past counterparty the document names in some other role (an
+    # affiliate, a recited prior agreement) is dropped too, so an external
+    # field may then cite that party's past deal: a recorded fail-open
+    # residual (`without_names_the_document_carries`, docs/threat-model.md).
+    # `corpus` is first read at stage 5, so narrowing it here covers every
+    # field the leakage gate scans.
+    corpus = leakage_scan.without_names_the_document_carries(
+        corpus,
+        [
+            value
+            for paragraph in draft_paragraphs
+            if isinstance(paragraph, dict)
+            for value in (paragraph.get("heading"), paragraph.get("text"))
+        ],
+    )
     # Issue #563: when stage 1 accepted one or more pending tracked changes
     # into the paragraph TEXT the model reads (`normalization_notes` present
     # iff at least one accept-all disposition happened), the SAME
