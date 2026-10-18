@@ -1123,6 +1123,13 @@ _ANALYSIS_FIELDS = (
     # otherwise. `reviews.get_review_detail` projects it for the receipt's
     # counts-only line.
     "hard_ledger",
+    # Issue #40: the critic dossier audit record
+    # (`critic_dossiers.audit_record`) -- the clause ids of the dossiers
+    # selected and sent to the critic, those dropped over the 24 cap or the
+    # critic's `max_input_tokens` budget, and counts. Never dossier,
+    # excerpt or model text. Present on every OPF review that reached the
+    # critic pass; `null` in this fixed-shape document otherwise.
+    "critic_dossiers",
 )
 
 

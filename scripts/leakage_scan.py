@@ -117,26 +117,65 @@ Not yet exercised in production: those two modes are unselectable while
 #572's `NOTES_MODE_ENABLED` kill switch is off, so every live review today
 runs `none`/`external` and produces no value for this field at all.
 
-## Check 4 is dormant by construction (issue #521, corrects #574's framing)
+## Checks 3 and 4 are live for the critic dossiers (issue #40; were dormant, #521)
 
-`precedent_verbatim_spans` is never populated, by either corpus builder or
-by any production caller, because **retrieval was retired**:
-`scripts/review_spine.py` passes `retrieved_precedent=[]` to the primary
-pass, so no precedent text ever reaches the model and there is nothing to
-derive spans from. Check 4 therefore blocks nothing in production. It is
-kept -- it costs nothing and is exercised by tests -- but it must not be
-cited as a live backstop for anything.
+Retrieval stays retired -- `scripts/review_spine.py` passes
+`retrieved_precedent=[]` to the primary pass -- but precedent text DOES
+reach the model now: since issue #40 the critic receives the selected OPF
+0.5 dossiers WHOLE (`scripts/critic_dossiers.py`), and every dossier excerpt
+carries the whole `opening` / `signed` text of a past deal, a text a
+counterparty wrote or signed. (The digest 4 in both passes' shared prefix
+carries signed variants, refused asks and changed openings too.)
 
-`counterparty_names` and `internal_precedent_ids` (check 3) are empty in
-production for the same reason, so check 3 is dormant too.
+Every dossier excerpt also carries its deal's `precedent_id`
+(`prec.<16 hex>`, which resolves to the deal through
+`provenance_index.dossiers`), and a dossier names each excerpt it dropped in
+`omitted_precedent_ids`; the critic receives those ids with the dossier.
 
-**Coupling to record, load-bearing:** a field IS internal-bound now
-(`internal_rationale_for_footnote`, #522), so this constraint has become
-live: checks 3 and 4 must be revisited *before* precedent retrieval is ever
-re-enabled. The internal channel's safety rests on the corpus being absent,
-not on any rule -- re-populating the corpus without revisiting them would
-permit precedent citations (check 3 permits on this channel) into a field
-that reaches a document.
+What guards them:
+
+  * External channel: check 2 blocks every one of those texts (the digest's,
+    the precedent record's and the dossiers', `from_opf_document`), and
+    check 3 blocks every one of those precedent ids: `from_opf_document`
+    fills `internal_precedent_ids` from each dossier excerpt's
+    `precedent_id` and each `omitted_precedent_ids` entry
+    (`_opf_dossier_precedent_ids`), so an external footnote that cites a
+    past deal by id is blocked as `internal-precedent-id`.
+  * Internal channel (`internal_rationale_for_footnote`): check 2 is skipped
+    there, so `from_opf_document` also makes each dossier excerpt's whole
+    `opening` / `signed` text -- unless it is our standard -- a check-4
+    `precedent_verbatim_spans` entry. An internal note that copies a whole
+    excerpt the critic was sent is blocked on every channel. Check 3 is
+    skipped there too, by design: an internal note may cite the deal it
+    reasons from by its precedent id.
+
+What does not:
+
+  * Check 4 matches a WHOLE span (containment), so an internal note that
+    quotes part of an excerpt, or paraphrases one, passes. That is the same
+    residual as paraphrase, below, and the attorney reading the internal
+    note is its backstop.
+  * A digest precedent text that is in no dossier is not a span: on the
+    internal channel nothing blocks it (#171).
+
+`counterparty_names` (check 3's other list) is still empty in production:
+no builder or production caller populates it. That is NOT because no
+prompt names a past deal: the digest's citations name each deal by its
+`document_id` (`opf_prompt._fmt_cite`, `[<document_id>@<version> ...]`, in
+both passes' prompts, pre-dating #40), a slug that can identify the
+counterparty, and no check-3 list holds those ids (#172). A dossier carries no
+document id.
+
+**Coupling to record, load-bearing:** a field IS internal-bound
+(`internal_rationale_for_footnote`, #522), and check 3 permits precedent
+citations on that channel. Checks 3 and 4 must be revisited before
+precedent retrieval is ever re-enabled, and before any prompt carries a
+precedent id or counterparty name from a source other than the dossiers:
+the external channel's safety against citation rests on every id the
+prompt carries being in `internal_precedent_ids` (today, exactly the
+dossiers'), and the internal channel's safety against whole-excerpt
+quotation rests on check 4 above. All of the internal channel is latent
+while #572's `NOTES_MODE_ENABLED` kill switch is off.
 
 ## Check 1 is populated from the prompt actually composed (issue #521)
 
@@ -898,6 +937,84 @@ def _opf_manifest_texts(opf_doc: dict[str, Any]) -> tuple[list[str], list[str]]:
     return statements, fallbacks
 
 
+def _opf_dossier_texts(
+    opf_doc: dict[str, Any],
+) -> tuple[list[str], list[str], list[str]]:
+    """`(blocked texts, our-standard texts, excerpt texts)` of every OPF 0.5
+    critic dossier
+    (`dossiers{}`), read DIRECTLY (issue #40): since the critic dossiers are
+    composed into the critic's prompt (`critic_dossiers`), a text found only
+    in a dossier reaches the model, so the corpus cannot rely on the dossiers
+    being a faithful derivation of the Floor and the precedent record -- the
+    same reasoning `_opf_manifest_texts` gives for the manifest.
+
+    Blocked: each listed Floor rule's `statement` and `rationale` (internal
+    strategy, like the Floor invariant it is), and each excerpt's `opening` /
+    `signed` (a whole precedent text) -- unless it IS this dossier's own
+    standard (its `our_standard` text, or one of its parts), which a deal
+    that opened with or signed our standard carries. Our standard: every
+    `our_standard.parts[].text` (allowlisted for replacement text). Never
+    read, on purpose: an excerpt's `vs_standard` (its label, reasons and part
+    map -- the same exclusion as the digest's `vs_standard`) and the
+    identifiers and titles (public clause vocabulary; the precedent ids are
+    read by `_opf_dossier_precedent_ids`, for check 3).
+
+    Excerpt texts: the blocked `opening` / `signed` texts again, on their
+    own -- the whole precedent texts a counterparty wrote or signed, which
+    `from_opf_document` also makes check-4 `precedent_verbatim_spans`
+    because check 2 does not run on the internal channel."""
+    blocked: list[str] = []
+    standards: list[str] = []
+    excerpts: list[str] = []
+    section = opf_doc.get("dossiers")
+    for dossier in section.values() if isinstance(section, dict) else []:
+        if not isinstance(dossier, dict):
+            continue
+        our_standard = dossier.get("our_standard")
+        parts = _texts_of(our_standard.get("parts")) if isinstance(our_standard, dict) else []
+        standards.extend(parts)
+        own_standard = {*parts, "\n\n".join(parts)} if parts else set()
+        for rule in dossier.get("floor_rules") or []:
+            if isinstance(rule, dict):
+                for key in ("statement", "rationale"):
+                    value = rule.get(key)
+                    if isinstance(value, str) and value:
+                        blocked.append(value)
+        for excerpt in dossier.get("excerpts") or []:
+            if not isinstance(excerpt, dict):
+                continue
+            for key in ("opening", "signed"):
+                value = excerpt.get(key)
+                if isinstance(value, str) and value and value not in own_standard:
+                    blocked.append(value)
+                    excerpts.append(value)
+    return blocked, standards, excerpts
+
+
+def _opf_dossier_precedent_ids(opf_doc: dict[str, Any]) -> list[str]:
+    """Every precedent id an OPF 0.5 critic dossier carries (issue #40): each
+    excerpt's `precedent_id` and each `omitted_precedent_ids[]` entry, in
+    dossier order, deduplicated. Each is a `prec.<16 hex>` id that resolves
+    to its deal through `provenance_index.dossiers`, and the critic receives
+    every selected dossier whole, ids included, so `from_opf_document` makes
+    them check-3 `internal_precedent_ids`: blocked on the external channel
+    (an external footnote must not cite a past deal), permitted on the
+    internal one, exactly as check 3's table says. Read from every dossier
+    the document carries, not only the selected ones -- the corpus is built
+    before selection, and a larger list fails closed."""
+    candidates: list[Any] = []
+    section = opf_doc.get("dossiers")
+    for dossier in section.values() if isinstance(section, dict) else []:
+        if not isinstance(dossier, dict):
+            continue
+        for excerpt in dossier.get("excerpts") or []:
+            if isinstance(excerpt, dict):
+                candidates.append(excerpt.get("precedent_id"))
+        omitted = dossier.get("omitted_precedent_ids")
+        candidates.extend(omitted if isinstance(omitted, list) else [])
+    return list(dict.fromkeys(i for i in candidates if isinstance(i, str) and i.strip()))
+
+
 def _without_public_vocabulary(
     grams: list[str], vocabulary: set[str]
 ) -> list[str]:
@@ -1096,19 +1213,32 @@ class ConfidentialCorpus:
         echoing a rendered rule line is blocked even though the predicate's
         phrases alone are not grams.
 
-        The `dossiers` are still covered BY DERIVATION, not read (issue
-        #128): a dossier floor rule's `statement` / `rationale` are the
-        Floor invariant's (blocked above); its `our_standard.parts[].text`
-        is our standard (allowlisted); an excerpt's `opening` / `signed` is
-        a whole precedent text from `evidence.precedent[]` (blocked), or our
-        standard itself (allowlisted part by part). That is enough because
-        the dossiers are composed into no prompt today, so a text found ONLY
-        there cannot reach the model to be leaked by it; and
-        `tests/test_leakage_opf_precedent_128.py` pins the derivation on the
-        gold fixture, the engine's NDA example and every conformance vector
-        (008 exercises every field). When dossiers are wired into a prompt
-        (#40), this builder must read them directly, as it now reads the
-        manifest. Deliberate exclusions, never added on either path:
+        The `dossiers` are READ DIRECTLY since issue #40, which composes
+        the selected ones into the critic's role suffix
+        (`scripts/critic_dossiers.py`), via `_opf_dossier_texts`: a dossier
+        floor rule's `statement` / `rationale` and an excerpt's `opening` /
+        `signed` are blocked (unless the excerpt text is that dossier's own
+        standard), and its `our_standard.parts[].text` is our standard
+        (allowlisted). Only what the derived lists do not already hold is
+        added: on an engine-built document every one of those texts is
+        already the Floor invariant's, a precedent record's or our
+        standard's (issue #128's derivation, which
+        `tests/test_leakage_opf_precedent_128.py` pins on the gold fixture,
+        the engine's NDA example and every conformance vector), so the
+        check-2 lists are byte-identical there, and a text found ONLY in a
+        dossier is still blocked. Check 2 does not run on the internal
+        channel, so each excerpt's whole `opening` / `signed` text that is
+        not our standard is ALSO a `precedent_verbatim_spans` entry (check
+        4, every channel), after any caller-supplied spans: the critic
+        receives those excerpts whole, and an internal note that copies one
+        whole is blocked. A part of an excerpt, or a paraphrase, is not
+        (see the module docstring, "Checks 3 and 4 are live for the critic
+        dossiers"). Each excerpt's `precedent_id` and each
+        `omitted_precedent_ids` entry is a check-3 `internal_precedent_ids`
+        entry (`_opf_dossier_precedent_ids`): the critic receives those ids
+        with the dossier, so an external field that cites one is blocked,
+        and an internal note may cite one. Deliberate exclusions, never
+        added on either path:
         `vs_standard` (its `reason`, `part_reasons` and addition `summary`
         -- the same reasoning as the `reason` above); a hard rule's
         `condition` (match phrases and patterns -- contract vocabulary a
@@ -1118,8 +1248,9 @@ class ConfidentialCorpus:
         Floor's `x_permissible_proof` extension, which no block renders:
         `opf_prompt._binding_block` renders only an invariant's id,
         statement and rationale, and `_manifest_block` leaves it out); and
-        identifiers and titles (rule/clause/precedent ids
-        and public clause vocabulary, see below).
+        identifiers and titles in the check-2 lists (rule/clause/precedent
+        ids and public clause vocabulary, see below; the dossiers' precedent
+        ids are check 3's, above).
 
         Also covers `posture.system_prompt` (issue #479 fix round 2):
         `scripts/opf_prompt.py::_posture_block` renders it VERBATIM as the
@@ -1187,6 +1318,31 @@ class ConfidentialCorpus:
             if text not in standard_clause_ngrams
         )
 
+        # Issue #40: the critic dossiers, read directly now that they reach
+        # the critic's prompt. As with the manifest, only what the lists
+        # above do not already hold is added, so an engine-built document --
+        # whose dossiers ARE the Floor, our standard and the precedent
+        # record -- leaves the corpus byte-identical. A dossier text that is
+        # already allowlisted as our standard is never also blocked.
+        dossier_blocked, dossier_standards, dossier_excerpts = _opf_dossier_texts(opf_doc)
+        standard_clause_ngrams.extend(
+            text
+            for text in dict.fromkeys(dossier_standards)
+            if text not in standard_clause_ngrams
+        )
+        playbook_ngrams.extend(
+            text
+            for text in dict.fromkeys(dossier_blocked)
+            if text not in playbook_ngrams and text not in standard_clause_ngrams
+        )
+        # ... and each excerpt's whole `opening` / `signed` text is a check-4
+        # verbatim span, the only check that runs on the internal channel
+        # (`internal_rationale_for_footnote`): check 2 above is skipped
+        # there, so without this the critic could copy a whole precedent
+        # excerpt it was sent into an internal note. Our standard is never a
+        # span. Only the WHOLE text is matched (check 4 is containment of
+        # the span), so a part-quotation or a paraphrase is not caught --
+        # docs/threat-model.md -> "Model output leakage".
         # Issue #616: drop the grams that are only this document's own public
         # clause vocabulary before they become blocked content. The UNFILTERED
         # lists still feed the check-1 exemption below, so check 1's corpus is
@@ -1194,6 +1350,21 @@ class ConfidentialCorpus:
         # keeps one text in one category, and removing a text from check 2
         # must not silently promote it into check 1.
         vocabulary = _opf_public_vocabulary(opf_doc)
+
+        # The dossier excerpts go through the SAME #616 filter before they
+        # become check-4 spans: an excerpt whose whole text is a public clause
+        # title or taxonomy label (no minLength rules it out) would otherwise
+        # block an ordinary verdict_summary that names the clause, on every
+        # channel, under `precedent-verbatim-span` -- the #616 false positive
+        # back under a different rule id (#40 review).
+        verbatim_spans = list(precedent_verbatim_spans or [])
+        verbatim_spans.extend(
+            text
+            for text in dict.fromkeys(
+                _without_public_vocabulary(dossier_excerpts, vocabulary)
+            )
+            if text not in verbatim_spans and text not in standard_clause_ngrams
+        )
         blocked_playbook_ngrams = _without_public_vocabulary(
             playbook_ngrams, vocabulary
         )
@@ -1211,9 +1382,9 @@ class ConfidentialCorpus:
             ),
             playbook_ngrams=blocked_playbook_ngrams,
             standard_clause_ngrams=blocked_standard_clause_ngrams,
-            internal_precedent_ids=[],
+            internal_precedent_ids=_opf_dossier_precedent_ids(opf_doc),
             counterparty_names=list(counterparty_names or []),
-            precedent_verbatim_spans=list(precedent_verbatim_spans or []),
+            precedent_verbatim_spans=verbatim_spans,
         )
 
 
@@ -1344,10 +1515,12 @@ class LeakageScanner:
         # 3. Citation leakage: counterparty names (other than the current
         #    review's counterparty, if given), internal precedent ids.
         #    Permitted on the internal channel: an internal note may name a
-        #    past counterparty and cite a specific past deal. Both lists are
-        #    empty in production today (module docstring, "Check 4 is dormant
-        #    by construction") -- so this permission grants nothing yet, and
-        #    must be revisited if retrieval is ever re-enabled.
+        #    past counterparty and cite a specific past deal. Since issue #40
+        #    `internal_precedent_ids` holds the critic dossiers' precedent ids
+        #    (`from_opf_document`), so an internal note may cite one;
+        #    `counterparty_names` is still empty in production (module
+        #    docstring, "Checks 3 and 4 are live for the critic dossiers").
+        #    Revisit both before retrieval is ever re-enabled.
         if not internal_channel:
             counterparty_ngrams = self._corpus.counterparty_names
             if current_counterparty_name:

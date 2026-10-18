@@ -42,9 +42,10 @@ the artifact, not by hope.
 
 What the digest deliberately omits -- every signed text beyond its 300-char
 summary, the per-deal precedent record, the per-part reasons -- is not lost
-from the playbook, but no running path reaches it today. Depth is planned as
-deterministic dossier selection appended by orchestration (#40; OPF 0.5 ships
-the `dossiers` section for it), not as a model tool call; the unwired
+from the playbook, and this module does not reach it. Depth is
+deterministic dossier selection appended by orchestration to the CRITIC's
+role suffix (#40, `scripts/critic_dossiers.py`, reading OPF 0.5's
+`dossiers`), not a model tool call and not a block here; the unwired
 drill-down tool was retired in #161. Summaries by default is the trade that
 lets the prompt fit, and the block says what each capped list left out.
 
