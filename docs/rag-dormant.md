@@ -59,9 +59,9 @@ non-RAG depth path is already designed** and is not the same as "no depth."
   reach a model at all."
 - **The index.** Depth comes from exact keys, not similarity: per-clause critic dossiers
   selected deterministically from the rule ids the reviewer and the open hard-rejection
-  ledger name, and appended by orchestration to the critic's role suffix (#40,
-  `scripts/critic_dossiers.py`; a pre-critic anomaly source does not exist yet, since the
-  Floor judge runs after the critic). OPF 0.5 ships those dossiers precomputed
+  ledger name and the manifest predicates a pre-critic code check finds broken in the
+  document (#170, `hard_ledger.anomaly_rule_ids`), and appended by orchestration to the
+  critic's role suffix (#40, `scripts/critic_dossiers.py`). OPF 0.5 ships those dossiers precomputed
   (`dossiers`, with the hard-rule `manifest`), so #40 selects rather than builds them, and
   sends each whole. An earlier design served
   the same keys through a model-callable `lookup_clause_evidence` tool; it was never wired

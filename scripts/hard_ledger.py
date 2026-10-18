@@ -112,6 +112,16 @@ verdict still becomes a monotonic Floor fire exactly as before, which only
 ever adds a rejection. Floor invariants that are not ledger entries are
 judged exactly as before this module existed.
 
+## Pre-critic anomaly fires (issue #170)
+
+`anomaly_rule_ids` runs the same predicates (`evaluate_predicate`) BEFORE
+either pass for the manifest rules this ledger does not own -- those with
+`required_presence` false and a predicate `condition` -- over the clause's
+own section of the document, and returns the ids of the rules whose
+predicate evaluates False. It is a critic dossier selection signal only
+(`critic_dossiers.select_dossiers`): it opens no entry, inserts nothing and
+adds no fire, and the Floor judge still judges those rules after the critic.
+
 ## What never leaves this module
 
 The ledger record (`enforce`'s second return value) carries rule ids, clause
@@ -360,6 +370,76 @@ def judged_floor_invariants(
         for invariant in floor_invariants
         if not (isinstance(invariant, dict) and invariant.get("id") in owned)
     ]
+
+
+# ---------------------------------------------------------------------------
+# Pre-critic anomaly fires (issue #170): a dossier-selection signal only
+# ---------------------------------------------------------------------------
+
+
+def _section_text(block_map: dict[str, Any], title: str) -> str | None:
+    """The text of every block whose heading matches `title`, joined in
+    document order -- the clause's own text, as `_clause_text` reads it --
+    or None when the document has no such section."""
+    texts = [
+        str(block.get("text") or "")
+        for _index, _block_id, block in _ordered_blocks(block_map)
+        if _heading_matches(block.get("heading"), title)
+    ]
+    return "\n".join(texts) if texts else None
+
+
+def anomaly_rule_ids(opf_doc: dict[str, Any] | None, block_map: dict[str, Any] | None) -> list[str]:
+    """The manifest rules a deterministic check of the document FIRES
+    before either model pass: the rule ids, in manifest (Floor) order, of
+    every hard rule the ledger does NOT own (`required_presence` not true)
+    whose condition is a predicate (`required_phrases`, `numeric_bound`,
+    `cross_reference`) and whose clause's own section is in the document
+    (`_heading_matches` against the clause's public title) with text the
+    predicate evaluates to False (`evaluate_predicate`).
+
+    What does not fire: a `"judged"` rule (no machine can evaluate it), a
+    rule whose clause the document lacks (absence is a hard rejection only
+    for a presence rule, which the ledger owns), a predicate that cannot be
+    evaluated (None -- e.g. a `numeric_bound` clause over
+    `MAX_CLAUSE_CHARS`), and every presence rule (the ledger already opens
+    an entry for it).
+
+    Its only consumer is critic dossier selection
+    (`critic_dossiers.select_dossiers`, issue #170): a fire puts the
+    clause's dossier in front of the critic. It decides nothing -- no
+    insertion, no fire in `detector_fires`, no verdict; the Floor judge still
+    judges these rules after the critic, exactly as before. Rule ids only,
+    never clause or document text."""
+    if not isinstance(opf_doc, dict) or not block_map:
+        return []
+    manifest = opf_doc.get("manifest")
+    if not isinstance(manifest, dict):
+        return []
+    titles = clause_titles(opf_doc)
+    fired: list[str] = []
+    for rule in manifest.get("hard_rules") or []:
+        if not isinstance(rule, dict) or rule.get("required_presence") is True:
+            continue
+        rule_id, clause_id, condition = rule.get("rule_id"), rule.get("clause_id"), rule.get("condition")
+        if not isinstance(rule_id, str) or not rule_id or rule_id in fired:
+            continue
+        if not isinstance(condition, dict) or not isinstance(clause_id, str):
+            continue
+        title = titles.get(clause_id)
+        if not isinstance(title, str) or not _heading_form(title):
+            continue
+        text = _section_text(block_map, title)
+        if text is None:
+            continue
+        reference = condition.get("clause_id") if condition.get("type") == "cross_reference" else None
+        entry = {
+            "condition": condition,
+            "reference_title": titles.get(reference) if isinstance(reference, str) else None,
+        }
+        if evaluate_predicate(entry, text) is False:
+            fired.append(rule_id)
+    return fired
 
 
 # ---------------------------------------------------------------------------

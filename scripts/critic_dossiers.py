@@ -32,19 +32,23 @@ The union of:
      `UNPROVEN_HARD_REJECTION` (#147; the ledger is built before either pass,
      so before the critic every entry is open), resolved by the entry's own
      `clause_id`, else its `taxonomy_id`.
-
-"Deterministic anomaly rule ids" are NOT a source today: the only
-deterministic detector left is the OPF Floor judge (stage 3.5), and it runs
-AFTER the critic pass (`review_spine.run_review`), so there is nothing to
-select from before the critic (#170).
+  3. **deterministic anomaly rule ids** (#170) -- `hard_ledger.anomaly_rule_ids`:
+     every manifest hard rule the ledger does not own (`required_presence`
+     false) whose predicate `condition` evaluates False on its clause's own
+     section of the document, checked by code before either pass. Resolved
+     like a reviewer id (through the manifest's `clause_id`). The OPF Floor
+     judge is not a source: it is a model call and runs AFTER the critic
+     pass (`review_spine.run_review`, stage 3.5).
 
 ## Order and bounds
 
 One dossier per clause, in a STABLE order: the ledger's clauses first (the
-hard rules the playbook requires), then the reviewer's, each group sorted by
-clause id -- never by the order the reviewer happened to list its issues.
-At most `MAX_DOSSIERS` (24); a selection over the cap drops whole dossiers
-from the END of that order, and the dropped clause ids are recorded.
+hard rules the playbook requires), then the anomalies' (a rule code found
+broken), then the reviewer's, each group sorted by clause id -- never by the
+order the reviewer happened to list its issues. A clause two sources name is
+the earlier source's. At most `MAX_DOSSIERS` (24); a selection over the cap
+drops whole dossiers from the END of that order, and the dropped clause ids
+are recorded.
 
 Each dossier is used WHOLE, exactly as the engine emitted it (2026-10-17
 amendment): the engine already bounds every dossier normatively (a budget of
@@ -91,6 +95,7 @@ MAX_DOSSIERS = 24
 LEDGER_OPEN_STATUS = "UNPROVEN_HARD_REJECTION"
 
 SOURCE_LEDGER = "ledger"
+SOURCE_ANOMALY = "anomaly"
 SOURCE_REVIEWER = "reviewer"
 
 
@@ -103,6 +108,7 @@ class DossierSelection:
     sources: dict[str, str] = field(default_factory=dict)
     dropped_over_cap: tuple[str, ...] = ()
     n_unresolved_reviewer_ids: int = 0
+    n_anomaly_rule_ids: int = 0
 
 
 def _dossiers(opf_doc: Any) -> dict[str, dict[str, Any]]:
@@ -191,19 +197,27 @@ def select_dossiers(
     reviewer_output: Any,
     ledger: Iterable[dict[str, Any]] | None = None,
     *,
+    anomaly_rule_ids: Iterable[str] = (),
     max_dossiers: int = MAX_DOSSIERS,
 ) -> DossierSelection:
     """The dossiers the critic reads: reviewer rule ids UNION open
-    hard-ledger rule ids, one per clause, ledger first then reviewer, each group sorted by
-    clause id, at most `max_dossiers`. Each selected dossier is the
-    document's own object, untouched. An empty selection for a document
-    without dossiers (a v1 review never calls this)."""
+    hard-ledger rule ids UNION deterministic anomaly rule ids
+    (`hard_ledger.anomaly_rule_ids`), one per clause, ledger first, then
+    anomaly, then reviewer, each group sorted by clause id, at most
+    `max_dossiers`. Each selected dossier is the document's own object,
+    untouched. An empty selection for a document without dossiers (a v1
+    review never calls this)."""
     dossiers = _dossiers(opf_doc)
+    anomaly_ids = [rule_id for rule_id in anomaly_rule_ids or () if isinstance(rule_id, str)]
     if not dossiers:
         return DossierSelection()
     resolve = _resolver(dossiers, opf_doc)
 
     ledger_clauses = sorted(set(_open_ledger_clauses(ledger, resolve)))
+    anomaly_clauses = sorted(
+        {clause_id for rule_id in anomaly_ids for clause_id in resolve(rule_id)}
+        - set(ledger_clauses)
+    )
     reviewer_clauses: set[str] = set()
     unresolved = 0
     for topic_id in reviewer_rule_ids(reviewer_output):
@@ -212,9 +226,10 @@ def select_dossiers(
             unresolved += 1
         reviewer_clauses.update(resolved)
 
-    ordered: list[str] = list(ledger_clauses)
+    ordered: list[str] = [*ledger_clauses, *anomaly_clauses]
     sources = dict.fromkeys(ledger_clauses, SOURCE_LEDGER)
-    for clause_id in sorted(reviewer_clauses - set(ledger_clauses)):
+    sources.update(dict.fromkeys(anomaly_clauses, SOURCE_ANOMALY))
+    for clause_id in sorted(reviewer_clauses - set(ordered)):
         ordered.append(clause_id)
         sources[clause_id] = SOURCE_REVIEWER
 
@@ -225,6 +240,7 @@ def select_dossiers(
         sources={clause_id: sources[clause_id] for clause_id in kept},
         dropped_over_cap=tuple(over_cap),
         n_unresolved_reviewer_ids=unresolved,
+        n_anomaly_rule_ids=len(anomaly_ids),
     )
 
 
@@ -264,4 +280,5 @@ def audit_record(
         "dropped_over_budget": list(dropped_over_budget),
         "max_dossiers": MAX_DOSSIERS,
         "n_unresolved_reviewer_ids": selection.n_unresolved_reviewer_ids,
+        "n_anomaly_rule_ids": selection.n_anomaly_rule_ids,
     }

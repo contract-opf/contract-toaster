@@ -1249,6 +1249,19 @@ def run_review(
     # and killing every edit in the response with no second chance.
     doc_text = document_text_for_review(draft_paragraphs)
     block_map = extraction_normalization_stage.build_block_map(draft_paragraphs)
+    # Issue #170: the deterministic anomaly fires, computed HERE -- once the
+    # block map exists and BEFORE either model pass -- from the OPF manifest
+    # and this document's block map alone (no model output): the
+    # non-presence manifest rules whose predicate `condition` fails on their
+    # clause's own section (`hard_ledger.anomaly_rule_ids`). Rule ids only.
+    # Their one consumer is stage 2.5's critic dossier selection below; they
+    # insert nothing, add no detector fire and decide no verdict. Empty for
+    # a v1 review (no OPF document).
+    anomaly_fires = (
+        hard_ledger.anomaly_rule_ids(dossier_opf_doc, block_map)
+        if opf_bundle_v2 is not None
+        else []
+    )
     report_progress(PROGRESS_PRIMARY_PASS)
     primary_result = primary_review_pass.run_primary_pass(
         cancel_checkpoint=cancel_checkpoint,
@@ -1278,16 +1291,22 @@ def run_review(
 
     # Stage 2.5 (issue #40): critic dossier selection, by orchestration and
     # not by a model tool call. Reviewer rule ids (the reviewer's
-    # `playbook_topic_id`s) union open hard-ledger rule ids, resolved to the
-    # OPF document's own engine-built dossiers, one per clause, stable order,
-    # at most `critic_dossiers.MAX_DOSSIERS`, each used whole. The critic pass
-    # bounds the set again against its `max_input_tokens` gate. Deterministic
-    # anomaly rule ids are not a source: the only deterministic detector
-    # left, the Floor judge (stage 3.5), runs after the critic (#170). Empty for a v1 review
-    # (no OPF document), which leaves the critic prompt byte-identical.
+    # `playbook_topic_id`s) union open hard-ledger rule ids union
+    # deterministic anomaly rule ids (#170: `anomaly_fires`, computed by
+    # code above, before either pass, from the manifest and THIS document's
+    # block map alone), resolved to the OPF document's own engine-built
+    # dossiers, one per clause, stable order (ledger, anomaly, reviewer), at most
+    # `critic_dossiers.MAX_DOSSIERS`, each used whole. The critic pass bounds
+    # the set again against its `max_input_tokens` gate. The Floor judge
+    # (stage 3.5) is not a source: it is a model call and runs after the
+    # critic. Empty for a v1 review (no OPF document), which leaves the
+    # critic prompt byte-identical.
     dossier_selection = (
         critic_dossiers.select_dossiers(
-            dossier_opf_doc, primary_result.get("response"), ledger
+            dossier_opf_doc,
+            primary_result.get("response"),
+            ledger,
+            anomaly_rule_ids=anomaly_fires,
         )
         if opf_bundle_v2 is not None
         else critic_dossiers.DossierSelection()
