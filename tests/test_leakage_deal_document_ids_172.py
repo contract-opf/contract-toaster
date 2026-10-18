@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+"""
+Issue #172: a digest citation's deal `document_id` echoed into an external
+field is blocked; the same citation on the internal channel is permitted.
+
+Both passes' prompts render every digest 4 entry with a citation
+`[<document_id>@<version> §<clause_path>]` (`opf_prompt._fmt_cite`). A deal's
+`document_id` is a filename-derived slug that can name the counterparty, and
+before this issue no check-3 list held one: `internal_precedent_ids` carried
+only the critic dossiers' `prec.<16 hex>` ids (#40), so a model that echoed
+`theta-logistics@2` into `external_rationale_for_footnote` -- written into a
+footnote of the document sent to the counterparty -- passed the leakage scan.
+
+Reproduced on the untouched tree (2026-10-18): on the engine's NDA example,
+`from_opf_document(doc, system_blocks=<the composed prompt>)` held none of
+the six deal slugs the composed digest cites, and an external footnote
+citing one scanned clean.
+
+What this pins:
+
+  [1] every deal slug the composed digest block cites is a check-3
+      `internal_precedent_ids` entry, on the engine's NDA example and the
+      gold fixture; the template slug our standard cites, and the digest
+      intro's `[document@version §clause]` placeholder, are not. Citations
+      are not the only path: engine-written Floor rationale names deals by
+      slug in unbracketed prose, in the shared prefix's Binding block and
+      again in a dossier's `floor_rules` (the NDA example's liability-cap
+      rationale names three). So every `corpus.documents[].document_id`
+      that appears as a whole token anywhere in the composed prompt or the
+      rendered dossiers must be a check-3 id too;
+  [2] each of those slugs, echoed into `external_rationale_for_footnote`
+      (as the bracketed citation and bare), blocks as `citation_leakage` /
+      `internal-precedent-id`; with check 3's ids removed the same output
+      passes, so check 3 is the guard; the same text in
+      `internal_rationale_for_footnote` is permitted;
+  [3] each ref kind is read on its own: a document whose digest carries
+      ONLY signed variants / ONLY collapsed exemplars / ONLY refused asks /
+      ONLY changed openings yields exactly that kind's ids, and the
+      `evidence.precedent[]` record contributes the deals the capped digest
+      does not cite (the gold fixture's two evidence-only deals);
+  [4] the template slug is never a check-3 id, so an external note that says
+      "template" is not blocked (the false positive a careless walk of every
+      `document_id` would introduce).
+
+## Fixture reachability
+
+  * The OPF documents are engine output, never edited for [1], [2] and [4]:
+    the engine's public NDA example
+    (`tests/fixtures/opf/engine-nda-example.opf.json`) and the committed gold
+    fixture (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`). The
+    citations asserted on are read out of `opf_prompt.compose_opf_system_blocks`
+    -- the production composition both passes share -- not out of the
+    document, so [1] fails if the prompt cites a slug the corpus misses.
+  * The corpus is `ConfidentialCorpus.from_opf_document`, the builder
+    `review_spine.run_review` and `review_routes` call in production, and
+    the scan is `scan_model_output`, the production entry point.
+  * [3]'s per-kind documents are the NDA example with the OTHER digest
+    lists emptied and `evidence.precedent` emptied: every entry kept is the
+    engine's own, and an empty list is a shape the 0.5 schema admits
+    (`evidence` itself is required; vector 001 carries
+    `evidence: {"clauses": [], "precedent": []}`).
+  * The issue dicts carry only the fields the reviewer's v3 output carries;
+    their other prose is checked clean on its own before each assertion, so
+    a block can only come from the citation.
+
+Run standalone: `.venv/bin/python tests/test_leakage_deal_document_ids_172.py`
+Exit codes: 0 = pass, 1 = fail
+"""
+
+from __future__ import annotations
+
+import copy
+import dataclasses
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+for _dir in (REPO_ROOT / "scripts",):
+    if str(_dir) not in sys.path:
+        sys.path.insert(0, str(_dir))
+
+import critic_dossiers  # noqa: E402
+import leakage_scan  # noqa: E402
+import opf_prompt  # noqa: E402
+
+NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
+GOLD_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+
+_EXTERNAL = "external_rationale_for_footnote"
+_INTERNAL = "internal_rationale_for_footnote"
+
+# One rendered citation: `[<document_id>@<version> §<clause_path>]`.
+_CITATION = re.compile(r"\[([^\s@\[\]]+)@([^\s\]]+) §[^\]]*\]")
+# The digest intro's own illustration of the citation shape.
+_PLACEHOLDER = "document"
+
+
+def _load(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _template_ids(doc: dict[str, Any]) -> set[str]:
+    """The document ids that cite our own template, not a deal."""
+    ids = {doc.get("baseline", {}).get("template_ref", {}).get("document_id")}
+    for clause in doc["digest"]["clauses"]:
+        ids.add(((clause.get("our_standard") or {}).get("source_ref") or {}).get("document_id"))
+    return {i for i in ids if i}
+
+
+def _composed(doc: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    blocks = opf_prompt.compose_opf_system_blocks(doc)
+    return "\n".join(blocks), [{"type": "text", "text": block} for block in blocks]
+
+
+def _corpus(doc: dict[str, Any]) -> leakage_scan.ConfidentialCorpus:
+    _text, system_blocks = _composed(doc)
+    return leakage_scan.ConfidentialCorpus.from_opf_document(
+        doc, overrides=None, system_blocks=system_blocks
+    )
+
+
+def _cited(doc: dict[str, Any]) -> dict[str, str]:
+    """`{document_id: the first whole citation naming it}` for every citation
+    the composed prompt renders."""
+    text, _blocks = _composed(doc)
+    cited: dict[str, str] = {}
+    for match in _CITATION.finditer(text):
+        cited.setdefault(match.group(1), match.group(0))
+    return cited
+
+
+def _deal_citations(doc: dict[str, Any]) -> dict[str, str]:
+    cited = _cited(doc)
+    assert _PLACEHOLDER in cited, sorted(cited)  # the intro's illustration renders
+    templates = _template_ids(doc)
+    assert templates & set(cited), (sorted(templates), sorted(cited))  # our standard is cited
+    return {k: v for k, v in cited.items() if k != _PLACEHOLDER and k not in templates}
+
+
+def _deal_ids(doc: dict[str, Any]) -> set[str]:
+    """Every deal the corpus records, read independently of the code under test."""
+    return {d["document_id"] for d in doc["corpus"]["documents"]}
+
+
+def _rendered_dossiers(doc: dict[str, Any]) -> str:
+    """Every dossier the document carries, rendered as the critic receives one
+    (a selection is a subset, so this covers any selection)."""
+    dossiers = doc.get("dossiers")
+    values = dossiers.values() if isinstance(dossiers, dict) else []
+    return "\n".join(critic_dossiers.render_dossier_lines([d for d in values if isinstance(d, dict)]))
+
+
+def _named(text: str, ids: set[str]) -> set[str]:
+    """The ids that appear in `text` as a whole token, bracketed or not, in any case."""
+    return {i for i in ids if re.search(rf"(?<!\w){re.escape(i)}(?!\w)", text, re.IGNORECASE)}
+
+
+def _issue(**fields: str) -> dict[str, Any]:
+    issue: dict[str, Any] = {
+        "issue_key": "I1",
+        "section_ref": "Governing Law",
+        "section_title": "Governing Law",
+        "counterparty_change_summary": "The governing law clause names a different state.",
+        "decision": "REQUEST_CHANGE",
+        "external_rationale_for_footnote": "We ask to keep a US state as the governing law.",
+        "playbook_topic_id": "governing_law",
+        "internal_precedent_citation": None,
+        "provenance": "model",
+    }
+    issue.update(fields)
+    return issue
+
+
+def _output(issue: dict[str, Any]) -> dict[str, Any]:
+    return {"verdict_summary": "Changes are requested.", "issues": [issue]}
+
+
+# ---------------------------------------------------------------------------
+# [1] every deal slug the composed prompt cites is a check-3 id
+# ---------------------------------------------------------------------------
+
+
+def test_every_cited_deal_slug_is_a_check_3_id() -> None:
+    for path in (NDA_EXAMPLE, GOLD_FIXTURE):
+        doc = _load(path)
+        deals = _deal_citations(doc)
+        assert deals, path.name
+        ids = set(_corpus(doc).internal_precedent_ids)
+        missing = sorted(set(deals) - ids)
+        assert not missing, (path.name, missing)
+        assert not (_template_ids(doc) | {_PLACEHOLDER}) & ids, path.name
+
+        # Every deal the prompt or a dossier names in any form, not only in
+        # a bracketed citation, is a check-3 id.
+        text, _blocks = _composed(doc)
+        dossiers = _rendered_dossiers(doc)
+        named = _named(text, _deal_ids(doc)) | _named(dossiers, _deal_ids(doc))
+        assert set(deals) <= named, path.name
+        unheld = sorted(named - ids)
+        assert not unheld, (path.name, unheld)
+
+    # The prose path is exercised, not vacuous: on the NDA example the Floor
+    # rationale names deals outside any citation, in the shared prefix and
+    # in a dossier.
+    nda = _load(NDA_EXAMPLE)
+    nda_text, _blocks = _composed(nda)
+    assert _named(_CITATION.sub("", nda_text), _deal_ids(nda))
+    assert _named(_rendered_dossiers(nda), _deal_ids(nda))
+
+
+# ---------------------------------------------------------------------------
+# [2] blocked externally, permitted internally, and check 3 is the guard
+# ---------------------------------------------------------------------------
+
+
+def test_a_cited_slug_blocks_externally_and_is_permitted_internally() -> None:
+    doc = _load(NDA_EXAMPLE)
+    corpus = _corpus(doc)
+    without_ids = dataclasses.replace(corpus, internal_precedent_ids=[])
+    # The issue's own prose is clean, so any block below is the citation's.
+    assert not leakage_scan.scan_model_output(_output(_issue()), corpus).blocked
+
+    deals = _deal_citations(doc)
+    assert len(deals) == 6, sorted(deals)
+    assert leakage_scan.channel_for_field(_EXTERNAL) == leakage_scan.CHANNEL_EXTERNAL
+    assert leakage_scan.channel_for_field(_INTERNAL) == leakage_scan.CHANNEL_INTERNAL
+    for slug, citation in sorted(deals.items()):
+        for echoed in (
+            f"Signed this way before {citation}, so we keep a US state.",
+            f"As agreed with {slug}, we keep a US state.",
+        ):
+            outcome = leakage_scan.scan_model_output(_output(_issue(**{_EXTERNAL: echoed})), corpus)
+            assert outcome.blocked, (slug, echoed)
+            assert outcome.field_name and _EXTERNAL in outcome.field_name, outcome
+            assert outcome.category == leakage_scan.CATEGORY_CITATION, outcome
+            assert outcome.rule_id == "internal-precedent-id", outcome
+            # Check 3 is the guard: without its ids the same footnote passes
+            # (the pre-#172 behaviour).
+            assert not leakage_scan.scan_model_output(
+                _output(_issue(**{_EXTERNAL: echoed})), without_ids
+            ).blocked, (slug, echoed)
+
+            # The same citation in the internal note is permitted.
+            assert not leakage_scan.scan_model_output(
+                _output(_issue(**{_INTERNAL: echoed})), corpus
+            ).blocked, (slug, echoed)
+            assert not leakage_scan.LeakageScanner(corpus).scan(
+                echoed, field_name=_INTERNAL, channel=leakage_scan.CHANNEL_INTERNAL
+            ).blocked, (slug, echoed)
+
+
+# ---------------------------------------------------------------------------
+# [3] each ref kind is read on its own, and the precedent record too
+# ---------------------------------------------------------------------------
+
+_KINDS = ("signed_variants", "exemplars", "refused_asks", "changed_openings")
+
+
+def _only(doc: dict[str, Any], kind: str) -> tuple[dict[str, Any], set[str]]:
+    """The doc with only `kind`'s digest refs left (and no precedent record), plus
+    the ids that kind cites, read independently of the code under test."""
+    doc = copy.deepcopy(doc)
+    doc["evidence"]["precedent"] = []
+    doc.pop("dossiers", None)
+    expected: set[str] = set()
+    for clause in doc["digest"]["clauses"]:
+        for field_name in ("signed_variants", "refused_asks", "changed_openings"):
+            entries = clause.get(field_name) or []
+            if kind == "exemplars" and field_name == "signed_variants":
+                kept = [e for e in entries if e.get("exemplars")]
+                for entry in kept:
+                    entry.pop("ref", None)
+                    expected.update(x["ref"]["document_id"] for x in entry["exemplars"])
+                clause[field_name] = kept
+            elif field_name == kind:
+                kept = [e for e in entries if not e.get("exemplars")]
+                expected.update(e["ref"]["document_id"] for e in kept)
+                clause[field_name] = kept
+            else:
+                clause[field_name] = []
+    return doc, expected
+
+
+def test_each_ref_kind_contributes_its_own_ids() -> None:
+    nda = _load(NDA_EXAMPLE)
+    for kind in _KINDS:
+        doc, expected = _only(nda, kind)
+        assert expected, kind  # the NDA example carries every kind
+        ids = leakage_scan.ConfidentialCorpus.from_opf_document(doc).internal_precedent_ids
+        assert set(ids) == expected, (kind, sorted(ids), sorted(expected))
+
+
+def test_the_precedent_record_contributes_deals_the_digest_does_not_cite() -> None:
+    doc = _load(GOLD_FIXTURE)
+    record = {r["document_id"] for r in doc["evidence"]["precedent"]}
+    evidence_only = record - set(_cited(doc))
+    assert len(evidence_only) == 2, sorted(evidence_only)
+    ids = set(leakage_scan.ConfidentialCorpus.from_opf_document(doc).internal_precedent_ids)
+    assert record <= ids, sorted(record - ids)
+
+    no_evidence = copy.deepcopy(doc)
+    no_evidence["evidence"]["precedent"] = []
+    without = set(
+        leakage_scan.ConfidentialCorpus.from_opf_document(no_evidence).internal_precedent_ids
+    )
+    assert not evidence_only & without, sorted(evidence_only & without)
+
+
+def test_dossier_ids_still_lead_and_nothing_is_listed_twice() -> None:
+    doc = _load(NDA_EXAMPLE)
+    ids = leakage_scan.ConfidentialCorpus.from_opf_document(doc).internal_precedent_ids
+    assert len(ids) == len(set(ids)), ids
+    dossier_ids = leakage_scan._opf_dossier_precedent_ids(doc)
+    assert dossier_ids and ids[: len(dossier_ids)] == dossier_ids
+
+
+# ---------------------------------------------------------------------------
+# [4] the template slug is never a check-3 id
+# ---------------------------------------------------------------------------
+
+
+def test_the_template_slug_does_not_block_an_external_note() -> None:
+    for path in (NDA_EXAMPLE, GOLD_FIXTURE):
+        doc = _load(path)
+        corpus = _corpus(doc)
+        for template in sorted(_template_ids(doc)):
+            note = f"We ask to restore the {template} wording for governing law."
+            outcome = leakage_scan.scan_model_output(_output(_issue(**{_EXTERNAL: note})), corpus)
+            assert not outcome.blocked, (path.name, template, outcome)
+
+
+def test_the_current_counterpartys_own_slug_is_exempt() -> None:
+    """#172 review: the #208 current-counterparty exemption reaches the deal
+    slugs. On a review of the counterparty a slug was made from, naming that
+    party (as its slug or its plain name) in an external field is not a leak;
+    every OTHER deal's slug still blocks."""
+    doc = _load(NDA_EXAMPLE)
+    corpus = _corpus(doc)
+    slugs = sorted(_deal_citations(doc))
+    current, other = slugs[0], slugs[1]
+    name = current.replace("-", " ").replace("_", " ").title()
+    # The slug token blocks without the exemption and passes with it. (The
+    # plain name is never held -- the de-slugged residual, #173 -- so it
+    # passes either way; asserted so a future list change is noticed.)
+    as_slug = _issue(**{_EXTERNAL: f"As agreed with {current}, we keep a US state."})
+    assert leakage_scan.scan_model_output(_output(as_slug), corpus).blocked, current
+    for issue in (as_slug, _issue(**{_EXTERNAL: f"We ask {name} to keep a US state."})):
+        assert not leakage_scan.scan_model_output(
+            _output(issue), corpus, current_counterparty_name=name
+        ).blocked, (name, issue[_EXTERNAL])
+    outcome = leakage_scan.scan_model_output(
+        _output(_issue(**{_EXTERNAL: f"As agreed with {other}, we keep a US state."})),
+        corpus,
+        current_counterparty_name=name,
+    )
+    assert outcome.blocked and outcome.rule_id == "internal-precedent-id", (other, outcome)
+
+
+def main() -> int:
+    tests = [
+        test_every_cited_deal_slug_is_a_check_3_id,
+        test_a_cited_slug_blocks_externally_and_is_permitted_internally,
+        test_each_ref_kind_contributes_its_own_ids,
+        test_the_precedent_record_contributes_deals_the_digest_does_not_cite,
+        test_dossier_ids_still_lead_and_nothing_is_listed_twice,
+        test_the_template_slug_does_not_block_an_external_note,
+        test_the_current_counterpartys_own_slug_is_exempt,
+    ]
+    failed = 0
+    for test in tests:
+        try:
+            test()
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            print(f"FAIL: {test.__name__}: {type(exc).__name__}: {exc}")
+        else:
+            print(f"PASS: {test.__name__}")
+    print()
+    if failed:
+        print(f"FAIL: {failed} test(s) failed (issue #172).")
+        return 1
+    print("PASS: digest citation document ids are check-3 ids (issue #172).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -668,12 +668,16 @@ def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
         # Everything but checks 3 and 4 is the derivation, byte for byte ...
         assert dataclasses.replace(
             with_dossiers, precedent_verbatim_spans=[], internal_precedent_ids=[]
-        ) == derived, path.name
+        ) == dataclasses.replace(derived, internal_precedent_ids=[]), path.name
         assert derived.precedent_verbatim_spans == [], path.name
-        assert derived.internal_precedent_ids == [], path.name
-        # ... check 3 holds every dossier precedent id ...
-        assert with_dossiers.internal_precedent_ids == _dossier_precedent_ids(doc), path.name
-        assert with_dossiers.internal_precedent_ids, path.name
+        # ... check 3 holds every dossier precedent id, then the deal
+        # document ids the digest cites (#172, which a document without
+        # dossiers carries alone) ...
+        deal_ids = leakage_scan._opf_deal_document_ids(doc)
+        assert deal_ids, path.name
+        assert derived.internal_precedent_ids == deal_ids, path.name
+        assert with_dossiers.internal_precedent_ids == _dossier_precedent_ids(doc) + deal_ids, path.name
+        assert _dossier_precedent_ids(doc), path.name
         # ... and check 4 holds each excerpt's whole text, never our standard.
         spans = with_dossiers.precedent_verbatim_spans
         assert spans == _excerpt_texts(doc), path.name
@@ -813,7 +817,9 @@ def test_a_dossier_precedent_id_cited_in_an_external_field_is_blocked() -> None:
     assert omitted in line
     vector_corpus = leakage_scan.ConfidentialCorpus.from_opf_document(vector_doc, overrides=None)
     assert omitted in vector_corpus.internal_precedent_ids, vector_corpus.internal_precedent_ids
-    assert vector_corpus.internal_precedent_ids == _dossier_precedent_ids(vector_doc)
+    assert vector_corpus.internal_precedent_ids == _dossier_precedent_ids(
+        vector_doc
+    ) + leakage_scan._opf_deal_document_ids(vector_doc)
     _assert_cited_id_blocked_externally_and_allowed_internally(vector_corpus, omitted)
 
 

@@ -108,15 +108,22 @@ are:
 | `system_prompt_ngrams` | empty (#521 populates it) | not passed by `review_spine.py:482`/`:486` |
 | `playbook_ngrams` | 4 entries | derived from the playbook |
 | `standard_clause_ngrams` | 3 entries | derived from the playbook |
-| `internal_precedent_ids` | the dossier precedent ids (#40) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`) |
+| `internal_precedent_ids` | the dossier precedent ids (#40) and every deal `document_id` (#172) | `from_opf_document` reads every dossier excerpt's `precedent_id` and every `omitted_precedent_ids` entry (`_opf_dossier_precedent_ids`), then every deal `document_id` the digest citations and `evidence.precedent[]` carry (`_opf_deal_document_ids`) |
 | `counterparty_names` | empty | not passed |
 | `precedent_verbatim_spans` | the dossier excerpts (#40) | `from_opf_document` reads every dossier excerpt's whole `opening` / `signed` text that is not our standard |
 
-Leakage check **3** (`citation_leakage`) is **live, for the dossiers' precedent ids
-only**: the critic receives each selected dossier whole, ids included, and check 3
-blocks an external field that cites one. `counterparty_names` is still empty, although
-the digest's citations in both passes' prompts name each deal by its `document_id`, which
-no check-3 list holds (#172).
+Leakage check **3** (`citation_leakage`) is **live, for the dossiers' precedent ids and
+the deals' `document_id`s**: the critic receives each selected dossier whole, ids
+included, and the prompt names each deal by its `document_id` on two paths, the
+digest's citations in both passes' prompts and engine-written Floor rationale prose
+(printed verbatim in both passes' shared prefix and carried again in each dossier's
+`floor_rules`); since #172 `internal_precedent_ids` holds both, so check 3 blocks an
+external field that echoes one. The deal ids come from the digest citations and the
+`evidence.precedent[]` walk; nothing reads the Floor rationale, so a deal only that
+prose names is held because it has a precedent record. It is a token match and blocks
+the slug as rendered, and only that: `counterparty_names` is still empty, so the same
+counterparty name de-slugged into plain words (`Theta Logistics` for `theta-logistics`)
+passes (#173).
 Check **4** (`precedent_verbatim_spans`)
 is **live, for the critic dossiers only**: retrieval is off, but since #40 the critic
 receives whole precedent excerpts (texts a counterparty wrote or signed), and check 4 is
