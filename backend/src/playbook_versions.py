@@ -304,8 +304,10 @@ def record_playbook_version_upload(
     Issue #478 adds four write-once fields, all optional (absent for a
     caller that never parses/validates the artifact -- e.g. every test that
     calls this function directly rather than through the HTTP route):
-      - `artifact_kind` -- `"opf-0.5"` (the one OPF format since issue #128;
-        older rows may read `"opf-0.3"` / `"opf-0.2"`) / `"v1"`
+      - `artifact_kind` -- `"opf-0.6"` (the one OPF format since issue #177;
+        older rows may read `"opf-0.5"` / `"opf-0.3"` / `"opf-0.2"`, and
+        re-validating such a row's artifact at review time refuses it as an
+        unsupported version) / `"v1"`
         (`src.playbook_upload.validate_playbook_upload`'s classification).
       - `opf_content_hash` -- the OPF document's own `identity.content_hash`,
         distinct from `content_hash` above (which is the hash of the RAW

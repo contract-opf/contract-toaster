@@ -5,9 +5,9 @@
   },
   "bundle_schema_version": 2,
   "lineage": {
-    "opf_content_hash": "sha256:1ece46f1303272b6104025dc240bf6f695c7013cdedc5efd69fbfa19fbd48f93",
+    "opf_content_hash": "sha256:56f690d109917a453d90944173e5a3322c3b8b70f66d5b17da11027b52b2269e",
     "opf_section_digests": {
-      "evidence": "sha256:b3380c98411baa0676a9b72d5ef87d90b3320efebc7b6d8aa89e6b34475d8aea",
+      "evidence": "sha256:26efd24db9fcdbfbea7e36340ad3ebe647201dd8a68c545bd97b24d7b6406355",
       "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd",
       "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842"
     }
@@ -40,6 +40,8 @@
           "document_id": "synthetic-doc-001",
           "in_scope": true,
           "provenance": "our_paper",
+          "signed_on": "2025-05",
+          "signed_on_basis": "signature_block",
           "signed_version": 1,
           "title": "Synthetic Fixture Document 1",
           "versions": 1
@@ -48,6 +50,8 @@
           "document_id": "synthetic-doc-002",
           "in_scope": true,
           "provenance": "counterparty_paper",
+          "signed_on": null,
+          "signed_on_basis": null,
           "signed_version": 1,
           "title": "Synthetic Fixture Document 2",
           "versions": 1
@@ -58,32 +62,93 @@
       }
     },
     "evidence": {
+      "absence": {
+        "guard": 0.1,
+        "records": [
+          {
+            "basis": "scored",
+            "candidates": [
+              {
+                "filed_under": "liability_cap",
+                "ref": {
+                  "char_span": [
+                    0,
+                    87
+                  ],
+                  "clause_path": "5.2",
+                  "document_id": "synthetic-doc-001",
+                  "version": 1
+                },
+                "score": 0.143
+              }
+            ],
+            "document_id": "synthetic-doc-001",
+            "id": "abs.d280df15b8d07c5f",
+            "n_checked": 1,
+            "status": "possibly_present",
+            "taxonomy_id": "termination"
+          },
+          {
+            "basis": "scored",
+            "candidates": [
+              {
+                "filed_under": "termination",
+                "ref": {
+                  "char_span": [
+                    0,
+                    89
+                  ],
+                  "clause_path": "9.1",
+                  "document_id": "synthetic-doc-002",
+                  "version": 1
+                },
+                "score": 0.143
+              }
+            ],
+            "document_id": "synthetic-doc-002",
+            "id": "abs.18488c69e70b7ece",
+            "n_checked": 1,
+            "status": "possibly_present",
+            "taxonomy_id": "liability_cap"
+          }
+        ]
+      },
       "clauses": [
         {
           "id": "clause-liability-cap",
           "n_changed_openings": 0,
           "n_deals": 1,
+          "n_kept_prior": 0,
           "n_kept_standard": 0,
+          "n_moved_to_current": 0,
+          "n_opened_prior": 0,
           "n_opened_standard": 0,
           "n_refused": 0,
           "n_signed_standard": 0,
           "n_variants": 1,
           "our_standard": null,
+          "prior_standards": [],
           "taxonomy_id": "liability_cap",
-          "title": "Liability Cap"
+          "title": "Liability Cap",
+          "why_changed": null
         },
         {
           "id": "clause-termination",
           "n_changed_openings": 0,
           "n_deals": 1,
+          "n_kept_prior": 0,
           "n_kept_standard": 0,
+          "n_moved_to_current": 0,
+          "n_opened_prior": 0,
           "n_opened_standard": 0,
           "n_refused": 0,
           "n_signed_standard": 0,
           "n_variants": 1,
           "our_standard": null,
+          "prior_standards": [],
           "taxonomy_id": "termination",
-          "title": "Termination for Convenience"
+          "title": "Termination for Convenience",
+          "why_changed": null
         }
       ],
       "precedent": [
@@ -99,6 +164,7 @@
           "refused_asks": [],
           "rounds": 0,
           "signed": true,
+          "signed_on": "2025-05",
           "signed_text": {
             "ref": {
               "char_span": [
@@ -127,6 +193,7 @@
           "refused_asks": [],
           "rounds": 0,
           "signed": true,
+          "signed_on": null,
           "signed_text": {
             "ref": {
               "char_span": [
@@ -160,14 +227,14 @@
       ]
     },
     "identity": {
-      "content_hash": "sha256:1ece46f1303272b6104025dc240bf6f695c7013cdedc5efd69fbfa19fbd48f93",
+      "content_hash": "sha256:56f690d109917a453d90944173e5a3322c3b8b70f66d5b17da11027b52b2269e",
       "section_digests": {
-        "evidence": "sha256:b3380c98411baa0676a9b72d5ef87d90b3320efebc7b6d8aa89e6b34475d8aea",
+        "evidence": "sha256:26efd24db9fcdbfbea7e36340ad3ebe647201dd8a68c545bd97b24d7b6406355",
         "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd",
         "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842"
       }
     },
-    "opf_version": "0.5",
+    "opf_version": "0.6",
     "posture": {
       "system_prompt": "This is a synthetic posture for a fictional educational internship and affiliation agreement, authored only for test fixtures. It expresses no real party's negotiation intent. Treat all monetary and party details in this document as placeholders."
     },

@@ -6,7 +6,7 @@ hard-rejection RECALL enforced by code, outside both models.
 ## The invariant
 
 Before either model pass runs, `build_ledger` reads the agreement type's
-hard-rule manifest (OPF 0.5 `manifest.hard_rules`, playbook-engine#228) and
+hard-rule manifest (OPF 0.6 `manifest.hard_rules`, playbook-engine#228) and
 opens one ledger entry per rule whose `required_presence` is true -- the
 rules whose clause's absence or deletion is itself a hard rejection. Every
 entry starts as `UNPROVEN_HARD_REJECTION`.
@@ -288,7 +288,7 @@ def build_ledger(opf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     """One `UNPROVEN_HARD_REJECTION` entry per manifest rule with
     `required_presence` true, in manifest (Floor) order. Empty for a document
     with no manifest (a v1 bundle never reaches this; the manifest is
-    optional in the 0.5 schema) or no presence rule.
+    optional in the 0.6 schema) or no presence rule.
 
     Each entry carries what evaluation and enforcement need, resolved once
     here: the rule's `condition` and `fallback_language`, the clause's public

@@ -45,10 +45,10 @@ handler. So every row and object these tests assert over is a shape
 production writes; nothing asserts over a state the system cannot reach.
 
 Coverage (the issue's "Required verification" list for this file):
-  - OPF 0.5 artifacts with and without a digest (the gold fixture carries
+  - OPF 0.6 artifacts with and without a digest (the gold fixture carries
     the engine-derived sections; the synthetic EIAA fixture carries none),
     both through the one top-level `agreement_type` object
-    `playbooks/opf/playbook.schema-0.5.json` declares, and the legacy v1
+    `playbooks/opf/playbook.schema-0.6.json` declares, and the legacy v1
     registry shape.
   - Active-vs-inactive version selection: a second uploaded version whose
     `agreement_type.name` differs leaves the vocabulary alone until it is
@@ -123,10 +123,10 @@ import preflight_pass  # noqa: E402
 import test_preflight_491 as preflight491  # noqa: E402
 
 # The two committed OPF fixtures. Both are real, schema-valid, identity-
-# sealed artifacts the loader accepts today (tests/test_opf_ingest_05.py
+# sealed artifacts the loader accepts today (tests/test_opf_ingest_06.py
 # loads this exact pair), so what is uploaded here is what an admin would
 # upload.
-OPF_DIGEST_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+OPF_DIGEST_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 OPF_NO_DIGEST_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 
 # `playbook_upload._check_agreement_type_match` refuses an upload whose
@@ -143,7 +143,7 @@ def _with_perspective(doc: dict[str, Any]) -> dict[str, Any]:
 
     Issue #676 made `perspective` an upload-time minimum
     (`playbook_upload.OPF_UPLOAD_MINIMUMS`): schema-OPTIONAL in OPF
-    0.5, but refused by the admin upload path this harness drives. The gold
+    0.6, but refused by the admin upload path this harness drives. The gold
     fixture already carries one, so this is a no-op there; the no-digest
     fixture (`tests/fixtures/opf/synthetic-eiaa.opf.json`) does not.
 
@@ -184,7 +184,7 @@ OTHER = preflight_pass.UNCLASSIFIED_AGREEMENT_TYPE
 def _reseal(doc: dict[str, Any]) -> dict[str, Any]:
     """Recompute `identity` so a mutated OPF document hashes honestly again
     -- the loader verifies `identity.content_hash` and would otherwise
-    refuse the upload. Same helper shape as tests/test_opf_ingest_05.py's."""
+    refuse the upload. Same helper shape as tests/test_opf_ingest_06.py's."""
     doc = copy.deepcopy(doc)
     original_sections = set(doc["identity"].get("section_digests") or {})
     doc["identity"]["content_hash"] = opf_canonicalize.content_hash(doc)
@@ -456,9 +456,9 @@ class TestDbInstalledOpfPlaybookReachesTheVocabulary(PreflightVocabularyTestBase
         self.assertEqual(body["match"], "likely")
 
     def test_opf_without_a_digest_active_type_resolves_the_same_way(self):
-        """An OPF 0.5 artifact with no digest or other derived section
+        """An OPF 0.6 artifact with no digest or other derived section
         resolves through the same top-level `agreement_type` object
-        (`playbooks/opf/playbook.schema-0.5.json`) as the gold fixture --
+        (`playbooks/opf/playbook.schema-0.6.json`) as the gold fixture --
         asserted, not assumed, against a real no-digest artifact."""
         self._install_opf_fixture(OPF_NO_DIGEST_PLAYBOOK_ID, OPF_NO_DIGEST_FIXTURE)
 

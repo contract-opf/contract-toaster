@@ -1,20 +1,5 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>OPF playbook — acme-university-0.5-real-shape</title>
-<!--
-  Single-file OPF bundle. The canonical playbook is the JSON embedded in
-  the script block with id "opf-canonical" below. Extract that block,
-  JSON-parse it, and verify identity.content_hash over the canonical
-  serialization (see scripts/opf_canonicalize.py).
--->
-</head>
-<body>
-<h1>OPF playbook — acme-university-0.5-real-shape</h1>
-<script id="opf-canonical" type="application/json">
 {
-  "opf_version": "0.5",
+  "opf_version": "0.6",
   "agreement_type": {
     "id": "educational-affiliation",
     "name": "Educational Affiliation Agreement",
@@ -29,7 +14,14 @@
       "document_id": "template",
       "title": "FixtureCorp Affiliation Template",
       "source": "template/affiliation-template.docx"
-    }
+    },
+    "prior_templates": [
+      {
+        "label": "2022 affiliation form",
+        "in_use_from": "2022-01",
+        "sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ]
   },
   "taxonomy": {
     "source": "custom",
@@ -104,12 +96,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 5,
         "n_signed_standard": 2,
         "n_variants": 2,
         "n_refused": 1,
         "n_opened_standard": 2,
         "n_kept_standard": 1,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -135,12 +132,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 1,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 3,
         "n_kept_standard": 1,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -166,12 +168,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 3,
         "n_signed_standard": 2,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 2,
         "n_kept_standard": 2,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -197,12 +204,62 @@
             }
           ]
         },
+        "prior_standards": [
+          {
+            "form_label": "2022 affiliation form",
+            "text": "Confidential Information shall be protected for two (2) years after disclosure.",
+            "parts": [
+              {
+                "part_id": "405d25fe",
+                "order": 1,
+                "text": "Confidential Information shall be protected for two (2) years after disclosure."
+              }
+            ],
+            "source_ref": {
+              "document_id": "prior_template:2022 affiliation form",
+              "version": "prior_template",
+              "clause_path": "9",
+              "char_span": [
+                0,
+                79
+              ]
+            },
+            "vs_standard": {
+              "label": "less_protective",
+              "reason": "Protects information for two years, not three.",
+              "parts": [
+                {
+                  "part_id": "bd86b370",
+                  "status": "present",
+                  "relation": "less_protective",
+                  "reason": "Protects information for two years, not three."
+                }
+              ],
+              "additions": [],
+              "basis": "agent",
+              "check": {
+                "agreed": false,
+                "label_agreed": false,
+                "parts_agreed": true,
+                "by": "fixture-adjudicator",
+                "adjudicated": true
+              }
+            }
+          }
+        ],
+        "why_changed": {
+          "text": "We lengthened confidentiality protection from two years to three after placements began sharing student records.",
+          "basis": "owner"
+        },
         "n_deals": 4,
         "n_signed_standard": 1,
         "n_variants": 2,
         "n_refused": 0,
-        "n_opened_standard": 3,
+        "n_opened_standard": 2,
         "n_kept_standard": 1,
+        "n_opened_prior": 1,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       }
     ],
@@ -215,6 +272,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-03-14",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct.",
@@ -243,6 +301,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-09",
         "rounds": 1,
         "signed_text": {
           "text": "Each party shall indemnify the other for third-party claims arising from its negligence, provided the indemnified party gives prompt notice and reasonable cooperation.",
@@ -268,7 +327,13 @@
             ],
             "additions": [],
             "basis": "agent",
-            "check": null
+            "check": {
+              "agreed": true,
+              "label_agreed": true,
+              "parts_agreed": true,
+              "by": "fixture-checker",
+              "adjudicated": false
+            }
           }
         },
         "opened_with": "standard",
@@ -313,7 +378,13 @@
               ],
               "additions": [],
               "basis": "agent",
-              "check": null
+              "check": {
+                "agreed": false,
+                "label_agreed": false,
+                "parts_agreed": true,
+                "by": "fixture-adjudicator",
+                "adjudicated": true
+              }
             }
           }
         ]
@@ -326,6 +397,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2025-02-03",
         "rounds": 0,
         "signed_text": {
           "text": "FixtureCorp shall indemnify Example Institute against any claim that the placement materials infringe a third party's intellectual property rights.",
@@ -354,6 +426,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct.",
@@ -408,6 +481,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": false,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct.",
@@ -436,6 +510,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-03-14",
         "rounds": 1,
         "signed_text": {
           "text": "This Agreement shall be governed by the laws of the State of Acmeland.",
@@ -490,6 +565,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-09",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of Fixtureland.",
@@ -518,6 +594,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2025-02-03",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement shall be governed by the laws of the State of Exampleland.",
@@ -542,7 +619,7 @@
               }
             ],
             "additions": [],
-            "basis": "agent",
+            "basis": "owner",
             "check": null
           }
         },
@@ -560,6 +637,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "This Agreement shall be governed by the laws of the State of Acmeland.",
@@ -614,6 +692,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-03-14",
         "rounds": 0,
         "signed_text": {
           "text": "Either party may terminate for convenience on thirty (30) days' written notice.",
@@ -642,6 +721,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-09",
         "rounds": 0,
         "signed_text": {
           "text": "Either party may terminate for convenience on thirty (30) days' written notice.",
@@ -670,6 +750,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2025-02-03",
         "rounds": 2,
         "signed_text": {
           "text": "Either party may terminate for convenience upon sixty (60) days' prior written notice.",
@@ -738,6 +819,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-03-14",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information shall be protected for three (3) years after disclosure.",
@@ -766,6 +848,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2024-09",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information consisting of student education records shall be protected in perpetuity.",
@@ -791,7 +874,13 @@
             ],
             "additions": [],
             "basis": "agent",
-            "check": null
+            "check": {
+              "agreed": true,
+              "label_agreed": true,
+              "parts_agreed": true,
+              "by": "fixture-checker",
+              "adjudicated": false
+            }
           }
         },
         "opened_with": "non_standard",
@@ -808,6 +897,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2025-02-03",
         "rounds": 1,
         "signed_text": null,
         "opened_with": "standard",
@@ -836,6 +926,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "Each party shall protect the other's Confidential Information for three (3) years following disclosure.",
@@ -863,16 +954,17 @@
             "check": null
           }
         },
-        "opened_with": "standard",
+        "opened_with": "prior_standard",
+        "opened_with_form": "2022 affiliation form",
         "opening_text": {
-          "text": "Confidential Information shall be protected for three (3) years after disclosure.",
+          "text": "Confidential Information shall be protected for two (2) years after disclosure.",
           "ref": {
             "document_id": "acme-nursing-school",
             "version": 1,
             "clause_path": "9",
             "char_span": [
               0,
-              81
+              79
             ]
           },
           "vs_standard": null
@@ -881,7 +973,44 @@
         "moved": true,
         "refused_asks": []
       }
-    ]
+    ],
+    "absence": {
+      "guard": 0.1,
+      "records": [
+        {
+          "id": "abs.4eb4665272f88463",
+          "taxonomy_id": "term_termination",
+          "document_id": "acme-nursing-school",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 5,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "acme-nursing-school",
+                "version": 2,
+                "clause_path": "15",
+                "char_span": [
+                  0,
+                  89
+                ]
+              },
+              "score": 0.571,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.156371cd60fedfdb",
+          "taxonomy_id": "confidentiality",
+          "document_id": "example-institute",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 3,
+          "candidates": []
+        }
+      ]
+    }
   },
   "posture": {},
   "floor": {},
@@ -896,7 +1025,9 @@
         "scope_confidence": 0.95,
         "versions": 3,
         "signed_version": 3,
-        "version_order_basis": "edit_distance_chain+signed_anchor"
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "signed_on": "2024-03-14",
+        "signed_on_basis": "document_text"
       },
       {
         "document_id": "fixture-college",
@@ -907,7 +1038,9 @@
         "scope_confidence": 0.95,
         "versions": 2,
         "signed_version": 2,
-        "version_order_basis": "edit_distance_chain+signed_anchor"
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "signed_on": "2024-09",
+        "signed_on_basis": "signature_block"
       },
       {
         "document_id": "example-institute",
@@ -918,7 +1051,9 @@
         "scope_confidence": 0.95,
         "versions": 4,
         "signed_version": 4,
-        "version_order_basis": "edit_distance_chain+signed_anchor"
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "signed_on": "2025-02-03",
+        "signed_on_basis": "filename"
       },
       {
         "document_id": "acme-nursing-school",
@@ -929,7 +1064,9 @@
         "scope_confidence": 0.95,
         "versions": 2,
         "signed_version": 2,
-        "version_order_basis": "edit_distance_chain+signed_anchor"
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "signed_on": null,
+        "signed_on_basis": null
       },
       {
         "document_id": "example-academy",
@@ -940,7 +1077,9 @@
         "scope_confidence": 0.95,
         "versions": 1,
         "signed_version": null,
-        "version_order_basis": "edit_distance_chain+signed_anchor"
+        "version_order_basis": "edit_distance_chain+signed_anchor",
+        "signed_on": null,
+        "signed_on_basis": null
       }
     ],
     "stats": {
@@ -957,7 +1096,7 @@
     "stub_basis_present": false
   },
   "digest": {
-    "digest_version": "4",
+    "digest_version": "5",
     "perspective": {
       "party": "FixtureCorp",
       "counterparty_type": "Educational Institution"
@@ -969,8 +1108,8 @@
     "corpus": {
       "n_deals": 5,
       "n_signed": 4,
-      "first_signed": null,
-      "last_signed": null
+      "first_signed": "2024-03",
+      "last_signed": "2025-02"
     },
     "part_map_legend": {
       "part_map": {
@@ -989,6 +1128,12 @@
       "label_by": {
         "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
         "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
+      },
+      "settled": {
+        "agreed": "an independent blind check reached the same label and parts as the judgment",
+        "adjudicated": "the blind check disagreed and a fresh agent decided: the judgment shown is that decision, so this label was contested and deserves more scrutiny",
+        "unchecked": "no completed blind check (none yet, or a disagreement still awaiting adjudication): weaker evidence than agreed or adjudicated",
+        "owner": "the owner set or corrected the judgment; it is never blind-checked"
       }
     },
     "clauses": [
@@ -1014,9 +1159,15 @@
           }
         },
         "n_deals": 5,
+        "first_signed": "2024-03",
+        "last_signed": "2025-02",
         "n_signed_standard": 2,
         "n_opened_standard": 2,
         "n_kept_standard": 1,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 2,
           "equivalent": 0,
@@ -1030,7 +1181,8 @@
           {
             "text": "Each party shall indemnify the other for third-party claims arising from its negligence, provided the indemnified party gives prompt notice and reasonable cooperation.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2024-09",
+            "last_signed": "2024-09",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "less_protective",
@@ -1039,6 +1191,7 @@
             ],
             "additions": [],
             "reason": "Conditions our indemnity on prompt notice and cooperation.",
+            "settled": "agreed",
             "ref": {
               "document_id": "fixture-college",
               "version": 2,
@@ -1055,13 +1208,15 @@
           {
             "text": "FixtureCorp shall indemnify Example Institute against any claim that the placement materials infringe a third party's intellectual property rights.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2025-02",
+            "last_signed": "2025-02",
             "n_from_standard": 0,
             "n_unchanged": 1,
             "label": null,
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "example-institute",
               "version": 4,
@@ -1080,12 +1235,15 @@
           {
             "text": "FixtureCorp shall indemnify Acme University against any and all claims of any kind, including those arising from Acme University's own negligence, without limitation.",
             "n_deals": 1,
+            "first_signed": "2024-09",
+            "last_signed": "2024-09",
             "label": "less_protective",
             "part_map": [
               "-"
             ],
             "additions": [],
             "reason": "Makes our indemnity uncapped and one-way.",
+            "settled": "adjudicated",
             "ref": {
               "document_id": "fixture-college",
               "version": 2,
@@ -1112,6 +1270,7 @@
             ],
             "additions": [],
             "reason": "Removes the mutual indemnity entirely.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "acme-nursing-school",
               "version": 1,
@@ -1128,7 +1287,10 @@
         ],
         "n_variants_total": 2,
         "n_refused_total": 1,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.governing-law",
@@ -1152,9 +1314,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2024-03",
+        "last_signed": "2025-02",
         "n_signed_standard": 1,
         "n_opened_standard": 3,
         "n_kept_standard": 1,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 1,
           "equivalent": 0,
@@ -1168,7 +1336,8 @@
           {
             "text": "This Agreement shall be governed by the laws of the State of Acmeland.",
             "n_deals": 2,
-            "last_signed": null,
+            "first_signed": "2024-03",
+            "last_signed": "2024-03",
             "n_from_standard": 2,
             "n_unchanged": 0,
             "label": "less_protective",
@@ -1177,10 +1346,11 @@
             ],
             "additions": [],
             "reason": "Substitutes the counterparty's home-state law for ours.",
+            "settled": "unchecked",
             "ref": {
-              "document_id": "acme-nursing-school",
-              "version": 2,
-              "clause_path": "12",
+              "document_id": "acme-university",
+              "version": 3,
+              "clause_path": "14",
               "char_span": [
                 0,
                 70
@@ -1194,7 +1364,8 @@
           {
             "text": "This Agreement shall be governed by the laws of the State of Exampleland.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2025-02",
+            "last_signed": "2025-02",
             "n_from_standard": 0,
             "n_unchanged": 1,
             "label": "less_protective",
@@ -1203,6 +1374,7 @@
             ],
             "additions": [],
             "reason": "Substitutes the counterparty's home-state law for ours.",
+            "settled": "owner",
             "ref": {
               "document_id": "example-institute",
               "version": 4,
@@ -1221,7 +1393,10 @@
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.term-termination",
@@ -1245,9 +1420,15 @@
           }
         },
         "n_deals": 3,
+        "first_signed": "2024-03",
+        "last_signed": "2025-02",
         "n_signed_standard": 2,
         "n_opened_standard": 2,
         "n_kept_standard": 2,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 2,
           "equivalent": 0,
@@ -1261,7 +1442,8 @@
           {
             "text": "Either party may terminate for convenience upon sixty (60) days' prior written notice.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2025-02",
+            "last_signed": "2025-02",
             "n_from_standard": 0,
             "n_unchanged": 0,
             "label": "less_protective",
@@ -1270,6 +1452,7 @@
             ],
             "additions": [],
             "reason": "Doubles the notice period before either party may exit.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "example-institute",
               "version": 4,
@@ -1297,6 +1480,7 @@
             ],
             "additions": [],
             "reason": "Triples the notice period before either party may exit.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "example-institute",
               "version": 1,
@@ -1313,7 +1497,10 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 1,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.confidentiality",
@@ -1337,9 +1524,53 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2024-03",
+        "last_signed": "2025-02",
         "n_signed_standard": 1,
-        "n_opened_standard": 3,
+        "n_opened_standard": 2,
         "n_kept_standard": 1,
+        "standard_history": {
+          "forms": [
+            {
+              "form": "2022 affiliation form",
+              "basis": "supplied",
+              "in_use_from": "2022-01",
+              "in_use_until": null,
+              "in_use_basis": "config",
+              "n_opened": 1,
+              "n_kept": 0,
+              "n_conceded": 1,
+              "n_moved_to_current": 0,
+              "unchanged": false,
+              "label": "less_protective",
+              "part_map": [
+                "-"
+              ],
+              "additions": [],
+              "reason": "Protects information for two years, not three.",
+              "settled": "adjudicated",
+              "parts": [
+                {
+                  "part_id": "405d25fe",
+                  "text": "Confidential Information shall be protected for two (2) years after disclosure."
+                }
+              ],
+              "ref": {
+                "document_id": "prior_template:2022 affiliation form",
+                "version": "prior_template",
+                "clause_path": "9",
+                "char_span": [
+                  0,
+                  79
+                ]
+              }
+            }
+          ],
+          "why_changed": {
+            "text": "We lengthened confidentiality protection from two years to three after placements began sharing student records.",
+            "basis": "owner"
+          }
+        },
         "positions": {
           "standard": 1,
           "equivalent": 1,
@@ -1353,7 +1584,8 @@
           {
             "text": "Confidential Information consisting of student education records shall be protected in perpetuity.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2024-09",
+            "last_signed": "2024-09",
             "n_from_standard": 0,
             "n_unchanged": 1,
             "label": "more_protective",
@@ -1362,6 +1594,7 @@
             ],
             "additions": [],
             "reason": "Extends protection of student records without a time limit.",
+            "settled": "agreed",
             "ref": {
               "document_id": "fixture-college",
               "version": 2,
@@ -1379,8 +1612,15 @@
             "label": "equivalent",
             "n_deals": 1,
             "n_texts": 1,
-            "n_from_standard": 1,
+            "n_from_standard": 0,
             "n_unchanged": 0,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -1405,7 +1645,16 @@
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 1,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": [
+          {
+            "document_id": "example-institute",
+            "signed_on": "2025-02-03",
+            "absence_id": "abs.156371cd60fedfdb"
+          }
+        ]
       }
     ],
     "uncovered_clause_types": [
@@ -1444,6 +1693,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Conditions our indemnity on prompt notice and cooperation.",
+            "settled": "agreed",
             "part_map": [
               "-"
             ],
@@ -1466,6 +1716,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Removes the mutual indemnity entirely.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -1507,6 +1758,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Substitutes the counterparty's home-state law for ours.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -1529,6 +1781,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Substitutes the counterparty's home-state law for ours.",
+            "settled": "owner",
             "part_map": [
               "-"
             ],
@@ -1570,6 +1823,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Triples the notice period before either party may exit.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -1602,23 +1856,6 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.8f38b4043376ba82",
-          "kind": "signed_variant",
-          "opening": "Confidential Information shall be protected for three (3) years after disclosure.",
-          "signed": "Each party shall protect the other's Confidential Information for three (3) years following disclosure.",
-          "outcome": "signed",
-          "vs_standard": {
-            "label": "equivalent",
-            "label_by": "parts",
-            "reason": "Same three-year protection, reworded.",
-            "part_map": [
-              "="
-            ],
-            "part_reasons": [],
-            "additions": []
-          }
-        },
-        {
           "precedent_id": "prec.655569eecb3751da",
           "kind": "signed_variant",
           "opening": null,
@@ -1628,6 +1865,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Extends protection of student records without a time limit.",
+            "settled": "agreed",
             "part_map": [
               "+"
             ],
@@ -1637,6 +1875,24 @@
                 "reason": "Extends protection of student records without a time limit."
               }
             ],
+            "additions": []
+          }
+        },
+        {
+          "precedent_id": "prec.8f38b4043376ba82",
+          "kind": "signed_variant",
+          "opening": "Confidential Information shall be protected for two (2) years after disclosure.",
+          "signed": "Each party shall protect the other's Confidential Information for three (3) years following disclosure.",
+          "outcome": "signed",
+          "vs_standard": {
+            "label": "equivalent",
+            "label_by": "parts",
+            "reason": "Same three-year protection, reworded.",
+            "settled": "unchecked",
+            "part_map": [
+              "="
+            ],
+            "part_reasons": [],
             "additions": []
           }
         }
@@ -1654,22 +1910,22 @@
     "documents": [
       {
         "document_id": "acme-nursing-school",
-        "signed_at": null,
+        "signed_on": null,
         "version_files": []
       },
       {
         "document_id": "acme-university",
-        "signed_at": null,
+        "signed_on": "2024-03-14",
         "version_files": []
       },
       {
         "document_id": "example-institute",
-        "signed_at": null,
+        "signed_on": "2025-02-03",
         "version_files": []
       },
       {
         "document_id": "fixture-college",
-        "signed_at": null,
+        "signed_on": "2024-09",
         "version_files": []
       }
     ],
@@ -1712,14 +1968,14 @@
       ],
       "clause.confidentiality": [
         {
-          "precedent_id": "prec.8f38b4043376ba82",
-          "document_id": "acme-nursing-school",
+          "precedent_id": "prec.655569eecb3751da",
+          "document_id": "fixture-college",
           "kind": "signed_variant",
           "omitted": false
         },
         {
-          "precedent_id": "prec.655569eecb3751da",
-          "document_id": "fixture-college",
+          "precedent_id": "prec.8f38b4043376ba82",
+          "document_id": "acme-nursing-school",
           "kind": "signed_variant",
           "omitted": false
         }
@@ -1730,476 +1986,11 @@
     "id": "educational-affiliation",
     "version": "1.0.0",
     "supersedes": null,
-    "content_hash": "sha256:1667a4b29e9d12f2a78b6948f624a10769e88666d01242bfeae000b120cda3d2",
+    "content_hash": "sha256:28fb815ecdac37fca3c65784fbcfb4a8103c73478a38e9f4a4226c5d2f21464f",
     "section_digests": {
-      "evidence": "sha256:5f07dba0c6408a0c6d73fa76db59a36c54c4c687a820fef3ea303f4df5e1d2f3",
+      "evidence": "sha256:d466f78954c5ca05fd91fcdd1bcefb31847f6c5fb5e731bd76404d407d8e0a7e",
       "posture": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
       "floor": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     }
   }
 }
-
-</script>
-<script id="opf-digest" type="application/json">
-{
- "digest_version": "4",
- "perspective": {
-  "party": "FixtureCorp",
-  "counterparty_type": "Educational Institution"
- },
- "agreement_type": {
-  "id": "educational-affiliation",
-  "name": "Educational Affiliation Agreement"
- },
- "corpus": {
-  "n_deals": 5,
-  "n_signed": 4,
-  "first_signed": null,
-  "last_signed": null
- },
- "part_map_legend": {
-  "part_map": {
-   "=": "our part is present with the same legal effect",
-   "+": "our part is present but more protective for perspective.party",
-   "-": "our part is present but less protective for perspective.party",
-   "x+": "our part is omitted, which is more protective for perspective.party",
-   "x-": "our part is omitted, which is less protective for perspective.party",
-   "x0": "our part is omitted with no effect on perspective.party"
-  },
-  "additions": {
-   "+": "an addition no part covers, more protective for perspective.party",
-   "-": "an addition no part covers, less protective for perspective.party",
-   "0": "an addition no part covers, neutral for perspective.party"
-  },
-  "label_by": {
-   "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
-   "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
-  }
- },
- "clauses": [
-  {
-   "id": "clause.indemnification",
-   "taxonomy_id": "indemnification",
-   "title": "Indemnification",
-   "our_standard": {
-    "parts": [
-     {
-      "part_id": "08e679ee",
-      "text": "Each party shall indemnify the other against third-party claims arising from its own negligence or willful misconduct."
-     }
-    ],
-    "source_ref": {
-     "document_id": "template",
-     "version": "template",
-     "clause_path": "8",
-     "char_span": [
-      0,
-      118
-     ]
-    }
-   },
-   "n_deals": 5,
-   "n_signed_standard": 2,
-   "n_opened_standard": 2,
-   "n_kept_standard": 1,
-   "positions": {
-    "standard": 2,
-    "equivalent": 0,
-    "more_protective": 0,
-    "less_protective": 1,
-    "mixed": 0,
-    "different_concept": 0,
-    "unjudged": 1
-   },
-   "signed_variants": [
-    {
-     "text": "Each party shall indemnify the other for third-party claims arising from its negligence, provided the indemnified party gives prompt notice and reasonable cooperation.",
-     "n_deals": 1,
-     "last_signed": null,
-     "n_from_standard": 1,
-     "n_unchanged": 0,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Conditions our indemnity on prompt notice and cooperation.",
-     "ref": {
-      "document_id": "fixture-college",
-      "version": 2,
-      "clause_path": "8.1",
-      "char_span": [
-       0,
-       167
-      ]
-     },
-     "precedent_ids": [
-      "prec.1a182e0824acb8f6"
-     ]
-    },
-    {
-     "text": "FixtureCorp shall indemnify Example Institute against any claim that the placement materials infringe a third party's intellectual property rights.",
-     "n_deals": 1,
-     "last_signed": null,
-     "n_from_standard": 0,
-     "n_unchanged": 1,
-     "label": null,
-     "part_map": null,
-     "additions": null,
-     "reason": null,
-     "ref": {
-      "document_id": "example-institute",
-      "version": 4,
-      "clause_path": "8.2",
-      "char_span": [
-       0,
-       147
-      ]
-     },
-     "precedent_ids": [
-      "prec.dda9c54042776f8d"
-     ]
-    }
-   ],
-   "refused_asks": [
-    {
-     "text": "FixtureCorp shall indemnify Acme University against any and all claims of any kind, including those arising from Acme University's own negligence, without limitation.",
-     "n_deals": 1,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Makes our indemnity uncapped and one-way.",
-     "ref": {
-      "document_id": "fixture-college",
-      "version": 2,
-      "clause_path": "8.1",
-      "char_span": [
-       0,
-       166
-      ]
-     },
-     "precedent_ids": [
-      "prec.1a182e0824acb8f6"
-     ]
-    }
-   ],
-   "changed_openings": [
-    {
-     "text": "Each party is responsible for its own acts and omissions, and neither party shall indemnify the other.",
-     "n_deals": 1,
-     "n_to_standard": 1,
-     "n_struck": 0,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Removes the mutual indemnity entirely.",
-     "ref": {
-      "document_id": "acme-nursing-school",
-      "version": 1,
-      "clause_path": "7",
-      "char_span": [
-       0,
-       102
-      ]
-     },
-     "precedent_ids": [
-      "prec.3ca4b632df644839"
-     ]
-    }
-   ],
-   "n_variants_total": 2,
-   "n_refused_total": 1,
-   "n_changed_openings_total": 1
-  },
-  {
-   "id": "clause.governing-law",
-   "taxonomy_id": "governing_law",
-   "title": "Governing Law",
-   "our_standard": {
-    "parts": [
-     {
-      "part_id": "ed9e2d80",
-      "text": "This Agreement is governed by the laws of the State of Fixtureland."
-     }
-    ],
-    "source_ref": {
-     "document_id": "template",
-     "version": "template",
-     "clause_path": "14",
-     "char_span": [
-      0,
-      67
-     ]
-    }
-   },
-   "n_deals": 4,
-   "n_signed_standard": 1,
-   "n_opened_standard": 3,
-   "n_kept_standard": 1,
-   "positions": {
-    "standard": 1,
-    "equivalent": 0,
-    "more_protective": 0,
-    "less_protective": 3,
-    "mixed": 0,
-    "different_concept": 0,
-    "unjudged": 0
-   },
-   "signed_variants": [
-    {
-     "text": "This Agreement shall be governed by the laws of the State of Acmeland.",
-     "n_deals": 2,
-     "last_signed": null,
-     "n_from_standard": 2,
-     "n_unchanged": 0,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Substitutes the counterparty's home-state law for ours.",
-     "ref": {
-      "document_id": "acme-nursing-school",
-      "version": 2,
-      "clause_path": "12",
-      "char_span": [
-       0,
-       70
-      ]
-     },
-     "precedent_ids": [
-      "prec.0f1669db3fe6e197",
-      "prec.6b06849951bcb796"
-     ]
-    },
-    {
-     "text": "This Agreement shall be governed by the laws of the State of Exampleland.",
-     "n_deals": 1,
-     "last_signed": null,
-     "n_from_standard": 0,
-     "n_unchanged": 1,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Substitutes the counterparty's home-state law for ours.",
-     "ref": {
-      "document_id": "example-institute",
-      "version": 4,
-      "clause_path": "16",
-      "char_span": [
-       0,
-       73
-      ]
-     },
-     "precedent_ids": [
-      "prec.348568391cc0ce1d"
-     ]
-    }
-   ],
-   "refused_asks": [],
-   "changed_openings": [],
-   "n_variants_total": 2,
-   "n_refused_total": 0,
-   "n_changed_openings_total": 0
-  },
-  {
-   "id": "clause.term-termination",
-   "taxonomy_id": "term_termination",
-   "title": "Term and Termination",
-   "our_standard": {
-    "parts": [
-     {
-      "part_id": "f4a5d3fd",
-      "text": "Either party may terminate for convenience on thirty (30) days' written notice."
-     }
-    ],
-    "source_ref": {
-     "document_id": "template",
-     "version": "template",
-     "clause_path": "11",
-     "char_span": [
-      0,
-      79
-     ]
-    }
-   },
-   "n_deals": 3,
-   "n_signed_standard": 2,
-   "n_opened_standard": 2,
-   "n_kept_standard": 2,
-   "positions": {
-    "standard": 2,
-    "equivalent": 0,
-    "more_protective": 0,
-    "less_protective": 1,
-    "mixed": 0,
-    "different_concept": 0,
-    "unjudged": 0
-   },
-   "signed_variants": [
-    {
-     "text": "Either party may terminate for convenience upon sixty (60) days' prior written notice.",
-     "n_deals": 1,
-     "last_signed": null,
-     "n_from_standard": 0,
-     "n_unchanged": 0,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Doubles the notice period before either party may exit.",
-     "ref": {
-      "document_id": "example-institute",
-      "version": 4,
-      "clause_path": "11.1",
-      "char_span": [
-       0,
-       86
-      ]
-     },
-     "precedent_ids": [
-      "prec.70c696880c251b40"
-     ]
-    }
-   ],
-   "refused_asks": [],
-   "changed_openings": [
-    {
-     "text": "Either party may terminate for convenience upon ninety (90) days' prior written notice.",
-     "n_deals": 1,
-     "n_to_standard": 0,
-     "n_struck": 0,
-     "label": "less_protective",
-     "part_map": [
-      "-"
-     ],
-     "additions": [],
-     "reason": "Triples the notice period before either party may exit.",
-     "ref": {
-      "document_id": "example-institute",
-      "version": 1,
-      "clause_path": "11.1",
-      "char_span": [
-       0,
-       87
-      ]
-     },
-     "precedent_ids": [
-      "prec.70c696880c251b40"
-     ]
-    }
-   ],
-   "n_variants_total": 1,
-   "n_refused_total": 0,
-   "n_changed_openings_total": 1
-  },
-  {
-   "id": "clause.confidentiality",
-   "taxonomy_id": "confidentiality",
-   "title": "Confidentiality",
-   "our_standard": {
-    "parts": [
-     {
-      "part_id": "bd86b370",
-      "text": "Confidential Information shall be protected for three (3) years after disclosure."
-     }
-    ],
-    "source_ref": {
-     "document_id": "template",
-     "version": "template",
-     "clause_path": "9",
-     "char_span": [
-      0,
-      81
-     ]
-    }
-   },
-   "n_deals": 4,
-   "n_signed_standard": 1,
-   "n_opened_standard": 3,
-   "n_kept_standard": 1,
-   "positions": {
-    "standard": 1,
-    "equivalent": 1,
-    "more_protective": 1,
-    "less_protective": 0,
-    "mixed": 0,
-    "different_concept": 0,
-    "unjudged": 0
-   },
-   "signed_variants": [
-    {
-     "text": "Confidential Information consisting of student education records shall be protected in perpetuity.",
-     "n_deals": 1,
-     "last_signed": null,
-     "n_from_standard": 0,
-     "n_unchanged": 1,
-     "label": "more_protective",
-     "part_map": [
-      "+"
-     ],
-     "additions": [],
-     "reason": "Extends protection of student records without a time limit.",
-     "ref": {
-      "document_id": "fixture-college",
-      "version": 2,
-      "clause_path": "9.2",
-      "char_span": [
-       0,
-       98
-      ]
-     },
-     "precedent_ids": [
-      "prec.655569eecb3751da"
-     ]
-    },
-    {
-     "label": "equivalent",
-     "n_deals": 1,
-     "n_texts": 1,
-     "n_from_standard": 1,
-     "n_unchanged": 0,
-     "last_signed": null,
-     "exemplars": [
-      {
-       "text": "Each party shall protect the other's Confidential Information for three (3) years following disclosure.",
-       "ref": {
-        "document_id": "acme-nursing-school",
-        "version": 2,
-        "clause_path": "9",
-        "char_span": [
-         0,
-         103
-        ]
-       }
-      }
-     ],
-     "precedent_ids": [
-      "prec.8f38b4043376ba82"
-     ]
-    }
-   ],
-   "refused_asks": [],
-   "changed_openings": [],
-   "n_variants_total": 2,
-   "n_refused_total": 0,
-   "n_changed_openings_total": 0
-  }
- ],
- "uncovered_clause_types": [
-  {
-   "taxonomy_id": "insurance",
-   "label": "Insurance"
-  }
- ]
-}
-</script>
-</body>
-</html>

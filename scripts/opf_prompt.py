@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 OPF prompt composition -- issue #284, rebuilt on the DIGEST for OPF 0.3, and
-on digest_version 4 (OPF 0.5, the only format this repo reads) by issue #129.
+on digest_version 4 (OPF 0.5) by issue #129, and on digest_version 5 (OPF 0.6,
+the only format this repo reads) by issue #177.
 
 Pure composition: turn a schema-shaped OPF document (see `scripts/opf_load.py`
 for the loader/validator this consumes) plus an optional approved review policy
@@ -30,7 +31,7 @@ on the real corpus. It does not fit any model's context; it could never have run
 a single review. It was not too expensive, it was impossible.
 
 The engine-built `digest` section replaces it: the same knowledge projected
-for exactly this use. Digest 4 (OPF 0.5) is verdict-free precedent -- per
+for exactly this use. Digest 5 (OPF 0.6) is verdict-free precedent -- per
 clause, our standard (in its parts), how many signed deals opened with it and
 kept it, the positions of the signed texts, the signed variants (with how many
 were reached from our standard and how many were signed as proposed), the
@@ -44,7 +45,7 @@ What the digest deliberately omits -- every signed text beyond its 300-char
 summary, the per-deal precedent record, the per-part reasons -- is not lost
 from the playbook, and this module does not reach it. Depth is
 deterministic dossier selection appended by orchestration to the CRITIC's
-role suffix (#40, `scripts/critic_dossiers.py`, reading OPF 0.5's
+role suffix (#40, `scripts/critic_dossiers.py`, reading OPF 0.6's
 `dossiers`), not a model tool call and not a block here; the unwired
 drill-down tool was retired in #161. Summaries by default is the trade that
 lets the prompt fit, and the block says what each capped list left out.
@@ -59,13 +60,49 @@ Digest 2 was rendered under four judged headers (preferred variations /
 concessions / unacceptable / exemplar forms), a stance sentence, frequency
 bands and risk annotations. On the real playbook the stance was "mixed" for 22
 of 24 clauses and the bands were inflated, and live runs showed the model
-mining the "unacceptable" list as replacement language. Digest 4 carries none
+mining the "unacceptable" list as replacement language. Digest 5 carries none
 of that, and this module renders it as facts: counts of distinct deals, the
 wording, and a citation. The one judged value is the `vs_standard` label (with
 its reason and part map), rendered as an index the model must check against
 the cited text, never as an instruction -- DIGEST_INTRO says so in as many
 words. The display renames (`scripts/opf_terminology.py`) are retired with
-digest 2: the digest 4 field names are already plain.
+digest 2: the digest 5 field names are already plain.
+
+## Digest 5: dates, settled-ness, former forms, absence (issue #177)
+
+Digest 5 adds four kinds of fact, and each renders as a fact, never a
+stance (the #129 rule):
+
+  - **Signing months.** Each clause, signed variant, collapsed equivalent
+    entry and refused ask says "first signed <YYYY-MM>, last signed
+    <YYYY-MM>" (`_signed_span`), and the corpus line gives the corpus span.
+    No date is rendered finer than a month, and a verified-absent deal's
+    own date is not rendered at all (the decision is recorded on
+    `_signed_span`).
+  - **How settled a label is** (`settled`). A label whose judgment is
+    `adjudicated` (contested, decided by a third reading) or `unchecked`
+    carries a marker telling the model to weigh it with more care;
+    `agreed` and `owner` render plainly. It qualifies the LABEL, never the
+    entry's weight, and DIGEST_INTRO says so.
+  - **Our former forms** (`standard_history`). One line per former form:
+    its label, RECONSTRUCTED when the producer rebuilt it from the corpus,
+    its in-use dates, the signed deals that opened on it and what became of
+    them, and its comparison with today's standard; then the owner's
+    `why_changed` note, only when the owner wrote one -- the playbook never
+    states a reason it does not carry. A signed variant whose deals opened
+    on a former form says so by the form's label (read from
+    `evidence.precedent[]` through its `precedent_ids`: the record's
+    `opened_with` / `opened_with_form`, nothing else): its origin is ours.
+  - **Absence.** "absent in N signed deals (verified)" and, separately,
+    "possibly absent in M more; not verified" -- never summed, and neither
+    is the same as "no precedent" (the heading's coverage and the closing
+    no-precedent line, #158).
+
+The owner's note and a form's label are owner/producer free text new in
+0.6; both pass through the #162 block-tag neutralisation before they render
+(`_neutralise`), on top of the load-time injection scan. A supplied form's
+label also renders as its `prior_template:<label>` citation, so every
+citation (`_fmt_cite`) is neutralised too.
 
 Mirrors the block/cache-breakpoint CONVENTION of
 `scripts/primary_review_pass.py:assemble_system_blocks` (fixed block order,
@@ -94,7 +131,11 @@ the digest is the projection of it that reaches the model, and nothing reads
 the full evidence section into a prompt. (Since issue #173 the deal ids in
 `corpus.documents[]` and the `evidence.precedent[]` refs ARE read, by
 `deal_aliases.alias_map`, but only to name each deal by an opaque alias in
-the digest citations and the Floor rationale; no slug is rendered.) Every other top-level section --
+the digest citations and the Floor rationale; no slug is rendered. Since
+issue #177 each `evidence.precedent[]` record's `id`, `opened_with` and
+`opened_with_form` are read too, by `_prior_form_openings`, only to say how
+many of a signed variant's deals opened on which of our former forms; no
+text is read.) Every other top-level section --
 `posture.rubric` (excised from the schema entirely per engine #178, but this
 function does not validate its input, so a caller-constructed dict carrying
 it is simply never looked at), `posture.generation` (interview transcript),
@@ -136,7 +177,7 @@ deterministic function of the input. Only stderr is new.
 ## Coverage, and the silent-playbook default (issue #158)
 
 The playbook is one input to a review, and for many clauses -- especially on
-counterparty paper -- it has thin precedent or none. Digest 4 makes that
+counterparty paper -- it has thin precedent or none. The digest makes that
 legible and this module renders it: each clause heading states `precedent
 in <n_deals> of <corpus.n_deals> deals`, and one closing line names the
 `uncovered_clause_types` (recognised types with no precedent, each with the
@@ -155,10 +196,10 @@ started being policy -- which is the policy document's job, not the digest's.
 DIGEST_INTRO says so to the model in as many words.
 
 Unlike the retired wholesale projection, this block renders a KNOWN shape (the
-digest 4 clause), so a genuinely new digest field would not appear in the
+digest 5 clause), so a genuinely new digest field would not appear in the
 prompt until this module renders it. That is the deliberate trade for text a
 model can read: `digest_version` is checked at ingest (`scripts/opf_load.py`
-accepts "4" only), so a shape this module does not understand is refused at
+accepts "5" only), so a shape this module does not understand is refused at
 the door rather than silently half-rendered here, and
 `tests/test_opf_schema_sync.py` pins every field this module reads at the
 shape it reads it.
@@ -381,9 +422,31 @@ DIGEST_INTRO = (
     "= same legal effect; + more protective of us; - less protective of us; x+, x-, x0 "
     "omitted, with a more protective, less protective or no effect for us. Additions no "
     "part covers are marked +, - or 0 the same way.\n"
+    "- A label marked \"adjudicated: weigh with care\" was contested: two independent "
+    "readings disagreed and a third decided it. One marked \"unchecked: weigh with care\" "
+    "has not been confirmed by an independent reading. Check the cited text with more care "
+    "before you rely on either. An unmarked label was confirmed by an independent reading "
+    "or set by the owner. How settled a label is says how far to trust the label, never "
+    "how much the entry matters.\n"
+    "- Dates are signing months (YYYY-MM): first signed and last signed are the earliest "
+    "and latest month among the deals behind an entry. A date says when, never how much "
+    "an entry weighs.\n"
+    "- Our former forms: our own earlier template wording for the clause, each with when "
+    "it was in use, the signed deals that opened on it (kept it, conceded from it, or moved "
+    "to today's standard) and how it compares with today's standard. A form marked "
+    "reconstructed was rebuilt from first drafts in the corpus, not supplied by the owner. "
+    "A deal that opened on a former form opened on OUR wording, not the other side's. The "
+    "playbook never says why a form changed; only an owner's note, when one is shown, "
+    "does.\n"
+    "- Signed without this clause: signed deals that carry no text for the clause. Only "
+    "\"verified\" means we signed that deal without the clause. \"Possibly absent ... not "
+    "verified\" means a passage may carry the clause unrecognised, so it is evidence of "
+    "nothing either way; never add it to the verified count. Neither is the same as the "
+    "playbook having no precedent for a clause.\n"
     "- Every count is of distinct deals. A citation [document@version §clause] names "
     "where the entry was signed or proposed; the document is an opaque "
-    "reference, never the other party's name.\n"
+    "reference, never the other party's name. A citation of prior_template:<form> "
+    "cites one of our own former forms, not a deal.\n"
     "Each quoted entry is a summary of at most 300 characters ending on a sentence "
     "boundary, not necessarily the whole clause: do not present it as quoted in full "
     "from the corpus.\n"
@@ -393,7 +456,7 @@ DIGEST_INTRO = (
 class PromptCompositionError(ValueError):
     """Raised when an OPF document cannot compose a knowledge prompt.
 
-    Currently: no `digest` section. The 0.5 schema marks `digest` optional (not
+    Currently: no `digest` section. The 0.6 schema marks `digest` optional (not
     every producer populates it; the reference engine always does), but this is
     a KNOWLEDGE-FIRST review -- the digest IS the knowledge. Composing anyway
     would emit a prompt with no corpus precedent in it and review a contract on
@@ -428,8 +491,73 @@ _POSITION_WORDS = (
 )
 
 
+#: `settled` values (digest 5, issue #248) that carry a marker beside the
+#: label they qualify. `adjudicated`: the blind check disagreed and a third
+#: reading decided, so the label was contested; `unchecked`: no independent
+#: check confirmed it. Both tell the model to weigh the label with more care.
+#: `agreed` and `owner` render plainly (no marker). A fact about how settled
+#: the LABEL is, never a weight on the entry: DIGEST_INTRO says so. The
+#: schema's `settled` enum is pinned EXACTLY in tests/test_opf_schema_sync.py.
+_SETTLED_MARKERS = {
+    "adjudicated": "adjudicated: weigh with care",
+    "unchecked": "unchecked: weigh with care",
+}
+#: The `settled` values that render plainly.
+_SETTLED_PLAIN = frozenset({"agreed", "owner"})
+
+
 def _plural(n: Any, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _neutralise(text: str) -> str:
+    """Owner- or producer-written free text new in OPF 0.6 (a former form's
+    label, the owner's why-changed note), passed through the prompt's
+    block-tag neutralisation (issue #162) before it is rendered, so it can
+    neither open nor close a prompt block. Byte-identical for any text that
+    carries no block-tag head, which is every engine-built playbook's.
+    Imported lazily: `primary_review_pass` is the one home of the escape,
+    and this module is otherwise import-light."""
+    import primary_review_pass  # noqa: PLC0415
+
+    return primary_review_pass.neutralise_prompt_delimiters(text)
+
+
+def _month(value: Any) -> str | None:
+    """A signing date at month precision (`YYYY-MM`), or None. The digest's
+    own spans are months already; a deal's `signed_on` may be a full date
+    (`verified_absent_deals[].signed_on`), and the prompt never renders a
+    date finer than a month (see `_signed_span`)."""
+    if isinstance(value, str) and len(value) >= 7 and value[4] == "-":
+        return value[:7]
+    return None
+
+
+def _signed_span(entry: dict) -> str | None:
+    """`first signed 2024-03, last signed 2025-11` from an entry's
+    `first_signed` / `last_signed` (digest 5, issue #247), or None when
+    neither is known.
+
+    Dates are facts about WHEN, never weights, and they are rendered to the
+    month only. Decision recorded for issue #177: a signing month is not
+    held in leakage check 3. A month names no deal -- the alias does, and
+    the alias-to-slug map never enters the prompt (`deal_aliases`) -- and a
+    held month would block every external field that states a date, which
+    the document under review is full of. A one-deal entry's span is that
+    deal's signing month beside its aliased citation, at month precision;
+    a `verified_absent_deals[]` entry's own `signed_on` (which may be a full
+    date) is not rendered at all (`_absence_line` names the alias only). What keeps a past deal's date out
+    of an external field is the same rule that keeps its precedent out: the
+    external footnote must not disclose what our playbook holds
+    (SILENT_PLAYBOOK_DEFAULT; docs/output-contract.md)."""
+    first, last = _month(entry.get("first_signed")), _month(entry.get("last_signed"))
+    if first and last:
+        return f"first signed {first}, last signed {last}"
+    if last:
+        return f"last signed {last}"
+    if first:
+        return f"first signed {first}"
+    return None
 
 
 def _count(value: Any, field: str, where: str) -> int | None:
@@ -451,6 +579,13 @@ def _fmt_cite(ref: Any, where: str) -> str:
     (`deal_aliases.alias_digest`), which an operator or auditor resolves back
     to the corpus location with `deal_aliases.resolution_map`, kept out of
     every prompt. Our standard's template ref is not a deal and renders as is.
+
+    The whole cite passes through the #162 block-tag neutralisation
+    (`_neutralise`, issue #177): a former form's citation is
+    `prior_template:<label>`, so the owner-written form label the line head
+    neutralises reaches the prompt a second time here, and must not render
+    raw. Byte-identical for any ref that carries no block-tag head, which is
+    every engine-built playbook's.
     """
     if ref is None:
         _omit("citation — entry has no ref, so it reaches the model ungrounded, with no corpus location an operator or auditor can resolve it to", where)
@@ -462,19 +597,81 @@ def _fmt_cite(ref: Any, where: str) -> str:
     if not doc_id:
         _omit("citation — ref carries no document_id, so it cannot be resolved", where)
         return ""
-    return f" [{doc_id}@{ver} §{path}]"
+    return _neutralise(f" [{doc_id}@{ver} §{path}]")
+
+
+def _settled_marker(entry: dict, where: str) -> str:
+    """`; adjudicated: weigh with care` for a label whose `settled` (digest
+    5, issue #248) is `adjudicated` or `unchecked`, '' for `agreed` and
+    `owner` (plain) and for an entry that carries no `settled` (the
+    collapsed equivalent entry, whose counts `_settled_counts_note`
+    renders)."""
+    settled = entry.get("settled")
+    if settled is None or settled in _SETTLED_PLAIN:
+        return ""
+    marker = _SETTLED_MARKERS.get(settled) if isinstance(settled, str) else None
+    if marker is None:
+        _omit("settled — not one of the four values; the label renders without it", where)
+        return ""
+    return f"; {marker}"
 
 
 def _fmt_label(entry: dict, where: str) -> str:
     """`[less protective of us] ` — the entry's `vs_standard` label, or '' when
-    the entry was not judged (`label` null is a fact, not a drop)."""
+    the entry was not judged (`label` null is a fact, not a drop). A label
+    whose judgment is `adjudicated` or `unchecked` carries its settled
+    marker inside the brackets: `[mixed; unchecked: weigh with care] `."""
     label = entry.get("label")
     if label is None:
         return ""
     if not isinstance(label, str):
         _omit(f"vs_standard label — value is a {type(label).__name__}, not a string; not rendered", where)
         return ""
-    return f"[{_LABEL_WORDS.get(label, label)}] "
+    return f"[{_LABEL_WORDS.get(label, label)}{_settled_marker(entry, where)}] "
+
+
+def _settled_counts_note(entry: dict, where: str) -> str | None:
+    """`1 adjudicated, 2 unchecked: weigh those with care` from the
+    collapsed equivalent entry's `settled_counts` (digest 5, issue #248),
+    or None when every collapsed text's label is `agreed` or `owner`."""
+    counts = entry.get("settled_counts")
+    if counts is None:
+        return None
+    if not isinstance(counts, dict):
+        _omit("settled_counts — not an object; the collapsed entry renders without it", where)
+        return None
+    parts = []
+    for key in ("adjudicated", "unchecked"):
+        n = _count(counts.get(key), f"settled_counts.{key}", where)
+        if n:
+            parts.append(f"{n} {key}")
+    if not parts:
+        return None
+    return f"of these labels {', '.join(parts)}: weigh those with care"
+
+
+def _prior_form_note(entry: dict, prior_forms: dict[str, str] | None) -> str | None:
+    """`opened on our former form "2018 form" in 1` -- how many of a signed
+    variant's deals opened on one of OUR former forms (OPF 0.6
+    `opened_with: prior_standard`, issue #249), named by the form's label.
+    Read from `evidence.precedent[]` through the variant's `precedent_ids`
+    (`prior_forms` maps a record id to its `opened_with_form`), because the
+    digest variant counts only openings on today's standard
+    (`n_from_standard`). Such a variant was reached from our own wording,
+    not the other side's: its origin is ours."""
+    if not prior_forms:
+        return None
+    ids = entry.get("precedent_ids")
+    counts: dict[str, int] = {}
+    for precedent_id in ids if isinstance(ids, list) else []:
+        form = prior_forms.get(precedent_id) if isinstance(precedent_id, str) else None
+        if form:
+            counts[form] = counts.get(form, 0) + 1
+    if not counts:
+        return None
+    return ", ".join(
+        f'opened on our former form "{_neutralise(form)}" in {n}' for form, n in counts.items()
+    )
 
 
 def _fmt_quote(entry: dict, where: str) -> str:
@@ -510,7 +707,9 @@ def _fmt_judgment(entry: dict, show_part_map: bool, where: str) -> list[str]:
     return lines
 
 
-def _fmt_signed_variant(entry: Any, show_part_map: bool, where: str) -> list[str]:
+def _fmt_signed_variant(
+    entry: Any, show_part_map: bool, where: str, prior_forms: dict[str, str] | None = None
+) -> list[str]:
     """One signed-variant line (plus its judgment), or the collapsed
     equivalent-wording entry."""
     if not isinstance(entry, dict):
@@ -518,13 +717,17 @@ def _fmt_signed_variant(entry: Any, show_part_map: bool, where: str) -> list[str
         return []
     n_deals = _count(entry.get("n_deals"), "n_deals", where)
     facts = [f"signed in {_plural(n_deals, 'deal')}"] if n_deals is not None else []
-    if entry.get("last_signed"):
-        facts.append(f"most recently {entry['last_signed']}")
+    span = _signed_span(entry)
+    if span:
+        facts.append(span)
     for field, words in (("n_from_standard", "reached from our standard in"),
                          ("n_unchanged", "signed as proposed in")):
         n = _count(entry.get(field), field, where)
         if n:
             facts.append(f"{words} {n}")
+    prior = _prior_form_note(entry, prior_forms)
+    if prior:
+        facts.append(prior)
 
     if entry.get("label") == "equivalent" and "exemplars" in entry:
         # The engine collapses every text labelled equivalent into ONE entry
@@ -534,6 +737,9 @@ def _fmt_signed_variant(entry: Any, show_part_map: bool, where: str) -> list[str
         n_texts = _count(entry.get("n_texts"), "n_texts", where)
         if n_texts is not None:
             facts.insert(0, _plural(n_texts, "text"))
+        settled_note = _settled_counts_note(entry, where)
+        if settled_note:
+            facts.append(settled_note)
         exemplars = entry.get("exemplars") if isinstance(entry.get("exemplars"), list) else []
         if not exemplars:
             _omit("equivalent-wording exemplars — collapsed entry rendered with no example text", where)
@@ -558,8 +764,12 @@ def _fmt_refused_ask(entry: Any, show_part_map: bool, where: str) -> list[str]:
         _omit(f"refused ask — entry is a {type(entry).__name__}, not an object; not rendered", where)
         return []
     n_deals = _count(entry.get("n_deals"), "n_deals", where)
-    facts = f" — refused in {_plural(n_deals, 'deal')}" if n_deals is not None else ""
-    line = f"  - {_fmt_label(entry, where)}{_fmt_quote(entry, where)}{facts}"
+    facts = [f"refused in {_plural(n_deals, 'deal')}"] if n_deals is not None else []
+    span = _signed_span(entry)
+    if span:
+        facts.append(span)
+    joined = f" — {', '.join(facts)}" if facts else ""
+    line = f"  - {_fmt_label(entry, where)}{_fmt_quote(entry, where)}{joined}"
     return [line + _fmt_cite(entry.get("ref"), where), *_fmt_judgment(entry, show_part_map, where)]
 
 
@@ -622,8 +832,158 @@ def _positions_line(clause: dict, where: str) -> str | None:
     return f"Positions of the {_plural(total, 'signed deal')}: {', '.join(parts)}."
 
 
-def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str:
-    """One digest-4 clause, rendered as plain facts under plain headers.
+def _in_use_text(form: dict) -> str:
+    """`in use 2018-01 to 2019-12`, `in use from 2021`, `in use until
+    2020-05 (from deal dates)` or `in-use dates unknown` -- a former form's
+    `in_use_from` / `in_use_until` at the precision given, and where they
+    came from (`in_use_basis`: the owner's config, the deals that opened on
+    the form, or both). Never a guessed date: a null end stays unstated."""
+    start, end = form.get("in_use_from"), form.get("in_use_until")
+    start = start if isinstance(start, str) and start else None
+    end = end if isinstance(end, str) and end else None
+    if start and end:
+        text = f"in use {start} to {end}"
+    elif start:
+        text = f"in use from {start}"
+    elif end:
+        text = f"in use until {end}"
+    else:
+        return "in-use dates unknown"
+    basis = {"deal_dates": "from deal dates", "mixed": "partly from deal dates"}.get(
+        form.get("in_use_basis")
+    )
+    return f"{text} ({basis})" if basis else text
+
+
+def _fmt_former_form(form: Any, show_part_map: bool, where: str) -> list[str]:
+    """One former form of ours (digest 5 `standard_history.forms[]`, issue
+    #249) on one line: its label, whether it is RECONSTRUCTED from the
+    corpus rather than supplied by the owner (issue #250), its in-use
+    dates, the signed deals that opened on it and what became of them, and
+    how its clause compares with today's standard -- the label (with its
+    settled marker) and, where it adds something, its part map. Facts only:
+    no reason for the change is stated here; the owner's note, when there
+    is one, is the clause's `why_changed` line (`_standard_history_lines`).
+    """
+    if not isinstance(form, dict):
+        _omit(f"former form — entry is a {type(form).__name__}, not an object; not rendered", where)
+        return []
+    label = form.get("form")
+    if not isinstance(label, str) or not label:
+        _omit("former form label — absent; the form is not rendered", where)
+        return []
+    head = f'  - "{_neutralise(label)}"'
+    if form.get("basis") == "reconstructed":
+        head += " (reconstructed from the corpus, not supplied by the owner)"
+    head += f", {_in_use_text(form)}"
+    n_opened = _count(form.get("n_opened"), "n_opened", where)
+    facts: list[str] = []
+    if n_opened:
+        facts.append(f"opened on it in {_plural(n_opened, 'signed deal')}")
+        for field, words in (("n_kept", "kept it in"), ("n_conceded", "conceded in"),
+                             ("n_moved_to_current", "moved to today's standard in")):
+            n = _count(form.get(field), field, where)
+            if n is not None:
+                facts.append(f"{words} {n}")
+    elif n_opened == 0:
+        facts.append("no signed deal opened on it")
+    if form.get("unchanged") is True:
+        facts.append("reads as today's standard")
+    elif form.get("label") is not None:
+        compared = f"{_fmt_label(form, where).strip()} compared with today's standard"
+        part_map, additions = form.get("part_map"), form.get("additions")
+        tokens = []
+        if (show_part_map or additions) and isinstance(part_map, list) and part_map:
+            tokens.append("part map " + " ".join(str(t) for t in part_map))
+        if isinstance(additions, list) and additions:
+            tokens.append("additions " + " ".join(str(t) for t in additions))
+        facts.append(compared + (f" ({'; '.join(tokens)})" if tokens else ""))
+    else:
+        facts.append("not compared with today's standard")
+    line = f"{head}: {'; '.join(facts)}"
+    return [line + _fmt_cite(form.get("ref"), where)]
+
+
+def _standard_history_lines(clause: dict, show_part_map: bool, where: str) -> list[str]:
+    """The clause's `standard_history` (digest 5, issue #249): one line per
+    former form of ours, then the owner's `why_changed` note -- the ONLY
+    reason a change is ever given, rendered only when the owner wrote one.
+    Empty (no section) when the clause has neither."""
+    history = clause.get("standard_history")
+    if history is None:
+        _omit("standard_history — absent; the clause's former forms are not rendered", where)
+        return []
+    if not isinstance(history, dict):
+        _omit(
+            f"standard_history — value is a {type(history).__name__}, not an object; not rendered",
+            where,
+        )
+        return []
+    forms = history.get("forms")
+    if not isinstance(forms, list):
+        _omit("standard_history.forms — not a list; the former forms are not rendered", where)
+        forms = []
+    lines: list[str] = []
+    for index, form in enumerate(forms):
+        lines.extend(_fmt_former_form(form, show_part_map, f"{where} / standard_history.forms[{index}]"))
+    note = history.get("why_changed")
+    note_text = note.get("text") if isinstance(note, dict) else None
+    if note is not None and not (isinstance(note_text, str) and note_text):
+        _omit("why_changed — present but carries no text; not rendered", where)
+    if not lines and not (isinstance(note_text, str) and note_text):
+        return []
+    out = ["\nOur former forms of this clause:" if lines else "\nOur former forms of this clause: none on record."]
+    out.extend(lines)
+    if isinstance(note_text, str) and note_text:
+        out.append(f"  Owner's note on why our standard changed: \"{_neutralise(note_text)}\"")
+    return out
+
+
+def _absence_line(clause: dict, where: str) -> str | None:
+    """`Signed without this clause: absent in 4 signed deals (verified:
+    deal-03, deal-07); possibly absent in 2 more; not verified.` (digest 5,
+    issue #251), or None when the clause was signed in every signed deal.
+
+    The two counts are never merged: only `n_signed_without_verified` is a
+    deal we verifiably signed WITHOUT the clause type; a "possibly" deal may
+    carry it unrecognised, so it is no evidence either way. Distinct, too,
+    from "no precedent" (the heading's coverage, and the closing line of
+    clause types the playbook has no precedent for at all, #158). The
+    verified deals are named by their opaque aliases (`verified_absent_deals`
+    is aliased with the rest of the digest, #173), capped like the other
+    lists, with the uncapped remainder stated."""
+    verified = _count(clause.get("n_signed_without_verified"), "n_signed_without_verified", where)
+    possible = _count(clause.get("n_signed_without_possible"), "n_signed_without_possible", where)
+    parts: list[str] = []
+    if verified:
+        deals = clause.get("verified_absent_deals")
+        names = [
+            entry["document_id"]
+            for entry in (deals if isinstance(deals, list) else [])
+            if isinstance(entry, dict) and isinstance(entry.get("document_id"), str) and entry["document_id"]
+        ]
+        if not isinstance(deals, list):
+            _omit("verified_absent_deals — not a list; the verified deals are not named", where)
+        listed = ", ".join(names)
+        if names and verified > len(names):
+            listed += f", and {verified - len(names)} more"
+        parts.append(
+            f"absent in {_plural(verified, 'signed deal')} (verified"
+            + (f": {listed})" if listed else ")")
+        )
+    if possible:
+        more = " more" if verified else ""
+        noun = "" if verified else (" signed deal" if possible == 1 else " signed deals")
+        parts.append(f"possibly absent in {possible}{more}{noun}; not verified")
+    if not parts:
+        return None
+    return f"Signed without this clause: {'; '.join(parts)}."
+
+
+def _digest_clause_block(
+    clause: dict, corpus_n_deals: int | None = None, prior_forms: dict[str, str] | None = None
+) -> str:
+    """One digest-5 clause, rendered as plain facts under plain headers.
 
     Text, not JSON: a raw dump would hand the model field names
     (`refused_asks`, `changed_openings`) without the one thing that matters
@@ -635,6 +995,15 @@ def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str
     <corpus.n_deals> deals` (issue #158) -- so a clause seen in one deal of
     forty is legibly thin rather than read as settled; DIGEST_INTRO's
     silent-playbook paragraph says what to do then.
+
+    Digest 5 (issue #177) adds the clause's signing months to the heading,
+    a line of the deals signed WITHOUT the clause (verified versus possibly,
+    never summed, `_absence_line`), our former forms of it
+    (`_standard_history_lines`), how settled each judged label is, and the
+    signing months of each entry. `prior_forms` maps an
+    `evidence.precedent[]` id to its `opened_with_form` for a record that
+    opened on one of our former forms (`_digest_block` builds it), so a
+    signed variant reached from our former wording says so.
     """
     clause_id = clause.get("id")
     where = f"clause {clause_id!r}"
@@ -648,6 +1017,9 @@ def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str
         if n_deals is not None and corpus_n_deals is not None
         else ""
     )
+    span = _signed_span(clause)
+    if span:
+        coverage += f", {span}"
     lines.append(f"## {title}  [clause_id: {clause_id}]{coverage}")
 
     our_standard = clause.get("our_standard")
@@ -680,6 +1052,12 @@ def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str
     if positions:
         lines.append(positions)
 
+    absence = _absence_line(clause, where)
+    if absence:
+        lines.append(absence)
+
+    lines.extend(_standard_history_lines(clause, show_part_map, where))
+
     variants = _entry_list(clause, "signed_variants", where)
     n_standard = _count(clause.get("n_signed_standard"), "n_signed_standard", where)
     if n_standard is not None and n_deals is not None:
@@ -691,7 +1069,9 @@ def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str
         header = "\nSigned language on record:"
     lines.append(header if variants else header + " no other wording signed.")
     for index, entry in enumerate(variants):
-        lines.extend(_fmt_signed_variant(entry, show_part_map, f"{where} / signed_variants[{index}]"))
+        lines.extend(
+            _fmt_signed_variant(entry, show_part_map, f"{where} / signed_variants[{index}]", prior_forms)
+        )
 
     refused = _entry_list(clause, "refused_asks", where)
     if refused:
@@ -725,7 +1105,8 @@ def _digest_clause_block(clause: dict, corpus_n_deals: int | None = None) -> str
 
 
 def _corpus_line(digest: dict) -> str | None:
-    """`From 6 deals (6 signed), signed between 2024-Q1 and 2026-03-02.`"""
+    """`From 6 deals (6 signed), signed between 2022-03 and 2024-11.` (digest
+    5's corpus span is to the month, issue #247)."""
     corpus = digest.get("corpus")
     if not isinstance(corpus, dict):
         _omit("digest corpus — absent; the block does not say how many deals it rests on", "digest")
@@ -795,9 +1176,27 @@ def _uncovered_line(digest: dict) -> str | None:
     return f"{UNCOVERED_LINE_LEAD}{', '.join(items)}."
 
 
+def _prior_form_openings(opf_doc: dict) -> dict[str, str]:
+    """`{precedent id: opened_with_form}` for every `evidence.precedent[]`
+    record that opened on one of our former forms (OPF 0.6 `opened_with:
+    prior_standard`, issue #249). Only the record's id and these two fields
+    are read -- never a text, never a deal id -- so a signed variant can say
+    how many of its deals opened on which of our former forms."""
+    evidence = opf_doc.get("evidence")
+    records = evidence.get("precedent") if isinstance(evidence, dict) else None
+    out: dict[str, str] = {}
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict) or record.get("opened_with") != "prior_standard":
+            continue
+        record_id, form = record.get("id"), record.get("opened_with_form")
+        if isinstance(record_id, str) and isinstance(form, str) and form:
+            out[record_id] = form
+    return out
+
+
 def _digest_block(opf_doc: dict) -> str:
-    """The model-facing knowledge block, built from the OPF 0.5 `digest`
-    (digest_version 4, the only one `scripts/opf_load.py` accepts).
+    """The model-facing knowledge block, built from the OPF 0.6 `digest`
+    (digest_version 5, the only one `scripts/opf_load.py` accepts).
 
     Replaces the retired ~1M-token wholesale `evidence` projection -- see the
     module docstring before considering a change here.
@@ -815,8 +1214,11 @@ def _digest_block(opf_doc: dict) -> str:
     # the block stays the same bytes for every review of this version.
     digest = deal_aliases.alias_digest(_strip_x_keys(digest), deal_aliases.alias_map(opf_doc))
     corpus_n_deals = _corpus_n_deals(digest)
+    prior_forms = _prior_form_openings(opf_doc)
     body = "\n\n".join(
-        _digest_clause_block(c, corpus_n_deals) for c in digest["clauses"] if isinstance(c, dict)
+        _digest_clause_block(c, corpus_n_deals, prior_forms)
+        for c in digest["clauses"]
+        if isinstance(c, dict)
     )
     corpus = _corpus_line(digest)
     head = f"{DIGEST_INTRO}\n{corpus}" if corpus else DIGEST_INTRO
@@ -1065,7 +1467,7 @@ def _manifest_rule_lines(
 
 
 def _manifest_block(opf_doc: dict) -> str | None:
-    """The OPF 0.5 hard-rule manifest (`manifest.hard_rules`,
+    """The OPF hard-rule manifest (`manifest.hard_rules`,
     playbook-engine#228) as one block of the shared prefix (issue #163): per
     rule, its `[floor:<id>]` tag and statement, the clause it names (by public
     title), whether that clause's presence is required, its test (the
@@ -1075,7 +1477,7 @@ def _manifest_block(opf_doc: dict) -> str | None:
     Returns None -- no block -- when the document carries no manifest, or a
     manifest with no rules. The real playbook ships `floor == {}`, so its
     manifest is empty and its prompt is unchanged by this block. Neither is
-    recorded as an omission: the manifest is optional in the 0.5 schema and an
+    recorded as an omission: the manifest is optional in the 0.6 schema and an
     empty one is derived from an empty Floor, which the Binding block already
     records.
 
@@ -1294,7 +1696,7 @@ def compose_opf_system_blocks(
 
     Fixed order -- POSTURE, BINDING, DIGEST, MANIFEST, GUIDANCE, CONTEXT -- so
     the model reads what BINDS it before the precedent it weighs, and reads
-    prescriptive intent before either. MANIFEST (issue #163) is the OPF 0.5
+    prescriptive intent before either. MANIFEST (issue #163) is the OPF
     hard-rule manifest, directly after the digest: like every block here it
     precedes the system-side cache breakpoint, so it caches with the digest. Every block is ABSENT or has content; none is ever an
     empty string, so a caller cannot index a slot that says nothing (the shape

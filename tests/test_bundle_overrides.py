@@ -81,7 +81,7 @@ FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.js
 # version-independent, but prompt composition now requires a digest (an OPF 0.2
 # document has none, and composing knowledge-free would review a contract on
 # model judgement alone). Production binds 0.3, so compose against 0.3.
-FIXTURE_03_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE_03_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 BUNDLE_SCHEMA_PATH = REPO_ROOT / "playbooks" / "bundle.schema-v2.json"
 MODEL_POLICY_PATH = REPO_ROOT / "model-policy" / "openrouter.json"
 BIND_BUNDLE_SCRIPT = SCRIPTS_DIR / "bind_bundle.py"

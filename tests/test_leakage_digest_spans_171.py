@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Issue #171: every digest 4 precedent text is a check-4 verbatim span, so the
+Issue #171: every digest precedent text is a check-4 verbatim span, so the
 internal channel guards it whether or not a critic dossier carries it.
 
 The defect (reproduced on the untouched tree before the fix): #40 made each
@@ -23,7 +23,7 @@ What this pins:
      `precedent-verbatim-span`. Check 4 is the guard: with that one span
      removed, the same note passes although check 2 still holds the text.
   2. Every kind blocks: on a document carrying no `dossiers` section (it is
-     optional in the 0.5 schema) every digest text is in no dossier, and a
+     optional in the 0.6 schema) every digest text is in no dossier, and a
      signed variant, a collapsed exemplar, a refused ask and a changed
      opening each block on the internal channel.
   3. Never our standard: our standard's parts are no span, an internal note
@@ -39,11 +39,11 @@ What this pins:
 
   * The NDA example (`tests/fixtures/opf/engine-nda-example.opf.json`, equal
     to the engine's public `examples/nda/playbook.opf.json`) and the gold
-    fixture (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`,
+    fixture (`tests/gold-fixtures-opf/acme-university-0.6.opf.json`,
     generated with the engine's reference functions) are engine output,
     used unmutated in (1) and (5): the texts found in no dossier are the
     engine's own digest entries, located by search, not planted.
-  * (2) drops the `dossiers` section, which the 0.5 schema makes optional
+  * (2) drops the `dossiers` section, which the 0.6 schema makes optional
     (`tests/test_dossier_selection_40.py` drops the optional `manifest` the
     same way); `from_opf_document` is fed that whole document by
     `review_spine.run_review` and by the cover-note corpus resolver.
@@ -78,7 +78,7 @@ import leakage_scan  # noqa: E402
 import opf_prompt  # noqa: E402
 
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
-GOLD = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+GOLD = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 INTERNAL = "internal_rationale_for_footnote"
 
 

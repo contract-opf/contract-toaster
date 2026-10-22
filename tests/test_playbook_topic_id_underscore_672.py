@@ -6,7 +6,7 @@ playbook's topic vocabulary could not be cited at all -- the root cause of
 
 ## The contradiction this file pins
 
-`playbooks/opf/playbook.schema-0.5.json` (0.2 and 0.3 before it) -- the
+`playbooks/opf/playbook.schema-0.6.json` (0.2 and 0.3 before it) -- the
 schema the toaster validates every uploaded playbook against, authored
 OUTSIDE this repo -- constrains `taxonomy.entries[].id` to::
 
@@ -120,11 +120,11 @@ OUTPUT_SCHEMA_PATHS = {
     "v3": REPO_ROOT / "playbooks" / "output-schema-v3.json",
 }
 # The one OPF schema this repo reads since issue #128 (0.2 and 0.3 shared
-# this taxonomy-id grammar, and 0.5 kept it).
+# this taxonomy-id grammar, and 0.5 and 0.6 kept it).
 OPF_SCHEMA_PATHS = {
-    "0.5": REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json",
+    opf_load.OPF_VERSION: opf_load.OPF_SCHEMA_PATH,
 }
-GOLD_OPF_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5-real-shape.opf.json"
+GOLD_OPF_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-real-shape.opf.json"
 
 PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 
@@ -268,9 +268,9 @@ def _minimal_evidence_clause(template: dict[str, Any], topic_id: str) -> dict[st
 
 
 def _wide_vocabulary_opf_doc() -> dict[str, Any]:
-    """A representative OPF 0.5 playbook carrying the full 61-id vocabulary.
+    """A representative OPF 0.6 playbook carrying the full 61-id vocabulary.
 
-    Built from `tests/gold-fixtures-opf/acme-university-0.5-real-shape.opf.json`
+    Built from `tests/gold-fixtures-opf/acme-university-0.6-real-shape.opf.json`
     -- the repo's existing real-shape OPF fixture -- by widening ONLY its
     taxonomy and clause vocabulary, then re-sealing `identity` with the
     production canonicalizer (`opf_canonicalize`) so the artifact hashes

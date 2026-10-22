@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Gate for the synthetic OPF 0.5 gold fixtures (tests/gold-fixtures-opf/) and
+"""Gate for the synthetic OPF 0.6 gold fixtures (tests/gold-fixtures-opf/) and
 the no-digest fixture (tests/fixtures/opf/synthetic-eiaa.opf.json).
 
 Every OPF test in this repo runs against these fictional-party fixtures
-(issue #128 replaced the 0.3 set: OPF 0.5 / digest 4 is the one format). This
+(issue #128 replaced the 0.3 set with OPF 0.5; issue #177 replaced that with
+OPF 0.6 / digest 5, the one format). This
 gate guarantees they stay honest:
 
-  1. SCHEMA: every fixture validates against the vendored 0.5 schema.
+  1. SCHEMA: every fixture validates against the vendored 0.6 schema.
   2. HASH: identity.content_hash verifies over the canonical body.
   3. HTML BUNDLE: each .opf.html embeds exactly its .opf.json (extract == parse).
-  4. DIGEST: digest_version 4 present on every acme fixture, one digest clause
+  4. DIGEST: digest_version 5 present on every acme fixture, one digest clause
      per evidence clause, and well under the model-context budget.
   5. VARIANTS: the empty-floor fixture has floor.invariants == [] and the
      real-shape one posture == {} and floor == {}; the full fixture carries a
@@ -41,8 +42,9 @@ for p in (str(SCRIPTS_DIR), str(FIXTURE_DIR)):
 import generate_opf_fixture as gen  # noqa: E402
 import opf_canonicalize  # noqa: E402
 import opf_html  # noqa: E402
+import opf_load  # noqa: E402
 
-SCHEMA_PATH = REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json"
+SCHEMA_PATH = opf_load.OPF_SCHEMA_PATH
 
 STEMS = (gen.FULL_STEM, gen.EMPTY_FLOOR_STEM, gen.REAL_SHAPE_STEM)
 FULL_JSON = FIXTURE_DIR / f"{gen.FULL_STEM}.opf.json"
@@ -102,8 +104,8 @@ def check_digest() -> list[str]:
         path = FIXTURE_DIR / f"{stem}.opf.json"
         doc = _load(path)
         digest = doc.get("digest")
-        if not isinstance(digest, dict) or digest.get("digest_version") != "4":
-            failures.append(f"  {path.name}: missing a digest_version 4 digest")
+        if not isinstance(digest, dict) or digest.get("digest_version") != opf_load.DIGEST_VERSION:
+            failures.append(f"  {path.name}: missing a digest_version {opf_load.DIGEST_VERSION} digest")
             continue
         evidence_ids = [c["id"] for c in doc["evidence"]["clauses"]]
         if [c["id"] for c in digest["clauses"]] != evidence_ids:
@@ -176,10 +178,10 @@ def check_no_real_names() -> list[str]:
 
 def main() -> int:
     checks = [
-        ("1", "fixtures validate against the vendored 0.5 schema", check_schema),
+        ("1", "fixtures validate against the vendored 0.6 schema", check_schema),
         ("2", "identity.content_hash verifies", check_hash),
         ("3", ".opf.html embeds exactly the .opf.json", check_html_bundle),
-        ("4", "digest 4 present, one clause per evidence clause, within budget", check_digest),
+        ("4", "digest 5 present, one clause per evidence clause, within budget", check_digest),
         ("5", "empty-floor / real-shape / no-digest variants have their shapes", check_variants),
         ("6", "engine accepts and reproduces the fixtures (local-only)", check_reachable),
         ("7", "fixtures use only invented party names", check_no_real_names),

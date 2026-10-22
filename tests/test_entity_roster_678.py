@@ -107,7 +107,7 @@ import src.pipeline_runner as pipeline_runner  # noqa: E402
 # the SAME production writers the deployment runs.
 import test_dts_pipeline_runner_real_review as dts  # noqa: E402
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 
 ADMIN_SUB = "admin-678"
 ADMIN = {"cognito_sub": ADMIN_SUB, "email": f"{ADMIN_SUB}@example.com", "is_admin": True}

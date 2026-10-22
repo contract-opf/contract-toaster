@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 OPF loader/validator -- issue #283, extended for the OPF 0.3 launch and cut
-over to OPF 0.5 ONLY by issue #128.
+over to OPF 0.5 ONLY by issue #128, and replaced by OPF 0.6 ONLY by issue #177.
 
 Loads an Open Playbook Format (OPF) document, validates it against the VENDORED
-schema (playbooks/opf/playbook.schema-0.5.json), verifies its
+schema (playbooks/opf/playbook.schema-0.6.json), verifies its
 `identity.content_hash`, runs the
 fail-closed prompt-injection scan, and matches its `agreement_type` to a
 registered playbook_id (scripts/playbook_registry.py) via `agreement_type.id`/
@@ -33,25 +33,27 @@ through. `load_opf` (the internal/bare loader used by bind) keeps the softer
 verify-if-present contract for backward compatibility; `bind_bundle` requires
 `identity` on its own.
 
-## One format: OPF 0.5 / digest_version 4 (issue #128)
+## One format: OPF 0.6 / digest_version 5 (issue #177)
 
-The owner's 2026-10-06 direction: this repo supports exactly ONE format,
-`opf_version` "0.5" with `digest_version` "4" -- no backward compatibility and
-no dispatch by version (there are zero installed copies to stay compatible
-with). The 0.2/0.3 schemas, the digest-2 reader and every 0.3 path are gone.
+The owner's 2026-10-06 direction (issue #128): this repo supports exactly ONE
+format -- no backward compatibility and no dispatch by version. Issue #177
+replaced OPF 0.5 / digest 4 with `opf_version` "0.6" / `digest_version` "5"
+in place (the engine emits 0.6 only, from playbook-engine `fe89bc6`); the 0.5
+schema, its conformance set and every 0.5 path are gone, as the 0.2/0.3
+schemas and the digest-2 reader were before them.
 
 Both versions are still CHECKED, and checked BEFORE schema validation, because
 the check names the cause instead of a symptom:
 
-  - `opf_version`: anything but "0.5" (absent, non-string, "0.3", "0.4") is
+  - `opf_version`: anything but "0.6" (absent, non-string, "0.3", "0.5") is
     refused with OpfVersionError rather than validated against a schema it was
     never written for -- which would fail at some field deep inside the
     document and describe a symptom, not the cause. Never defaulted: a
     document that declares a version we do not vendor a schema for has not
     been validated by anything, and guessing would be a fail-open.
   - `digest.digest_version`: a SEPARATE version governing the digest section's
-    shape and SELECTION SEMANTICS. Anything but "4" is refused with
-    OpfDigestVersionError. The 0.5 schema pins the const too, but schema
+    shape and SELECTION SEMANTICS. Anything but "5" is refused with
+    OpfDigestVersionError. The 0.6 schema pins the const too, but schema
     validation is not a substitute: a version can change what the data MEANS
     without changing its shape (what the lists include, how entries are
     ranked or capped), and no schema check can see that. Reading a digest
@@ -107,18 +109,29 @@ except ImportError as _exc:  # pragma: no cover - dev dependency, see requiremen
 
 OPF_SCHEMA_DIR = REPO_ROOT / "playbooks" / "opf"
 
-# The ONE format this repo reads (issue #128; see "One format" above). The
-# schema is vendored byte-for-byte from playbook-engine and pinned in
+# The ONE format this repo reads (issues #128, #177; see "One format" above).
+# The schema is vendored byte-for-byte from playbook-engine and pinned in
 # tests/test_opf_schema_sync.py (playbooks/opf/README.md has the procedure).
-OPF_VERSION = "0.5"
-OPF_SCHEMA_PATH = OPF_SCHEMA_DIR / "playbook.schema-0.5.json"
+OPF_VERSION = "0.6"
+OPF_SCHEMA_PATH = OPF_SCHEMA_DIR / f"playbook.schema-{OPF_VERSION}.json"
 
-# The ONE digest_version this repo reads. Digest 4 is the verdict-free
+# The engine's conformance set for OPF_VERSION, vendored beside the schema
+# (`manifest.json` + `vectors/*.json`, byte-for-byte). The ONE place a test
+# finds it: every test that replays or loads a vector reads these constants,
+# never a hard-coded `conformance-<version>` path, so the next format is a
+# change here and nowhere else.
+OPF_CONFORMANCE_DIR = OPF_SCHEMA_DIR / f"conformance-{OPF_VERSION}"
+OPF_CONFORMANCE_VECTORS_DIR = OPF_CONFORMANCE_DIR / "vectors"
+
+# The ONE digest_version this repo reads. Digest 5 is the verdict-free
 # precedent projection `scripts/opf_prompt.py` renders: per clause our
 # standard (as parts), the opened/kept counts, the positions by `vs_standard`
 # label, the signed variants with their provenance counts, the refused asks
-# and the openings not signed as proposed.
-DIGEST_VERSION = "4"
+# and the openings not signed as proposed -- plus, new in digest 5, the
+# signing months of each entry (`first_signed` / `last_signed`), how settled
+# each judged label is (`settled`), our former forms (`standard_history`)
+# and the verified versus possible absence counts.
+DIGEST_VERSION = "5"
 
 _SCHEMA_CACHE: dict[str, dict] = {}
 
@@ -147,7 +160,7 @@ class OpfInjectionError(OpfValidationError):
 
 class OpfVersionError(OpfValidationError):
     """Raised when `opf_version` is missing, non-string, or anything but
-    OPF_VERSION ("0.5"). Never defaulted: an unvalidated document must not
+    OPF_VERSION ("0.6"). Never defaulted: an unvalidated document must not
     load."""
 
 
@@ -164,7 +177,7 @@ class OpfHashMismatchError(OpfValidationError):
 
 class OpfDigestVersionError(OpfValidationError):
     """Raised when a document's `digest.digest_version` is anything but
-    DIGEST_VERSION ("4").
+    DIGEST_VERSION ("5").
 
     Separate from OpfVersionError because the two versions are independent:
     the digest's shape and selection semantics are versioned on their own.
@@ -181,7 +194,7 @@ class OpfExtractError(OpfValidationError):
 
 class OpfDuplicateIdError(OpfValidationError):
     """Raised when an OPF document repeats an id within one of the four
-    sibling sets the engine's validator makes normative for OPF 0.5:
+    sibling sets the engine's validator makes normative for OPF 0.6:
     `evidence.clauses[].id`, `evidence.precedent[].id`,
     `floor.invariants[].id`, and `corpus.documents[].document_id`.
 
@@ -275,7 +288,7 @@ def resolve_digest_version(doc: dict) -> Optional[str]:  # noqa: UP045
     """Return the document's `digest.digest_version`, or None if it has no digest.
 
     Raises OpfDigestVersionError if a digest is present but declares anything
-    but DIGEST_VERSION. None is a legitimate answer (the 0.5 schema marks
+    but DIGEST_VERSION. None is a legitimate answer (the 0.6 schema marks
     `digest` optional) -- the caller decides whether a digest is required;
     `scripts/opf_prompt.py` refuses to compose a review prompt without one.
     """
@@ -295,7 +308,7 @@ def resolve_digest_version(doc: dict) -> Optional[str]:  # noqa: UP045
 
 # (JSON Pointer to the sibling array, dotted path to reach it from the
 # document root, id field name) for each of the four sets the engine's
-# validator makes unique for OPF 0.5 -- parity with its _check_duplicate_ids
+# validator makes unique for OPF 0.6 -- parity with its _check_duplicate_ids
 # (clauses, invariants, documents) and _check_precedent (precedent ids).
 _SIBLING_ID_SETS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("/evidence/clauses", ("evidence", "clauses"), "id"),
@@ -426,9 +439,9 @@ def is_html_bundle(path: Path) -> bool:
 
 
 def load_opf(path: Path) -> dict:
-    """Load and validate a bare OPF 0.5 JSON document.
+    """Load and validate a bare OPF 0.6 JSON document.
 
-    Validates against the vendored 0.5 schema, verifies `identity.content_hash` IF the document carries one, and runs the
+    Validates against the vendored 0.6 schema, verifies `identity.content_hash` IF the document carries one, and runs the
     fail-closed injection tripwire.
 
     For untrusted uploads use `load_opf_document`, which additionally REQUIRES

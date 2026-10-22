@@ -110,21 +110,47 @@ from typing import Any
 ALIAS_STEM = "deal"
 
 
+#: The citation `version` values that name OUR OWN form, never a deal
+#: (`$defs.citation.version`): `template` is today's standard form, and
+#: `prior_template` (OPF 0.6, issue #249) one of our former forms, cited as
+#: `{document_id: "prior_template:<label>", version: "prior_template"}`.
+OWN_FORM_VERSIONS = frozenset({"template", "prior_template"})
+
+
 def _ref_document_id(ref: Any) -> Any:
     return ref.get("document_id") if isinstance(ref, dict) else None
+
+
+def _deal_ref_document_id(ref: Any) -> Any:
+    """`ref`'s `document_id` when it cites a deal, else None: a ref whose
+    `version` names one of our own forms (`OWN_FORM_VERSIONS`) cites our
+    template, today's or a former one, which is not a deal. A reconstructed
+    former form (OPF 0.6, issue #250) is cited by an ordinary corpus
+    citation -- the deal its wording was read from -- and IS a deal ref."""
+    if isinstance(ref, dict) and ref.get("version") in OWN_FORM_VERSIONS:
+        return None
+    return _ref_document_id(ref)
 
 
 def deal_document_ids(opf_doc: Any) -> list[str]:
     """Every past deal's `document_id` the OPF document carries, deduplicated,
     in first-seen order: each `corpus.documents[].document_id`, then each id
-    the digest 4 citations cite (signed variants, collapsed exemplars,
-    refused asks, changed openings) and each `evidence.precedent[]` record's
-    own id and the refs of its texts and refused asks (#172's walk) that the
-    corpus list does not already hold -- so a citation is aliased even on a
-    document whose `corpus` section omits its deal.
+    the digest citations cite (signed variants, collapsed exemplars,
+    refused asks, changed openings, and since digest 5 (issue #177) each
+    `verified_absent_deals[]` deal and each `standard_history.forms[].ref`
+    that cites a deal) and each `evidence.precedent[]` record's own id and
+    the refs of its texts and refused asks (#172's walk), each
+    `evidence.absence.records[]` deal and candidate ref, and each
+    `evidence.clauses[].prior_standards[].source_ref` that cites a deal,
+    that the corpus list does not already hold -- so a citation is aliased
+    even on a document whose `corpus` section omits its deal.
 
     Not read: our standard's `source_ref` and `baseline.template_ref` (the
-    tenant's own template, not a deal)."""
+    tenant's own template, not a deal), and any ref citing one of our former
+    forms (`version` `prior_template`, `document_id` `prior_template:<label>`,
+    `_deal_ref_document_id`): a former form is ours, not a past deal, and
+    its label is rendered as it is (it names our own paper, never a
+    counterparty)."""
     if not isinstance(opf_doc, dict):
         return []
     candidates: list[Any] = []
@@ -148,6 +174,15 @@ def deal_document_ids(opf_doc: Any) -> list[str]:
                 for exemplar in exemplars if isinstance(exemplars, list) else []:
                     if isinstance(exemplar, dict):
                         candidates.append(_ref_document_id(exemplar.get("ref")))
+        absent = clause.get("verified_absent_deals")
+        for entry in absent if isinstance(absent, list) else []:
+            if isinstance(entry, dict):
+                candidates.append(entry.get("document_id"))
+        history = clause.get("standard_history")
+        forms = history.get("forms") if isinstance(history, dict) else None
+        for form in forms if isinstance(forms, list) else []:
+            if isinstance(form, dict):
+                candidates.append(_deal_ref_document_id(form.get("ref")))
     evidence = opf_doc.get("evidence")
     records = evidence.get("precedent") if isinstance(evidence, dict) else None
     for record in records if isinstance(records, list) else []:
@@ -162,6 +197,20 @@ def deal_document_ids(opf_doc: Any) -> list[str]:
         for ask in asks if isinstance(asks, list) else []:
             if isinstance(ask, dict):
                 candidates.append(_ref_document_id(ask.get("ref")))
+    absence = evidence.get("absence") if isinstance(evidence, dict) else None
+    absence_records = absence.get("records") if isinstance(absence, dict) else None
+    for record in absence_records if isinstance(absence_records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        candidates.append(record.get("document_id"))
+        for candidate in record.get("candidates") or []:
+            if isinstance(candidate, dict):
+                candidates.append(_ref_document_id(candidate.get("ref")))
+    evidence_clauses = evidence.get("clauses") if isinstance(evidence, dict) else None
+    for clause in evidence_clauses if isinstance(evidence_clauses, list) else []:
+        for prior in (clause.get("prior_standards") or []) if isinstance(clause, dict) else []:
+            if isinstance(prior, dict):
+                candidates.append(_deal_ref_document_id(prior.get("source_ref")))
     return list(dict.fromkeys(i for i in candidates if isinstance(i, str) and i.strip()))
 
 
@@ -219,11 +268,15 @@ def alias_text(text: str, aliases: dict[str, str]) -> str:
 
 
 def alias_digest(digest: Any, aliases: dict[str, str]) -> Any:
-    """A copy of `digest` with every ref's `document_id` that names a deal
+    """A copy of `digest` with every `document_id` that names a deal
     replaced by its alias -- the only digest field that carries a slug, and
     the one `opf_prompt._fmt_cite` renders. Any dict, at any depth, whose
-    `document_id` is a key of `aliases` is a ref here; every other value is
-    copied unchanged. `digest` itself is never mutated."""
+    `document_id` is a key of `aliases` is a ref here -- since digest 5 that
+    includes each `verified_absent_deals[]` entry and a reconstructed former
+    form's `standard_history.forms[].ref` -- and every other value is
+    copied unchanged; a `prior_template:<label>` id is never a key (it is
+    our former form, `deal_document_ids`), so it stays as written. `digest`
+    itself is never mutated."""
     if not aliases:
         return digest
 

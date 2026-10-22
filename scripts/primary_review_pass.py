@@ -553,7 +553,7 @@ REVIEW_GUIDANCE_BLOCK = render_review_guidance_block()
 # review died at `run_review` with nothing for the user to download. On the
 # OPF path `ConfidentialCorpus.from_opf_document` puts Floor invariant
 # `statement`/`rationale`, `posture.system_prompt`, and the digest's
-# precedent texts (then digest 2's summaries; since issue #128 digest 4's
+# precedent texts (then digest 2's summaries; since issue #128 the digest's
 # signed variants, refused asks and changed openings, plus the per-deal
 # precedent record) into `playbook_ngrams` -- all of it contract prose, i.e.
 # exactly the wording a model reaches for when it states back which position

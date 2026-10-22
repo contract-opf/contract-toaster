@@ -24,7 +24,7 @@ reuses the exact same tested validate/store engine
 ## Fixture note
 
 Same convention as tests/test_playbook_upload_478.py: the committed gold
-OPF 0.5 fixture (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`,
+OPF 0.6 fixture (`tests/gold-fixtures-opf/acme-university-0.6.opf.json`,
 agreement_type.id "educational-affiliation", aliases ["acme-university",
 "eiaa-fixture"]) stands in for a real playbook-engine artifact. That id is
 NOT a registered playbook_id anywhere in the real `playbooks/registry.json`
@@ -77,8 +77,8 @@ import opf_canonicalize  # noqa: E402
 import src.main as backend_main  # noqa: E402
 import src.playbook_versions as pv  # noqa: E402
 
-OPF03_JSON_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
-OPF03_HTML_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.html"
+OPF03_JSON_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
+OPF03_HTML_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.html"
 V1_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 
 # The document's own agreement_type.id (the identity `POST /api/admin/
@@ -213,7 +213,7 @@ class TestCreateNewOpfPlaybookHappyPath(PlaybookCreateTestBase):
         self.assertEqual(body["playbook_id"], DERIVED_PLAYBOOK_ID)
         self.assertEqual(body["version"], "1.0.0")
         self.assertEqual(body["status"], pv.STATUS_DRAFT)
-        self.assertEqual(body["artifact_kind"], "opf-0.5")
+        self.assertEqual(body["artifact_kind"], "opf-0.6")
         self.assertIsNotNone(body["storage_key"])
         self.assertTrue(body["storage_key"].startswith(f"playbooks/{DERIVED_PLAYBOOK_ID}/"))
 
@@ -231,7 +231,7 @@ class TestCreateNewOpfPlaybookHappyPath(PlaybookCreateTestBase):
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["playbook_id"], DERIVED_PLAYBOOK_ID)
-        self.assertEqual(resp.json()["artifact_kind"], "opf-0.5")
+        self.assertEqual(resp.json()["artifact_kind"], "opf-0.6")
 
 
 class TestCreateRequiresAdmin(PlaybookCreateTestBase):

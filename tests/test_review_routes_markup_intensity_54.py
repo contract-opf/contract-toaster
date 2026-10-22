@@ -102,7 +102,7 @@ import src.reviews as reviews  # noqa: E402
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 INVALID_DETAIL = "markup_intensity must be one of: light, medium, heavy."
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 V1_PLAYBOOK_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 MODEL_RESPONSES_DIR = REPO_ROOT / "tests" / "fixtures" / "model_responses"
 STANDING_INSTRUCTIONS = "Prefer mutual terms wherever the playbook allows it."
@@ -169,15 +169,25 @@ CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"
 # reproduce their previous values (49a9e6c1... and 6d00584b...), checked
 # when this was re-captured. The V1 pin did NOT move (no digest).
 #
+# RE-CAPTURED for issue #177 (2026-10-21): OPF 0.6 / digest 5 replaces 0.5 /
+# digest 4, so the fixture is the regenerated acme-university 0.6 gold fixture
+# (signing dates, settled judgments, a former form, absence records) and the
+# Digest block is the digest-5 renderer (signing months, settled markers,
+# former forms, absence lines, the extended DIGEST_INTRO legend). Both are
+# DELIBERATE changes to the OPF knowledge these pins cover, owned by #177;
+# no strip-back to the previous value is possible because the fixture itself
+# changed. The markup-intensity block is still composed nowhere in them (the
+# other assertions here), and the V1 pin did NOT move (no digest).
+#
 # The knowledge blocks: sha256 of "\n\n".join(compose_opf_system_blocks(...))
-# for the acme-university 0.5 gold fixture. The markup-intensity block is NOT
+# for the acme-university 0.6 gold fixture. The markup-intensity block is NOT
 # composed there, so no markup level may ever move it.
-GOLDEN_KNOWLEDGE_BARE_SHA256 = "99c25df7b17cc89d3d631417672d7b367a0fe05abf26f97a76f13513da4ad182"
+GOLDEN_KNOWLEDGE_BARE_SHA256 = "1465c5ce733fa2e8cefacae904c34ad22d0385dcff38de634030a12855e2fc01"
 # The ASSEMBLED OPF system prompt (`review_spine._assemble_opf_system_blocks`
 # over `resolve_knowledge` of the same fixture): sha256 of the blocks' texts
 # joined with "\n\n".
 GOLDEN_OPF_ASSEMBLED_BARE_SHA256 = (
-    "90494a9456c245dea48c197f269d2a07faa756c60a42511ff48542e014ea0af9"
+    "73fa2c13ad96881144875ecd8eeec7b0466cf1d3824585b7ef65b4079f175ac4"
 )
 # The ASSEMBLED v1 system prompt (`primary_review_pass.assemble_system_blocks`
 # over V1_PLAYBOOK).

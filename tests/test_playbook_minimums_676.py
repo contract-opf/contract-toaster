@@ -5,7 +5,7 @@ spec-normative minimum, starting with `perspective`.
 
 ## What is being gated, and why here
 
-`playbooks/opf/playbook.schema-0.5.json` (and 0.2/0.3 before it) describes `/perspective` as
+`playbooks/opf/playbook.schema-0.6.json` (and 0.2/0.3 before it) describes `/perspective` as
 "Whose perspective this playbook is reviewed 'as' -- an open-standard OPF
 instance must say who 'us' is", but leaves it OUT of the schema's own
 `required` list (verified in this file by
@@ -37,9 +37,10 @@ Every document under test is a committed gold OPF fixture with its
 `identity.content_hash` and `identity.section_digests` recomputed with
 `scripts/opf_canonicalize.py`, the same functions the real compiler seals
 with. That is not a hand-forged shape: `perspective` is schema-OPTIONAL in
-`playbook.schema-0.5.json` (as it was in 0.2/0.3), so
+`playbook.schema-0.6.json` (as it was in 0.2/0.3), so
 `scripts/opf_load.py::load_opf_document` accepted such a document before
-this change and every pre-#676 upload of one succeeded. Since OPF 0.5 the
+this change and every pre-#676 upload of one succeeded. Since OPF 0.5 (and in
+0.6) the
 digest carries a copy of `perspective` (null when the document has none),
 so the perspective-less document nulls that copy too, exactly as the
 engine's digest builder would (issue #128). The
@@ -92,6 +93,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
 
 import opf_canonicalize  # noqa: E402
+import opf_load  # noqa: E402
 
 import src.main as backend_main  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
@@ -99,9 +101,9 @@ import src.playbook_upload as playbook_upload  # noqa: E402
 import src.playbook_versions as playbook_versions  # noqa: E402
 
 OPF_FIXTURE_DIR = REPO_ROOT / "tests" / "gold-fixtures-opf"
-FULL_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.5.opf.json"
-REAL_SHAPE_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.5-real-shape.opf.json"
-SCHEMA_05_PATH = REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json"
+FULL_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.6.opf.json"
+REAL_SHAPE_FIXTURE_PATH = OPF_FIXTURE_DIR / "acme-university-0.6-real-shape.opf.json"
+SCHEMA_05_PATH = opf_load.OPF_SCHEMA_PATH
 
 PLAYBOOK_ID = "acme-university"  # an agreement_type.aliases entry of both fixtures
 VERSIONS_PATH = f"/api/admin/playbooks/{PLAYBOOK_ID}/versions"
@@ -188,7 +190,7 @@ def _normative_but_optional(schema: dict[str, Any]) -> set[str]:
     language (must/required/shall) that the schema's `required` list does
     NOT back -- #676's scoping scan, re-run here rather than trusted.
 
-    OPF 0.5's derived sections (`digest`, `manifest`, `dossiers`,
+    OPF 0.6's derived sections (`digest`, `manifest`, `dossiers`,
     `provenance_index`) each say "when present it MUST equal
     build_...(document)": a consistency rule the engine's validator applies
     to a section that is there, not a requirement that it be there. Those
@@ -273,7 +275,7 @@ class TestValidatePlaybookUpload(unittest.TestCase):
     def test_document_without_perspective_is_rejected(self):
         with self.assertRaises(playbook_upload.PlaybookUploadRejected) as ctx:
             playbook_upload.validate_playbook_upload(
-                filename="acme-university-0.5.opf.json",
+                filename="acme-university-0.6.opf.json",
                 contents=_as_bytes(_without_perspective()),
                 playbook_id=PLAYBOOK_ID,
             )
@@ -285,7 +287,7 @@ class TestValidatePlaybookUpload(unittest.TestCase):
         field. A gate nobody can act on is a support ticket." """
         with self.assertRaises(playbook_upload.PlaybookUploadRejected) as ctx:
             playbook_upload.validate_playbook_upload(
-                filename="acme-university-0.5.opf.json",
+                filename="acme-university-0.6.opf.json",
                 contents=_as_bytes(_without_perspective()),
                 playbook_id=PLAYBOOK_ID,
             )
@@ -299,7 +301,7 @@ class TestValidatePlaybookUpload(unittest.TestCase):
     def test_blank_party_is_rejected_too(self):
         with self.assertRaises(playbook_upload.PlaybookUploadRejected) as ctx:
             playbook_upload.validate_playbook_upload(
-                filename="acme-university-0.5.opf.json",
+                filename="acme-university-0.6.opf.json",
                 contents=_as_bytes(_blank_party()),
                 playbook_id=PLAYBOOK_ID,
             )
@@ -308,7 +310,7 @@ class TestValidatePlaybookUpload(unittest.TestCase):
     def test_blank_counterparty_type_is_rejected_too(self):
         with self.assertRaises(playbook_upload.PlaybookUploadRejected) as ctx:
             playbook_upload.validate_playbook_upload(
-                filename="acme-university-0.5.opf.json",
+                filename="acme-university-0.6.opf.json",
                 contents=_as_bytes(_blank_counterparty_type()),
                 playbook_id=PLAYBOOK_ID,
             )
@@ -316,13 +318,13 @@ class TestValidatePlaybookUpload(unittest.TestCase):
 
     def test_real_shape_document_without_perspective_is_rejected(self):
         """#676's verification bar names "a real-shaped OPF document" --
-        `acme-university-0.5-real-shape.opf.json` is the empty-posture,
+        `acme-university-0.6-real-shape.opf.json` is the empty-posture,
         policy-less twin of the production EIAA artifact (the shape issue
         #479 AC1 runs end-to-end against), so the gate is proven on it and
         not only on the fuller gold fixture."""
         with self.assertRaises(playbook_upload.PlaybookUploadRejected) as ctx:
             playbook_upload.validate_playbook_upload(
-                filename="acme-university-0.5.opf.json",
+                filename="acme-university-0.6.opf.json",
                 contents=_as_bytes(_without_perspective(REAL_SHAPE_FIXTURE_PATH)),
                 playbook_id=PLAYBOOK_ID,
             )
@@ -331,18 +333,18 @@ class TestValidatePlaybookUpload(unittest.TestCase):
     def test_document_with_perspective_still_validates(self):
         """#676: "prove you added a gate, not a wall"."""
         validated = playbook_upload.validate_playbook_upload(
-            filename="acme-university-0.5.opf.json",
+            filename="acme-university-0.6.opf.json",
             contents=_as_bytes(_load(FULL_FIXTURE_PATH)),
             playbook_id=PLAYBOOK_ID,
         )
         self.assertTrue(validated.is_opf)
-        self.assertEqual(validated.artifact_kind, "opf-0.5")
+        self.assertEqual(validated.artifact_kind, "opf-0.6")
 
     def test_a_digest_whose_perspective_copy_is_null_is_rejected(self):
         """Issue #128: "reject a document whose digest lacks perspective"."""
         with self.assertRaises(playbook_upload.PlaybookUploadRejected) as ctx:
             playbook_upload.validate_playbook_upload(
-                filename="acme-university-0.5.opf.json",
+                filename="acme-university-0.6.opf.json",
                 contents=_as_bytes(_digest_copy_missing()),
                 playbook_id=PLAYBOOK_ID,
             )
@@ -359,7 +361,7 @@ class TestValidatePlaybookUpload(unittest.TestCase):
 
     def test_real_shape_document_with_perspective_still_validates(self):
         validated = playbook_upload.validate_playbook_upload(
-            filename="acme-university-0.5.opf.json",
+            filename="acme-university-0.6.opf.json",
             contents=_as_bytes(_load(REAL_SHAPE_FIXTURE_PATH)),
             playbook_id=PLAYBOOK_ID,
         )
@@ -450,7 +452,7 @@ class TestVersionsUploadRoute(RouteTestBase):
             VERSIONS_PATH,
             files={
                 "file": (
-                    "acme-university-0.5.opf.json",
+                    "acme-university-0.6.opf.json",
                     _as_bytes(doc),
                     "application/octet-stream",
                 )
@@ -478,7 +480,7 @@ class TestVersionsUploadRoute(RouteTestBase):
     def test_upload_with_perspective_still_succeeds(self):
         resp = self._upload(_load(FULL_FIXTURE_PATH))
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertEqual(resp.json()["artifact_kind"], "opf-0.5")
+        self.assertEqual(resp.json()["artifact_kind"], "opf-0.6")
 
 
 class TestCreatePlaybookRoute(RouteTestBase):
@@ -493,7 +495,7 @@ class TestCreatePlaybookRoute(RouteTestBase):
             CREATE_PATH,
             files={
                 "file": (
-                    "acme-university-0.5.opf.json",
+                    "acme-university-0.6.opf.json",
                     _as_bytes(doc),
                     "application/octet-stream",
                 )

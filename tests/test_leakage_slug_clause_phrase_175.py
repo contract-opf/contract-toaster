@@ -47,7 +47,7 @@ What this pins:
     (`tests/fixtures/opf/engine-nda-example.opf.json`), unedited except that
     one deal's `document_id` is renamed everywhere it occurs
     (`delta-ventures` -> the slug under test). `document_id` is
-    uploader-controlled text the 0.5 schema constrains only to
+    uploader-controlled text the 0.6 schema constrains only to
     `minLength: 1`, so a deal filed as `Limitation-of-Liability.docx`
     produces such a slug. No slug under test is already a `document_id` of
     that corpus, so no rename merges two deals into one: every fixture
@@ -96,11 +96,11 @@ from test_deal_aliases_173 import (  # noqa: E402
 _HELD = "internal-precedent-id"
 
 
-def _loadable(slug: str) -> dict[str, Any]:
-    """`_renamed(slug)`, asserted to be a document the loader accepts: the
-    renamed slug must not duplicate another `corpus.documents[]` id
-    (`opf_load._check_duplicate_sibling_ids` raises on one)."""
-    doc = _renamed(slug)
+def _loadable(slug: str, old_slug: str = "delta-ventures") -> dict[str, Any]:
+    """`_renamed(slug, old_slug)`, asserted to be a document the loader
+    accepts: the renamed slug must not duplicate another `corpus.documents[]`
+    id (`opf_load._check_duplicate_sibling_ids` raises on one)."""
+    doc = _renamed(slug, old_slug)
     ids = [entry["document_id"] for entry in doc["corpus"]["documents"]]
     assert ids.count(slug) == 1, (slug, ids)
     opf_load._check_duplicate_sibling_ids(doc)

@@ -52,7 +52,7 @@ import review_spine  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
 from test_opf_cache_127 import BUCKET, PLAYBOOK_ID, _CountingS3, _doc, _stored  # noqa: E402
 
-REAL_SHAPE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5-real-shape.opf.json"
+REAL_SHAPE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-real-shape.opf.json"
 
 
 class _Stop(Exception):

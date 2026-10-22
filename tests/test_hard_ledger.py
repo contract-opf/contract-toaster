@@ -45,7 +45,7 @@ its rule id reaches the internal footnotes.
 ## Fixture reachability
 
   * The OPF document is the committed synthetic gold fixture
-    (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`) with one more
+    (`tests/gold-fixtures-opf/acme-university-0.6.opf.json`) with one more
     signed Floor invariant, `IND-004`, carrying the vendor keys
     `playbook floor sign --clause indemnification --requires-presence
     --condition ...` writes (`x_taxonomy_id`, `x_required_presence`,
@@ -94,7 +94,7 @@ from test_review_spine import _body_p, _build_docx_bytes, _heading_p, _load_bund
 REVIEW_ID = "00000000-0000-4000-a000-000000000147"
 RULE_ID = "IND-004"
 JUDGED_RULE = "no-uncapped-liability"
-OPF_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+OPF_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 ENGINE_CHECKOUT = Path(
     os.environ.get("PLAYBOOK_ENGINE_CHECKOUT", REPO_ROOT.parent / "playbook-engine")
 )

@@ -6,7 +6,7 @@ selection.
 #40 selected the critic's dossiers from `reviewer rule ids UNION open
 hard-ledger rule ids`. Its third named source, deterministic anomaly rule
 ids, had no producer: the Floor judge runs AFTER the critic (and is a model
-call). The OPF 0.5 manifest already carries what a cheap, pre-critic,
+call). The OPF 0.6 manifest already carries what a cheap, pre-critic,
 deterministic signal needs: a hard rule whose `condition` is a predicate
 (`required_phrases`, `numeric_bound`, `cross_reference`) is checked against
 the text of the clause it names. `hard_ledger.anomaly_rule_ids` runs that
@@ -104,6 +104,7 @@ import critic_dossiers as cd  # noqa: E402
 import hard_ledger as hl  # noqa: E402
 import model_client  # noqa: E402
 import opf_canonicalize  # noqa: E402
+import opf_load  # noqa: E402
 import review_spine  # noqa: E402
 from test_dossier_selection_40 import (  # noqa: E402
     RULE_A_CLAUSE,
@@ -130,7 +131,7 @@ from test_review_spine import _body_p, _build_docx_bytes, _heading_p, _load_bund
 
 REVIEW_ID = "00000000-0000-4000-a000-000000000170"
 VECTOR_008 = (
-    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "008-hard-rules-and-dossiers.json"
+    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
 )
 
 CONFIDENTIALITY_CLAUSE = "clause.confidentiality"

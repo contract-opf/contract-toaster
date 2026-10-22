@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Issue #128 (item 6): the OPF leakage corpus reads digest 4 and the per-deal
-precedent record, so it is never empty on an OPF 0.5 playbook.
+Issue #128 (item 6): the OPF leakage corpus reads digest and the per-deal
+precedent record, so it is never empty on an OPF 0.6 playbook.
 
 `leakage_scan.ConfidentialCorpus.from_opf_document` used to read digest 2's
 `concessions` / `unacceptable` / `exemplar_forms` / `preferred_variations` and
-OPF 0.3's `evidence.clause_library`. An OPF 0.5 document carries none of them,
+OPF 0.3's `evidence.clause_library`. An OPF 0.6 document carries none of them,
 so on the real playbook's shape (`posture == {}`, `floor == {}`) the corpus
 would have been EMPTY -- the failure mode #104 exists to prevent, arriving by a
 format change instead of a lookup failure. This pins the replacement:
@@ -34,7 +34,7 @@ format change instead of a lookup failure. This pins the replacement:
      the dossiers since issue #40 (`tests/test_dossier_selection_40.py`).
 
 Fixture reachability: every document here is unmutated engine output -- a
-committed gold OPF 0.5 fixture generated with the engine's reference
+committed gold OPF 0.6 fixture generated with the engine's reference
 functions (tests/gold-fixtures-opf/generate_opf_fixture.py), the engine's own
 public NDA example, or a vendored conformance vector assembled the way the
 engine emits it (its `input` plus its `expected` derived sections). The
@@ -60,12 +60,13 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import leakage_scan  # noqa: E402
+import opf_load  # noqa: E402
 
 FIXTURES = REPO_ROOT / "tests" / "gold-fixtures-opf"
-FULL = FIXTURES / "acme-university-0.5.opf.json"
-REAL_SHAPE = FIXTURES / "acme-university-0.5-real-shape.opf.json"
+FULL = FIXTURES / "acme-university-0.6.opf.json"
+REAL_SHAPE = FIXTURES / "acme-university-0.6-real-shape.opf.json"
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
-VECTORS = REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors"
+VECTORS = opf_load.OPF_CONFORMANCE_VECTORS_DIR
 CAPPED_VECTOR = VECTORS / "003-cap-totals-and-summary.json"
 DOSSIER_VECTOR = VECTORS / "008-hard-rules-and-dossiers.json"
 

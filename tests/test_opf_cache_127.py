@@ -21,6 +21,8 @@ since it was activated. This pins the cache that replaces that:
      raises exactly as an uncached read would, and one the store reports as
      different bytes (whole-object SHA-256) drops the entry and takes the
      full path.
+  8. (issue #177) An OPF 0.5 artifact activated before 0.6 replaced it is
+     refused for its version on every review and never cached.
 
 The real validator runs throughout; only the object store and the
 playbook_versions read are faked, so a hit/miss is counted on the real seam.
@@ -47,10 +49,11 @@ for _dir in (REPO_ROOT / "backend", REPO_ROOT / "scripts"):
         sys.path.insert(0, str(_dir))
 
 import opf_canonicalize  # noqa: E402
+import opf_load  # noqa: E402
 import src.pipeline_runner as pipeline_runner  # noqa: E402
 import src.playbook_upload as playbook_upload  # noqa: E402
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 PLAYBOOK_ID = "cache-127"
 BUCKET = "uploads-127"
 
@@ -171,6 +174,29 @@ class OpfCacheTest(unittest.TestCase):
         for _ in range(2):
             with self.assertRaises(playbook_upload.PlaybookUploadRejected):
                 self._load()
+        self.assertEqual(self.validations, 2)
+        self.assertEqual(pipeline_runner._opf_cache, {})
+
+    def test_an_opf_0_5_artifact_activated_before_0_6_is_refused_and_never_cached(self) -> None:
+        """Issue #177: OPF 0.6 replaced 0.5 with no backward compatibility. A
+        version activated while 0.5 was the format (its row reads
+        `artifact_kind: opf-0.5`, its stored bytes stamp `opf_version` 0.5 and
+        digest 4) is re-validated on every review and refused for its version,
+        and nothing of it is cached -- so no 0.6 review can be served a
+        document, or a composed-blocks memo, validated as 0.5. (The memo is
+        keyed on the document's `identity.content_hash`, which covers
+        `opf_version`, so a 0.5 and a 0.6 stamping of the same content can
+        never share one either.)"""
+        old = _doc()
+        old["opf_version"], old["digest"]["digest_version"] = "0.5", "4"
+        old["identity"]["content_hash"] = opf_canonicalize.content_hash(old)
+        self.assertNotEqual(old["identity"]["content_hash"], _doc()["identity"]["content_hash"])
+        self.active = _stored(self.s3, old, "1.0.0")
+        self.assertEqual(self.active["artifact_kind"], "opf-0.5")
+        for _ in range(2):
+            with self.assertRaises(opf_load.OpfVersionError) as raised:
+                self._load()
+            self.assertIn("OPF 0.6", str(raised.exception))
         self.assertEqual(self.validations, 2)
         self.assertEqual(pipeline_runner._opf_cache, {})
 

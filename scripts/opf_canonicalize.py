@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical serialization + content hashing for OPF playbooks (OPF 0.5).
+"""Canonical serialization + content hashing for OPF playbooks (OPF 0.6).
 
 VENDORED, byte-faithful in semantics, from the playbook-engine reference
 implementation ``playbook_engine/canonicalize.py`` (issue #143). This is the
@@ -37,11 +37,14 @@ self-referential and isn't perturbed by non-content run metadata:
     run identifier; two compiles of byte-identical content a second apart (or
     with a different ``run_id``) must hash identically.
 
-OPF 0.5 removed the top-level ``curation`` section (engine issue #233; a 0.5
+OPF 0.5 removed the top-level ``curation`` section (engine issue #233; a 0.5 or 0.6
 document carrying it fails schema validation), so it is no longer excluded
-and no longer has a section digest. Everything else the 0.5 document carries
--- ``digest``, ``manifest``, ``dossiers``, ``provenance_index`` included --
-joins ``content_hash`` like any other top-level content.
+and no longer has a section digest. OPF 0.6 (issue #177) changed nothing here:
+its conformance manifest states the canonical / content_hash /
+section_digests algorithm is "exactly as the 0.3 set". Everything else the 0.6
+document carries -- ``digest``, ``manifest``, ``dossiers``,
+``provenance_index`` included -- joins ``content_hash`` like any other
+top-level content.
 
 A section digest (``evidence``/``posture``/``floor``) is the hash of that
 section's own canonical bytes in isolation.
@@ -51,8 +54,8 @@ Hash format: ``"sha256:" + hexdigest`` (``^sha256:[0-9a-f]{64}$``).
 Keep in sync with playbook-engine ``playbook_engine/canonicalize.py``; the
 schema sync test (tests/test_opf_schema_sync.py) guards the schemas, and
 tests/test_opf_canonicalize.py pins a golden hash and replays the engine's
-vendored OPF 0.5 conformance vectors (playbooks/opf/conformance-0.5/), so
-drift here is caught.
+vendored OPF 0.6 conformance vectors (``opf_load.OPF_CONFORMANCE_DIR``,
+playbooks/opf/conformance-0.6/), so drift here is caught.
 """
 
 from __future__ import annotations
@@ -133,7 +136,7 @@ def verify_content_hash(playbook: dict[str, Any]) -> bool:
     """True iff ``playbook['identity']['content_hash']`` matches the recomputed
     whole-document hash. False if ``identity`` or ``content_hash`` is absent.
 
-    This is the ingest-time integrity gate: an OPF 0.5 upload whose declared
+    This is the ingest-time integrity gate: an OPF 0.6 upload whose declared
     hash does not match its own canonical body must be rejected (see
     scripts/opf_load.py).
     """

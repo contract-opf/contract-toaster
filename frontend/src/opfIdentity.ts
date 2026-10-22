@@ -12,10 +12,13 @@
  *
  * ## The complication, and the rule that resolves it
  *
- * OPF 0.3 carries `identity.version`, but it is OPTIONAL and the real
- * playbook in production (`educational-affiliation`) does not have one:
- * `opf_version` 0.3, `identity.content_hash` present, `identity.version`
- * absent. So "just read it from the file" cannot be the whole rule.
+ * OPF carries `identity.version`, but it is OPTIONAL (from 0.3 through
+ * 0.6, the one format the server accepts since issue #177) and the real
+ * playbook does not have one: first seen on `opf_version` 0.3 in production
+ * (`educational-affiliation`), and still so on the private acceptance
+ * playbook compiled as 0.6 -- `identity.content_hash` present,
+ * `identity.version` absent. So "just read it from the file" cannot be the
+ * whole rule.
  *
  * Owner decision, 2026-08-22 (issue #597 comment) — option (a), derive only:
  *
@@ -67,7 +70,7 @@
 
 /** The two `identity` fields this module cares about. */
 export interface OpfIdentity {
-  /** `identity.version` — optional in OPF 0.3, absent on the real playbook. */
+  /** `identity.version` — optional in OPF (0.3 to 0.6), absent on the real playbook. */
   version?: string;
   /** `identity.content_hash` — `sha256:<64 hex>`. */
   contentHash?: string;

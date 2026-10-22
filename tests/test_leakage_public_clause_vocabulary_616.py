@@ -27,9 +27,9 @@ from each (then digest 2) clause's summary entries, which carried no
 `minLength`, so a summary that summarised nothing -- the bare clause name
 repeated -- was schema-valid, and became a blocked gram byte-identical to the
 SAME document's public `taxonomy.entries[].label`. Since issue #128 the corpus
-reads digest 4's precedent texts (signed variants, refused asks, openings not
+reads the digest's precedent texts (signed variants, refused asks, openings not
 signed as proposed) and the per-deal precedent record, and
-`playbooks/opf/playbook.schema-0.5.json` puts no `minLength` on those either,
+`playbooks/opf/playbook.schema-0.6.json` puts no `minLength` on those either,
 so the hazard -- and this guard -- carry over unchanged. The owner measured 18 fields in
 the real bound playbook whose entire content is `indemnification`, including
 that taxonomy label. The toaster consumes a playbook authored elsewhere, so
@@ -48,7 +48,7 @@ would be indistinguishable from switching the check off.
 
 ## Fixture reachability
 
-The document under test is the shipped gold OPF 0.5 fixture with two precedent
+The document under test is the shipped gold OPF 0.6 fixture with two precedent
 texts (a refused ask and an opening not signed as proposed, in the digest AND in
 the precedent record they summarise) rewritten to the bare-clause-name shape
 the real playbook was measured to contain. `TestProductionAcceptsThisPlaybook` re-derives
@@ -73,7 +73,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -197,7 +197,7 @@ def _scan_summary(
 class TestProductionAcceptsThisPlaybook(unittest.TestCase):
     def test_the_bare_clause_name_document_passes_the_real_opf_loader(self):
         """A precedent text holding nothing but the clause's own name is not a
-        malformed document this test invented -- it is schema-valid OPF 0.5
+        malformed document this test invented -- it is schema-valid OPF 0.6
         that `opf_load.load_opf_document` accepts, hash check and injection
         scan included. That is what makes every assertion below a statement
         about production rather than about a fixture."""
@@ -223,7 +223,7 @@ class TestProductionAcceptsThisPlaybook(unittest.TestCase):
         removes the hazard also turns this file red and invites the guard to
         be re-examined."""
         schema = json.loads(
-            (REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json").read_text(
+            (opf_load.OPF_SCHEMA_PATH).read_text(
                 encoding="utf-8"
             )
         )
@@ -409,6 +409,15 @@ class TestTheGateStillFires(unittest.TestCase):
             if record["opening_text"] and record["opened_with"] != "standard":
                 expected_playbook.append(record["opening_text"]["text"])
             expected_playbook.extend(ask["text"] for ask in record["refused_asks"])
+        # OPF 0.6 (issue #177): our former forms' wording and the owner's
+        # why-changed note, each once.
+        for clause in gold["evidence"]["clauses"]:
+            for prior in clause["prior_standards"]:
+                for text in [prior["text"], *(p["text"] for p in prior["parts"])]:
+                    if text not in expected_playbook:
+                        expected_playbook.append(text)
+            if clause["why_changed"]:
+                expected_playbook.append(clause["why_changed"]["text"])
         expected_standard = [
             part["text"]
             for clause in gold["digest"]["clauses"]

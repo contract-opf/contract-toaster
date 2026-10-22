@@ -2,37 +2,51 @@
 
 Pinned, vendored copies of the Open Playbook Format (OPF) JSON Schema and its
 conformance vectors from the playbook-engine repo. This repo reads exactly ONE
-format: `opf_version` "0.5" with `digest_version` "4" (issue #128; the owner's
-2026-10-06 direction: no backward compatibility, no dispatch by version).
+format: `opf_version` "0.6" with `digest_version` "5" (issue #177, which
+replaced 0.5 / digest 4 in place; the owner's 2026-10-06 direction on issue
+#128 stands: no backward compatibility, no dispatch by version).
 
-- `playbook.schema-0.5.json` — `$id`
-  `https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.5.json`.
-  The verdict-free per-deal precedent record (`evidence.precedent[]`, with
-  `opened_with` and an `opening_text` for any distinct opening), digest 4,
-  the `vs_standard` label judged part by part against our standard, and the
-  hard-rule `manifest`, critic `dossiers` and `provenance_index` sections.
-- `conformance-0.5/` — the engine's OPF 0.5 conformance set
-  (`manifest.json` + `vectors/*.json`, byte-for-byte from
-  `spec/conformance/0.5/`). `tests/test_opf_canonicalize.py` replays every
-  vector's `canonical` / `content_hash` / `section_digests`, and
+- `playbook.schema-0.6.json` — `$id`
+  `https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.6.json`.
+  Everything 0.5 carried (the verdict-free per-deal precedent record with
+  `opened_with` and an `opening_text` for any distinct opening, the
+  `vs_standard` label judged part by part against our standard, the hard-rule
+  `manifest`, critic `dossiers` and `provenance_index`), plus 0.6's signing
+  dates (`signed_on`), our former forms (`baseline.prior_templates`,
+  `prior_standards`, `why_changed`, `opened_with: prior_standard`), verified
+  absence (`evidence.absence`) and digest 5 (`first_signed` / `last_signed`,
+  `settled`, `standard_history`, `n_signed_without_verified` /
+  `n_signed_without_possible`, `verified_absent_deals`).
+- `conformance-0.6/` — the engine's OPF 0.6 conformance set (`README.md`,
+  `manifest.json` + the 14 `vectors/*.json`, byte-for-byte from
+  `spec/conformance/0.6/`). `scripts/opf_load.py` names the directory once
+  (`OPF_CONFORMANCE_DIR`, `OPF_CONFORMANCE_VECTORS_DIR`) and every test reads
+  it from there. `tests/test_opf_canonicalize.py` replays every vector's
+  `canonical` / `content_hash` / `section_digests`, and
   `tests/test_opf_load.py` loads every vector as the engine emits it.
 
-OPF 0.2 and 0.3 (with digest 2) were deleted by issue #128, not kept beside
-0.5. They stay in this repo's git history and in contract-opf/opf. A document
-declaring any other `opf_version` or `digest_version` is refused at ingest
-with a version error (`scripts/opf_load.py`).
+OPF 0.2 and 0.3 (with digest 2) were deleted by issue #128, and OPF 0.5 (with
+digest 4) by issue #177, not kept beside 0.6. They stay in this repo's git
+history and in contract-opf/opf. A document declaring any other
+`opf_version` or `digest_version` is refused at ingest with a version error
+that names 0.6 (`scripts/opf_load.py`).
 
 ## Provenance — which engine commit each copy came from
 
 | Vendored artifact | playbook-engine commit | Engine pin (`spec/CHANGELOG.md`) |
 | --- | --- | --- |
-| `playbook.schema-0.5.json` | `b90c647` | `f09c1b7abc08c14b80f7f2b8d572fd5cf26d9491a0566e27311387af960e6657` |
-| `conformance-0.5/` (manifest + vectors, concatenated) | `b90c647` | `79cb9f0b4b01b4dc914258ff530a5a5aa22d1b9bf17dd54e4663a16a796fb308` |
+| `playbook.schema-0.6.json` | `fe89bc6` | `b2a925811fd661c5d7c11eaa768444fa63764b479c34fff9a50187c580668bf2` |
+| `conformance-0.6/` (manifest + vectors, concatenated) | `fe89bc6` | `c5e3828e7d59c961aca2d633b390b3ea536902e7818efe0dd778a0916cf8be96` |
 
-The engine announced these pins on contract-opf/playbook-engine#236. Until
-this repo vendored it, 0.5 had no consumer and the engine changed it in place;
+The engine announced 0.6 on its epic contract-opf/playbook-engine#245. Until
+this repo vendored it, 0.6 had no consumer and the engine changed it in place;
 vendoring is what freezes it. A later format is a new `opf_version` and a new
-ticket here, never a re-vendor over 0.5.
+ticket here, never a re-vendor over 0.6.
+
+The conformance set's `README.md` is vendored beside it for the reader but is
+not part of the engine's concatenated pin (manifest + vectors only), so the
+pin and `tests/test_opf_schema_sync.py`'s parity check cover the manifest and
+the vectors.
 
 Record the commit here on every re-vendor. The pinned sha256 values in
 `tests/test_opf_schema_sync.py` tell you *that* a copy changed; this table
@@ -41,8 +55,8 @@ tells you *from what*, which is what you need to diagnose a drift.
 ## Re-vendoring
 
 **Never hand-edit these files.** Re-vendor by re-copying byte-for-byte from
-`../playbook-engine/spec/playbook.schema-0.5.json` and
-`../playbook-engine/spec/conformance/0.5/{manifest.json,vectors/*.json}`, then
+`../playbook-engine/spec/playbook.schema-0.6.json` and
+`../playbook-engine/spec/conformance/0.6/{README.md,manifest.json,vectors/*.json}`, then
 set `UPSTREAM_FROZEN_SHA256` and `UPSTREAM_CONFORMANCE_SHA256` in
 `tests/test_opf_schema_sync.py` **from the engine's published pins** (its
 `spec/CHANGELOG.md`) — *not* by running `sha256sum` over the files you just
@@ -92,7 +106,7 @@ That gate alarms in three layers, at deliberately different urgencies:
    shape contract is the only thing standing between an upstream change and a
    silently degraded prompt.
 
-Ingest validates an uploaded OPF against `playbook.schema-0.5.json`
+Ingest validates an uploaded OPF against `playbook.schema-0.6.json`
 (`scripts/opf_load.py`). Content-hash verification uses
 `scripts/opf_canonicalize.py` (the OPF canonical-form definition, vendored from
 playbook-engine `playbook_engine/canonicalize.py`; since 0.5 only `identity`

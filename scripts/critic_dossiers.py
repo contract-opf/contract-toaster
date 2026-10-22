@@ -6,7 +6,7 @@ non-RAG depth path, served by orchestration rather than a model tool call.
 ## What it does
 
 The digest in the shared prefix is a bounded projection: per clause, the
-signed variants as 300-character summaries, counts and citations. The OPF 0.5
+signed variants as 300-character summaries, counts and citations. The OPF 0.6
 artifact also carries `dossiers` (playbook-engine#228): one bounded dossier
 per evidence clause, keyed by clause id -- our standard in its parts, the
 clause's signed Floor rules, and at most two WHOLE precedent excerpts (an
