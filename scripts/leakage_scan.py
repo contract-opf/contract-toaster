@@ -1126,8 +1126,14 @@ def _opf_prior_form_reasons(opf_doc: dict[str, Any]) -> list[str]:
     """The reasons and summaries beside our former forms (OPF 0.6, issue
     #177): each `evidence.clauses[].prior_standards[].vs_standard`'s
     `reason`, `parts[].reason`, `additions[].summary` and
-    `owner_label.reason`, and each digest `standard_history.forms[].reason`,
-    which `opf_prompt` renders beside the form.
+    `owner_label.reason`, and each digest `standard_history.forms[].reason`.
+
+    The digest form's `reason` is NOT rendered in the prompt:
+    `opf_prompt._fmt_former_form` never reads it, because the renderer
+    states no reason for a change the owner did not write (the owner's
+    note, when there is one, is the clause's `why_changed` line). It is
+    still a check-4 span because #177 lists it, as defence in depth in case
+    a later renderer or the critic dossier carries it.
 
     Issue #177 enumerates these among the texts the leakage scan must see
     "exactly as other precedent text is" at check 4, so `from_opf_document`
