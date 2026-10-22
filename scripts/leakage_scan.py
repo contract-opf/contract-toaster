@@ -242,8 +242,11 @@ the text it is:
     `standard_history.forms[].parts[].text`) and the owner's `why_changed`
     note (`_opf_why_changed_texts`) are treated as precedent text: check-2
     grams (blocked externally) and check-4 spans (blocked whole on every
-    channel). A former form's text that reads as today's standard is our
-    standard, never either.
+    channel). A former form's text that is equal to or contained in today's
+    standard (a part, or the whole clause) is our standard, never either
+    (#179): a shorter earlier version that today's wording extends is
+    literally inside the position we openly ask for. Containment runs one
+    way only -- a former form that extends today's standard is still held.
   * A former form's `vs_standard` reasons and summaries (`reason`,
     `parts[].reason`, `additions[].summary`, `owner_label.reason`) and each
     digest form's `reason` (`_opf_prior_form_reasons`) are check-4 spans
@@ -1058,8 +1061,9 @@ def _opf_standard_texts(opf_doc: dict[str, Any]) -> list[str]:
 def _opf_our_standard_keys(opf_doc: dict[str, Any]) -> set[str]:
     """`_normalize`d forms of our standard as the digest and the evidence
     carry it: each part's text and the parts joined with a blank line (the
-    whole clause). A former form's text that reads as today's standard
-    (an `unchanged` form, or a passage it shares with today's) IS our
+    whole clause). A former form's text that is equal to or contained in
+    one of these (an `unchanged` form, a passage it shares with today's, or
+    a shorter earlier version today's wording extends, #179) IS our
     standard, which must stay restorable in replacement text, so
     `_opf_prior_form_texts` never treats it as a former form's text."""
     keys: set[str] = set()
@@ -1087,8 +1091,17 @@ def _opf_prior_form_texts(opf_doc: dict[str, Any]) -> list[str]:
     """Our former forms' wording (OPF 0.6, issue #177): each
     `evidence.clauses[].prior_standards[]` entry's `text` and its
     `parts[].text`, and each digest `standard_history.forms[].parts[].text`
-    (null where the passage is today's) -- unless it reads as today's
+    (null where the passage is today's) -- unless its `_normalize`d form is
+    equal to or contained in a `_normalize`d part or whole of today's
     standard (`_opf_our_standard_keys`), which stays our standard.
+
+    Containment, not only equality (issue #179): a former form whose text
+    is a shorter earlier version that today's wording extends is literally
+    inside our current standard, which check 2b already allowlists and which
+    is never a check-4 span, so holding it would only block an internal note
+    that quotes today's standard as "excessive precedent quotation". The
+    test runs one way: a former form that CONTAINS today's standard plus
+    more wording is not inside it, and stays a gram and a span.
 
     `from_opf_document` treats each exactly as a precedent text: a check-2
     gram (blocked externally -- our own former position is internal
@@ -1118,7 +1131,11 @@ def _opf_prior_form_texts(opf_doc: dict[str, Any]) -> list[str]:
             if isinstance(form, dict):
                 texts.extend(_texts_of(form.get("parts")))
     return list(
-        dict.fromkeys(text for text in texts if _normalize(text) not in standard_keys)
+        dict.fromkeys(
+            text
+            for text in texts
+            if not any(_normalize(text) in key for key in standard_keys)
+        )
     )
 
 
