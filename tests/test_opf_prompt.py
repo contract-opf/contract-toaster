@@ -15,7 +15,7 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    (byte-identical, i.e. `==`, on independently deep-copied input).
 2. Exclusion list: none of `posture.rubric`, `posture.generation`,
    `corpus`, `compiler`, `identity`, `curation`, `baseline`, `composes`, the
-   OPF 0.5 `dossiers` / `provenance_index`, a manifest rule's
+   OPF 0.6 `dossiers` / `provenance_index`, a manifest rule's
    `permissible_proof` (issue #163 composes the rest of the manifest), or
    any `x_*`-prefixed key (nested inside `evidence`, engine #180) leaks
    into any composed block -- checked via sentinel strings planted in each
@@ -24,7 +24,8 @@ no model call, no runtime wiring (that is a later slice). Checks, in order
    doc without it.
 4. No tenant-brand strings appears in the composed output for the synthetic
    fixture.
-5. (2026-07-16 update, OPF 0.3; OPF 0.5 since issue #128) The wholesale
+5. (2026-07-16 update, OPF 0.3; OPF 0.5 since issue #128, OPF 0.6 since
+   issue #177) The wholesale
    Evidence projection is RETIRED -- it measured ~1M tokens on the real
    corpus and could never reach a model. The per-deal precedent record
    (`evidence.precedent[]`) must NOT appear in the prompt: the digest carries
@@ -89,13 +90,13 @@ import model_client  # noqa: E402
 import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
 
-# The 0.5 gold fixture: this module composes a DIGEST prompt, so its test must
+# The 0.6 gold fixture: this module composes a DIGEST prompt, so its test must
 # compose from a digest-bearing document. The synthetic-eiaa fixture carries
 # no digest section and (correctly) raises -- covered by
 # tests/test_opf_digest_prompt.py, not here.
-FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 FIXTURE_02_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
-# The engine's public OPF 0.5 example (three uncovered clause types).
+# The engine's public OPF 0.6 example (three uncovered clause types).
 NDA_EXAMPLE_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
 OUTPUT_SCHEMA_V3_PATH = REPO_ROOT / "playbooks" / "output-schema-v3.json"
 OUTPUT_CONTRACT_DOC = REPO_ROOT / "docs" / "output-contract.md"
@@ -112,7 +113,7 @@ def check_1_block_order_and_determinism() -> list[str]:
 
     if len(blocks) != 5:
         failures.append(
-            f"  [1] expected 5 blocks (0.5 fixture has a manifest, perspective + de_minimis), "
+            f"  [1] expected 5 blocks (0.6 fixture has a manifest, perspective + de_minimis), "
             f"got {len(blocks)}"
         )
         return failures
@@ -277,7 +278,7 @@ def check_5_wholesale_evidence_is_retired() -> list[str]:
     Forward-compat did not vanish, it moved: `digest_version` is checked at
     ingest (scripts/opf_load.py accepts "4" only), so a digest shape this
     composer does not understand is refused at the door rather than silently
-    half-rendered here. Checked by tests/test_opf_ingest_05.py.
+    half-rendered here. Checked by tests/test_opf_ingest_06.py.
     """
     failures = []
     doc = _load_fixture()
@@ -309,7 +310,7 @@ def check_5_wholesale_evidence_is_retired() -> list[str]:
 def check_6_context_block_only_when_present() -> list[str]:
     failures = []
     # Strip explicitly rather than relying on the fixture happening to lack
-    # them: the 0.5 gold fixture carries both.
+    # them: the 0.6 gold fixture carries both.
     doc_without_context = _load_fixture()
     doc_without_context.pop("perspective", None)
     doc_without_context.pop("de_minimis", None)
@@ -516,9 +517,16 @@ def check_9_coverage_heading_and_uncovered_line() -> list[str]:
 
         for clause in digest["clauses"]:
             deals = "deal" if corpus_n == 1 else "deals"
+            # Digest 5 (issue #177): the heading also carries the clause's
+            # signing months when the corpus dates them.
+            span = (
+                f", first signed {clause['first_signed']}, last signed {clause['last_signed']}"
+                if clause.get("first_signed") and clause.get("last_signed")
+                else ""
+            )
             expected = (
                 f"## {clause['title']}  [clause_id: {clause['id']}] — "
-                f"precedent in {clause['n_deals']} of {corpus_n} {deals}"
+                f"precedent in {clause['n_deals']} of {corpus_n} {deals}{span}"
             )
             if expected not in lines:
                 failures.append(f"  [9] {path.name}: heading not {expected!r}")
@@ -581,6 +589,7 @@ def check_9_coverage_heading_and_uncovered_line() -> list[str]:
     doc = _load_fixture()
     doc["digest"]["corpus"]["n_deals"] = 1
     doc["digest"]["clauses"][0]["n_deals"] = 1
+    doc["digest"]["clauses"][0]["first_signed"] = doc["digest"]["clauses"][0]["last_signed"] = None
     if "precedent in 1 of 1 deal\n" not in _digest_of(doc):
         failures.append("  [9] a one-deal corpus does not read 'of 1 deal'")
     return failures

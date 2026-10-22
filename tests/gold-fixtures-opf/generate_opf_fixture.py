@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the synthetic OPF 0.5 fixture playbooks — FICTIONAL parties only.
+"""Generate the synthetic OPF 0.6 fixture playbooks — FICTIONAL parties only.
 
 The gold OPF fixtures every OPF test in this repo runs against. All parties are
 invented ("Acme University", "FixtureCorp College", "Example Institute", ...);
@@ -8,19 +8,20 @@ there is NO real corpus content here. Run:
     python3 tests/gold-fixtures-opf/generate_opf_fixture.py
 
 Emits, next to this script:
-    acme-university-0.5.opf.json / .opf.html              (full fixture, 4 clauses)
-    acme-university-0.5-empty-floor.opf.json / .opf.html  (floor.invariants == [])
-    acme-university-0.5-real-shape.opf.json / .opf.html   (posture == {}, floor == {}
+    acme-university-0.6.opf.json / .opf.html              (full fixture, 4 clauses)
+    acme-university-0.6-empty-floor.opf.json / .opf.html  (floor.invariants == [])
+    acme-university-0.6-real-shape.opf.json / .opf.html   (posture == {}, floor == {}
                                                            -- the REAL playbook's shape)
 and, for the no-digest path:
-    tests/fixtures/opf/synthetic-eiaa.opf.json            (OPF 0.5, NO digest section)
+    tests/fixtures/opf/synthetic-eiaa.opf.json            (OPF 0.6, NO digest section)
 
 ## Only the INPUTS are authored here; every derived value is the engine's
 
-OPF 0.5 / digest_version 4 is the one format this repo reads (issue #128). Its
-derived values -- precedent ids, the clause counts, our standard's part ids,
-the whole `digest`, and the `manifest` / `dossiers` / `provenance_index`
-sections -- are normative functions of the document that the engine's
+OPF 0.6 / digest_version 5 is the one format this repo reads (issues #128,
+#177). Its derived values -- precedent ids, the clause counts, our standard's
+and our former forms' part ids, the `evidence.absence` records, the whole
+`digest`, and the `manifest` / `dossiers` / `provenance_index` sections --
+are normative functions of the document that the engine's
 validator recomputes and compares. A fixture whose digest was hand-built, or
 built by a port of the engine's code, would be a shape the engine refuses to
 emit: tests asserting over it would prove nothing about what production can
@@ -39,9 +40,26 @@ artifacts are what every test reads, and CI has no sibling.
 engine's validator, only when the sibling is present -- the same local-only
 convention as `tests/test_opf_schema_sync.py`'s source-parity check.
 
-Pinned engine: main `b90c647` (the commit `playbooks/opf/playbook.schema-0.5.json`
+Pinned engine: main `fe89bc6` (the commit `playbooks/opf/playbook.schema-0.6.json`
 was vendored from). A different engine commit may stamp a different digest;
 that is a drift signal to understand, not a reason to regenerate blindly.
+
+## What OPF 0.6 adds to the corpus authored here (issue #177)
+
+Every 0.6 fact the toaster renders is exercised by at least two variants, so
+no branch is green on one shape alone:
+
+  - signing dates: a full date, a month, a signed deal with no date and an
+    unsigned deal, on four different `signed_on_basis` values;
+  - how settled a judgment is: `agreed`, `adjudicated`, `unchecked` (never
+    checked) and `owner` judgments;
+  - a former form of ours (`baseline.prior_templates`, one supplied form):
+    the Confidentiality clause's 2022 form, judged against today's standard,
+    one deal that opened on it and conceded to an equivalent rewording, and
+    the owner's `why_changed` note; the other three clauses have none;
+  - absence: `evidence.absence` is the engine's own `build_absence` over the
+    deals' signed-text nodes, with one deal verifiably signed without a
+    clause and one where a passage may carry it (`possibly_present`).
 
 `identity` is sealed with `scripts/opf_canonicalize.py` (this repo's own copy
 of the canonical form), so the fixtures also prove the two implementations
@@ -67,15 +85,17 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import opf_canonicalize  # noqa: E402
 import opf_html  # noqa: E402
+import opf_load  # noqa: E402
 
-SCHEMA_PATH = REPO_ROOT / "playbooks" / "opf" / "playbook.schema-0.5.json"
+SCHEMA_PATH = opf_load.OPF_SCHEMA_PATH
 SYNTHETIC_EIAA_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 
-FULL_STEM = "acme-university-0.5"
-EMPTY_FLOOR_STEM = "acme-university-0.5-empty-floor"
-REAL_SHAPE_STEM = "acme-university-0.5-real-shape"
+OPF_VERSION = opf_load.OPF_VERSION
 
-OPF_VERSION = "0.5"
+FULL_STEM = f"acme-university-{OPF_VERSION}"
+EMPTY_FLOOR_STEM = f"acme-university-{OPF_VERSION}-empty-floor"
+REAL_SHAPE_STEM = f"acme-university-{OPF_VERSION}-real-shape"
+
 COMPILER_VERSION = "1.0.0"
 
 
@@ -114,18 +134,26 @@ def load_engine() -> SimpleNamespace | None:
             # Imported lazily by the grouping-key normalizer; import it here,
             # inside the filter, so its warnings stay silent too.
             import playbook_engine.version_orderer  # noqa: F401, PLC0415
-            from playbook_engine.digest import build_digest_v4  # noqa: PLC0415
+            from playbook_engine.absence import build_absence  # noqa: PLC0415
+            from playbook_engine.digest import build_digest_v5  # noqa: PLC0415
             from playbook_engine.dossiers import build_derived_sections  # noqa: PLC0415
             from playbook_engine.equivalence import standard_parts  # noqa: PLC0415
+            from playbook_engine.observation_builder import (  # noqa: PLC0415
+                Observation,
+                ObservationCitation,
+            )
             from playbook_engine.precedent import restamp_evidence  # noqa: PLC0415
             from playbook_engine.validator import validate_document  # noqa: PLC0415
     finally:
         sys.dont_write_bytecode = previous
     return SimpleNamespace(
         repo=repo,
-        build_digest_v4=build_digest_v4,
+        build_absence=build_absence,
+        build_digest_v5=build_digest_v5,
         build_derived_sections=build_derived_sections,
         standard_parts=standard_parts,
+        Observation=Observation,
+        ObservationCitation=ObservationCitation,
         restamp_evidence=restamp_evidence,
         validate_document=validate_document,
     )
@@ -154,10 +182,25 @@ def _standard(text: str, clause_path: str) -> dict:
     }
 
 
-def _vs(label: str, reason: str) -> dict:
+#: The blind-check outcomes a producer records (OPF-SPEC section 3.5.6), by
+#: the `settled` value each derives in the digest (issue #248): `agreed`
+#: (the check reached the same label and parts) and `adjudicated` (it
+#: disagreed on the label and a fresh agent decided). `None` is never
+#: checked (`unchecked`); an owner judgment (`basis: owner`) carries none.
+_CHECKS: dict[str, dict[str, Any]] = {
+    "agreed": {"agreed": True, "label_agreed": True, "parts_agreed": True,
+               "by": "fixture-checker", "adjudicated": False},
+    "adjudicated": {"agreed": False, "label_agreed": False, "parts_agreed": True,
+                    "by": "fixture-adjudicator", "adjudicated": True},
+}
+
+
+def _vs(label: str, reason: str, *, check: str | None = None, basis: str = "agent") -> dict:
     """A `vs_standard` judgment over a one-part standard whose parts DERIVE
     *label* (OPF-SPEC section 3.5.6: the label is a function of the parts and
-    additions, and the engine's validator recomputes it)."""
+    additions, and the engine's validator recomputes it). *check* names a
+    blind-check outcome (`_CHECKS`), None for an unchecked one; *basis*
+    `owner` is an owner's correction, which carries no check."""
     relation = {"equivalent": "equivalent", "more_protective": "more_protective",
                 "less_protective": "less_protective"}[label]
     part: dict[str, Any] = {"part_id": _PART, "status": "present", "relation": relation}
@@ -168,8 +211,8 @@ def _vs(label: str, reason: str) -> dict:
         "reason": reason,
         "parts": [part],
         "additions": [],
-        "basis": "agent",
-        "check": None,
+        "basis": basis,
+        "check": copy.deepcopy(_CHECKS[check]) if check is not None else None,
     }
 
 
@@ -191,9 +234,13 @@ def _prec(
     signed: bool = True,
     rounds: int = 0,
     refused_asks: list[dict] | None = None,
+    opened_with_form: str | None = None,
 ) -> dict:
+    """One precedent record. `signed_on` is left None here and set from the
+    record's corpus document by `_date_precedent` (OPF 0.6: a precedent's
+    date equals its document's, and is null when `signed` is false)."""
     asks = refused_asks or []
-    return {
+    record: dict[str, Any] = {
         "id": "",
         "taxonomy_id": taxonomy_id,
         "document_id": document_id,
@@ -201,14 +248,20 @@ def _prec(
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": signed,
+        "signed_on": None,
         "rounds": rounds,
         "signed_text": signed_text,
         "opened_with": opened_with,
+    }
+    if opened_with_form is not None:
+        record["opened_with_form"] = opened_with_form
+    record.update({
         "opening_text": opening_text,
         "standard": standard,
         "moved": bool(rounds or opening_text is not None or asks),
         "refused_asks": asks,
-    }
+    })
+    return record
 
 
 def _ask(text: str, document_id: str, version: int, clause_path: str, vs: dict | None) -> dict:
@@ -235,8 +288,43 @@ CONFIDENTIALITY_STANDARD = (
 
 ACMELAND_LAW = "This Agreement shall be governed by the laws of the State of Acmeland."
 
+#: Our former form (OPF 0.6 `baseline.prior_templates`, issue #249): the
+#: 2022 affiliation template, whose Confidentiality clause protected
+#: information for two years. One deal opened on it.
+PRIOR_FORM_2022 = "2022 affiliation form"
+CONFIDENTIALITY_2022 = (
+    "Confidential Information shall be protected for two (2) years after disclosure."
+)
+#: The owner's note on why the Confidentiality standard changed (OPF 0.6
+#: `why_changed`, basis owner). Synthetic.
+CONFIDENTIALITY_WHY_CHANGED = (
+    "We lengthened confidentiality protection from two years to three after "
+    "placements began sharing student records."
+)
+
+#: When each fixture deal was signed (OPF 0.6 `corpus.documents[].signed_on`
+#: and its `signed_on_basis`): a full date, a month, a signed deal with no
+#: date, and the unsigned deal (no date, no basis).
+SIGNED_ON = {
+    "acme-university": ("2024-03-14", "document_text"),
+    "fixture-college": ("2024-09", "signature_block"),
+    "example-institute": ("2025-02-03", "filename"),
+    "acme-nursing-school": (None, None),
+    "example-academy": (None, None),
+}
+
 
 def _clauses() -> list[dict]:
+    """The four clauses. OPF 0.6 requires `prior_standards` and `why_changed`
+    on every clause; only Confidentiality has a former form and a note."""
+    clauses = _clause_entries()
+    for clause in clauses:
+        clause.setdefault("prior_standards", [])
+        clause.setdefault("why_changed", None)
+    return clauses
+
+
+def _clause_entries() -> list[dict]:
     return [
         {"id": "clause.indemnification", "taxonomy_id": "indemnification", "title": "Indemnification",
          "our_standard": _standard(INDEMNITY_STANDARD, "8")},
@@ -245,7 +333,19 @@ def _clauses() -> list[dict]:
         {"id": "clause.term-termination", "taxonomy_id": "term_termination", "title": "Term and Termination",
          "our_standard": _standard(TERM_STANDARD, "11")},
         {"id": "clause.confidentiality", "taxonomy_id": "confidentiality", "title": "Confidentiality",
-         "our_standard": _standard(CONFIDENTIALITY_STANDARD, "9")},
+         "our_standard": _standard(CONFIDENTIALITY_STANDARD, "9"),
+         # Our 2022 form's clause, judged once against today's standard; the
+         # check disagreed and a fresh agent decided (settled: adjudicated).
+         "prior_standards": [{
+             "form_label": PRIOR_FORM_2022,
+             "text": CONFIDENTIALITY_2022,
+             "parts": [{"part_id": "", "order": 1, "text": CONFIDENTIALITY_2022}],
+             "source_ref": _cite(f"prior_template:{PRIOR_FORM_2022}", "prior_template", "9",
+                                 [0, len(CONFIDENTIALITY_2022)]),
+             "vs_standard": _vs("less_protective", "Protects information for two years, not three.",
+                                check="adjudicated"),
+         }],
+         "why_changed": {"text": CONFIDENTIALITY_WHY_CHANGED, "basis": "owner"}},
     ]
 
 
@@ -267,12 +367,14 @@ def _precedent() -> list[dict]:
                   "Each party shall indemnify the other for third-party claims arising from its "
                   "negligence, provided the indemnified party gives prompt notice and reasonable "
                   "cooperation.", fc, 2, "8.1",
-                  _vs("less_protective", "Conditions our indemnity on prompt notice and cooperation.")),
+                  _vs("less_protective", "Conditions our indemnity on prompt notice and cooperation.",
+                      check="agreed")),
               refused_asks=[_ask(
                   "FixtureCorp shall indemnify Acme University against any and all claims of any "
                   "kind, including those arising from Acme University's own negligence, without "
                   "limitation.", fc, 2, "8.1",
-                  _vs("less_protective", "Makes our indemnity uncapped and one-way."))]),
+                  _vs("less_protective", "Makes our indemnity uncapped and one-way.",
+                      check="adjudicated"))]),
         # Counterparty paper: a one-way IP indemnity signed as proposed (not judged).
         _prec(ei, "indemnification", paper="theirs", opened_with="non_standard",
               signed_text=_text(
@@ -301,7 +403,8 @@ def _precedent() -> list[dict]:
               signed_text=_text(
                   "This Agreement shall be governed by the laws of the State of Exampleland.",
                   ei, 4, "16",
-                  _vs("less_protective", "Substitutes the counterparty's home-state law for ours."))),
+                  _vs("less_protective", "Substitutes the counterparty's home-state law for ours.",
+                      basis="owner"))),
         _prec(an, "governing_law", paper="theirs", opened_with="standard", rounds=1,
               opening_text=_text(GOVERNING_LAW_STANDARD, an, 1, "12"),
               signed_text=_text(ACMELAND_LAW, an, 2, "12",
@@ -329,14 +432,18 @@ def _precedent() -> list[dict]:
               signed_text=_text(
                   "Confidential Information consisting of student education records shall be "
                   "protected in perpetuity.", fc, 2, "9.2",
-                  _vs("more_protective", "Extends protection of student records without a time limit."))),
+                  _vs("more_protective", "Extends protection of student records without a time limit.",
+                      check="agreed"))),
         # Our standard struck before signing.
         _prec(ei, "confidentiality", paper="theirs", opened_with="standard", rounds=1,
               opening_text=_text(CONFIDENTIALITY_STANDARD, ei, 1, "9"),
               signed_text=None),
-        # Our standard reworded to the same effect: an equivalent variant.
-        _prec(an, "confidentiality", paper="theirs", opened_with="standard", rounds=1,
-              opening_text=_text(CONFIDENTIALITY_STANDARD, an, 1, "9"),
+        # Opened on our 2022 former form (OPF 0.6 `prior_standard`) and
+        # conceded to a rewording of today's standard: an equivalent variant
+        # whose origin is ours.
+        _prec(an, "confidentiality", paper="theirs", opened_with="prior_standard", rounds=1,
+              opened_with_form=PRIOR_FORM_2022,
+              opening_text=_text(CONFIDENTIALITY_2022, an, 1, "9"),
               signed_text=_text(
                   "Each party shall protect the other's Confidential Information for three (3) "
                   "years following disclosure.", an, 2, "9",
@@ -344,13 +451,84 @@ def _precedent() -> list[dict]:
     ]
 
 
+def _date_precedent(records: list[dict], documents: list[dict]) -> list[dict]:
+    """Set each record's `signed_on` from its corpus document (OPF 0.6: equal
+    to the document's, and null on an unsigned record)."""
+    dates = {d["document_id"]: d.get("signed_on") for d in documents}
+    for record in records:
+        record["signed_on"] = dates.get(record["document_id"]) if record["signed"] else None
+    return records
+
+
+#: Passages of the deals' executed copies that are NOT precedent records
+#: (OPF 0.6 absence, issue #251): `(document_id, version, clause_path,
+#: filed_under, text)`. Acme Nursing School's copy carries an unclassified
+#: notice passage that reads like a termination clause, so its signed-without
+#: Term and Termination is only `possibly_present`; Example Institute's
+#: struck Confidentiality has no such passage, so it is `absent_verified`.
+_EXTRA_NODES: tuple[tuple[str, int, str, str | None, str], ...] = (
+    ("acme-nursing-school", 2, "15", None,
+     "Either party may terminate this agreement for convenience on written notice to the other."),
+    ("acme-nursing-school", 2, "16", None,
+     "Notices under this agreement shall be delivered in writing to the addresses set out above."),
+)
+
+
+def _absence(doc: dict, engine: SimpleNamespace, extra_nodes: tuple = _EXTRA_NODES) -> dict:
+    """`evidence.absence`, written by the engine's own `build_absence` over the
+    deals' signed-text nodes (one per signed precedent record, filed under its
+    clause type, plus `extra_nodes`) -- never by hand, the same rule the
+    engine's conformance generator follows: a validator cannot see
+    `n_checked` or `filed_under`, so a hand-written record could state what no
+    compile produces."""
+    evidence = doc["evidence"]
+    versions = {d["document_id"]: d.get("signed_version") for d in doc["corpus"]["documents"]}
+
+    def node(document_id: str, version: int, clause_path: str, taxonomy_id: str | None, text: str):
+        return engine.Observation(
+            observation_id=f"{document_id}/{version}/{clause_path}",
+            taxonomy_id=taxonomy_id,
+            text_summary=text[:100],
+            full_text=text,
+            citation=engine.ObservationCitation(
+                document_id=document_id, version=version, clause_path=clause_path,
+                char_span=(0, len(text)),
+            ),
+            deviation="none",
+            risk_delta={"direction": "neutral", "magnitude": "none"},
+            provenance="our_paper",
+            outcome="signed",
+        )
+
+    nodes = [
+        node(p["document_id"], p["signed_text"]["ref"]["version"], p["signed_text"]["ref"]["clause_path"],
+             p["taxonomy_id"], p["signed_text"]["text"])
+        for p in evidence["precedent"]
+        if p["signed"] and p["signed_text"]
+    ]
+    nodes += [
+        node(document_id, version, path, filed_under, text)
+        for document_id, version, path, filed_under, text in extra_nodes
+        if versions.get(document_id) is not None
+    ]
+    return engine.build_absence(
+        agreement_type_id=doc["agreement_type"]["id"],
+        clauses=evidence["clauses"],
+        precedent=evidence["precedent"],
+        observations=nodes,
+        corpus_documents=doc["corpus"]["documents"],
+    )
+
+
 def _documents() -> list[dict]:
     def doc(document_id: str, title: str, provenance: str, versions: int, signed_version: int | None) -> dict:
+        signed_on, basis = SIGNED_ON[document_id]
         return {
             "document_id": document_id, "title": title, "provenance": provenance, "in_scope": True,
             "scope_rationale": "Educational affiliation agreement matching target type.",
             "scope_confidence": 0.95, "versions": versions, "signed_version": signed_version,
             "version_order_basis": "edit_distance_chain+signed_anchor",
+            "signed_on": signed_on, "signed_on_basis": basis,
         }
 
     return [
@@ -372,7 +550,7 @@ def build_body(empty_floor: bool = False, *, empty_posture: bool = False, absent
         declares no invariants.
       - ``absent_floor`` + ``empty_posture``: ``floor == {}`` and
         ``posture == {}``, which is THE REAL PLAYBOOK'S SHAPE, and is
-        schema-valid: the 0.5 schema requires the `posture` and `floor` keys
+        schema-valid: the 0.6 schema requires the `posture` and `floor` keys
         but requires nothing INSIDE them. A fixture that only ever carries
         prose and invariants tests a shape production does not have.
     """
@@ -419,6 +597,11 @@ def build_body(empty_floor: bool = False, *, empty_posture: bool = False, absent
                 "title": "FixtureCorp Affiliation Template",
                 "source": "template/affiliation-template.docx",
             },
+            # OPF 0.6 (issue #249): one supplied former form, with the owner's
+            # in-use start and a synthetic content address.
+            "prior_templates": [
+                {"label": PRIOR_FORM_2022, "in_use_from": "2022-01", "sha256": "sha256:" + "2" * 64},
+            ],
         },
         "taxonomy": {
             "source": "custom",
@@ -437,7 +620,7 @@ def build_body(empty_floor: bool = False, *, empty_posture: bool = False, absent
         },
         "perspective": {"party": "FixtureCorp", "counterparty_type": "Educational Institution"},
         "de_minimis": ["typo fixes", "renumbering with no substantive change"],
-        "evidence": {"clauses": _clauses(), "precedent": _precedent()},
+        "evidence": {"clauses": _clauses(), "precedent": _date_precedent(_precedent(), _documents())},
         "posture": posture,
         "floor": {} if absent_floor else {"invariants": invariants},
         "corpus": {
@@ -455,11 +638,12 @@ def build_body(empty_floor: bool = False, *, empty_posture: bool = False, absent
 
 
 def _synthetic_eiaa_body() -> dict:
-    """`tests/fixtures/opf/synthetic-eiaa.opf.json`: an OPF 0.5 document with
+    """`tests/fixtures/opf/synthetic-eiaa.opf.json`: an OPF 0.6 document with
     NO digest section (schema-optional; a producer may omit it), for the
     no-digest refusal path and the Floor/bind tests that only read posture,
     Floor and agreement_type. Freshly authored for issue #283, migrated to
-    0.5 by issue #128; not copied from any engine example."""
+    0.5 by issue #128 and to 0.6 by issue #177; not copied from any engine
+    example."""
     d1, d2 = "synthetic-doc-001", "synthetic-doc-002"
     cap = "Synthetic clause: liability is capped at a fixed dollar amount stated in the agreement."
     notice = "Synthetic clause: either party may terminate for convenience on thirty (30) days' notice."
@@ -482,15 +666,16 @@ def _synthetic_eiaa_body() -> dict:
         "evidence": {
             "clauses": [
                 {"id": "clause-liability-cap", "taxonomy_id": "liability_cap", "title": "Liability Cap",
-                 "our_standard": None},
+                 "our_standard": None, "prior_standards": [], "why_changed": None},
                 {"id": "clause-termination", "taxonomy_id": "termination",
-                 "title": "Termination for Convenience", "our_standard": None},
+                 "title": "Termination for Convenience", "our_standard": None,
+                 "prior_standards": [], "why_changed": None},
             ],
             "precedent": [
-                _prec(d1, "liability_cap", paper="ours", opened_with="non_standard",
-                      signed_text=_text(cap, d1, 1, "5.2")),
-                _prec(d2, "termination", paper="theirs", opened_with="non_standard",
-                      signed_text=_text(notice, d2, 1, "9.1")),
+                {**_prec(d1, "liability_cap", paper="ours", opened_with="non_standard",
+                         signed_text=_text(cap, d1, 1, "5.2")), "signed_on": "2025-05"},
+                {**_prec(d2, "termination", paper="theirs", opened_with="non_standard",
+                         signed_text=_text(notice, d2, 1, "9.1")), "signed_on": None},
             ],
         },
         "posture": {
@@ -526,9 +711,11 @@ def _synthetic_eiaa_body() -> dict:
         "corpus": {
             "documents": [
                 {"document_id": d1, "title": "Synthetic Fixture Document 1", "provenance": "our_paper",
-                 "in_scope": True, "versions": 1, "signed_version": 1},
+                 "in_scope": True, "versions": 1, "signed_version": 1,
+                 "signed_on": "2025-05", "signed_on_basis": "signature_block"},
                 {"document_id": d2, "title": "Synthetic Fixture Document 2", "provenance": "counterparty_paper",
-                 "in_scope": True, "versions": 1, "signed_version": 1},
+                 "in_scope": True, "versions": 1, "signed_version": 1,
+                 "signed_on": None, "signed_on_basis": None},
             ],
             "stats": {"document_count": 2},
         },
@@ -560,6 +747,14 @@ def _stamp_evidence(doc: dict, engine: SimpleNamespace) -> None:
             for part in vs["parts"]:
                 if part["part_id"] == _PART:
                     (part["part_id"],) = part_ids[record["taxonomy_id"]]
+    # A former form's clause is judged against today's standard, part by part.
+    for clause in doc["evidence"]["clauses"]:
+        for prior in clause.get("prior_standards") or []:
+            vs = prior.get("vs_standard")
+            for part in vs["parts"] if isinstance(vs, dict) else []:
+                if part["part_id"] == _PART:
+                    (part["part_id"],) = part_ids[clause["taxonomy_id"]]
+    doc["evidence"]["absence"] = _absence(doc, engine)
 
 
 def finalize(body: dict, engine: SimpleNamespace, *, with_digest: bool = True) -> dict:
@@ -568,7 +763,7 @@ def finalize(body: dict, engine: SimpleNamespace, *, with_digest: bool = True) -
     doc = copy.deepcopy(body)
     _stamp_evidence(doc, engine)
     if with_digest:
-        doc["digest"] = engine.build_digest_v4(doc)
+        doc["digest"] = engine.build_digest_v5(doc)
         doc.update(engine.build_derived_sections(doc))
     identity: dict[str, Any] = {}
     if with_digest:

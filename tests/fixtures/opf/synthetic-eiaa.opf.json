@@ -1,5 +1,5 @@
 {
-  "opf_version": "0.5",
+  "opf_version": "0.6",
   "agreement_type": {
     "id": "educational-internship-affiliation",
     "name": "Synthetic Educational Internship & Affiliation Agreement",
@@ -34,12 +34,17 @@
         "taxonomy_id": "liability_cap",
         "title": "Liability Cap",
         "our_standard": null,
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 1,
         "n_signed_standard": 0,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -47,12 +52,17 @@
         "taxonomy_id": "termination",
         "title": "Termination for Convenience",
         "our_standard": null,
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 1,
         "n_signed_standard": 0,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       }
     ],
@@ -65,6 +75,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": "2025-05",
         "rounds": 0,
         "signed_text": {
           "text": "Synthetic clause: liability is capped at a fixed dollar amount stated in the agreement.",
@@ -93,6 +104,7 @@
         "paper_basis": "provenance_detection",
         "paper_confidence": 0.9,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Synthetic clause: either party may terminate for convenience on thirty (30) days' notice.",
@@ -113,7 +125,58 @@
         "moved": false,
         "refused_asks": []
       }
-    ]
+    ],
+    "absence": {
+      "guard": 0.1,
+      "records": [
+        {
+          "id": "abs.d280df15b8d07c5f",
+          "taxonomy_id": "termination",
+          "document_id": "synthetic-doc-001",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 1,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "synthetic-doc-001",
+                "version": 1,
+                "clause_path": "5.2",
+                "char_span": [
+                  0,
+                  87
+                ]
+              },
+              "score": 0.143,
+              "filed_under": "liability_cap"
+            }
+          ]
+        },
+        {
+          "id": "abs.18488c69e70b7ece",
+          "taxonomy_id": "liability_cap",
+          "document_id": "synthetic-doc-002",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 1,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "synthetic-doc-002",
+                "version": 1,
+                "clause_path": "9.1",
+                "char_span": [
+                  0,
+                  89
+                ]
+              },
+              "score": 0.143,
+              "filed_under": "termination"
+            }
+          ]
+        }
+      ]
+    }
   },
   "posture": {
     "system_prompt": "This is a synthetic posture for a fictional educational internship and affiliation agreement, authored only for test fixtures. It expresses no real party's negotiation intent. Treat all monetary and party details in this document as placeholders."
@@ -140,7 +203,9 @@
         "provenance": "our_paper",
         "in_scope": true,
         "versions": 1,
-        "signed_version": 1
+        "signed_version": 1,
+        "signed_on": "2025-05",
+        "signed_on_basis": "signature_block"
       },
       {
         "document_id": "synthetic-doc-002",
@@ -148,7 +213,9 @@
         "provenance": "counterparty_paper",
         "in_scope": true,
         "versions": 1,
-        "signed_version": 1
+        "signed_version": 1,
+        "signed_on": null,
+        "signed_on_basis": null
       }
     ],
     "stats": {
@@ -161,9 +228,9 @@
     "generated_at": "2026-07-12T00:00:00Z"
   },
   "identity": {
-    "content_hash": "sha256:1ece46f1303272b6104025dc240bf6f695c7013cdedc5efd69fbfa19fbd48f93",
+    "content_hash": "sha256:56f690d109917a453d90944173e5a3322c3b8b70f66d5b17da11027b52b2269e",
     "section_digests": {
-      "evidence": "sha256:b3380c98411baa0676a9b72d5ef87d90b3320efebc7b6d8aa89e6b34475d8aea",
+      "evidence": "sha256:26efd24db9fcdbfbea7e36340ad3ebe647201dd8a68c545bd97b24d7b6406355",
       "posture": "sha256:aef5e5d34149d1cea93e7c981d15c534e6962d6eea30b683263161ef67a23842",
       "floor": "sha256:f28611fa5ed41baccfcc5a9d2e1a33198ffe681698a12024621db5a87d21a1bd"
     }

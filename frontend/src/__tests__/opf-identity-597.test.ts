@@ -32,7 +32,7 @@ function wrapAsHtml(json: string): string {
 describe('readOpfIdentity', () => {
   it('reads identity out of a bare .opf.json document', () => {
     const text = JSON.stringify({
-      opf_version: '0.3',
+      opf_version: '0.6',
       identity: { id: 'synthetic-sample', version: '1.0.0', content_hash: HASH },
     });
     expect(readOpfIdentity(text)).toEqual({ version: '1.0.0', contentHash: HASH });
@@ -40,7 +40,7 @@ describe('readOpfIdentity', () => {
 
   it('reads identity out of the embedded canonical block of an .opf.html bundle', () => {
     const json = JSON.stringify({
-      opf_version: '0.3',
+      opf_version: '0.6',
       identity: { id: 'synthetic-sample', content_hash: HASH },
     });
     expect(readOpfIdentity(wrapAsHtml(json))).toEqual({ contentHash: HASH });
@@ -59,7 +59,7 @@ describe('readOpfIdentity', () => {
     // either way. Mutation-checked: removing the `.replace` leaves this file
     // fully green, which is why no assertion here pretends otherwise.
     const json = JSON.stringify({
-      opf_version: '0.3',
+      opf_version: '0.6',
       note: 'contains </script> in prose',
       identity: { content_hash: HASH },
     });
@@ -77,7 +77,7 @@ describe('readOpfIdentity', () => {
     // The caller must be able to tell "unreadable file" from "readable file
     // with nothing to derive from"; both refuse the upload, but only one is
     // a parse failure.
-    expect(readOpfIdentity(JSON.stringify({ opf_version: '0.3' }))).toEqual({});
+    expect(readOpfIdentity(JSON.stringify({ opf_version: '0.6' }))).toEqual({});
   });
 
   it('treats a blank or non-string version as absent rather than as a value', () => {
@@ -97,7 +97,7 @@ describe('deriveVersionIdentifier', () => {
 
   it('derives <upload date>-<hash prefix> when identity.version is absent', () => {
     // The real production playbook (educational-affiliation) is exactly this
-    // shape: opf_version 0.3, content_hash present, version absent.
+    // shape: opf_version 0.6, content_hash present, version absent.
     expect(deriveVersionIdentifier({ contentHash: HASH }, UPLOADED)).toBe(
       '2026-08-20-73add98b',
     );

@@ -24,7 +24,7 @@ the ZDR route -- issue #143's probe). Before this issue:
 ## What this file proves
 
   1. On the #665 fixture (the synthetic-generic v1 playbook and its draft)
-     AND on an OPF 0.5 artifact, driven end to end through
+     AND on an OPF 0.6 artifact, driven end to end through
      `review_spine.run_review` and the REAL `OpenRouterModelClient` against a
      fake HTTP transport, the two requests a review sends carry
      byte-identical serialized `tools` (one schema, with the `role`
@@ -107,7 +107,7 @@ from test_review_spine import (  # noqa: E402
 )
 
 OPF_FIXTURE_PATH = (
-    REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5-empty-floor.opf.json"
+    REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-empty-floor.opf.json"
 )
 
 # Anthropic's documented floor for a cacheable prefix -- the STRICTER of its

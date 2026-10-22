@@ -43,17 +43,29 @@ review -- see below):
   - `posture.system_prompt`
   - every `floor.invariants[].statement` / `.rationale`
   - the ENTIRE `evidence` subtree, wholesale: every string value found by a
-    recursive walk of `evidence`, at any depth (OPF 0.5: `.clauses[].title`,
+    recursive walk of `evidence`, at any depth (OPF 0.6: `.clauses[].title`,
     `.clauses[].our_standard.text` and `.parts[].text`,
     `.precedent[].signed_text.text`, `.precedent[].opening_text.text` --
     recorded for ANY distinct opening since 0.5, whatever its origin --,
     `.precedent[].refused_asks[].text`, every `vs_standard` reason, and any
     future evidence field, known or not) -- see "Why evidence is walked
-    wholesale" below.
+    wholesale" below. OPF 0.6 (issue #177) added our former forms here, and
+    the walk covered every one of them without a change: each
+    `.clauses[].prior_standards[]` `form_label`, `text`, `.parts[].text` and
+    its `vs_standard` (`reason`, `.parts[].reason`, `.additions[].summary`,
+    `.owner_label.reason`), the owner's `.clauses[].why_changed.text`,
+    `.precedent[].opened_with_form`, and the `evidence.absence` records.
   - the ENTIRE `digest` subtree, wholesale (`.clauses[].our_standard.parts[]
     .text`, `.signed_variants[].text` and `.exemplars[].text`,
     `.refused_asks[].text`, `.changed_openings[].text`, every `reason`,
-    `.uncovered_clause_types[].label`, ...).
+    `.uncovered_clause_types[].label`, and since digest 5 each
+    `.standard_history.forms[]` `form`, `reason` and `.parts[].text` and the
+    owner's `.standard_history.why_changed.text`, ...).
+  - `baseline.prior_templates[].label` (OPF 0.6, issue #177): the label of
+    each of our former forms, which the digest repeats as a form's `form`,
+    the evidence as a prior standard's `form_label` and a record's
+    `opened_with_form`, and the prompt renders by name. `baseline` is not
+    otherwise model-bound, so only this field of it is read.
   - the ENTIRE `manifest`, `dossiers` and `provenance_index` subtrees (OPF
     0.5, engine #228), wholesale: the hard-rule manifest carries each Floor
     rule's `statement` and `fallback_language`, and every critic dossier
@@ -72,9 +84,9 @@ review -- see below):
 historically the WHOLE `evidence` section via a single `json.dumps(...)` of
 `evidence` minus `x_*` keys, and now the `digest` section (the compact
 model-facing projection of that same evidence -- see
-`playbooks/opf/playbook.schema-0.5.json`, `$defs.digestClause`). The digest's
+`playbooks/opf/playbook.schema-0.6.json`, `$defs.digestClause`). The digest's
 strings land in the model's context verbatim, the evidence is the source every
-digest entry cites back into, and the OPF 0.5 `manifest` / `dossiers` /
+digest entry cites back into, and the OPF `manifest` / `dossiers` /
 `provenance_index` sections exist to be handed to a model by later stages --
 so ALL of them are walked wholesale here. The scan surface must be at least
 the prompt surface, today and after the next renderer change.
@@ -90,8 +102,11 @@ enumerate -- which is exactly what happened under OPF 0.2, when an
 observation's `full_text` and a clause's `our_standard.text` both flowed into
 the prompt but neither was in the original enumerated list. OPF 0.5 widened
 the surface again (`opening_text` for every distinct opening, the digest's
-`changed_openings`, the dossiers' whole excerpts), and a wholesale walk
-covered each of them the day the schema did, with no change here.
+`changed_openings`, the dossiers' whole excerpts), and so did OPF 0.6 (our
+former forms' texts and part texts, the owner's `why_changed` note, the
+digest's `standard_history`); a wholesale walk covered each of them the day
+the schema did, with no change here. The one 0.6 text outside a walked
+section, `baseline.prior_templates[].label`, is read on its own.
 
 `json_path` uses dotted/bracket notation (e.g.
 `"evidence.precedent[3].opening_text.text"`) -- deliberately
@@ -278,7 +293,7 @@ def _walk_section_strings(node: Any, path: str) -> list[tuple[str, str]]:
 
 
 def scan_untrusted_playbook_text(opf_doc: dict) -> list[dict]:
-    """Scan every model-bound text field of an OPF 0.5 document for
+    """Scan every model-bound text field of an OPF 0.6 document for
     hardcoded prompt-injection patterns (see module docstring for scope
     and the "tripwire, not a security boundary" caveat).
 
@@ -319,12 +334,23 @@ def scan_untrusted_playbook_text(opf_doc: dict) -> list[dict]:
     # the review prompt actually carries, so it is scanned in its own right --
     # a producer's digest is not guaranteed to be evidence-derived (the
     # engine's validator enforces that; this repo does not re-derive it).
-    # The OPF 0.5 hard-rule manifest, critic dossiers and provenance index
+    # The OPF hard-rule manifest, critic dossiers and provenance index
     # (engine #228) are the same class: derived sections a later stage hands
     # a model, scanned in their own right for the same reason.
     for section in ("digest", "manifest", "dossiers", "provenance_index"):
         for path, text in _walk_section_strings(opf_doc.get(section) or {}, section):
             _add(text, path)
+
+    # OPF 0.6 (issue #177): our former forms' labels. The prompt renders a
+    # form by this label (`opf_prompt`'s standard-history lines and the
+    # opened-on-a-former-form facts), and `baseline` is not walked, so the
+    # label is read here on its own -- the evidence and digest copies of it
+    # (`form_label`, `opened_with_form`, `form`) are covered by the walks.
+    baseline = opf_doc.get("baseline") or {}
+    prior_templates = baseline.get("prior_templates") if isinstance(baseline, dict) else None
+    for i, form in enumerate(prior_templates if isinstance(prior_templates, list) else []):
+        if isinstance(form, dict):
+            _add(form.get("label"), f"baseline.prior_templates[{i}].label")
 
     taxonomy = opf_doc.get("taxonomy") or {}
     for i, entry in enumerate(taxonomy.get("entries") or []):

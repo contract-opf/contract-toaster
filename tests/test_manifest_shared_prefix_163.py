@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Issue #163: the OPF 0.5 hard-rule manifest is composed into the shared prefix,
+Issue #163: the OPF 0.6 hard-rule manifest is composed into the shared prefix,
 and the leakage corpus covers it.
 
 ## What was missing
@@ -48,7 +48,7 @@ only while no manifest text reached a prompt.
 
 ## Fixture reachability
 
-  * Vector 008 is vendored engine output (`playbooks/opf/conformance-0.5/
+  * Vector 008 is vendored engine output (`playbooks/opf/conformance-0.6/
     vectors/`), assembled the way the engine emits it (its `input` plus its
     `expected` derived sections), exactly as
     `tests/test_leakage_opf_precedent_128.py` assembles it.
@@ -58,7 +58,7 @@ only while no manifest text reached a prompt.
     manifest rebuilt by `test_hard_ledger._build_manifest` -- the mirror of
     the engine's `build_manifest` that `test_hard_ledger.py` cross-checks
     against the engine whenever the sibling checkout is importable (and this
-    file does too). The document is validated against the vendored 0.5
+    file does too). The document is validated against the vendored 0.6
     schema and the upload injection scan here, so it is a document the
     toaster's own load path accepts.
   * The multi-sentence document (`_with_standard`) edits that document's
@@ -139,10 +139,10 @@ from test_shared_prefix_byte_identical import (  # noqa: E402
 REVIEW_ID = "00000000-0000-4000-a000-000000000163"
 RULE_ID = "IND-004"
 EMPTY_FLOOR_FIXTURE = (
-    REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5-empty-floor.opf.json"
+    REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6-empty-floor.opf.json"
 )
 VECTOR_008 = (
-    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "008-hard-rules-and-dossiers.json"
+    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "008-hard-rules-and-dossiers.json"
 )
 GOVERNING_LAW = "This Agreement is governed by the laws of the State of Fixtureland."
 CLEARING_SPAN = "Each party shall indemnify the other against third-party claims"

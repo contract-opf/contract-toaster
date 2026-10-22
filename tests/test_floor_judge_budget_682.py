@@ -117,7 +117,7 @@ FRONTEND_REVIEW_SUBMISSION = REPO_ROOT / "frontend" / "src" / "ReviewSubmission.
 
 # The gold OPF 0.3 fixture tests/test_review_opf_digest_mode_479.py drives its
 # own Floor-coverage cases with: posture plus exactly ONE floor invariant.
-OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+OPF_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 _FIXTURE_INVARIANT_ID = "no-uncapped-liability"
 
 # Bedrock-form ids, the form an OPF bundle's `playbook.metadata` carries --

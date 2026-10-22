@@ -190,8 +190,8 @@ PROGRESS_STAGES = (
 )
 
 # ---------------------------------------------------------------------------
-# OPF digest-mode wiring (issue #479): an activated OPF playbook (0.5 only
-# since issue #128)
+# OPF digest-mode wiring (issue #479): an activated OPF playbook (one OPF
+# format since issue #128: 0.6 since issue #177)
 # (`backend/src/pipeline_runner.py::_load_playbook_bundle`, issue #478's
 # uploaded-artifact path) governs the review instead of the v1
 # `playbooks/<id>.json` registry read. `bundle["opf_bundle_v2"]` -- present
@@ -590,7 +590,7 @@ def _floor_perspective_note(
 
     Sourced from the OPF document's OWN `perspective` block (`{party,
     counterparty_type}`, required together by
-    `playbooks/opf/playbook.schema-0.5.json`) -- the same block
+    `playbooks/opf/playbook.schema-0.6.json`) -- the same block
     `opf_prompt._context_block` renders into the review passes' CONTEXT
     block, so the judge and the passes act for the same principal by
     construction.
@@ -610,7 +610,7 @@ def _floor_perspective_note(
     whenever there is no usable binding: no `perspective`, a malformed one,
     a blank `counterparty_type`, or NO entity on either side to recognise us
     by. `perspective` is NOT in the top-level `required` list of
-    `playbooks/opf/playbook.schema-0.5.json` (nor was it in 0.2/0.3), so an
+    `playbooks/opf/playbook.schema-0.6.json` (nor was it in 0.2-0.5), so an
     artifact without it validates; since issue #676 the upload and
     review-time minimums refuse one, but this stays the fail-closed answer
     for any caller that reaches the judge without that gate.

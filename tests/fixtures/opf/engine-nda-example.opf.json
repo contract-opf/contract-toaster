@@ -1,5 +1,5 @@
 {
-  "opf_version": "0.5",
+  "opf_version": "0.6",
   "agreement_type": {
     "id": "nda",
     "name": "Mutual Non-Disclosure Agreement",
@@ -348,12 +348,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -379,12 +384,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 3,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -410,12 +420,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 3,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -441,12 +456,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -472,12 +492,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -503,12 +528,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 2,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -534,12 +564,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -565,12 +600,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 1,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -596,12 +636,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -627,12 +672,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 2,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -658,12 +708,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -671,12 +726,17 @@
         "taxonomy_id": "limitation_of_liability",
         "title": "Limitation of Liability",
         "our_standard": null,
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 3,
         "n_signed_standard": 0,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -702,12 +762,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -733,12 +798,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -764,12 +834,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -795,12 +870,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 3,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -826,12 +906,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -857,12 +942,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 0,
         "n_variants": 4,
         "n_refused": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -888,12 +978,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -919,12 +1014,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -932,12 +1032,17 @@
         "taxonomy_id": "residuals",
         "title": "Residuals",
         "our_standard": null,
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 1,
         "n_signed_standard": 0,
         "n_variants": 0,
         "n_refused": 1,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -963,12 +1068,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 4,
         "n_signed_standard": 4,
         "n_variants": 0,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -994,12 +1104,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -1025,12 +1140,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 3,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       },
       {
@@ -1056,12 +1176,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 2,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 1
       },
       {
@@ -1087,12 +1212,17 @@
             }
           ]
         },
+        "prior_standards": [],
+        "why_changed": null,
         "n_deals": 6,
         "n_signed_standard": 4,
         "n_variants": 1,
         "n_refused": 0,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "n_opened_prior": 0,
+        "n_kept_prior": 0,
+        "n_moved_to_current": 0,
         "n_changed_openings": 0
       }
     ],
@@ -1105,6 +1235,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -1133,6 +1264,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -1161,6 +1293,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -1189,6 +1322,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -1217,6 +1351,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -1245,6 +1380,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 1,
         "signed_text": {
           "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -1299,6 +1435,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -1327,6 +1464,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 2,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -1384,6 +1522,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -1412,6 +1551,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 1,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
@@ -1466,6 +1606,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -1494,6 +1635,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -1522,6 +1664,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -1550,6 +1693,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -1578,6 +1722,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -1606,6 +1751,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -1634,6 +1780,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -1675,6 +1822,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -1703,6 +1851,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -1731,6 +1880,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -1759,6 +1909,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -1787,6 +1938,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 1,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
@@ -1841,6 +1993,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 2,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -1869,6 +2022,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-03-16",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -1897,6 +2051,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -1925,6 +2080,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -1953,6 +2109,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -1981,6 +2138,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -2009,6 +2167,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -2037,6 +2196,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 1,
         "signed_text": {
           "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -2091,6 +2251,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -2119,6 +2280,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -2147,6 +2309,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -2175,6 +2338,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 1,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
@@ -2229,6 +2393,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -2257,6 +2422,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -2285,6 +2451,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -2313,6 +2480,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -2341,6 +2509,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -2369,6 +2538,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -2397,6 +2567,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -2438,6 +2609,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -2466,6 +2638,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -2494,6 +2667,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -2522,6 +2696,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -2550,6 +2725,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -2578,6 +2754,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -2606,6 +2783,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-06-02",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -2634,6 +2812,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -2662,6 +2841,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 1,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -2716,6 +2896,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party shall disclose the existence or status of the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -2744,6 +2925,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -2772,6 +2954,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -2800,6 +2983,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -2828,6 +3012,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -2856,6 +3041,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -2884,6 +3070,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -2912,6 +3099,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
@@ -2940,6 +3128,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -2968,6 +3157,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 2,
         "signed_text": {
           "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
@@ -3008,6 +3198,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -3036,6 +3227,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -3064,6 +3256,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -3092,6 +3285,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall notify Discloser promptly upon discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -3120,6 +3314,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -3148,6 +3343,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Epsilon Systems, Inc. (\"Epsilon\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -3189,6 +3385,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -3217,6 +3414,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -3245,6 +3443,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -3273,6 +3472,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -3301,6 +3501,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -3329,6 +3530,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -3357,6 +3559,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9045454545454545,
         "signed": true,
+        "signed_on": "2022-09-12",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -3385,6 +3588,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the other party's prior written consent, except to an affiliate or to a successor in connection with a merger, acquisition, or sale of substantially all of its assets.",
@@ -3413,6 +3617,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "If Recipient is required by law or legal process to disclose Confidential Information, it shall, where legally permitted, give Discloser prompt written notice so that Discloser may seek a protective order, and shall disclose only that portion legally required.",
@@ -3441,6 +3646,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 1,
         "signed_text": {
           "text": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
@@ -3495,6 +3701,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be executed in counterparts, including by electronic signature, each of which is an original and all of which together constitute one agreement.",
@@ -3523,6 +3730,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "\"Confidential Information\" means non-public information disclosed by Discloser that is designated as confidential at the time of disclosure or that a reasonable person would understand to be confidential given its nature and the circumstances of disclosure. Information disclosed orally need not be reduced to writing in order to be protected.",
@@ -3551,6 +3759,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -3579,6 +3788,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is the entire agreement between the parties as to its subject matter and supersedes all prior discussions. It may be amended only by a writing signed by both parties.",
@@ -3607,6 +3817,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) was independently developed by Recipient without reference to or use of Discloser's Confidential Information; (c) is or becomes publicly available through no act or omission of Recipient; or (d) is rightfully received by Recipient from a third party without a duty of confidentiality. Recipient bears the burden of establishing that an exclusion applies.",
@@ -3635,6 +3846,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Each party shall comply with applicable export control and sanctions laws with respect to any technical data disclosed under this Agreement.",
@@ -3663,6 +3875,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
@@ -3691,6 +3904,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Each party acknowledges that a breach of this Agreement may cause irreparable harm for which monetary damages are an inadequate remedy, and that the non-breaching party is entitled to seek injunctive relief in addition to any other remedy available at law or in equity.",
@@ -3719,6 +3933,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "No license or other right in any patent, copyright, trademark, trade secret, or other intellectual property is granted by this Agreement or by any disclosure made under it. Each party retains all right, title, and interest in its own Confidential Information.",
@@ -3747,6 +3962,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Nothing in this Agreement obligates either party to proceed with any transaction, grants either party exclusivity, or restricts either party from pursuing similar discussions with third parties. Either party may terminate discussions at any time.",
@@ -3775,6 +3991,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "All Confidential Information is provided AS IS. Neither party makes any representation or warranty as to the accuracy or completeness of any Confidential Information it discloses.",
@@ -3803,6 +4020,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 1,
         "signed_text": {
           "text": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
@@ -3862,6 +4080,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Notices under this Agreement must be in writing and sent to the addresses set out beneath the parties' signatures, and are effective on receipt.",
@@ -3890,6 +4109,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
@@ -3931,6 +4151,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient may disclose Confidential Information only to its employees, affiliates, and professional advisers who need to know it for the Purpose and who are bound by confidentiality obligations no less protective than those in this Agreement (\"Representatives\"). Recipient remains responsible for any breach by its Representatives.",
@@ -3959,6 +4180,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "The \"Purpose\" is the evaluation of a potential commercial relationship between the parties. Recipient shall use Confidential Information solely for the Purpose and for no other purpose.",
@@ -3987,6 +4209,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Upon Discloser's written request, Recipient shall return or destroy all Confidential Information in its possession and, if requested, certify that it has done so. Recipient may retain copies held in routine automated backups and copies it is required to retain by law or legal hold, which remain subject to this Agreement for as long as they are retained.",
@@ -4015,6 +4238,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "If any provision of this Agreement is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions continue in full force.",
@@ -4043,6 +4267,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "Recipient shall protect Confidential Information using reasonable care.",
@@ -4071,6 +4296,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 2,
         "signed_text": {
           "text": "Recipient's obligations with respect to Confidential Information continue for three (3) years from the date of its disclosure, notwithstanding any expiration or termination of this Agreement.",
@@ -4099,6 +4325,7 @@
         "paper_basis": "template_similarity",
         "paper_confidence": 0.9268518518518518,
         "signed": true,
+        "signed_on": "2022-11-30",
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement takes effect on the date of last signature and continues for two (2) years, unless earlier terminated by either party on thirty (30) days written notice. Disclosures may be made only during this period.",
@@ -4127,6 +4354,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
@@ -4169,6 +4397,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
@@ -4210,6 +4439,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be signed in counterparts, each of which is deemed an original.",
@@ -4251,6 +4481,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
@@ -4293,6 +4524,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
@@ -4335,6 +4567,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
@@ -4403,6 +4636,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of California.",
@@ -4445,6 +4679,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
@@ -4487,6 +4722,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": null,
         "opened_with": "non_standard",
@@ -4515,6 +4751,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
@@ -4556,6 +4793,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
@@ -4598,6 +4836,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "If any provision is held invalid, the remaining provisions remain in effect.",
@@ -4640,6 +4879,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
@@ -4682,6 +4922,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
@@ -4750,6 +4991,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
@@ -4792,6 +5034,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
@@ -4834,6 +5077,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The receiving party may disclose Confidential Information to the extent required by law, regulation, or court order, provided that it gives the disclosing party prompt written notice where legally permitted and discloses only the portion legally required.",
@@ -4875,6 +5119,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement may be signed in counterparts, each of which is deemed an original.",
@@ -4916,6 +5161,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
@@ -4958,6 +5204,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
@@ -5000,6 +5247,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was independently developed by the receiving party without reference to or use of the disclosing party's Confidential Information.",
@@ -5068,6 +5316,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement is governed by the laws of the State of California.",
@@ -5110,6 +5359,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
@@ -5152,6 +5402,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 1,
         "signed_text": {
           "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
@@ -5192,6 +5443,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "Confidential Information is provided without warranty of any kind as to accuracy or completeness.",
@@ -5233,6 +5485,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
@@ -5275,6 +5528,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 2,
         "signed_text": null,
         "opened_with": "absent",
@@ -5306,6 +5560,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "If any provision is held invalid, the remaining provisions remain in effect.",
@@ -5348,6 +5603,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
@@ -5390,6 +5646,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
@@ -5432,6 +5689,7 @@
         "paper_basis": "llm",
         "paper_confidence": 0.85,
         "signed": true,
+        "signed_on": null,
         "rounds": 0,
         "signed_text": {
           "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
@@ -5466,14 +5724,1133 @@
         "moved": false,
         "refused_asks": []
       }
-    ]
+    ],
+    "absence": {
+      "guard": 0.1,
+      "records": [
+        {
+          "id": "abs.211c7cd8cf60e638",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "beta-industries",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": []
+        },
+        {
+          "id": "abs.957fc3891191583c",
+          "taxonomy_id": "residuals",
+          "document_id": "beta-industries",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "beta-industries",
+                "version": 4,
+                "clause_path": "13",
+                "char_span": [
+                  3739,
+                  4014
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "beta-industries",
+                "version": 4,
+                "clause_path": "2",
+                "char_span": [
+                  426,
+                  640
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "beta-industries",
+                "version": 4,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  425
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.f19e831a4c686aba",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "delta-ventures",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": []
+        },
+        {
+          "id": "abs.3f2dccfe608002f0",
+          "taxonomy_id": "residuals",
+          "document_id": "delta-ventures",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "delta-ventures",
+                "version": 2,
+                "clause_path": "13",
+                "char_span": [
+                  3615,
+                  3890
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "delta-ventures",
+                "version": 2,
+                "clause_path": "2",
+                "char_span": [
+                  424,
+                  638
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "delta-ventures",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  423
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.73e219f2e84fc5f4",
+          "taxonomy_id": "residuals",
+          "document_id": "epsilon-systems",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 28,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "epsilon-systems",
+                "version": 3,
+                "clause_path": "13",
+                "char_span": [
+                  3621,
+                  3896
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "epsilon-systems",
+                "version": 3,
+                "clause_path": "2",
+                "char_span": [
+                  430,
+                  644
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "epsilon-systems",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  429
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.91465c705cc01859",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "gamma-holdings",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": []
+        },
+        {
+          "id": "abs.b840630d57b78595",
+          "taxonomy_id": "residuals",
+          "document_id": "gamma-holdings",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 27,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "gamma-holdings",
+                "version": 3,
+                "clause_path": "13",
+                "char_span": [
+                  3648,
+                  3923
+                ]
+              },
+              "score": 0.286,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "gamma-holdings",
+                "version": 3,
+                "clause_path": "2",
+                "char_span": [
+                  427,
+                  641
+                ]
+              },
+              "score": 0.211,
+              "filed_under": "purpose_permitted_use"
+            },
+            {
+              "ref": {
+                "document_id": "gamma-holdings",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  426
+                ]
+              },
+              "score": 0.13,
+              "filed_under": "parties_and_recitals"
+            }
+          ]
+        },
+        {
+          "id": "abs.28b3c4bce4508b7a",
+          "taxonomy_id": "confidentiality_of_discussions",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "17",
+                "char_span": [
+                  2941,
+                  3049
+                ]
+              },
+              "score": 0.278,
+              "filed_under": "assignment"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "7",
+                "char_span": [
+                  1564,
+                  1842
+                ]
+              },
+              "score": 0.114,
+              "filed_under": "compelled_disclosure"
+            }
+          ]
+        },
+        {
+          "id": "abs.00a36d17b8677cc2",
+          "taxonomy_id": "definition_confidential_info",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "2",
+                "char_span": [
+                  310,
+                  580
+                ]
+              },
+              "score": 0.108,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.d1325377e1fcbcca",
+          "taxonomy_id": "export_control",
+          "document_id": "theta-logistics",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": []
+        },
+        {
+          "id": "abs.663e822c72fdefbf",
+          "taxonomy_id": "limitation_of_liability",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "3",
+                "char_span": [
+                  581,
+                  1011
+                ]
+              },
+              "score": 0.1,
+              "filed_under": "exclusions_from_confidential"
+            }
+          ]
+        },
+        {
+          "id": "abs.171aa8f98786c10f",
+          "taxonomy_id": "no_license_ip_ownership",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "11",
+                "char_span": [
+                  2212,
+                  2337
+                ]
+              },
+              "score": 0.208,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "5",
+                "char_span": [
+                  1161,
+                  1359
+                ]
+              },
+              "score": 0.129,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "10",
+                "char_span": [
+                  2064,
+                  2211
+                ]
+              },
+              "score": 0.107,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.bb4acc8c46638593",
+          "taxonomy_id": "no_obligation_to_proceed",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "11",
+                "char_span": [
+                  2212,
+                  2337
+                ]
+              },
+              "score": 0.105,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.98cbf1a9633cd25e",
+          "taxonomy_id": "notice_of_unauthorized_disclosure",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "4",
+                "char_span": [
+                  1012,
+                  1160
+                ]
+              },
+              "score": 0.154,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "10",
+                "char_span": [
+                  2064,
+                  2211
+                ]
+              },
+              "score": 0.13,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.12,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.63b44f8d066aaaa8",
+          "taxonomy_id": "parties_and_recitals",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.219,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "7",
+                "char_span": [
+                  1564,
+                  1842
+                ]
+              },
+              "score": 0.105,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.a59930efc8661980",
+          "taxonomy_id": "permitted_disclosure_reps",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.296,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "5",
+                "char_span": [
+                  1161,
+                  1359
+                ]
+              },
+              "score": 0.125,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.111,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.ae3e6be63752f3ad",
+          "taxonomy_id": "purpose_permitted_use",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.176,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "4",
+                "char_span": [
+                  1012,
+                  1160
+                ]
+              },
+              "score": 0.158,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.136,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.0592b753701d28ea",
+          "taxonomy_id": "residuals",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "4",
+                "char_span": [
+                  1012,
+                  1160
+                ]
+              },
+              "score": 0.182,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.16,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  309
+                ]
+              },
+              "score": 0.143,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.18dc0650b4ea3a0a",
+          "taxonomy_id": "return_or_destruction",
+          "document_id": "theta-logistics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 21,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "10",
+                "char_span": [
+                  2064,
+                  2211
+                ]
+              },
+              "score": 0.242,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "7",
+                "char_span": [
+                  1564,
+                  1842
+                ]
+              },
+              "score": 0.104,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "theta-logistics",
+                "version": 2,
+                "clause_path": "6",
+                "char_span": [
+                  1360,
+                  1563
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.e9c4974a8aebe335",
+          "taxonomy_id": "confidentiality_of_discussions",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "18",
+                "char_span": [
+                  3196,
+                  3304
+                ]
+              },
+              "score": 0.278,
+              "filed_under": "assignment"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "7",
+                "char_span": [
+                  1566,
+                  1844
+                ]
+              },
+              "score": 0.114,
+              "filed_under": "compelled_disclosure"
+            }
+          ]
+        },
+        {
+          "id": "abs.3baa46c164d32b45",
+          "taxonomy_id": "definition_confidential_info",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "2",
+                "char_span": [
+                  312,
+                  582
+                ]
+              },
+              "score": 0.108,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.e9d1ca8024fc5bae",
+          "taxonomy_id": "export_control",
+          "document_id": "zeta-diagnostics",
+          "status": "absent_verified",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": []
+        },
+        {
+          "id": "abs.bbdfd3504c8cde94",
+          "taxonomy_id": "no_license_ip_ownership",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "11",
+                "char_span": [
+                  2213,
+                  2338
+                ]
+              },
+              "score": 0.208,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "5",
+                "char_span": [
+                  1163,
+                  1361
+                ]
+              },
+              "score": 0.129,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "10",
+                "char_span": [
+                  2065,
+                  2212
+                ]
+              },
+              "score": 0.107,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.7c239f3af3f82815",
+          "taxonomy_id": "no_obligation_to_proceed",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "11",
+                "char_span": [
+                  2213,
+                  2338
+                ]
+              },
+              "score": 0.105,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.b58fc4d91e5cb65d",
+          "taxonomy_id": "notice_of_unauthorized_disclosure",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "4",
+                "char_span": [
+                  1014,
+                  1162
+                ]
+              },
+              "score": 0.154,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "10",
+                "char_span": [
+                  2065,
+                  2212
+                ]
+              },
+              "score": 0.13,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.12,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.4987a07867fd3a50",
+          "taxonomy_id": "parties_and_recitals",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.226,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "7",
+                "char_span": [
+                  1566,
+                  1844
+                ]
+              },
+              "score": 0.105,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.c373fa6a614ff06d",
+          "taxonomy_id": "permitted_disclosure_reps",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.296,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "5",
+                "char_span": [
+                  1163,
+                  1361
+                ]
+              },
+              "score": 0.125,
+              "filed_under": "standard_of_care"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "13",
+                "char_span": [
+                  2453,
+                  2706
+                ]
+              },
+              "score": 0.12,
+              "filed_under": "limitation_of_liability"
+            }
+          ]
+        },
+        {
+          "id": "abs.adf6096790dc2c97",
+          "taxonomy_id": "purpose_permitted_use",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.176,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "4",
+                "char_span": [
+                  1014,
+                  1162
+                ]
+              },
+              "score": 0.158,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.136,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.4066b5f6ba19d9dd",
+          "taxonomy_id": "residuals",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "4",
+                "char_span": [
+                  1014,
+                  1162
+                ]
+              },
+              "score": 0.182,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.16,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "1",
+                "char_span": [
+                  59,
+                  311
+                ]
+              },
+              "score": 0.143,
+              "filed_under": null
+            }
+          ]
+        },
+        {
+          "id": "abs.183ef6b739088657",
+          "taxonomy_id": "return_or_destruction",
+          "document_id": "zeta-diagnostics",
+          "status": "possibly_present",
+          "basis": "scored",
+          "n_checked": 22,
+          "candidates": [
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "10",
+                "char_span": [
+                  2065,
+                  2212
+                ]
+              },
+              "score": 0.242,
+              "filed_under": null
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "7",
+                "char_span": [
+                  1566,
+                  1844
+                ]
+              },
+              "score": 0.104,
+              "filed_under": "compelled_disclosure"
+            },
+            {
+              "ref": {
+                "document_id": "zeta-diagnostics",
+                "version": 3,
+                "clause_path": "6",
+                "char_span": [
+                  1362,
+                  1565
+                ]
+              },
+              "score": 0.1,
+              "filed_under": null
+            }
+          ]
+        }
+      ]
+    }
   },
   "posture": {
     "system_prompt": "Rounds before escalating: Typically two rounds of redlines before we escalate to outside counsel or walk; our own history shows most deals settle by the second or third version. Default leverage posture: Collaborative — four of our six negotiated NDAs closed on our own paper and most changes were accepted without escalation; we lead from our standard form but do not force it through unchanged. Non-material counterparty change: We accept non-material redlines (venue, governing law, notice mechanics, minor wording) to keep a deal moving, but hold firm on the two clause types named above and never accept a limitation-of-liability clause that reaches a confidentiality breach. Hard lines named in interview (see Floor): Exclusions from Confidential Information; Survival of Confidentiality Obligations. Flexible to close a deal: Governing law, dispute resolution venue, and standard of care — our history shows these move to a counterparty's preferred jurisdiction or phrasing without us treating it as a loss. Output audience and deal-size sensitivity: Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader.",
     "version": 1,
     "generation": {
       "generated_by": "playbook-engine",
-      "generated_at": "2026-10-10T18:44:15+00:00",
+      "generated_at": "2026-10-21T12:34:10+00:00",
       "interview": [
         {
           "q": "rounds",
@@ -5506,7 +6883,7 @@
           "answer": "Terse — reviewed by in-house counsel who already knows the standard form, not a first-time reader."
         }
       ],
-      "grounded_in": "evidence@sha256:318d76515af4d7aaaf136f758f60e63db288f9d3f442d8e4ddc81053f2a253ab"
+      "grounded_in": "evidence@sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650"
     }
   },
   "floor": {
@@ -5526,7 +6903,7 @@
         "statement": "Limitation of liability, if present, must not apply to a breach of the confidentiality obligations in this Agreement.",
         "rationale": "A $50,000 liability cap appeared in 3 of 6 deals (epsilon-systems, theta-logistics, zeta-diagnostics) -- introduced by the counterparty in theta-logistics and zeta-diagnostics (both counterparty-paper) and carried into our own epsilon-systems draft; our taxonomy flags limitation-of-liability as normally absent from a mutual NDA because capping breach-of-confidence damages guts the agreement's only real remedy.",
         "x_signed_by": "Legal Owner",
-        "x_signed_at": "2026-10-10T18:44:16+00:00",
+        "x_signed_at": "2026-10-21T12:34:11+00:00",
         "x_taxonomy_id": "limitation_of_liability"
       }
     ]
@@ -5588,10 +6965,12 @@
           },
           {
             "version": 4,
-            "sha256": "sha256:268cc14ae4d50adb1de505cb7d519d3856e0e419532e77a99ec41b4d37d3c48c",
+            "sha256": "sha256:d2ea9f375f10e6f2f951ef00153183a19acee7c8495da415d3dca0f5dcf07dc1",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-03-16",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5627,10 +7006,12 @@
           },
           {
             "version": 2,
-            "sha256": "sha256:78b60f1c67bfa02587eba740f15251d67e47b051ee64624781a34804f98a505b",
+            "sha256": "sha256:664a24ae369b91a9fb7abdf7f17296764ca7325eb92fa1ce2390a517348ee24e",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-06-02",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5677,10 +7058,12 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:05919ef7bff2e97f3f37578e3a993b4bceaf31bfb9eeb3e749b7d514fa360dd7",
+            "sha256": "sha256:9229e31579922b07a6e3bbfdbdcdef1c75dfdf5719fae8dab6d12e8833f61564",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-09-12",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5727,10 +7110,12 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:37a0766fcfdd18c825f79925c87dc73d8091624ca965ae4ea31a2387e8afa3ef",
+            "sha256": "sha256:c670dbcc4058e7dd7ae773d9cf9ffebb54f1e3441dcfbc4892474d81de451d8c",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": "2022-11-30",
+        "signed_on_basis": "signature_block",
         "x_mixed_extractors": false
       },
       {
@@ -5770,6 +7155,8 @@
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": null,
+        "signed_on_basis": null,
         "x_mixed_extractors": false
       },
       {
@@ -5816,10 +7203,12 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:7d761618975cf1286ed6952f0014f0c30a04a8024c64a23e4137d93c14b3c66d",
+            "sha256": "sha256:a4a91d6c3b0e1d48fb53eb2506feb2ff5218aaec91df127eae0462191ccaf675",
             "media_type": "application/rtf"
           }
         ],
+        "signed_on": null,
+        "signed_on_basis": null,
         "x_mixed_extractors": false
       }
     ],
@@ -5828,25 +7217,16 @@
       "documents_in_scope": 6,
       "versions_total": 17,
       "unclassified": {
-        "count": 34,
+        "count": 28,
         "by_document": {
-          "beta-industries": 6,
-          "delta-ventures": 4,
-          "epsilon-systems": 4,
-          "gamma-holdings": 4,
-          "theta-logistics": 8,
-          "zeta-diagnostics": 8
+          "beta-industries": 5,
+          "delta-ventures": 3,
+          "epsilon-systems": 3,
+          "gamma-holdings": 3,
+          "theta-logistics": 7,
+          "zeta-diagnostics": 7
         },
         "example_citations": [
-          {
-            "document_id": "beta-industries",
-            "version": 4,
-            "clause_path": "0",
-            "char_span": [
-              0,
-              58
-            ]
-          },
           {
             "document_id": "beta-industries",
             "version": 4,
@@ -5882,6 +7262,15 @@
               5484,
               5684
             ]
+          },
+          {
+            "document_id": "beta-industries",
+            "version": 3,
+            "clause_path": "21",
+            "char_span": [
+              5669,
+              6040
+            ]
           }
         ]
       },
@@ -5899,23 +7288,23 @@
       }
     },
     "snapshot": {
-      "manifest_hash": "sha256:c284938b666b9e9ce227a50be6e0fc261b2bdb45ee9505c190b3d78907a4c183"
+      "manifest_hash": "sha256:44b0f13a0ce91dc7fc939deffc4ec0898b50c29132e693196f0ead4f5cb31e6b"
     }
   },
   "compiler": {
     "name": "playbook-engine",
     "version": "1.0.1",
-    "generated_at": "2026-10-10T18:44:13+00:00",
+    "generated_at": "2026-10-21T12:34:09+00:00",
     "stub_basis_present": false
   },
   "x_sidecars": {
     "precedent.jsonl": {
-      "sha256": "sha256:e91aa1a5429fc683b04e6d6c193b847c83679b8faf9a8045f73971f740755769",
+      "sha256": "sha256:0c687b63a227a61351b13a33f0dd1e4f1a22dd4d6a974f8478a16c897f8691a3",
       "records": 128
     }
   },
   "digest": {
-    "digest_version": "4",
+    "digest_version": "5",
     "perspective": {
       "party": "AlphaCorp Holdings, Inc.",
       "counterparty_type": "Prospective Commercial Counterparty"
@@ -5927,8 +7316,8 @@
     "corpus": {
       "n_deals": 6,
       "n_signed": 6,
-      "first_signed": null,
-      "last_signed": null
+      "first_signed": "2022-03",
+      "last_signed": "2022-11"
     },
     "part_map_legend": {
       "part_map": {
@@ -5947,6 +7336,12 @@
       "label_by": {
         "parts": "the default, so a digest entry omits label_by: the label is derived from the part map and additions; reason is the judgment's most important difference",
         "owner": "the owner set the label over the judged part map and additions, which may imply another label; reason is the owner's and wins"
+      },
+      "settled": {
+        "agreed": "an independent blind check reached the same label and parts as the judgment",
+        "adjudicated": "the blind check disagreed and a fresh agent decided: the judgment shown is that decision, so this label was contested and deserves more scrutiny",
+        "unchecked": "no completed blind check (none yet, or a disagreement still awaiting adjudication): weaker evidence than agreed or adjudicated",
+        "owner": "the owner set or corrected the judgment; it is never blind-checked"
       }
     },
     "clauses": [
@@ -5972,9 +7367,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -5988,6 +7389,7 @@
           {
             "text": "Neither party may assign this Agreement without the prior written consent of the other party.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -5997,6 +7399,7 @@
             ],
             "additions": [],
             "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6016,7 +7419,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.compelled_disclosure",
@@ -6040,9 +7446,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 3,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 2,
@@ -6059,6 +7471,13 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 0,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -6093,6 +7512,7 @@
             ],
             "additions": [],
             "reason": "No notice before a compelled disclosure.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "epsilon-systems",
               "version": 1,
@@ -6109,7 +7529,10 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.confidentiality_of_discussions",
@@ -6133,9 +7556,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 3,
           "equivalent": 0,
@@ -6149,7 +7578,8 @@
           {
             "text": "Neither party shall issue any press release or public announcement concerning the discussions between the parties without the other party's prior written consent, except as required by law or by the rules of a securities exchange.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2022-11",
+            "last_signed": "2022-11",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "less_protective",
@@ -6158,6 +7588,7 @@
             ],
             "additions": [],
             "reason": "Only public announcements about the discussions are restricted.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -6176,7 +7607,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.counterparts",
@@ -6200,9 +7634,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 2,
@@ -6219,6 +7659,13 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 2,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -6244,7 +7691,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.definition_confidential_info",
@@ -6268,9 +7718,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6285,7 +7741,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.dispute_resolution_venue",
@@ -6309,9 +7768,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 2,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 2,
           "equivalent": 0,
@@ -6323,8 +7788,37 @@
         },
         "signed_variants": [
           {
+            "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
+            "n_deals": 2,
+            "first_signed": "2022-03",
+            "last_signed": "2022-06",
+            "n_from_standard": 2,
+            "n_unchanged": 0,
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "settled": "unchecked",
+            "ref": {
+              "document_id": "delta-ventures",
+              "version": 2,
+              "clause_path": "22",
+              "char_span": [
+                5738,
+                5957
+              ]
+            },
+            "precedent_ids": [
+              "prec.6afc0a36d68064d1",
+              "prec.a9a443dd9fbd9de3"
+            ]
+          },
+          {
             "text": "The parties submit to the exclusive jurisdiction of the state and federal courts located in San Francisco, California.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6334,6 +7828,7 @@
             ],
             "additions": [],
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6347,39 +7842,16 @@
               "prec.48aa9562d17197c1",
               "prec.f376c7ceca80794f"
             ]
-          },
-          {
-            "text": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
-            "n_deals": 2,
-            "last_signed": null,
-            "n_from_standard": 2,
-            "n_unchanged": 0,
-            "label": "less_protective",
-            "part_map": [
-              "-"
-            ],
-            "additions": [],
-            "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
-            "ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "22",
-              "char_span": [
-                5862,
-                6081
-              ]
-            },
-            "precedent_ids": [
-              "prec.6afc0a36d68064d1",
-              "prec.a9a443dd9fbd9de3"
-            ]
           }
         ],
         "refused_asks": [],
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.entire_agreement_amendment",
@@ -6403,9 +7875,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6419,6 +7897,7 @@
           {
             "text": "This Agreement constitutes the entire agreement of the parties regarding its subject matter and may be amended only in a writing signed by both parties.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6428,6 +7907,7 @@
             ],
             "additions": [],
             "reason": "Earlier understandings are not displaced.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6447,7 +7927,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.exclusions_from_confidential",
@@ -6471,9 +7954,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6487,6 +7976,7 @@
           {
             "text": "The obligations in this Agreement do not apply to information that: (a) is or becomes publicly known through no fault of the receiving party; (b) was lawfully in the receiving party's possession before disclosure; (c) is lawfully obtained from a third party without restriction; or (d) was",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 0,
@@ -6496,6 +7986,7 @@
             ],
             "additions": [],
             "reason": "The four exclusions are the same but the recipient no longer bears the burden of proving one.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6515,12 +8006,15 @@
           {
             "text": "Confidential Information does not include information that: (a) was already known to Recipient without a duty of confidentiality; (b) is or becomes publicly available through no act or omission of Recipient; or (c) is rightfully received by Recipient from a third party without a duty of",
             "n_deals": 1,
+            "first_signed": "2022-03",
+            "last_signed": "2022-03",
             "label": "less_protective",
             "part_map": [
               "-"
             ],
             "additions": [],
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "beta-industries",
               "version": 2,
@@ -6547,6 +8041,7 @@
             ],
             "additions": [],
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 1,
@@ -6564,7 +8059,10 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 1,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.export_control",
@@ -6588,9 +8086,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6605,7 +8109,21 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 2,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": [
+          {
+            "document_id": "theta-logistics",
+            "signed_on": null,
+            "absence_id": "abs.d1325377e1fcbcca"
+          },
+          {
+            "document_id": "zeta-diagnostics",
+            "signed_on": null,
+            "absence_id": "abs.e9d1ca8024fc5bae"
+          }
+        ]
       },
       {
         "id": "clause.governing_law",
@@ -6629,9 +8147,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 2,
         "n_opened_standard": 4,
         "n_kept_standard": 2,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 2,
           "equivalent": 0,
@@ -6643,8 +8167,37 @@
         },
         "signed_variants": [
           {
+            "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
+            "n_deals": 2,
+            "first_signed": "2022-03",
+            "last_signed": "2022-06",
+            "n_from_standard": 2,
+            "n_unchanged": 0,
+            "label": "less_protective",
+            "part_map": [
+              "-"
+            ],
+            "additions": [],
+            "reason": "Substitutes New York law for our chosen Delaware law.",
+            "settled": "unchecked",
+            "ref": {
+              "document_id": "delta-ventures",
+              "version": 2,
+              "clause_path": "21",
+              "char_span": [
+                5604,
+                5737
+              ]
+            },
+            "precedent_ids": [
+              "prec.7377a6430df64a98",
+              "prec.c4140ebf91bb980b"
+            ]
+          },
+          {
             "text": "This Agreement is governed by the laws of the State of California.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6654,6 +8207,7 @@
             ],
             "additions": [],
             "reason": "Substitutes California law for our chosen Delaware law.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6667,39 +8221,16 @@
               "prec.95daf3a231f7a092",
               "prec.f4efbee84462b782"
             ]
-          },
-          {
-            "text": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
-            "n_deals": 2,
-            "last_signed": null,
-            "n_from_standard": 2,
-            "n_unchanged": 0,
-            "label": "less_protective",
-            "part_map": [
-              "-"
-            ],
-            "additions": [],
-            "reason": "Substitutes New York law for our chosen Delaware law.",
-            "ref": {
-              "document_id": "beta-industries",
-              "version": 4,
-              "clause_path": "21",
-              "char_span": [
-                5728,
-                5861
-              ]
-            },
-            "precedent_ids": [
-              "prec.7377a6430df64a98",
-              "prec.c4140ebf91bb980b"
-            ]
           }
         ],
         "refused_asks": [],
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.injunctive_relief",
@@ -6723,9 +8254,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6739,6 +8276,7 @@
           {
             "text": "The parties agree that a breach of this Agreement may cause irreparable harm and that the non-breaching party may seek injunctive relief.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -6748,6 +8286,7 @@
             ],
             "additions": [],
             "reason": "A weaker basis for injunctive relief.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -6767,7 +8306,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.limitation_of_liability",
@@ -6775,9 +8317,15 @@
         "title": "Limitation of Liability",
         "our_standard": null,
         "n_deals": 3,
+        "first_signed": "2022-09",
+        "last_signed": "2022-09",
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 0,
           "equivalent": 0,
@@ -6791,13 +8339,15 @@
           {
             "text": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
             "n_deals": 2,
-            "last_signed": null,
+            "first_signed": "2022-09",
+            "last_signed": "2022-09",
             "n_from_standard": 0,
             "n_unchanged": 0,
             "label": null,
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 3,
@@ -6824,6 +8374,7 @@
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "epsilon-systems",
               "version": 1,
@@ -6842,7 +8393,26 @@
         ],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 3,
+        "n_signed_without_possible": 1,
+        "verified_absent_deals": [
+          {
+            "document_id": "gamma-holdings",
+            "signed_on": "2022-11-30",
+            "absence_id": "abs.91465c705cc01859"
+          },
+          {
+            "document_id": "delta-ventures",
+            "signed_on": "2022-06-02",
+            "absence_id": "abs.f19e831a4c686aba"
+          },
+          {
+            "document_id": "beta-industries",
+            "signed_on": "2022-03-16",
+            "absence_id": "abs.211c7cd8cf60e638"
+          }
+        ]
       },
       {
         "id": "clause.no_license_ip_ownership",
@@ -6866,9 +8436,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6883,7 +8459,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.no_obligation_to_proceed",
@@ -6907,9 +8486,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -6924,7 +8509,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.no_warranty_as_is",
@@ -6948,9 +8536,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 2,
@@ -6967,6 +8561,13 @@
             "n_texts": 1,
             "n_from_standard": 0,
             "n_unchanged": 2,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 1,
+              "owner": 0
+            },
+            "first_signed": null,
             "last_signed": null,
             "exemplars": [
               {
@@ -6992,7 +8593,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.notice_of_unauthorized_disclosure",
@@ -7016,9 +8620,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 3,
           "equivalent": 0,
@@ -7032,7 +8642,8 @@
           {
             "text": "Recipient shall notify Discloser in writing within five (5) business days of discovering any unauthorized use, disclosure, or loss of Confidential Information, and shall cooperate reasonably with Discloser to mitigate its effects.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2022-11",
+            "last_signed": "2022-11",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "mixed",
@@ -7043,6 +8654,7 @@
               "+"
             ],
             "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "gamma-holdings",
               "version": 3,
@@ -7061,7 +8673,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.notices",
@@ -7085,9 +8700,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7101,6 +8722,7 @@
           {
             "text": "All notices must be in writing and delivered to the addresses set out below the signature blocks.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7110,6 +8732,7 @@
             ],
             "additions": [],
             "reason": "When a notice takes effect is left undefined.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7129,7 +8752,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.parties_and_recitals",
@@ -7153,9 +8779,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 0,
           "equivalent": 4,
@@ -7172,29 +8804,36 @@
             "n_texts": 4,
             "n_from_standard": 0,
             "n_unchanged": 4,
-            "last_signed": null,
+            "settled_counts": {
+              "agreed": 0,
+              "adjudicated": 0,
+              "unchecked": 4,
+              "owner": 0
+            },
+            "first_signed": "2022-03",
+            "last_signed": "2022-11",
             "exemplars": [
               {
-                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\").",
+                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\").",
                 "ref": {
-                  "document_id": "beta-industries",
-                  "version": 4,
+                  "document_id": "gamma-holdings",
+                  "version": 3,
                   "clause_path": "1",
                   "char_span": [
                     59,
-                    425
+                    426
                   ]
                 }
               },
               {
-                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Delta Ventures LP (\"Delta\").",
+                "text": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Epsilon Systems, Inc. (\"Epsilon\").",
                 "ref": {
-                  "document_id": "delta-ventures",
-                  "version": 2,
+                  "document_id": "epsilon-systems",
+                  "version": 3,
                   "clause_path": "1",
                   "char_span": [
                     59,
-                    423
+                    429
                   ]
                 }
               }
@@ -7211,7 +8850,10 @@
         "changed_openings": [],
         "n_variants_total": 4,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.permitted_disclosure_reps",
@@ -7235,9 +8877,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7252,7 +8900,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.purpose_permitted_use",
@@ -7276,9 +8927,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7293,7 +8950,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.residuals",
@@ -7301,9 +8961,15 @@
         "title": "Residuals",
         "our_standard": null,
         "n_deals": 1,
+        "first_signed": null,
+        "last_signed": null,
         "n_signed_standard": 0,
         "n_opened_standard": 0,
         "n_kept_standard": 0,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 0,
           "equivalent": 0,
@@ -7318,10 +8984,13 @@
           {
             "text": "Notwithstanding anything to the contrary in this Agreement, the receiving party may use Residuals for any purpose. Residuals means information retained in the unaided memory of individuals who have had access to Confidential Information.",
             "n_deals": 1,
+            "first_signed": null,
+            "last_signed": null,
             "label": null,
             "part_map": null,
             "additions": null,
             "reason": null,
+            "settled": null,
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 2,
@@ -7339,7 +9008,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 1,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 6,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.return_or_destruction",
@@ -7363,9 +9035,15 @@
           }
         },
         "n_deals": 4,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7380,7 +9058,10 @@
         "changed_openings": [],
         "n_variants_total": 0,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 2,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.severability",
@@ -7404,9 +9085,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7420,6 +9107,7 @@
           {
             "text": "If any provision is held invalid, the remaining provisions remain in effect.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7429,6 +9117,7 @@
             ],
             "additions": [],
             "reason": "No reformation of an unenforceable provision.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7448,7 +9137,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.standard_of_care",
@@ -7472,9 +9164,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 3,
         "n_opened_standard": 4,
         "n_kept_standard": 3,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 3,
           "equivalent": 0,
@@ -7488,6 +9186,7 @@
           {
             "text": "The receiving party shall protect Confidential Information using the same degree of care it uses to protect its own confidential information, and in no event less than reasonable care.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7497,6 +9196,7 @@
             ],
             "additions": [],
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7514,7 +9214,8 @@
           {
             "text": "Recipient shall protect Confidential Information using the same degree of care it uses to protect its own confidential information of like importance, and in no event less than reasonable care.",
             "n_deals": 1,
-            "last_signed": null,
+            "first_signed": "2022-03",
+            "last_signed": "2022-03",
             "n_from_standard": 1,
             "n_unchanged": 0,
             "label": "more_protective",
@@ -7523,6 +9224,7 @@
             ],
             "additions": [],
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "beta-industries",
               "version": 4,
@@ -7541,7 +9243,10 @@
         "changed_openings": [],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.survival_period",
@@ -7565,9 +9270,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7581,6 +9292,7 @@
           {
             "text": "The confidentiality obligations in this Agreement continue for three (3) years from the date of disclosure.",
             "n_deals": 1,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 0,
@@ -7590,6 +9302,7 @@
             ],
             "additions": [],
             "reason": "Survival after termination is implied rather than stated.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7606,6 +9319,7 @@
           {
             "text": "The confidentiality obligations in this Agreement continue for five (5) years from the date of disclosure.",
             "n_deals": 1,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 1,
@@ -7615,6 +9329,7 @@
             ],
             "additions": [],
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "zeta-diagnostics",
               "version": 3,
@@ -7642,6 +9357,7 @@
             ],
             "additions": [],
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 1,
@@ -7658,7 +9374,10 @@
         ],
         "n_variants_total": 2,
         "n_refused_total": 0,
-        "n_changed_openings_total": 1
+        "n_changed_openings_total": 1,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       },
       {
         "id": "clause.term",
@@ -7682,9 +9401,15 @@
           }
         },
         "n_deals": 6,
+        "first_signed": "2022-03",
+        "last_signed": "2022-11",
         "n_signed_standard": 4,
         "n_opened_standard": 4,
         "n_kept_standard": 4,
+        "standard_history": {
+          "forms": [],
+          "why_changed": null
+        },
         "positions": {
           "standard": 4,
           "equivalent": 0,
@@ -7698,6 +9423,7 @@
           {
             "text": "This Agreement begins on the date of last signature and remains in effect for two (2) years.",
             "n_deals": 2,
+            "first_signed": null,
             "last_signed": null,
             "n_from_standard": 0,
             "n_unchanged": 2,
@@ -7707,6 +9433,7 @@
             ],
             "additions": [],
             "reason": "No right to end the agreement early on notice.",
+            "settled": "unchecked",
             "ref": {
               "document_id": "theta-logistics",
               "version": 2,
@@ -7726,7 +9453,10 @@
         "changed_openings": [],
         "n_variants_total": 1,
         "n_refused_total": 0,
-        "n_changed_openings_total": 0
+        "n_changed_openings_total": 0,
+        "n_signed_without_verified": 0,
+        "n_signed_without_possible": 0,
+        "verified_absent_deals": []
       }
     ],
     "uncovered_clause_types": [
@@ -7804,6 +9534,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No assignment without consent, even to an affiliate or a successor.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -7845,6 +9576,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No notice before a compelled disclosure.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -7867,6 +9599,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Same duty to disclose only what is legally required after prompt written notice where permitted.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -7903,6 +9636,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Only public announcements about the discussions are restricted.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -7944,6 +9678,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Same counterparts mechanism; the omitted electronic-signature mention does not change its effect.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -7989,7 +9724,7 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.6afc0a36d68064d1",
+          "precedent_id": "prec.a9a443dd9fbd9de3",
           "kind": "signed_variant",
           "opening": "The state and federal courts located in Wilmington, Delaware have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
           "signed": "The state and federal courts located in New York County, New York have exclusive jurisdiction over any dispute arising out of this Agreement, and each party submits to that jurisdiction.",
@@ -7998,6 +9733,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to New York County.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8020,6 +9756,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Moves the exclusive forum away from our chosen Delaware courts to San Francisco.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8061,6 +9798,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Earlier understandings are not displaced.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8102,6 +9840,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8124,6 +9863,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Fewer carve-outs protect AlphaCorp as recipient and the recipient's burden of proof is gone.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8174,7 +9914,7 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.7377a6430df64a98",
+          "precedent_id": "prec.c4140ebf91bb980b",
           "kind": "signed_variant",
           "opening": "This Agreement is governed by the laws of the State of Delaware, without regard to its conflict of laws principles.",
           "signed": "This Agreement is governed by the laws of the State of New York, without regard to its conflict of laws principles.",
@@ -8183,6 +9923,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Substitutes New York law for our chosen Delaware law.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8205,6 +9946,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "Substitutes California law for our chosen Delaware law.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8246,6 +9988,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "A weaker basis for injunctive relief.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8277,7 +10020,7 @@
       ],
       "excerpts": [
         {
-          "precedent_id": "prec.20c4e3248b6371c9",
+          "precedent_id": "prec.6e17fb71a752c28a",
           "kind": "changed_opening",
           "opening": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000).",
           "signed": "Each party's aggregate liability arising out of or relating to this Agreement shall not exceed fifty thousand dollars ($50,000). This limitation does not apply to a breach of the confidentiality obligations in this Agreement.",
@@ -8349,6 +10092,7 @@
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Same disclaimer of any warranty of accuracy or completeness without the AS IS label.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -8385,6 +10129,7 @@
             "label": "mixed",
             "label_by": "parts",
             "reason": "A fixed five-business-day window can be slower than prompt notice, though the notice must now be written.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8431,6 +10176,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "When a notice takes effect is left undefined.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8463,15 +10209,16 @@
       "floor_rules": [],
       "excerpts": [
         {
-          "precedent_id": "prec.1073f6d32012245b",
+          "precedent_id": "prec.22bd3a0c133a8b5b",
           "kind": "signed_variant",
           "opening": null,
-          "signed": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Beta Industries, LLC (\"Beta\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
+          "signed": "This Mutual Non-Disclosure Agreement (this \"Agreement\") is entered into by and between AlphaCorp Holdings, Inc. (\"AlphaCorp\") and Gamma Holdings, Inc. (\"Gamma\"). Each party may disclose information to the other in connection with the Purpose, and each party may act as both a disclosing party (\"Discloser\") and a receiving party (\"Recipient\").",
           "outcome": "signed",
           "vs_standard": {
             "label": "equivalent",
             "label_by": "parts",
             "reason": "Only fills the counterparty's name into the placeholder; same legal effect.",
+            "settled": "unchecked",
             "part_map": [
               "="
             ],
@@ -8582,6 +10329,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No reformation of an unenforceable provision.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8623,6 +10371,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8645,6 +10394,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Raises the standard of care above reasonable care.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8686,6 +10436,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8708,6 +10459,7 @@
             "label": "more_protective",
             "label_by": "parts",
             "reason": "Five years of confidentiality instead of three.",
+            "settled": "unchecked",
             "part_map": [
               "+"
             ],
@@ -8749,6 +10501,7 @@
             "label": "less_protective",
             "label_by": "parts",
             "reason": "No right to end the agreement early on notice.",
+            "settled": "unchecked",
             "part_map": [
               "-"
             ],
@@ -8771,11 +10524,11 @@
       "name": "playbook-engine",
       "version": "1.0.1"
     },
-    "corpus_manifest_hash": "sha256:c284938b666b9e9ce227a50be6e0fc261b2bdb45ee9505c190b3d78907a4c183",
+    "corpus_manifest_hash": "sha256:44b0f13a0ce91dc7fc939deffc4ec0898b50c29132e693196f0ead4f5cb31e6b",
     "documents": [
       {
         "document_id": "beta-industries",
-        "signed_at": null,
+        "signed_on": "2022-03-16",
         "version_files": [
           {
             "version": 1,
@@ -8791,13 +10544,27 @@
           },
           {
             "version": 4,
-            "sha256": "sha256:268cc14ae4d50adb1de505cb7d519d3856e0e419532e77a99ec41b4d37d3c48c"
+            "sha256": "sha256:d2ea9f375f10e6f2f951ef00153183a19acee7c8495da415d3dca0f5dcf07dc1"
+          }
+        ]
+      },
+      {
+        "document_id": "delta-ventures",
+        "signed_on": "2022-06-02",
+        "version_files": [
+          {
+            "version": 1,
+            "sha256": "sha256:c30a35fa32d93ce2916ef18b1d6d357eae7f40fc917baaca82157f2b4416c183"
+          },
+          {
+            "version": 2,
+            "sha256": "sha256:664a24ae369b91a9fb7abdf7f17296764ca7325eb92fa1ce2390a517348ee24e"
           }
         ]
       },
       {
         "document_id": "epsilon-systems",
-        "signed_at": null,
+        "signed_on": "2022-09-12",
         "version_files": [
           {
             "version": 1,
@@ -8809,13 +10576,13 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:05919ef7bff2e97f3f37578e3a993b4bceaf31bfb9eeb3e749b7d514fa360dd7"
+            "sha256": "sha256:9229e31579922b07a6e3bbfdbdcdef1c75dfdf5719fae8dab6d12e8833f61564"
           }
         ]
       },
       {
         "document_id": "gamma-holdings",
-        "signed_at": null,
+        "signed_on": "2022-11-30",
         "version_files": [
           {
             "version": 1,
@@ -8827,13 +10594,13 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:37a0766fcfdd18c825f79925c87dc73d8091624ca965ae4ea31a2387e8afa3ef"
+            "sha256": "sha256:c670dbcc4058e7dd7ae773d9cf9ffebb54f1e3441dcfbc4892474d81de451d8c"
           }
         ]
       },
       {
         "document_id": "theta-logistics",
-        "signed_at": null,
+        "signed_on": null,
         "version_files": [
           {
             "version": 1,
@@ -8847,7 +10614,7 @@
       },
       {
         "document_id": "zeta-diagnostics",
-        "signed_at": null,
+        "signed_on": null,
         "version_files": [
           {
             "version": 1,
@@ -8859,7 +10626,7 @@
           },
           {
             "version": 3,
-            "sha256": "sha256:7d761618975cf1286ed6952f0014f0c30a04a8024c64a23e4137d93c14b3c66d"
+            "sha256": "sha256:a4a91d6c3b0e1d48fb53eb2506feb2ff5218aaec91df127eae0462191ccaf675"
           }
         ]
       }
@@ -8906,8 +10673,8 @@
       "clause.definition_confidential_info": [],
       "clause.dispute_resolution_venue": [
         {
-          "precedent_id": "prec.6afc0a36d68064d1",
-          "document_id": "beta-industries",
+          "precedent_id": "prec.a9a443dd9fbd9de3",
+          "document_id": "delta-ventures",
           "kind": "signed_variant",
           "omitted": false
         },
@@ -8943,8 +10710,8 @@
       "clause.export_control": [],
       "clause.governing_law": [
         {
-          "precedent_id": "prec.7377a6430df64a98",
-          "document_id": "beta-industries",
+          "precedent_id": "prec.c4140ebf91bb980b",
+          "document_id": "delta-ventures",
           "kind": "signed_variant",
           "omitted": false
         },
@@ -8965,8 +10732,8 @@
       ],
       "clause.limitation_of_liability": [
         {
-          "precedent_id": "prec.20c4e3248b6371c9",
-          "document_id": "zeta-diagnostics",
+          "precedent_id": "prec.6e17fb71a752c28a",
+          "document_id": "epsilon-systems",
           "kind": "changed_opening",
           "omitted": false
         }
@@ -8999,8 +10766,8 @@
       ],
       "clause.parties_and_recitals": [
         {
-          "precedent_id": "prec.1073f6d32012245b",
-          "document_id": "beta-industries",
+          "precedent_id": "prec.22bd3a0c133a8b5b",
+          "document_id": "gamma-holdings",
           "kind": "signed_variant",
           "omitted": false
         }
@@ -9063,11 +10830,11 @@
     }
   },
   "identity": {
-    "content_hash": "sha256:fa5afcee13d94f52815d2f883f1f27d4de76002ca6089e404999cc6069e7ce6e",
+    "content_hash": "sha256:d5df096e604dfbe0e088d09a0fc79a6a9799d833eae6f676c16cb9334e0c0596",
     "section_digests": {
-      "evidence": "sha256:318d76515af4d7aaaf136f758f60e63db288f9d3f442d8e4ddc81053f2a253ab",
-      "posture": "sha256:a41f9c21ab78b03977101836a82eee2c6e224d75ef3627d10072b717276a5698",
-      "floor": "sha256:1e068514c00a1c56cf9e7b97ed09b8f78ffe254449f5713c553fe36c361d2f51"
+      "evidence": "sha256:f5bed711abaef7b64f85a43420bf9739d9da05454ac374903f3ceae3d648e650",
+      "posture": "sha256:2917e416528a64c119934e8b7b1b69a3d5d3671978ec4d7d80ced9845aa8a4d6",
+      "floor": "sha256:8fea54a4f67eafb57e32f063c4a8f34d060bdf574662d0f515a17f39dab3edeb"
     }
   }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OPF acceptance harness — the ONE command that proves the chain end to end.
 
-Reads OPF 0.5 / digest_version 4, the only format this repo accepts (issue #128).
+Reads OPF 0.6 / digest_version 5, the only format this repo accepts (issues #128, #177).
 
 Runs the full acceptance sequence against a bundle (bare ``.opf.json`` or
 single-file ``.opf.html``) and a sample contract. Used two ways:
@@ -9,7 +9,7 @@ single-file ``.opf.html``) and a sample contract. Used two ways:
   - NOW, against the synthetic fixture, as the launch's own acceptance gate:
 
         python3 scripts/opf_acceptance.py \\
-          --bundle tests/gold-fixtures-opf/acme-university-0.5.opf.html \\
+          --bundle tests/gold-fixtures-opf/acme-university-0.6.opf.html \\
           --playbook-id acme-university \\
           --policy tests/gold-fixtures-opf/acme-university-policy-v1.json
 
@@ -18,7 +18,7 @@ single-file ``.opf.html``) and a sample contract. Used two ways:
     prompt alone:
 
         python3 scripts/opf_acceptance.py \\
-          tests/gold-fixtures-opf/acme-university-0.5.opf.json --stage REVIEW
+          tests/gold-fixtures-opf/acme-university-0.6.opf.json --stage REVIEW
 
   - LATER, unchanged, against the operator-provided REAL playbook. The policy
     resolves automatically from the playbook_id, so neither flag is needed:
@@ -31,7 +31,7 @@ Stages (each prints PASS / FAIL / PENDING):
   1. EXTRACT   — .opf.html → embedded canonical OPF JSON            [PR A]
   2. VERIFY    — schema-valid for its opf_version + content_hash    [PR A]
   3. BIND      — content_hash re-verified; review policy recorded   [PR C]
-  4. REVIEW    — digest-4 prompt (<50K tokens), no wholesale dump   [PR D/F, #129]
+  4. REVIEW    — digest-5 prompt (<50K tokens), no wholesale dump   [PR D/F, #129, #177]
   5. ROUNDTRIP — reject-all tracked changes == inbound document      [PR G2]
   6. ATTRIBUTE — every w:ins/w:del attributed; zero unattributed     [PR G2]
   7. COMMENTS  — external|internal|both|none; ONE file in every mode [PR G2]
@@ -85,13 +85,36 @@ def _strings(node: object) -> set[str]:
     return set()
 
 
+def _our_standard_parts(doc: dict) -> list[str]:
+    """Every `our_standard.parts[].text` of every digest clause -- our own
+    wording, which the Digest block's "Our standard" line renders by design."""
+    digest = doc.get("digest")
+    clauses = digest.get("clauses") if isinstance(digest, dict) else None
+    texts: list[str] = []
+    for clause in clauses or []:
+        standard = clause.get("our_standard") if isinstance(clause, dict) else None
+        parts = standard.get("parts") if isinstance(standard, dict) else None
+        for part in parts or []:
+            text = part.get("text") if isinstance(part, dict) else None
+            if isinstance(text, str) and text:
+                texts.append(text)
+    return texts
+
+
 def _wholesale_evidence_in(doc: dict, prompt: str) -> int:
-    """How many per-deal precedent values (OPF 0.5 `evidence.precedent[]`)
+    """How many per-deal precedent values (OPF 0.6 `evidence.precedent[]`)
     reached *prompt*: any precedent id, and any signed, opening or refused
     text longer than a digest summary appearing verbatim -- unless the digest
     itself carries that exact text (our standard, a part of it, or a short
-    text that is its own summary), which the Digest block renders by design."""
+    text that is its own summary), which the Digest block renders by design.
+
+    Also exempt: a precedent text contained in any digest `our_standard`
+    part, of ANY clause (#177). A deal that refused, or opened with, wording
+    that is a verbatim piece of our own standard for a different clause puts
+    that wording in the prompt through that clause's "Our standard" line --
+    our own text rendered by design, not the per-deal record leaking."""
     digest_texts = _strings(doc.get("digest"))
+    standard_parts = _our_standard_parts(doc)
     leaked = 0
     for record in (doc.get("evidence") or {}).get("precedent") or []:
         if not isinstance(record, dict):
@@ -106,6 +129,7 @@ def _wholesale_evidence_in(doc: dict, prompt: str) -> int:
                 isinstance(text, str)
                 and len(text) > _DIGEST_SUMMARY_MAX_CHARS
                 and text not in digest_texts
+                and not any(text in part for part in standard_parts)
                 and text in prompt
             ):
                 leaked += 1
@@ -209,7 +233,7 @@ def run(
 
     # --- Stage 4: the digest prompt ------------------------------------------
     # The stage's own criterion: the review prompt is built from the digest
-    # (digest 4, issue #129), fits the 50K review budget, and carries no
+    # (digest 5, issues #129/#177), fits the 50K review budget, and carries no
     # wholesale evidence. The per-deal precedent record never reaches the
     # prompt: no precedent id is rendered, and no signed or proposed text
     # longer than the digest's 300-char summary appears verbatim (a shorter

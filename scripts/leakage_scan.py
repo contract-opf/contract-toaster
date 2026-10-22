@@ -122,9 +122,9 @@ runs `none`/`external` and produces no value for this field at all.
 Retrieval stays retired -- `scripts/review_spine.py` passes
 `retrieved_precedent=[]` to the primary pass -- but precedent text DOES
 reach the model now: since issue #40 the critic receives the selected OPF
-0.5 dossiers WHOLE (`scripts/critic_dossiers.py`), and every dossier excerpt
+dossiers WHOLE (`scripts/critic_dossiers.py`), and every dossier excerpt
 carries the whole `opening` / `signed` text of a past deal, a text a
-counterparty wrote or signed. (The digest 4 in both passes' shared prefix
+counterparty wrote or signed. (The digest in both passes' shared prefix
 carries signed variants, refused asks and changed openings too.)
 
 Every dossier excerpt also carries its deal's `precedent_id`
@@ -168,7 +168,7 @@ What guards them:
     aliased nor added.
   * Internal channel (`internal_rationale_for_footnote`): check 2 is skipped
     there, so `from_opf_document` also makes each dossier excerpt's whole
-    `opening` / `signed` text, and (#171) each digest 4 precedent text --
+    `opening` / `signed` text, and (#171) each digest precedent text --
     signed variant, collapsed exemplar, refused ask, changed opening, which
     both passes read verbatim in the shared prefix -- unless it is our
     standard, a check-4 `precedent_verbatim_spans` entry. An internal note
@@ -186,7 +186,7 @@ What does not:
   * A past counterparty's name a precedent text carries as contract
     wording (a signed parties recital names the party; the engine's NDA
     example has two) reaches the prompt verbatim, and since #174 is held on
-    its own only where the document records who that party was: OPF 0.5
+    its own only where the document records who that party was: OPF 0.6
     carries no plain party-name field (OPF-SPEC §3.5.4), so
     `_opf_past_counterparty_names` reads the deal slugs and the
     entity-registry aliases (`counterparty_ref.alias`) and holds each one a
@@ -231,6 +231,40 @@ What does not:
     closed rather than leaking; the dossier excerpts' spans have carried
     it since #40, and like all of the internal channel it is latent while
     #572's `NOTES_MODE_ENABLED` kill switch is off.
+
+## OPF 0.6 facts (issue #177)
+
+Digest 5 renders four new kinds of fact, and each is guarded on the terms of
+the text it is:
+
+  * Our former forms' wording (`_opf_prior_form_texts`: each
+    `evidence.clauses[].prior_standards[]` text and part text, each digest
+    `standard_history.forms[].parts[].text`) and the owner's `why_changed`
+    note (`_opf_why_changed_texts`) are treated as precedent text: check-2
+    grams (blocked externally) and check-4 spans (blocked whole on every
+    channel). A former form's text that reads as today's standard is our
+    standard, never either.
+  * A former form's `vs_standard` reasons and summaries (`reason`,
+    `parts[].reason`, `additions[].summary`, `owner_label.reason`) and each
+    digest form's `reason` (`_opf_prior_form_reasons`) are check-4 spans
+    only, as #177 requires: an internal note may not copy one whole. They
+    are not our wording, so, like every other `vs_standard` reason, they
+    are not check-2 grams.
+  * A former form's label (`_opf_prior_form_labels`) is a check-4 span only.
+    It names our own paper -- a supplied form's owner label, or a
+    reconstructed form's `reconstructed <taxonomy_id> <YYYY-MM> to
+    <YYYY-MM>` -- not a position, a past deal or a counterparty, so it is
+    neither a check-2 gram nor a check-3 id.
+  * Every new deal reference (`verified_absent_deals[]`, a reconstructed
+    form's citation, `evidence.absence` records and candidates) is one of
+    `deal_aliases.deal_document_ids`, so it is named by its alias in the
+    prompt and that alias is a check-3 id like every other deal's.
+  * Signing dates are rendered to the month (`opf_prompt._signed_span`) and
+    are deliberately NOT held in check 3: a month names no deal -- the alias
+    does, and the alias-to-slug map never enters a prompt -- and a held
+    month would block every external field that states a date. The external
+    footnote's rule that it never discloses what the playbook holds is what
+    keeps a past deal's date out of it.
 
 `counterparty_names` (check 3's other list) is populated since #174: on an
 OPF review `from_opf_document` holds every past counterparty's name a
@@ -889,10 +923,10 @@ def _opf_public_vocabulary(opf_doc: dict[str, Any]) -> set[str]:
     wrote a summary that summarises nothing -- just the clause name back
     again -- therefore contributed a blocked gram byte-identical to that
     same document's PUBLIC taxonomy `label`. The owner measured 18 such
-    fields in the real bound playbook. Digest 4's texts are signed or
+    fields in the real bound playbook. The digest's texts are signed or
     proposed wording, not summaries, but the schema still carries no
     `minLength` on them (`$defs.digestVariant.text` in
-    `playbooks/opf/playbook.schema-0.5.json`), so the guard stays.
+    `playbooks/opf/playbook.schema-0.6.json`), so the guard stays.
 
     The toaster is an empty shell consuming a playbook authored elsewhere
     (`playbook-engine`), so it cannot assume those fields are well-formed.
@@ -965,7 +999,7 @@ def _texts_of(entries: Any, key: str = "text") -> list[str]:
 
 
 def _opf_digest_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
-    """Every precedent text a digest 4 clause carries into the prompt (issue
+    """Every precedent text a digest clause carries into the prompt (issue
     #128): signed variants (and the collapsed equivalent entry's exemplars),
     refused asks and openings not signed as proposed -- never our standard,
     which is `_opf_standard_texts`'. `from_opf_document` makes each a check-2
@@ -988,7 +1022,7 @@ def _opf_digest_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
 
 
 def _opf_evidence_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
-    """Every non-standard text of the OPF 0.5 per-deal precedent record
+    """Every non-standard text of the OPF per-deal precedent record
     (`evidence.precedent[]`, issue #128): the signed text unless it is our
     standard, the opening unless the deal opened with our standard, and every
     refused ask."""
@@ -1009,7 +1043,7 @@ def _opf_evidence_precedent_texts(opf_doc: dict[str, Any]) -> list[str]:
 
 
 def _opf_standard_texts(opf_doc: dict[str, Any]) -> list[str]:
-    """Our standard, part by part, from every digest 4 clause: the position
+    """Our standard, part by part, from every digest clause: the position
     openly asked for (allowlisted for replacement text)."""
     texts: list[str] = []
     digest = opf_doc.get("digest")
@@ -1021,8 +1055,182 @@ def _opf_standard_texts(opf_doc: dict[str, Any]) -> list[str]:
     return texts
 
 
+def _opf_our_standard_keys(opf_doc: dict[str, Any]) -> set[str]:
+    """`_normalize`d forms of our standard as the digest and the evidence
+    carry it: each part's text and the parts joined with a blank line (the
+    whole clause). A former form's text that reads as today's standard
+    (an `unchanged` form, or a passage it shares with today's) IS our
+    standard, which must stay restorable in replacement text, so
+    `_opf_prior_form_texts` never treats it as a former form's text."""
+    keys: set[str] = set()
+    groups: list[Any] = []
+    for section in ("digest", "evidence"):
+        container = opf_doc.get(section)
+        if isinstance(container, dict):
+            groups.append(container.get("clauses"))
+    for clauses in groups:
+        for clause in clauses if isinstance(clauses, list) else []:
+            our_standard = clause.get("our_standard") if isinstance(clause, dict) else None
+            if not isinstance(our_standard, dict):
+                continue
+            parts = _texts_of(our_standard.get("parts"))
+            texts = [*parts, "\n\n".join(parts)] if parts else []
+            whole = our_standard.get("text")
+            if isinstance(whole, str):
+                texts.append(whole)
+            keys.update(_normalize(text) for text in texts if text)
+    keys.discard("")
+    return keys
+
+
+def _opf_prior_form_texts(opf_doc: dict[str, Any]) -> list[str]:
+    """Our former forms' wording (OPF 0.6, issue #177): each
+    `evidence.clauses[].prior_standards[]` entry's `text` and its
+    `parts[].text`, and each digest `standard_history.forms[].parts[].text`
+    (null where the passage is today's) -- unless it reads as today's
+    standard (`_opf_our_standard_keys`), which stays our standard.
+
+    `from_opf_document` treats each exactly as a precedent text: a check-2
+    gram (blocked externally -- our own former position is internal
+    history, not the position this review asks for) and a check-4
+    `precedent_verbatim_spans` entry (an internal note may not copy a whole
+    one either). A former form's `vs_standard` reasons and summaries and
+    the digest form's `reason` are not read here: they are not our wording,
+    so they are not check-2 grams. Issue #177 lists them among the texts
+    check 4 must see, so `_opf_prior_form_reasons` makes each a check-4
+    span."""
+    standard_keys = _opf_our_standard_keys(opf_doc)
+    texts: list[str] = []
+    evidence = opf_doc.get("evidence")
+    clauses = evidence.get("clauses") if isinstance(evidence, dict) else None
+    for clause in clauses if isinstance(clauses, list) else []:
+        priors = clause.get("prior_standards") if isinstance(clause, dict) else None
+        for prior in priors if isinstance(priors, list) else []:
+            if isinstance(prior, dict):
+                texts.extend(_texts_of([prior]))
+                texts.extend(_texts_of(prior.get("parts")))
+    digest = opf_doc.get("digest")
+    digest_clauses = digest.get("clauses") if isinstance(digest, dict) else None
+    for clause in digest_clauses if isinstance(digest_clauses, list) else []:
+        history = clause.get("standard_history") if isinstance(clause, dict) else None
+        forms = history.get("forms") if isinstance(history, dict) else None
+        for form in forms if isinstance(forms, list) else []:
+            if isinstance(form, dict):
+                texts.extend(_texts_of(form.get("parts")))
+    return list(
+        dict.fromkeys(text for text in texts if _normalize(text) not in standard_keys)
+    )
+
+
+def _opf_prior_form_reasons(opf_doc: dict[str, Any]) -> list[str]:
+    """The reasons and summaries beside our former forms (OPF 0.6, issue
+    #177): each `evidence.clauses[].prior_standards[].vs_standard`'s
+    `reason`, `parts[].reason`, `additions[].summary` and
+    `owner_label.reason`, and each digest `standard_history.forms[].reason`,
+    which `opf_prompt` renders beside the form.
+
+    Issue #177 enumerates these among the texts the leakage scan must see
+    "exactly as other precedent text is" at check 4, so `from_opf_document`
+    makes each a check-4 `precedent_verbatim_spans` entry -- through the
+    same #616 filter, never our standard, and only at or over
+    `_MIN_PRECEDENT_SPAN_CHARS` (check 4 skips a shorter span) -- so an
+    internal note that copies a whole one is blocked on every channel. It is
+    NOT a check-2 gram: a reason describes a difference from our standard,
+    not our wording, and stays out of check 2 as every other `vs_standard`
+    reason does."""
+    texts: list[Any] = []
+    evidence = opf_doc.get("evidence")
+    clauses = evidence.get("clauses") if isinstance(evidence, dict) else None
+    for clause in clauses if isinstance(clauses, list) else []:
+        priors = clause.get("prior_standards") if isinstance(clause, dict) else None
+        for prior in priors if isinstance(priors, list) else []:
+            vs = prior.get("vs_standard") if isinstance(prior, dict) else None
+            if not isinstance(vs, dict):
+                continue
+            texts.append(vs.get("reason"))
+            for part in vs.get("parts") or []:
+                if isinstance(part, dict):
+                    texts.append(part.get("reason"))
+            for addition in vs.get("additions") or []:
+                if isinstance(addition, dict):
+                    texts.append(addition.get("summary"))
+            owner = vs.get("owner_label")
+            if isinstance(owner, dict):
+                texts.append(owner.get("reason"))
+    digest = opf_doc.get("digest")
+    digest_clauses = digest.get("clauses") if isinstance(digest, dict) else None
+    for clause in digest_clauses if isinstance(digest_clauses, list) else []:
+        history = clause.get("standard_history") if isinstance(clause, dict) else None
+        forms = history.get("forms") if isinstance(history, dict) else None
+        for form in forms if isinstance(forms, list) else []:
+            if isinstance(form, dict):
+                texts.append(form.get("reason"))
+    return list(dict.fromkeys(text for text in texts if isinstance(text, str) and text))
+
+
+def _opf_why_changed_texts(opf_doc: dict[str, Any]) -> list[str]:
+    """The owner's note on why a clause's standard changed (OPF 0.6, issue
+    #177): each `evidence.clauses[].why_changed.text` and its digest copy,
+    `standard_history.why_changed.text`, which `opf_prompt` renders. It is
+    the owner's own reasoning about our standard -- internal strategy, like
+    the posture prose -- so `from_opf_document` blocks it externally
+    (check 2) and makes it a check-4 span (an internal note may not copy it
+    whole)."""
+    texts: list[str] = []
+    for section, key in (("evidence", None), ("digest", "standard_history")):
+        container = opf_doc.get(section)
+        clauses = container.get("clauses") if isinstance(container, dict) else None
+        for clause in clauses if isinstance(clauses, list) else []:
+            if not isinstance(clause, dict):
+                continue
+            holder = clause.get(key) if key else clause
+            note = holder.get("why_changed") if isinstance(holder, dict) else None
+            texts.extend(_texts_of([note]))
+    return list(dict.fromkeys(texts))
+
+
+def _opf_prior_form_labels(opf_doc: dict[str, Any]) -> list[str]:
+    """Every label of one of our former forms (OPF 0.6, issue #177):
+    `baseline.prior_templates[].label`, each prior standard's `form_label`,
+    each digest form's `form` and each precedent record's
+    `opened_with_form`. `from_opf_document` makes each a check-4 span (an
+    internal note may not reproduce one whole) and nothing else: a label is
+    a name, like a clause title, not a position, so it is not a check-2
+    gram, and it is not a check-3 id, because it names our own paper, never
+    a past deal or counterparty -- a supplied form's label is the owner's
+    own name for it, and a reconstructed form's is built from its clause
+    type and its deals' signing months (`reconstructed <taxonomy_id>
+    <YYYY-MM> to <YYYY-MM>`, engine `prior_reconstruction._form_label`),
+    with no deal slug in it. Check 4 ignores a span under
+    `_MIN_PRECEDENT_SPAN_CHARS`, so a short label ("2018 form") blocks
+    nothing."""
+    labels: list[Any] = []
+    baseline = opf_doc.get("baseline")
+    forms = baseline.get("prior_templates") if isinstance(baseline, dict) else None
+    for form in forms if isinstance(forms, list) else []:
+        if isinstance(form, dict):
+            labels.append(form.get("label"))
+    evidence = opf_doc.get("evidence")
+    if isinstance(evidence, dict):
+        for clause in evidence.get("clauses") or []:
+            for prior in (clause.get("prior_standards") or []) if isinstance(clause, dict) else []:
+                if isinstance(prior, dict):
+                    labels.append(prior.get("form_label"))
+        for record in evidence.get("precedent") or []:
+            if isinstance(record, dict):
+                labels.append(record.get("opened_with_form"))
+    digest = opf_doc.get("digest")
+    if isinstance(digest, dict):
+        for clause in digest.get("clauses") or []:
+            history = clause.get("standard_history") if isinstance(clause, dict) else None
+            for form in (history.get("forms") or []) if isinstance(history, dict) else []:
+                if isinstance(form, dict):
+                    labels.append(form.get("form"))
+    return list(dict.fromkeys(label for label in labels if isinstance(label, str) and label))
+
+
 def _opf_manifest_texts(opf_doc: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """`(statements, fallback languages)` of every OPF 0.5 hard-rule manifest
+    """`(statements, fallback languages)` of every OPF hard-rule manifest
     rule (`manifest.hard_rules[]`), read DIRECTLY (issue #163): since
     `opf_prompt._manifest_block` composes the manifest into the shared prefix,
     a text found only in the manifest reaches the model, so the corpus cannot
@@ -1051,7 +1259,7 @@ def _opf_manifest_texts(opf_doc: dict[str, Any]) -> tuple[list[str], list[str]]:
 def _opf_dossier_texts(
     opf_doc: dict[str, Any],
 ) -> tuple[list[str], list[str], list[str]]:
-    """`(blocked texts, our-standard texts, excerpt texts)` of every OPF 0.5
+    """`(blocked texts, our-standard texts, excerpt texts)` of every OPF
     critic dossier
     (`dossiers{}`), read DIRECTLY (issue #40): since the critic dossiers are
     composed into the critic's prompt (`critic_dossiers`), a text found only
@@ -1113,7 +1321,7 @@ def _opf_dossier_texts(
 
 
 def _opf_dossier_precedent_ids(opf_doc: dict[str, Any]) -> list[str]:
-    """Every precedent id an OPF 0.5 critic dossier carries (issue #40): each
+    """Every precedent id an OPF critic dossier carries (issue #40): each
     excerpt's `precedent_id` and each `omitted_precedent_ids[]` entry, in
     dossier order, deduplicated. Each is a `prec.<16 hex>` id that resolves
     to its deal through `provenance_index.dossiers`, and the critic receives
@@ -1320,7 +1528,7 @@ def _opf_counterparty_ref_aliases(opf_doc: dict[str, Any]) -> list[str]:
     deal's counterparty (`Counterparty-<n>`), which the engine writes into
     that deal's clause text in place of the party's name when the playbook
     was compiled with a `known_entities` list (OPF-SPEC §3.5.4). It is the
-    only party field OPF 0.5 carries: the spec says the producer's
+    only party field OPF 0.6 carries: the spec says the producer's
     configured party names are not in the document, and the reverse map
     stays in the engine's restricted sidecar."""
     aliases: list[str] = []
@@ -1338,13 +1546,13 @@ def _opf_past_counterparty_names(opf_doc: dict[str, Any]) -> list[str]:
     """The past counterparties' names a precedent text puts in the prompt
     (issue #174), for check 3's `counterparty_names`.
 
-    A digest 4 precedent text, and a dossier excerpt, is contract wording
+    A digest precedent text, and a dossier excerpt, is contract wording
     a past deal signed or proposed, and a parties recital in it names the
-    party ("... by and between AlphaCorp Holdings, Inc. and Beta Industries,
-    LLC" on the engine's NDA example). Both passes read the digest verbatim
+    party ("... by and between AlphaCorp Holdings, Inc. ("AlphaCorp") and
+    Epsilon Systems, Inc." on the engine's NDA example). Both passes read the digest verbatim
     and the critic reads the excerpts, so a model can repeat that name in an
     external field; check 2 blocks only the whole text and check 4 only the
-    whole span. OPF 0.5 carries no field holding a party's plain name, so
+    whole span. OPF 0.6 carries no field holding a party's plain name, so
     the names are read from the document's own records of who its past
     counterparties were:
 
@@ -1673,7 +1881,7 @@ class ConfidentialCorpus:
         the Binding block itself renders), plus every precedent text that
         is NOT the tenant's own openly-asked-for position (issue #128):
 
-          - from the digest 4 clauses `scripts/opf_prompt.py
+          - from the digest clauses `scripts/opf_prompt.py
             ::_digest_clause_block` sends to the model: each signed
             variant's `text` (and each collapsed equivalent-wording entry's
             `exemplars[].text`), each refused ask's `text`, and each changed
@@ -1698,7 +1906,7 @@ class ConfidentialCorpus:
         openly asked for, exactly like a v1 topic's `our_standard` (see
         `from_playbook`'s own docstring for why that one is allowlisted).
 
-        The OPF 0.5 `manifest` (playbook-engine#228) is READ DIRECTLY since
+        The OPF `manifest` (playbook-engine#228) is READ DIRECTLY since
         issue #163, which composes it into the shared prefix
         (`opf_prompt._manifest_block`): each hard rule's `statement` joins
         `playbook_ngrams` (blocked everywhere, like the Floor invariant it
@@ -1734,7 +1942,7 @@ class ConfidentialCorpus:
         not our standard is ALSO a `precedent_verbatim_spans` entry (check
         4, every channel), after any caller-supplied spans: the critic
         receives those excerpts whole, and an internal note that copies one
-        whole is blocked. Each digest 4 precedent text
+        whole is blocked. Each digest precedent text
         (`_opf_digest_precedent_texts`) that is not our standard follows
         them (issue #171) -- both passes read it verbatim in the shared
         prefix, in a dossier or not -- through the same #616 filter. A part
@@ -1839,6 +2047,16 @@ class ConfidentialCorpus:
         playbook_ngrams.extend(_opf_digest_precedent_texts(opf_doc))
         playbook_ngrams.extend(_opf_evidence_precedent_texts(opf_doc))
         standard_clause_ngrams.extend(_opf_standard_texts(opf_doc))
+        # Issue #177 (OPF 0.6): our former forms' wording, never one that
+        # reads as today's standard, and the owner's why-changed note, on
+        # the same terms as a precedent text (check 2 here, check 4 below).
+        prior_form_texts = _opf_prior_form_texts(opf_doc)
+        why_changed_texts = _opf_why_changed_texts(opf_doc)
+        playbook_ngrams.extend(
+            text
+            for text in [*prior_form_texts, *why_changed_texts]
+            if text not in playbook_ngrams
+        )
 
         # Issue #163: the manifest, read directly. Only what the lists above
         # do not already hold is added, so an engine-built manifest -- whose
@@ -1893,7 +2111,7 @@ class ConfidentialCorpus:
         # channel, under `precedent-verbatim-span` -- the #616 false positive
         # back under a different rule id (#40 review).
         #
-        # Issue #171: the digest 4 precedent texts join them on the same
+        # Issue #171: the digest precedent texts join them on the same
         # terms. The digest sits in BOTH passes' shared prefix
         # (`opf_prompt._digest_clause_block`), so each signed variant (and
         # collapsed exemplar), refused ask and changed opening reaches both
@@ -1903,7 +2121,19 @@ class ConfidentialCorpus:
         # standard, after the dossier excerpts so an engine-built document's
         # spans list the excerpts first and add only what no excerpt holds.
         verbatim_spans = list(precedent_verbatim_spans or [])
-        for candidates in (dossier_excerpts, _opf_digest_precedent_texts(opf_doc)):
+        # Issue #177 (OPF 0.6): after the digest texts, our former forms'
+        # wording, the owner's why-changed notes, the former forms' labels
+        # and the reasons and summaries beside them, through the same #616
+        # filter and never our standard -- an internal note that copies one
+        # whole is blocked on every channel.
+        for candidates in (
+            dossier_excerpts,
+            _opf_digest_precedent_texts(opf_doc),
+            prior_form_texts,
+            why_changed_texts,
+            _opf_prior_form_labels(opf_doc),
+            _opf_prior_form_reasons(opf_doc),
+        ):
             verbatim_spans.extend(
                 text
                 for text in dict.fromkeys(

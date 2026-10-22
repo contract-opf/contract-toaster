@@ -79,7 +79,7 @@ What this pins:
   * [4]'s ordinary-word slugs each rename one deal's `document_id` everywhere
     it occurs (`delta-ventures` -> `delta`, `nda`, `agreement`, `liability`,
     `confidentiality`, `30`, `in-house`), with no other edit:
-    `document_id` is uploader-controlled text the 0.5 schema constrains only
+    `document_id` is uploader-controlled text the 0.6 schema constrains only
     to `minLength: 1`, so a deal filed as `NDA.docx` produces `nda`. The
     prose that uses each word is the engine's own, unedited; the number's is
     an `overrides.floor_additions` statement, which the owner writes and the
@@ -128,14 +128,15 @@ import critic_dossiers  # noqa: E402
 import deal_aliases  # noqa: E402
 import leakage_scan  # noqa: E402
 import model_client  # noqa: E402
+import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
 import review_spine  # noqa: E402
 from test_hard_ledger import _docx, _response, _verdict  # noqa: E402
 from test_review_spine import _load_bundle  # noqa: E402
 
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
-GOLD_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
-VECTORS = REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors"
+GOLD_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
+VECTORS = opf_load.OPF_CONFORMANCE_VECTORS_DIR
 
 LIABILITY_RULE = "limitation-of-liability-confidentiality-carveout"
 LIABILITY_CLAUSE = "clause.limitation_of_liability"
@@ -467,13 +468,15 @@ def test_check_3_holds_the_aliases_in_place_of_the_slugs() -> None:
             ).blocked, said
 
 
-def _renamed(new_slug: str) -> dict[str, Any]:
+def _renamed(new_slug: str, old_slug: str = "delta-ventures") -> dict[str, Any]:
     """The NDA example with one deal's `document_id` renamed everywhere it
-    occurs (`delta-ventures` -> `new_slug`) and nothing else edited."""
+    occurs (`old_slug`, `delta-ventures` by default, -> `new_slug`) and
+    nothing else edited."""
     raw = NDA_EXAMPLE.read_text(encoding="utf-8")
-    assert raw.count('"delta-ventures"') >= 2
-    doc = json.loads(raw.replace('"delta-ventures"', json.dumps(new_slug)))
-    assert new_slug in _slugs(doc) and "delta-ventures" not in _slugs(doc)
+    quoted = json.dumps(old_slug)
+    assert raw.count(quoted) >= 2
+    doc = json.loads(raw.replace(quoted, json.dumps(new_slug)))
+    assert new_slug in _slugs(doc) and old_slug not in _slugs(doc)
     return doc
 
 
@@ -751,10 +754,12 @@ def _aliasing_bypassed() -> Iterator[None]:
 def test_a_document_with_no_deals_composes_as_with_aliasing_bypassed() -> None:
     doc = _load(NDA_EXAMPLE)
     for clause in doc["digest"]["clauses"]:
-        for field in ("signed_variants", "refused_asks", "changed_openings"):
+        # Digest 5 (issue #177): a verified-absent deal is a deal too.
+        for field in ("signed_variants", "refused_asks", "changed_openings", "verified_absent_deals"):
             clause[field] = []
     doc["corpus"]["documents"] = []
     doc["evidence"]["precedent"] = []
+    doc["evidence"]["absence"]["records"] = []
     for invariant in doc["floor"]["invariants"]:
         invariant.pop("rationale", None)
     for dossier in doc["dossiers"].values():

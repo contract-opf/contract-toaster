@@ -318,7 +318,7 @@ ADR 0001's Amendment item 1 makes hard-rejection **recall** an invariant enforce
 (`scripts/hard_ledger.py`). The disposition shape is `critic_delta.ledger_dispositions[]`, above; this is
 what code does with it.
 
-- **Opened before either pass.** One `UNPROVEN_HARD_REJECTION` entry per OPF 0.5 `manifest.hard_rules[]`
+- **Opened before either pass.** One `UNPROVEN_HARD_REJECTION` entry per OPF `manifest.hard_rules[]`
   rule with `required_presence: true`. A v1 bundle, or a manifest demanding no presence, opens none and
   changes nothing — the critic's prompt is byte-identical to a review without a ledger.
 - **Every entry needs exactly one disposition.** `critic_review_pass.critic_delta_rejection` checks it
@@ -1314,8 +1314,8 @@ short-fragment-prone in the same way.
 OPF path `ConfidentialCorpus.from_opf_document` derives `playbook_ngrams`
 and `standard_clause_ngrams` from playbook prose authored in a separate tool,
 and the schema puts no `minLength` on that prose (then digest 2's
-`text_summary`; since issue #128 digest 4's `$defs.digestVariant.text` in
-`playbooks/opf/playbook.schema-0.5.json`, and the precedent record's texts).
+`text_summary`; since issue #128 the digest's `$defs.digestVariant.text`, in
+`playbooks/opf/playbook.schema-0.6.json` since issue #177, and the precedent record's texts).
 A summary that summarised nothing — the bare clause name repeated — was
 therefore schema-valid and became a blocked gram identical to the same
 document's **public** `taxonomy.entries[].label`. Against the real
@@ -1390,6 +1390,19 @@ That no precedent supports the position is said in `internal_rationale_for_footn
 mode asks for one, never in `external_rationale_for_footnote`: the external footnote reaches the
 counterparty, and what our playbook does or does not hold is internal. Pinned by
 `tests/test_opf_prompt.py` (checks 9–11).
+
+**Signed without the clause is not "no precedent" (issue #177).** Digest 5 also tells the model how
+many signed deals carry no text for a clause: `Signed without this clause: absent in N signed deals
+(verified: <aliases>); possibly absent in M more; not verified.` Only the verified count is a deal we
+signed without the clause type; a possibly-absent deal may carry it unrecognised, and the two are never
+summed. Both are facts about a clause the playbook HAS precedent for, so neither changes the rules
+above: the block names a verified-absent deal only by its opaque alias, a check-3 id, so an external
+footnote that names it is blocked like every other past-deal reference, and the no-precedent rules
+apply only to a clause with no digest entry. The same section of the block lists
+our former forms of the clause (`standard_history`) with their in-use dates and counts, and a label
+marked `adjudicated` or `unchecked` carries a weigh-with-care marker; none of it is a citation an
+issue may invent, and the output contract (v3) is unchanged. Pinned by
+`tests/test_opf_digest5_177.py`.
 
 ## Literal-runs-only insertion and output OOXML scan
 

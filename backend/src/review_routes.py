@@ -806,7 +806,7 @@ def _put_upload_object(s3_client: Any, key: str, contents: bytes, sha256_hex: st
 # What it replaces: a read of `data["playbook"]["agreement_type"]` off the
 # registry's on-disk JSON. That shape is legacy v1 only, so an OPF playbook
 # -- which carries `agreement_type` as a TOP-LEVEL `{id, name, aliases}`
-# object (`playbooks/opf/playbook.schema-0.5.json`, as in 0.2/0.3 before it)
+# object (`playbooks/opf/playbook.schema-0.6.json`, as in 0.2-0.5 before it)
 # -- resolved to `(None, [])`, `compute_match_verdict`
 # returned "unclear", and the amber `review-preflight-match-unlikely`
 # banner never rendered. A playbook installed purely through the admin
@@ -872,8 +872,8 @@ def _agreement_type_from_bundle(bundle: dict[str, Any]) -> tuple[str | None, lis
     """`(name, aliases)` off whichever bundle shape
     `pipeline_runner._load_playbook_bundle` returned.
 
-    OPF (`opf_bundle_v2`; the 0.5 schema declares the same `agreement_type`
-    object 0.2/0.3 did): `name` is the label; `aliases` plus
+    OPF (`opf_bundle_v2`; the 0.6 schema declares the same `agreement_type`
+    object 0.2-0.5 did): `name` is the label; `aliases` plus
     the machine `id` are the match aliases. OPF's own schema documents
     `aliases` as "Other names this agreement type is known by, e.g. a
     consuming app's own dial key", which is exactly this use.

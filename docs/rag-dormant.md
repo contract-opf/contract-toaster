@@ -49,11 +49,15 @@ This is the part worth understanding before reconsidering retrieval, because **t
 non-RAG depth path is already designed** and is not the same as "no depth."
 
 - **The projection.** `scripts/opf_prompt.py::_digest_block` renders the OPF `digest`
-  (`digest_version` 4, OPF 0.5 — the only format this repo reads since issue #128) as
+  (`digest_version` 5, OPF 0.6 — the only format this repo reads since issue #177; one
+  format since issue #128) as
   precedent: per clause our standard, how many deals opened with it and kept it, the
   positions of the signed texts, the signed variants with how many were reached from our
   standard or signed as proposed, the refused asks and the openings not signed as proposed,
-  each with distinct-deal counts and a citation. It carries no stance, band or risk
+  each with distinct-deal counts and a citation; since digest 5 also each entry's signing
+  months, how settled each judged label is, our former forms of the clause (with the
+  owner's note on why it changed, when the owner wrote one) and the deals verifiably
+  signed without the clause, kept apart from those only possibly so. It carries no stance, band or risk
   verdict, and no per-deal precedent record: variant and ask texts are ≤ 300-character
   summaries. The wholesale alternative "measured ~1M tokens on a real corpus and cannot
   reach a model at all."
@@ -61,7 +65,7 @@ non-RAG depth path is already designed** and is not the same as "no depth."
   selected deterministically from the rule ids the reviewer and the open hard-rejection
   ledger name and the manifest predicates a pre-critic code check finds broken in the
   document (#170, `hard_ledger.anomaly_rule_ids`), and appended by orchestration to the
-  critic's role suffix (#40, `scripts/critic_dossiers.py`). OPF 0.5 ships those dossiers precomputed
+  critic's role suffix (#40, `scripts/critic_dossiers.py`). OPF ships those dossiers precomputed
   (`dossiers`, with the hard-rule `manifest`), so #40 selects rather than builds them, and
   sends each whole. An earlier design served
   the same keys through a model-callable `lookup_clause_evidence` tool; it was never wired
@@ -175,7 +179,7 @@ promotion) → #90 (curation). Note #89's own title carries the requirements tha
   third-party in origin.
 - Positive and negative precedent must not commingle in one top-K context — #60 built
   `document_type` and `corpus_polarity` for this; honour them.
-- Retrieval must never become policy. The digest (digest_version 4) renders precedent as
+- Retrieval must never become policy. The digest (digest_version 5) renders precedent as
   facts only (counts, the signed or proposed wording, a citation), and its one judged value,
   the `vs_standard` label, is an index to check, never an instruction, precisely so the
   playbook stays evidence; retrieved precedent is subject to the same rule.

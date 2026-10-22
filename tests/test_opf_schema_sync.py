@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Vendored-OPF-schema sync + shape-contract gate (OPF 0.5 / digest 4).
+"""Vendored-OPF-schema sync + shape-contract gate (OPF 0.6 / digest 5).
 
 The OPF schema under ``playbooks/opf/`` is a VENDORED copy of the
 playbook-engine spec: physically committed here because this repo's CI has no
 sibling checkout and must validate uploads hermetically. Since issue #128 it is
-exactly ONE file, ``playbook.schema-0.5.json`` (the owner's 2026-10-06
-direction: one format, no backward compatibility), vendored from engine main
-``b90c647`` together with the engine's OPF 0.5 conformance vectors
-(``playbooks/opf/conformance-0.5/``, replayed by
-``tests/test_opf_canonicalize.py``).
+exactly ONE file (the owner's 2026-10-06 direction: one format, no backward
+compatibility); since issue #177 that file is ``playbook.schema-0.6.json``,
+vendored from engine main ``fe89bc6`` together with the engine's OPF 0.6
+conformance vectors (``playbooks/opf/conformance-0.6/``,
+``opf_load.OPF_CONFORMANCE_DIR``, replayed by
+``tests/test_opf_canonicalize.py``). The 0.5 schema and its vectors are
+deleted, not kept beside it.
 
 The cost of vendoring is that a copy is a SNAPSHOT -- the source can move and
 ours silently won't. That happened three times during the 0.3 launch (0.2
@@ -17,7 +19,9 @@ swapped an item type and started enforcing a token budget). Upstream fixed the
 root cause (engine 458ac7a): a published `opf_version` is IMMUTABLE once a
 consumer exists, and `digest_version` governs the digest under the same rule.
 OPF 0.5 was deliberately left unfrozen until it had a consumer: this repo's
-vendoring of it (#128) is what freezes it, at the pins below.
+vendoring of it (#128) froze it. OPF 0.6 was changed in place the same way
+while it had none (epic contract-opf/playbook-engine#245); this repo's
+vendoring of it (#177) is what freezes it, at the pins below.
 
 This gate alarms in three layers, deliberately at different urgencies:
 
@@ -56,12 +60,12 @@ This gate alarms in three layers, deliberately at different urgencies:
      never as the primary alarm. That asymmetry is precisely why layer 1
      carries the weight.
 
-Re-vendor procedure: copy ``spec/playbook.schema-0.5.json`` and
-``spec/conformance/0.5/{manifest.json,vectors/*.json}`` byte-for-byte, then set
+Re-vendor procedure: copy ``spec/playbook.schema-0.6.json`` and
+``spec/conformance/0.6/{manifest.json,vectors/*.json}`` byte-for-byte, then set
 the pins below FROM THE ENGINE'S PUBLISHED SHAS (`spec/CHANGELOG.md`) -- never
 from `sha256sum` of the files you just copied, which would make the pin a
 tautology -- and record the engine commit in playbooks/opf/README.md. A newer
-format is a new `opf_version` and a new ticket, not a re-vendor over 0.5.
+format is a new `opf_version` and a new ticket, not a re-vendor over 0.6.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -78,21 +82,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 OPF_DIR = REPO_ROOT / "playbooks" / "opf"
 
 # The sha256 the ENGINE PUBLISHED for each vendored artifact (engine
-# `spec/CHANGELOG.md`, "Current pins", at main b90c647), which our vendored
+# `spec/CHANGELOG.md`, "Current pins", at main fe89bc6), which our vendored
 # bytes must equal. Transcribe from the engine changelog on re-vendor; do NOT
 # regenerate from our own copy (see the module docstring, layer 2 -- a pin
 # computed from the file it pins proves only that the file equals itself).
 UPSTREAM_FROZEN_SHA256 = {
-    "playbook.schema-0.5.json": "f09c1b7abc08c14b80f7f2b8d572fd5cf26d9491a0566e27311387af960e6657",
+    "playbook.schema-0.6.json": "b2a925811fd661c5d7c11eaa768444fa63764b479c34fff9a50187c580668bf2",
 }
 
 # The engine pins its conformance set as ONE sha256 over manifest.json followed
 # by vectors/*.json sorted by filename, concatenated (its
-# tests/test_spec_consistency.py::_conformance_fixture_digest_v05).
-CONFORMANCE_DIR_NAME = "conformance-0.5"
-UPSTREAM_CONFORMANCE_SHA256 = "79cb9f0b4b01b4dc914258ff530a5a5aa22d1b9bf17dd54e4663a16a796fb308"
+# tests/test_spec_consistency.py, "Current pins").
+CONFORMANCE_DIR_NAME = "conformance-0.6"
+UPSTREAM_CONFORMANCE_SHA256 = "c5e3828e7d59c961aca2d633b390b3ea536902e7818efe0dd778a0916cf8be96"
 # Where the engine keeps the same set, relative to its repo root.
-SOURCE_CONFORMANCE_SUBDIR = Path("spec") / "conformance" / "0.5"
+SOURCE_CONFORMANCE_SUBDIR = Path("spec") / "conformance" / "0.6"
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +135,7 @@ SOURCE_CONFORMANCE_SUBDIR = Path("spec") / "conformance" / "0.5"
 # this repo does not merely need the fields to be THERE, it renders them at an
 # assumed shape, and everything downstream of that assumption fails SOFT.
 #
-# Concretely, the lies a widening tells under digest 4:
+# Concretely, the lies a widening tells under digest 5:
 #   (a) opf_prompt.DIGEST_INTRO ships the model a HARDCODED legend for the
 #       `vs_standard` labels and the part-map / addition tokens. An added label
 #       or token does not break the render: it reaches the model unexplained,
@@ -150,12 +154,15 @@ SOURCE_CONFORMANCE_SUBDIR = Path("spec") / "conformance" / "0.5"
 # ---------------------------------------------------------------------------
 
 _LABELS = ["equivalent", "more_protective", "less_protective", "mixed", "different_concept", None]
+#: digest 5 `settled` (issue #248), pinned EXACTLY: opf_prompt._SETTLED_MARKERS
+#: and _SETTLED_PLAIN between them name all four.
+_SETTLED = ["agreed", "adjudicated", "unchecked", "owner"]
 _COUNT = "integer"
 
 _CONTRACT: list[tuple[str, str, object]] = [
     # opf_load.resolve_opf_version accepts exactly this value.
     ("properties.opf_version.type", "equals", "string"),
-    ("properties.opf_version.const", "equals", "0.5"),
+    ("properties.opf_version.const", "equals", "0.6"),
     # opf_canonicalize.verify_content_hash / bind_bundle lineage.
     ("properties.identity.properties.content_hash.pattern", "equals", "^sha256:[0-9a-f]{64}$"),
     ("properties.identity.properties.section_digests.required", "superset_of",
@@ -181,8 +188,12 @@ _CONTRACT: list[tuple[str, str, object]] = [
      ["id", "signed_text", "opened_with", "opening_text", "standard", "refused_asks"]),
     ("$defs.precedent.properties.id", "type_is", "string"),
     ("$defs.precedent.properties.standard", "type_is", "boolean"),
-    # leakage_scan skips an opening only when it is exactly "standard".
-    ("$defs.precedent.properties.opened_with.enum", "enum_is", ["standard", "non_standard", "absent", None]),
+    # leakage_scan skips an opening only when it is exactly "standard";
+    # opf_prompt._prior_form_openings reads exactly "prior_standard" (OPF 0.6)
+    # and its `opened_with_form` label.
+    ("$defs.precedent.properties.opened_with.enum", "enum_is",
+     ["standard", "prior_standard", "non_standard", "absent", None]),
+    ("$defs.precedent.properties.opened_with_form", "type_is", "string"),
     ("$defs.precedent.properties.signed_text", "refs_exactly", {"textRef"}),
     ("$defs.precedent.properties.opening_text", "refs_exactly", {"textRef"}),
     ("$defs.precedent.properties.refused_asks", "array_of", {"refusedAsk"}),
@@ -197,7 +208,7 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("properties.digest.required", "superset_of", ["digest_version", "corpus", "clauses", "perspective"]),
     # opf_load.resolve_digest_version accepts exactly this value.
     ("properties.digest.properties.digest_version.type", "equals", "string"),
-    ("properties.digest.properties.digest_version.const", "equals", "4"),
+    ("properties.digest.properties.digest_version.const", "equals", "5"),
     # playbook_upload's perspective minimum reads the digest copy.
     ("properties.digest.properties.perspective.oneOf.1.$ref", "equals", "#/properties/perspective"),
     # opf_prompt._corpus_line.
@@ -205,6 +216,11 @@ _CONTRACT: list[tuple[str, str, object]] = [
      ["n_deals", "n_signed", "first_signed", "last_signed"]),
     ("properties.digest.properties.corpus.properties.n_deals", "type_is", _COUNT),
     ("properties.digest.properties.corpus.properties.n_signed", "type_is", _COUNT),
+    # Digest 5: every signing span the prompt renders is a month (`_signed_span`
+    # cuts anything longer to one, and never renders a finer date).
+    ("properties.digest.properties.corpus.properties.first_signed", "refs_exactly", {"digestMonthOrNull"}),
+    ("properties.digest.properties.corpus.properties.last_signed", "refs_exactly", {"digestMonthOrNull"}),
+    ("$defs.digestMonth.pattern", "equals", "^\\d{4}-\\d{2}$"),
     # opf_prompt._uncovered_line (issue #158): the closing no-precedent line
     # renders each entry's label and the taxonomy id an issue on it cites.
     # Required (an absent list is recorded, not read as "full coverage"),
@@ -225,7 +241,9 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestClause.required", "superset_of",
      ["id", "taxonomy_id", "title", "our_standard", "n_deals", "n_signed_standard",
       "n_opened_standard", "n_kept_standard", "positions", "signed_variants", "refused_asks",
-      "changed_openings", "n_variants_total", "n_refused_total", "n_changed_openings_total"]),
+      "changed_openings", "n_variants_total", "n_refused_total", "n_changed_openings_total",
+      "first_signed", "last_signed", "standard_history", "n_signed_without_verified",
+      "n_signed_without_possible", "verified_absent_deals"]),
     ("$defs.digestClause.additionalProperties", "equals", False),
     ("$defs.digestClause.properties.title", "type_is", "string"),
     ("$defs.digestClause.properties.n_deals", "type_is", _COUNT),
@@ -235,6 +253,44 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestClause.properties.n_variants_total", "type_is", _COUNT),
     ("$defs.digestClause.properties.n_refused_total", "type_is", _COUNT),
     ("$defs.digestClause.properties.n_changed_openings_total", "type_is", _COUNT),
+    ("$defs.digestClause.properties.first_signed", "refs_exactly", {"digestMonthOrNull"}),
+    ("$defs.digestClause.properties.last_signed", "refs_exactly", {"digestMonthOrNull"}),
+    # opf_prompt._absence_line (issue #177): the verified and the possible
+    # counts, never summed, and the verified deals named by their aliases
+    # (deal_aliases.alias_digest swaps each entry's document_id).
+    ("$defs.digestClause.properties.n_signed_without_verified", "type_is", _COUNT),
+    ("$defs.digestClause.properties.n_signed_without_possible", "type_is", _COUNT),
+    ("$defs.digestClause.properties.verified_absent_deals", "array_of", {"digestAbsentDeal"}),
+    ("$defs.digestAbsentDeal.properties", "keys_exactly", ["document_id", "signed_on", "absence_id"]),
+    ("$defs.digestAbsentDeal.properties.document_id", "type_is", "string"),
+    # opf_prompt._standard_history_lines / _fmt_former_form (issue #177): one
+    # line per former form; every key it reads, at the shape it reads it. The
+    # key set is EXACT: a new per-form fact would otherwise never render.
+    ("$defs.digestClause.properties.standard_history", "refs_exactly", {"digestStandardHistory"}),
+    ("$defs.digestStandardHistory.properties", "keys_exactly", ["forms", "why_changed"]),
+    ("$defs.digestStandardHistory.properties.forms", "array_of", {"digestStandardForm"}),
+    ("$defs.digestStandardHistory.properties.why_changed.oneOf.1.required", "superset_of", ["text", "basis"]),
+    ("$defs.digestStandardHistory.properties.why_changed.oneOf.1.properties.text", "type_is", "string"),
+    ("$defs.digestStandardHistory.properties.why_changed.oneOf.1.properties.basis.const", "equals", "owner"),
+    ("$defs.digestStandardForm.additionalProperties", "equals", False),
+    ("$defs.digestStandardForm.properties", "keys_exactly",
+     ["form", "basis", "in_use_from", "in_use_until", "in_use_basis", "n_opened", "n_kept",
+      "n_conceded", "n_moved_to_current", "unchanged", "label", "part_map", "additions",
+      "label_by", "reason", "settled", "parts", "ref"]),
+    ("$defs.digestStandardForm.properties.form", "type_is", "string"),
+    ("$defs.digestStandardForm.properties.basis.enum", "enum_is", ["supplied", "reconstructed"]),
+    ("$defs.digestStandardForm.properties.in_use_basis.enum", "enum_is",
+     ["config", "deal_dates", "mixed", None]),
+    ("$defs.digestStandardForm.properties.n_opened", "type_is", _COUNT),
+    ("$defs.digestStandardForm.properties.n_kept", "type_is", _COUNT),
+    ("$defs.digestStandardForm.properties.n_conceded", "type_is", _COUNT),
+    ("$defs.digestStandardForm.properties.n_moved_to_current", "type_is", _COUNT),
+    ("$defs.digestStandardForm.properties.unchanged", "type_is", "boolean"),
+    ("$defs.digestStandardForm.properties.label.enum", "enum_is", _LABELS),
+    ("$defs.digestStandardForm.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
+    ("$defs.digestStandardForm.properties.part_map.oneOf.1.items.enum", "enum_is",
+     ["=", "+", "-", "x+", "x-", "x0"]),
+    ("$defs.digestStandardForm.properties.ref", "refs_exactly", {"citation"}),
     # Our standard, in its parts (the leakage scan's allowlisted standard text
     # and the prompt's "Our standard" line).
     ("$defs.digestClause.properties.our_standard", "refs_exactly", {"digestOurStandard"}),
@@ -261,8 +317,8 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestClause.properties.changed_openings", "array_of", {"digestChangedOpening"}),
     # A signed variant.
     ("$defs.digestVariant.required", "superset_of",
-     ["text", "n_deals", "last_signed", "n_from_standard", "n_unchanged", "label",
-      "part_map", "additions", "reason", "ref"]),
+     ["text", "n_deals", "first_signed", "last_signed", "n_from_standard", "n_unchanged",
+      "label", "part_map", "additions", "reason", "settled", "ref", "precedent_ids"]),
     ("$defs.digestVariant.additionalProperties", "equals", False),
     ("$defs.digestVariant.properties.text", "type_is", "string"),
     # The acceptance harness treats a precedent text longer than this as one
@@ -278,9 +334,20 @@ _CONTRACT: list[tuple[str, str, object]] = [
      ["=", "+", "-", "x+", "x-", "x0"]),
     ("$defs.digestVariant.properties.additions.oneOf.1.items.enum", "enum_is", ["+", "-", "0"]),
     ("$defs.digestVariant.properties.ref", "refs_exactly", {"citation"}),
+    # opf_prompt._settled_marker: `adjudicated` and `unchecked` carry a
+    # marker, `agreed` and `owner` render plainly. EXACT: a fifth value would
+    # reach the model unexplained by DIGEST_INTRO.
+    ("$defs.digestVariant.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
+    ("$defs.digestVariant.properties.first_signed", "refs_exactly", {"digestMonthOrNull"}),
+    ("$defs.digestVariant.properties.last_signed", "refs_exactly", {"digestMonthOrNull"}),
+    # opf_prompt._prior_form_note reads the variant's precedent ids.
+    ("$defs.digestVariant.properties.precedent_ids.type", "equals", "array"),
     # The collapsed equivalent-wording entry.
     ("$defs.digestEquivalentVariants.required", "superset_of",
-     ["label", "n_deals", "n_texts", "n_from_standard", "n_unchanged", "last_signed", "exemplars"]),
+     ["label", "n_deals", "n_texts", "n_from_standard", "n_unchanged", "first_signed",
+      "last_signed", "settled_counts", "exemplars", "precedent_ids"]),
+    # opf_prompt._settled_counts_note renders the adjudicated / unchecked counts.
+    ("$defs.digestEquivalentVariants.properties.settled_counts.properties", "keys_exactly", _SETTLED),
     ("$defs.digestEquivalentVariants.additionalProperties", "equals", False),
     ("$defs.digestEquivalentVariants.properties.label.const", "equals", "equivalent"),
     ("$defs.digestEquivalentVariants.properties.n_texts", "type_is", _COUNT),
@@ -288,7 +355,9 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestEquivalentVariants.properties.exemplars.items.required", "superset_of", ["text", "ref"]),
     ("$defs.digestEquivalentVariants.properties.exemplars.items.properties.text", "type_is", "string"),
     # A refused ask.
-    ("$defs.digestRefusedAsk.required", "superset_of", ["text", "n_deals", "label", "reason", "ref"]),
+    ("$defs.digestRefusedAsk.required", "superset_of",
+     ["text", "n_deals", "first_signed", "last_signed", "label", "reason", "settled", "ref"]),
+    ("$defs.digestRefusedAsk.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
     ("$defs.digestRefusedAsk.additionalProperties", "equals", False),
     ("$defs.digestRefusedAsk.properties.text", "type_is", "string"),
     ("$defs.digestRefusedAsk.properties.n_deals", "type_is", _COUNT),
@@ -296,7 +365,8 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.digestRefusedAsk.properties.ref", "refs_exactly", {"citation"}),
     # An opening not signed as proposed.
     ("$defs.digestChangedOpening.required", "superset_of",
-     ["text", "n_deals", "n_to_standard", "n_struck", "label", "reason", "ref"]),
+     ["text", "n_deals", "n_to_standard", "n_struck", "label", "reason", "settled", "ref"]),
+    ("$defs.digestChangedOpening.properties.settled.oneOf.1.enum", "enum_is", _SETTLED),
     ("$defs.digestChangedOpening.additionalProperties", "equals", False),
     ("$defs.digestChangedOpening.properties.text", "type_is", "string"),
     ("$defs.digestChangedOpening.properties.n_to_standard", "type_is", _COUNT),
@@ -307,10 +377,27 @@ _CONTRACT: list[tuple[str, str, object]] = [
     ("$defs.citation.required", "superset_of", ["document_id", "version", "clause_path"]),
     ("$defs.citation.properties.document_id", "type_is", "string"),
     ("$defs.citation.properties.clause_path", "type_is", "string"),
+    # deal_aliases.OWN_FORM_VERSIONS: a citation of one of OUR forms is never
+    # aliased as a deal. EXACT: a new own-form version would be read as a deal.
+    ("$defs.citation.properties.version.oneOf.1.const", "equals", "template"),
+    ("$defs.citation.properties.version.oneOf.2.const", "equals", "prior_template"),
+    # opf_injection_scan reads each former form's label on its own (baseline
+    # is not otherwise walked); leakage_scan._opf_prior_form_labels too.
+    ("properties.baseline.properties.prior_templates.items.properties.label", "type_is", "string"),
+    # leakage_scan._opf_prior_form_texts / _opf_why_changed_texts read our
+    # former forms' wording and the owner's note off the evidence.
+    ("$defs.precedentClause.properties.prior_standards", "array_of", {"priorStandard"}),
+    ("$defs.priorStandard.properties.text", "type_is", "string"),
+    ("$defs.priorStandard.properties.parts.items.properties.text", "type_is", "string"),
+    ("$defs.precedentClause.properties.why_changed.oneOf.1.properties.text", "type_is", "string"),
+    # deal_aliases.deal_document_ids reads the absence records' deals.
+    ("properties.evidence.required", "superset_of", ["clauses", "precedent", "absence"]),
+    ("$defs.absence.properties.records", "array_of", {"absenceRecord"}),
+    ("$defs.absenceRecord.properties.document_id", "type_is", "string"),
 ]
 
 SHAPE_CONTRACT: dict[str, list[tuple[str, str, object]]] = {
-    "playbook.schema-0.5.json": _CONTRACT,
+    "playbook.schema-0.6.json": _CONTRACT,
 }
 
 _MISSING = object()
@@ -515,7 +602,7 @@ def _conformance_sha256(directory: Path) -> str | None:
 
 
 def check_conformance_pin() -> list[str]:
-    """The vendored OPF 0.5 conformance set must equal the set the engine
+    """The vendored OPF 0.6 conformance set must equal the set the engine
     PUBLISHED (its concatenated pin). Runs in CI; same reasoning as
     check_upstream_pin."""
     directory = OPF_DIR / CONFORMANCE_DIR_NAME
@@ -527,7 +614,7 @@ def check_conformance_pin() -> list[str]:
             f"  {CONFORMANCE_DIR_NAME}: vendored vectors do NOT match the engine's published pin\n"
             f"    upstream: {UPSTREAM_CONFORMANCE_SHA256}\n"
             f"    vendored: {actual}\n"
-            f"    -> re-vendor spec/conformance/0.5/ byte-for-byte; never hand-edit a vector."
+            f"    -> re-vendor spec/conformance/0.6/ byte-for-byte; never hand-edit a vector."
         ]
     return []
 
@@ -572,7 +659,7 @@ def main() -> int:
     checks = [
         ("1", "shape contract: every field this repo consumes is still declared, at the shape we consume it", check_shape_contract),
         ("2", "vendored schema sha256 matches the engine's PUBLISHED frozen sha (runs in CI)", check_upstream_pin),
-        ("2b", "vendored OPF 0.5 conformance set matches the engine's PUBLISHED pin (runs in CI)", check_conformance_pin),
+        ("2b", "vendored OPF 0.6 conformance set matches the engine's PUBLISHED pin (runs in CI)", check_conformance_pin),
         ("3", "vendored schema + conformance byte-identical to playbook-engine source (chore signal, local-only)", check_source_parity),
     ]
     ok = True

@@ -11,8 +11,8 @@ status:"draft", ...}` via `src.playbook_versions.record_playbook_version_upload`
 admin got "draft recorded" for a file that might not even be JSON.
 
 This module wires up the ingestion stack that already existed and was
-already tested but unused: `scripts/opf_load.py::load_opf_document` (OPF 0.5
-schema validation -- the one format, issue #128 -- `identity.content_hash`
+already tested but unused: `scripts/opf_load.py::load_opf_document` (OPF 0.6
+schema validation -- the one format, issues #128/#177 -- `identity.content_hash`
 verification, injection scan,
 `.opf.html` bundle extraction via `scripts/opf_html.py`) and
 `scripts/playbook_validation.py::validate_playbook_document` (the legacy v1
@@ -38,7 +38,7 @@ other OPF validation failure -- this module never loosens that.
 `_load_opf_from_bytes` additionally refuses an OPF document that omits a
 field the OPF spec's own prose calls mandatory but the JSON Schema's
 `required` list does not enforce -- today exactly one, `perspective` (whose
-OPF 0.5 digest copy, `digest.perspective`, must name the principal too). The
+OPF 0.6 digest copy, `digest.perspective`, must name the principal too). The
 list lives in ONE named place, `OPF_UPLOAD_MINIMUMS` below, with the
 requirement's source and the field's purpose stated on each entry (both
 surfaced to the operator on rejection). Because the check sits in
@@ -172,10 +172,10 @@ def _opf_artifact_kind(opf_version: Any) -> str:
 #     a stated reason on the entry itself.
 #
 # Today the list is exactly one field. Every top-level property of the
-# vendored schema (`playbooks/opf/playbook.schema-0.5.json` since issue #128;
-# 0.2 and 0.3 before it) was scanned for normative language
+# vendored schema (`playbooks/opf/playbook.schema-0.6.json` since issue #177;
+# 0.2, 0.3 and 0.5 before it) was scanned for normative language
 # (must/required/shall) in its description that the schema's `required` list
-# does NOT back, and `perspective` was the only match (issue #676). The 0.5
+# does NOT back, and `perspective` was the only match (issue #676). The 0.6
 # derived sections (`digest`, `manifest`, `dossiers`, `provenance_index`) say
 # "when present it MUST equal build_...(document)" -- a consistency rule the
 # engine's validator enforces on a section that is there, not a requirement
@@ -205,7 +205,7 @@ class OpfMinimum:
 
 def _perspective_defect(doc: dict[str, Any]) -> str | None:
     """Value-free description of what is missing from `/perspective` (or
-    from its OPF 0.5 digest copy, `/digest/perspective`), or None when both
+    from its OPF 0.6 digest copy, `/digest/perspective`), or None when both
     name a principal.
 
     Both the absent-block and the blank-string cases are defects: the
@@ -215,8 +215,8 @@ def _perspective_defect(doc: dict[str, Any]) -> str | None:
     is to say who "us" is, a blank value fails the requirement exactly as
     an absent block does.
 
-    Issue #128: digest 4 carries its own copy of `perspective` (required
-    as a key by the 0.5 schema, but nullable), so the digest always says
+    Issue #128: the digest carries its own copy of `perspective` (required
+    as a key since digest 4, but nullable), so the digest always says
     who "us" is. A document carrying a digest whose copy is null or names
     nobody is refused too -- the digest is what the review prompt is built
     from, and a reader of it alone must not be left without a principal.
@@ -260,11 +260,11 @@ def _blank_perspective_fields(perspective: Any, what: str) -> str | None:
 OPF_UPLOAD_MINIMUMS: tuple[OpfMinimum, ...] = (
     OpfMinimum(
         field="perspective",
-        # SOURCE: spec prose. `playbooks/opf/playbook.schema-0.5.json` (and
-        # 0.2/0.3 before it, identically) describes /perspective as "Whose
+        # SOURCE: spec prose. `playbooks/opf/playbook.schema-0.6.json` (and
+        # 0.2-0.5 before it, identically) describes /perspective as "Whose
         # perspective this playbook is reviewed 'as' -- an open-standard OPF
         # instance must say who 'us' is", but omits it from the schema's own
-        # `required` list, so nothing enforced it. Its digest 4 copy
+        # `required` list, so nothing enforced it. Its digest copy
         # (`/digest/perspective`, "the digest always says who 'us' is") is
         # checked under the same entry -- see `_perspective_defect`.
         requirement_source=(

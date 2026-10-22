@@ -88,8 +88,8 @@ import src.pipeline_runner as pipeline_runner  # noqa: E402
 FIXTURES = REPO_ROOT / "tests" / "gold-fixtures-opf"
 # posture={} AND floor={} -- the real playbook's own documented shape (see
 # tests/test_review_opf_digest_mode_479.py's EMPTY_POSTURE_FIXTURE_PATH).
-REAL_SHAPE_FIXTURE = FIXTURES / "acme-university-0.5-real-shape.opf.json"
-FULL_FIXTURE = FIXTURES / "acme-university-0.5.opf.json"
+REAL_SHAPE_FIXTURE = FIXTURES / "acme-university-0.6-real-shape.opf.json"
+FULL_FIXTURE = FIXTURES / "acme-university-0.6.opf.json"
 
 PRIMARY_MODEL_ID = "anthropic.claude-opus-4-8"
 CRITIC_MODEL_ID = "anthropic.claude-sonnet-4-6"

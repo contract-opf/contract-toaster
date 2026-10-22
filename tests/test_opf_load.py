@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Red gate for issue #283: OPF loader/validator + agreement_type -> registry
-matching (slice 1 of 5 of the #278 OPF-bind chain); OPF 0.5 only since issue
-#128.
+matching (slice 1 of 5 of the #278 OPF-bind chain); one OPF format since issue
+#128, OPF 0.6 only since issue #177.
 
 Checks, in order (per the issue's "Required verification" section; check 5 in
 the issue's ORIGINAL list -- "a doc containing posture.rubric still loads
@@ -12,7 +12,7 @@ carrying it now FAILS validation like any other unrecognized property; the
 tolerance behavior that check would have asserted no longer exists):
 
 1. `load_opf` accepts the synthetic fixture (tests/fixtures/opf/synthetic-eiaa.opf.json,
-   an OPF 0.5 document with no digest).
+   an OPF 0.6 document with no digest).
 2. `load_opf` rejects (a) a doc missing `evidence` and (b) a doc with a
    wrong-type `floor.invariants` -- each raising OpfValidationError with a
    JSON Pointer to the failure and no document content in the message.
@@ -39,18 +39,21 @@ tolerance behavior that check would have asserted no longer exists):
    `document_id` holding long, document-shaped/injection-shaped text is
    never echoed, since the vendored schema does not constrain any of these
    four id fields and this check runs before the injection scan.
-6. (issue #128) OPF 0.5 / digest_version 4 is the ONLY format: any other
-   `opf_version` (absent, "0.3", "0.4") raises OpfVersionError and any other
-   `digest_version` ("2", "3") raises OpfDigestVersionError -- the cause, never
-   a schema symptom -- while the engine's own public NDA example
-   (tests/fixtures/opf/engine-nda-example.opf.json, vendored byte-for-byte
-   from playbook-engine examples/nda/playbook.opf.json at b90c647) loads
-   through the full upload path, identity required.
-7. (issue #128) Every vendored OPF 0.5 conformance vector, assembled as the
-   engine emits it (input + the expected digest, manifest, dossiers and
-   provenance index), passes schema validation, the sibling-id rule and the
-   injection scan: the engine's reference output is a shape this loader
-   accepts.
+6. (issues #128, #177) OPF 0.6 / digest_version 5 is the ONLY format: any
+   other `opf_version` (absent, "0.3", "0.4", "0.5") raises OpfVersionError
+   whose message names 0.6, and any other `digest_version` ("2", "3", "4")
+   raises OpfDigestVersionError -- the cause, never a schema symptom. A
+   document stamped as OPF 0.5 / digest 4 throughout (both versions) is
+   refused for its opf_version, naming 0.6. The engine's own public NDA
+   example (tests/fixtures/opf/engine-nda-example.opf.json, vendored
+   byte-for-byte from playbook-engine examples/nda/playbook.opf.json at
+   fe89bc6) loads through the full upload path, identity required.
+7. (issues #128, #177) The vendored OPF 0.6 conformance set
+   (`opf_load.OPF_CONFORMANCE_DIR`) is the 14 vectors 001-014 its manifest
+   indexes, and every one, assembled as the engine emits it (input + the
+   expected digest, manifest, dossiers and provenance index), passes schema
+   validation, the sibling-id rule and the injection scan: the engine's
+   reference output is a shape this loader accepts.
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -70,9 +73,9 @@ if str(SCRIPTS_DIR) not in sys.path:
 import opf_load  # noqa: E402
 
 FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
-DIGEST_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+DIGEST_FIXTURE_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 ENGINE_NDA_EXAMPLE_PATH = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
-CONFORMANCE_DIR = REPO_ROOT / "playbooks" / "opf" / "conformance-0.5"
+CONFORMANCE_DIR = opf_load.OPF_CONFORMANCE_DIR
 
 # Content markers that must NEVER appear in an OpfValidationError message --
 # proof the error carries no document content (issue #283 scope item 2).
@@ -281,24 +284,36 @@ def check_6_one_format() -> list[str]:
     def _refused(doc: dict, expected: type, label: str, pointer: str) -> None:
         try:
             opf_load._validate_doc(doc, require_identity=False)
-            failures.append(f"  [6] {label}: loaded; only OPF 0.5 / digest 4 may")
+            failures.append(f"  [6] {label}: loaded; only OPF 0.6 / digest 5 may")
         except expected as exc:
             if pointer not in str(exc):
                 failures.append(f"  [6] {label}: message does not name {pointer}: {exc}")
         except Exception as exc:  # noqa: BLE001
             failures.append(f"  [6] {label}: raised {type(exc).__name__}, expected {expected.__name__}: {exc}")
 
-    for version in (None, "0.2", "0.3", "0.4", 5):
+    for version in (None, "0.2", "0.3", "0.4", "0.5", 5, 0.6):
         doc = copy.deepcopy(base)
         if version is None:
             doc.pop("opf_version")
         else:
             doc["opf_version"] = version
         _refused(doc, opf_load.OpfVersionError, f"opf_version={version!r}", "/opf_version")
-    for version in ("1", "2", "3", 4, None):
+    for version in ("1", "2", "3", "4", 5, None):
         doc = copy.deepcopy(base)
         doc["digest"]["digest_version"] = version
         _refused(doc, opf_load.OpfDigestVersionError, f"digest_version={version!r}", "/digest/digest_version")
+    # A 0.5 document (both versions stamped as 0.5 emits them) is refused for
+    # its opf_version, and the message names the one version accepted.
+    doc = copy.deepcopy(base)
+    doc["opf_version"], doc["digest"]["digest_version"] = "0.5", "4"
+    try:
+        opf_load._validate_doc(doc, require_identity=False)
+        failures.append("  [6] an OPF 0.5 / digest 4 document loaded")
+    except opf_load.OpfVersionError as exc:
+        if "OPF 0.6" not in str(exc):
+            failures.append(f"  [6] the 0.5 refusal does not name 0.6: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"  [6] a 0.5 document raised {type(exc).__name__}, not OpfVersionError: {exc}")
     # A digest-2 shaped digest is refused for its VERSION, not a schema symptom.
     doc = copy.deepcopy(base)
     doc["digest"] = {"digest_version": "2", "clause_count": 0, "clauses": []}
@@ -306,8 +321,8 @@ def check_6_one_format() -> list[str]:
 
     try:
         loaded = opf_load.load_opf_document(ENGINE_NDA_EXAMPLE_PATH)
-        if (loaded.get("opf_version"), loaded["digest"].get("digest_version")) != ("0.5", "4"):
-            failures.append("  [6] the engine's NDA example is not OPF 0.5 / digest 4")
+        if (loaded.get("opf_version"), loaded["digest"].get("digest_version")) != ("0.6", "5"):
+            failures.append("  [6] the engine's NDA example is not OPF 0.6 / digest 5")
     except Exception as exc:  # noqa: BLE001
         failures.append(f"  [6] the engine's own NDA example does not load: {type(exc).__name__}: {exc}")
     return failures
@@ -316,6 +331,15 @@ def check_6_one_format() -> list[str]:
 def check_7_conformance_vectors_load() -> list[str]:
     failures: list[str] = []
     manifest = json.loads((CONFORMANCE_DIR / "manifest.json").read_text(encoding="utf-8"))
+    if manifest["format_version"] != {"opf_version": "0.6", "engine_version": "1.0.0", "digest_version": "5"}:
+        failures.append(f"  [7] the vendored set is stamped {manifest['format_version']!r}, not OPF 0.6 / digest 5")
+    files = [entry["file"] for entry in manifest["vectors"]]
+    numbers = [name.split("/")[-1][:3] for name in files]
+    if numbers != [f"{n:03d}" for n in range(1, 15)]:
+        failures.append(f"  [7] the manifest indexes vectors {numbers}, not 001-014")
+    on_disk = sorted(f"vectors/{p.name}" for p in (CONFORMANCE_DIR / "vectors").glob("*.json"))
+    if on_disk != sorted(files):
+        failures.append("  [7] the vectors on disk are not exactly the ones the manifest indexes")
     for entry in manifest["vectors"]:
         vector = json.loads((CONFORMANCE_DIR / entry["file"]).read_text(encoding="utf-8"))
         doc = copy.deepcopy(vector["input"])
@@ -370,8 +394,8 @@ def main() -> int:
         ("5c", "load_opf rejects a duplicated floor.invariants[].id (issue #480)", check_5_rejects_duplicate_invariant_id),
         ("5d", "load_opf rejects a duplicated corpus.documents[].document_id (issue #480)", check_5_rejects_duplicate_document_id),
         ("5e", "load_opf rejects a duplicated document_id without echoing hostile content (issue #480)", check_5_rejects_duplicate_id_with_hostile_content),
-        ("6", "only OPF 0.5 / digest 4 loads; the engine's NDA example does (issue #128)", check_6_one_format),
-        ("7", "every engine conformance vector, as emitted, loads (issue #128)", check_7_conformance_vectors_load),
+        ("6", "only OPF 0.6 / digest 5 loads, 0.5 refused naming 0.6; the engine's NDA example loads (issues #128, #177)", check_6_one_format),
+        ("7", "all 14 engine conformance vectors, as emitted, load (issues #128, #177)", check_7_conformance_vectors_load),
     ]
 
     overall_pass = True

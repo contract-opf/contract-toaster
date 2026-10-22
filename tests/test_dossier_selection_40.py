@@ -64,7 +64,7 @@ ledger's and the reviewer's.
 ## Fixture reachability
 
   * The OPF documents are engine output: the committed gold fixture
-    (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`, generated with
+    (`tests/gold-fixtures-opf/acme-university-0.6.opf.json`, generated with
     the engine's reference functions) and the engine's public NDA example
     (`tests/fixtures/opf/engine-nda-example.opf.json`, equal to the sibling
     checkout's `examples/nda/playbook.opf.json`). Their `dossiers` are the
@@ -82,7 +82,7 @@ ledger's and the reviewer's.
     `playbook_topic_id`; `[3]` cites it through `run_review`, so that
     validation runs.
   * `[3]`'s Floor-rule branch drops the NDA example's `manifest` (optional in
-    the 0.5 schema, as `dossiers` is), so a rule id resolves only through the
+    the 0.6 schema, as `dossiers` is), so a rule id resolves only through the
     dossier's own `floor_rules`.
   * The ledger entries are `hard_ledger.build_ledger`'s own output; the
     reviewer responses pass the reviewer pass's full v3 schema validation, or
@@ -90,7 +90,7 @@ ledger's and the reviewer's.
   * The over-budget run drives the real `run_critic_pass` with a lower
     `max_input_tokens` -- the same parameter the production gate reads.
   * The omitted-precedent-id case reads conformance vector 008
-    (`playbooks/opf/conformance-0.5/vectors/008-hard-rules-and-dossiers.json`,
+    (`playbooks/opf/conformance-0.6/vectors/008-hard-rules-and-dossiers.json`,
     input plus the engine's expected derived sections, assembled as
     `tests/test_leakage_opf_precedent_128.py::_vector_doc` does): the one
     engine-built dossier in the repo that dropped an excerpt, so its
@@ -129,6 +129,7 @@ import hard_ledger as hl  # noqa: E402
 import leakage_scan  # noqa: E402
 import model_client  # noqa: E402
 import opf_canonicalize  # noqa: E402
+import opf_load  # noqa: E402
 import primary_review_pass as pp  # noqa: E402
 import review_spine  # noqa: E402
 from test_hard_ledger import (  # noqa: E402
@@ -670,6 +671,46 @@ def _digest_texts(doc: dict[str, Any]) -> list[str]:
     return [t for t in dict.fromkeys(texts) if t not in standard]
 
 
+def _former_form_spans(doc: dict[str, Any]) -> list[str]:
+    """OPF 0.6 (issue #177): our former forms' wording (each prior standard's
+    text and part texts, each digest form's non-null part texts), then the
+    owner's why-changed notes, then the former forms' labels, then the
+    reasons and summaries beside each former form (its `vs_standard`
+    reason, part reasons, addition summaries and owner reason, then each
+    digest form's reason) -- never one of our standard's texts,
+    deduplicated, and without a one-word label (#616) -- read here
+    independently of `leakage_scan`. They follow the digest texts in check
+    4."""
+    standard: set[str] = set()
+    for clause in doc["evidence"]["clauses"]:
+        ours = clause.get("our_standard") or {}
+        parts = [p["text"] for p in ours.get("parts") or []]
+        standard.update([*parts, "\n\n".join(parts), ours.get("text") or ""])
+    texts: list[str] = []
+    for clause in doc["evidence"]["clauses"]:
+        for prior in clause.get("prior_standards") or []:
+            texts.extend([prior["text"], *(p["text"] for p in prior["parts"])])
+    for clause in doc["digest"]["clauses"]:
+        for form in clause["standard_history"]["forms"]:
+            texts.extend(p["text"] for p in form["parts"] if p["text"])
+    texts = [t for t in texts if t not in standard]
+    texts.extend(c["why_changed"]["text"] for c in doc["evidence"]["clauses"] if c.get("why_changed"))
+    texts.extend(
+        t["label"] for t in (doc.get("baseline") or {}).get("prior_templates") or [] if len(t["label"].split()) > 1
+    )
+    for clause in doc["evidence"]["clauses"]:
+        for prior in clause.get("prior_standards") or []:
+            vs = prior.get("vs_standard") or {}
+            texts.extend([vs.get("reason")] if vs.get("reason") else [])
+            texts.extend(p["reason"] for p in vs.get("parts") or [] if p.get("reason"))
+            texts.extend(a["summary"] for a in vs.get("additions") or [] if a.get("summary"))
+            if vs.get("owner_label"):
+                texts.append(vs["owner_label"]["reason"])
+    for clause in doc["digest"]["clauses"]:
+        texts.extend(f["reason"] for f in clause["standard_history"]["forms"] if f.get("reason"))
+    return list(dict.fromkeys(texts))
+
+
 def _dossier_precedent_ids(doc: dict[str, Any]) -> list[str]:
     """Every dossier excerpt's `precedent_id`, then that dossier's
     `omitted_precedent_ids`, in dossier order, deduplicated."""
@@ -685,7 +726,7 @@ def _dossier_precedent_ids(doc: dict[str, Any]) -> list[str]:
 
 def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
     for path in (
-        REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json",
+        REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json",
         NDA_EXAMPLE,
     ):
         doc = json.loads(path.read_text(encoding="utf-8"))
@@ -703,7 +744,8 @@ def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
         # alone (issue #171, `tests/test_leakage_digest_spans_171.py`) ...
         digest = _digest_texts(doc)
         assert digest, path.name
-        assert derived.precedent_verbatim_spans == digest, path.name
+        former = [t for t in _former_form_spans(doc) if t not in digest]
+        assert derived.precedent_verbatim_spans == digest + former, path.name
         # ... check 3 holds every dossier precedent id, then each deal's
         # alias (#173, in place of #172's slugs; a document without dossiers
         # carries them alone) ...
@@ -716,7 +758,8 @@ def test_engine_built_dossiers_leave_the_check_2_lists_byte_identical() -> None:
         # digest text no excerpt already holds, never our standard.
         spans = with_dossiers.precedent_verbatim_spans
         excerpts = _excerpt_texts(doc)
-        assert spans == excerpts + [t for t in digest if t not in excerpts], path.name
+        listed = excerpts + [t for t in digest if t not in excerpts]
+        assert spans == listed + [t for t in _former_form_spans(doc) if t not in listed], path.name
         assert spans, path.name
         assert not set(spans) & set(with_dossiers.standard_clause_ngrams), path.name
 
@@ -842,7 +885,7 @@ def test_a_dossier_precedent_id_cited_in_an_external_field_is_blocked() -> None:
     # An omitted excerpt's id travels in the dossier too: vector 008's term
     # dossier dropped one excerpt whole to fit its budget.
     vector = json.loads(
-        (REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors"
+        (opf_load.OPF_CONFORMANCE_VECTORS_DIR
          / "008-hard-rules-and-dossiers.json").read_text(encoding="utf-8")
     )
     vector_doc = copy.deepcopy(vector["input"])

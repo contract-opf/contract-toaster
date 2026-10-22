@@ -5,14 +5,16 @@ prompt (a signed parties recital) is held on its own by check 3.
 
 The defect (reproduced on the untouched tree, main @ 0f3ca7c): the engine's
 NDA example carries two digest signed variants that are parties recitals
-("... by and between AlphaCorp Holdings, Inc. ("AlphaCorp") and Beta
-Industries, LLC ("Beta")", and the same for Delta Ventures LP). Both passes
+("... by and between AlphaCorp Holdings, Inc. ("AlphaCorp") and Epsilon
+Systems, Inc. ("Epsilon")", and the same for Gamma Holdings, Inc.; at the 0.5
+example these were Beta Industries, LLC and Delta Ventures LP, and the 0.6
+example's signing dates made two other deals the representatives). Both passes
 read the digest verbatim, so the past counterparty's plain name is in the
 prompt. Check 2 blocks only the whole recital and check 4 only the whole
 span; `counterparty_names` was empty, so an external footnote saying "We
-ask Beta Industries to restore our confidentiality position." passed.
+ask Epsilon Systems to restore our confidentiality position." passed.
 
-OPF 0.5 carries no field that holds a party's plain name (OPF-SPEC §3.5.4:
+OPF 0.6 carries no field that holds a party's plain name (OPF-SPEC §3.5.4:
 the producer's configured names are not in the document). It does carry two
 records of who a past counterparty was: each deal's `document_id` (the
 record the #173 deal aliases are made from; filed under the party's name, it
@@ -28,12 +30,12 @@ What this pins:
       are held (the four deals no rendered text names are not); each blocks
       an external field as `counterparty-name` and is permitted on the
       internal channel; the current counterparty's own name is never
-      blocked (#208, now a containment test, so "Beta Industries, LLC"
-      exempts the held `beta industries`) while the other party's still is.
+      blocked (#208, now a containment test, so "Epsilon Systems, Inc."
+      exempts the held `epsilon systems`) while the other party's still is.
       A name held de-slugged is blocked in the form the recital renders it:
       with a fictitious hyphenated party ("Hollis-Varga LP") in the recital,
       "Hollis-Varga" blocks externally and is permitted internally, as do
-      `Beta-Industries` and `beta_industries` on the unmodified example.
+      `Epsilon-Systems` and `epsilon_systems` on the unmodified example.
   [2] The pseudonymised shape (conformance vector 004 as the engine emits
       it): each `counterparty_ref.alias` a rendered text carries is held as
       written and blocks externally; one no rendered text carries is not
@@ -41,7 +43,7 @@ What this pins:
       digits do not match ordinary prose ("the counterparty 2 business
       days").
   [3] The negative, on ordinary contract prose: an unremarkable review is
-      not blocked; a deal slug that is a single word (`delta`), that spells
+      not blocked; a deal slug that is a single word (`gamma`), that spells
       our own name (`alphacorp-holdings`), or that spells a phrase our own
       standard uses (`receiving-party`) is not held although a rendered
       recital or clause uses it, and an external field using that phrase
@@ -68,10 +70,10 @@ What this pins:
   * [1] and [3]'s base is the engine's public NDA example
     (`tests/fixtures/opf/engine-nda-example.opf.json`), whose recitals are
     the engine's own output. [3]'s renamed slugs rename one deal's
-    `document_id` everywhere it occurs (`delta-ventures` -> the slug), with
+    `document_id` everywhere it occurs (`gamma-holdings` -> the slug), with
     no other edit except where a case says (the hyphenated party renames
-    the Delta recital's party; the clause-name case rewrites one governing
-    law variant so it names its clause): `document_id` is uploader-controlled text the 0.5 schema
+    the Gamma recital's party; the clause-name case rewrites one governing
+    law variant so it names its clause): `document_id` is uploader-controlled text the 0.6 schema
     constrains only to `minLength: 1`. None is already a `corpus.documents[]`
     id, so every fixture passes `opf_load._check_duplicate_sibling_ids`
     (asserted by `_loadable`).
@@ -125,9 +127,12 @@ from test_review_spine import _load_bundle  # noqa: E402
 
 _NAME = "counterparty-name"
 _RECITALS = {
-    "beta industries": "Beta Industries, LLC",
-    "delta ventures": "Delta Ventures LP",
+    "epsilon systems": "Epsilon Systems, Inc.",
+    "gamma holdings": "Gamma Holdings, Inc.",
 }
+#: The deal whose `document_id` [3]'s cases rename: its recital is one the
+#: digest renders (an exemplar of the collapsed parties-and-recitals entry).
+_RENAMED_DEAL = "gamma-holdings"
 
 
 def _scan(
@@ -182,22 +187,22 @@ def test_a_past_counterpartys_name_from_a_recital_is_held() -> None:
 
 def test_the_current_counterpartys_own_name_is_never_blocked() -> None:
     corpus = _corpus(_load(NDA_EXAMPLE))
-    for current in ("Beta Industries, LLC", "Beta Industries", "beta-industries", "BETA INDUSTRIES LLC"):
-        said = "We ask Beta Industries, LLC to restore our confidentiality position."
+    for current in ("Epsilon Systems, Inc.", "Epsilon Systems", "epsilon-systems", "EPSILON SYSTEMS INC"):
+        said = "We ask Epsilon Systems, Inc. to restore our confidentiality position."
         assert not _scan(said, corpus, current=current).blocked, current
         # The other past counterparty is still blocked on that review.
-        other = _scan("As Delta Ventures LP signed before, we keep it.", corpus, current=current)
+        other = _scan("As Gamma Holdings, Inc. signed before, we keep it.", corpus, current=current)
         assert other.blocked and other.rule_id == _NAME, (current, other)
     # Containment runs one way: a current name that is only part of a held
     # name does not exempt it.
-    outcome = _scan("We ask Beta Industries to keep it.", corpus, current="Beta")
+    outcome = _scan("We ask Epsilon Systems to keep it.", corpus, current="Epsilon")
     assert outcome.blocked and outcome.rule_id == _NAME, outcome
 
 
 def _edited(slug: str, edits: tuple[tuple[str, str], ...]) -> dict[str, Any]:
     """`_loadable(slug)` with each `(old, new)` text edit applied wherever
     `old` occurs, still a document the loader accepts."""
-    raw = json.dumps(_loadable(slug))
+    raw = json.dumps(_loadable(slug, _RENAMED_DEAL))
     for old, new in edits:
         assert old in raw, old
         raw = raw.replace(old, new)
@@ -206,7 +211,7 @@ def _edited(slug: str, edits: tuple[tuple[str, str], ...]) -> dict[str, Any]:
     return doc
 
 
-_HYPHENATED = ("hollis-varga", (("Delta Ventures LP", "Hollis-Varga LP"),))
+_HYPHENATED = ("hollis-varga", (("Gamma Holdings, Inc.", "Hollis-Varga LP"),))
 
 
 def test_a_hyphenated_name_is_blocked_as_the_recital_renders_it() -> None:
@@ -214,7 +219,7 @@ def test_a_hyphenated_name_is_blocked_as_the_recital_renders_it() -> None:
     doc = _edited(slug, edits)
     assert "Hollis-Varga LP" in _compose(doc).replace('\\"', '"')
     corpus = _corpus(doc)
-    assert corpus.counterparty_names == ["beta industries", "hollis varga"], corpus.counterparty_names
+    assert corpus.counterparty_names == ["epsilon systems", "hollis varga"], corpus.counterparty_names
     for said in (
         "As Hollis-Varga signed before, we keep it.",
         "We ask Hollis-Varga LP to restore it.",
@@ -232,11 +237,11 @@ def test_a_hyphenated_name_is_blocked_as_the_recital_renders_it() -> None:
     # The document under review rendering it hyphenated drops it, as check 3
     # would match it there.
     narrowed = leakage_scan.without_names_the_document_carries(corpus, ["Between AlphaCorp and Hollis-Varga LP."])
-    assert narrowed.counterparty_names == ["beta industries"], narrowed.counterparty_names
+    assert narrowed.counterparty_names == ["epsilon systems"], narrowed.counterparty_names
 
     # On the unmodified example, the de-slugged name blocks every separator form.
     corpus = _corpus(_load(NDA_EXAMPLE))
-    for said in ("We ask Beta-Industries to restore it.", "beta_industries accepted this wording."):
+    for said in ("We ask Epsilon-Systems to restore it.", "epsilon_systems accepted this wording."):
         outcome = _scan(said, corpus)
         assert outcome.blocked and outcome.rule_id == _NAME, (said, outcome)
 
@@ -288,7 +293,7 @@ _GOVERNING_LAW_EDIT = (
     ),
 )
 _NOT_HELD: tuple[tuple[str, str, str, tuple[tuple[str, str], ...]], ...] = (
-    ("delta", "a single word", "Delta-hedging is outside this clause.", ()),
+    ("gamma", "a single word", "Gamma-ray inspection is outside this clause.", ()),
     ("alphacorp-holdings", "our own name", "AlphaCorp Holdings keeps its standard position.", ()),
     ("receiving-party", "our own standard's vocabulary", "The Receiving Party must return all copies.", ()),
     # Only the clause-name filter drops this one: a rendered governing law
@@ -330,7 +335,7 @@ def test_ordinary_prose_is_not_blocked() -> None:
         corpus = _corpus(doc)
         assert key not in corpus.counterparty_names, (slug, why, corpus.counterparty_names)
         # The other recital's party is still held.
-        assert corpus.counterparty_names == ["beta industries"], (slug, corpus.counterparty_names)
+        assert corpus.counterparty_names == ["epsilon systems"], (slug, corpus.counterparty_names)
         assert not _scan(said, corpus).blocked, (slug, why)
 
 
@@ -339,7 +344,7 @@ def test_ordinary_prose_is_not_blocked() -> None:
 # ---------------------------------------------------------------------------
 
 _PARTIES = (
-    ("Parties", "This Agreement is between AlphaCorp Holdings, Inc. and Beta Industries, LLC."),
+    ("Parties", "This Agreement is between AlphaCorp Holdings, Inc. and Epsilon Systems, Inc.."),
 )
 
 
@@ -381,18 +386,18 @@ def _run(docx: bytes, note: str) -> dict[str, Any]:
 
 
 def test_a_name_the_document_under_review_carries_is_delivered() -> None:
-    beta = "We ask Beta Industries to restore our confidentiality position."
-    plain = _run(_docx(with_indemnity=False), beta)
+    epsilon = "We ask Epsilon Systems to restore our confidentiality position."
+    plain = _run(_docx(with_indemnity=False), epsilon)
     assert plain["status"] == "ERROR" and plain["reason"] == "leakage_detected", (
         plain["status"],
         plain.get("reason"),
     )
-    repeat = _run(_docx(with_indemnity=False, extra=_PARTIES), beta)
+    repeat = _run(_docx(with_indemnity=False, extra=_PARTIES), epsilon)
     assert repeat["status"] == "OK", (repeat["status"], repeat.get("reason"))
-    assert [f["external_rationale_for_footnote"] for f in repeat["findings"]] == [beta]
+    assert [f["external_rationale_for_footnote"] for f in repeat["findings"]] == [epsilon]
     other = _run(
         _docx(with_indemnity=False, extra=_PARTIES),
-        "We ask Delta Ventures to restore our confidentiality position.",
+        "We ask Gamma Holdings to restore our confidentiality position.",
     )
     assert other["status"] == "ERROR" and other["reason"] == "leakage_detected", other["status"]
 
@@ -400,15 +405,15 @@ def test_a_name_the_document_under_review_carries_is_delivered() -> None:
 def test_without_names_the_document_carries_narrows_only_the_names() -> None:
     corpus = _corpus(_load(NDA_EXAMPLE))
     narrowed = leakage_scan.without_names_the_document_carries(
-        corpus, ["PARTIES", "Between AlphaCorp and BETA INDUSTRIES, LLC.", None, 7]
+        corpus, ["PARTIES", "Between AlphaCorp and EPSILON SYSTEMS, INC.", None, 7]
     )
-    assert narrowed.counterparty_names == ["delta ventures"], narrowed.counterparty_names
+    assert narrowed.counterparty_names == ["gamma holdings"], narrowed.counterparty_names
     assert dataclasses.replace(narrowed, counterparty_names=corpus.counterparty_names) == corpus
     # A whole token only, and nothing to drop returns the corpus itself.
-    for texts in (["Beta Industriesx Ltd."], ["Beta", "Industries"], []):
+    for texts in (["Epsilon Systemsx Ltd."], ["Epsilon", "Systems"], []):
         assert leakage_scan.without_names_the_document_carries(corpus, texts) is corpus, texts
     empty = leakage_scan.ConfidentialCorpus()
-    assert leakage_scan.without_names_the_document_carries(empty, ["Beta Industries"]) is empty
+    assert leakage_scan.without_names_the_document_carries(empty, ["Epsilon Systems"]) is empty
 
 
 def test_the_narrowing_is_role_blind() -> None:
@@ -416,28 +421,28 @@ def test_the_narrowing_is_role_blind() -> None:
     under review names in another role (an affiliate) is dropped too, and an
     external field may then cite that party's past deal."""
     corpus = _corpus(_load(NDA_EXAMPLE))
-    said = "As Delta Ventures signed before, we keep the two-year term."
+    said = "As Gamma Holdings signed before, we keep the two-year term."
     outcome = _scan(said, corpus)
     assert outcome.blocked and outcome.rule_id == _NAME, outcome
     narrowed = leakage_scan.without_names_the_document_carries(
-        corpus, ["The Recipient's affiliates include Delta Ventures LP."]
+        corpus, ["The Recipient's affiliates include Gamma Holdings, Inc.."]
     )
-    assert narrowed.counterparty_names == ["beta industries"], narrowed.counterparty_names
+    assert narrowed.counterparty_names == ["epsilon systems"], narrowed.counterparty_names
     assert not _scan(said, narrowed).blocked
 
 
 def test_the_cover_note_narrows_over_scanned_texts_only() -> None:
     issues = [
         {
-            "section_title": "Delta Ventures terms",
-            "counterparty_change_summary": "Beta Industries narrowed the carve-out.",
+            "section_title": "Gamma Holdings terms",
+            "counterparty_change_summary": "Epsilon Systems narrowed the carve-out.",
             "external_rationale_for_footnote": "Our standard keeps the carve-out.",
         },
-        {"section_title": "Unsummarised", "proposed_replacement_text": "Delta Ventures LP"},
+        {"section_title": "Unsummarised", "proposed_replacement_text": "Gamma Holdings, Inc."},
     ]
     texts = cover_note_pass.scanned_digest_texts(issues, "Changes are requested.")
     assert texts == [
-        "Beta Industries narrowed the carve-out.",
+        "Epsilon Systems narrowed the carve-out.",
         "Our standard keeps the carve-out.",
         "Changes are requested.",
     ], texts
@@ -445,7 +450,7 @@ def test_the_cover_note_narrows_over_scanned_texts_only() -> None:
     corpus = _corpus(_load(NDA_EXAMPLE))
     narrowed = leakage_scan.without_names_the_document_carries(corpus, texts)
     # The label and the replacement text are not scanned: they exempt nothing.
-    assert narrowed.counterparty_names == ["delta ventures"], narrowed.counterparty_names
+    assert narrowed.counterparty_names == ["gamma holdings"], narrowed.counterparty_names
 
 
 def main() -> int:

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Gate for the digest prompt: digest_version 4 rendered as precedent (issue
-#129; the digest-2 renderer, its stance sentence, bands, risk annotations and
-the `opf_terminology` renames were deleted with it).
+"""Gate for the digest prompt: digest_version 5 rendered as precedent (issue
+#129 for digest 4, issue #177 for digest 5; the digest-2 renderer, its stance
+sentence, bands, risk annotations and the `opf_terminology` renames were
+deleted with #129). Digest 5's own facts -- settled markers, standard
+history, absence and dates -- are pinned in tests/test_opf_digest5_177.py.
 
- 1. THE NDA EXAMPLE (issue #129's own test): the engine's public OPF 0.5
+ 1. THE NDA EXAMPLE (issue #129's own test): the engine's public OPF 0.6
     example (tests/fixtures/opf/engine-nda-example.opf.json) renders its
     governing-law block with "Opened with our standard in 4 signed deals;
     signed it unchanged in 2.", the New York variant with "reached from our
@@ -26,7 +28,8 @@ the `opf_terminology` renames were deleted with it).
  8. THE INTRO says precedent, not instruction; refused asks and unsigned
     openings are never replacement language; a label is an index to check.
  9. DATES RENDER: a digest that carries them (conformance vector 002) states
-    the corpus's signed span and each variant's most recent signing.
+    the corpus's signed span and each variant's first and last signing month
+    (digest 5's months, issue #177).
 
 Exit code: 0 = all pass, 1 = one or more failed.
 """
@@ -44,19 +47,20 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import deal_aliases  # noqa: E402
+import opf_load  # noqa: E402
 import opf_prompt  # noqa: E402
 
-FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 NO_DIGEST_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "opf" / "synthetic-eiaa.opf.json"
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
 VECTOR_002 = (
-    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "002-variants-refused-and-exclusions.json"
+    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "002-variants-refused-and-exclusions.json"
 )
 VECTOR_003 = (
-    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "003-cap-totals-and-summary.json"
+    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "003-cap-totals-and-summary.json"
 )
 VECTOR_009 = (
-    REPO_ROOT / "playbooks" / "opf" / "conformance-0.5" / "vectors" / "009-standard-parts-and-owner-label.json"
+    opf_load.OPF_CONFORMANCE_VECTORS_DIR / "009-standard-parts-and-owner-label.json"
 )
 
 
@@ -104,9 +108,13 @@ def check_1_nda_example() -> list[str]:
         failures.append(f"  California variant lacks 'signed as proposed in 2': {california!r}")
     if "reached from our standard" in california:
         failures.append("  California variant claims a concession the digest does not record")
-    # Cited by the deal's opaque alias, never its slug (issue #173).
-    alias = deal_aliases.alias_map(_doc(NDA_EXAMPLE))["beta-industries"]
-    if f"[{alias}@4 §21]" not in new_york or "beta-industries" in new_york:
+    # Cited by the deal's opaque alias, never its slug (issue #173): the
+    # representative's own ref, as the engine's digest records it.
+    doc = _doc(NDA_EXAMPLE)
+    clause = next(c for c in doc["digest"]["clauses"] if c["id"] == "clause.governing_law")
+    (ref,) = [v["ref"] for v in clause["signed_variants"] if "State of New York" in v.get("text", "")]
+    alias = deal_aliases.alias_map(doc)[ref["document_id"]]
+    if f"[{alias}@{ref['version']} §{ref['clause_path']}]" not in new_york or ref["document_id"] in new_york:
         failures.append("  New York variant lost its citation")
     return failures
 
@@ -163,7 +171,12 @@ def check_4_labels_are_an_index() -> list[str]:
         failures.append("  positions line missing or wrong for indemnification")
     confidentiality = _clause_section(block, "clause.confidentiality")
     equivalent = [line for line in confidentiality.splitlines() if "[equivalent wording]" in line]
-    if len(equivalent) != 1 or "1 text, signed in 1 deal, reached from our standard in 1" not in equivalent[0]:
+    # The fixture's equivalent rewording was reached from our 2022 former
+    # form (OPF 0.6 `prior_standard`), not today's standard.
+    if len(equivalent) != 1 or (
+        '1 text, signed in 1 deal, opened on our former form "2022 affiliation form" in 1'
+        not in equivalent[0]
+    ):
         failures.append(f"  collapsed equivalent-wording entry not rendered once with its counts: {equivalent!r}")
 
     several_parts = _digest_block(_vector_doc(VECTOR_009))
@@ -241,7 +254,7 @@ def check_7_no_digest_refuses() -> list[str]:
     failures: list[str] = []
     stripped = _doc()
     stripped.pop("digest", None)
-    for label, doc in (("0.5 document with no digest", _doc(NO_DIGEST_FIXTURE)), ("digest removed", stripped)):
+    for label, doc in (("0.6 document with no digest", _doc(NO_DIGEST_FIXTURE)), ("digest removed", stripped)):
         try:
             opf_prompt.compose_opf_system_blocks(doc)
             failures.append(
@@ -270,7 +283,7 @@ def check_8_intro() -> list[str]:
         if phrase not in intro:
             failures.append(f"  DIGEST_INTRO does not say {phrase!r}")
     block = _digest_block(_doc())
-    if "From 5 deals (4 signed)." not in block:
+    if "From 5 deals (4 signed), signed between 2024-03 and 2025-02." not in block:
         failures.append("  the block does not say how many deals the precedent rests on")
     return failures
 
@@ -278,12 +291,12 @@ def check_8_intro() -> list[str]:
 def check_9_dates_render() -> list[str]:
     failures: list[str] = []
     block = _digest_block(_vector_doc(VECTOR_002))
-    corpus = "From 8 deals (7 signed), signed between 2024-06-30 and 2025-Q4."
+    corpus = "From 8 deals (7 signed), signed between 2024-06 and 2025-11."
     if corpus not in block:
         failures.append(f"  a dated corpus does not render {corpus!r}")
     assignment = _clause_section(block, "clause.assignment")
     variant = _line_containing(assignment, "to an affiliate, without consent")
-    if "signed in 3 deals, most recently 2025-Q4," not in variant:
+    if "signed in 3 deals, first signed 2025-03, last signed 2025-11," not in variant:
         failures.append(f"  a dated variant does not say when it was most recently signed: {variant!r}")
     return failures
 
@@ -298,7 +311,7 @@ def main() -> int:
         ("6", "a capped list says how many more are on record", check_6_capped_list_says_so),
         ("7", "no digest => refuse to compose", check_7_no_digest_refuses),
         ("8", "the intro frames precedent as an index, never instruction", check_8_intro),
-        ("9", "a dated digest states its signed span and each variant's latest signing", check_9_dates_render),
+        ("9", "a dated digest states its signed span and each variant's signing months", check_9_dates_render),
     ]
     ok = True
     for code, name, fn in checks:

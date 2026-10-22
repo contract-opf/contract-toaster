@@ -3,7 +3,7 @@
 Issue #172: a digest citation's deal `document_id` echoed into an external
 field is blocked; the same citation on the internal channel is permitted.
 
-Both passes' prompts render every digest 4 entry with a citation
+Both passes' prompts render every digest entry with a citation
 `[<document_id>@<version> §<clause_path>]` (`opf_prompt._fmt_cite`). A deal's
 `document_id` is a filename-derived slug that can name the counterparty, and
 before this issue no check-3 list held one: `internal_precedent_ids` carried
@@ -56,7 +56,7 @@ What this pins:
   * The OPF documents are engine output, never edited for [1], [2] and [4]:
     the engine's public NDA example
     (`tests/fixtures/opf/engine-nda-example.opf.json`) and the committed gold
-    fixture (`tests/gold-fixtures-opf/acme-university-0.5.opf.json`). The
+    fixture (`tests/gold-fixtures-opf/acme-university-0.6.opf.json`). The
     citations asserted on are read out of `opf_prompt.compose_opf_system_blocks`
     -- the production composition both passes share -- not out of the
     document, so [1] fails if the prompt cites a slug the corpus misses.
@@ -65,12 +65,12 @@ What this pins:
     the scan is `scan_model_output`, the production entry point.
   * [3]'s per-kind documents are the NDA example with the OTHER digest
     lists emptied and `evidence.precedent` emptied: every entry kept is the
-    engine's own, and an empty list is a shape the 0.5 schema admits
+    engine's own, and an empty list is a shape the 0.6 schema admits
     (`evidence` itself is required; vector 001 carries
     `evidence: {"clauses": [], "precedent": []}`).
   * [3]'s `no_corpus` document -- an empty `corpus.documents` beside the
     gold fixture's full `evidence.precedent[]` -- is a shape NO producer
-    makes: the 0.5 schema requires `corpus.documents`, the engine lists
+    makes: the 0.6 schema requires `corpus.documents`, the engine lists
     every deal there, and no engine example, gold fixture or conformance
     vector cites a deal in its digest or evidence that the list lacks
     (checked 2026-10-18). It pins a DEFENSIVE fallback, kept on purpose:
@@ -109,7 +109,7 @@ import leakage_scan  # noqa: E402
 import opf_prompt  # noqa: E402
 
 NDA_EXAMPLE = REPO_ROOT / "tests" / "fixtures" / "opf" / "engine-nda-example.opf.json"
-GOLD_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
+GOLD_FIXTURE = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
 
 _EXTERNAL = "external_rationale_for_footnote"
 _INTERNAL = "internal_rationale_for_footnote"
@@ -340,7 +340,10 @@ def test_the_precedent_record_contributes_deals_the_digest_does_not_cite() -> No
         deal_aliases.resolution_map(doc).get(alias) for alias in _cited(doc)
     } - {None}
     evidence_only = record - cited_slugs
-    assert len(evidence_only) == 2, sorted(evidence_only)
+    # The unsigned deal: nothing in the digest cites it (since OPF 0.6 the
+    # digest's representatives are the latest-signed deals, so every signed
+    # deal of the gold fixture is cited somewhere).
+    assert evidence_only == {"example-academy"}, sorted(evidence_only)
 
     # Even with `corpus.documents` empty, the record's deals are aliased and
     # their aliases held. No producer emits this shape: it pins the
@@ -386,7 +389,7 @@ def test_the_current_counterpartys_own_name_is_never_blocked() -> None:
     or its plain name) in an external field is not a leak. Since #173 no
     slug is held, because the prompt never renders one. Since #174 the plain
     name IS held when a precedent text the prompt quotes names the party
-    (the engine's NDA example's recital names Beta Industries, LLC), so it
+    (the engine's NDA example's recital names Epsilon Systems, Inc.), so it
     -- and the slug, which spells it with a hyphen -- blocks on a review of
     another party -- and the #208 exemption still
     reaches it on a review of that party
@@ -396,9 +399,10 @@ def test_the_current_counterpartys_own_name_is_never_blocked() -> None:
     doc = _load(NDA_EXAMPLE)
     corpus = _corpus(doc)
     aliases = deal_aliases.alias_map(doc)
-    current = sorted(aliases)[0]
+    current = "epsilon-systems"
+    assert current in aliases
     name = current.replace("-", " ").replace("_", " ").title()
-    assert current == "beta-industries" and "beta industries" in corpus.counterparty_names
+    assert "epsilon systems" in corpus.counterparty_names
     for said in (f"As agreed with {current}, we keep a US state.", f"We ask {name} to keep a US state."):
         issue = _issue(**{_EXTERNAL: said})
         # Both forms: the held name is matched under the folding it was

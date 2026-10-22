@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Executable tests for issue #478: parse, validate, and store playbook uploads
-(OPF 0.5 since issue #128, + `.opf.html` bundles) at `POST /api/admin/playbooks/{playbook_id}/versions`.
+(one OPF format since issue #128, OPF 0.6 since issue #177, + `.opf.html` bundles) at `POST /api/admin/playbooks/{playbook_id}/versions`.
 
 Before this ticket the route hashed the uploaded bytes and dropped them --
 nothing was parsed, validated, or persisted (confirmed in issue #463). This
@@ -20,7 +20,7 @@ convention as tests/test_playbook_version_routes_430.py).
 
   - Uploading a valid `.opf.html` bundle records a draft whose bytes
     round-trip (GET the stored artifact -> hash matches), with
-    `artifact_kind: opf-0.5`.
+    `artifact_kind: opf-0.6`.
   - A doc with a bad `identity.content_hash`, an unknown `opf_version`, or a
     mismatched playbook id is refused with 400 naming the failing check
     (pointer only, no document values).
@@ -42,7 +42,7 @@ name). This module still does not fetch it over the network, though --
 no network" above), and pulling a live GitHub blob into a test run would
 break that invariant for this file alone. Instead:
 
-  - Ordinary fixture coverage uses the repo's OWN existing gold OPF 0.5
+  - Ordinary fixture coverage uses the repo's OWN existing gold OPF 0.6
     fixtures (`tests/gold-fixtures-opf/acme-university.*`, already
     committed, already the same "brand-free stand-in playbook" role the
     issue asks the public twin to play).
@@ -50,7 +50,7 @@ break that invariant for this file alone. Instead:
     `TestLargeUploadHandling.test_multi_megabyte_opf_json_upload_succeeds`
     below, which synthesizes a real multi-MB OPF document by padding a
     free-text field of the gold fixture and re-sealing it (`_reseal`, same
-    technique `tests/test_opf_ingest_05.py` uses) to a size representative
+    technique `tests/test_opf_ingest_06.py` uses) to a size representative
     of the public twin's real `playbook.opf.json` -- no blob needs
     committing, and no test needs network access, to exercise genuine
     near-the-corpus-size behavior end-to-end.
@@ -98,11 +98,11 @@ from src.upload_validation import MAX_UPLOAD_SIZE_BYTES  # noqa: E402
 ADMIN_SUB = "admin-1"
 NON_ADMIN_SUB = "reviewer-1"
 
-# The gold OPF 0.5 fixtures already committed to this repo (tests/gold-
+# The gold OPF 0.6 fixtures already committed to this repo (tests/gold-
 # fixtures-opf/generate_opf_fixture.py's output) -- agreement_type.id
 # "educational-affiliation", aliases ["acme-university", "eiaa-fixture"].
-OPF03_JSON_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.json"
-OPF03_HTML_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.5.opf.html"
+OPF03_JSON_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.json"
+OPF03_HTML_PATH = REPO_ROOT / "tests" / "gold-fixtures-opf" / "acme-university-0.6.opf.html"
 V1_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "playbooks" / "synthetic-generic-v1.0.0.json"
 
 PLAYBOOK_ID = "acme-university"  # an agreement_type.aliases entry of the OPF fixture
@@ -120,7 +120,7 @@ def _opf05_html_bytes() -> bytes:
 def _reseal(doc: dict) -> dict:
     """Recompute identity.content_hash (+ section digests) after mutating
     *doc* so it hashes honestly again -- same technique as
-    tests/test_opf_ingest_05.py::_reseal. Models a real, self-consistent
+    tests/test_opf_ingest_06.py::_reseal. Models a real, self-consistent
     artifact (e.g. a stub-basis compile) rather than a hash-tampered one."""
     doc = copy.deepcopy(doc)
     doc["identity"]["content_hash"] = opf_canonicalize.content_hash(doc)
@@ -240,17 +240,17 @@ class PlaybookUploadTestBase(unittest.TestCase):
         ).get("Item")
 
 
-# -- OPF 0.5 .opf.html bundle: happy path + round-trip -----------------------
+# -- OPF 0.6 .opf.html bundle: happy path + round-trip -----------------------
 
 
 class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
     def test_html_bundle_upload_is_accepted_with_opf05_artifact_kind(self):
         resp = self._upload(
-            PLAYBOOK_ID, "1.0.0", _opf05_html_bytes(), "acme-university-0.5.opf.html"
+            PLAYBOOK_ID, "1.0.0", _opf05_html_bytes(), "acme-university-0.6.opf.html"
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
-        self.assertEqual(body["artifact_kind"], "opf-0.5")
+        self.assertEqual(body["artifact_kind"], "opf-0.6")
         self.assertEqual(body["status"], pv.STATUS_DRAFT)
         self.assertIsNotNone(body["storage_key"])
         self.assertTrue(body["storage_key"].startswith(f"playbooks/{PLAYBOOK_ID}/"))
@@ -265,7 +265,7 @@ class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
         recorded, proving the persisted bytes are the validated document,
         bit-for-bit, not merely "some bytes were written somewhere"."""
         resp = self._upload(
-            PLAYBOOK_ID, "1.0.0", _opf05_html_bytes(), "acme-university-0.5.opf.html"
+            PLAYBOOK_ID, "1.0.0", _opf05_html_bytes(), "acme-university-0.6.opf.html"
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
@@ -283,7 +283,7 @@ class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
 
     def test_original_html_artifact_is_also_persisted(self):
         resp = self._upload(
-            PLAYBOOK_ID, "1.0.0", _opf05_html_bytes(), "acme-university-0.5.opf.html"
+            PLAYBOOK_ID, "1.0.0", _opf05_html_bytes(), "acme-university-0.6.opf.html"
         )
         self.assertEqual(resp.status_code, 200, resp.text)
         original_key = (
@@ -302,26 +302,26 @@ class TestOpfHtmlBundleUpload(PlaybookUploadTestBase):
         AC either (see TestLargeUploadHandling below, fix round 2, finding
         2, for a document synthesized to the public twin's real ~7-8 MB
         size). This repo's real ~8 MB corpus artifact is never committed
-        (per the issue); the gold `acme-university-0.5.opf.html` fixture (~42
+        (per the issue); the gold `acme-university-0.6.opf.html` fixture (~42
         KB, already checked in) merely confirms a bundle bigger than a
         trivial fixture still uploads end-to-end -- it says nothing about
         behavior anywhere near `MAX_UPLOAD_SIZE_BYTES` (25 MiB) or the real
         corpus artifact's actual size."""
         content = _opf05_html_bytes()
         self.assertGreater(len(content), 10_000)  # not a trivial fixture
-        resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.5.opf.html")
+        resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.6.opf.html")
         self.assertEqual(resp.status_code, 200, resp.text)
 
 
-# -- OPF 0.5 bare .opf.json ----------------------------------------------
+# -- OPF 0.6 bare .opf.json ----------------------------------------------
 
 
 class TestOpfJsonUpload(PlaybookUploadTestBase):
     def test_bare_opf_json_upload_is_accepted(self):
         content = OPF03_JSON_PATH.read_bytes()
-        resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.5.opf.json")
+        resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.6.opf.json")
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertEqual(resp.json()["artifact_kind"], "opf-0.5")
+        self.assertEqual(resp.json()["artifact_kind"], "opf-0.6")
 
     def test_bare_opf_json_matched_via_alias_id(self):
         """agreement_type.id is 'educational-affiliation'; PLAYBOOK_ID here
@@ -329,7 +329,7 @@ class TestOpfJsonUpload(PlaybookUploadTestBase):
         id matching."""
         content = OPF03_JSON_PATH.read_bytes()
         resp = self._upload(
-            "educational-affiliation", "1.0.0", content, "acme-university-0.5.opf.json"
+            "educational-affiliation", "1.0.0", content, "acme-university-0.6.opf.json"
         )
         self.assertEqual(resp.status_code, 200, resp.text)
 
@@ -342,14 +342,14 @@ class TestOpfJsonUpload(PlaybookUploadTestBase):
         content_hash (the raw-byte hash) -- no stored object addressed by
         content_hash existed at all."""
         content = OPF03_JSON_PATH.read_bytes()
-        resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.5.opf.json")
+        resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.6.opf.json")
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
 
         original_key = pu.original_artifact_key(
             PLAYBOOK_ID,
             hashlib.sha256(content).hexdigest(),
-            filename="acme-university-0.5.opf.json",
+            filename="acme-university-0.6.opf.json",
         )
         stored_original = self.s3.get_object(
             Bucket=os.environ["UPLOADS_BUCKET"], Key=original_key
@@ -371,7 +371,7 @@ class TestLargeUploadHandling(PlaybookUploadTestBase):
     note"). `TestOpfHtmlBundleUpload.test_large_bundle_upload_handled`
     (the 42 KB gold fixture) is NOT this: it says nothing about behavior
     anywhere near the real corpus size. This synthesizes a real multi-MB
-    OPF 0.5 document -- no blob committed, no network access -- by padding
+    OPF 0.6 document -- no blob committed, no network access -- by padding
     a free-text field of the gold fixture and re-sealing it (`_reseal`)."""
 
     TARGET_SIZE_BYTES = 7 * 1024 * 1024  # representative of the public twin's 6,935,610-byte playbook.opf.json
@@ -394,7 +394,7 @@ class TestLargeUploadHandling(PlaybookUploadTestBase):
         resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-large.opf.json")
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
-        self.assertEqual(body["artifact_kind"], "opf-0.5")
+        self.assertEqual(body["artifact_kind"], "opf-0.6")
 
         # AC1: "records a draft whose bytes round-trip (GET the stored
         # artifact -> hash matches)" -- both the canonical storage key and
@@ -466,7 +466,7 @@ class TestRefusals(PlaybookUploadTestBase):
     def test_agreement_type_mismatch_is_400(self):
         content = OPF03_JSON_PATH.read_bytes()
         resp = self._upload(
-            "some-unrelated-playbook-id", "1.0.0", content, "acme-university-0.5.opf.json"
+            "some-unrelated-playbook-id", "1.0.0", content, "acme-university-0.6.opf.json"
         )
         self.assertEqual(resp.status_code, 400)
         self.assertIn("agreement_type", resp.json()["detail"])
@@ -568,7 +568,7 @@ class TestRefusals(PlaybookUploadTestBase):
         content must 409 and leave the bucket's object set exactly as it
         was after the first, successful upload."""
         first = OPF03_JSON_PATH.read_bytes()
-        resp = self._upload(PLAYBOOK_ID, "1.0.0", first, "acme-university-0.5.opf.json")
+        resp = self._upload(PLAYBOOK_ID, "1.0.0", first, "acme-university-0.6.opf.json")
         self.assertEqual(resp.status_code, 200, resp.text)
 
         keys_after_first = sorted(
@@ -584,7 +584,7 @@ class TestRefusals(PlaybookUploadTestBase):
         second = json.dumps(second_doc).encode("utf-8")
         self.assertNotEqual(first, second)
 
-        resp2 = self._upload(PLAYBOOK_ID, "1.0.0", second, "acme-university-0.5.opf.json")
+        resp2 = self._upload(PLAYBOOK_ID, "1.0.0", second, "acme-university-0.6.opf.json")
         self.assertEqual(resp2.status_code, 409, resp2.text)
 
         keys_after_conflict = sorted(
@@ -635,7 +635,7 @@ class TestUploadsBucketNotConfigured(PlaybookUploadTestBase):
     def test_blank_uploads_bucket_is_503_and_records_no_row(self):
         content = OPF03_JSON_PATH.read_bytes()
         with unittest.mock.patch.dict(os.environ, {"UPLOADS_BUCKET": ""}):
-            resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.5.opf.json")
+            resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.6.opf.json")
         self.assertEqual(resp.status_code, 503, resp.text)
         self.assertEqual(resp.json()["detail"], "UPLOADS_BUCKET not configured.")
         self.assertIsNone(self._row(PLAYBOOK_ID, "1.0.0"))
@@ -645,7 +645,7 @@ class TestUploadsBucketNotConfigured(PlaybookUploadTestBase):
         env = dict(os.environ)
         env.pop("UPLOADS_BUCKET", None)
         with unittest.mock.patch.dict(os.environ, env, clear=True):
-            resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.5.opf.json")
+            resp = self._upload(PLAYBOOK_ID, "1.0.0", content, "acme-university-0.6.opf.json")
         self.assertEqual(resp.status_code, 503, resp.text)
         self.assertEqual(resp.json()["detail"], "UPLOADS_BUCKET not configured.")
         self.assertIsNone(self._row(PLAYBOOK_ID, "1.0.0"))

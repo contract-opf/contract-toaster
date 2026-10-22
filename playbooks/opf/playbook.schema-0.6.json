@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.5.json",
-  "title": "Open Playbook Format (OPF) v0.5",
-  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 4 model-facing projection, a hard-rule `manifest`, per-clause critic `dossiers` and a `provenance_index` (issue #228). OPF 0.5 = the 0.4 document plus `opened_with` on every precedent record and `opening_text` recorded for any distinct opening, whatever its origin (issue #233); it replaces 0.4 in place and 0.4 is no longer a supported format. Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged once against our standard and blind-checked by an independent model (issue #240). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
+  "$id": "https://contract-opf.github.io/playbook-engine/spec/playbook.schema-0.6.json",
+  "title": "Open Playbook Format (OPF) v0.6",
+  "description": "Schema for the three-section (Evidence/Posture/Floor) OPF playbook with the verdict-free per-deal precedent record as its evidence shape, plus the digest_version 5 model-facing projection, a hard-rule `manifest`, per-clause critic `dossiers` and a `provenance_index` (issue #228). OPF 0.6 = the 0.5 document plus the date each deal was signed as a fact (issue #247): `corpus.documents[].signed_on` and `signed_on_basis`, `signed_on` on every precedent record (replacing the optional `signed_at`), and `first_signed` / `last_signed` year-month spans in digest 5. It replaces 0.5 in place and 0.5 is no longer a supported format. Every precedent record carries `opened_with` and `opening_text` (issue #233). Each distinct non-standard text (a signed text, a non-standard opening, a refused ask) also carries an optional `vs_standard` equivalence label judged part by part against our standard and blind-checked by an independent model (issues #240, #243). No stance, band, risk or deviation verdict anywhere in evidence or digest. Apart from `vs_standard`, judged verdicts from an opt-in judged run travel only under the vendor namespace `x_judgments`. See docs/OPF-SPEC.md.",
   "type": "object",
   "required": [
     "opf_version",
@@ -22,7 +22,7 @@
   "properties": {
     "opf_version": {
       "type": "string",
-      "const": "0.5"
+      "const": "0.6"
     },
     "agreement_type": {
       "type": "object",
@@ -85,6 +85,59 @@
         },
         "notes": {
           "type": "string"
+        },
+        "prior_templates": {
+          "type": "array",
+          "description": "Our OLDER forms (OPF 0.6, issues #249, #250), in the order the producer holds them: the forms the owner SUPPLIED (`baseline.prior_templates` in the config; each one's label, the in-use dates the owner gave and its content address) or, when none was supplied, forms the producer RECONSTRUCTED from the corpus' first drafts on our paper (`basis: reconstructed`: the deals that opened on it and the span of their signing dates; no file, so no hash). A supplied form always wins: the two never appear together. Absent when there is no former form. `evidence.clauses[].prior_standards[]` and a precedent record's `opened_with_form` name a form by its label.",
+          "items": {
+            "type": "object",
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The form's label, unique in the list."
+              },
+              "basis": {
+                "enum": [
+                  "supplied",
+                  "reconstructed"
+                ],
+                "description": "Where the form came from: `supplied` (the owner gave its file; the default when absent) or `reconstructed` (rebuilt from the corpus' first drafts, issue #250). A reconstructed form has no `sha256` and no owner dates, and its `prior_standards` entries cite the corpus document the wording was read from."
+              },
+              "in_use_from": {
+                "$ref": "#/$defs/inUseDate",
+                "description": "When the form came into use, as the owner gave it (config), at the precision given. Absent when not given."
+              },
+              "in_use_until": {
+                "$ref": "#/$defs/inUseDate",
+                "description": "When the form went out of use, as the owner gave it. Absent when not given."
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "description": "Content address of the form's source file: what a citation of the form (`document_id` `prior_template:<label>`, `version` `prior_template`) resolves through (OPF-SPEC \u00a74.1). Required in effect for a form any citation names: a validator rejects a citation of a form that carries none."
+              },
+              "n_deals": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Reconstructed forms only: the distinct deals that opened on the form (the deals whose precedent records name it in `opened_with_form`)."
+              },
+              "first_signed": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$",
+                "description": "Reconstructed forms only: the earliest signing month (YYYY-MM) among those deals; absent when none is dated."
+              },
+              "last_signed": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}$",
+                "description": "Reconstructed forms only: the latest signing month (YYYY-MM) among those deals; absent when none is dated."
+              }
+            }
+          }
         }
       }
     },
@@ -179,10 +232,11 @@
     },
     "evidence": {
       "type": "object",
-      "description": "\u00a73.5 (OPF 0.5) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
+      "description": "\u00a73.5 (OPF 0.6) \u2014 the verdict-free per-deal precedent record. `clauses` names each clause type with its counts; `precedent` holds one record per (deal, clause type); `absence` says, for every signed deal and clause type with no signed precedent, whether the clause is verified absent from the signed copy or possibly present (a signed-text passage other than one filed under the clause itself scores as plausibly the clause) (issue #251). Every count in `clauses` MUST equal what `precedent` implies (validator-enforced). Advisory at runtime.",
       "required": [
         "clauses",
-        "precedent"
+        "precedent",
+        "absence"
       ],
       "additionalProperties": false,
       "properties": {
@@ -197,6 +251,9 @@
           "items": {
             "$ref": "#/$defs/precedent"
           }
+        },
+        "absence": {
+          "$ref": "#/$defs/absence"
         }
       }
     },
@@ -426,6 +483,20 @@
               "version_order_basis": {
                 "type": "string"
               },
+              "signed_on": {
+                "$ref": "#/$defs/signedOnOrNull",
+                "description": "When the deal was signed (OPF 0.6, \u00a73.8): a date from the executed copy, never invented. null when the deal has no detected executed copy (`signed_version` null) or no source states a date; absent on an out-of-scope document."
+              },
+              "signed_on_basis": {
+                "enum": [
+                  "document_text",
+                  "signature_block",
+                  "filename",
+                  "file_metadata",
+                  null
+                ],
+                "description": "Where `signed_on` was read, tried in this order of trust: the date the document states for itself (`document_text`), a date in its signature block (`signature_block`), a date in the executed copy's file name (`filename`) or its file metadata (`file_metadata`). null exactly when `signed_on` is null."
+              },
               "version_files": {
                 "type": "array",
                 "description": "Per-version content addresses (\u00a74, issue #185): sha256 of each SOURCE file's bytes, keyed by the same inferred ordinal citations use \u2014 a consumer holding the corpus verifies 'I have the cited document' by hashing its copy. Hashes of confidential files leak nothing; source_uri does and is stripped by the public export profile.",
@@ -467,6 +538,46 @@
                 "then": {
                   "required": [
                     "scope_rationale"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "signed_on"
+                  ],
+                  "properties": {
+                    "signed_on": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "signed_on_basis"
+                  ],
+                  "properties": {
+                    "signed_on_basis": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "required": [
+                    "in_scope"
+                  ],
+                  "properties": {
+                    "in_scope": {
+                      "const": false
+                    }
+                  }
+                },
+                "else": {
+                  "required": [
+                    "signed_on",
+                    "signed_on_basis"
                   ]
                 }
               }
@@ -578,7 +689,7 @@
     },
     "digest": {
       "type": "object",
-      "description": "digest_version 4 \u2014 the compact model-facing projection of the 0.5 evidence (playbook_engine/digest.py build_digest_v4): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v4(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` judgment \u2014 its label, compact part map and one-sentence reason (issue #243) \u2014 an index and never an instruction. Covered by identity.content_hash like every content section.",
+      "description": "digest_version 5 \u2014 the compact model-facing projection of the 0.6 evidence (playbook_engine/digest.py build_digest_v5): per clause our standard, the deals that opened with it and kept it, the positions of the signed texts, the non-standard signed variants (with how many deals conceded each from our standard and how many signed it as proposed; the variants judged `equivalent` collapse into one entry), the refused asks and the openings not signed as proposed, plus the clause types with no evidence. Optional in the schema; the reference engine always emits it, and when present it MUST equal build_digest_v5(document) (validator-enforced). No `full_text` anywhere; no stance, band, risk or deviation fields; the only judged value is the `vs_standard` judgment \u2014 its label, compact part map, one-sentence reason (issue #243) and how settled it is (`settled`, issue #248) \u2014 an index and never an instruction. Covered by identity.content_hash like every content section.",
       "required": [
         "digest_version",
         "perspective",
@@ -595,7 +706,7 @@
       "properties": {
         "digest_version": {
           "type": "string",
-          "const": "4"
+          "const": "5"
         },
         "perspective": {
           "description": "Copy of the document's top-level `perspective` (null when absent) \u2014 the digest always says who 'us' is.",
@@ -644,10 +755,10 @@
               "description": "In-scope deals with a detected executed copy."
             },
             "first_signed": {
-              "$ref": "#/$defs/signedAtOrNull"
+              "$ref": "#/$defs/digestMonthOrNull"
             },
             "last_signed": {
-              "$ref": "#/$defs/signedAtOrNull"
+              "$ref": "#/$defs/digestMonthOrNull"
             }
           }
         },
@@ -682,10 +793,11 @@
           "required": [
             "part_map",
             "additions",
-            "label_by"
+            "label_by",
+            "settled"
           ],
           "additionalProperties": false,
-          "description": "What each part-map and addition token and each `label_by` value means (a constant, OPF-SPEC \u00a73.5.6, \u00a73.12.2).",
+          "description": "What each part-map and addition token, each `label_by` value and each `settled` value means (a constant, OPF-SPEC \u00a73.5.6, \u00a73.12.2).",
           "properties": {
             "part_map": {
               "type": "object",
@@ -704,6 +816,12 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "settled": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           }
         }
@@ -711,7 +829,7 @@
     },
     "manifest": {
       "type": "object",
-      "description": "The hard-rule manifest (OPF 0.5, issue #228): one rule per `floor.invariants[]` entry whose deletion or absence is a hard rejection, so a consumer can enforce hard-rejection recall outside both models. Derived only from the signed Floor (never from precedent counts) and MUST equal build_manifest(document) (validator-enforced). No judged verdict. Covered by identity.content_hash. Optional in the schema; the reference engine always emits it (about 2,000 tokens on a real Floor).",
+      "description": "The hard-rule manifest (OPF 0.6, issue #228): one rule per `floor.invariants[]` entry whose deletion or absence is a hard rejection, so a consumer can enforce hard-rejection recall outside both models. Derived only from the signed Floor (never from precedent counts) and MUST equal build_manifest(document) (validator-enforced). No judged verdict. Covered by identity.content_hash. Optional in the schema; the reference engine always emits it (about 2,000 tokens on a real Floor).",
       "required": [
         "hard_rules"
       ],
@@ -730,14 +848,14 @@
     },
     "dossiers": {
       "type": "object",
-      "description": "Critic dossiers (OPF 0.5, issue #228): one bounded dossier per `evidence.clauses[]` entry, keyed by clause id, each with at most two precedent excerpts chosen by a fixed order and a budget of `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4); over budget, whole parts are dropped (never cut): listed Floor rules, last first, while the dossier holding only its first excerpt is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. A dossier always keeps one complete excerpt (when the clause has any), even if that alone puts it over budget: that is the only case where a dossier may exceed its budget. Adding precedents changes which excerpts appear, never adds to a dossier (a dossier carries no count). MUST equal build_dossiers(document) (validator-enforced). Covered by identity.content_hash. Optional in the schema; the reference engine always emits it.",
+      "description": "Critic dossiers (OPF 0.6, issue #228): one bounded dossier per `evidence.clauses[]` entry, keyed by clause id, each with at most two precedent excerpts chosen by a fixed order and a budget of `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4); over budget, whole parts are dropped (never cut): listed Floor rules, last first, while the dossier holding only its first excerpt is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. A dossier always keeps one complete excerpt (when the clause has any), even if that alone puts it over budget: that is the only case where a dossier may exceed its budget. Adding precedents changes which excerpts appear, never adds to a dossier (a dossier carries no count). MUST equal build_dossiers(document) (validator-enforced). Covered by identity.content_hash. Optional in the schema; the reference engine always emits it.",
       "additionalProperties": {
         "$ref": "#/$defs/dossier"
       }
     },
     "provenance_index": {
       "type": "object",
-      "description": "Where every dossier excerpt came from, kept or dropped for size (OPF 0.5, issue #228). Not sent to a model. `dossiers` maps a clause id to each excerpt the dossier selected, in selection order: the kept excerpts (`omitted` false), then the ones dropped whole to fit the budget (`omitted` true), so every `omitted_precedent_ids` entry resolves here to its deal; `documents` lists every deal behind those rows. MUST equal build_provenance_index(document) (validator-enforced). Covered by identity.content_hash.",
+      "description": "Where every dossier excerpt came from, kept or dropped for size (OPF 0.6, issue #228). Not sent to a model. `dossiers` maps a clause id to each excerpt the dossier selected, in selection order: the kept excerpts (`omitted` false), then the ones dropped whole to fit the budget (`omitted` true), so every `omitted_precedent_ids` entry resolves here to its deal; `documents` lists every deal behind those rows. MUST equal build_provenance_index(document) (validator-enforced). Covered by identity.content_hash.",
       "required": [
         "compiler",
         "corpus_manifest_hash",
@@ -784,16 +902,13 @@
             "type": "object",
             "required": [
               "document_id",
-              "signed_at",
+              "signed_on",
               "version_files"
             ],
             "additionalProperties": false,
             "properties": {
               "document_id": {
                 "type": "string"
-              },
-              "signed_at": {
-                "$ref": "#/$defs/signedAtOrNull"
               },
               "version_files": {
                 "type": "array",
@@ -819,6 +934,9 @@
                     }
                   }
                 }
+              },
+              "signed_on": {
+                "$ref": "#/$defs/signedOnOrNull"
               }
             }
           },
@@ -896,8 +1014,12 @@
             },
             {
               "const": "template"
+            },
+            {
+              "const": "prior_template"
             }
-          ]
+          ],
+          "description": "The inferred 1-based version of a corpus document; `template` for today's form (`document_id` `template`, resolved through `baseline.template_ref.sha256`); `prior_template` for one of our former forms (`document_id` `prior_template:<label>`, resolved through that form's `baseline.prior_templates[].sha256`, OPF-SPEC \u00a74.1)."
         },
         "clause_path": {
           "type": "string",
@@ -913,21 +1035,6 @@
           "maxItems": 2
         }
       }
-    },
-    "signedAt": {
-      "type": "string",
-      "pattern": "^\\d{4}-(\\d{2}-\\d{2}|Q[1-4])$",
-      "description": "An ISO-8601 date, or the YYYY-Qn quarter `playbook publish` coarsens it to."
-    },
-    "signedAtOrNull": {
-      "oneOf": [
-        {
-          "type": "null"
-        },
-        {
-          "$ref": "#/$defs/signedAt"
-        }
-      ]
     },
     "ourStandard": {
       "type": [
@@ -1001,24 +1108,29 @@
               "$ref": "#/$defs/vsStandardVerdict"
             }
           ],
-          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.5, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
+          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.6, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
         }
       }
     },
     "precedentClause": {
       "type": "object",
-      "description": "One clause type (OPF 0.5). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
+      "description": "One clause type (OPF 0.6). The n_* counts are derived from evidence.precedent and MUST equal what it implies.",
       "required": [
         "id",
         "taxonomy_id",
         "title",
         "our_standard",
+        "prior_standards",
+        "why_changed",
         "n_deals",
         "n_signed_standard",
         "n_variants",
         "n_refused",
         "n_opened_standard",
         "n_kept_standard",
+        "n_opened_prior",
+        "n_kept_prior",
+        "n_moved_to_current",
         "n_changed_openings"
       ],
       "additionalProperties": false,
@@ -1034,6 +1146,38 @@
         },
         "our_standard": {
           "$ref": "#/$defs/ourStandard"
+        },
+        "prior_standards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/priorStandard"
+          },
+          "description": "The clause in each of our former forms that has text for it (`baseline.prior_templates`), in config order; empty when none was supplied (OPF 0.6, issue #249)."
+        },
+        "why_changed": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "text",
+                "basis"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "basis": {
+                  "const": "owner"
+                }
+              }
+            }
+          ],
+          "description": "Why the owner changed this standard since our former forms, in the owner's own words (`basis: owner`); null unless the owner wrote one. The engine never writes a reason."
         },
         "n_deals": {
           "type": "integer",
@@ -1064,6 +1208,21 @@
           "type": "integer",
           "minimum": 0,
           "description": "Of those deals, the ones whose signed text is our standard language (`standard: true`)."
+        },
+        "n_opened_prior": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose clause opened on one of our former forms (`opened_with` is `prior_standard`)."
+        },
+        "n_kept_prior": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, the deals that signed the text they opened with (a signed text and no distinct `opening_text`): they held the form we sent."
+        },
+        "n_moved_to_current": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, the deals whose signed text is today's standard (`standard: true`)."
         },
         "n_changed_openings": {
           "type": "integer",
@@ -1102,13 +1261,13 @@
               "$ref": "#/$defs/vsStandardVerdict"
             }
           ],
-          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.5, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
+          "description": "The equivalence label of this text against our standard, judged once per distinct text (OPF 0.6, issue #240); null = not yet judged (never guessed), and always null for a text whose `standard` fact is true and for a clause with no `our_standard`. An index the consuming model checks against the cited text, never an instruction."
         }
       }
     },
     "precedent": {
       "type": "object",
-      "description": "One deal's record for one clause type (OPF 0.5) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
+      "description": "One deal's record for one clause type (OPF 0.6) \u2014 facts only, never a judged verdict. At most one record per (document_id, taxonomy_id).",
       "required": [
         "id",
         "taxonomy_id",
@@ -1117,6 +1276,7 @@
         "paper_basis",
         "paper_confidence",
         "signed",
+        "signed_on",
         "rounds",
         "signed_text",
         "opened_with",
@@ -1175,8 +1335,9 @@
           "type": "boolean",
           "description": "The deal has a detected executed copy; MUST agree with corpus.documents[].signed_version."
         },
-        "signed_at": {
-          "$ref": "#/$defs/signedAt"
+        "signed_on": {
+          "$ref": "#/$defs/signedOnOrNull",
+          "description": "When the deal was signed: the deal's `corpus.documents[].signed_on`, which it MUST equal. null when the deal has no detected executed copy (`signed` false) or no date could be established \u2014 never guessed."
         },
         "rounds": {
           "type": "integer",
@@ -1197,14 +1358,20 @@
         "opened_with": {
           "enum": [
             "standard",
+            "prior_standard",
             "non_standard",
             "absent",
             null
           ],
-          "description": "What the clause opened with, a fact about the deal's first draft (the first version in negotiation order; the signed copy itself for a single-version deal), whatever its origin and whatever paper the deal is on. `standard`: the first-draft text of the clause type is our standard language (the same exact check `standard` uses). `non_standard`: present but not standard, including a clause type with no template clause. `absent`: the first draft has no node of the clause type (it was added during negotiation). null: not determined, i.e. the deal has no detected executed copy (`signed` false) or the store predates this field. MUST be null when `signed` is false. Never a judged verdict."
+          "description": "What the clause opened with, a fact about the deal's first draft (the first version in negotiation order; the signed copy itself for a single-version deal), whatever its origin and whatever paper the deal is on. `standard`: the first-draft text of the clause type is our standard language (the same exact check `standard` uses). `prior_standard`: not today's standard but the text of one of OUR former forms for the clause (`opened_with_form` names it; the same exact check, the current standard winning when both match), so its origin is ours, never the counterparty's. `non_standard`: present but neither of those, including a clause type with no template clause. `absent`: the first draft has no node of the clause type (it was added during negotiation). null: not determined, i.e. the deal has no detected executed copy (`signed` false) or the store predates this field. MUST be null when `signed` is false. Never a judged verdict."
+        },
+        "opened_with_form": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The label of the former form `opened_with: prior_standard` matched (the form the deal opened on: of the forms whose text matches, the one the most of the deal's first-draft clause types match, then the first listed; a `baseline.prior_templates[].label`). Present exactly when `opened_with` is `prior_standard`."
         },
         "opening_text": {
-          "description": "The first-draft text of the clause type (every first-draft node bound into an aligned row of it, joined with a newline in first-draft order; `ref` cites the first node), whatever its origin. Recorded when `opened_with` is `standard` or `non_standard` AND either `signed_text` is null or the \u00a73.5.4 grouping key of the opening differs from that of `signed_text`; null otherwise. null means \"not recorded / not distinct\", never \"opened with the signed text\" when `opened_with` is null. When non-null, `moved` MUST be true.",
+          "description": "The first-draft text of the clause type (every first-draft node bound into an aligned row of it, joined with a newline in first-draft order; `ref` cites the first node), whatever its origin. Recorded when `opened_with` is `standard`, `prior_standard` or `non_standard` AND either `signed_text` is null or the \u00a73.5.4 grouping key of the opening differs from that of `signed_text`; null otherwise. null means \"not recorded / not distinct\", never \"opened with the signed text\" when `opened_with` is null. When non-null, `moved` MUST be true.",
           "oneOf": [
             {
               "type": "null"
@@ -1236,6 +1403,7 @@
       "required": [
         "text",
         "n_deals",
+        "first_signed",
         "last_signed",
         "n_from_standard",
         "n_unchanged",
@@ -1243,6 +1411,7 @@
         "part_map",
         "additions",
         "reason",
+        "settled",
         "ref",
         "precedent_ids"
       ],
@@ -1257,8 +1426,11 @@
           "type": "integer",
           "minimum": 1
         },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
+        },
         "last_signed": {
-          "$ref": "#/$defs/signedAtOrNull"
+          "$ref": "#/$defs/digestMonthOrNull"
         },
         "n_from_standard": {
           "type": "integer",
@@ -1340,6 +1512,22 @@
             "null"
           ],
           "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
         }
       }
     },
@@ -1348,10 +1536,13 @@
       "required": [
         "text",
         "n_deals",
+        "first_signed",
+        "last_signed",
         "label",
         "part_map",
         "additions",
         "reason",
+        "settled",
         "ref",
         "precedent_ids"
       ],
@@ -1364,6 +1555,12 @@
         "n_deals": {
           "type": "integer",
           "minimum": 1
+        },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
+        },
+        "last_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
         },
         "label": {
           "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
@@ -1435,6 +1632,22 @@
             "null"
           ],
           "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
         }
       }
     },
@@ -1446,16 +1659,22 @@
         "title",
         "our_standard",
         "n_deals",
+        "first_signed",
+        "last_signed",
         "n_signed_standard",
         "n_opened_standard",
         "n_kept_standard",
+        "standard_history",
         "positions",
         "signed_variants",
         "refused_asks",
         "changed_openings",
         "n_variants_total",
         "n_refused_total",
-        "n_changed_openings_total"
+        "n_changed_openings_total",
+        "n_signed_without_verified",
+        "n_signed_without_possible",
+        "verified_absent_deals"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1475,6 +1694,14 @@
           "type": "integer",
           "minimum": 0
         },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull",
+          "description": "Earliest signing month among the deals with a precedent record for the clause (null when none is dated)."
+        },
+        "last_signed": {
+          "$ref": "#/$defs/digestMonthOrNull",
+          "description": "Latest signing month among the same deals."
+        },
         "n_signed_standard": {
           "type": "integer",
           "minimum": 0
@@ -1488,6 +1715,9 @@
           "type": "integer",
           "minimum": 0,
           "description": "Of those, deals whose signed text is our standard language."
+        },
+        "standard_history": {
+          "$ref": "#/$defs/digestStandardHistory"
         },
         "positions": {
           "$ref": "#/$defs/digestPositions"
@@ -1532,6 +1762,23 @@
           "type": "integer",
           "minimum": 0,
           "description": "Uncapped number of changed openings; equals evidence.clauses[].n_changed_openings."
+        },
+        "n_signed_without_verified": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals with no signed text for the clause where it is verified absent (`evidence.absence`, status `absent_verified`): no signed-text passage other than one filed under the clause itself resembles it. A fact; no verdict."
+        },
+        "n_signed_without_possible": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals with no signed text for the clause where it is possibly present (status `possibly_present`: a signed-text passage other than one filed under the clause itself resembles it, or nothing could be checked). Together with the verified count, every signed deal without a signed text for the clause."
+        },
+        "verified_absent_deals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestAbsentDeal"
+          },
+          "description": "The deals counted in `n_signed_without_verified`, latest `signed_on` first (undated last), then `document_id`; capped (see `n_signed_without_verified`)."
         }
       }
     },
@@ -1752,6 +1999,8 @@
         "n_texts",
         "n_from_standard",
         "n_unchanged",
+        "settled_counts",
+        "first_signed",
         "last_signed",
         "exemplars",
         "precedent_ids"
@@ -1779,8 +2028,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "first_signed": {
+          "$ref": "#/$defs/digestMonthOrNull"
+        },
         "last_signed": {
-          "$ref": "#/$defs/signedAtOrNull"
+          "$ref": "#/$defs/digestMonthOrNull"
         },
         "exemplars": {
           "type": "array",
@@ -1811,6 +2063,35 @@
             "type": "string"
           },
           "minItems": 1
+        },
+        "settled_counts": {
+          "type": "object",
+          "required": [
+            "agreed",
+            "adjudicated",
+            "unchecked",
+            "owner"
+          ],
+          "additionalProperties": false,
+          "description": "How many of the `n_texts` collapsed texts are in each `settled` state (OPF-SPEC \u00a73.5.6, issue #248); the four counts sum to `n_texts`.",
+          "properties": {
+            "agreed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "adjudicated": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unchecked": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "owner": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -1826,6 +2107,7 @@
         "part_map",
         "additions",
         "reason",
+        "settled",
         "ref",
         "precedent_ids"
       ],
@@ -1920,6 +2202,22 @@
             "null"
           ],
           "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
         }
       }
     },
@@ -2046,7 +2344,7 @@
     },
     "hardRule": {
       "type": "object",
-      "description": "One hard rule (OPF 0.5, issue #228), derived from one `floor.invariants[]` entry and never from precedent counts. `clause_id` / `taxonomy_id` come from the invariant's `x_taxonomy_id` (null when it names none or the corpus has no evidence for it); `required_presence`, `condition` and `permissible_proof` from its `x_required_presence`, `x_condition` and `x_permissible_proof` (defaults: false, \"judged\", []); `fallback_language` is the clause's `our_standard.text` (null when there is none). A rule that demands presence (`required_presence` true) or carries a predicate (`condition` other than \"judged\") MUST name its clause: `taxonomy_id` is then a string, because a predicate is checked against the text of the clause it names and a presence rule rejects that clause's absence (OPF-SPEC \u00a73.12.3).",
+      "description": "One hard rule (OPF 0.6, issue #228), derived from one `floor.invariants[]` entry and never from precedent counts. `clause_id` / `taxonomy_id` come from the invariant's `x_taxonomy_id` (null when it names none or the corpus has no evidence for it); `required_presence`, `condition` and `permissible_proof` from its `x_required_presence`, `x_condition` and `x_permissible_proof` (defaults: false, \"judged\", []); `fallback_language` is the clause's `our_standard.text` (null when there is none). A rule that demands presence (`required_presence` true) or carries a predicate (`condition` other than \"judged\") MUST name its clause: `taxonomy_id` is then a string, because a predicate is checked against the text of the clause it names and a presence rule rejects that clause's absence (OPF-SPEC \u00a73.12.3).",
       "required": [
         "rule_id",
         "clause_id",
@@ -2188,12 +2486,13 @@
                 "label",
                 "label_by",
                 "reason",
+                "settled",
                 "part_map",
                 "part_reasons",
                 "additions"
               ],
               "additionalProperties": false,
-              "description": "The judgment of the text the excerpt's group stands for (the signed text of a signed variant, the opening of a changed opening, the ask of a refused ask): its label, who set it (`label_by`), its reason (the owner's when the owner set the label), part map, the reason of every part that is not equivalent or not a neutral omission, and every addition with its token (issue #243). Null when that text is not judged.",
+              "description": "The judgment of the text the excerpt's group stands for (the signed text of a signed variant, the opening of a changed opening, the ask of a refused ask): its label, who set it (`label_by`), its reason (the owner's when the owner set the label), how settled it is (`settled`), part map, the reason of every part that is not equivalent or not a neutral omission, and every addition with its token (issue #243). Null when that text is not judged.",
               "properties": {
                 "label": {
                   "enum": [
@@ -2269,6 +2568,15 @@
                       }
                     }
                   }
+                },
+                "settled": {
+                  "enum": [
+                    "agreed",
+                    "adjudicated",
+                    "unchecked",
+                    "owner"
+                  ],
+                  "description": "How settled the judgment is (`agreed`, `adjudicated`, `unchecked` or `owner`; as in the digest, issue #248). A dossier carries it only for a judged text."
                 }
               }
             }
@@ -2278,7 +2586,7 @@
     },
     "dossier": {
       "type": "object",
-      "description": "A bounded critic dossier for one clause (OPF 0.5, issue #228): at most two excerpts, every text WHOLE (nothing is cut part-way: a cut-off clause can drop its operative carve-out or cap and so plant a false fact). Its budget is `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4; 1,000 when there is no our standard); over budget, WHOLE parts are dropped: the listed Floor rules, last first, while the dossier holding only its first excerpt (none, when the clause has none) is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. Our standard and the identifiers are never dropped. A dossier keeps at least one complete excerpt (when the clause has any), even if that one alone puts it over budget: a dossier holding its single kept excerpt is the only one that may exceed its budget, and a dossier with no excerpt over its budget is invalid. Facts only: our standard, the signed Floor's own statements and rationale for the clause, and the selected excerpts. `n_floor_rules` is the uncapped number of Floor rules for the clause (at most three are listed, fewer when rules are dropped for size; the manifest states every one).",
+      "description": "A bounded critic dossier for one clause (OPF 0.6, issue #228): at most two excerpts, every text WHOLE (nothing is cut part-way: a cut-off clause can drop its operative carve-out or cap and so plant a false fact). Its budget is `max(1000, 3 * tokens(our_standard.text))` tokens (canonical JSON chars / 4; 1,000 when there is no our standard); over budget, WHOLE parts are dropped: the listed Floor rules, last first, while the dossier holding only its first excerpt (none, when the clause has none) is still over budget, then excerpts in reverse selection order, keeping the first, until it fits. Our standard and the identifiers are never dropped. A dossier keeps at least one complete excerpt (when the clause has any), even if that one alone puts it over budget: a dossier holding its single kept excerpt is the only one that may exceed its budget, and a dossier with no excerpt over its budget is invalid. Facts only: our standard, the signed Floor's own statements and rationale for the clause, and the selected excerpts. `n_floor_rules` is the uncapped number of Floor rules for the clause (at most three are listed, fewer when rules are dropped for size; the manifest states every one).",
       "required": [
         "clause_id",
         "taxonomy_id",
@@ -2422,6 +2730,477 @@
         },
         "source_ref": {
           "$ref": "#/$defs/citation"
+        }
+      }
+    },
+    "signedOn": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}(-\\d{2})?$",
+      "description": "When a deal was signed: an ISO-8601 date (YYYY-MM-DD) or, when only the month is known, YYYY-MM. A real calendar date with a year in 1980-2099 (OPF-SPEC \u00a73.8)."
+    },
+    "signedOnOrNull": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/signedOn"
+        }
+      ]
+    },
+    "digestMonth": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}$",
+      "description": "A year-month (YYYY-MM): the digest reports signing dates to the month."
+    },
+    "digestMonthOrNull": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/digestMonth"
+        }
+      ]
+    },
+    "inUseDate": {
+      "type": "string",
+      "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$",
+      "description": "A year (YYYY), a month (YYYY-MM) or a date (YYYY-MM-DD), at the precision the owner gave."
+    },
+    "priorStandard": {
+      "type": "object",
+      "description": "One clause of one of OUR former forms (OPF 0.6, issue #249): its text as ordered parts (the form's passages of the clause type in form order, form front matter excluded: the rule `our_standard` follows) and its judgment against TODAY's standard, part by part. A fact about a supplied form, never a reason: why a clause changed is only ever the owner's `why_changed`.",
+      "required": [
+        "form_label",
+        "text",
+        "parts",
+        "source_ref",
+        "vs_standard"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "form_label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The form's label (a `baseline.prior_templates[].label`)."
+        },
+        "text": {
+          "type": "string",
+          "description": "The parts joined in order with a blank line."
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "part_id",
+              "order",
+              "text"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "part_id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}(-[0-9]+)?$",
+                "description": "Content hash of the part's normalized text (first 8 hex chars of sha256 over its OPF-SPEC \u00a73.5.4 grouping key); a later part of the same standard with the same hash gets `-2`, `-3`, ... (issue #243)."
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based position in the standard."
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "The form's parts in order; `part_id` is the same content hash `our_standard.parts[]` use, so an identical passage has the same id in both."
+        },
+        "source_ref": {
+          "$ref": "#/$defs/citation",
+          "description": "Where the clause sits. For a SUPPLIED form, in the form's own bytes: `document_id` `prior_template:<form_label>` and `version` `prior_template` (resolved through that form's `baseline.prior_templates[].sha256`, never through `template`, which is today's form; OPF-SPEC \u00a74.1), `clause_path` its path (or paths) and `char_span` its span in that form. For a RECONSTRUCTED form (issue #250), which has no file, the ordinary citation of the dominant wording in the corpus document it was read from."
+        },
+        "vs_standard": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/vsStandardVerdict"
+            }
+          ],
+          "description": "This form's clause judged against today's standard, once per distinct text (the same judgment and cache key as any other text, role `prior_standard`). null = not yet judged, and always null when the clause reads the same as today's standard or the clause has no `our_standard`. Its parts are today's standard's parts. An index the consuming model checks against the cited text, never an instruction."
+        }
+      }
+    },
+    "digestStandardHistory": {
+      "type": "object",
+      "description": "The clause's standard history (OPF 0.6 / digest 5, issue #249): each of our former forms with text for the clause, and the owner's optional note on why we changed it. Facts only: the only reason ever shown is the owner's.",
+      "required": [
+        "forms",
+        "why_changed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "forms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestStandardForm"
+          },
+          "description": "One entry per former form that has text for the clause, in config order."
+        },
+        "why_changed": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "text",
+                "basis"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "basis": {
+                  "const": "owner"
+                }
+              }
+            }
+          ],
+          "description": "The owner's note (copy of `evidence.clauses[].why_changed`), or null."
+        }
+      }
+    },
+    "digestStandardForm": {
+      "type": "object",
+      "description": "One former form of ours for a clause: how deals that opened on it fared, and how its text compares with today's standard.",
+      "required": [
+        "form",
+        "basis",
+        "in_use_from",
+        "in_use_until",
+        "in_use_basis",
+        "n_opened",
+        "n_kept",
+        "n_conceded",
+        "n_moved_to_current",
+        "unchanged",
+        "label",
+        "part_map",
+        "additions",
+        "reason",
+        "settled",
+        "parts",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "form": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The form's label."
+        },
+        "basis": {
+          "enum": [
+            "supplied",
+            "reconstructed"
+          ],
+          "description": "Where the form came from (copy of `baseline.prior_templates[].basis`, `supplied` when absent): the owner gave its file, or the producer rebuilt it from the corpus' first drafts on our paper (issue #250)."
+        },
+        "in_use_from": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/inUseDate"
+            }
+          ],
+          "description": "When the form came into use: the config's own value when given, else the earliest signing month among the deals that opened on it; null when neither exists."
+        },
+        "in_use_until": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/inUseDate"
+            }
+          ],
+          "description": "When the form went out of use: the config's own value when given, else the latest signing month among the deals that opened on it."
+        },
+        "in_use_basis": {
+          "enum": [
+            "config",
+            "deal_dates",
+            "mixed",
+            null
+          ],
+          "description": "Where the in-use dates came from: `config` (the owner gave every date shown), `deal_dates` (inferred, once per form, from the signing months of the deals that opened on the form in any clause), `mixed`, or null when there is no date."
+        },
+        "n_opened": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct signed deals whose clause opened on this form."
+        },
+        "n_kept": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, deals that signed the text they opened with."
+        },
+        "n_conceded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "`n_opened - n_kept`: deals whose signed text is not the form we sent."
+        },
+        "n_moved_to_current": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, deals whose signed text is today's standard."
+        },
+        "unchanged": {
+          "type": "boolean",
+          "description": "The form's clause reads, under the OPF-SPEC \u00a73.5.4 grouping key, exactly as today's standard: nothing to compare, so the part map is null."
+        },
+        "label": {
+          "description": "The `vs_standard.label` of the group's representative text (OPF-SPEC \u00a73.5.6), or null when it is not judged. An index the consuming model checks against the cited text, never an instruction.",
+          "enum": [
+            "equivalent",
+            "more_protective",
+            "less_protective",
+            "mixed",
+            "different_concept",
+            null
+          ]
+        },
+        "part_map": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "=",
+                  "+",
+                  "-",
+                  "x+",
+                  "x-",
+                  "x0"
+                ]
+              }
+            }
+          ],
+          "description": "One token per part of our standard, in order (see `part_map_legend`); null when the text is not judged."
+        },
+        "additions": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "+",
+                  "-",
+                  "0"
+                ]
+              }
+            }
+          ],
+          "description": "One token per addition no part covers (see `part_map_legend`); null when the text is not judged."
+        },
+        "label_by": {
+          "const": "owner",
+          "description": "Present only when the owner set `label` over the judged parts (`vs_standard.owner_label`): the part map may then imply another label, and `reason` is the owner's. Absent, the label is derived from `part_map` and `additions` (`parts`, the default `part_map_legend.label_by` states; OPF-SPEC \u00a73.5.6), and on an entry whose text is not judged."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The one-sentence reason beside the label: the owner's (`owner_label.reason`) when `label_by` is `owner`, else the judgment's most important difference; null when the text is not judged. Per-part reasons are in the evidence and the dossiers."
+        },
+        "settled": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "agreed",
+                "adjudicated",
+                "unchecked",
+                "owner"
+              ]
+            }
+          ],
+          "description": "How settled the judgment of this text is (OPF-SPEC \u00a73.5.6, issue #248), derived from its `basis` and blind `check`: `owner` (an owner's correction, never checked), `adjudicated` (the blind check disagreed and a fresh agent decided: a contested label, worth more scrutiny), `agreed` (the blind check reached the same label and parts) or `unchecked` (no completed check, including a disagreement still awaiting adjudication). Null when the text is not judged. `part_map_legend.settled` says what each value means."
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The form's parts in order; `text` is null for a part whose `part_id` is a part of today's standard (the passage is unchanged, see `our_standard`).",
+          "items": {
+            "type": "object",
+            "required": [
+              "part_id",
+              "text"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "part_id": {
+                "type": "string"
+              },
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "ref": {
+          "$ref": "#/$defs/citation",
+          "description": "Where the clause sits in the form: a copy of the prior standard's `source_ref` (`document_id` `prior_template:<form>`, `version` `prior_template`), resolved through that form's `baseline.prior_templates[].sha256`, never through today's template (OPF-SPEC \u00a74.1)."
+        }
+      }
+    },
+    "absence": {
+      "type": "object",
+      "description": "Verified absence (OPF 0.6, issue #251, OPF-SPEC \u00a73.5.8) \u2014 facts only. One record per (signed deal, clause type) with no signed precedent: every in-scope deal with a detected executed copy (`corpus.documents[].signed_version` non-null) crossed with every `evidence.clauses` entry, less the pairs that have a `precedent` record with a `signed_text`. `guard` is the similarity score at or above which a signed-text node keeps a deal out of the verified count. The validator enforces completeness, uniqueness and the status rules.",
+      "required": [
+        "guard",
+        "records"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "guard": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "description": "The score threshold the producer used: a record's `candidates[].score` is at least this, and a `scored` record is `absent_verified` exactly when it has no candidate."
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/absenceRecord"
+          }
+        }
+      }
+    },
+    "absenceRecord": {
+      "type": "object",
+      "description": "One signed deal with no signed text for one clause type (OPF 0.6). At most one record per (document_id, taxonomy_id). A fact about the signed copy, never a verdict.",
+      "required": [
+        "id",
+        "taxonomy_id",
+        "document_id",
+        "status",
+        "basis",
+        "n_checked",
+        "candidates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^abs\\.[0-9a-f]{16}$",
+          "description": "\"abs.\" + the first 16 hex chars of sha256(canonical([agreement_type.id, document_id, taxonomy_id]))."
+        },
+        "taxonomy_id": {
+          "type": "string"
+        },
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "absent_verified",
+            "possibly_present"
+          ],
+          "description": "`absent_verified`: no signed-text node of the deal scores at or above `guard` against the clause type (see `basis`). `possibly_present`: at least one does (`candidates`), or the check could not be made (`basis: unverifiable`)."
+        },
+        "basis": {
+          "enum": [
+            "scored",
+            "unverifiable"
+          ],
+          "description": "`scored`: the deal's signed-text nodes were scored against the clause type's reference texts. `unverifiable`: nothing could be checked (the executed copy produced no readable text or has 1,000 characters or more of passages that extracted as junk, or the clause type has no reference text); the status is then `possibly_present`."
+        },
+        "n_checked": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many of the deal's signed-text nodes were examined: every clause node of the executed copy except those filed under this clause type (a node that is no clause is not one), plus any node filed under this clause type but too short to be precedent."
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/absenceCandidate"
+          },
+          "description": "The signed-text nodes scoring at or above `guard`, best first (at most three); empty when `status` is `absent_verified`."
+        }
+      }
+    },
+    "absenceCandidate": {
+      "type": "object",
+      "required": [
+        "ref",
+        "score",
+        "filed_under"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/citation"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Content-word Jaccard similarity of the cited node (as a whole, or its best paragraph, sentence or list item) to the clause type's reference texts, rounded to three places; 1.0 for a node the classifier assigned to the clause type that was too short to be precedent."
+        },
+        "filed_under": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The clause type the classifier filed the cited node under (`taxonomy_id`), or null when it left the node unclassified. A node filed under the very clause type of the record is one too short to be precedent (score 1.0)."
+        }
+      }
+    },
+    "digestAbsentDeal": {
+      "type": "object",
+      "description": "A signed deal the clause is verified absent from (an `evidence.absence.records[]` entry).",
+      "required": [
+        "document_id",
+        "signed_on",
+        "absence_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signed_on": {
+          "$ref": "#/$defs/signedOnOrNull"
+        },
+        "absence_id": {
+          "type": "string",
+          "pattern": "^abs\\.[0-9a-f]{16}$"
         }
       }
     }
