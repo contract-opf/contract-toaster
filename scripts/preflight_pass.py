@@ -317,11 +317,15 @@ def render_preflight_excerpt_block(excerpt: str) -> str:
     apart. This module does not import or mutate `primary_review_pass`'s
     private `_delimited_block` helper or its `UNTRUSTED_BEARING_TAGS`
     frozenset -- `PREFLIGHT_DOCUMENT_EXCERPT` is this module's own tag, with
-    its own single call site, so there is nothing to register it into.
+    its own single call site, so there is nothing to register it into. The
+    excerpt does go through the same public `neutralise_prompt_delimiters`,
+    with this tag added, so a `w:br`-separated line cannot close the block.
     """
     return (
         f"{pp.UNTRUSTED_BLOCK_WARNING}\n"
-        f"<{PREFLIGHT_EXCERPT_TAG}>\n{excerpt}\n</{PREFLIGHT_EXCERPT_TAG}>"
+        f"<{PREFLIGHT_EXCERPT_TAG}>\n"
+        f"{pp.neutralise_prompt_delimiters(excerpt, frozenset({PREFLIGHT_EXCERPT_TAG}))}\n"
+        f"</{PREFLIGHT_EXCERPT_TAG}>"
     )
 
 

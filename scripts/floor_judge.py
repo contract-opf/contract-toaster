@@ -231,6 +231,13 @@ def _is_party_relative(statement: str) -> bool:
     return _PARTY_RELATIVE_TERM in statement.lower()
 
 
+#: The judge's one block tag. `review_context` is the counterparty's document,
+#: so the #162 delimiter escaping covers it too: without it a paragraph
+#: carrying a `w:br` could close the block early and lay out a second
+#: `invariant_id:`/`statement:` pair after it.
+_REVIEW_CONTEXT_TAGS = frozenset({"REVIEW_CONTEXT"})
+
+
 def _build_user_prompt(
     *, invariant_id: str, statement: str, review_context: str, perspective_note: str = ""
 ) -> str:
@@ -244,7 +251,7 @@ def _build_user_prompt(
         f"statement: {statement}\n"
         "\n"
         "<REVIEW_CONTEXT>\n"
-        f"{review_context}\n"
+        f"{_primary_review_pass.neutralise_prompt_delimiters(review_context, _REVIEW_CONTEXT_TAGS)}\n"
         "</REVIEW_CONTEXT>\n"
     )
 
@@ -308,7 +315,11 @@ def _check_judge_response(raw_text: str, *, expected_invariant_id: str) -> tuple
     return {
         "invariant_id": expected_invariant_id,
         "violated": violated,
-        "evidence_quote": evidence_quote,
+        # A quote copied out of REVIEW_CONTEXT carries the escaped delimiter
+        # spelling; report the document's own characters instead.
+        "evidence_quote": _primary_review_pass.restore_neutralised_delimiters(
+            evidence_quote, _REVIEW_CONTEXT_TAGS
+        ),
     }, ""
 
 

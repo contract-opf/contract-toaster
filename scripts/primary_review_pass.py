@@ -2728,7 +2728,7 @@ PROMPT_BLOCK_TAGS = UNTRUSTED_BEARING_TAGS | frozenset(
 # `</COUNTERPARTY_DOCUMENT>` on its own line followed by a forged
 # `<TOASTER_GUIDANCE>` block laid out exactly like the real one, and it landed
 # in the same position the real one occupies (docs/threat-model.md,
-# "Residual since issue #148").
+# "Forged block delimiters").
 #
 # `_delimited_block` therefore escapes the `<` that opens every opening or
 # closing tag head of a `PROMPT_BLOCK_TAGS` tag inside an untrusted block's
@@ -2780,22 +2780,38 @@ PROMPT_BLOCK_TAGS = UNTRUSTED_BEARING_TAGS | frozenset(
 # `<` or `&`. The entity names are matched case-sensitively (the tag name is
 # not): `&LT;` is not a spelling this function emits, so it is left alone in
 # both directions.
-_PROMPT_TAG_ALTERNATION = "|".join(sorted(PROMPT_BLOCK_TAGS))
 # The head is POSSESSIVE (`\s*+`). Whitespace and `/` are disjoint, so a
 # greedy run is always the only way to match and possessiveness changes no
 # match -- but with plain `\s*/?\s*` a `<` followed by a long whitespace run
 # that ends in no tag name made the engine try every split of that run
 # between the two quantifiers, quadratic in its length, on untrusted text
 # before any size gate (#162 review: ~80 s for 40k NBSP in an 82 KB .docx).
-_PROMPT_TAG_HEAD = rf"\s*+/?\s*+(?i:{_PROMPT_TAG_ALTERNATION})\b"
-_PROMPT_DELIMITER_RE = re.compile(
-    rf"<(?={_PROMPT_TAG_HEAD})"
-    rf"|&(?=(?:amp;)*lt;{_PROMPT_TAG_HEAD})"
-)
-_NEUTRALISED_PROMPT_DELIMITER_RE = re.compile(
-    rf"&lt;(?={_PROMPT_TAG_HEAD})"
-    rf"|&amp;(?=(?:amp;)*lt;{_PROMPT_TAG_HEAD})"
-)
+#
+# Since the #162 follow-up the patterns are built per tag SET, because the other prompt
+# builders that embed document-derived text under a tag of their own (the
+# Floor judge's `REVIEW_CONTEXT`, preflight's `PREFLIGHT_DOCUMENT_EXCERPT`,
+# the cover note's `REVIEW_ANALYSIS_DIGEST`) pass that tag as `extra_tags`.
+# `PROMPT_BLOCK_TAGS` is always included, so no builder's untrusted text can
+# carry a review-prompt delimiter either. The argument above holds for any
+# tag set: it never relied on which names the alternation lists.
+_DelimiterPatterns = tuple[re.Pattern[str], re.Pattern[str]]
+_DELIMITER_PATTERNS: dict[frozenset[str], _DelimiterPatterns] = {}
+
+
+def _delimiter_patterns(extra_tags: frozenset[str]) -> _DelimiterPatterns:
+    """`(neutralise, restore)` patterns for `PROMPT_BLOCK_TAGS | extra_tags`,
+    compiled once per distinct tag set (there are four in the codebase)."""
+    tags = PROMPT_BLOCK_TAGS | extra_tags
+    patterns = _DELIMITER_PATTERNS.get(tags)
+    if patterns is None:
+        alternation = "|".join(re.escape(tag) for tag in sorted(tags))
+        head = rf"\s*+/?\s*+(?i:{alternation})\b"
+        patterns = (
+            re.compile(rf"<(?={head})|&(?=(?:amp;)*lt;{head})"),
+            re.compile(rf"&lt;(?={head})|&amp;(?=(?:amp;)*lt;{head})"),
+        )
+        _DELIMITER_PATTERNS[tags] = patterns
+    return patterns
 
 
 def _neutralise_match(match: re.Match[str]) -> str:
@@ -2806,21 +2822,22 @@ def _restore_match(match: re.Match[str]) -> str:
     return "<" if match.group() == "&lt;" else "&"
 
 
-def neutralise_prompt_delimiters(content: str) -> str:
-    """`content` with the `<` of every `PROMPT_BLOCK_TAGS` tag head escaped,
-    closed or not, and the `&` of any escaped spelling of one escaped in turn
-    (issue #162; see the comment above). For any input the result contains
-    no `<` followed by a tag head, so no complete delimiter either.
-    Deterministic and exactly invertible by `restore_neutralised_delimiters`
-    for every input. Not idempotent, and need not be: `_delimited_block`
-    applies it once per rendered block."""
-    return _PROMPT_DELIMITER_RE.sub(_neutralise_match, content)
+def neutralise_prompt_delimiters(content: str, extra_tags: frozenset[str] = frozenset()) -> str:
+    """`content` with the `<` of every `PROMPT_BLOCK_TAGS` (and `extra_tags`)
+    tag head escaped, closed or not, and the `&` of any escaped spelling of
+    one escaped in turn (issue #162; see the comment above). For any input
+    the result contains no `<` followed by a tag head, so no complete
+    delimiter either. Deterministic and exactly invertible by
+    `restore_neutralised_delimiters` with the same `extra_tags`, for every
+    input. Not idempotent, and need not be: `_delimited_block` applies it
+    once per rendered block."""
+    return _delimiter_patterns(extra_tags)[0].sub(_neutralise_match, content)
 
 
-def restore_neutralised_delimiters(text: str) -> str:
+def restore_neutralised_delimiters(text: str, extra_tags: frozenset[str] = frozenset()) -> str:
     """The inverse of `neutralise_prompt_delimiters`, for a string a model
     transcribed out of an untrusted block (issue #162)."""
-    return _NEUTRALISED_PROMPT_DELIMITER_RE.sub(_restore_match, text)
+    return _delimiter_patterns(extra_tags)[1].sub(_restore_match, text)
 
 
 def _delimited_block(tag: str, content: str) -> str:
@@ -2966,7 +2983,7 @@ RENDERED_BLOCK_MARKER_PATTERN = re.compile(r"^\[p\d{4,}\][ \t]*")
 # content (`neutralise_prompt_delimiters`), so the forged block stays inside
 # the document block it came from. What remains -- prose imitating an
 # untagged block such as this tasking -- is recorded in docs/threat-model.md
-# ("Residual since issue #148").
+# ("Forged block delimiters", What remains).
 # ---------------------------------------------------------------------------
 
 REVIEWER_TASKING_BLOCK = (
