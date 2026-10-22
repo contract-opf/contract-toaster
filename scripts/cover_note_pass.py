@@ -57,6 +57,9 @@ restated) -- nothing inside the digest is ever treated as an instruction.
 `proposed_replacement_text` are deliberately NEVER included in the digest:
 this is a business-English summary of WHAT changed and WHY, not a
 restatement of clause text or internal playbook/precedent bookkeeping.
+The digest body also goes through `primary_review_pass
+.neutralise_prompt_delimiters` with this module's tag added, so a field that
+carries a forged closing delimiter cannot end the block early.
 
 That the digest's INPUT fields were themselves scanned before landing on
 the review row is not why the note this module drafts is safe -- a fresh
@@ -211,7 +214,9 @@ def render_cover_note_user_prompt(issues: Any, verdict_summary: str | None = Non
     body = "\n".join(lines) if lines else "(no substantive edits recorded)"
     return (
         f"{pp.UNTRUSTED_BLOCK_WARNING}\n"
-        f"<{COVER_NOTE_DIGEST_TAG}>\n{body}\n</{COVER_NOTE_DIGEST_TAG}>"
+        f"<{COVER_NOTE_DIGEST_TAG}>\n"
+        f"{pp.neutralise_prompt_delimiters(body, frozenset({COVER_NOTE_DIGEST_TAG}))}\n"
+        f"</{COVER_NOTE_DIGEST_TAG}>"
     )
 
 
