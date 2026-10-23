@@ -559,7 +559,9 @@ def _actual_cents_from_client(client: Any, dynamodb_resource: Any) -> int:
     `cumulative_usage` is the SAME shape `last_usage` always was --
     `{"input_tokens": int, "output_tokens": int}` -- so it drops straight
     into `reviews.compute_actual_usd_cents_from_usage` as its single
-    argument, exactly as that function's docstring says it must. This one
+    argument, exactly as that function's docstring says it must -- plus, when
+    a call reported prompt caching, the cache-write / cache-read counts that
+    function prices at the model's declared cache rates (issue #154). This one
     combined total (primary + critic + every successful retry on the
     instance) is passed as the `primary_usage` slot with `critic_usage`
     left `None` -- there is no per-role split once the two passes have

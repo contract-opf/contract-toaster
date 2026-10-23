@@ -1706,6 +1706,13 @@ class OpenRouterModelClient:
     without a null check, and is safe to read after `close()` -- it is a
     plain instance attribute, not a transport call.
 
+    Issue #154: `cumulative_usage` DOES accumulate issue #568's two cache
+    keys (`cache_creation_input_tokens` / `cache_read_input_tokens`), each
+    added only once some call reported it -- a client that never saw caching
+    keeps the two-key shape above. They are a subset of `input_tokens`, not
+    extra tokens; `compute_actual_usd_cents_from_usage` reads them to price
+    the written and read portions at the model's declared cache rates.
+
     Issue #661: `last_usage` may additionally carry `reasoning_tokens` when
     the response reported it (`_reasoning_usage_fields` above), on the same
     "present only when the provider reported it" terms as issue #568's two
@@ -2128,6 +2135,14 @@ class OpenRouterModelClient:
                 # the provider and got billed, not just the last one.
                 self.cumulative_usage["input_tokens"] += self.last_usage["input_tokens"]
                 self.cumulative_usage["output_tokens"] += self.last_usage["output_tokens"]
+                # Issue #154: the prompt-cache counts accumulate too, so
+                # settlement prices cache writes and reads at their own rates
+                # -- see the class docstring's `cumulative_usage` paragraph.
+                for cache_key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
+                    if cache_key in self.last_usage:
+                        self.cumulative_usage[cache_key] = (
+                            self.cumulative_usage.get(cache_key, 0) + self.last_usage[cache_key]
+                        )
                 # Issue #514: what the provider says it SERVED, next to what
                 # we asked for. Assigned unconditionally (both keys are None
                 # when absent) so a provider that reports ids on one call and

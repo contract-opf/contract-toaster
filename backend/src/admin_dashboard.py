@@ -1005,7 +1005,11 @@ def _cost_outliers(dynamodb_resource: Any, max_rows: int) -> dict[str, Any]:
     (`pipeline_runner._actual_cents_from_client`), which bills the critic's
     tokens at primary rates; this reconstructs the same review pass by pass
     from the ledger and bills the critic pass at critic rates. The two can
-    therefore differ by the primary/critic rate spread. What matters here is
+    therefore differ by the primary/critic rate spread. They also differ on
+    prompt caching: settlement prices cache-written and cache-read input at
+    the model's declared cache rates (issue #154), while this sums only each
+    pass's input and output tokens, so it prices cached input at the base
+    input rate. What matters here is
     that every review in the sample is priced the SAME way as every other,
     so the multiple-of-median comparison is sound (see
     `_priced_review_usd_cents`: no pass is dropped).

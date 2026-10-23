@@ -602,6 +602,84 @@ def _openrouter_rates_for_role(
     )
 
 
+# The two per-model prompt-cache price multipliers model-policy/openrouter.json
+# may declare (issue #154), as multiples of that model's own
+# `cost_per_million_input_usd`: what one input token costs when the provider
+# WROTE it to the prompt cache, and when it READ it from there.
+CACHE_WRITE_MULTIPLIER_KEY = "cache_write_input_rate_multiplier"
+CACHE_READ_MULTIPLIER_KEY = "cache_read_input_rate_multiplier"
+# What an undeclared (or malformed) multiplier means: the base input rate --
+# exactly how every input token was priced before issue #154.
+_BASE_CACHE_MULTIPLIERS = (1.0, 1.0)
+
+
+def _cache_multiplier(entry: dict[str, Any], key: str) -> float:
+    """One declared multiplier, or 1.0 (the base input rate) when the entry
+    declares nothing usable -- absent, a bool, or not a positive number.
+    Settlement is a best-effort read that must never raise over a policy
+    typo, and 1.0 is the pre-#154 pricing, never a made-up discount."""
+    value = entry.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return 1.0
+    return float(value)
+
+
+def _openrouter_cache_multipliers_for_role(
+    policy: dict[str, Any], role: str, effective_model_id: str
+) -> tuple[float, float]:
+    """The `(cache_write, cache_read)` input-rate multipliers for the model a
+    role will ACTUALLY run on (issue #154), resolved from the SAME entry
+    `_openrouter_rates_for_role` takes that model's rates from -- the
+    `selectable` entry first, then the role's `models.<role>` pin -- so a
+    multiplier always applies to the base rate it was declared against."""
+    for entry in model_client.openrouter_selectable_models(policy):
+        if entry.get("model_id") == effective_model_id:
+            return (
+                _cache_multiplier(entry, CACHE_WRITE_MULTIPLIER_KEY),
+                _cache_multiplier(entry, CACHE_READ_MULTIPLIER_KEY),
+            )
+    block = policy["models"][role]
+    return (
+        _cache_multiplier(block, CACHE_WRITE_MULTIPLIER_KEY),
+        _cache_multiplier(block, CACHE_READ_MULTIPLIER_KEY),
+    )
+
+
+def _active_cache_multipliers(
+    dynamodb_resource: Any = None,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """`((primary_write, primary_read), (critic_write, critic_read))` -- the
+    prompt-cache input-rate multipliers for the models
+    `_active_provider_rates` prices (issue #154), resolved through the same
+    provider switch and the same admin > env > pin selection.
+
+    Only the OpenRouter path declares them. Every other provider (the
+    AWS/Bedrock target's hardcoded regional constants) returns 1.0 across
+    the board, which prices cached input exactly as before issue #154: that
+    adapter sends no cache breakpoints, and its Anthropic-native
+    `input_tokens` does not include the cache counts the way OpenRouter's
+    `prompt_tokens` does, so a multiplier there would price the wrong base.
+    """
+    if config.model_provider() != "openrouter":
+        return (_BASE_CACHE_MULTIPLIERS, _BASE_CACHE_MULTIPLIERS)
+    policy = model_client.load_openrouter_policy()
+    effective = model_settings.resolve_openrouter_model_ids(dynamodb_resource)
+    return (
+        _openrouter_cache_multipliers_for_role(policy, "primary", effective["primary"]),
+        _openrouter_cache_multipliers_for_role(policy, "critic", effective["critic"]),
+    )
+
+
+def _usage_reports_cache_tokens(usage: dict[str, int] | None) -> bool:
+    """True when a usage dict carries a non-zero prompt-cache count -- the
+    only case in which pricing could differ from the base input rate."""
+    if not usage:
+        return False
+    return bool(
+        usage.get("cache_creation_input_tokens") or usage.get("cache_read_input_tokens")
+    )
+
+
 def _active_provider_rates(
     dynamodb_resource: Any = None,
 ) -> tuple[float, float, float, float]:
@@ -761,18 +839,71 @@ def compute_actual_usd_cents_from_usage(
     resolves the tuple once and threads it in here). Omitted (the settlement
     path's own shape, and every existing caller), the rates are resolved
     here exactly as before, so a caller pricing one review is unchanged.
+
+    PROMPT-CACHE PRICING (issue #154). A usage dict may also carry
+    `cache_creation_input_tokens` / `cache_read_input_tokens` (the client's
+    `last_usage` / `cumulative_usage`, or a ledger row's columns). Those
+    tokens are a SUBSET of `input_tokens` -- OpenRouter's `prompt_tokens`
+    counts them -- and the provider bills them at their own rates: a cache
+    write at about 1.25x the input rate, a cache read at about 0.1x. So the
+    input charge is
+
+        base * (input - written - read)
+          + write_multiplier * base * written
+          + read_multiplier * base * read
+
+    with the two multipliers declared per model in
+    model-policy/openrouter.json (`_active_cache_multipliers`, resolved here).
+    A usage dict with no non-zero cache count never resolves them and prices
+    exactly as it did before this issue; an undeclared multiplier is 1.0,
+    the base rate.
     """
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
         rates if rates is not None else _active_provider_rates(dynamodb_resource)
     )
+    primary_cache, critic_cache = (
+        _active_cache_multipliers(dynamodb_resource)
+        if _usage_reports_cache_tokens(primary_usage) or _usage_reports_cache_tokens(critic_usage)
+        else (_BASE_CACHE_MULTIPLIERS, _BASE_CACHE_MULTIPLIERS)
+    )
     total_usd = 0.0
     if primary_usage:
-        total_usd += primary_usage.get("input_tokens", 0) * (primary_input_rate / 1_000_000)
+        total_usd += _input_usd(primary_usage, primary_input_rate, primary_cache)
         total_usd += primary_usage.get("output_tokens", 0) * (primary_output_rate / 1_000_000)
     if critic_usage:
-        total_usd += critic_usage.get("input_tokens", 0) * (critic_input_rate / 1_000_000)
+        total_usd += _input_usd(critic_usage, critic_input_rate, critic_cache)
         total_usd += critic_usage.get("output_tokens", 0) * (critic_output_rate / 1_000_000)
     return int(round(total_usd * 100))  # noqa: RUF046
+
+
+def _input_usd(
+    usage: dict[str, int], input_rate: float, cache_multipliers: tuple[float, float]
+) -> float:
+    """One pass's input charge in USD, with its cache-written and cache-read
+    tokens priced at their own multiples of `input_rate` (issue #154; see
+    `compute_actual_usd_cents_from_usage`). The uncached remainder is
+    clamped at zero so a provider that ever reported more cache tokens than
+    prompt tokens is billed for the cache tokens it named, never a negative
+    remainder.
+
+    Base multipliers (1.0, 1.0) -- every provider but OpenRouter, and any
+    model that declares none -- short-circuit to `input_tokens` at the base
+    rate, the pre-#154 figure to the bit, whatever cache counts are present:
+    Bedrock's Anthropic-native `input_tokens` EXCLUDES its cache counts, so
+    the subtraction above would be wrong there."""
+    write_multiplier, read_multiplier = cache_multipliers
+    per_token = input_rate / 1_000_000
+    input_tokens = usage.get("input_tokens", 0) or 0
+    written = usage.get("cache_creation_input_tokens") or 0
+    read = usage.get("cache_read_input_tokens") or 0
+    if (not written and not read) or cache_multipliers == _BASE_CACHE_MULTIPLIERS:
+        return input_tokens * per_token
+    uncached = max(input_tokens - written - read, 0)
+    return (
+        uncached * per_token
+        + written * write_multiplier * per_token
+        + read * read_multiplier * per_token
+    )
 
 
 def estimate_review_usd_cents(dynamodb_resource: Any = None) -> int | None:
@@ -3588,6 +3719,15 @@ def _actual_cents_from_ledger(review_id: str, dynamodb_resource: Any) -> int:
         bucket = critic_usage if row.get("pass_name") == "critic" else primary_usage
         bucket["input_tokens"] += int(actual_in or 0)
         bucket["output_tokens"] += int(actual_out or 0)
+        # Issue #154: the row's prompt-cache columns ride along so
+        # `compute_actual_usd_cents_from_usage` prices the written and read
+        # tokens at their own rates. Added only when the row carries one --
+        # `None` means the provider reported no caching for that attempt --
+        # so a review that never cached keeps the same two-key buckets.
+        for cache_key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
+            cache_value = row.get(cache_key)
+            if cache_value is not None:
+                bucket[cache_key] = bucket.get(cache_key, 0) + int(cache_value)
 
     if not measured:
         return 0
