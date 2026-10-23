@@ -282,8 +282,14 @@ export class CicdStack extends cdk.NestedStack {
           commands: [
             // --- STEP E: Build container image ---
             'echo "[STEP E] Building container image …"',
-            'COMMIT_SHA=$(git rev-parse --short HEAD)',
-            'IMAGE_TAG="${COMMIT_SHA}-$(date +%Y%m%d%H%M%S)"',
+            // COMMIT_SHA is the ARTIFACT REVISION: the full, immutable commit
+            // SHA (issue #42), as in ci-pipeline.yml's STEP E. It becomes the
+            // image's org.opencontainers.image.revision label and GET
+            // /version's `commit`. The tag and VERSION keep the short form;
+            // a prefix is not an immutable name.
+            'COMMIT_SHA=$(git rev-parse HEAD)',
+            'SHORT_SHA=$(git rev-parse --short HEAD)',
+            'IMAGE_TAG="${SHORT_SHA}-$(date +%Y%m%d%H%M%S)"',
             'docker build --build-arg VERSION=$IMAGE_TAG --build-arg COMMIT_SHA=$COMMIT_SHA -t $ECR_REPO_URI:$IMAGE_TAG backend/',
 
             // --- STEP F: Sign image (cosign + AWS Signer) ---

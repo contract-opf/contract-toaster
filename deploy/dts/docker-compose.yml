@@ -36,7 +36,7 @@ x-backend-build: &backend-build
     # a plain `docker compose build` behaves exactly as before; pass real
     # values with e.g.
     #   VERSION=$(git describe --tags --always) \
-    #   COMMIT_SHA=$(git rev-parse --short HEAD) \
+    #   COMMIT_SHA=$(git rev-parse HEAD) \
     #   docker compose -f deploy/dts/docker-compose.yml build
     VERSION: ${VERSION:-dev}
     COMMIT_SHA: ${COMMIT_SHA:-unknown}
@@ -206,7 +206,7 @@ services:
         # defaults as the backend anchor above, so ONE pair of values stamps
         # both images:
         #   VERSION=$(git describe --tags --always) \
-        #   COMMIT_SHA=$(git rev-parse --short HEAD) \
+        #   COMMIT_SHA=$(git rev-parse HEAD) \
         #   docker compose -f deploy/dts/docker-compose.yml build
         VERSION: ${VERSION:-dev}
         COMMIT_SHA: ${COMMIT_SHA:-unknown}

@@ -175,6 +175,31 @@ target, where the table is CDK-managed, the same helper **refuses the boot**
 rather than creating one; here it just creates it, tolerating the race with
 `bootstrap` if both run at once.
 
+## Which commit is this image? (issue #42)
+
+Both images end in a small metadata block that takes the source revision as
+a direct input, after every install and `COPY` step. A warm-cache rebuild for
+a new commit therefore reuses the dependency layers but cannot reuse the
+revision layer. Before #42, an image could keep an older `GET /version`
+stamp even though the right `--build-arg` was passed.
+
+- **Artifact revision.** `COMMIT_SHA` is the full commit SHA. The publish
+  workflow passes the `TARGET_SHA` that passed CI. It is recorded in three
+  places: the `org.opencontainers.image.revision` label, the file
+  `/etc/image-revision`, and (on the backend) the `ENV` that
+  `GET /version` serves as `commit`. Read it from an image with
+  `docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' <image>`.
+- **Release/build identifier.** `VERSION` is `<short-sha>-<UTC build time>`.
+  It is a separate field: the `org.opencontainers.image.version` label and
+  `GET /version`'s `version`.
+- **Image digest.** This is the digest of the pushed manifest, so the build
+  cannot know it. The publish job prints it, and the deployment supplies it as
+  `IMAGE_DIGEST` when it is wanted.
+- **Deployment identity.** Which deployment started a container is never baked
+  into an image. It is a runtime fact.
+
+When building by hand, pass `COMMIT_SHA=$(git rev-parse HEAD)`.
+
 ## Not yet included (follow-ups)
 
 - **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend

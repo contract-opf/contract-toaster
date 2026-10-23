@@ -443,8 +443,14 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           ECR_REPOSITORY: contract-toaster-api-dev
         run: |
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          IMAGE_TAG="${COMMIT_SHA}-$(date +%Y%m%d%H%M%S)"
+          # COMMIT_SHA is the ARTIFACT REVISION: the full, immutable commit
+          # SHA (issue #42). It becomes the image's
+          # org.opencontainers.image.revision label and GET /version's
+          # `commit`. The tag and VERSION (the release/build identifier) keep
+          # the short form; a prefix is not an immutable name.
+          COMMIT_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          IMAGE_TAG="${SHORT_SHA}-$(date +%Y%m%d%H%M%S)"
           echo "image-tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           docker build \
             --build-arg VERSION="${IMAGE_TAG}" \

@@ -97,6 +97,12 @@ jobs:
           echo "image=ghcr.io/${owner}/contract-toaster-dts-${{ matrix.component }}" >> "$GITHUB_OUTPUT"
           short_sha="${TARGET_SHA::7}"
           echo "sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          # The ARTIFACT REVISION is the full, immutable commit SHA (issue #42):
+          # it becomes the COMMIT_SHA build arg, the image's
+          # org.opencontainers.image.revision label and GET /version's
+          # `commit`. The short SHA above stays for tags and VERSION only; a
+          # prefix is not an immutable name.
+          echo "revision=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
           # VERSION follows the AWS path's convention (ci-pipeline.yml:320-321):
           # "<short-sha>-<UTC build timestamp>", unique per build so two builds
           # of the same commit are still distinguishable in the footer.
@@ -128,7 +134,7 @@ jobs:
           # is an error on bash < 4.4 under `set -u`).
           build_flags=(-f "${{ matrix.dockerfile }}")
           build_flags+=(--build-arg "VERSION=${{ steps.meta.outputs.version }}")
-          build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.sha }}")
+          build_flags+=(--build-arg "COMMIT_SHA=${{ steps.meta.outputs.revision }}")
           docker build \
             "${build_flags[@]}" \
             -t "${{ steps.meta.outputs.image }}:latest" \
@@ -247,12 +253,13 @@ jobs:
       - name: Say what to verify
         if: steps.trigger.outputs.rolled == 'true'
         run: |
-          # NOT GET /version: issue #613 is open — the backend build cache can
-          # ignore a changed --build-arg COMMIT_SHA, so that endpoint may serve
-          # a stale stamp even after a good pull. The SPA bakes its own commit
-          # in at build time (VITE_COMMIT_SHA), so the Settings tab showing the
-          # two halves agree is the honest check.
+          # Issue #42 (#613 on the private tracker) made the revision a direct
+          # cache input of each image's final layer and added the
+          # org.opencontainers.image.revision label, so a warm-cache build can
+          # no longer keep an older GET /version stamp. The Settings tab, which
+          # compares the server's commit with the bundle's own, stays the
+          # quickest post-deploy check.
           echo "Coolify is pulling ${SHA} onto the DTS host."
-          echo "Verify in the app's Settings tab, not GET /version (issue #613)."
+          echo "Verify in the app's Settings tab that server and bundle agree on ${SHA}."
         env:
           SHA: ${{ needs.publish.outputs.sha }}

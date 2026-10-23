@@ -38,7 +38,7 @@ the shipped index will name paths that are not in it.
 - `TRADEMARKS.md` — The trademark grant and its limits for the "Contract Toaster" name and word mark.
 
 ## deploy/dts/
-- `deploy/dts/README.md` — Operating guide for the DTS target — a non-AWS Docker Compose deployment of the same codebase, its bootstrap, its required environment, and its retention cadence. anchors: phase-status, the-openrouter-key, run-it, what-the-bootstrap-does, retention-purge-cadence, the-backend-refuses-to-start-with-an-incomplete-environment, our-own-legal-entities-entity_roster_table-issue-678, not-yet-included-follow-ups covers: deploy/dts/**
+- `deploy/dts/README.md` — Operating guide for the DTS target — a non-AWS Docker Compose deployment of the same codebase, its bootstrap, its required environment, and its retention cadence. anchors: phase-status, the-openrouter-key, run-it, what-the-bootstrap-does, retention-purge-cadence, the-backend-refuses-to-start-with-an-incomplete-environment, our-own-legal-entities-entity_roster_table-issue-678, which-commit-is-this-image-issue-42, not-yet-included-follow-ups covers: deploy/dts/**
 
 ## docs/
 - `docs/CONTEXT.md` — Domain glossary: the terms specific to this repo, added one at a time as they get pinned down in conversation. anchors: the-product, review-and-its-output, repository-and-deployment
