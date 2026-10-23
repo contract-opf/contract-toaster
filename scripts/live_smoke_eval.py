@@ -339,16 +339,30 @@ def compute_actual_usd_from_usage(
     `compute_actual_usd_cents_from_usage` computes `total_usd` internally
     before it rounds, so the two can never independently drift on rates --
     only on whether the last digit is kept.
+
+    Issue #154: that includes prompt-cache pricing. A usage dict carrying
+    `cache_creation_input_tokens` / `cache_read_input_tokens` (see
+    `pass_usage_totals`) has its input priced through the SAME
+    `reviews._input_usd` with the SAME `reviews._active_cache_multipliers`
+    settlement uses -- resolved only when a cache count is non-zero, exactly
+    as settlement resolves them -- so a cached run is measured at what the
+    ledger charges, not at the base input rate.
     """
     primary_input_rate, primary_output_rate, critic_input_rate, critic_output_rate = (
         reviews._active_provider_rates(None)
     )
+    primary_cache, critic_cache = (
+        reviews._active_cache_multipliers(None)
+        if reviews._usage_reports_cache_tokens(primary_usage)
+        or reviews._usage_reports_cache_tokens(critic_usage)
+        else (reviews._BASE_CACHE_MULTIPLIERS, reviews._BASE_CACHE_MULTIPLIERS)
+    )
     total_usd = 0.0
     if primary_usage:
-        total_usd += primary_usage.get("input_tokens", 0) * (primary_input_rate / 1_000_000)
+        total_usd += reviews._input_usd(primary_usage, primary_input_rate, primary_cache)
         total_usd += primary_usage.get("output_tokens", 0) * (primary_output_rate / 1_000_000)
     if critic_usage:
-        total_usd += critic_usage.get("input_tokens", 0) * (critic_input_rate / 1_000_000)
+        total_usd += reviews._input_usd(critic_usage, critic_input_rate, critic_cache)
         total_usd += critic_usage.get("output_tokens", 0) * (critic_output_rate / 1_000_000)
     return total_usd
 
@@ -363,6 +377,14 @@ def pass_usage_totals(records: list[Any]) -> tuple[dict[str, int], dict[str, int
     treating a `None` (client cannot report usage -- e.g. a raised attempt,
     or a client with no `last_usage`) as 0 rather than failing the run's
     accounting over one unmeasured attempt.
+
+    Issue #154: a bucket also carries `cache_creation_input_tokens` /
+    `cache_read_input_tokens`, summed the same way, once any attempt of that
+    pass recorded one (`None` -- the provider reported no caching -- adds
+    nothing), exactly as `reviews._actual_cents_from_ledger` builds its
+    buckets from the same records' ledger columns. Both pricing functions
+    then bill those tokens at the model's cache rates; a run that never
+    cached keeps the two-key buckets and prices as before.
     """
     totals = {
         "primary": {"input_tokens": 0, "output_tokens": 0},
@@ -374,6 +396,10 @@ def pass_usage_totals(records: list[Any]) -> tuple[dict[str, int], dict[str, int
             continue
         bucket["input_tokens"] += record.actual_input_tokens or 0
         bucket["output_tokens"] += record.actual_output_tokens or 0
+        for cache_key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
+            cache_value = getattr(record, cache_key, None)
+            if cache_value is not None:
+                bucket[cache_key] = bucket.get(cache_key, 0) + int(cache_value)
     return totals["primary"], totals["critic"]
 
 
