@@ -76,6 +76,36 @@ Haiku 4.5's 200K window leaves almost no headroom over what the size gate admits
 
 Check the account's remaining credit first (`GET https://openrouter.ai/api/v1/credits`). The report holds status, attempts, tokens and cost only, never document text.
 
+### Floor judge accuracy
+
+`scripts/floor_judge_eval.py` scores how accurately `scripts/floor_judge.py` applies a playbook's signed Floor invariants. Before it, nothing measured that: every Floor test uses a fake client, which proves the seam but not whether a real model's verdicts are right. The question came over from playbook-engine#5. The engine writes and signs the Floor, but the judge that applies it runs here.
+
+The cases are in `tests/fixtures/floor-judge-eval/cases.json`. They are synthetic, in the style of the NDA example. Each invariant comes with clauses labelled violated or not violated, and each clause has a kind:
+
+| Kind | What it tests |
+|---|---|
+| `violation` | The forbidden term, stated plainly. |
+| `paraphrase_violation` | The same violation in words the invariant does not use. |
+| `compliant` | The concept is addressed and satisfied, including boundary values. |
+| `mention_not_violation` | The concept is named but not violated, for example a for-cause termination clause tested against a convenience-notice rule. |
+| `directional_near_miss` | The mirror image of a violation, running in our client's favour (the #679 failure). |
+
+Each clause is one call to the real `judge_floor_invariants`, with the perspective note a production review sends. The report gives TP/FP/TN/FN, precision, recall and specificity per invariant and overall, accuracy per kind, and every miss. Precision is reported next to recall because a judge that fires on everything scores perfect recall. Unjudged answers are counted separately and never scored.
+
+`--break INVARIANT_ID` also judges that invariant against its `broken_statement`, which is the same rule with one condition deleted, and scores the answers against the original labels. If the judge reads the statement, the score falls. If the score does not move, the judge is answering from the clause alone.
+
+The run is live and spends money: one call per clause per run, plus one for each broken clause. It never runs in CI and refuses to start without `--yes`. By default it uses the critic model id, which is what a production review gives the judge:
+
+```bash
+OPENROUTER_API_KEY="$(security find-generic-password -s openrouter-api-key -w)" \
+OPENROUTER_CRITIC_MODEL_ID=anthropic/claude-haiku-4.5 \
+python3 scripts/floor_judge_eval.py --break floor-termination-notice --runs 3 --out floor-eval.json --yes
+```
+
+The repository has no Makefile, so this command is the entry point. `tests/test_floor_judge_eval.py` is the offline test, run by `scripts/check.sh`. It uses scripted judges to show that the scorer catches an always-fire judge and a keyword-matching judge, and that `--break` can tell a judge that reads the statement from one that ignores it.
+
+The labels are the fixture author's reading of each statement. Whether the judge's calls are legally correct, and not only consistent with those labels, needs an attorney's review. A clause is also judged on its own, while a production review judges the whole document.
+
 ## Metrics
 
 The harness reports a fixed set of metrics over the gold set on every run. These are the numbers that gate promotion:

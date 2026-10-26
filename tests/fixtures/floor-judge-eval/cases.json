@@ -1,0 +1,207 @@
+{
+  "schema": "floor-judge-eval-v1",
+  "_comment": "SYNTHETIC. Every party name, invariant and clause here was written for this eval (NDA-example style); none is drawn from a real agreement or playbook, and none is legal advice. Labels are the author's reading of each statement as written -- whether those readings are CORRECT is the attorney review the handoff calls Part B, not something this file can establish. See scripts/floor_judge_eval.py for the case kinds.",
+  "perspective": {
+    "party": "Example Co.",
+    "counterparty_type": "vendor"
+  },
+  "invariants": [
+    {
+      "id": "floor-no-uncapped-liability",
+      "statement": "Our maximum liability under this agreement is a fixed dollar cap stated in the agreement; it is never unlimited or tied solely to a multiplier of fees paid.",
+      "broken_statement": "Our maximum liability under this agreement is never unlimited.",
+      "cases": [
+        {
+          "case_id": "liability-unlimited-mutual",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "Nothing in this Agreement limits either party's liability for any claim arising under or in connection with it."
+        },
+        {
+          "case_id": "liability-fee-multiplier",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "Example Co.'s aggregate liability under this Agreement shall not exceed two times the fees paid by Example Co. in the twelve months preceding the claim."
+        },
+        {
+          "case_id": "liability-no-ceiling-reworded",
+          "kind": "paraphrase_violation",
+          "expected_violated": true,
+          "clause": "The Customer shall be answerable for the full amount of any loss the Vendor suffers, without any ceiling of any kind."
+        },
+        {
+          "case_id": "liability-fixed-cap",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "Example Co.'s aggregate liability under this Agreement shall not exceed five hundred thousand US dollars (US$500,000)."
+        },
+        {
+          "case_id": "liability-cross-reference",
+          "kind": "mention_not_violation",
+          "expected_violated": false,
+          "clause": "The limitations of liability that apply to this Agreement are set out in Section 9, and nothing in this Section 3 expands them."
+        },
+        {
+          "case_id": "liability-vendor-uncapped",
+          "kind": "directional_near_miss",
+          "expected_violated": false,
+          "clause": "The Vendor's liability for any breach of its confidentiality obligations shall be unlimited."
+        }
+      ]
+    },
+    {
+      "id": "floor-termination-notice",
+      "statement": "Either party may terminate for convenience only with at least 30 days written notice.",
+      "broken_statement": "Either party may terminate for convenience only with written notice.",
+      "cases": [
+        {
+          "case_id": "termination-ten-days",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "The Vendor may terminate this Agreement for convenience upon ten (10) days' prior written notice to Example Co."
+        },
+        {
+          "case_id": "termination-at-will-immediate",
+          "kind": "paraphrase_violation",
+          "expected_violated": true,
+          "clause": "Either party may bring this Agreement to an end at any time and without cause, effective immediately on notice to the other."
+        },
+        {
+          "case_id": "termination-two-weeks-email",
+          "kind": "paraphrase_violation",
+          "expected_violated": true,
+          "clause": "Either party may walk away from this Agreement for any reason by giving the other party two weeks' notice by email."
+        },
+        {
+          "case_id": "termination-sixty-days",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "Either party may terminate this Agreement for convenience on sixty (60) days' prior written notice to the other party."
+        },
+        {
+          "case_id": "termination-for-cause-immediate",
+          "kind": "mention_not_violation",
+          "expected_violated": false,
+          "clause": "Either party may terminate this Agreement immediately on written notice if the other party materially breaches it and fails to cure the breach within thirty (30) days of being notified of it."
+        },
+        {
+          "case_id": "termination-forty-five-days",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "Either party may end this Agreement without cause by giving the other not less than forty-five (45) days' written notice."
+        }
+      ]
+    },
+    {
+      "id": "floor-indemnity-not-unilateral",
+      "statement": "Indemnification obligations must not run solely in the counterparty's favor; any indemnity we give must be matched by a reciprocal indemnity from the counterparty.",
+      "broken_statement": "Indemnification obligations must not run solely in one party's favor.",
+      "cases": [
+        {
+          "case_id": "indemnity-we-indemnify-vendor",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "Example Co. shall indemnify, defend and hold harmless the Vendor from and against all third-party claims arising out of or relating to this Agreement."
+        },
+        {
+          "case_id": "indemnity-customer-reimburses-supplier",
+          "kind": "paraphrase_violation",
+          "expected_violated": true,
+          "clause": "The Customer agrees to reimburse the Supplier for any losses the Supplier incurs as a result of claims brought against it by third parties in connection with the services. The Supplier gives no corresponding undertaking."
+        },
+        {
+          "case_id": "indemnity-vendor-indemnifies-us",
+          "kind": "directional_near_miss",
+          "expected_violated": false,
+          "clause": "The Vendor shall indemnify, defend and hold harmless Example Co. from and against all third-party claims arising out of the Vendor's performance of the services."
+        },
+        {
+          "case_id": "indemnity-mutual",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "Each party shall indemnify the other against third-party claims to the extent arising from its own breach of this Agreement."
+        },
+        {
+          "case_id": "indemnity-none-created",
+          "kind": "mention_not_violation",
+          "expected_violated": false,
+          "clause": "Indemnification between the parties is governed exclusively by the Master Services Agreement, and nothing in this Agreement creates any indemnity obligation."
+        }
+      ]
+    },
+    {
+      "id": "floor-confidentiality-survival",
+      "statement": "Confidentiality obligations must survive termination or expiry of the agreement for at least three years.",
+      "broken_statement": "Confidentiality obligations must survive termination or expiry of the agreement.",
+      "cases": [
+        {
+          "case_id": "survival-ends-at-termination",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "The obligations in this Section 4 terminate upon the expiry or termination of this Agreement."
+        },
+        {
+          "case_id": "survival-one-year",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "The Recipient's duty of confidentiality continues for one (1) year after this Agreement ends."
+        },
+        {
+          "case_id": "survival-free-to-disclose",
+          "kind": "paraphrase_violation",
+          "expected_violated": true,
+          "clause": "Once the Term ends, the Recipient may use and disclose any information it received from the Discloser without restriction."
+        },
+        {
+          "case_id": "survival-five-years",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "The Recipient's obligations under this Section 4 survive for five (5) years following the termination or expiry of this Agreement."
+        },
+        {
+          "case_id": "survival-three-years-boundary",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "The Recipient's confidentiality obligations survive termination for three (3) years, except that obligations concerning trade secrets continue for as long as the information remains a trade secret."
+        },
+        {
+          "case_id": "survival-public-information-exclusion",
+          "kind": "mention_not_violation",
+          "expected_violated": false,
+          "clause": "Confidential Information does not include information that is or becomes publicly available through no fault of the Recipient."
+        }
+      ]
+    },
+    {
+      "id": "floor-governing-law-new-york",
+      "statement": "This agreement must be governed by the laws of the State of New York.",
+      "broken_statement": "This agreement must be governed by the laws of a U.S. state.",
+      "cases": [
+        {
+          "case_id": "law-delaware",
+          "kind": "violation",
+          "expected_violated": true,
+          "clause": "This Agreement shall be governed by and construed in accordance with the laws of the State of Delaware."
+        },
+        {
+          "case_id": "law-english-reworded",
+          "kind": "paraphrase_violation",
+          "expected_violated": true,
+          "clause": "Any dispute about the meaning or performance of this Agreement is to be decided under English law."
+        },
+        {
+          "case_id": "law-new-york",
+          "kind": "compliant",
+          "expected_violated": false,
+          "clause": "This Agreement and any dispute arising from it shall be governed by the laws of the State of New York, without regard to its conflict-of-laws principles."
+        },
+        {
+          "case_id": "law-forum-only-delaware",
+          "kind": "mention_not_violation",
+          "expected_violated": false,
+          "clause": "The parties submit to the exclusive jurisdiction of the state and federal courts located in Wilmington, Delaware for any action under this Agreement."
+        }
+      ]
+    }
+  ]
+}
