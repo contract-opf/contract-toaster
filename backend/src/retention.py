@@ -53,9 +53,11 @@ from fastapi import HTTPException, status
 try:  # production runs `src.main`; tests put backend/src on sys.path
     from src import reviews as reviews_module
     from src.authz import require_admin
+    from src.users import json_safe
 except ImportError:  # pragma: no cover
     import reviews as reviews_module  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
+    from users import json_safe  # type: ignore[no-redef]
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +266,11 @@ def get_retention_settings(
 
     result["default_retention_window_days"] = DEFAULT_RETENTION_WINDOW_DAYS
     result["window_options"] = [dict(opt) for opt in RETENTION_WINDOW_OPTIONS]
-    return result
+    # The row goes straight into GET /api/admin/retention's JSONResponse, and
+    # boto3 reads a stored bounded window (and a pending reduction's numbers)
+    # back as Decimals -- the same 500 GET /api/users had (#440). See
+    # tests/test_retention_settings_decimal.py.
+    return json_safe(result)
 
 
 # ---------------------------------------------------------------------------
