@@ -121,6 +121,7 @@ import {
   readInflightReviewId,
   writeInflightReviewId,
 } from './inflightReview';
+import { notifyReviewsChanged } from './reviewsChanged';
 import { readLastBrowning, writeLastBrowning } from './lastBrowning';
 import { readLastNotesMode, writeLastNotesMode } from './lastNotesMode';
 // The cheap, advisory upload-time preflight check (issue #491) — fired the
@@ -561,6 +562,19 @@ export const POLL_FAST_PHASE_MS = 120_000;
 // 1); it retries with growing delay, capped, until a response (success or
 // terminal status) arrives.
 export const POLL_BACKOFF_MAX_MS = 30000;
+
+// The longest one poll attempt may take, request AND body, before it is
+// abandoned as a transient failure and retried on the backoff ladder above.
+// The loop keeps exactly one attempt in flight and schedules the next only
+// when that attempt settles, so before this an attempt that never settled
+// (a stalled connection at the edge, a backend that stopped answering) froze
+// the loop for good: no error, no retry, and the screen stuck on whatever the
+// last good poll said — the shape of the 2026-10-28 production report:
+// "Stage not yet reported" for the whole run and still "Toasting…" after the
+// server had marked the review DONE, until a reload. Comfortably above a healthy
+// `GET /api/reviews/{id}` (one row read and, once finished, one small object),
+// well under the 60 s an nginx or edge proxy would take to give up on it.
+export const POLL_REQUEST_TIMEOUT_MS = 20_000;
 
 /** The poll delay to use for a review that is `ageMs` old. */
 export function pollIntervalFor(ageMs: number): number {
@@ -2403,8 +2417,33 @@ export default function ReviewSubmission(): React.ReactElement {
     const ageNow = (): number => reviewAgeMs(anchor.createdAt, anchor.firstSeenAt, Date.now());
 
     async function poll(): Promise<void> {
+      // See POLL_REQUEST_TIMEOUT_MS. Raced as well as aborted, the same shape
+      // as `checkForStalledSubmission`: the abort stops the request, and the
+      // race also covers a hang before it is sent (`getToken`) or after its
+      // headers arrive (the body).
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), POLL_REQUEST_TIMEOUT_MS);
+      const timedOut = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new Error(`GET /api/reviews/${reviewId} timed out`)),
+          { once: true },
+        );
+      });
+      // Once the race has settled nothing awaits this; an abort after that
+      // must not surface as an unhandled rejection.
+      timedOut.catch(() => undefined);
       try {
-        const response = await authorizedFetch(`/api/reviews/${reviewId}`);
+        const response = await Promise.race([
+          // `no-store`: a poll answered from any HTTP cache is a status that
+          // can never change, which freezes the screen exactly as a hung
+          // request does. The backend marks these responses no-store too.
+          authorizedFetch(`/api/reviews/${reviewId}`, {
+            signal: controller.signal,
+            cache: 'no-store',
+          }),
+          timedOut,
+        ]);
         if (!response.ok) {
           // Issue #122: some non-2xx statuses on this route will never
           // resolve on a later attempt (see `classifyPollFailure`'s own
@@ -2432,7 +2471,7 @@ export default function ReviewSubmission(): React.ReactElement {
           }
           throw new Error(`GET /api/reviews/${reviewId} returned HTTP ${response.status}`);
         }
-        const data = (await response.json()) as ReviewDetail;
+        const data = (await Promise.race([response.json(), timedOut])) as ReviewDetail;
         if (cancelled) {
           return;
         }
@@ -2453,6 +2492,9 @@ export default function ReviewSubmission(): React.ReactElement {
           // to History -- the same rule the mount probe above applies to a
           // stored id that has since finished.
           clearInflightReviewId();
+          // ...and History, which loaded its listing while this row was
+          // still running, reloads to show how it finished.
+          notifyReviewsChanged();
         }
       } catch (err) {
         if (cancelled) {
@@ -2466,6 +2508,8 @@ export default function ReviewSubmission(): React.ReactElement {
         pollTimer.current = setTimeout(() => {
           void poll();
         }, nextPollDelayMs(ageNow(), attempt));
+      } finally {
+        clearTimeout(timer);
       }
     }
 
@@ -2610,6 +2654,8 @@ export default function ReviewSubmission(): React.ReactElement {
         // window because this tab's own has not been written yet. That tab's
         // review would be attached and recorded here.
         writeInflightReviewId(submittedId);
+        // A new row now exists in the caller's listing; History reloads.
+        notifyReviewsChanged();
       };
 
       try {
