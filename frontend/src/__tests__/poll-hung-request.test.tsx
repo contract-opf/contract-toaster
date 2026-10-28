@@ -2,12 +2,13 @@
  * poll-hung-request.test.tsx — one poll that never answers must not freeze
  * the Review screen.
  *
- * ## The production report this locks fixed (2026-10-28, build c35b5e1)
+ * ## Why (hardening from the 2026-10-28 production report)
  *
- * The first successful real review on the DTS target ran for 153 s and the
- * server marked it DONE, but the Review screen read "Stage not yet reported"
- * the whole time and the tab title stayed on "Toasting…" well after DONE,
- * until a reload. No "Still checking…" notice ever appeared.
+ * That report — "Stage not yet reported" for a whole 153 s review and
+ * "Toasting…" past DONE — turned out to be a run of HTTP 500s
+ * (poll-server-errors.test.tsx, tests/test_review_detail_decimal.py). Reading
+ * the loop for it found a second way to the same frozen screen, with no error
+ * shown at all, which this file closes.
  *
  * The poll loop keeps exactly ONE attempt in flight and schedules the next
  * only when that attempt settles (`ReviewSubmission.tsx`'s poll effect). The
@@ -15,7 +16,7 @@
  * connection at the edge, a proxy holding the request, a backend that stopped
  * answering — stopped polling for good with no error to show, and the screen
  * stayed on whatever the last good poll said. If the very first poll is the
- * one that hangs, that is "no stage, ever", exactly as reported.
+ * one that hangs, that is "no stage, ever".
  *
  * The fake below hangs the first status GET forever and IGNORES its abort
  * signal, so the test proves the loop recovers by its own deadline
@@ -114,7 +115,7 @@ function consoleStatus(): string | null | undefined {
   return document.querySelector('.od-console')?.getAttribute('data-status');
 }
 
-describe('a poll that never answers (2026-10-28 production report)', () => {
+describe('a poll that never answers', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     window.sessionStorage.clear();

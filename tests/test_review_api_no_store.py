@@ -2,13 +2,13 @@
 """
 The review READ routes answer `Cache-Control: no-store`.
 
-## The production report this guards (2026-10-28, build c35b5e1)
+## Why (hardening from the 2026-10-28 production report)
 
-The Review screen read "Stage not yet reported" for a whole 153 s review and
-stayed on "Toasting..." after the server had marked it DONE, until a reload.
-A poll response that any cache along the way keeps and replays -- the browser,
-or the edge proxy in front of the DTS target -- is a status that can never
-change, which freezes the screen the same way a hung poll does. The frontend
+That report -- "Stage not yet reported" for a whole review and "Toasting..."
+past DONE -- was the detail route 500ing on a `Decimal`
+(tests/test_review_detail_decimal.py). A poll response that any cache along
+the way keeps and replays -- the browser, or the edge proxy in front of the
+DTS target -- would freeze the screen the same way, so it is closed too. The frontend
 now asks with `cache: 'no-store'` and abandons a hung attempt
 (frontend/src/__tests__/poll-hung-request.test.tsx); this is the half an
 intermediary obeys: `GET /api/reviews/{id}` and `GET /api/reviews` both say
