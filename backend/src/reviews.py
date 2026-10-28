@@ -3232,7 +3232,16 @@ def get_review_detail(
     # the retention rationale).
     analysis = load_analysis_artifact(item, s3_client)
 
-    return {
+    # `json_safe` because this projection is read straight off the row through
+    # boto3's resource API, which hands every stored number back as
+    # `decimal.Decimal` -- unserializable by JSONResponse. `instructions_version`
+    # (an int whenever admin instructions are active) and the OPF
+    # `posture_version`/`policy_version` are numbers on the row, so on
+    # 2026-10-28 every poll of the first real OPF review 500'd from its first
+    # second, and the Review screen sat on "Stage not yet reported" past DONE.
+    # The in-memory test doubles store plain ints, which is how the suite
+    # missed it -- the same blind spot as GET /api/users (issue #440).
+    return json_safe({
         "review_id": review_id,
         "status": status_value,
         "decision": item.get("decision"),
@@ -3423,7 +3432,7 @@ def get_review_detail(
         "attorney_disposition_note": item.get("attorney_disposition_note"),
         "attorney_disposition_recorded_at": item.get("attorney_disposition_recorded_at"),
         "legal_triage_status": item.get("legal_triage_status"),
-    }
+    })
 
 
 class ReviewNotCancellableError(Exception):
@@ -3859,7 +3868,9 @@ def _review_list_item(item: dict[str, Any]) -> dict[str, Any]:
     # has_input directly above -- History's row action needs to know
     # whether a cached draft exists without a billed round trip.
     projection["has_cover_note_draft"] = bool(item.get("cover_note_draft"))
-    return projection
+    # Same Decimal hazard as `get_review_detail`: `policy_version`,
+    # `posture_version` and `playbook_version` are numbers on the row.
+    return json_safe(projection)
 
 
 # ---------------------------------------------------------------------------

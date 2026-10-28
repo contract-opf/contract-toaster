@@ -569,9 +569,9 @@ export const POLL_BACKOFF_MAX_MS = 30000;
 // when that attempt settles, so before this an attempt that never settled
 // (a stalled connection at the edge, a backend that stopped answering) froze
 // the loop for good: no error, no retry, and the screen stuck on whatever the
-// last good poll said — the shape of the 2026-10-28 production report:
-// "Stage not yet reported" for the whole run and still "Toasting…" after the
-// server had marked the review DONE, until a reload. Comfortably above a healthy
+// last good poll said. Hardening found while diagnosing the 2026-10-28 report
+// (whose actual cause was a run of HTTP 500s — see SERVER_ERROR_COPY below);
+// a hang would have looked the same, minus even the error. Comfortably above a healthy
 // `GET /api/reviews/{id}` (one row read and, once finished, one small object),
 // well under the 60 s an nginx or edge proxy would take to give up on it.
 export const POLL_REQUEST_TIMEOUT_MS = 20_000;
@@ -746,6 +746,19 @@ export function classifyPollFailure(status: number, ageMs: number): PollFailureO
 }
 
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
+
+// A run of server errors is not a reconnect. On 2026-10-28 every status poll
+// of a real review answered HTTP 500 (a `Decimal` the detail route could not
+// serialize) from its first second to well past DONE, and "reconnecting…"
+// promised a recovery that was never coming while the review itself finished
+// fine. Owner rule #122 still holds — a 5xx stays transient and the poller
+// keeps retrying, since a redeploy can clear it — but once this many in a row
+// have come back, the copy says what is actually known: the server is
+// failing to report, the review may well be running or done, and History
+// (a different route) is where to look.
+export const POLL_SERVER_ERROR_STREAK = 3;
+export const SERVER_ERROR_COPY =
+  "The server is not reporting this review's status right now. It may still be running or already finished — check History. Still retrying…";
 
 // Issue #122. Deliberately generic: the two statuses that reach it — a 404
 // still 404ing past the grace window (the row is purged, or was never this
@@ -2410,6 +2423,8 @@ export default function ReviewSubmission(): React.ReactElement {
 
     let cancelled = false;
     let attempt = 0;
+    // Consecutive 5xx answers; see POLL_SERVER_ERROR_STREAK.
+    let serverErrors = 0;
     if (pollAnchor.current?.reviewId !== reviewId) {
       pollAnchor.current = { reviewId, firstSeenAt: Date.now(), createdAt: null };
     }
@@ -2469,8 +2484,10 @@ export default function ReviewSubmission(): React.ReactElement {
             clearInflightReviewId();
             return;
           }
+          serverErrors = response.status >= 500 ? serverErrors + 1 : 0;
           throw new Error(`GET /api/reviews/${reviewId} returned HTTP ${response.status}`);
         }
+        serverErrors = 0;
         const data = (await Promise.race([response.json(), timedOut])) as ReviewDetail;
         if (cancelled) {
           return;
@@ -2504,7 +2521,12 @@ export default function ReviewSubmission(): React.ReactElement {
         // stop: log the technical detail and reschedule with capped
         // exponential backoff instead of giving up on polling for good.
         attempt += 1;
-        setPollError(friendlyErrorMessage(err, STILL_CHECKING_COPY));
+        setPollError(
+          friendlyErrorMessage(
+            err,
+            serverErrors >= POLL_SERVER_ERROR_STREAK ? SERVER_ERROR_COPY : STILL_CHECKING_COPY,
+          ),
+        );
         pollTimer.current = setTimeout(() => {
           void poll();
         }, nextPollDelayMs(ageNow(), attempt));
