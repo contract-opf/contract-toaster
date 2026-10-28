@@ -200,6 +200,60 @@ stamp even though the right `--build-arg` was passed.
 
 When building by hand, pass `COMMIT_SHA=$(git rev-parse HEAD)`.
 
+The MinIO image below carries the same block, with `VERSION` set to the MinIO
+release instead.
+
+## MinIO image
+
+MinIO stopped publishing community images. Both `quay.io/minio/minio` and
+`docker.io/minio/minio` answer 401 for the release this target pinned, so
+`minio/minio:RELEASE.2025-04-08T15-41-24Z` can no longer be pulled.
+`minio/Dockerfile` rebuilds that **same release** from upstream source:
+
+- It clones the tag `RELEASE.2025-04-08T15-41-24Z` and checks that it still
+  points at commit `d0cada583fce88f60cb276ddfb06f5cb16820069`.
+- It builds with upstream's own release ldflags, so `minio --version` reports
+  that release and commit, exactly as the official binary did. The build fails
+  if it doesn't.
+- The runtime base is `alpine`, and the container runs as root, as the
+  upstream image did.
+
+The release is the same, so the on-disk format is the same. An existing
+`minio-data` volume needs no migration. The build doesn't use dl.min.io
+binaries, which could be withdrawn the same way.
+
+**Licence.** MinIO is AGPL-3.0-or-later. This image redistributes it
+unmodified, in its own container. The corresponding source is
+<https://github.com/minio/minio/tree/RELEASE.2025-04-08T15-41-24Z>. The
+upstream `LICENSE` and `CREDITS` ship in the image under `/licenses`.
+
+**Where each compose file gets it.**
+
+| File | MinIO image |
+|---|---|
+| `docker-compose.yml` | Built locally from `minio/Dockerfile` on `up --build`, tagged `contract-toaster-dts-minio:<release>`. The first build compiles MinIO (a few minutes). |
+| `docker-compose.coolify.yml` | `ghcr.io/${GHCR_OWNER}/contract-toaster-dts-minio:<release>`, published by `.github/workflows/dts-image-publish.yml`. |
+
+**The tag is the release, and it is immutable.** The publish workflow reads
+`ARG MINIO_TAG` from the Dockerfile and pushes that tag only, with no
+`:latest`. It publishes the tag when it is absent. It skips the tag when the
+published image was built from this exact Dockerfile, which it records in the
+`contract-toaster.dockerfile.sha256` label. It fails when the Dockerfile
+changed under an existing tag.
+
+To move to another MinIO release:
+
+1. Change `MINIO_TAG` and `MINIO_COMMIT` together. Get the commit with
+   `git ls-remote https://github.com/minio/minio 'refs/tags/<tag>^{}'`.
+2. Update both compose files.
+
+`tests/test_dts_minio_image.py` keeps the three files in step. Check MinIO's
+release notes for format changes before upgrading a volume that holds data.
+
+`amazon/dynamodb-local:2.5.2` is the only other third-party image here. AWS
+still publishes it, both on Docker Hub and on
+`public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local`, so it stays as it is.
+
 ## Not yet included (follow-ups)
 
 - **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend
