@@ -72,7 +72,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 AWS_BACKEND = REPO_ROOT / "backend" / "Dockerfile"
 DTS_BACKEND = REPO_ROOT / "deploy" / "dts" / "backend.Dockerfile"
 DTS_FRONTEND = REPO_ROOT / "deploy" / "dts" / "frontend.Dockerfile"
-DOCKERFILES = (AWS_BACKEND, DTS_BACKEND, DTS_FRONTEND)
+# The upstream-source MinIO build (deploy/dts/README.md#minio-image) carries
+# the same metadata block; its VERSION is the MinIO release.
+DTS_MINIO = REPO_ROOT / "deploy" / "dts" / "minio" / "Dockerfile"
+DOCKERFILES = (AWS_BACKEND, DTS_BACKEND, DTS_FRONTEND, DTS_MINIO)
 
 CI_PIPELINE = REPO_ROOT / ".github" / "workflows" / "ci-pipeline.yml"
 DTS_PUBLISH = REPO_ROOT / ".github" / "workflows" / "dts-image-publish.yml"
@@ -127,7 +130,7 @@ class Dockerfile:
 
 def parse_dockerfile(path: Path) -> Dockerfile:
     """Instructions grouped by stage, with continuations joined and comments
-    dropped. Only as much of the grammar as these three files use."""
+    dropped. Only as much of the grammar as these files use."""
     global_args: list[Instruction] = []
     stages: list[Stage] = []
     buffer = ""

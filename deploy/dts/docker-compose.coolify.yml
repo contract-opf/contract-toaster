@@ -2,7 +2,8 @@
 # (or any host that pulls prebuilt images instead of building from source).
 #
 # Differences from docker-compose.yml (the build-from-source local variant):
-#   - backend/bootstrap/frontend pull published GHCR images instead of `build:`.
+#   - backend/bootstrap/frontend/minio pull published GHCR images instead of
+#     `build:` (minio: the upstream-source build, tagged by MinIO release).
 #   - No host `ports:` publishing on backend/frontend: the reverse proxy routes
 #     a domain to each service's internal container port (set in the Coolify UI).
 #   - Every deployment-specific value is a bare ${VAR}, filled in by the host's
@@ -99,7 +100,13 @@ services:
       - ddb-data:/data
 
   minio:
-    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    # Built from upstream source by .github/workflows/dts-image-publish.yml.
+    # MinIO no longer publishes community images: minio/minio now answers 401,
+    # and that one failed pull aborts the WHOLE pull-latest restart, so the
+    # backend and frontend never roll forward either. The tag is the MinIO
+    # release, is immutable, and has no :latest; it must match ARG MINIO_TAG in
+    # deploy/dts/minio/Dockerfile. See deploy/dts/README.md#minio-image.
+    image: ghcr.io/${GHCR_OWNER}/contract-toaster-dts-minio:RELEASE.2025-04-08T15-41-24Z
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: local
