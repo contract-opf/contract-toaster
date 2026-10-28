@@ -1539,6 +1539,16 @@ async def get_playbooks(
 SCOPE_MINE = "mine"
 
 
+# The two review READ routes are polled for state that changes underneath
+# them: the Review tab polls one review's status until it is terminal, and
+# History lists rows whose status moves. A response any cache along the way
+# (the browser, the edge proxy in front of the DTS target) keeps and replays
+# is a status that never changes, which freezes the Review screen exactly as
+# a hung poll does -- the 2026-10-28 production report. The frontend also
+# asks with `cache: 'no-store'`; this is the half intermediaries obey.
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
 @router.get("/api/reviews", include_in_schema=True)
 async def get_reviews(
     scope: str = Query(
@@ -1587,7 +1597,8 @@ async def get_reviews(
     # read -- it now reads a bounded first page of it, which is the point.
     # `next_token` is null when there is nothing behind this page.
     return JSONResponse(
-        content={"reviews": page["items"], "next_token": page["next_token"]}
+        content={"reviews": page["items"], "next_token": page["next_token"]},
+        headers=_NO_STORE_HEADERS,
     )
 
 
@@ -1611,7 +1622,7 @@ async def get_review(
     the persisted analysis artifact (`reviews.load_analysis_artifact`) --
     neither field is ever written to the `reviews` row itself."""
     detail = reviews.get_review_detail(review_id, caller_row, dynamodb_resource, s3_client)
-    return JSONResponse(content=detail)
+    return JSONResponse(content=detail, headers=_NO_STORE_HEADERS)
 
 
 # ---------------------------------------------------------------------------

@@ -104,6 +104,7 @@ import { butterIt, formatCostUsdCents, COVER_NOTE_FAILURE_COPY } from './coverNo
 // "Run again" (issue #70) — the one-slot, in-memory hand-off to the Review
 // tab. No storage, no props: see that module's docstring.
 import { requestRunAgain } from './runAgainRequest';
+import { onReviewsChanged } from './reviewsChanged';
 import {
   CtBanner,
   CtButton,
@@ -542,6 +543,20 @@ export default function ReviewHistory(): React.ReactElement {
     void loadHistory();
   }, [loadHistory]);
 
+  // App.tsx never remounts this panel, so the load above is the only one it
+  // would ever make on its own. A review the Review tab submits or watches
+  // finish changes this listing; reload page one when it does, exactly as
+  // "Refresh" would (cursor dropped with it — see `retry` below).
+  useEffect(
+    () =>
+      onReviewsChanged(() => {
+        setNextToken(null);
+        setMoreError(null);
+        void loadHistory();
+      }),
+    [loadHistory],
+  );
+
   const retry = useCallback(() => {
     setLoad({ status: 'loading' });
     // Back to page one, and the old cursor goes with it (issue #488):
@@ -920,8 +935,18 @@ export default function ReviewHistory(): React.ReactElement {
                   width: '14rem',
                 }}
               />
-              <span className="ct-muted" style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}>
-                Showing {filteredRows.length} of {load.data.length}
+              {/* The server pages at 25 and sends no total, so with a cursor
+                  outstanding `load.data.length` is how many are LOADED, not
+                  how many exist. "Showing 25 of 25" read as the whole
+                  history to a reviewer with 26. */}
+              <span
+                className="ct-muted"
+                style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}
+                data-testid="history-count"
+              >
+                {nextToken
+                  ? `Showing ${filteredRows.length} of the ${load.data.length} loaded, more below`
+                  : `Showing ${filteredRows.length} of ${load.data.length}`}
               </span>
             </div>
           </div>
