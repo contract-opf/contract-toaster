@@ -416,6 +416,26 @@ fi
 # cache, so it never sees this. Start every local run from a clean cdk.out.
 rm -rf infra/cdk.out
 
+# Provision infra/node_modules BEFORE the suite, the way CI GATE A's `npm ci`
+# step does. A fresh git worktree has none, and only two infra tests
+# (test_infra_cdk_skeleton.py, test_infra_app_stack.py) install it, lazily, in
+# whatever order the runner reaches them. Any other synth test that gets there
+# first runs `npx` against the shared `~/.npm/_npx` cache instead: no
+# aws-cdk-lib, and since that cache picked up TypeScript 6 its ts-node also
+# refuses bin/contract-toaster.ts's side-effect import (TS2882). That is the
+# test_ci_pipeline.py "FLAKY" of 2026-10-28: red in the suite, green alone
+# once the lazy install had run. Not fail-open: a failed install is a red gate.
+# Guarded on the lockfile so the synthetic repo tests/test_check_only_flag_68.py
+# runs this script in (no infra/) is untouched, and skipped under SKIP_INFRA,
+# which runs no synth.
+if ! is_truthy "${SKIP_INFRA:-}" && [ -f infra/package-lock.json ] && [ ! -d infra/node_modules ]; then
+  echo "CHECK: infra/node_modules absent - running npm ci in infra/ …"
+  if ! (cd infra && npm ci --no-audit --no-fund); then
+    echo "CHECK: FAIL - npm ci in infra/ failed; the cdk synth tests cannot run without it." >&2
+    exit 1
+  fi
+fi
+
 # SKIP_INFRA=1 skips the tests that shell out to `cdk synth` (~14 files, each a
 # full ~15s synth → ~5-6 min total). Use it as a FAST gate for changes that do
 # NOT touch infra/ (e.g. pure-Python backend/scripts fixes): those changes

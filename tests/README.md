@@ -121,6 +121,13 @@ ALLOW_FLAKY=1 bash scripts/check.sh         # land despite a FLAKY verdict (a hu
 Quote the glob — unquoted, the shell expands it before `check.sh` sees it. A
 glob that matches nothing exits **4** and is never green.
 
+A full (non-`SKIP_INFRA`) run first installs `infra/node_modules` with `npm ci`
+when it is absent — a fresh git worktree has none — the way CI GATE A does.
+Without it, whichever CDK-synth file the runner reached first fell back to the
+shared `~/.npm/_npx` cache and failed, then passed alone once a later file's
+lazy install had run: a FLAKY verdict that was really ordering. So the first
+full run in a new worktree needs network; a failed install is a red gate.
+
 One file, the two direct ways:
 
 ```bash
