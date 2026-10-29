@@ -116,7 +116,7 @@ from src import (
 )
 from src.auth import get_current_user
 from src.demo_auth import enforce_default_credentials_rotation
-from src.users import require_active_user
+from src.users import json_safe, require_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -1539,6 +1539,18 @@ async def get_playbooks(
 SCOPE_MINE = "mine"
 
 
+# The two review READ routes are polled for state that changes underneath
+# them: the Review tab polls one review's status until it is terminal, and
+# History lists rows whose status moves. A response any cache along the way
+# (the browser, the edge proxy in front of the DTS target) keeps and replays
+# is a status that never changes, which would freeze the Review screen on a
+# stale "running" -- hardening found while diagnosing the 2026-10-28 report,
+# not its cause (that was a `Decimal` 500ing this detail route; see
+# `reviews.get_review_detail`). The frontend also asks with
+# `cache: 'no-store'`; this is the half intermediaries obey.
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
 @router.get("/api/reviews", include_in_schema=True)
 async def get_reviews(
     scope: str = Query(
@@ -1587,7 +1599,8 @@ async def get_reviews(
     # read -- it now reads a bounded first page of it, which is the point.
     # `next_token` is null when there is nothing behind this page.
     return JSONResponse(
-        content={"reviews": page["items"], "next_token": page["next_token"]}
+        content={"reviews": page["items"], "next_token": page["next_token"]},
+        headers=_NO_STORE_HEADERS,
     )
 
 
@@ -1611,7 +1624,7 @@ async def get_review(
     the persisted analysis artifact (`reviews.load_analysis_artifact`) --
     neither field is ever written to the `reviews` row itself."""
     detail = reviews.get_review_detail(review_id, caller_row, dynamodb_resource, s3_client)
-    return JSONResponse(content=detail)
+    return JSONResponse(content=detail, headers=_NO_STORE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -2348,7 +2361,9 @@ async def post_review_cover_note(
                 # last REAL cost to render its cost hint on the common real
                 # path (reload / History revisit), not just right after a
                 # fresh generation in the same session.
-                "last_generation_cost_usd_cents": item.get("cover_note_cost_usd_cents"),
+                # A number on the row, so a `Decimal` off boto3 -- see
+                # `reviews.get_review_detail`'s json_safe note.
+                "last_generation_cost_usd_cents": json_safe(item.get("cover_note_cost_usd_cents")),
             },
         )
 

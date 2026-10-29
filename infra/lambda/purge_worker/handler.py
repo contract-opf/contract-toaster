@@ -197,7 +197,9 @@ def is_pending_reduction_ready(pending: dict[str, Any]) -> bool:
     is applied immediately in request_retention_change and never reaches
     this "waiting on the clock" path.
     """
-    requested_at = pending["requested_at"]
+    # boto3 reads the stored epoch back as a Decimal, and `float - Decimal`
+    # raises TypeError -- coerce before the arithmetic.
+    requested_at = float(pending["requested_at"])
     return (now_epoch() - requested_at) >= RETROACTIVE_REDUCTION_DELAY_SECONDS
 
 
@@ -257,11 +259,12 @@ def request_retention_change(
 
     # No valid second-admin confirmation -- enter the 72h pending-delay
     # state. The window itself is NOT lowered yet; only a later sweep that
-    # observes is_pending_reduction_ready() == True applies it.
+    # observes is_pending_reduction_ready() == True applies it. A whole epoch
+    # second, because boto3 refuses a Python float on every write.
     pending_reduction = {
         "new_window_days": new_window_days,
         "requested_by": actor,
-        "requested_at": now,
+        "requested_at": int(now),
     }
     table.update_item(
         Key={"setting_id": GLOBAL_SETTING_ID},
