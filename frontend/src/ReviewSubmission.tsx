@@ -121,6 +121,7 @@ import {
   readInflightReviewId,
   writeInflightReviewId,
 } from './inflightReview';
+import { notifyReviewsChanged } from './reviewsChanged';
 import { readLastBrowning, writeLastBrowning } from './lastBrowning';
 import { readLastNotesMode, writeLastNotesMode } from './lastNotesMode';
 // The cheap, advisory upload-time preflight check (issue #491) — fired the
@@ -562,6 +563,19 @@ export const POLL_FAST_PHASE_MS = 120_000;
 // terminal status) arrives.
 export const POLL_BACKOFF_MAX_MS = 30000;
 
+// The longest one poll attempt may take, request AND body, before it is
+// abandoned as a transient failure and retried on the backoff ladder above.
+// The loop keeps exactly one attempt in flight and schedules the next only
+// when that attempt settles, so before this an attempt that never settled
+// (a stalled connection at the edge, a backend that stopped answering) froze
+// the loop for good: no error, no retry, and the screen stuck on whatever the
+// last good poll said. Hardening found while diagnosing the 2026-10-28 report
+// (whose actual cause was a run of HTTP 500s — see SERVER_ERROR_COPY below);
+// a hang would have looked the same, minus even the error. Comfortably above a healthy
+// `GET /api/reviews/{id}` (one row read and, once finished, one small object),
+// well under the 60 s an nginx or edge proxy would take to give up on it.
+export const POLL_REQUEST_TIMEOUT_MS = 20_000;
+
 /** The poll delay to use for a review that is `ageMs` old. */
 export function pollIntervalFor(ageMs: number): number {
   return ageMs < POLL_FAST_PHASE_MS ? POLL_INTERVAL_MS : POLL_INTERVAL_SLOW_MS;
@@ -732,6 +746,19 @@ export function classifyPollFailure(status: number, ageMs: number): PollFailureO
 }
 
 const STILL_CHECKING_COPY = "Still checking on your review's status — reconnecting…";
+
+// A run of server errors is not a reconnect. On 2026-10-28 every status poll
+// of a real review answered HTTP 500 (a `Decimal` the detail route could not
+// serialize) from its first second to well past DONE, and "reconnecting…"
+// promised a recovery that was never coming while the review itself finished
+// fine. Owner rule #122 still holds — a 5xx stays transient and the poller
+// keeps retrying, since a redeploy can clear it — but once this many in a row
+// have come back, the copy says what is actually known: the server is
+// failing to report, the review may well be running or done, and History
+// (a different route) is where to look.
+export const POLL_SERVER_ERROR_STREAK = 3;
+export const SERVER_ERROR_COPY =
+  "The server is not reporting this review's status right now. It may still be running or already finished — check History. Still retrying…";
 
 // Issue #122. Deliberately generic: the two statuses that reach it — a 404
 // still 404ing past the grace window (the row is purged, or was never this
@@ -2396,6 +2423,8 @@ export default function ReviewSubmission(): React.ReactElement {
 
     let cancelled = false;
     let attempt = 0;
+    // Consecutive 5xx answers; see POLL_SERVER_ERROR_STREAK.
+    let serverErrors = 0;
     if (pollAnchor.current?.reviewId !== reviewId) {
       pollAnchor.current = { reviewId, firstSeenAt: Date.now(), createdAt: null };
     }
@@ -2403,8 +2432,33 @@ export default function ReviewSubmission(): React.ReactElement {
     const ageNow = (): number => reviewAgeMs(anchor.createdAt, anchor.firstSeenAt, Date.now());
 
     async function poll(): Promise<void> {
+      // See POLL_REQUEST_TIMEOUT_MS. Raced as well as aborted, the same shape
+      // as `checkForStalledSubmission`: the abort stops the request, and the
+      // race also covers a hang before it is sent (`getToken`) or after its
+      // headers arrive (the body).
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), POLL_REQUEST_TIMEOUT_MS);
+      const timedOut = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new Error(`GET /api/reviews/${reviewId} timed out`)),
+          { once: true },
+        );
+      });
+      // Once the race has settled nothing awaits this; an abort after that
+      // must not surface as an unhandled rejection.
+      timedOut.catch(() => undefined);
       try {
-        const response = await authorizedFetch(`/api/reviews/${reviewId}`);
+        const response = await Promise.race([
+          // `no-store`: a poll answered from any HTTP cache is a status that
+          // can never change, which freezes the screen exactly as a hung
+          // request does. The backend marks these responses no-store too.
+          authorizedFetch(`/api/reviews/${reviewId}`, {
+            signal: controller.signal,
+            cache: 'no-store',
+          }),
+          timedOut,
+        ]);
         if (!response.ok) {
           // Issue #122: some non-2xx statuses on this route will never
           // resolve on a later attempt (see `classifyPollFailure`'s own
@@ -2430,9 +2484,11 @@ export default function ReviewSubmission(): React.ReactElement {
             clearInflightReviewId();
             return;
           }
+          serverErrors = response.status >= 500 ? serverErrors + 1 : 0;
           throw new Error(`GET /api/reviews/${reviewId} returned HTTP ${response.status}`);
         }
-        const data = (await response.json()) as ReviewDetail;
+        serverErrors = 0;
+        const data = (await Promise.race([response.json(), timedOut])) as ReviewDetail;
         if (cancelled) {
           return;
         }
@@ -2453,6 +2509,9 @@ export default function ReviewSubmission(): React.ReactElement {
           // to History -- the same rule the mount probe above applies to a
           // stored id that has since finished.
           clearInflightReviewId();
+          // ...and History, which loaded its listing while this row was
+          // still running, reloads to show how it finished.
+          notifyReviewsChanged();
         }
       } catch (err) {
         if (cancelled) {
@@ -2462,10 +2521,17 @@ export default function ReviewSubmission(): React.ReactElement {
         // stop: log the technical detail and reschedule with capped
         // exponential backoff instead of giving up on polling for good.
         attempt += 1;
-        setPollError(friendlyErrorMessage(err, STILL_CHECKING_COPY));
+        setPollError(
+          friendlyErrorMessage(
+            err,
+            serverErrors >= POLL_SERVER_ERROR_STREAK ? SERVER_ERROR_COPY : STILL_CHECKING_COPY,
+          ),
+        );
         pollTimer.current = setTimeout(() => {
           void poll();
         }, nextPollDelayMs(ageNow(), attempt));
+      } finally {
+        clearTimeout(timer);
       }
     }
 
@@ -2610,6 +2676,8 @@ export default function ReviewSubmission(): React.ReactElement {
         // window because this tab's own has not been written yet. That tab's
         // review would be attached and recorded here.
         writeInflightReviewId(submittedId);
+        // A new row now exists in the caller's listing; History reloads.
+        notifyReviewsChanged();
       };
 
       try {
