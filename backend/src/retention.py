@@ -350,11 +350,14 @@ def request_retention_change(
         result = {"status": "APPLIED", "applied_immediately": False}
     else:
         # No valid second-admin confirmation -- enter the 72h pending-delay
-        # state. The window itself is NOT lowered yet.
+        # state. The window itself is NOT lowered yet. `requested_at` is a
+        # whole epoch second: boto3 refuses a Python float on every write
+        # ("Float types are not supported"), and a 72h delay needs no finer
+        # grain. See tests/test_retention_pending_reduction_moto.py.
         pending_reduction = {
             "new_window_days": new_window_days,
             "requested_by": actor,
-            "requested_at": now,
+            "requested_at": int(now),
         }
         settings_table.update_item(
             Key={"setting_id": GLOBAL_SETTING_ID},
