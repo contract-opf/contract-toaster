@@ -24,6 +24,15 @@ PATH, and pin:
   6. The digest is read for the watched repository even when the image has
      several RepoDigests, and a registry port is not mistaken for a tag.
   7. The workflow's `deploy` job steps aside in pull mode.
+  8. An accepted restart is recorded only once the service's containers run
+     the new revision and are healthy (or have no healthcheck); an exited
+     one-shot container and another service's containers are not counted.
+  9. A rollout that does not come up is rolled back: the watched refs are
+     re-tagged to the previous digests, Coolify restarts WITHOUT pulling, and
+     the bad digests are held off until a newer image is published.
+ 10. With AUTOPULL_HEARTBEAT_URL set, every run reports up or down.
+ 11. A run with nothing to roll out still checks the containers, and reports
+     down (without restarting anything) when one is not running and healthy.
 
 Run: python3 tests/test_dts_autopull.py
 """
@@ -61,21 +70,29 @@ case "$1" in
       *RepoDigests*) cat "$FAKE/$(key "$img").digests" ;;
       *Labels*) cat "$FAKE/$(key "$img").rev" 2>/dev/null; echo ;;
     esac ;;
+  ps) cat "$FAKE/ps" 2>/dev/null; exit 0 ;;
+  inspect) cat "$FAKE/inspect.${*: -1}" 2>/dev/null; echo ;;
+  tag)
+    printf '%s %s\n' "$2" "$3" >> "$FAKE/tag.log"
+    [ -e "$FAKE/tag_fail" ] && exit 1; exit 0 ;;
 esac
 """
 
 FAKE_CURL = r"""#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE/curl.argv"
 out=""
+fmt=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift ;;
+    -w) fmt="$2"; shift ;;
     -H) case "$2" in @*) cat "${2#@}" >> "$FAKE/curl.headerfiles" ;; esac; shift ;;
   esac
   shift
 done
-[ -n "$out" ] && printf 'body from coolify' > "$out"
-printf '%s' "$(cat "$FAKE/http_code" 2>/dev/null || echo 200)"
+[ -n "$out" ] && [ "$out" != /dev/null ] && printf 'body from coolify' > "$out"
+[ -n "$fmt" ] && printf '%s' "$(cat "$FAKE/http_code" 2>/dev/null || echo 200)"
+exit 0
 """
 
 
@@ -104,7 +121,27 @@ class Box:
         (self.fake / f"{self.key(image)}.digests").write_text(lines, encoding="utf-8")
         (self.fake / f"{self.key(image)}.rev").write_text(revision, encoding="utf-8")
 
-    def run(self, images: str = f"{BACKEND} {FRONTEND}") -> subprocess.CompletedProcess[str]:
+    def serve(self, revision: str, health: str = "healthy", state: str = "running") -> None:
+        """What `docker ps`/`docker inspect` show for the service's containers."""
+        rows = [(f"backend-{UUID}", BACKEND), (f"frontend-{UUID}", FRONTEND)]
+        (self.fake / "ps").write_text(
+            "".join(f"{name}\t{image}\n" for name, image in rows), encoding="utf-8"
+        )
+        for name, _ in rows:
+            self.container(name, revision, health, state)
+
+    def container(self, name: str, revision: str, health: str, state: str) -> None:
+        (self.fake / f"inspect.{name}").write_text(
+            f"{revision}|{health}|{state}", encoding="utf-8"
+        )
+
+    def add_ps(self, name: str, image: str) -> None:
+        with (self.fake / "ps").open("a", encoding="utf-8") as fh:
+            fh.write(f"{name}\t{image}\n")
+
+    def run(
+        self, images: str = f"{BACKEND} {FRONTEND}", **extra: str
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "FAKE": str(self.fake),
@@ -112,14 +149,29 @@ class Box:
             "COOLIFY_SERVICE_UUID": UUID,
             "COOLIFY_API_TOKEN": TOKEN,
             "AUTOPULL_STATE_FILE": str(self.state),
+            "AUTOPULL_VERIFY_SECONDS": "1",
+            "AUTOPULL_VERIFY_INTERVAL": "0",
+            **extra,
         }
         return subprocess.run(  # noqa: S603 (the repo's own script)
             [BASH or "bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False
         )
 
     def curl_calls(self) -> list[str]:
+        """The Coolify restart calls (heartbeat pings are left out)."""
+        return [c for c in self.all_curl() if "/restart?" in c]
+
+    def all_curl(self) -> list[str]:
         path = self.fake / "curl.argv"
         return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    def tags(self) -> list[str]:
+        path = self.fake / "tag.log"
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    @property
+    def bad(self) -> Path:
+        return self.state.with_name(self.state.name + ".bad")
 
 
 @unittest.skipUnless(BASH, "needs bash")
@@ -149,6 +201,7 @@ class AutopullBehaviour(unittest.TestCase):
 
     def test_unchanged_does_nothing(self) -> None:
         self.initialise()
+        self.box.serve("a" * 40)
         result = self.box.run()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
@@ -158,6 +211,7 @@ class AutopullBehaviour(unittest.TestCase):
         self.initialise()
         self.box.publish(BACKEND, "sha256:b2", "b" * 40)
         self.box.publish(FRONTEND, "sha256:f2", "b" * 40)
+        self.box.serve("b" * 40)
         result = self.box.run()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = self.box.curl_calls()
@@ -198,6 +252,7 @@ class AutopullBehaviour(unittest.TestCase):
         self.assertIn("HTTP 401", result.stdout)
         self.assertEqual(self.box.state.read_text(encoding="utf-8"), before)
         (self.box.fake / "http_code").write_text("200", encoding="utf-8")
+        self.box.serve("b" * 40)
         self.assertEqual(self.box.run().returncode, 0)
         self.assertEqual(len(self.box.curl_calls()), 2)
         self.assertIn("sha256:b2", self.box.state.read_text(encoding="utf-8"))
@@ -219,6 +274,141 @@ class AutopullBehaviour(unittest.TestCase):
         self.assertEqual(
             self.box.state.read_text(encoding="utf-8"), f"{image} sha256:mine\n"
         )
+
+
+    def publish_b(self) -> None:
+        self.box.publish(BACKEND, "sha256:b2", "b" * 40)
+        self.box.publish(FRONTEND, "sha256:f2", "b" * 40)
+
+    def assert_rolled_back(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("rolling back", result.stdout)
+        calls = self.box.curl_calls()
+        self.assertEqual(len(calls), 2)
+        self.assertIn("restart?latest=true", calls[0])
+        self.assertIn("restart?latest=false", calls[1], "a rollback must not pull")
+        repo_b, repo_f = BACKEND.rsplit(":", 1)[0], FRONTEND.rsplit(":", 1)[0]
+        self.assertEqual(
+            self.box.tags(), [f"{repo_b}@sha256:b1 {BACKEND}", f"{repo_f}@sha256:f1 {FRONTEND}"]
+        )
+        self.assertEqual(
+            self.box.state.read_text(encoding="utf-8"),
+            f"{BACKEND} sha256:b1\n{FRONTEND} sha256:f1\n",
+        )
+        self.assertEqual(
+            self.box.bad.read_text(encoding="utf-8"),
+            f"{BACKEND} sha256:b2\n{FRONTEND} sha256:f2\n",
+        )
+
+    def test_containers_still_on_the_old_revision_roll_back(self) -> None:
+        self.box.serve("a" * 40)
+        self.initialise()
+        self.publish_b()
+        self.assert_rolled_back(self.box.run())
+
+    def test_unhealthy_rollout_rolls_back(self) -> None:
+        self.initialise()
+        self.publish_b()
+        self.box.serve("b" * 40, health="unhealthy")
+        self.assert_rolled_back(self.box.run())
+
+    def test_still_starting_counts_as_not_up(self) -> None:
+        self.initialise()
+        self.publish_b()
+        self.box.serve("b" * 40, health="starting")
+        self.assert_rolled_back(self.box.run())
+
+    def test_missing_container_counts_as_not_up(self) -> None:
+        self.initialise()
+        self.publish_b()
+        (self.box.fake / "ps").write_text(f"backend-{UUID}\t{BACKEND}\n", encoding="utf-8")
+        self.box.container(f"backend-{UUID}", "b" * 40, "healthy", "running")
+        self.assert_rolled_back(self.box.run())
+
+    def test_no_healthcheck_and_exited_one_shot_and_other_services_are_fine(self) -> None:
+        self.initialise()
+        self.publish_b()
+        self.box.serve("b" * 40, health="none")
+        self.box.add_ps(f"bootstrap-{UUID}", BACKEND)
+        self.box.container(f"bootstrap-{UUID}", "a" * 40, "none", "exited")
+        self.box.add_ps("backend-some-other-service", BACKEND)
+        self.box.container("backend-some-other-service", "a" * 40, "unhealthy", "running")
+        result = self.box.run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("up and healthy", result.stdout)
+        self.assertIn("sha256:b2", self.box.state.read_text(encoding="utf-8"))
+
+    def test_known_bad_revision_is_held_and_retagged(self) -> None:
+        self.initialise()
+        self.publish_b()
+        self.box.serve("b" * 40, health="unhealthy")
+        self.box.run()
+        result = self.box.run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("holding at the previous revision", result.stdout)
+        self.assertEqual(len(self.box.curl_calls()), 2, "no new restart while held")
+        self.assertEqual(len(self.box.tags()), 4, "re-tagged after the pull")
+        self.assertIn("sha256:b1", self.box.state.read_text(encoding="utf-8"))
+
+    def test_a_newer_image_after_a_bad_one_rolls_out_and_clears_it(self) -> None:
+        self.initialise()
+        self.publish_b()
+        self.box.serve("b" * 40, health="unhealthy")
+        self.box.run()
+        self.box.publish(BACKEND, "sha256:b3", "c" * 40)
+        self.box.publish(FRONTEND, "sha256:f3", "c" * 40)
+        self.box.serve("c" * 40)
+        result = self.box.run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("sha256:b3", self.box.state.read_text(encoding="utf-8"))
+        self.assertFalse(self.box.bad.exists())
+
+    def test_rollback_without_the_previous_image_says_so(self) -> None:
+        self.initialise()
+        self.publish_b()
+        (self.box.fake / "tag_fail").touch()
+        result = self.box.run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ROLLBACK FAILED", result.stdout)
+        self.assertEqual(len(self.box.curl_calls()), 1, "no restart without the old image")
+
+    def test_verification_can_be_turned_off(self) -> None:
+        self.initialise()
+        self.publish_b()
+        result = self.box.run(AUTOPULL_VERIFY_SECONDS="0")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("not verified", result.stdout)
+        self.assertIn("sha256:b2", self.box.state.read_text(encoding="utf-8"))
+
+    def test_heartbeat_reports_up_and_down(self) -> None:
+        url = "https://kuma.example/api/push/abc"
+        self.assertEqual(self.box.run(AUTOPULL_HEARTBEAT_URL=url).returncode, 0)
+        up = [c for c in self.box.all_curl() if url in c]
+        self.assertEqual(len(up), 1)
+        self.assertIn("status=up", up[0])
+        (self.box.fake / "pull_fail").touch()
+        self.assertEqual(self.box.run(AUTOPULL_HEARTBEAT_URL=url).returncode, 1)
+        down = [c for c in self.box.all_curl() if url in c]
+        self.assertEqual(len(down), 2)
+        self.assertIn("status=down", down[1])
+        self.assertIn("could not pull", down[1])
+
+    def test_unchanged_but_unhealthy_reports_down_without_restarting(self) -> None:
+        url = "https://kuma.example/api/push/abc"
+        self.initialise()
+        self.box.serve("a" * 40, health="unhealthy")
+        result = self.box.run(AUTOPULL_HEARTBEAT_URL=url)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not running and healthy", result.stdout)
+        self.assertEqual(self.box.curl_calls(), [], "a liveness check never restarts")
+        self.assertIn("status=down", [c for c in self.box.all_curl() if url in c][-1])
+        self.box.serve("a" * 40)
+        self.assertEqual(self.box.run(AUTOPULL_HEARTBEAT_URL=url).returncode, 0)
+        self.assertIn("status=up", [c for c in self.box.all_curl() if url in c][-1])
+
+    def test_no_heartbeat_without_a_url(self) -> None:
+        self.initialise()
+        self.assertEqual(self.box.all_curl(), [])
 
 
 class Wiring(unittest.TestCase):
