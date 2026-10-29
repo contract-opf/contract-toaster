@@ -272,6 +272,14 @@ skip rule gets past it on the free plan.
    run.
 3. When the digests have changed since the last rollout, POSTs Coolify's
    `/api/v1/services/<uuid>/restart?latest=true` on `127.0.0.1:8000`.
+4. Waits (`AUTOPULL_VERIFY_SECONDS`, default 420) until the service's backend
+   and frontend containers run the new revision and report `healthy` (the
+   compose healthchecks). Only then does it record the rollout.
+5. If they never get there, **rolls back**: it re-tags the watched refs to the
+   digests last rolled out, which are still in the box's image store, and
+   restarts with `latest=false`, so Coolify recreates the containers from them
+   without pulling. The bad digests go in `deployed.bad`. Later runs hold at the
+   previous revision until a newer image is published.
 
 Nothing inbound is needed, and Cloudflare stays as it is. The first run only
 records the current digests; it never restarts. A refused restart is retried
@@ -303,6 +311,23 @@ Then set the repository variable `DTS_DEPLOY_MODE=pull`. The workflow's
   `echo stale > /var/lib/coolify-autopull/deployed` and then
   `systemctl start coolify-autopull.service`. Deleting the file instead only
   re-initialises it, without a restart.
+- After a rollback the journal says `holding at the previous revision`. Fix
+  forward on `main`, and the next image rolls out on its own. To retry the
+  same image, delete `/var/lib/coolify-autopull/deployed.bad`.
+- **Roll back by hand** to any published commit: in the Coolify compose, change
+  the backend and frontend `:latest` to `:<short-sha>` (every publish also
+  pushes that tag), then click Restart. Put `:latest` back to resume auto-pull.
+- **Alerting.** Set `AUTOPULL_HEARTBEAT_URL` to an Uptime Kuma *Push* monitor's
+  URL (heartbeat interval about 15 minutes). Every run reports `up` or `down`
+  with its last log line, so a failed rollout, a rollback and a stopped timer
+  all raise an alert. A run with nothing to roll out still checks that the
+  backend and frontend containers are running and healthy, so the same
+  monitor is the service's liveness check. An HTTP monitor from outside would
+  only see the edge's sign-in page.
+
+**Upgrade the script** the same way you installed it: re-run the three
+`install` lines from a fresh checkout. Leave the env file and the state files
+as they are.
 
 **Coolify API access.** The script authenticates with a bearer token. If
 Coolify's API is limited to listed IPs (Settings → API), allow the address
