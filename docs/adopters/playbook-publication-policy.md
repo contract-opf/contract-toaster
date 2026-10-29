@@ -1,8 +1,9 @@
 # Playbook publication policy
 
-**Destination: `contract-opf/playbooks`.** Drafted here for GC review. Under the
-owner decision of 2026-09-08 (D5) this draft is **accepted on creation unless
-the General Counsel objects**.
+**Destination: `contract-opf/playbooks`.** First adopted 8 September 2026 under
+the owner decision of that date (D5), which accepted this draft on creation
+unless the General Counsel objected. Approved by the General Counsel, as amended
+(Part 4.4), 28 October 2026.
 
 A playbook encodes one organization's negotiating positions. Published, it
 invites readers to treat it as advice. This policy exists so that it cannot
@@ -88,9 +89,11 @@ See the [CC BY 4.0 legal code](https://creativecommons.org/licenses/by/4.0/legal
 2. **Schema validity** — the playbook validates against the published format.
    Mechanical.
 3. **Notice present** — the Part 1 notice is carried, unmodified.
-4. **No confidential or identifying content** — no counterparty names, no
-   executed-agreement text, no material that looks extracted from a specific
-   negotiation rather than generalized from one.
+4. **No confidential or identifying content** — nothing that identifies a
+   counterparty, directly or in combination: no counterparty names, people,
+   addresses, contact details, or institution-specific names. Verbatim
+   precedent from the publisher's own executed agreements is permitted once it
+   has been de-identified so that no counterparty can be identified from it.
 5. **Not held out as advice** — the contribution's own framing does not
    contradict Part 1.
 

@@ -60,7 +60,7 @@ the shipped index will name paths that are not in it.
 
 ## docs/adopters/
 - `docs/adopters/pilot-and-validation-guide.md` — Advisory parallel-run guide with the recommended exit criteria — fatal safety and output-integrity bars, count-based quality ceilings, repeatability, and efficiency as a business criterion only. anchors: shape-of-the-pilot, exit-criteria, recording-the-decision, related
-- `docs/adopters/playbook-publication-policy.md` — The notice, required metadata, licensing position and review policy for publishing a community playbook; drafted for GC review and destined for the contract-opf/playbooks repo. anchors: part-1--the-notice-every-published-playbook-carries, part-2--required-metadata, part-3--licensing-and-what-it-does-not-do, part-4--review-policy-for-contributions, part-5--what-is-not-accepted
+- `docs/adopters/playbook-publication-policy.md` — The notice, required metadata, licensing position and review policy for publishing a community playbook; approved by the General Counsel (as amended 2026-10-28) and published in the contract-opf/playbooks repo. anchors: part-1--the-notice-every-published-playbook-carries, part-2--required-metadata, part-3--licensing-and-what-it-does-not-do, part-4--review-policy-for-contributions, part-5--what-is-not-accepted
 - `docs/adopters/production-readiness-review.md` — Advisory template an adopter runs before a deployment informs real legal work: seven control areas, each asking what was demonstrated and by whom rather than what was reviewed. anchors: how-to-use-it, 1--data-residency-and-storage, 2--audit-integrity, 3--access-control, 4--output-safety, 5--cost-and-abuse-limits, 6--operations, 7--the-honest-summary
 
 ## docs/adr/
