@@ -254,6 +254,65 @@ release notes for format changes before upgrading a volume that holds data.
 still publishes it, both on Docker Hub and on
 `public.ecr.aws/aws-dynamodb-local/aws-dynamodb-local`, so it stays as it is.
 
+## Automatic roll-forward from the box
+
+`.github/workflows/dts-image-publish.yml` publishes the backend and frontend
+images on every green `main`. Its `deploy` job then calls Coolify's API from a
+GitHub-hosted runner. If the Coolify host is behind Cloudflare with **Bot
+Fight Mode** on, that call never arrives: Cloudflare answers with a challenge
+page (HTTP 403, "Just a moment..."). Neither an Access service token nor a WAF
+skip rule gets past it on the free plan.
+
+`autopull/` reverses the direction. A systemd timer on the box runs
+`coolify-autopull` every five minutes. Each run:
+
+1. Pulls the watched `:latest` images with the box's existing GHCR login.
+2. Checks that the images agree on `org.opencontainers.image.revision`. If
+   they don't, the publish run is half-way through, so it waits for the next
+   run.
+3. When the digests have changed since the last rollout, POSTs Coolify's
+   `/api/v1/services/<uuid>/restart?latest=true` on `127.0.0.1:8000`.
+
+Nothing inbound is needed, and Cloudflare stays as it is. The first run only
+records the current digests; it never restarts. A refused restart is retried
+on the next run.
+
+**Install (once, as root on the Coolify host):**
+
+```bash
+git clone --depth 1 https://github.com/<owner>/contract-toaster /tmp/ct
+install -m 0755 /tmp/ct/deploy/dts/autopull/coolify-autopull.sh /usr/local/bin/coolify-autopull
+install -m 0644 /tmp/ct/deploy/dts/autopull/coolify-autopull.service /tmp/ct/deploy/dts/autopull/coolify-autopull.timer /etc/systemd/system/
+install -m 0600 /tmp/ct/deploy/dts/autopull/coolify-autopull.env.example /etc/coolify-autopull.env
+# edit /etc/coolify-autopull.env: the two image refs, the service UUID, an API token
+systemctl daemon-reload
+systemctl start coolify-autopull.service   # first run: records digests, no restart
+journalctl -u coolify-autopull -n 5         # expect "initialised at revision …"
+systemctl enable --now coolify-autopull.timer
+```
+
+Then set the repository variable `DTS_DEPLOY_MODE=pull`. The workflow's
+`deploy` job then skips instead of failing at the edge on every run.
+
+**Operate it:**
+
+- `journalctl -u coolify-autopull` shows each rollout ("rolled forward to
+  <sha>"), each deferral, and each refusal.
+- `systemctl list-timers coolify-autopull.timer` shows the next run.
+- To force a rollout of what is already published, run
+  `echo stale > /var/lib/coolify-autopull/deployed` and then
+  `systemctl start coolify-autopull.service`. Deleting the file instead only
+  re-initialises it, without a restart.
+
+**Coolify API access.** The script authenticates with a bearer token. If
+Coolify's API is limited to listed IPs (Settings → API), allow the address
+Coolify sees for a request from the host itself: the Docker bridge gateway,
+usually `172.17.0.1`, or the `coolify` network's gateway. Otherwise the restart
+is refused with a 403, which the journal shows.
+
+`tests/test_dts_autopull.py` runs the script against fake `docker` and `curl`
+binaries.
+
 ## Not yet included (follow-ups)
 
 - **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend

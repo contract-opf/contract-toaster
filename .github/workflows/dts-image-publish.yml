@@ -5,6 +5,15 @@
 # its own when "CI pipeline" finishes successfully on main, and it triggers the
 # Coolify pull itself. No human clicks anything on the happy path.
 #
+# TWO WAYS TO ROLL FORWARD. The `deploy` job below PUSHES: it calls Coolify's
+# API from the runner. That cannot work when the Coolify host is behind
+# Cloudflare with Bot Fight Mode on (a challenge page answers instead). The
+# alternative PULLS: deploy/dts/autopull/ runs on the box, watches GHCR, and
+# calls Coolify on localhost. Set the repository variable
+# DTS_DEPLOY_MODE=pull when the box pulls, and the `deploy` job steps aside
+# instead of failing every run. See
+# deploy/dts/README.md#automatic-roll-forward-from-the-box.
+#
 # WHAT THIS DOES **NOT** CHANGE. ci-pipeline.yml's security invariant 1 — "No
 # auto-deploy from main", promotion to App Runner is a deliberate, audited,
 # cosign-verified step with an audit row, and AppStack pins
@@ -274,6 +283,9 @@ jobs:
     # MinIO too: a compose that names the MinIO release must not be restarted
     # before that image exists, or the pull aborts the whole restart.
     needs: [publish, publish-minio]
+    # In pull mode the box rolls itself forward (deploy/dts/autopull/), so a
+    # push from here would only be a second, redundant restart.
+    if: vars.DTS_DEPLOY_MODE != 'pull'
     runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Trigger the Coolify pull-and-restart
@@ -350,7 +362,8 @@ jobs:
             echo "service token scoped to the Coolify application). A 403 challenge page"
             echo "with those set is Bot Fight Mode, which no rule can skip on the free"
             echo "plan: turn it off for the zone, or run this job on a runner that"
-            echo "reaches Coolify without crossing Cloudflare."
+            echo "reaches Coolify without crossing Cloudflare. Or let the box pull:"
+            echo "install deploy/dts/autopull/ and set DTS_DEPLOY_MODE=pull."
             exit 1
           fi
           case "${code:-}" in

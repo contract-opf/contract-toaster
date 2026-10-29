@@ -88,7 +88,14 @@ by every usage reset.
 
 Bot Fight Mode stays ON for the zone, so the GitHub deploy leg of
 `dts-image-publish.yml` always fails at the edge (expected, not a
-regression). Images still publish on every green `main`. After each landing:
+regression). Images still publish on every green `main`.
+
+**Superseded once installed (2026-10-29):** `deploy/dts/autopull/` runs on
+the box and rolls Coolify forward from GHCR itself, with no call through
+Cloudflare. Install steps:
+[deploy/dts/README.md](../../deploy/dts/README.md#automatic-roll-forward-from-the-box).
+With it installed and `DTS_DEPLOY_MODE=pull` set, the manual step below is no
+longer needed. Until then, after each landing:
 
 ```bash
 bash /private/tmp/claude-502/-Users-marcmandel-Documents-dev-contract-toaster-public/910c593d-c65e-416a-92ec-05c953bec404/scratchpad/roll-forward.sh
