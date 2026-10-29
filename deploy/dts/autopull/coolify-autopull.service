@@ -1,0 +1,17 @@
+# Runs deploy/dts/autopull/coolify-autopull.sh once. Started by
+# coolify-autopull.timer; see deploy/dts/README.md#automatic-roll-forward-from-the-box.
+[Unit]
+Description=Roll the DTS Coolify service forward when GHCR has new images
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Root, because it uses the box's docker socket and root's existing GHCR
+# login (/root/.docker/config.json), the same ones Coolify pulls with.
+EnvironmentFile=/etc/coolify-autopull.env
+ExecStart=/usr/local/bin/coolify-autopull
+StateDirectory=coolify-autopull
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
