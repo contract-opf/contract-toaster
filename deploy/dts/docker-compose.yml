@@ -102,6 +102,16 @@ services:
     environment:
       MINIO_ROOT_USER: local
       MINIO_ROOT_PASSWORD: localsecret
+    # Healthchecks: Coolify shows them, and deploy/dts/autopull/ waits for
+    # "healthy" before it records a rollout (and rolls back if it never comes).
+    # Each probe uses a tool the image already has: python3 in the backend,
+    # busybox wget in the alpine-based frontend and MinIO images.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
     restart: unless-stopped
     volumes:
       - minio-data:/data
@@ -186,6 +196,12 @@ services:
     depends_on:
       bootstrap:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 40s
     restart: unless-stopped
     ports:
       # Bound to loopback only (issue #469): container-to-container traffic
@@ -222,6 +238,12 @@ services:
         COMMIT_SHA: ${COMMIT_SHA:-unknown}
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
     restart: unless-stopped
     ports:
       - "8081:8080"
