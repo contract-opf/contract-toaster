@@ -81,6 +81,40 @@ need `S3_PUBLIC_ENDPOINT_URL` set to that host's externally-reachable address
 instead (e.g. behind an nginx path-route or a real DNS name) — not needed for
 the local Phase 1 quickstart this README covers.
 
+### MinIO on a public domain: credentials and an edge rule
+
+In `docker-compose.coolify.yml`, MinIO sits on its own public domain, because
+the browser follows presigned download URLs straight to it. Two consequences:
+
+**Its login must be secret.** The local compose uses `local` / `localsecret`
+(fine on a laptop). The Coolify compose names Coolify magic variables
+instead, `${SERVICE_USER_MINIO}` and `${SERVICE_PASSWORD_64_MINIO}`. Coolify
+generates them on first save, and MinIO's root login and the backend's
+`AWS_*` pair both read them, so they always match. Changing the pair on an
+existing deployment keeps every stored object. Links presigned before the
+restart stop working, and new ones work. On any other host, set both
+variables yourself. `tests/test_dts_minio_credentials.py` fails if a literal
+value comes back.
+
+**Only presigned downloads need the public domain.** The backend reaches MinIO
+on the internal network, and presigns only `GetObject`. Its links carry
+`Signature=` and `Expires=` (or `X-Amz-Signature=` and `X-Amz-Expires=` with
+SigV4). If the domain is behind Cloudflare, a custom WAF rule (action:
+**Block**) can refuse everything else. That covers uploads, deletes, listings,
+admin calls and any request signed with a header:
+
+```
+(http.host eq "<minio-domain>" and not (
+  http.request.method in {"GET" "HEAD"}
+  and http.request.uri.query contains "Signature="
+  and http.request.uri.query contains "Expires="
+  and not ends_with(http.request.uri.path, "/")
+))
+```
+
+This is defence in depth, not a replacement for the secret login. Someone
+holding the login could still presign a GET for themselves.
+
 ## What the bootstrap does
 
 `bootstrap.py` (a one-shot compose service the backend waits on) creates the
