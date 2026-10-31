@@ -258,6 +258,14 @@ export interface ReviewProjectionState {
    * rendered under one headline. `ReviewSubmission` never sets both at once.
    */
   pollStopped?: string | null;
+  /**
+   * QA 2026-10-31 W9: the app has stopped following the review on screen
+   * (`ReviewSubmission`'s `reviewLost` — the poll gave up for good). Decided
+   * by the app, read here: `projectStatus` answers as if no review were in
+   * flight, so the console shows the intake and the Start lever rather than a
+   * Stop for a review nobody can see move. `pollStopped` still says why.
+   */
+  reviewLost?: boolean;
   downloadError?: string | null;
   catalogError?: string | null;
   notesModeSaveError?: string | null;
@@ -347,7 +355,9 @@ function projectStatus(state: ReviewProjectionState): Status {
   if (state.submitting) {
     return 'SUBMITTING';
   }
-  if (!state.reviewId) {
+  // A lost review (see `reviewLost`) rests like no review at all: its last
+  // polled status is a RUNNING that will never change.
+  if (!state.reviewId || state.reviewLost) {
     return state.file ? 'LOADED' : 'EMPTY';
   }
   // Submitted, nothing polled back yet — the pipeline's own first status.

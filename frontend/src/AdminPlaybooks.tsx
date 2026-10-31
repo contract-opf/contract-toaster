@@ -231,7 +231,8 @@ import {
   type PlaybookCatalogEntry,
   type PlaybookCatalogStatus,
 } from './playbooksStore';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail, triggerBrowserDownload } from './api';
+import { authorizedFetch, friendlyErrorMessage, triggerBrowserDownload } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import { linkifyText } from './linkify';
 import { deriveVersionIdentifier, readOpfIdentity } from './opfIdentity';
 import AdminInstructions from './AdminInstructions';
@@ -509,7 +510,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET playbook versions returned HTTP ${response.status}`,
             "We couldn't load that playbook's version history. Please try again.",
@@ -664,15 +665,12 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ?? friendlyErrorMessage(options.technical, options.fallback),
-          );
+          throw await responseError(response, options.technical, options.fallback);
         }
         options.onSuccess?.();
       } catch (err) {
         setActionError(
-          err instanceof Error ? err.message : friendlyErrorMessage(err, options.fallback),
+          toUserMessage(err, options.fallback),
         );
       } finally {
         setPendingAction(null);
@@ -718,31 +716,31 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (response.status === 410) {
-          throw new Error('This playbook version is no longer available in storage.');
+          throw new UserFacingError('This playbook version is no longer available in storage.');
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `GET playbook version download ${playbookId}/${version}`,
-                "We couldn't download that playbook version. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `GET playbook version download ${playbookId}/${version}`,
+            "We couldn't download that playbook version. Please try again.",
           );
         }
         const data = (await response.json()) as { url?: string };
         if (!data.url) {
-          throw new Error('Download URL missing from response.');
+          throw new UserFacingError(
+            friendlyErrorMessage(
+              `GET playbook version download ${playbookId}/${version} returned no url`,
+              "We couldn't download that playbook version. Please try again.",
+            ),
+          );
         }
         triggerBrowserDownload(data.url);
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(
-                err,
-                "We couldn't download that playbook version. Please try again.",
-              ),
+          toUserMessage(
+            err,
+            "We couldn't download that playbook version. Please try again.",
+          ),
         );
       } finally {
         setPendingAction(null);
@@ -798,13 +796,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!approvalResponse.ok) {
-          const detail = await readErrorDetail(approvalResponse);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST legal-approval ${playbookId}/${version}`,
-                "We couldn't record approval for that version. Please try again.",
-              ),
+          throw await responseError(
+            approvalResponse,
+            `POST legal-approval ${playbookId}/${version}`,
+            "We couldn't record approval for that version. Please try again.",
           );
         }
 
@@ -814,14 +809,14 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!activateResponse.ok) {
-          const detail = await readErrorDetail(activateResponse);
-          const refusal =
-            detail ??
-            friendlyErrorMessage(
+          const refusal = (
+            await responseError(
+              activateResponse,
               `POST activate ${playbookId}/${version}`,
               "We couldn't activate that version.",
-            );
-          throw new Error(
+            )
+          ).message;
+          throw new UserFacingError(
             `${refusal} The approval was recorded and stands, but this version is not live — ` +
               'activate it from its row once that is resolved.',
           );
@@ -829,12 +824,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         refreshAfterVersionChange(playbookId);
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(
-                err,
-                "We couldn't approve and activate that version. Please try again.",
-              ),
+          toUserMessage(
+            err,
+            "We couldn't approve and activate that version. Please try again.",
+          ),
         );
         // Re-read even on failure: a half-completed sequence must show the
         // approval it really did record, not the pre-click state.
@@ -963,13 +956,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST upload ${targetId}/${version}`,
-                "We couldn't upload that version. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `POST upload ${targetId}/${version}`,
+            "We couldn't upload that version. Please try again.",
           );
         }
 
@@ -987,13 +977,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
             return;
           }
           if (!notesResponse.ok) {
-            const detail = await readErrorDetail(notesResponse);
-            throw new Error(
-              detail ??
-                friendlyErrorMessage(
-                  `PATCH notes ${targetId}/${version}`,
-                  'The version was uploaded, but its note could not be saved. Edit it from the version history below.',
-                ),
+            throw await responseError(
+              notesResponse,
+              `PATCH notes ${targetId}/${version}`,
+              'The version was uploaded, but its note could not be saved. Edit it from the version history below.',
             );
           }
         }
@@ -1013,9 +1000,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         showHistoryFor(targetId);
       } catch (err) {
         setUploadError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't upload that version. Please try again."),
+          toUserMessage(err, "We couldn't upload that version. Please try again."),
         );
       } finally {
         setUploading(false);
@@ -1120,13 +1105,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
           return;
         }
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                'POST /api/admin/playbooks',
-                "We couldn't upload that playbook. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            'POST /api/admin/playbooks',
+            "We couldn't upload that playbook. Please try again.",
           );
         }
         const created = (await response.json()) as { playbook_id: string; version: string };
@@ -1144,13 +1126,10 @@ export default function AdminPlaybooks(): React.ReactElement | null {
             return;
           }
           if (!notesResponse.ok) {
-            const detail = await readErrorDetail(notesResponse);
-            throw new Error(
-              detail ??
-                friendlyErrorMessage(
-                  `PATCH notes ${created.playbook_id}/${created.version}`,
-                  'The playbook was uploaded, but its note could not be saved. Edit it from the version history below.',
-                ),
+            throw await responseError(
+              notesResponse,
+              `PATCH notes ${created.playbook_id}/${created.version}`,
+              'The playbook was uploaded, but its note could not be saved. Edit it from the version history below.',
             );
           }
         }
@@ -1169,9 +1148,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
         showHistoryFor(created.playbook_id);
       } catch (err) {
         setCreateError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't upload that playbook. Please try again."),
+          toUserMessage(err, "We couldn't upload that playbook. Please try again."),
         );
       } finally {
         setCreating(false);
