@@ -900,8 +900,13 @@ def run_purge_sweep_now(
     # W6.7: a parked reduction whose 72-hour delay has passed takes effect
     # here, exactly as the purge worker Lambda applies it at the start of
     # its sweep on AWS. Skipped on a dry run, which must change nothing.
+    # A failure here does not stop the sweep: this run purges on each
+    # review's own snapshotted window either way, and the next run retries.
     if not dry_run:
-        apply_ready_pending_reduction(dynamodb_resource)
+        try:
+            apply_ready_pending_reduction(dynamodb_resource)
+        except Exception:  # noqa: BLE001 -- logged by fact, not provider text
+            logger.warning("retention sweep: applying a pending reduction failed; will retry")
     reviews_table = _reviews_table(dynamodb_resource)
     sweep_id = uuid.uuid4().hex
 
