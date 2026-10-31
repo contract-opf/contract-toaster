@@ -27,6 +27,9 @@
  * owner), not "the cheap-model call had a bad day".
  */
 import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { UserFacingError, withUserFacingErrors } from './userMessage';
+
+export const COVER_NOTE_ERROR_COPY = "We couldn't load that. Please try again.";
 
 export interface CoverNoteResult {
   reviewId: string;
@@ -86,33 +89,38 @@ export async function butterIt(
   reviewId: string,
   { regenerate = false }: { regenerate?: boolean } = {},
 ): Promise<CoverNoteOutcome> {
-  const response = await authorizedFetch(`/api/reviews/${reviewId}/cover-note`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ regenerate }),
-  });
-  if (response.status === 502) {
-    // Logged for support/diagnostics correlation, never rendered raw.
-    void readErrorDetail(response).then((detail) => {
-      if (detail) {
-        // eslint-disable-next-line no-console
-        console.error(detail);
-      }
+  // Every failure reaches the caller as a `UserFacingError` carrying fixed
+  // copy — a rejected fetch and an unparseable body included, whose own text
+  // is the browser's, not ours (QA 2026-10-31 W9).
+  return withUserFacingErrors(COVER_NOTE_ERROR_COPY, async (): Promise<CoverNoteOutcome> => {
+    const response = await authorizedFetch(`/api/reviews/${reviewId}/cover-note`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regenerate }),
     });
-    return { ok: false };
-  }
-  if (!response.ok) {
-    const errorDetail = await readErrorDetail(response);
-    throw new Error(
-      friendlyErrorMessage(
-        errorDetail ??
-          `POST /api/reviews/${reviewId}/cover-note returned HTTP ${response.status}`,
-        "We couldn't load that. Please try again.",
-      ),
-    );
-  }
-  const body = (await response.json()) as Record<string, unknown>;
-  return { ok: true, ...parseCoverNoteResponse(body) };
+    if (response.status === 502) {
+      // Logged for support/diagnostics correlation, never rendered raw.
+      void readErrorDetail(response).then((detail) => {
+        if (detail) {
+          // eslint-disable-next-line no-console
+          console.error(detail);
+        }
+      });
+      return { ok: false };
+    }
+    if (!response.ok) {
+      const errorDetail = await readErrorDetail(response);
+      throw new UserFacingError(
+        friendlyErrorMessage(
+          errorDetail ??
+            `POST /api/reviews/${reviewId}/cover-note returned HTTP ${response.status}`,
+          COVER_NOTE_ERROR_COPY,
+        ),
+      );
+    }
+    const body = (await response.json()) as Record<string, unknown>;
+    return { ok: true, ...parseCoverNoteResponse(body) };
+  });
 }
 
 /**

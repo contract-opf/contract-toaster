@@ -37,7 +37,8 @@
  * agree -- is on the authenticated Settings tab (AdminSettings.tsx).
  */
 import { useState } from 'react';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { authorizedFetch } from './api';
+import { AUTH_DETAIL_STATUSES, responseError, toUserMessage } from './userMessage';
 import { frontendStamp } from './deployIdentity';
 import { CtButton, CtBanner, CtCard, CtField } from './ui/react';
 
@@ -84,19 +85,17 @@ export default function PasswordLogin({
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(
-          detail ??
-            friendlyErrorMessage(
-              `POST /api/auth/login returned HTTP ${response.status}`,
-              SIGN_IN_FALLBACK,
-            ),
+        throw await responseError(
+          response,
+          `POST /api/auth/login returned HTTP ${response.status}`,
+          SIGN_IN_FALLBACK,
+          AUTH_DETAIL_STATUSES,
         );
       }
       const data = (await response.json()) as LoginResponse;
       onAuthenticated({ username: data.username, isAdmin: Boolean(data.is_admin) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : friendlyErrorMessage(err, SIGN_IN_FALLBACK));
+      setError(toUserMessage(err, SIGN_IN_FALLBACK));
     } finally {
       setSubmitting(false);
     }
