@@ -180,6 +180,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import { type ModelKeySettings } from './AdminModel';
 import {
   backendStamp,
@@ -822,7 +823,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/me/preferences returned HTTP ${response.status}`,
             "We couldn't load this deployment's settings. Please try again.",
@@ -848,7 +849,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/model-key returned HTTP ${response.status}`,
             "We couldn't load this deployment's secrets. Please try again.",
@@ -873,7 +874,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/entity-roster returned HTTP ${response.status}`,
             "We couldn't load your legal entity names. Please try again.",
@@ -920,17 +921,14 @@ export default function AdminSettings({
         body: JSON.stringify({ entities: parseRosterDraft(rosterDraft) }),
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
         // The server's own 400 detail is the useful half here (which name is
         // too long, which character is not allowed), so it is shown rather
         // than replaced — it names no endpoint and no status code (#425).
-        throw new Error(
-          typeof body.detail === 'string' && body.detail
-            ? body.detail
-            : friendlyErrorMessage(
-                `PUT /api/admin/entity-roster returned HTTP ${response.status}`,
-                "We couldn't save your legal entity names. Please try again.",
-              ),
+        // Any other status renders the fixed copy.
+        throw await responseError(
+          response,
+          `PUT /api/admin/entity-roster returned HTTP ${response.status}`,
+          "We couldn't save your legal entity names. Please try again.",
         );
       }
       const data = (await response.json()) as EntityRosterSettings;
@@ -939,9 +937,7 @@ export default function AdminSettings({
       setRosterSaved(true);
     } catch (err) {
       setRosterSaveError(
-        err instanceof Error
-          ? err.message
-          : "We couldn't save your legal entity names. Please try again.",
+        toUserMessage(err, "We couldn't save your legal entity names. Please try again."),
       );
     } finally {
       setRosterSaving(false);
@@ -961,7 +957,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/spend returned HTTP ${response.status}`,
             "We couldn't load this deployment's spend. Please try again.",
@@ -1042,17 +1038,13 @@ export default function AdminSettings({
           body: JSON.stringify({ daily_cap_usd_cents: nextCapUsdCents }),
         });
         if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
           // The server's own 400 detail is the useful half here (which bound
           // was missed), so it is shown rather than replaced — it names no
           // endpoint and no status code (#425).
-          throw new Error(
-            typeof body.detail === 'string' && body.detail
-              ? body.detail
-              : friendlyErrorMessage(
-                  `POST /api/admin/spend-cap returned HTTP ${response.status}`,
-                  "We couldn't save the daily spend cap. Please try again.",
-                ),
+          throw await responseError(
+            response,
+            `POST /api/admin/spend-cap returned HTTP ${response.status}`,
+            "We couldn't save the daily spend cap. Please try again.",
           );
         }
         // Re-read the LEDGER, not just the saved cap: "what is left today" and
@@ -1063,9 +1055,7 @@ export default function AdminSettings({
         setCapSaved(true);
       } catch (err) {
         setCapSaveError(
-          err instanceof Error
-            ? err.message
-            : "We couldn't save the daily spend cap. Please try again.",
+          toUserMessage(err, "We couldn't save the daily spend cap. Please try again."),
         );
       } finally {
         setCapSaving(false);
@@ -1082,7 +1072,7 @@ export default function AdminSettings({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /version returned HTTP ${response.status}`,
             "We couldn't read what this deployment is running. Please try again.",

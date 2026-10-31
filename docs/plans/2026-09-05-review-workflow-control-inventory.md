@@ -96,14 +96,15 @@ The console reads `model.status` — a fuller vocabulary projected by `PR`: `EMP
 | Submitting | Lever reads "Uploading"; both operations keys disabled | Inputs remain editable but the request has already been built | No abort during upload (#693 PLANNED) |
 | Queued / running (PENDING, RUNNING) | Progress (indeterminate until the first stage token, then the staged toast + caption in `review-stage-caption`), lever in its Stop state, review-id row, poll-error message in the status window with a "Check now" retry | Playbook, browning, notes mode, instructions stay enabled but changes do not affect the running review | Ticking sound, tab title and favicon browning |
 | Cancellation requested | Lever reads "Stopping"; it and the plain Stop key are inert | As above | 409 → "This review finished before it could be stopped." |
+| Lost (poll gave up — a 404 past its grace window, or a 410; QA 2026-10-31 W9) | `RS` stops following the review: its `phase` is `lost` and `toReviewModel` gets `reviewLost`, so the console reads EMPTY/LOADED — intake shown, lever in its Start state, no Stop — and the status window carries the fixed `review-poll-stopped` message ("…no longer being followed…") with no retry key | All inputs; Run again and the lever both work, and either one clears the message | Ticking, the elapsed clock and the tab title stop; the review id is kept for History |
 | Cancelled | Back to an operable idle console; the outcome is stated rather than burnt | All inputs, file retained | No burnt art, no clunk |
 | Completed (DONE) | Popped toast, "Save redline" on the operations rail, the receipt printer lit, the till's Butter it / Record outcome / sound / alerts / shortcuts keys, and the result — outcome, decision copy, applied guidance, confidence band, critic delta, meta line — on the page and again inside the overlay's record view | Download, butter, disposition, receipt actions; form inputs still editable for the next run | Pop sound, notification, automatic download once (below) |
 | Download preparing | "Save redline" reads "Preparing…" and is disabled | | Download-error message on failure |
 | Cover note generating | Butter/regenerate disabled | | Failure offers retry; a 502 shows the real error, and the two are different message ids |
-| Error | Burnt slice + steam, failure card with headline, cause, fix, failing stage and reason code, "Toast another slice" | Retry clears detail, review id, file, errors | Clunk sound |
+| Error | Burnt slice + steam, failure card with headline, cause, fix, failing stage and reason code, "Toast another slice" | Retry clears detail, review id, file, errors — submit, download, cancel, disposition and poll alike (QA 2026-10-31 W9) | Clunk sound |
 | Manual review required | "Needs a human", its own result card with the same diagnosis fields and a "Review details" key beside it | Disposition is available (`canDispose`) | Distinct from ERROR — see #458 above |
 
-Settings changeable during a review: all four are technically editable; only notes mode has a side effect (it saves the preference immediately). None of them affects the review in flight.
+Settings changeable during a review: all four are technically editable; only notes mode has a side effect (it saves the preference immediately; saves go out one at a time in the order chosen, and only the newest one may report a failure — QA 2026-10-31 W9). None of them affects the review in flight.
 
 ### The once-only automatic download
 

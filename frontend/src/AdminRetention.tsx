@@ -43,7 +43,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type AdminPanelRefreshProps } from './adminRefresh';
 import { failedLoad, type LoadState } from './loadState';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import {
   CtBanner,
   CtButton,
@@ -244,7 +245,7 @@ export default function AdminRetention({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/retention returned HTTP ${response.status}`,
             "We couldn't load the retention settings. Please try again.",
@@ -277,7 +278,7 @@ export default function AdminRetention({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/retention/holds returned HTTP ${response.status}`,
             "We couldn't load the legal holds. Please try again.",
@@ -429,7 +430,7 @@ export default function AdminRetention({
         body: JSON.stringify({ proposed_window_days: sliderValue }),
       });
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `Preview request returned HTTP ${response.status}`,
             "We couldn't load the purge preview. Please try again.",
@@ -439,9 +440,7 @@ export default function AdminRetention({
       setPreview((await response.json()) as PurgePreview);
     } catch (err) {
       setActionError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't load the purge preview. Please try again."),
+        toUserMessage(err, "We couldn't load the purge preview. Please try again."),
       );
     }
   }, [sliderValue]);
@@ -459,13 +458,10 @@ export default function AdminRetention({
         ),
       });
       if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(
-          detail ??
-            friendlyErrorMessage(
-              `Retention change returned HTTP ${response.status}`,
-              "We couldn't save the retention change. Please try again.",
-            ),
+        throw await responseError(
+          response,
+          `Retention change returned HTTP ${response.status}`,
+          "We couldn't save the retention change. Please try again.",
         );
       }
       // Reflect the change only after the server confirms it.
@@ -474,9 +470,7 @@ export default function AdminRetention({
       setReductionReason('');
     } catch (err) {
       setActionError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't save the retention change. Please try again."),
+        toUserMessage(err, "We couldn't save the retention change. Please try again."),
       );
     } finally {
       setSaving(false);
@@ -525,13 +519,10 @@ export default function AdminRetention({
         { method: 'POST', body: JSON.stringify({ reason: holdReason }) },
       );
       if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        throw new Error(
-          detail ??
-            friendlyErrorMessage(
-              `Place hold returned HTTP ${response.status}`,
-              "We couldn't place that legal hold. Please try again.",
-            ),
+        throw await responseError(
+          response,
+          `Place hold returned HTTP ${response.status}`,
+          "We couldn't place that legal hold. Please try again.",
         );
       }
       // Reload both: the holds table AND the review list (a freshly-held
@@ -544,9 +535,7 @@ export default function AdminRetention({
       setHoldReason('');
     } catch (err) {
       setActionError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(err, "We couldn't place that legal hold. Please try again."),
+        toUserMessage(err, "We couldn't place that legal hold. Please try again."),
       );
     } finally {
       setHoldActionPending(false);
@@ -566,13 +555,10 @@ export default function AdminRetention({
           },
         );
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `Release hold returned HTTP ${response.status}`,
-                "We couldn't release that legal hold. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `Release hold returned HTTP ${response.status}`,
+            "We couldn't release that legal hold. Please try again.",
           );
         }
         await loadHolds();
@@ -583,9 +569,7 @@ export default function AdminRetention({
         });
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't release that legal hold. Please try again."),
+          toUserMessage(err, "We couldn't release that legal hold. Please try again."),
         );
       } finally {
         setHoldActionPending(false);
