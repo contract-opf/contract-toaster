@@ -1359,7 +1359,7 @@ export default function AdminSettings({
                     {duplicateLineCount > 0 && (
                       <span
                         data-testid="admin-settings-roster-duplicate-notice"
-                        style={{ fontSize: '14px', color: 'var(--ct-color-warn, #b45309)', fontWeight: 500 }}
+                        style={{ fontSize: '14px', color: 'var(--ct-warn)', fontWeight: 500 }}
                       >
                         {duplicateLineCount}{' '}
                         {duplicateLineCount === 1 ? 'duplicate entry' : 'duplicate entries'} will be merged on save
@@ -1437,9 +1437,9 @@ export default function AdminSettings({
                 style={{
                   marginTop: '0.5rem',
                   padding: '0.75rem',
-                  borderRadius: 'var(--ct-radius, 6px)',
-                  background: 'var(--ct-color-surface-subtle, rgba(0,0,0,0.02))',
-                  border: '1px solid var(--ct-color-border-subtle, rgba(0,0,0,0.08))',
+                  borderRadius: 'var(--ct-radius-sm)',
+                  background: 'var(--ct-surface-sunken)',
+                  border: '1px solid var(--ct-border)',
                   fontSize: '14px',
                 }}
               >
@@ -1467,7 +1467,7 @@ export default function AdminSettings({
                         borderBottom:
                           idx === rosterLoad.data.history!.length - 1
                             ? 'none'
-                            : '1px solid var(--ct-color-border-subtle, rgba(0,0,0,0.06))',
+                            : '1px solid var(--ct-border)',
                         fontSize: '14px',
                       }}
                       data-testid={`admin-settings-roster-history-entry-${idx}`}
@@ -1496,9 +1496,9 @@ export default function AdminSettings({
                             key={`added-${name}`}
                             style={{
                               fontSize: '14px',
-                              color: 'var(--ct-color-success-text, #15803d)',
-                              background: 'var(--ct-color-success-bg, #f0fdf4)',
-                              border: '1px solid var(--ct-color-success-border, #bbf7d0)',
+                              color: 'var(--ct-ok)',
+                              background: 'var(--ct-ok-bg)',
+                              border: '1px solid var(--ct-ok-border)',
                               padding: '2px 8px',
                               borderRadius: '4px',
                               display: 'inline-block',
@@ -1512,9 +1512,9 @@ export default function AdminSettings({
                             key={`removed-${name}`}
                             style={{
                               fontSize: '14px',
-                              color: 'var(--ct-color-danger-text, #b91c1c)',
-                              background: 'var(--ct-color-danger-bg, #fef2f2)',
-                              border: '1px solid var(--ct-color-danger-border, #fecaca)',
+                              color: 'var(--ct-danger)',
+                              background: 'var(--ct-danger-bg)',
+                              border: '1px solid var(--ct-danger-border)',
                               padding: '2px 8px',
                               borderRadius: '4px',
                               display: 'inline-block',

@@ -875,15 +875,12 @@ export default function ReviewHistory(): React.ReactElement {
           <div
             className="ct-row ct-row--between ct-row--wrap"
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
               padding: '0.75rem 1rem',
               gap: '0.75rem',
-              borderBottom: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+              borderBottom: '1px solid var(--ct-border)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <div className="ct-row ct-row--wrap">
               <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
                 Filter:
               </span>
@@ -901,9 +898,9 @@ export default function ReviewHistory(): React.ReactElement {
                     type="button"
                     data-testid={`history-filter-${filterKey}`}
                     style={{
-                      background: active ? 'var(--ct-accent, #646cff)' : 'var(--ct-bg-subtle, rgba(255,255,255,0.06))',
-                      color: active ? '#fff' : 'var(--ct-text, #fff)',
-                      border: active ? '1px solid var(--ct-accent, #646cff)' : '1px solid var(--ct-border-subtle, rgba(255,255,255,0.1))',
+                      background: active ? 'var(--ct-accent)' : 'var(--ct-neutral-bg)',
+                      color: active ? 'var(--ct-accent-contrast)' : 'var(--ct-text)',
+                      border: active ? '1px solid var(--ct-accent)' : '1px solid var(--ct-neutral-border)',
                       padding: '0.25rem 0.65rem',
                       borderRadius: '16px',
                       fontSize: 'var(--ct-text-sm)',
@@ -918,22 +915,14 @@ export default function ReviewHistory(): React.ReactElement {
               })}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="ct-row ct-row--wrap" style={{ gap: '0.75rem' }}>
               <input
                 type="search"
+                className="ct-input"
                 placeholder="Search history…"
                 data-testid="history-search-input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  padding: '0.25rem 0.6rem',
-                  fontSize: 'var(--ct-text-sm)',
-                  borderRadius: '6px',
-                  background: 'var(--ct-bg, #1e1e1e)',
-                  border: '1px solid var(--ct-border, rgba(255,255,255,0.15))',
-                  color: 'inherit',
-                  width: '14rem',
-                }}
               />
               {/* The server pages at 25 and sends no total, so with a cursor
                   outstanding `load.data.length` is how many are LOADED, not
@@ -941,7 +930,6 @@ export default function ReviewHistory(): React.ReactElement {
                   history to a reviewer with 26. */}
               <span
                 className="ct-muted"
-                style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}
                 data-testid="history-count"
               >
                 {nextToken

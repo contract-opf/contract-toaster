@@ -1243,37 +1243,26 @@ export default function AdminPlaybooks(): React.ReactElement | null {
       ) : playbooks === null ? null : (
         <CtCard data-testid="admin-playbooks-table-panel">
           <div
-            className="ct-row ct-row--between"
+            className="ct-row ct-row--between ct-row--wrap"
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
               padding: '0.75rem 1rem',
               gap: '0.75rem',
-              borderBottom: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+              borderBottom: '1px solid var(--ct-border)',
             }}
           >
             <span style={{ fontSize: 'var(--ct-text-sm)', fontWeight: 600, color: 'var(--ct-text-muted)' }}>
               Catalog
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div className="ct-row ct-row--wrap" style={{ gap: '0.75rem' }}>
               <input
                 type="search"
+                className="ct-input"
                 placeholder="Filter playbooks…"
                 data-testid="playbooks-search-input"
                 value={playbookSearchQuery}
                 onChange={(e) => setPlaybookSearchQuery(e.target.value)}
-                style={{
-                  padding: '0.25rem 0.6rem',
-                  fontSize: 'var(--ct-text-sm)',
-                  borderRadius: '6px',
-                  background: 'var(--ct-bg, #1e1e1e)',
-                  border: '1px solid var(--ct-border, rgba(255,255,255,0.15))',
-                  color: 'inherit',
-                  width: '14rem',
-                }}
               />
-              <span className="ct-muted" style={{ fontSize: 'var(--ct-text-sm)', whiteSpace: 'nowrap' }}>
+              <span className="ct-muted">
                 Showing {filteredPlaybooks.length} of {playbooks.length}
               </span>
             </div>
@@ -1377,12 +1366,17 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                             the same visual weight as Rename. The routine
                             actions now sit together in their own band, and the
                             destructive one sits in a separate band that
-                            `.ct-row-actions` pushes to the end and separates
-                            with a rule (see app.css). Grouping, not just
-                            ordering: "third in a stack" is exactly what this
-                            replaces. */}
+                            `.ct-row-actions__danger` pushes to the end
+                            (`margin-inline-start: auto`) and separates with an
+                            inline-start rule (see app.css). When the cell is
+                            too narrow and the bands wrap, the rule is what
+                            still marks Remove as different. Grouping, not
+                            just ordering: "third in a stack" is exactly what
+                            this replaces. (A 2x2 grid that put Remove in the
+                            fourth cell beside Rename briefly replaced this;
+                            QA 2026-10-31 decision D5 restored the bands.) */}
                         <div
-                          className="ct-row-actions ct-actions-grid-2x2"
+                          className="ct-row-actions"
                           role="group"
                           data-testid={`playbook-row-actions-${entry.playbook_id}`}
                           aria-label={`Actions for ${entry.display_name}`}
@@ -1577,8 +1571,8 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                     marginBottom: '1rem',
                     padding: '0.75rem',
                     borderRadius: '6px',
-                    background: 'var(--ct-bg-subtle, rgba(255, 255, 255, 0.03))',
-                    border: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+                    background: 'var(--ct-surface-sunken)',
+                    border: '1px solid var(--ct-border)',
                   }}
                 >
                   <div
@@ -1694,13 +1688,12 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                           <div
                             style={{
                               display: 'grid',
-                              gridTemplateColumns: 'repeat(2, 1fr)',
+                              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
                               gap: '0.75rem',
                               padding: '0.75rem',
                               borderRadius: '4px',
-                              background: 'var(--ct-bg-card, rgba(0,0,0,0.2))',
-                              border:
-                                '1px solid var(--ct-border-subtle, rgba(255,255,255,0.06))',
+                              background: 'var(--ct-surface-raised)',
+                              border: '1px solid var(--ct-border)',
                               fontSize: 'var(--ct-text-sm)',
                             }}
                           >
@@ -1742,8 +1735,7 @@ export default function AdminPlaybooks(): React.ReactElement | null {
                               style={{
                                 gridColumn: '1 / -1',
                                 paddingTop: '0.4rem',
-                                borderTop:
-                                  '1px solid var(--ct-border-subtle, rgba(255,255,255,0.06))',
+                                borderTop: '1px solid var(--ct-border)',
                               }}
                             >
                               <CtChip variant={sameHash ? 'ok' : 'warn'}>
