@@ -115,7 +115,7 @@ from src import (
     upload_validation,
 )
 from src.auth import get_current_user
-from src.demo_auth import enforce_default_credentials_rotation
+from src.demo_auth import enforce_default_credentials_rotation, enforce_session_version
 from src.users import json_safe, require_active_user
 
 logger = logging.getLogger(__name__)
@@ -227,6 +227,7 @@ def get_active_user_row(
     src/main.py::get_active_user_row, including that enforcement step; see
     that function's docstring."""
     caller_row = require_active_user(current_user.get("sub", ""), dynamodb_resource)
+    enforce_session_version(current_user, caller_row)
     enforce_default_credentials_rotation(caller_row, request.url.path)
     return caller_row
 
