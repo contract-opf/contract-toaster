@@ -267,6 +267,7 @@ Usage:
 from __future__ import annotations
 
 import io
+import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -328,6 +329,15 @@ REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE = "block_op_unsupported_in_table"
 # statements about the whole document, so a caller cannot be told which one
 # edit to drop, only that no document is deliverable.
 REASON_PROJECTION_VERIFICATION_FAILED = "projection_verification_failed"
+# QA remediation W7-6: the text an edit would INSERT carries a character XML
+# 1.0 cannot hold at all (a C0 control other than tab/newline/carriage
+# return, a lone surrogate, U+FFFE/U+FFFF). Per edit, like every reason above
+# the batch-level one: before this, writing one such character raised an
+# uncaught `ExpatError` when the part was re-parsed, and the whole review --
+# every other proven edit included -- ended in ERROR. Checked BEFORE anything
+# is written, so the bad edit never reaches the document and its siblings
+# still land.
+REASON_INSERT_TEXT_NOT_XML_SAFE = "insert_text_not_xml_safe"
 
 FAILURE_REASONS = (
     REASON_UNKNOWN_BLOCK_ID,
@@ -340,7 +350,24 @@ FAILURE_REASONS = (
     REASON_ROUND_TRIP_FAILED,
     REASON_BLOCK_OP_UNSUPPORTED_IN_TABLE,
     REASON_PROJECTION_VERIFICATION_FAILED,
+    REASON_INSERT_TEXT_NOT_XML_SAFE,
 )
+
+#: Every character XML 1.0's `Char` production excludes (section 2.2).
+_XML_ILLEGAL_RE = re.compile("[^\t\n\r -\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def _xml_illegal_detail(text: str) -> Optional[str]:  # noqa: UP045
+    """A counts-only failure detail when `text` holds a character XML 1.0
+    cannot represent, else None (W7-6). Names how many and the offset of the
+    first, never the characters or the text around them."""
+    found = [match.start() for match in _XML_ILLEGAL_RE.finditer(text)]
+    if not found:
+        return None
+    return (
+        f"the inserted text carries {len(found)} character(s) XML cannot hold "
+        f"(first at offset {found[0]}), so it cannot be written into the document"
+    )
 
 # The whole-block ops this module compiles, bound to the single definition
 # in `block_transcript` (the module that owns the transcript vocabulary and
@@ -2060,6 +2087,10 @@ def apply_block_transcript(
 
         spans = live.get("physical_spans") or []
         for edit in edits:
+            unsafe = _xml_illegal_detail(edit.get("insert_text") or "")
+            if unsafe is not None:
+                failures.append(_failure(edit, block_id, REASON_INSERT_TEXT_NOT_XML_SAFE, unsafe))
+                continue
             span_index = _physical_span_for(spans, edit["start"], edit["end"])
             if span_index is None:
                 failures.append(
@@ -2135,6 +2166,10 @@ def apply_block_transcript(
     for block_op in block_ops:
         edit = _block_op_edit(block_op)
         target_block_id = _block_op_block_id(block_op)
+        unsafe = _xml_illegal_detail(edit.get("insert_text") or "")
+        if unsafe is not None:
+            failures.append(_failure(edit, target_block_id, REASON_INSERT_TEXT_NOT_XML_SAFE, unsafe))
+            continue
         from_start = (
             block_op["op"] == OP_INSERT_BLOCK_AFTER
             and block_op["anchor_block_id"] == block_transcript.ANCHOR_START
