@@ -688,6 +688,26 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
                 skipped_not_yet_eligible.append(review_id)
                 continue
 
+            # W6.6: the scan page was read before this candidate's turn and a
+            # scan is eventually consistent. A hold placed since must still
+            # win, so re-read the row strongly consistently right before
+            # acting. Mirrors backend/src/retention.py::run_purge_sweep_now.
+            current = reviews_table.get_item(
+                Key={"review_id": review_id}, ConsistentRead=True
+            ).get("Item")
+            if not current:
+                logger.warning(
+                    "retention sweep: review %s vanished mid-sweep; skipped", review_id
+                )
+                continue
+            if _is_legal_held(current):
+                skipped_hold.append(review_id)
+                continue
+            if current.get("status") not in TERMINAL_REVIEW_STATUSES:
+                skipped_active.append(review_id)
+                continue
+            review = current
+
             # Invariant 4: delete documents, then clear matched substance
             # fields.
             eligible.append(review_id)
