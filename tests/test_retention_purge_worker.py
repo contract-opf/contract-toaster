@@ -599,7 +599,7 @@ class PurgeWorkerTestCase(unittest.TestCase):
         result = _handler_module.request_retention_change(
             new_window_days=30,
             actor="admin-1",
-            second_admin_confirmation=None,
+
         )
 
         self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
@@ -614,7 +614,7 @@ class PurgeWorkerTestCase(unittest.TestCase):
         result = _handler_module.request_retention_change(
             new_window_days=90,
             actor="admin-1",
-            second_admin_confirmation=None,
+
         )
 
         self.assertEqual(result["status"], "APPLIED")
@@ -622,38 +622,38 @@ class PurgeWorkerTestCase(unittest.TestCase):
         settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
         self.assertEqual(settings_table.items["global"]["retention_window_days"], 90)
 
-    def test_retroactive_reduction_with_second_admin_confirmation_applies(self):
+    # W6.7 replaced the two tests that lived here
+    # (`..._with_second_admin_confirmation_applies` and
+    # `..._same_admin_confirming_itself_is_rejected`). They encoded the bug:
+    # the "second admin" was a free-text string in the requester's own call,
+    # so the first test proved that one admin could apply a reduction by
+    # typing another name. A reduction is now always parked; confirmation is
+    # the backend's authenticated confirm route
+    # (tests/test_retention_dual_control_w6.py).
+
+    def test_there_is_no_in_request_confirmation(self):
         self._seed_default_settings(window_days=90)
 
+        with self.assertRaises(TypeError):
+            _handler_module.request_retention_change(
+                new_window_days=30,
+                actor="admin-1",
+                second_admin_confirmation={"actor": "admin-2"},
+            )
         result = _handler_module.request_retention_change(
-            new_window_days=30,
-            actor="admin-1",
-            second_admin_confirmation={"actor": "admin-2", "reason": "quarterly cleanup"},
+            new_window_days=30, actor="admin-1", reason="quarterly cleanup"
         )
-
-        self.assertEqual(result["status"], "APPLIED")
-        settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
-        self.assertEqual(settings_table.items["global"]["retention_window_days"], 30)
-
-    def test_retroactive_reduction_same_admin_confirming_itself_is_rejected(self):
-        """A confirmation must come from a DIFFERENT admin than the requester,
-        or dual-control is trivially bypassable by one compromised session."""
-        self._seed_default_settings(window_days=90)
-
-        result = _handler_module.request_retention_change(
-            new_window_days=30,
-            actor="admin-1",
-            second_admin_confirmation={"actor": "admin-1", "reason": "self-confirm"},
-        )
-
         self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
         settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
         self.assertEqual(settings_table.items["global"]["retention_window_days"], 90)
+        pending = settings_table.items["global"]["pending_reduction"]
+        self.assertTrue(pending["pending_id"])
+        self.assertEqual(pending["reason"], "quarterly cleanup")
 
     def test_pending_reduction_sweep_blocked_before_delay_expires(self):
         self._seed_default_settings(window_days=90)
         _handler_module.request_retention_change(
-            new_window_days=0, actor="admin-1", second_admin_confirmation=None,
+            new_window_days=0, actor="admin-1", reason="test",
         )
         settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
         pending = settings_table.items["global"]["pending_reduction"]
@@ -667,11 +667,13 @@ class PurgeWorkerTestCase(unittest.TestCase):
     def test_pending_reduction_sweep_allowed_after_72h_delay_elapses(self):
         self._seed_default_settings(window_days=90)
         _handler_module.request_retention_change(
-            new_window_days=0, actor="admin-1", second_admin_confirmation=None,
+            new_window_days=0, actor="admin-1", reason="test",
         )
         settings_table = self.ddb.Table(os.environ["RETENTION_SETTINGS_TABLE"])
         pending = settings_table.items["global"]["pending_reduction"]
         pending["requested_at"] = _handler_module.now_epoch() - (73 * 3600)
+        # W6.7: the record now carries its own `apply_after`; age it too.
+        pending["apply_after"] = pending["requested_at"] + 72 * 3600
 
         allowed = _handler_module.is_pending_reduction_ready(pending)
         self.assertTrue(allowed)

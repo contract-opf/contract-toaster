@@ -86,7 +86,7 @@ class FakeTable:
         self.items: dict = {}
         self.raise_on_get: Exception | None = None
 
-    def get_item(self, Key):
+    def get_item(self, Key, ConsistentRead=False):  # noqa: ARG002
         if self.raise_on_get is not None:
             raise self.raise_on_get
         key = Key[self.key_name]
@@ -96,7 +96,8 @@ class FakeTable:
     def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items[Item[self.key_name]] = dict(Item)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None,
+                    ConditionExpression=None):  # noqa: ARG002 - moto suites cover conditions
         key = Key[self.key_name]
         item = self.items.setdefault(key, dict(Key))
         vals = ExpressionAttributeValues or {}
@@ -279,7 +280,9 @@ class TestRequestRetentionChange(RetentionTestCase):
         )
 
     def test_retroactive_reduction_single_admin_is_pending_not_applied(self):
-        result = _retention_module.request_retention_change(30, self.admin, self.ddb)
+        result = _retention_module.request_retention_change(
+            30, self.admin, self.ddb, reason="cleanup"
+        )
         self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
         self.assertFalse(result["applied_immediately"])
         # The window itself must NOT have been lowered yet.
@@ -287,13 +290,17 @@ class TestRequestRetentionChange(RetentionTestCase):
             self.settings.items.get("global", {}).get("retention_window_days", 90), 90
         )
 
+    # W6.7: the confirmation used to be a free-text `second_admin_confirmation`
+    # actor in the requester's own call -- which these tests exercised, and
+    # which is exactly how one admin could pass dual control alone. The
+    # confirmer is now the authenticated caller of a separate route.
+
     def test_retroactive_reduction_confirmed_by_different_admin_applies(self):
-        _retention_module.request_retention_change(30, self.admin, self.ddb)
-        result = _retention_module.request_retention_change(
-            30,
-            self.admin,
-            self.ddb,
-            second_admin_confirmation={"actor": "admin-2"},
+        pending_id = _retention_module.request_retention_change(
+            30, self.admin, self.ddb, reason="cleanup"
+        )["pending_id"]
+        result = _retention_module.confirm_pending_reduction(
+            pending_id, self.other_admin, self.ddb
         )
         self.assertEqual(result["status"], "APPLIED")
         self.assertEqual(self.settings.items["global"]["retention_window_days"], 30)
@@ -301,14 +308,12 @@ class TestRequestRetentionChange(RetentionTestCase):
     def test_self_confirmation_rejected_stays_pending(self):
         """A lone admin cannot satisfy dual control by confirming their own
         request -- single compromised session must not be enough."""
-        _retention_module.request_retention_change(30, self.admin, self.ddb)
-        result = _retention_module.request_retention_change(
-            30,
-            self.admin,
-            self.ddb,
-            second_admin_confirmation={"actor": "admin-1"},
-        )
-        self.assertEqual(result["status"], "PENDING_SECOND_APPROVAL")
+        pending_id = _retention_module.request_retention_change(
+            30, self.admin, self.ddb, reason="cleanup"
+        )["pending_id"]
+        with self.assertRaises(HTTPException) as ctx:
+            _retention_module.confirm_pending_reduction(pending_id, self.admin, self.ddb)
+        self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(
             self.settings.items.get("global", {}).get("retention_window_days", 90), 90
         )

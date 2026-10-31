@@ -230,6 +230,20 @@ def get_retention_settings(
 
     result["default_retention_window_days"] = DEFAULT_RETENTION_WINDOW_DAYS
     result["window_options"] = [dict(opt) for opt in RETENTION_WINDOW_OPTIONS]
+    pending = result.get("pending_reduction")
+    if pending:
+        # W6.7: the server, not the browser, says whether THIS viewer may
+        # confirm -- the requester never may. `apply_after` is filled in for a
+        # row parked before it was recorded.
+        pending = dict(pending)
+        pending.setdefault(
+            "apply_after", int(pending.get("requested_at", 0)) + RETROACTIVE_REDUCTION_DELAY_SECONDS
+        )
+        viewer = caller_user_row.get("cognito_sub", "")
+        pending["viewer_can_confirm"] = bool(
+            viewer and pending.get("pending_id") and viewer != pending.get("requested_by")
+        )
+        result["pending_reduction"] = pending
     # The row goes straight into GET /api/admin/retention's JSONResponse, and
     # boto3 reads a stored bounded window (and a pending reduction's numbers)
     # back as Decimals -- the same 500 GET /api/users had (#440). See
@@ -238,33 +252,46 @@ def get_retention_settings(
 
 
 # ---------------------------------------------------------------------------
-# request_retention_change -- POST (admin), dual control (#13 / #61)
+# request_retention_change -- POST (admin), real dual control (#13 / #61, W6.7)
 # ---------------------------------------------------------------------------
+
+# Invariant 5: a retroactive reduction waits this long for a second admin
+# before it applies itself. Mirrors the purge worker Lambda's
+# RETROACTIVE_REDUCTION_DELAY_SECONDS default.
+RETROACTIVE_REDUCTION_DELAY_SECONDS = 72 * 3600
+
+# The actor an automatic, delay-expired application is recorded under.
+PENDING_REDUCTION_SYSTEM_ACTOR = "system:retention-delay"
+
+_GLOBAL_KEY = {"setting_id": GLOBAL_SETTING_ID}
+
+
+def _clean_reason(reason: Any) -> str:
+    return reason.strip() if isinstance(reason, str) else ""
 
 
 def request_retention_change(
     new_window_days: int | str,
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
-    second_admin_confirmation: dict[str, Any] | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
-    """POST /api/admin/retention.
+    """POST /api/admin/retention. Body: {"retention_window_days", "reason"}.
 
     Forward-looking changes (raising the window, or an unchanged value)
     apply single-admin, immediately. A retroactive reduction (new window <
-    current window, ranked by `_window_rank` so the `forever` sentinel
-    always outranks any bounded window) requires either a second, different
-    admin's confirmation, or is parked in `pending_reduction` for the
-    mandatory 72-hour delay (applied automatically by the purge worker once
-    the delay elapses -- see infra/lambda/purge_worker/handler.py). A lone
-    admin cannot satisfy dual control by confirming their own request.
+    current window, ranked by `_window_rank` so `forever` outranks every
+    bounded window) NEVER applies from this request (W6.7). It is parked as
+    a pending record -- `pending_id`, requester, required `reason`,
+    `apply_after` -- that either a DIFFERENT authenticated admin confirms
+    (`confirm_pending_reduction`), any admin cancels
+    (`cancel_pending_reduction`), or the purge sweep applies once the 72-hour
+    delay has passed (`apply_ready_pending_reduction` on DTS, the Lambda on
+    AWS). The free-text "second admin" this request used to accept was
+    self-attested, so one admin could apply a 0-day window on their own.
 
-    `new_window_days` may be an int in [0, 1095] (RUNBOOK.md: "0 days-3
-    years") or the literal string `"forever"` (issue #34: indefinite
-    preservation -- the selected records are never purged).
-
-    Raises HTTPException(403) if the caller is not an admin, 400 if
-    new_window_days is neither a valid int in range nor `"forever"`.
+    Raises HTTPException(403) for a non-admin, 400 for an invalid window or
+    a reduction without a reason, 409 when a reduction is already pending.
     """
     require_admin(caller_user_row, "Admin privilege required to change retention settings.")
 
@@ -274,75 +301,294 @@ def request_retention_change(
     settings_table = _settings_table(dynamodb_resource)
     settings = get_retention_settings(caller_user_row, dynamodb_resource)
     current_window = settings["retention_window_days"]
-    now = now_epoch()
+    current_pending = settings.get("pending_reduction") or None
+    now = int(now_epoch())
 
     is_retroactive_reduction = _window_rank(new_window_days) < _window_rank(current_window)
 
     if not is_retroactive_reduction:
         settings_table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
+            Key=_GLOBAL_KEY,
             UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
+            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(now)},
         )
         result = {"status": "APPLIED", "applied_immediately": True}
+        detail: dict[str, Any] = {
+            "before_retention_window_days": current_window,
+            "after_retention_window_days": new_window_days,
+            "result_status": result["status"],
+        }
+        if current_pending:
+            # A forward change supersedes a parked reduction; say so.
+            detail["cleared_pending_id"] = current_pending.get("pending_id", "")
         _audit(
             dynamodb_resource,
             actor=actor,
             action="retention_change",
             target=GLOBAL_SETTING_ID,
             target_type="retention_settings",
-            detail={
-                "before_retention_window_days": current_window,
-                "after_retention_window_days": new_window_days,
-                "result_status": result["status"],
-            },
+            detail=detail,
         )
         return result
 
-    confirmed_by_different_admin = bool(
-        second_admin_confirmation
-        and second_admin_confirmation.get("actor")
-        and second_admin_confirmation["actor"] != actor
-    )
+    reason = _clean_reason(reason)
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to request a retention reduction.",
+        )
+    if current_pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A retention reduction is already pending. Confirm or cancel it "
+                "before requesting another."
+            ),
+        )
 
-    if confirmed_by_different_admin:
+    pending_reduction = {
+        "pending_id": uuid.uuid4().hex,
+        "new_window_days": new_window_days,
+        "previous_window_days": current_window,
+        "requested_by": actor,
+        # Whole epoch seconds: boto3 refuses a Python float on every write
+        # (tests/test_retention_pending_reduction_moto.py).
+        "requested_at": now,
+        "apply_after": now + RETROACTIVE_REDUCTION_DELAY_SECONDS,
+        "reason": reason,
+    }
+    try:
         settings_table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
-            UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
-        )
-        result = {"status": "APPLIED", "applied_immediately": False}
-    else:
-        # No valid second-admin confirmation -- enter the 72h pending-delay
-        # state. The window itself is NOT lowered yet. `requested_at` is a
-        # whole epoch second: boto3 refuses a Python float on every write
-        # ("Float types are not supported"), and a 72h delay needs no finer
-        # grain. See tests/test_retention_pending_reduction_moto.py.
-        pending_reduction = {
-            "new_window_days": new_window_days,
-            "requested_by": actor,
-            "requested_at": int(now),
-        }
-        settings_table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
+            Key=_GLOBAL_KEY,
             UpdateExpression="SET pending_reduction = :pending, updated_at = :now",
-            ExpressionAttributeValues={":pending": pending_reduction, ":now": str(int(now))},
+            ConditionExpression="attribute_not_exists(pending_reduction) OR pending_reduction = :none",
+            ExpressionAttributeValues={
+                ":pending": pending_reduction,
+                ":now": str(now),
+                ":none": None,
+            },
         )
-        result = {"status": "PENDING_SECOND_APPROVAL", "applied_immediately": False}
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A retention reduction is already pending.",
+            ) from None
+        raise
 
     _audit(
         dynamodb_resource,
         actor=actor,
-        action="retention_change",
+        action="retention_reduction_requested",
         target=GLOBAL_SETTING_ID,
         target_type="retention_settings",
         detail={
+            "pending_id": pending_reduction["pending_id"],
             "before_retention_window_days": current_window,
             "after_retention_window_days": new_window_days,
-            "result_status": result["status"],
+            "apply_after": pending_reduction["apply_after"],
+            "reason": reason,
+            "result_status": "PENDING_SECOND_APPROVAL",
         },
     )
-    return result
+    return {
+        "status": "PENDING_SECOND_APPROVAL",
+        "applied_immediately": False,
+        "pending_id": pending_reduction["pending_id"],
+        "apply_after": pending_reduction["apply_after"],
+    }
+
+
+def _current_pending(dynamodb_resource: Any, pending_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(settings row, pending record) for `pending_id`, or 404."""
+    row = (
+        _settings_table(dynamodb_resource)
+        .get_item(Key=_GLOBAL_KEY, ConsistentRead=True)
+        .get("Item")
+        or {}
+    )
+    pending = row.get("pending_reduction") or {}
+    if not pending_id or pending.get("pending_id") != pending_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending retention reduction with that id.",
+        )
+    return row, pending
+
+
+def _apply_pending(dynamodb_resource: Any, pending: dict[str, Any]) -> None:
+    """Lower the window to the pending value and clear the record -- only if
+    that same record is still the pending one (a concurrent cancel or
+    confirm loses cleanly)."""
+    _settings_table(dynamodb_resource).update_item(
+        Key=_GLOBAL_KEY,
+        UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
+        ConditionExpression="pending_reduction.pending_id = :pid",
+        ExpressionAttributeValues={
+            ":w": pending["new_window_days"],
+            ":none": None,
+            ":now": str(int(now_epoch())),
+            ":pid": pending["pending_id"],
+        },
+    )
+
+
+def _pending_audit_detail(row: dict[str, Any], pending: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "pending_id": pending.get("pending_id", ""),
+        "requested_by": pending.get("requested_by", ""),
+        "requested_at": pending.get("requested_at"),
+        "reason": pending.get("reason", ""),
+        "before_retention_window_days": row.get(
+            "retention_window_days", DEFAULT_RETENTION_WINDOW_DAYS
+        ),
+        "after_retention_window_days": pending.get("new_window_days"),
+    }
+
+
+def confirm_pending_reduction(
+    pending_id: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+) -> dict[str, Any]:
+    """POST /api/admin/retention/pending/{pending_id}/confirm.
+
+    The second half of dual control: an authenticated admin (strict
+    `is_admin is True`, `authz.require_admin`) who is NOT the requester
+    applies the parked reduction now. The confirmer's identity is the
+    caller's own row -- never anything in the request body.
+
+    Raises HTTPException(403) for a non-admin or for the requester, 404 for
+    an unknown or no-longer-pending id.
+    """
+    require_admin(caller_user_row, "Admin privilege required to confirm a retention reduction.")
+    actor = caller_user_row.get("cognito_sub", "")
+    row, pending = _current_pending(dynamodb_resource, pending_id)
+    if not actor or actor == pending.get("requested_by"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A retention reduction must be confirmed by a different admin than the one who requested it.",
+        )
+    try:
+        _apply_pending(dynamodb_resource, pending)
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No pending retention reduction with that id.",
+            ) from None
+        raise
+    _audit(
+        dynamodb_resource,
+        actor=actor,
+        action="retention_reduction_confirmed",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={**_pending_audit_detail(row, pending), "result_status": "APPLIED"},
+    )
+    return {"status": "APPLIED", "applied_immediately": False, "pending_id": pending_id}
+
+
+def cancel_pending_reduction(
+    pending_id: str,
+    caller_user_row: dict[str, Any],
+    dynamodb_resource: Any,
+    reason: str = "",
+) -> dict[str, Any]:
+    """POST /api/admin/retention/pending/{pending_id}/cancel. Body:
+    {"reason": str} (optional). Any admin -- including the requester -- may
+    withdraw a parked reduction; the window is left as it is.
+
+    Raises HTTPException(403) for a non-admin, 404 for an unknown or
+    no-longer-pending id.
+    """
+    require_admin(caller_user_row, "Admin privilege required to cancel a retention reduction.")
+    actor = caller_user_row.get("cognito_sub", "")
+    row, pending = _current_pending(dynamodb_resource, pending_id)
+    try:
+        _settings_table(dynamodb_resource).update_item(
+            Key=_GLOBAL_KEY,
+            UpdateExpression="SET pending_reduction = :none, updated_at = :now",
+            ConditionExpression="pending_reduction.pending_id = :pid",
+            ExpressionAttributeValues={
+                ":none": None,
+                ":now": str(int(now_epoch())),
+                ":pid": pending_id,
+            },
+        )
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No pending retention reduction with that id.",
+            ) from None
+        raise
+    _audit(
+        dynamodb_resource,
+        actor=actor,
+        action="retention_reduction_cancelled",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={
+            **_pending_audit_detail(row, pending),
+            "cancel_reason": _clean_reason(reason),
+            "result_status": "CANCELLED",
+        },
+    )
+    return {"status": "CANCELLED", "pending_id": pending_id}
+
+
+def apply_ready_pending_reduction(dynamodb_resource: Any) -> bool:
+    """Apply a parked reduction whose 72-hour delay has passed, and audit it
+    (DTS; the purge worker Lambda does the same on AWS). Called at the start
+    of every DTS sweep. Returns True when one was applied.
+
+    `apply_after` is honoured when recorded; a row parked before it was
+    recorded falls back to `requested_at` + the delay, as the Lambda does."""
+    if not os.environ.get("RETENTION_SETTINGS_TABLE"):
+        return False
+    row = (
+        _settings_table(dynamodb_resource)
+        .get_item(Key=_GLOBAL_KEY, ConsistentRead=True)
+        .get("Item")
+        or {}
+    )
+    pending = row.get("pending_reduction") or None
+    if not pending:
+        return False
+    apply_after = pending.get("apply_after")
+    if apply_after is None:
+        apply_after = float(pending.get("requested_at", 0)) + RETROACTIVE_REDUCTION_DELAY_SECONDS
+    if now_epoch() < float(apply_after):
+        return False
+    if not pending.get("pending_id"):
+        # A pre-W6.7 record: give it an id so the conditional apply can bind.
+        pending = {**pending, "pending_id": "legacy"}
+        _settings_table(dynamodb_resource).update_item(
+            Key=_GLOBAL_KEY,
+            UpdateExpression="SET pending_reduction.pending_id = :pid",
+            ExpressionAttributeValues={":pid": "legacy"},
+        )
+    try:
+        _apply_pending(dynamodb_resource, pending)
+    except Exception as exc:
+        if _is_conditional_failure(exc):
+            return False  # confirmed or cancelled meanwhile
+        raise
+    _audit(
+        dynamodb_resource,
+        actor=PENDING_REDUCTION_SYSTEM_ACTOR,
+        action="retention_reduction_applied_after_delay",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={**_pending_audit_detail(row, pending), "result_status": "APPLIED"},
+    )
+    return True
+
+
+def _is_conditional_failure(exc: Exception) -> bool:
+    response = getattr(exc, "response", None) or {}
+    return response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +892,11 @@ def run_purge_sweep_now(
     if not os.environ.get("AUDIT_TABLE"):
         # Refuse before deleting anything: a sweep must never run unrecorded.
         raise RuntimeError("AUDIT_TABLE is not configured; refusing to sweep unaudited")
+    # W6.7: a parked reduction whose 72-hour delay has passed takes effect
+    # here, exactly as the purge worker Lambda applies it at the start of
+    # its sweep on AWS. Skipped on a dry run, which must change nothing.
+    if not dry_run:
+        apply_ready_pending_reduction(dynamodb_resource)
     reviews_table = _reviews_table(dynamodb_resource)
     sweep_id = uuid.uuid4().hex
 
@@ -960,11 +1211,6 @@ def _get_review_or_404(review_id: str, dynamodb_resource: Any) -> dict[str, Any]
     if not review:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
     return review
-
-
-def _is_conditional_failure(exc: Exception) -> bool:
-    response = getattr(exc, "response", None) or {}
-    return response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
 
 
 def set_legal_hold(
