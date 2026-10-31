@@ -361,6 +361,7 @@ export class ContractToasterStack extends cdk.Stack {
       envName,
       alarmsEmail: alarmsEmail!,
       appRunnerServiceName: this.appStack.appRunnerService.serviceName,
+      appRunnerServiceId: this.appStack.appRunnerService.attrServiceId,
       stateMachine: this.pipelineStack.stateMachine,
       auditArchiveBucket: this.dataStack.auditArchiveBucket,
       auditKey: this.kmsKeysStack.auditKey,

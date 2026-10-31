@@ -161,10 +161,19 @@ def attempt_diagnostics_key(review_id: str) -> str:
 
 
 def make_attempt_diagnostic_write(
-    review_id: str, s3_client: Any
+    review_id: str,
+    s3_client: Any,
+    *,
+    extra_put_kwargs: Callable[[], dict[str, Any]] | None = None,
 ) -> Callable[[dict[str, Any]], None]:
     """Build the `attempt_diagnostic_write` callable `run_real_pipeline`
     passes into `review_spine.run_review` for ONE review.
+
+    `extra_put_kwargs` (W6.6) is called on every write and merged into the
+    `put_object` call -- `run_real_pipeline` passes the legal-hold `Tagging`
+    lookup, so an artifact written while the review is held is tagged as it
+    is written. Injected rather than imported to keep this module free of
+    the admin/retention stack.
 
     `review_id` is accepted (rather than trusted from `diagnostic
     ["review_id"]`) for the same reason `invocation_ledger.make_ledger_write`
@@ -217,6 +226,7 @@ def make_attempt_diagnostic_write(
                     document, sort_keys=True, indent=2, default=str
                 ).encode("utf-8"),
                 ContentType="application/json",
+                **(extra_put_kwargs() if extra_put_kwargs else {}),
             )
         except Exception:  # noqa: BLE001 - never let a diagnostic write fail the review
             # Substance-free by construction: the diagnostic itself is the

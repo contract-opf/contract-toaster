@@ -168,6 +168,20 @@ def check_c_least_privilege() -> list[str]:
     # same role/policy alongside the dynamodbKey decrypt it also needs --
     # violating "no single IAM principal decrypts >1 data-class key". Delete
     # and List do not require decrypting object content.
+    # W6.4: every sweep writes one audit row -- the worker is told the table
+    # and may PutItem to it, and nothing more (no Update/Delete/Query).
+    failures += _assert(
+        "AUDIT_TABLE: `contract-toaster-audit-${envName}`" in block,
+        "purge worker is given AUDIT_TABLE (every sweep run is audited)",
+    )
+    audit_grant = block[block.find("PurgeSweepAuditWrite"):][:400]
+    failures += _assert(
+        "PurgeSweepAuditWrite" in block
+        and "'dynamodb:PutItem'" in audit_grant
+        and "UpdateItem" not in audit_grant
+        and "DeleteItem" not in audit_grant,
+        "purge worker audit grant is PutItem only",
+    )
     failures += _assert(
         "grantRead(this.purgeWorkerFunction)" not in block,
         "no grantRead (s3:GetObject / kms:Decrypt) granted to the purge worker "

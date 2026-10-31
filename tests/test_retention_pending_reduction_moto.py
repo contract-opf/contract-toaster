@@ -145,10 +145,11 @@ class TestRouteParksAndConfirmsAReduction(RealTableTestCase):
         self.app.dependency_overrides.clear()
         super().tearDown()
 
-    def _request_reduction(self) -> None:
-        resp = self.client.post(ROUTE, json={"retention_window_days": 30})
+    def _request_reduction(self) -> str:
+        resp = self.client.post(ROUTE, json={"retention_window_days": 30, "reason": "cleanup"})
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(resp.json()["status"], "PENDING_SECOND_APPROVAL")
+        return resp.json()["pending_id"]
 
     def test_a_lone_admin_reduction_is_parked_not_500ed(self) -> None:
         self._request_reduction()
@@ -166,27 +167,23 @@ class TestRouteParksAndConfirmsAReduction(RealTableTestCase):
         self.assertIsInstance(body["pending_reduction"]["requested_at"], int)
 
     def test_a_second_admin_confirms_the_parked_reduction(self) -> None:
-        self._request_reduction()
+        # W6.7: the confirmer is the authenticated caller of the confirm
+        # route, not a name typed into the request body.
+        pending_id = self._request_reduction()
 
         self.caller = ADMIN_B
-        resp = self.client.post(
-            ROUTE,
-            json={"retention_window_days": 30, "second_admin_confirmation": {"actor": "admin-a"}},
-        )
+        resp = self.client.post(f"{ROUTE}/pending/{pending_id}/confirm")
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertEqual(resp.json(), {"status": "APPLIED", "applied_immediately": False})
+        self.assertEqual(resp.json()["status"], "APPLIED")
 
         row = self._row()
         self.assertEqual(row["retention_window_days"], 30)
         self.assertIsNone(row["pending_reduction"])
 
     def test_a_self_confirmation_stays_parked(self) -> None:
-        resp = self.client.post(
-            ROUTE,
-            json={"retention_window_days": 30, "second_admin_confirmation": {"actor": "admin-a"}},
-        )
-        self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertEqual(resp.json()["status"], "PENDING_SECOND_APPROVAL")
+        pending_id = self._request_reduction()
+        resp = self.client.post(f"{ROUTE}/pending/{pending_id}/confirm")
+        self.assertEqual(resp.status_code, 403, resp.text)
         self.assertEqual(self._row()["retention_window_days"], 365)
 
 
