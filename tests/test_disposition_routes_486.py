@@ -88,7 +88,7 @@ class FakeAuditTable:
     def __init__(self):
         self.items: list[dict] = []
 
-    def put_item(self, Item):
+    def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items.append(dict(Item))
 
 

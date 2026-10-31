@@ -535,10 +535,10 @@ export class AppStack extends cdk.NestedStack {
           // UpdateItem, or DeleteItem: the audit table is write-only from the
           // API's perspective, and UpdateItem/DeleteItem are additionally
           // denied to every application role by the table's own resource
-          // policy (DataStack._addAuditImmutabilityPolicy). Written by
-          // src/users.py::_write_audit_entry and src/retention.py::
-          // _write_audit_entry (user admin-flag changes, retention changes,
-          // legal-hold placements/releases).
+          // policy (DataStack._addAuditImmutabilityPolicy). Written only by
+          // src/audit_log.py::write_audit_entry, whose PutItem carries
+          // attribute_not_exists(partition) AND attribute_not_exists(timestamp)
+          // so a PutItem can never overwrite an existing row either.
           new iam.PolicyStatement({
             sid: 'AuditWrite',
             effect: iam.Effect.ALLOW,

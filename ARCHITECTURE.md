@@ -918,7 +918,7 @@ Audit rows include before/after content hashes where applicable, and (for review
 **Append-only enforcement (not just a name).** Calling a table "audit" does not make it immutable. We enforce it:
 
 - IAM **denies `UpdateItem` and `DeleteItem`** on the `audit` table to **all application roles** (API, pipeline, purge worker). No app role can mutate or remove an audit row.
-- Writes are **append-only `PutItem` with a conditional-nonexistence** check on the partition+SK, so a row can be created but never overwritten.
+- Writes are **append-only `PutItem` with a conditional-nonexistence** check on the partition+SK (`attribute_not_exists(partition) AND attribute_not_exists(timestamp)`), so a row can be created but never overwritten. Every backend row goes through the one writer, `backend/src/audit_log.py`; the purge worker Lambda, which cannot import it, carries a parity-tested copy (`tests/test_audit_log_single_writer.py` fails if any other module writes the table or the two drift). This condition is the only append-only control on the Docker Compose target, which has no IAM or resource policy.
 - DynamoDB Streams immediately fan the rows to **object-locked S3** (the audit KMS key domain), so an out-of-band tamper attempt still leaves an immutable copy.
 - **Failed/denied mutation attempts are monitored and alarmed** — a denied `UpdateItem`/`DeleteItem` on `audit` is a security signal, not noise.
 

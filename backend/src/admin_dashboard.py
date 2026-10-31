@@ -739,7 +739,7 @@ RELEASE_ACTIVITY_MONTHS_BACK = 12
 # ALLOWLIST for one release-activity row. `actor` is the admin identity that
 # performed the act: that is the entire point of an activation audit trail,
 # and this route is admin-only. Nothing document-derived is present — the
-# audit row itself carries none (`playbook_versions._write_audit_entry`:
+# audit row itself carries none (`audit_log.write_audit_entry`:
 # "Identifiers, statuses, and hashes only — never document substance").
 _RELEASE_ACTIVITY_FIELDS = (
     "event_id",
@@ -818,7 +818,7 @@ _CRITIC_RATE_PASSES = ("critic", "floor")
 def _month_partitions(now: float, months_back: int) -> list[str]:
     """`YYYY-MM` audit partitions, newest first, walking back `months_back`
     months from `now` — the partition key format
-    `playbook_versions._write_audit_entry` writes
+    `audit_log.write_audit_entry` writes
     (`time.strftime("%Y-%m", time.gmtime(now))`)."""
     year, month = (int(p) for p in time.strftime("%Y-%m", time.gmtime(now)).split("-"))
     partitions: list[str] = []

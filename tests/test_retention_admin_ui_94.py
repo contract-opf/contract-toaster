@@ -93,7 +93,7 @@ class FakeTable:
         item = self.items.get(key)
         return {"Item": dict(item)} if item else {}
 
-    def put_item(self, Item):
+    def put_item(self, Item, ConditionExpression=None):  # noqa: ARG002 - audit writes are conditional (W6.1); moto covers the condition
         self.items[Item[self.key_name]] = dict(Item)
 
     def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None):

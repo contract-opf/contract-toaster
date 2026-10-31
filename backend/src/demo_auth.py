@@ -68,10 +68,12 @@ from fastapi import HTTPException, Request, Response, status
 from jwt import PyJWTError
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log
     from src.authz import require_admin
     from src.startup_checks import demo_token_secret_problem
     from src.users import public_user_view
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
     from startup_checks import demo_token_secret_problem  # type: ignore[no-redef]
     from users import public_user_view  # type: ignore[no-redef]
@@ -160,41 +162,6 @@ def _auth_settings_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["AUTH_SETTINGS_TABLE"])
 
 
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    target_type: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append an immutable audit row -- identifiers and setting values only,
-    never a plaintext password (same posture as src/users.py and
-    src/retention.py's own _write_audit_entry)."""
-    table = _audit_table(dynamodb_resource)
-    now = time.time()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": target_type,
-        "outcome": "success",
-    }
-    item.update(detail)
-    table.put_item(Item=item)
-
-
 # ---------------------------------------------------------------------------
 # Auth-mode settings -- GET/POST (admin), mirrors src/retention.py exactly.
 # ---------------------------------------------------------------------------
@@ -258,7 +225,7 @@ def set_auth_mode(
     )
 
     actor = caller_user_row.get("cognito_sub", "")
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="auth_mode_change",
@@ -945,7 +912,7 @@ def _change_own_password(
         ReturnValues="ALL_NEW",
     )["Attributes"]
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=cognito_sub,
         action="password_changed",
@@ -1200,7 +1167,7 @@ def add_user(
     table.put_item(Item=item)
 
     actor = caller_user_row.get("cognito_sub", "")
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="user_added",
@@ -1254,7 +1221,7 @@ def remove_user(
 
     table.delete_item(Key={"cognito_sub": cognito_sub})
 
-    _write_audit_entry(
+    audit_log.write_audit_entry(
         dynamodb_resource,
         actor=actor,
         action="user_removed",

@@ -45,16 +45,17 @@ Environment variables consumed:
 import logging
 import os
 import time
-import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
+    from src import audit_log
     from src import reviews as reviews_module
     from src.authz import require_admin
     from src.users import json_safe
 except ImportError:  # pragma: no cover
+    import audit_log  # type: ignore[no-redef]
     import reviews as reviews_module  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
@@ -177,47 +178,14 @@ def _settings_table(dynamodb_resource: Any):
     return dynamodb_resource.Table(os.environ["RETENTION_SETTINGS_TABLE"])
 
 
-def _audit_table(dynamodb_resource: Any):
-    return dynamodb_resource.Table(os.environ["AUDIT_TABLE"])
-
-
-def _write_audit_entry(
-    dynamodb_resource: Any,
-    actor: str,
-    action: str,
-    target: str,
-    target_type: str,
-    detail: dict[str, Any],
-) -> None:
-    """Append an immutable audit row. Identifiers and setting values only --
-    never document substance (same posture as src/users.py::_write_audit_entry
-    and ARCHITECTURE.md -> "Audit posture")."""
-    table = _audit_table(dynamodb_resource)
-    now = now_epoch()
-    event_id = uuid.uuid4().hex
-    partition = time.strftime("%Y-%m", time.gmtime(now))
-    timestamp = f"{int(now)}#{event_id}"
-
-    item: dict[str, Any] = {
-        "partition": partition,
-        "timestamp": timestamp,
-        "event_id": event_id,
-        "actor": actor,
-        "action": action,
-        "target": target,
-        "target_type": target_type,
-        "outcome": "success",
-    }
-    # Issue #253: same stamp src/review_routes.py::_write_audit_row applies,
-    # for the same reason -- a legal hold set or released against a review is
-    # part of that review's audit history, and docs/audit-queries.md's "full
-    # history of one review/document" query reads the audit table's
-    # `review_id-index`. Only review-scoped rows: a `retention_settings` row
-    # targets a global setting, not a review.
-    if target_type == "review" and target:
-        item["review_id"] = target
-    item.update(detail)
-    table.put_item(Item=item)
+def _audit(dynamodb_resource: Any, **fields: Any) -> dict[str, Any] | None:
+    """Append an immutable audit row through `audit_log`, the one writer.
+    Identifiers and setting values only -- never document substance
+    (ARCHITECTURE.md -> "Audit posture"). Stamped with this module's own
+    `now_epoch` so a test that pins the clock pins the audit row too. A
+    review-scoped row (a legal hold set or released) is stamped with
+    `review_id` for the `review_id-index` by `audit_log` (issue #253)."""
+    return audit_log.write_audit_entry(dynamodb_resource, now=now_epoch(), **fields)
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +289,7 @@ def request_retention_change(
             ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
         )
         result = {"status": "APPLIED", "applied_immediately": True}
-        _write_audit_entry(
+        _audit(
             dynamodb_resource,
             actor=actor,
             action="retention_change",
@@ -366,7 +334,7 @@ def request_retention_change(
         )
         result = {"status": "PENDING_SECOND_APPROVAL", "applied_immediately": False}
 
-    _write_audit_entry(
+    _audit(
         dynamodb_resource,
         actor=actor,
         action="retention_change",
@@ -868,7 +836,7 @@ def set_legal_hold(
 
     _tag_review_objects(review, s3_client, held=True)
 
-    _write_audit_entry(
+    _audit(
         dynamodb_resource,
         actor=actor,
         action="legal_hold_set",
@@ -917,7 +885,7 @@ def release_legal_hold(
 
     _tag_review_objects(review, s3_client, held=False)
 
-    _write_audit_entry(
+    _audit(
         dynamodb_resource,
         actor=actor,
         action="legal_hold_released",
