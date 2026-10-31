@@ -162,7 +162,7 @@ only when absent, so a redeploy no longer resets an admin's sign-in choice.
 
 Both demo accounts must change their password before they can do anything
 else (issue #586). **On a public deployment, remove them:** sign in as
-`admin`, change its password, add your own admin under *Users & access*, sign
+`admin`, change its password, add your own admin on the *Users* tab, sign
 in as that admin, and delete `admin` and `user` there. They do not come back
 on the next rollout.
 
@@ -218,6 +218,18 @@ the failure this check exists to make loud (issue #654: `USER_PREFERENCES_TABLE`
 was missing from the live compose, the container started anyway, and
 `GET /api/me/preferences` 500'd on every request while the Review tab just
 showed `Internal (unavailable)` — indistinguishable from an unbuilt feature).
+
+## Spend, concurrency and sign-in variables
+
+Three settings the compose files leave at their defaults. Set them in the
+backend service's environment (`.env` locally, Coolify's environment
+variables there) when the default does not fit.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DAILY_SPEND_CAP_USD_CENTS` | `2000` ($20/day) | The daily spend ceiling every review reserves against before it starts. An admin can override it without a restart on the **Settings** tab (`POST /api/admin/spend-cap`); clearing that override falls back to this value. Each review reserves its worst case, so at the default only about one review is in flight at a time (RUNBOOK.md, "Adjusting the daily spend ceiling"). |
+| `PIPELINE_MAX_CONCURRENCY` | `5` | How many reviews the in-process runner works on at once; more wait in its queue. `GET /api/admin/health` reports occupancy against it. The spend reservation usually binds first. |
+| `ALLOWED_EMAIL_DOMAINS` | unset | Comma-separated email domains a **Cognito** sign-in may come from (the email and Google `hd` claims are both checked). Not used for password sign-in, so this target does not need it unless `AUTH_MODE` is `sso` or `both`; unset there, every Cognito request is refused with `503`. On AWS it is required, and the CDK stack does not set it yet. |
 
 ## Our own legal entities (`ENTITY_ROSTER_TABLE`, issue #678)
 
@@ -426,8 +438,6 @@ binaries.
 
 ## Not yet included (follow-ups)
 
-- **Phase 2** real pipeline wiring + OpenRouter pricing branch in the spend
-  model.
 - **`Strict-Transport-Security` is yours to set at the TLS hop.**
   `nginx.conf` serves the SPA's security headers (CSP, `nosniff`,
   `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` —

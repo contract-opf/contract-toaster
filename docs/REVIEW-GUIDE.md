@@ -7,9 +7,9 @@ as spec", ahead of the code) and what is reachable now.
 
 ## What this is
 
-An internal tool that reviews counterparty-modified contract drafts (EIAA —
-educational internship affiliation agreements) against a codified playbook and
-returns either an **ACCEPT** decision or a redlined `.docx` with tracked changes
+An open-source tool that reviews counterparty-modified contract drafts against
+a codified playbook (the one it ships with is a fictional, brand-free NDA
+playbook; any agreement type is a playbook plus a registry entry) and returns either an **ACCEPT** decision or a redlined `.docx` with tracked changes
 and footnoted rationales. Nothing in the tool enforces, requires, gates on, or
 records attorney approval; approval happens outside this tool, in your
 organization's own review process. It produces drafts and analysis, not legal
@@ -27,8 +27,11 @@ advice.
 
 - **Docker Compose runs the real review.** `backend/src/pipeline_runner.py`
   selects `run_real_pipeline` when `MODEL_PROVIDER=openrouter`, running the full
-  chain — extract → diff → primary pass → adversarial critic → reconcile →
-  redline → leakage-scan — against the activated playbook. With `MODEL_PROVIDER`
+  chain — extract → primary pass → adversarial critic → reconcile →
+  redline → leakage-scan — against the activated playbook (the deterministic
+  standard-form diff stage was deleted in issue #631). It needs an OpenRouter
+  key: with none, every review ends in `ERROR` (see
+  [The OpenRouter key](../deploy/dts/README.md#the-openrouter-key)). With `MODEL_PROVIDER`
   unset it falls back to `run_mock_pipeline`, which is the escape hatch for
   tests and for callers that do not want a live model call.
 - **AWS does not.** `infra/lib/nested/pipeline-stack.ts` still wires
@@ -102,15 +105,21 @@ without any AWS account — see below.
 ## How to see it running (Docker Compose, self-contained)
 
 ```bash
-cp deploy/dts/.env.example deploy/dts/.env      # set DEMO_TOKEN_SECRET
+cp deploy/dts/.env.example deploy/dts/.env
+# set DEMO_TOKEN_SECRET (openssl rand -hex 32) and, optionally, OPENROUTER_API_KEY
 docker compose -f deploy/dts/docker-compose.yml --env-file deploy/dts/.env up --build
 ```
 
 - SPA: <http://localhost:8081> — sign in with **admin/admin** or **user/user**
+  (each must change its password first). These demo logins are seeded once,
+  on a deployment's first boot; delete them on anything others can reach.
 - API: <http://localhost:8080>
+- The bootstrap installs and activates the shipped playbook, so the first
+  upload reviews end to end once an OpenRouter key is set (in `.env`, or on
+  the admin **Models** tab).
 
-Full instructions (including a one-line `/etc/hosts` entry that presigned
-downloads need) are in [deploy/dts/README.md](../deploy/dts/README.md).
+Full instructions are in [deploy/dts/README.md](../deploy/dts/README.md).
+Presigned downloads need no host setup.
 
 > **Verification status:** the Docker Compose stack is verified against local emulators
 > (config routing, login → token, in-process pipeline PENDING→DONE + redline
@@ -135,7 +144,8 @@ downloads need) are in [deploy/dts/README.md](../deploy/dts/README.md).
 
 ## Running the checks
 
-- Backend + infra gate: `bash scripts/check.sh` (Python 3.13 venv, the version
+- Backend + infra gate: `bash scripts/check.sh` (ruff, mypy, docs-lint and
+  the docs-index audit first, then the suite; Python 3.13 venv, the version
   the root `.python-version` declares; the script prints the interpreter it
   actually activated and warns on a mismatch — see the
   script header). `SKIP_INFRA=1 bash scripts/check.sh` runs the ~20s Python-only
@@ -196,24 +206,27 @@ with real infra failures hidden in the FLAKY bucket.
    chain the Docker Compose target already runs, driven by a real model client.
    The `OpenRouterModelClient` exists; the AWS Bedrock client is still deferred.
    This is #243, and it carries its own milestone.
-2. **Add an OpenRouter pricing branch** to the spend model so the daily cost cap
-   protects against real-provider spend.
+   (The spend model already prices OpenRouter reviews per model, from the
+   rates in `model-policy/openrouter.json`, so the daily cap covers the
+   Docker Compose target today.)
 
 **To make the Docker Compose target production-usable:**
-3. Run the live `docker compose up` end-to-end (see the verification note above)
-   and, if downloads are proxied rather than host-mapped, finish that path.
-4. Add the retention purge scheduler (deferred; see `deploy/dts/README.md`).
+2. Run the live `docker compose up` end-to-end (see the verification note above).
+   The retention purge cadence already runs on this target
+   (`deploy/dts/README.md`, "Retention purge cadence").
 
 **To make AWS production-deployable:**
-5. Close #225 (deployability), #96 (prod account bootstrap), and pass the
+3. Set `ALLOWED_EMAIL_DOMAINS` on the App Runner service (the CDK stack does
+   not yet; without it every Cognito request is refused with `503`), then close #225 (deployability), #96 (prod account bootstrap), and pass the
    blocking gates #98 (production readiness) and #99 (pilot + go-live decision).
 
 **Product completeness:**
-6. Finish the reviewer result view (#85): per-issue provenance (#35), the
+4. Finish the reviewer result view (#85): per-issue provenance (#35), the
    disposition capture flow (#74), per-review cost, and every-status copy.
-7. Admin surfaces currently STUBBED/PLANNED in
-   [docs/implementation-status.md](implementation-status.md) (playbook
-   governance UI, audit viewer, corpus upload UI, cost-ledger reconcile).
+5. Admin surfaces currently STUBBED/PLANNED in
+   [docs/implementation-status.md](implementation-status.md) (bundle
+   deactivation and rollback quarantine, audit viewer, corpus upload UI,
+   cost-ledger reconcile). The playbook lifecycle UI itself ships.
 
 For phase-level tracking, see the repo
 [milestones](https://github.com/contract-opf/contract-toaster/milestones) and the
