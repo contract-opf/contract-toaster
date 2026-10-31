@@ -839,10 +839,7 @@ def check_links(repo_root: Path = REPO_ROOT, tracked: list[str] | None = None) -
 # pass). Each entry is (source file, link target). An entry is only honoured
 # while the link is still broken: once it resolves, the stale entry itself
 # fails the check, so this list can only shrink.
-LINK_KNOWN_BROKEN: set[tuple[str, str]] = {
-    # The heading is "Abuse and DoS controls" -> #abuse-and-dos-controls.
-    ("docs/threat-model.md", "#abuse--dos-controls"),
-}
+LINK_KNOWN_BROKEN: set[tuple[str, str]] = set()
 
 
 def check_h() -> list[str]:

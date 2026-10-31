@@ -289,11 +289,13 @@ not serve, if a served route has no row, or if a row's auth does not match the r
 | GET | `/api/admin/entity-roster` | admin | The deployment's roster of its own legal-entity names |
 | PUT | `/api/admin/entity-roster` | admin | Replace that roster; next review, no redeploy |
 | GET | `/api/admin/retention` | admin | Retention settings and any pending change (see [docs/data-handling.md](docs/data-handling.md)) |
-| POST | `/api/admin/retention` | admin | Request a retention-window change |
+| POST | `/api/admin/retention` | admin | Request a retention-window change (a reduction is parked as a pending change with a required reason) |
+| POST | `/api/admin/retention/pending/{pending_id}/confirm` | admin | Confirm a pending reduction; must be a different admin from the requester |
+| POST | `/api/admin/retention/pending/{pending_id}/cancel` | admin | Cancel a pending reduction |
 | POST | `/api/admin/retention/preview` | admin | Count what a proposed window would purge |
 | GET | `/api/admin/retention/holds` | admin | List legal holds |
 | POST | `/api/admin/retention/holds/{review_id}` | admin | Place a legal hold on a review |
-| DELETE | `/api/admin/retention/holds/{review_id}` | admin | Release a legal hold on a review |
+| DELETE | `/api/admin/retention/holds/{review_id}` | admin | Release a legal hold on a review (body carries a required reason) |
 | GET | `/api/audit` | admin | The [docs/audit-queries.md](docs/audit-queries.md) catalogue as a query API: no `query` returns the index, a `query` runs that entry (key/index access only, `limit` clamped) |
 | GET | `/api/playbooks` | allowlisted | The contract-type catalog (registry entries plus admin-created playbooks, with display names and active version) that the Review tab's picker reads |
 | POST | `/api/admin/playbooks` | admin | Create a new `playbook_id` and its first version in one step |
