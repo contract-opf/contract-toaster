@@ -123,30 +123,25 @@ def _validate_window(window_days: int | str) -> None:
             ),
         )
 
-# Same terminal-review-status set as the purge worker (invariant 1) --
-# reviews outside this set are active executions and must never be counted
-# as purge-eligible by the preview, even far past the retention window.
-TERMINAL_REVIEW_STATUSES = {
-    "DONE",
-    "ERROR",
-    # Issue #133 retired these two as anything a writer produces; rows stored
-    # with them before that change are still terminal and still purgeable.
-    "ERROR_MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
-    "MANUAL_REVIEW_REQUIRED",  # legacy read only (pre-#133 rows)
-    "QUARANTINED",
-    "SUPERSEDED",
-}
+# Invariant 1: only terminal reviews are ever purge-eligible -- reviews
+# outside this set are active executions and must never be counted or
+# purged, even far past the retention window.
+#
+# This is `reviews.REVIEW_STATUSES_TERMINAL` itself, not a copy. The copy
+# this module used to carry left out CANCELLED, so on DTS a review the user
+# stopped kept its uploaded contract past the retention window forever,
+# precisely because they stopped it. The purge worker Lambda cannot import
+# backend/src and keeps its own copy; tests/test_retention_sweep_w6.py holds
+# it equal to this one.
+TERMINAL_REVIEW_STATUSES = frozenset(reviews_module.REVIEW_STATUSES_TERMINAL)
 
-# Every status a reviews row can carry (issue #52): the purge worker's
-# terminal set above plus the app's own vocabulary. The sweep and the hold
+# Every status a reviews row can carry (issue #52). The sweep and the hold
 # list read the table one `status-index` partition at a time, so "every row"
 # is spelled as "every partition in this set" -- a hold can sit on a review
 # in any status, and the sweep's `skipped_active` bucket has to see the
 # in-flight rows it reports.
 _ALL_KNOWN_REVIEW_STATUSES = frozenset(
-    TERMINAL_REVIEW_STATUSES
-    | reviews_module.REVIEW_STATUSES_NON_TERMINAL
-    | reviews_module.REVIEW_STATUSES_TERMINAL
+    TERMINAL_REVIEW_STATUSES | reviews_module.REVIEW_STATUSES_NON_TERMINAL
 )
 
 
