@@ -291,7 +291,9 @@ still publishes it, both on Docker Hub and on
 ## Automatic roll-forward from the box
 
 `.github/workflows/dts-image-publish.yml` publishes the backend and frontend
-images on every green `main`. Its `deploy` job then calls Coolify's API from a
+images on every green `main`: only when the `CI pipeline` run it follows
+succeeded for a `push` to this repository's `main` (or on a manual dispatch).
+Its `deploy` job then calls Coolify's API from a
 GitHub-hosted runner. If the Coolify host is behind Cloudflare with **Bot
 Fight Mode** on, that call never arrives: Cloudflare answers with a challenge
 page (HTTP 403, "Just a moment..."). Neither an Access service token nor a WAF
@@ -304,12 +306,18 @@ skip rule gets past it on the free plan.
 2. Checks that the images agree on `org.opencontainers.image.revision`. If
    they don't, the publish run is half-way through, so it waits for the next
    run.
-3. When the digests have changed since the last rollout, POSTs Coolify's
+3. When the digests have changed since the last rollout, and
+   `AUTOPULL_GITHUB_REPO` is set, asks the GitHub compare API whether the new
+   revision is on that repository's `main` (`identical` or `behind`). If it is
+   not, or the API cannot be reached, it **refuses**: it re-tags the watched
+   refs back to the digests last rolled out, does not restart, and exits 1
+   (so the heartbeat reports `down`). The next run asks again.
+4. Then POSTs Coolify's
    `/api/v1/services/<uuid>/restart?latest=true` on `127.0.0.1:8000`.
-4. Waits (`AUTOPULL_VERIFY_SECONDS`, default 420) until the service's backend
+5. Waits (`AUTOPULL_VERIFY_SECONDS`, default 420) until the service's backend
    and frontend containers run the new revision and report `healthy` (the
    compose healthchecks). Only then does it record the rollout.
-5. If they never get there, **rolls back**: it re-tags the watched refs to the
+6. If they never get there, **rolls back**: it re-tags the watched refs to the
    digests last rolled out, which are still in the box's image store, and
    restarts with `latest=false`, so Coolify recreates the containers from them
    without pulling. The bad digests go in `deployed.bad`. Later runs hold at the
@@ -326,7 +334,8 @@ git clone --depth 1 https://github.com/<owner>/contract-toaster /tmp/ct
 install -m 0755 /tmp/ct/deploy/dts/autopull/coolify-autopull.sh /usr/local/bin/coolify-autopull
 install -m 0644 /tmp/ct/deploy/dts/autopull/coolify-autopull.service /tmp/ct/deploy/dts/autopull/coolify-autopull.timer /etc/systemd/system/
 install -m 0600 /tmp/ct/deploy/dts/autopull/coolify-autopull.env.example /etc/coolify-autopull.env
-# edit /etc/coolify-autopull.env: the two image refs, the service UUID, an API token
+# edit /etc/coolify-autopull.env: the two image refs, the service UUID, an API token,
+# and AUTOPULL_GITHUB_REPO (<owner>/<repo>; left as the placeholder, every rollout is refused)
 systemctl daemon-reload
 systemctl start coolify-autopull.service   # first run: records digests, no restart
 journalctl -u coolify-autopull -n 5         # expect "initialised at revision …"
@@ -361,7 +370,9 @@ Then set the repository variable `DTS_DEPLOY_MODE=pull`. The workflow's
 
 **Upgrade the script** the same way you installed it: re-run the three
 `install` lines from a fresh checkout. Leave the env file and the state files
-as they are.
+as they are, except to add `AUTOPULL_GITHUB_REPO=<owner>/<repo>` to an env file
+written before that setting existed; without it the revision-on-`main` check
+is skipped.
 
 **Coolify API access.** The script authenticates with a bearer token. If
 Coolify's API is limited to listed IPs (Settings → API), allow the address

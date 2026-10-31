@@ -47,8 +47,10 @@
 # deliberate step done outside this workflow.
 #
 # Runs on the self-hosted runner (vars.CI_RUNS_ON) while GitHub-hosted Actions
-# is unavailable; falls back to ubuntu-latest if the variable is unset. Uses the
-# plain docker CLI (no buildx/QEMU) to keep runner requirements minimal.
+# is unavailable; falls back to ubuntu-latest if the variable is unset. A
+# pull_request event always gets ubuntu-latest, the same rule as
+# ci-pipeline.yml, so pull-request code never runs on the self-hosted box. Uses
+# the plain docker CLI (no buildx/QEMU) to keep runner requirements minimal.
 
 name: Publish Docker Compose images
 
@@ -69,12 +71,22 @@ permissions:
 jobs:
   publish:
     name: Build and push
-    # A failed, cancelled or skipped CI pipeline must not publish. On a manual
-    # dispatch there is no workflow_run payload and the operator is the gate.
+    # Publish only what passed CI as a push to this repository's main. The
+    # `branches:` filter on the trigger matches the triggering run's head
+    # branch NAME only, so the job checks all four facts itself: the run
+    # succeeded, it was a `push`, its head branch is `main`, and its head
+    # repository is this one. A failed, cancelled or skipped CI pipeline, or
+    # one for any other event, publishes nothing. On a manual dispatch there
+    # is no workflow_run payload and the operator is the gate. publish-minio
+    # carries the same condition; tests/test_dts_publish_trigger_guard.py
+    # pins both.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository )
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     outputs:
       sha: ${{ steps.meta.outputs.sha }}
     env:
@@ -182,9 +194,12 @@ jobs:
     # runs. So it rebuilds only when the Dockerfile changes, and only under a
     # new tag.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository )
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     env:
       TARGET_SHA: >-
         ${{ github.event_name == 'workflow_run'
@@ -286,7 +301,7 @@ jobs:
     # In pull mode the box rolls itself forward (deploy/dts/autopull/), so a
     # push from here would only be a second, redundant restart.
     if: vars.DTS_DEPLOY_MODE != 'pull'
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Trigger the Coolify pull-and-restart
         id: trigger
