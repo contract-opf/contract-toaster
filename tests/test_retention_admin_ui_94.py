@@ -474,7 +474,9 @@ class TestLegalHold(RetentionTestCase):
             .get("contract-toaster:legal-hold"),
             "true",
         )
-        result = _retention_module.release_legal_hold("r-1", self.admin, self.ddb, self.fake_s3)
+        result = _retention_module.release_legal_hold(
+            "r-1", "Matter closed", self.admin, self.ddb, self.fake_s3
+        )
         self.assertFalse(result["legal_hold"])
         self.assertEqual(self._review_row(self.reviews, "r-1")["legal_hold"], False)
 
@@ -506,7 +508,9 @@ class TestLegalHold(RetentionTestCase):
 
     def test_set_and_release_are_audited(self):
         _retention_module.set_legal_hold("r-1", "matter ref 123", self.admin, self.ddb, self.fake_s3)
-        _retention_module.release_legal_hold("r-1", self.admin, self.ddb, self.fake_s3)
+        _retention_module.release_legal_hold(
+            "r-1", "Matter closed", self.admin, self.ddb, self.fake_s3
+        )
         actions = [e["action"] for e in self.audit.items.values()]
         self.assertIn("legal_hold_set", actions)
         self.assertIn("legal_hold_released", actions)
