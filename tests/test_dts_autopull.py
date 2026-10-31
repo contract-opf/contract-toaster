@@ -33,6 +33,11 @@ PATH, and pin:
  10. With AUTOPULL_HEARTBEAT_URL set, every run reports up or down.
  11. A run with nothing to roll out still checks the containers, and reports
      down (without restarting anything) when one is not running and healthy.
+ 12. With AUTOPULL_GITHUB_REPO set, a new image rolls out only when its
+     org.opencontainers.image.revision is on that repository's main (the
+     GitHub compare API answers `identical` or `behind`). Anything else, a
+     malformed revision, or an unreachable API refuses the roll-out, keeps
+     the previous images, and exits 1 so the heartbeat reports down.
 
 Run: python3 tests/test_dts_autopull.py
 """
@@ -82,14 +87,22 @@ FAKE_CURL = r"""#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE/curl.argv"
 out=""
 fmt=""
+url=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift ;;
     -w) fmt="$2"; shift ;;
     -H) case "$2" in @*) cat "${2#@}" >> "$FAKE/curl.headerfiles" ;; esac; shift ;;
+    http*) url="$1" ;;
   esac
   shift
 done
+case "$url" in
+  https://api.github.com/*)
+    [ -e "$FAKE/compare_fail" ] && exit 22
+    cat "$FAKE/compare"
+    exit 0 ;;
+esac
 [ -n "$out" ] && [ "$out" != /dev/null ] && printf 'body from coolify' > "$out"
 [ -n "$fmt" ] && printf '%s' "$(cat "$FAKE/http_code" 2>/dev/null || echo 200)"
 exit 0
@@ -411,6 +424,114 @@ class AutopullBehaviour(unittest.TestCase):
         self.assertEqual(self.box.all_curl(), [])
 
 
+GITHUB_REPO = "example/contract-toaster"
+GITHUB_TOKEN = "gh-test-token-not-a-secret"
+
+
+def compare_body(status: str) -> str:
+    """A GitHub compare response, pretty-printed as the API serves it, with
+    per-file `status` fields after the top-level one."""
+    return (
+        '{\n  "url": "https://api.github.com/repos/x/compare/main...b",\n'
+        '  "base_commit": {"sha": "1111"},\n'
+        f'  "status": "{status}",\n  "ahead_by": 0,\n  "behind_by": 3,\n'
+        '  "commits": [],\n'
+        '  "files": [{"filename": "a.py", "status": "added"}]\n}\n'
+    )
+
+
+@unittest.skipUnless(BASH, "needs bash")
+class AutopullRevisionOnMain(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.box = Box(Path(self._tmp.name))
+        self.box.publish(BACKEND, "sha256:b1", "a" * 40)
+        self.box.publish(FRONTEND, "sha256:f1", "a" * 40)
+        self.assertEqual(self.box.run().returncode, 0)
+        self.box.publish(BACKEND, "sha256:b2", "b" * 40)
+        self.box.publish(FRONTEND, "sha256:f2", "b" * 40)
+        self.box.serve("b" * 40)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def compare(self, status: str) -> None:
+        (self.box.fake / "compare").write_text(compare_body(status), encoding="utf-8")
+
+    def compare_calls(self) -> list[str]:
+        return [c for c in self.box.all_curl() if "api.github.com" in c]
+
+    def run_checked(self, **extra: str) -> subprocess.CompletedProcess[str]:
+        return self.box.run(AUTOPULL_GITHUB_REPO=GITHUB_REPO, **extra)
+
+    def assert_refused(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("refusing to roll forward", result.stdout)
+        self.assertEqual(self.box.curl_calls(), [], "no restart for an unverified revision")
+        self.assertEqual(
+            self.box.state.read_text(encoding="utf-8"),
+            f"{BACKEND} sha256:b1\n{FRONTEND} sha256:f1\n",
+        )
+        repo_b, repo_f = BACKEND.rsplit(":", 1)[0], FRONTEND.rsplit(":", 1)[0]
+        self.assertEqual(
+            self.box.tags(),
+            [f"{repo_b}@sha256:b1 {BACKEND}", f"{repo_f}@sha256:f1 {FRONTEND}"],
+            "the watched tags go back to the images last rolled out",
+        )
+
+    def test_behind_or_identical_rolls_forward(self) -> None:
+        for status in ("behind", "identical"):
+            with self.subTest(status=status):
+                self.compare(status)
+                self.box.state.write_text(
+                    f"{BACKEND} sha256:b1\n{FRONTEND} sha256:f1\n", encoding="utf-8"
+                )
+                result = self.run_checked()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("sha256:b2", self.box.state.read_text(encoding="utf-8"))
+                self.assertIn(
+                    f"https://api.github.com/repos/{GITHUB_REPO}/compare/main...{'b' * 40}",
+                    self.compare_calls()[-1],
+                )
+
+    def test_ahead_or_diverged_is_refused(self) -> None:
+        for status in ("ahead", "diverged"):
+            with self.subTest(status=status):
+                self.compare(status)
+                self.assert_refused(self.run_checked())
+                (self.box.fake / "tag.log").unlink()
+
+    def test_unparseable_answer_is_refused(self) -> None:
+        (self.box.fake / "compare").write_text('{"message": "Not Found"}', encoding="utf-8")
+        self.assert_refused(self.run_checked())
+
+    def test_unreachable_api_is_refused(self) -> None:
+        (self.box.fake / "compare_fail").touch()
+        self.assert_refused(self.run_checked())
+
+    def test_malformed_revision_is_refused_without_asking(self) -> None:
+        self.box.publish(BACKEND, "sha256:b2", "main")
+        self.box.publish(FRONTEND, "sha256:f2", "main")
+        self.compare("identical")
+        self.assert_refused(self.run_checked())
+        self.assertEqual(self.compare_calls(), [])
+
+    def test_token_goes_in_a_header_file(self) -> None:
+        self.compare("behind")
+        result = self.run_checked(AUTOPULL_GITHUB_TOKEN=GITHUB_TOKEN)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(GITHUB_TOKEN, self.compare_calls()[0])
+        self.assertIn(
+            f"Authorization: Bearer {GITHUB_TOKEN}",
+            (self.box.fake / "curl.headerfiles").read_text(encoding="utf-8"),
+        )
+
+    def test_unset_repo_skips_the_check(self) -> None:
+        result = self.box.run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.compare_calls(), [])
+
+
 class Wiring(unittest.TestCase):
     def test_workflow_deploy_job_steps_aside_in_pull_mode(self) -> None:
         text = PUBLISH.read_text(encoding="utf-8")
@@ -431,6 +552,7 @@ class Wiring(unittest.TestCase):
         self.assertIn("COOLIFY_API_TOKEN=<token>", text)
         self.assertIn("COOLIFY_SERVICE_UUID=<service-uuid>", text)
         self.assertIn("ghcr.io/<owner>/", text)
+        self.assertIn("AUTOPULL_GITHUB_REPO=<owner>/<repo>", text)
 
     def test_script_is_executable(self) -> None:
         self.assertTrue(os.access(SCRIPT, os.X_OK))
