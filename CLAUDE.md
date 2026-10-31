@@ -47,6 +47,7 @@ bash scripts/check-frontend.sh          # tsc + vite build + vitest + CTDS audit
 bash scripts/check.sh                   # the Python suite, docs-lint, detectors
 python3 tests/lint-brand-free.py        # no private-org ref in a pull path
 python3 tests/lint-counterparty-names.py # no counterparty identity on the public surface
+python3 tests/lint-publication-markers.py # no internal-only marker or private local path
 ```
 
 The counterparty gate (#341) is **fail-open**: with no private token list
