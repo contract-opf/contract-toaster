@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, toUserMessage } from './userMessage';
 import { failedLoad, type LoadState } from './loadState';
 import {
   capSourceNote,
@@ -64,7 +65,7 @@ export default function SpendCard({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/spend returned HTTP ${response.status}`,
             "We couldn't load this deployment's spend. Please try again.",
@@ -134,7 +135,7 @@ export default function SpendCard({
           return;
         }
         if (!response.ok) {
-          throw new Error(
+          throw new UserFacingError(
             friendlyErrorMessage(
               `POST /api/admin/spend-cap returned HTTP ${response.status}`,
               "We couldn't save the daily spend cap. Please try again.",
@@ -145,9 +146,7 @@ export default function SpendCard({
         setCapSaved(true);
       } catch (err) {
         setCapSaveError(
-          err instanceof Error
-            ? err.message
-            : "We couldn't save the daily spend cap. Please try again.",
+          toUserMessage(err, "We couldn't save the daily spend cap. Please try again."),
         );
       } finally {
         setCapSaving(false);
