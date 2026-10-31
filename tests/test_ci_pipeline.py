@@ -30,6 +30,13 @@ Verifies that all acceptance criteria for issue #66 are satisfied:
          — either as a build step annotation or via DynamoDB/CloudTrail write.
        - Verifies image signatures before promotion; an unsigned digest is rejected.
 
+  B2. The promote job is fail-closed and verifies what was built:
+       - The audit put-item fails the job on any error except the idempotent
+         ConditionalCheckFailedException, before the SSM update.
+       - The signature check reads the ECR repository the build pushed to.
+       - The cosign certificate identity is pinned to refs/heads/main, as
+         the CDK default in contract-toaster-stack.ts is.
+
   C. ARCHITECTURE.md documents the CI pipeline:
        - References docs-lint AND detector-correctness as CI gates.
        - States that a promotion writes an audit row (actor + digest + timestamp).
@@ -228,6 +235,79 @@ def check_ci_workflow() -> list[str]:
     return failures
 
 
+def _job_text(text: str, job: str) -> str:
+    """One top-level job's lines, read as text like the rest of this gate
+    (PyYAML is not installed in the job that runs it)."""
+    m = re.search(rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\Z)", text)
+    return m.group(1) if m else ""
+
+
+def _steps(job_text: str) -> list[str]:
+    return re.split(r"(?m)^      - (?=name:|uses:|run:)", job_text)[1:]
+
+
+def check_promote_path() -> list[str]:
+    """Check B2: the promote path is fail-closed and verifies what was built.
+
+    - The promotion audit write fails the job on any error except the
+      idempotent ConditionalCheckFailedException; it never swallows stderr
+      and falls through to the SSM update (the CodeBuild twin in
+      cicd-stack.ts is already fail-closed).
+    - STEP H verifies the ECR repository the build pushed to, not another:
+      every ECR_REPOSITORY in the workflow names one fixed repository.
+    - The cosign certificate identity is pinned to refs/heads/main, matching
+      the CDK default in contract-toaster-stack.ts, not the dispatching ref.
+    """
+    print("Check B2: ci-pipeline.yml promote path — audit fail-closed, same ECR repo, pinned identity …")
+    failures: list[str] = []
+    text = _read(WORKFLOWS_DIR / "ci-pipeline.yml")
+    build = _job_text(text, "build-sign-push")
+    promote = _job_text(text, "promote")
+    failures += _assert(bool(build) and bool(promote), "ci-pipeline.yml has build-sign-push and promote jobs")
+    steps = _steps(promote)
+
+    audit_steps = [st for st in steps if "dynamodb put-item" in st]
+    failures += _assert(len(audit_steps) == 1, "promote has exactly one audit put-item step")
+    for run in audit_steps:
+        failures += _assert(
+            not re.search(r"2>\s*/dev/null", run) and not re.search(r"\|\|\s*echo", run),
+            "audit write does not discard errors (no 2>/dev/null, no || echo)",
+        )
+        failures += _assert(
+            "ConditionalCheckFailedException" in run and re.search(r"\bexit 1\b", run) is not None,
+            "audit write tolerates only ConditionalCheckFailedException and exits 1 otherwise",
+        )
+    audit_idx = next((i for i, st in enumerate(steps) if "STEP I" in st.split("\n", 1)[0]), -1)
+    ssm_idx = next((i for i, st in enumerate(steps) if "STEP J" in st.split("\n", 1)[0]), -1)
+    failures += _assert(0 <= audit_idx < ssm_idx, "audit row (STEP I) precedes the SSM update (STEP J)")
+
+    repos = set(re.findall(r"(?m)^\s*ECR_REPOSITORY:\s*(\S.*?)\s*$", text))
+    failures += _assert(
+        len(repos) == 1 and "${{" not in next(iter(repos), "${{"),
+        "build and STEP H use one fixed ECR repository",
+        f"ECR_REPOSITORY values: {sorted(repos)}",
+    )
+    verify = next((st for st in steps if "cosign verify" in st), "")
+    failures += _assert(
+        'docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:' in build
+        and '"${ECR_REGISTRY}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"' in verify,
+        "STEP H verifies the same ECR repository the build pushed to",
+    )
+
+    m = re.search(r"(?m)^\s*CERT_IDENTITY:\s*(\S.*?)\s*$", verify)
+    identity = m.group(1) if m else ""
+    failures += _assert(
+        identity.endswith("/.github/workflows/ci-pipeline.yml@refs/heads/main") and "github.ref" not in identity,
+        "STEP H pins CERT_IDENTITY to ci-pipeline.yml@refs/heads/main",
+        f"got: {identity}",
+    )
+    failures += _assert(
+        "/.github/workflows/ci-pipeline.yml@refs/heads/main" in _read(MAIN_STACK_PATH),
+        "CDK's default cosign identity is the same main-pinned workflow identity",
+    )
+    return failures
+
+
 def check_architecture_md() -> list[str]:
     """Check C: ARCHITECTURE.md documents the CI pipeline constraints."""
     print("Check C: ARCHITECTURE.md — docs-lint, detector-correctness, promotion audit, signature verification …")
@@ -332,6 +412,8 @@ def main() -> int:
     all_failures += check_cicd_stack()
     print()
     all_failures += check_ci_workflow()
+    print()
+    all_failures += check_promote_path()
     print()
     all_failures += check_architecture_md()
     print()
