@@ -473,10 +473,26 @@ def _write_audit_row(
     )
 
 
+def upload_audit_target(review_id: str | None, filename: str) -> str:
+    """The audit `target` for an upload row: the review id when there is
+    one, otherwise the first 16 hex characters of sha256(filename).
+
+    Never the filename itself. A contract filename routinely names the
+    counterparty ("Mutual NDA - Acme.docx"), which makes it Confidential
+    substance (issue #518) -- and the audit table outlives every retention
+    window. The digest still lets an investigator who holds the file confirm
+    "this rejection was that upload" without the table carrying the name."""
+    if review_id:
+        return review_id
+    return hashlib.sha256((filename or "").encode("utf-8")).hexdigest()[:16]
+
+
 def _upload_rejection_audit_write(dynamodb_resource: Any, actor: str):
     """Adapter satisfying upload_validation.AuditWrite's call shape
     (`audit_write(action=..., review_id=..., filename=..., reason_code=...,
-    detail=...)`), translated into this package's audit-row shape."""
+    detail=...)`), translated into this package's audit-row shape. The
+    filename is reduced to `upload_audit_target`'s digest and goes no
+    further."""
 
     def _write(
         *,
@@ -490,7 +506,7 @@ def _upload_rejection_audit_write(dynamodb_resource: Any, actor: str):
             dynamodb_resource,
             actor=actor,
             action=action,
-            target=review_id or filename,
+            target=upload_audit_target(review_id, filename),
             target_type="upload",
             detail={"reason_code": reason_code, "detail": detail, "outcome": "rejected"},
         )
