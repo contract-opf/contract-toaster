@@ -41,23 +41,34 @@ DOCS_LINT = REPO_ROOT / "scripts" / "docs-lint.py"
 
 STATUS_TOKENS = ("SHIPPED", "STUBBED", "PLANNED")
 
-# (label, required RUNBOOK line-range substring) — the fictional capabilities
-# named verbatim in the issue's Evidence section.
+# (label, required RUNBOOK anchor citation) — the capabilities named in the
+# issue's Evidence section. The issue cited RUNBOOK line ranges; QA 2026-10-31
+# (W11) found every one stale and moved the ledger to heading anchors, which
+# check_anchors_exist() below proves are real.
 REQUIRED_CAPABILITIES = [
-    ("playbook upload / version-history / rollback", "253-272"),
-    ("release-bundle deactivation", "286-299"),
-    ("admin UI corpus upload", "339-346"),
-    ("audit-log viewer / CSV export", "349-353"),
-    ("cost-ledger reconcile", "400-411"),
-    ("disposition capture / manual-review filter", "615-617"),
+    ("playbook upload / version-history / rollback", "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt"),
+    ("release-bundle deactivation", "RUNBOOK.md#suspending-intake-deactivate-without-a-successor"),
+    ("admin UI corpus upload", "RUNBOOK.md#adding-a-document-to-the-corpus"),
+    ("audit-log viewer / CSV export", "RUNBOOK.md#viewing-the-audit-log"),
+    ("cost-ledger reconcile", "RUNBOOK.md#adjusting-the-daily-spend-ceiling"),
+    ("disposition capture / manual-review filter", "RUNBOOK.md#failures-queue-owner-and-sla"),
 ]
 
-# The two demo-critical fictional steps called out by name in the issue body
+# The two demo-critical steps called out by name in the issue body
 # ("Prioritize converting the handful of demo-critical fictional steps
 # (playbook seed, corpus upload) into CLI scripts ... or explicitly marked
 # PLANNED or STUBBED").  Mapped to the REQUIRED_CAPABILITIES row that covers
-# each.
-DEMO_CRITICAL_LINE_REFS = ["253-272", "339-346"]
+# each.  Since W11 a SHIPPED row may also be backed by an `/api/...` route
+# that ARCHITECTURE.md's route table documents (that table is pinned to the
+# real app by tests/test_architecture_route_table.py).
+DEMO_CRITICAL_LINE_REFS = [
+    "RUNBOOK.md#rolling-back-a-bad-playbook-or-prompt",
+    "RUNBOOK.md#adding-a-document-to-the-corpus",
+]
+
+RUNBOOK = REPO_ROOT / "RUNBOOK.md"
+ARCHITECTURE = REPO_ROOT / "ARCHITECTURE.md"
+_ROUTE_RE = re.compile(r"`(?:(?:GET|POST|PUT|PATCH|DELETE) )?(/api/[^`\s]*)`")
 
 
 def _find_ledger_file() -> Path | None:
@@ -119,12 +130,12 @@ def check_capabilities_covered_with_status() -> list[str]:
         if row is None:
             failures.append(
                 f"  Ledger does not cover '{label}' (expected a row citing "
-                f"RUNBOOK.md:{line_ref})."
+                f"{line_ref})."
             )
             continue
         if not any(token in row for token in STATUS_TOKENS):
             failures.append(
-                f"  Ledger row for '{label}' (RUNBOOK.md:{line_ref}) does "
+                f"  Ledger row for '{label}' ({line_ref}) does "
                 f"not carry a SHIPPED/STUBBED/PLANNED status.\n"
                 f"    > {row.strip()}"
             )
@@ -158,7 +169,7 @@ def check_demo_critical_steps_cli_or_planned() -> list[str]:
         row = _capability_row(text, line_ref)
         if row is None:
             failures.append(
-                f"  No ledger row for demo-critical RUNBOOK.md:{line_ref}."
+                f"  No ledger row for demo-critical {line_ref}."
             )
             continue
 
@@ -167,15 +178,43 @@ def check_demo_critical_steps_cli_or_planned() -> list[str]:
 
         scripts = _script_paths_in_row(row)
         backed = scripts and all(_script_has_cli_entrypoint(p) for p in scripts)
+        if not backed and "SHIPPED" in row:
+            table = ARCHITECTURE.read_text(encoding="utf-8").split("#### Routes", 1)[-1]
+            routes = _ROUTE_RE.findall(row)
+            backed = bool(routes) and all(f"`{r}`" in table for r in routes)
         if not backed:
             failures.append(
-                f"  Demo-critical RUNBOOK.md:{line_ref} row is not marked "
+                f"  Demo-critical {line_ref} row is not marked "
                 f"PLANNED or STUBBED and does not cite a real CLI script "
                 f"with a '__main__' entrypoint.\n"
                 f"    > {row.strip()}"
             )
 
     return failures
+
+
+def _github_slug(heading: str) -> str:
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", heading)
+    text = re.sub(r"[`*]", "", text).strip().lower()
+    return re.sub(r"[^\w\- ]", "", text).replace(" ", "-")
+
+
+def check_anchors_exist() -> list[str]:
+    """Every cited RUNBOOK anchor names a real RUNBOOK heading."""
+    in_fence = False
+    slugs = set()
+    for line in RUNBOOK.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        m = None if in_fence else re.match(r"^#{1,6}\s+(.*?)\s*$", line)
+        if m:
+            slugs.add(_github_slug(m.group(1)))
+    return [
+        f"  {ref} (for '{label}') names no RUNBOOK.md heading."
+        for label, ref in REQUIRED_CAPABILITIES
+        if ref.split("#", 1)[1] not in slugs
+    ]
 
 
 def check_docs_lint_wires_ledger_check() -> list[str]:
@@ -214,12 +253,13 @@ def main() -> int:
     checks = [
         ("1", "Implementation-status ledger file exists", check_ledger_exists),
         ("2", "Legend defines SHIPPED / STUBBED / PLANNED", check_legend_defines_all_statuses),
-        ("3", "All six fictional RUNBOOK capabilities covered with a status",
+        ("3", "All six RUNBOOK capabilities covered with a status",
          check_capabilities_covered_with_status),
-        ("4", "Demo-critical steps (playbook seed, corpus upload) are CLI-backed, PLANNED, or STUBBED",
+        ("4", "Demo-critical steps (playbook seed, corpus upload) are CLI- or route-backed, PLANNED, or STUBBED",
          check_demo_critical_steps_cli_or_planned),
         ("5", "scripts/docs-lint.py wires an equivalent CI check",
          check_docs_lint_wires_ledger_check),
+        ("6", "Every cited RUNBOOK anchor names a real heading", check_anchors_exist),
     ]
 
     overall_pass = True
