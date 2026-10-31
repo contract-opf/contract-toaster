@@ -12,7 +12,9 @@
 # the authoritative gate for changes under frontend/: it fails on any type
 # error, build breakage, failing component test, or a11y/contrast
 # regression. No AWS/Cognito network calls anywhere in it — the auth/amplify
-# layer is mocked in the tests themselves; see
+# layer is mocked in the tests themselves, and the few that run the real
+# Amplify token provider (amplify-memory-token-storage.test.ts) use locally
+# minted, unexpired tokens and a throwing `fetch`; see
 # src/__tests__/security-posture.test.tsx. It is NOT fully offline, though:
 # the lockfile-validation step below (issue #112) fetches `npm@10.8.2`
 # through `npx` the first time it runs on a given machine, the same npm
