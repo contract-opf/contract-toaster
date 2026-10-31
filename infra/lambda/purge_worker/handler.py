@@ -294,15 +294,17 @@ def _window_rank(window: Any) -> float:
 
 
 def is_pending_reduction_ready(pending: dict[str, Any]) -> bool:
-    """True once the mandatory delay has elapsed for a reduction awaiting
-    second-admin confirmation.
+    """True once the mandatory delay has elapsed for a parked reduction.
 
-    A pending reduction that has already been confirmed by a second admin
-    is applied immediately in request_retention_change and never reaches
-    this "waiting on the clock" path.
+    `apply_after` is honoured when the record carries it (the backend
+    stamps it, W6.7); an older record falls back to `requested_at` + the
+    delay. A reduction a second admin confirms is applied by the backend's
+    confirm route and never reaches this "waiting on the clock" path.
     """
     # boto3 reads the stored epoch back as a Decimal, and `float - Decimal`
     # raises TypeError -- coerce before the arithmetic.
+    if pending.get("apply_after") is not None:
+        return now_epoch() >= float(pending["apply_after"])
     requested_at = float(pending["requested_at"])
     return (now_epoch() - requested_at) >= RETROACTIVE_REDUCTION_DELAY_SECONDS
 
@@ -310,23 +312,22 @@ def is_pending_reduction_ready(pending: dict[str, Any]) -> bool:
 def request_retention_change(
     new_window_days: int | str,
     actor: str,
-    second_admin_confirmation: dict[str, Any] | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
-    """Apply, or gate, a change to the global retention window.
+    """Apply a forward-looking change, or park a retroactive reduction.
 
     Forward-looking changes (raising the window, or an unchanged value)
     apply single-admin, immediately.
 
-    A retroactive reduction (new_window_days < current window) requires:
-      - a second admin's confirmation, where the confirming actor is
-        DIFFERENT from the requesting actor (a self-confirmation is
-        rejected -- dual control by a single compromised session is not
-        dual control); or
-      - is placed into a `pending_reduction` state with a 72-hour delay
-        and a GC alarm (the alarm-firing side is wired in the CDK
-        EventBridge rule / CloudWatch alarm consuming this state; see
-        pipeline-stack.ts PurgeWorker construct), applied automatically
-        once `is_pending_reduction_ready` returns True on a later sweep.
+    A retroactive reduction (new_window_days < current window) is ALWAYS
+    parked in `pending_reduction` (W6.7): there is no in-request
+    confirmation. The free-text `second_admin_confirmation` this function
+    used to take was self-attested -- the "second admin" was just a string
+    the requester typed. The backend's confirm route
+    (`POST /api/admin/retention/pending/{id}/confirm`) is the only way a
+    different, authenticated admin applies it early; otherwise a sweep
+    applies it once `is_pending_reduction_ready` is True. Mirrors
+    backend/src/retention.py::request_retention_change's record shape.
 
     Returns a dict with:
       status: "APPLIED" | "PENDING_SECOND_APPROVAL"
@@ -335,7 +336,7 @@ def request_retention_change(
     settings = get_retention_settings()
     current_window = settings["retention_window_days"]
     table = _ddb().Table(RETENTION_SETTINGS_TABLE)
-    now = now_epoch()
+    now = int(now_epoch())
 
     is_retroactive_reduction = _window_rank(new_window_days) < _window_rank(current_window)
 
@@ -343,45 +344,39 @@ def request_retention_change(
         table.update_item(
             Key={"setting_id": GLOBAL_SETTING_ID},
             UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
+            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(now)},
         )
         return {"status": "APPLIED", "applied_immediately": True}
 
-    confirmed_by_different_admin = bool(
-        second_admin_confirmation
-        and second_admin_confirmation.get("actor")
-        and second_admin_confirmation["actor"] != actor
-    )
-
-    if confirmed_by_different_admin:
-        table.update_item(
-            Key={"setting_id": GLOBAL_SETTING_ID},
-            UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-            ExpressionAttributeValues={":w": new_window_days, ":none": None, ":now": str(int(now))},
-        )
-        return {"status": "APPLIED", "applied_immediately": False}
-
-    # No valid second-admin confirmation -- enter the 72h pending-delay
-    # state. The window itself is NOT lowered yet; only a later sweep that
-    # observes is_pending_reduction_ready() == True applies it. A whole epoch
-    # second, because boto3 refuses a Python float on every write.
+    # Whole epoch seconds, because boto3 refuses a Python float on every write.
     pending_reduction = {
+        "pending_id": uuid.uuid4().hex,
         "new_window_days": new_window_days,
+        "previous_window_days": current_window,
         "requested_by": actor,
-        "requested_at": int(now),
+        "requested_at": now,
+        "apply_after": now + RETROACTIVE_REDUCTION_DELAY_SECONDS,
+        "reason": reason,
     }
     table.update_item(
         Key={"setting_id": GLOBAL_SETTING_ID},
         UpdateExpression="SET pending_reduction = :pending, updated_at = :now",
-        ExpressionAttributeValues={":pending": pending_reduction, ":now": str(int(now))},
+        ExpressionAttributeValues={":pending": pending_reduction, ":now": str(now)},
     )
     return {"status": "PENDING_SECOND_APPROVAL", "applied_immediately": False}
 
 
+# Mirrors backend/src/retention.py::PENDING_REDUCTION_SYSTEM_ACTOR.
+PENDING_REDUCTION_SYSTEM_ACTOR = "system:retention-delay"
+
+
 def _apply_ready_pending_reduction(settings: dict[str, Any]) -> dict[str, Any]:
-    """If a pending reduction's delay has elapsed, apply it and clear the
-    pending state. Called at the start of a sweep so a delayed reduction
-    takes effect on schedule without a human having to re-click Save."""
+    """If a pending reduction's delay has elapsed, apply it, clear the
+    pending state, and audit it (W6.7, same action and detail as
+    backend/src/retention.py::apply_ready_pending_reduction). Called at the
+    start of a sweep so a delayed reduction takes effect on schedule without
+    a human having to re-click Save. The apply is conditional on the record
+    still being the one read here, so a concurrent confirm or cancel wins."""
     pending = settings.get("pending_reduction")
     if not pending:
         return settings
@@ -390,13 +385,36 @@ def _apply_ready_pending_reduction(settings: dict[str, Any]) -> dict[str, Any]:
 
     table = _ddb().Table(RETENTION_SETTINGS_TABLE)
     now = now_epoch()
-    table.update_item(
-        Key={"setting_id": GLOBAL_SETTING_ID},
-        UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
-        ExpressionAttributeValues={
-            ":w": pending["new_window_days"],
-            ":none": None,
-            ":now": str(int(now)),
+    try:
+        table.update_item(
+            Key={"setting_id": GLOBAL_SETTING_ID},
+            UpdateExpression="SET retention_window_days = :w, pending_reduction = :none, updated_at = :now",
+            ConditionExpression="pending_reduction = :expected",
+            ExpressionAttributeValues={
+                ":w": pending["new_window_days"],
+                ":none": None,
+                ":now": str(int(now)),
+                ":expected": pending,
+            },
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return settings
+        raise
+    before = settings.get("retention_window_days", DEFAULT_RETENTION_WINDOW_DAYS)
+    _write_audit_entry(
+        actor=PENDING_REDUCTION_SYSTEM_ACTOR,
+        action="retention_reduction_applied_after_delay",
+        target=GLOBAL_SETTING_ID,
+        target_type="retention_settings",
+        detail={
+            "pending_id": pending.get("pending_id", ""),
+            "requested_by": pending.get("requested_by", ""),
+            "requested_at": pending.get("requested_at"),
+            "reason": pending.get("reason", ""),
+            "before_retention_window_days": before,
+            "after_retention_window_days": pending["new_window_days"],
+            "result_status": "APPLIED",
         },
     )
     settings["retention_window_days"] = pending["new_window_days"]

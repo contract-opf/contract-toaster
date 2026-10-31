@@ -6,10 +6,11 @@
  *   - Retention slider (0 days-3 years, GET/POST /api/admin/retention).
  *     Forward-looking changes (raising the window) apply immediately,
  *     single-admin. A retroactive reduction (lowering the window) is
- *     dual-controlled per #13/#61: it either needs a second, different
- *     admin's confirmation, or is parked for a mandatory 72-hour delay
- *     (with a GC alarm) before the sweep runs — this UI surfaces both
- *     paths and never lets a lone admin confirm their own request.
+ *     dual-controlled per #13/#61 (W6.7): saving it only PARKS it, with a
+ *     required reason. A different admin confirms it from the pending card
+ *     (the server reports `viewer_can_confirm`; the requester never may),
+ *     any admin can cancel it, and otherwise it applies itself after 72
+ *     hours. There is no field to type a "second admin" into.
  *   - A pre-sweep preview ("this change will purge N objects",
  *     POST /api/admin/retention/preview) shown before a retroactive save
  *     is confirmed, so an admin cannot blind-fire a destructive sweep.
@@ -72,9 +73,17 @@ import type { UserRow } from './AdminUsers';
 // ---------------------------------------------------------------------------
 
 export interface PendingReduction {
-  new_window_days: number;
+  // W6.7: absent only on a record parked before pending ids existed; such a
+  // record can still be applied by the 72-hour sweep but not confirmed or
+  // cancelled from here.
+  pending_id?: string;
+  new_window_days: number | string;
   requested_by: string;
   requested_at: number;
+  apply_after?: number;
+  reason?: string;
+  // Computed by the server for THIS viewer: never true for the requester.
+  viewer_can_confirm?: boolean;
 }
 
 export interface RetentionSettings {
@@ -195,7 +204,11 @@ export default function AdminRetention({
   // the field stays empty/partial until blur or save commits it.
   const [daysInputText, setDaysInputText] = useState<string>(String(90));
   const [preview, setPreview] = useState<PurgePreview | null>(null);
-  const [confirmingActor, setConfirmingActor] = useState('');
+  // W6.7: a retroactive reduction carries a required reason. There is no
+  // "confirming admin" field: the second admin confirms from the pending
+  // reduction card, as themselves.
+  const [reductionReason, setReductionReason] = useState('');
+  const [pendingActionPending, setPendingActionPending] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [holdReviewId, setHoldReviewId] = useState('');
@@ -439,10 +452,11 @@ export default function AdminRetention({
     try {
       const response = await jsonFetch('/api/admin/retention', {
         method: 'POST',
-        body: JSON.stringify({
-          retention_window_days: sliderValue,
-          second_admin_confirmation: confirmingActor ? { actor: confirmingActor } : null,
-        }),
+        body: JSON.stringify(
+          isRetroactiveReduction
+            ? { retention_window_days: sliderValue, reason: reductionReason.trim() }
+            : { retention_window_days: sliderValue },
+        ),
       });
       if (!response.ok) {
         const detail = await readErrorDetail(response);
@@ -457,7 +471,7 @@ export default function AdminRetention({
       // Reflect the change only after the server confirms it.
       await loadSettings();
       setPreview(null);
-      setConfirmingActor('');
+      setReductionReason('');
     } catch (err) {
       setActionError(
         err instanceof Error
@@ -467,7 +481,40 @@ export default function AdminRetention({
     } finally {
       setSaving(false);
     }
-  }, [sliderValue, confirmingActor, loadSettings]);
+  }, [sliderValue, isRetroactiveReduction, reductionReason, loadSettings]);
+
+  // W6.7: confirm (a DIFFERENT admin — the server refuses the requester) or
+  // cancel (any admin) a parked reduction. The confirmer is whoever is signed
+  // in; nothing about their identity is typed in.
+  const actOnPendingReduction = useCallback(
+    async (pendingId: string, action: 'confirm' | 'cancel') => {
+      setActionError(null);
+      setPendingActionPending(true);
+      const fallback =
+        action === 'confirm'
+          ? "We couldn't confirm that retention reduction. Please try again."
+          : "We couldn't cancel that retention reduction. Please try again.";
+      try {
+        const response = await jsonFetch(
+          `/api/admin/retention/pending/${encodeURIComponent(pendingId)}/${action}`,
+          { method: 'POST', body: JSON.stringify({}) },
+        );
+        if (!response.ok) {
+          const detail = await readErrorDetail(response);
+          throw new Error(
+            detail ??
+              friendlyErrorMessage(`Pending ${action} returned HTTP ${response.status}`, fallback),
+          );
+        }
+        await loadSettings();
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : friendlyErrorMessage(err, fallback));
+      } finally {
+        setPendingActionPending(false);
+      }
+    },
+    [loadSettings],
+  );
 
   const placeHold = useCallback(async () => {
     setActionError(null);
@@ -686,7 +733,11 @@ export default function AdminRetention({
                               holdActionPending ||
                               (releaseReasons[h.review_id] ?? '').trim() === ''
                             }
-                            onClick={() => void releaseHold(h.review_id)}
+                            onClick={() => {
+                              if ((releaseReasons[h.review_id] ?? '').trim() !== '') {
+                                void releaseHold(h.review_id);
+                              }
+                            }}
                           >
                             Release legal hold
                           </CtButton>
@@ -862,9 +913,82 @@ export default function AdminRetention({
 
             {settings.pending_reduction && (
               <CtBanner variant="warn" data-testid="retention-pending-reduction">
-                Pending reduction to {settings.pending_reduction.new_window_days} days, requested by{' '}
-                {settings.pending_reduction.requested_by} — will apply automatically after the
-                72-hour delay unless a second admin confirms sooner (GC is alerted).
+                <p>
+                  A retention reduction is pending. It applies automatically at the time shown
+                  unless a different admin confirms it sooner or any admin cancels it. The
+                  requester cannot confirm their own reduction.
+                </p>
+                <CtTable>
+                  <table data-testid="pending-reductions-table">
+                    <thead>
+                      <tr>
+                        <th>New window</th>
+                        <th>Requested by</th>
+                        <th>Reason</th>
+                        <th>Applies at</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        data-testid={`pending-reduction-${settings.pending_reduction.pending_id ?? 'legacy'}`}
+                      >
+                        <td>{settings.pending_reduction.new_window_days} days</td>
+                        <td>
+                          {submitterIdentity(settings.pending_reduction.requested_by, usersBySub)}
+                        </td>
+                        <td>{settings.pending_reduction.reason || '—'}</td>
+                        <td className="ct-table__mono" data-testid="pending-reduction-apply-after">
+                          {formatFailureTime(
+                            settings.pending_reduction.apply_after ??
+                              settings.pending_reduction.requested_at + 72 * 3600,
+                          )}
+                        </td>
+                        <td>
+                          <div className="ct-actions" role="group">
+                            <CtButton
+                              type="button"
+                              variant="danger"
+                              size="sm"
+                              confirm="Click again to apply now"
+                              data-testid="pending-reduction-confirm"
+                              disabled={
+                                pendingActionPending ||
+                                !settings.pending_reduction.pending_id ||
+                                settings.pending_reduction.viewer_can_confirm !== true
+                              }
+                              onClick={() => {
+                                // Guarded here as well as by `disabled`: the button is a
+                                // custom element, and the server refuses the requester anyway.
+                                const pending = settings.pending_reduction;
+                                if (pending?.pending_id && pending.viewer_can_confirm === true) {
+                                  void actOnPendingReduction(pending.pending_id, 'confirm');
+                                }
+                              }}
+                            >
+                              Confirm reduction
+                            </CtButton>
+                            <CtButton
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              data-testid="pending-reduction-cancel"
+                              disabled={
+                                pendingActionPending || !settings.pending_reduction.pending_id
+                              }
+                              onClick={() => {
+                                const id = settings.pending_reduction?.pending_id;
+                                if (id) void actOnPendingReduction(id, 'cancel');
+                              }}
+                            >
+                              Cancel reduction
+                            </CtButton>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </CtTable>
               </CtBanner>
             )}
 
@@ -936,8 +1060,9 @@ export default function AdminRetention({
             {isRetroactiveReduction && (
               <CtBanner variant="warn" data-testid="retroactive-reduction-warning">
                 <p>
-                  This is a <strong>retroactive reduction</strong> — it requires a second admin's
-                  confirmation or a 72-hour delay before the sweep runs (dual control, #13/#61).
+                  This is a <strong>retroactive reduction</strong>. Saving does not lower the
+                  window: it parks the reduction until a different admin confirms it, or for 72
+                  hours, after which it applies automatically unless cancelled (dual control).
                 </p>
                 <div className="ct-actions">
                   <CtButton
@@ -956,15 +1081,15 @@ export default function AdminRetention({
                   </CtBanner>
                 )}
                 <CtField
-                  label="Confirming admin"
-                  hint="must be a different admin from the requester; leave blank to enter the 72-hour delay instead"
+                  label="Reason for the reduction"
+                  hint="Required. Recorded in the audit trail and shown to the admin who confirms it."
                 >
                   <input
-                    id="confirming-admin"
-                    data-testid="confirming-admin-input"
+                    id="retention-reduction-reason"
+                    data-testid="retention-reduction-reason-input"
                     type="text"
-                    value={confirmingActor}
-                    onChange={(e) => setConfirmingActor(e.target.value)}
+                    value={reductionReason}
+                    onChange={(e) => setReductionReason(e.target.value)}
                   />
                 </CtField>
               </CtBanner>
@@ -975,7 +1100,11 @@ export default function AdminRetention({
                 type="button"
                 variant="primary"
                 data-testid="retention-save-button"
-                disabled={saving || sliderValue === settings.retention_window_days}
+                disabled={
+                  saving ||
+                  sliderValue === settings.retention_window_days ||
+                  (isRetroactiveReduction && reductionReason.trim() === '')
+                }
                 loading={saving}
                 onClick={() => void saveRetentionChange()}
               >

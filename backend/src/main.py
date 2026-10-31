@@ -61,6 +61,9 @@ Endpoints:
   POST /api/admin/retention                     — admin: request a retention change,
                                                     dual-controlled for retroactive
                                                     reductions per #13/#61 (#94).
+  POST /api/admin/retention/pending/{id}/confirm — admin: a DIFFERENT admin confirms a
+                                                   parked reduction (W6.7).
+  POST /api/admin/retention/pending/{id}/cancel  — admin: withdraw a parked reduction (W6.7).
   POST /api/admin/retention/preview              — admin: pre-sweep purge preview (#94).
   GET  /api/admin/retention/holds                — admin: legal-hold list view (#94).
   POST /api/admin/retention/holds/{review_id}    — admin: place a legal hold (#94).
@@ -473,6 +476,8 @@ from src.reviews import (
 from src.upload_validation import MAX_UPLOAD_SIZE_BYTES
 from src.retention import (
     RETENTION_WINDOW_FOREVER,
+    cancel_pending_reduction,
+    confirm_pending_reduction,
     get_retention_settings,
     list_legal_holds,
     preview_purge_sweep,
@@ -1268,13 +1273,28 @@ async def post_admin_retention(
 ) -> JSONResponse:
     """Admin: request a retention-window change (issue #94).
 
-    Body: {"retention_window_days": int | "forever", "second_admin_confirmation": {"actor": str} | null}
-    Forward-looking changes apply immediately, single-admin. Retroactive
-    reductions require a second, different admin's confirmation or enter a
-    72-hour pending-delay state (#13/#61's dual-control gate). Raises HTTP
-    403 for a non-admin caller, 400 for a window outside [0, 1095] days and
-    not the `"forever"` / indefinite-preservation sentinel (issue #34).
+    Body: {"retention_window_days": int | "forever", "reason": str}
+    Forward-looking changes apply immediately, single-admin. A retroactive
+    reduction never applies from this request (W6.7): it is parked as a
+    pending record (`reason` required) that a DIFFERENT admin confirms via
+    POST /api/admin/retention/pending/{pending_id}/confirm, any admin
+    cancels, or the purge sweep applies after 72 hours. Raises HTTP 403 for
+    a non-admin caller, 400 for a window outside [0, 1095] days and not the
+    `"forever"` sentinel (issue #34), for a reduction without a reason, or
+    for a body still carrying the retired `second_admin_confirmation`
+    field; 409 when a reduction is already pending.
     """
+    if body.get("second_admin_confirmation") is not None:
+        # The free-text "second admin" was self-attested (QA report #7).
+        # Refused rather than ignored, so an old client cannot believe it
+        # dual-controlled anything.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "second_admin_confirmation is no longer accepted. A reduction is "
+                "confirmed by a different admin from the pending-reductions list."
+            ),
+        )
     raw_window = body["retention_window_days"]
     # "forever" must pass through untouched -- int() on it raises ValueError
     # before request_retention_change's own validation ever runs.
@@ -1283,7 +1303,38 @@ async def post_admin_retention(
         window_days,
         caller_row,
         dynamodb_resource,
-        second_admin_confirmation=body.get("second_admin_confirmation"),
+        reason=body.get("reason", ""),
+    )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/admin/retention/pending/{pending_id}/confirm", include_in_schema=True)
+async def post_admin_retention_pending_confirm(
+    pending_id: str = Path(...),
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+) -> JSONResponse:
+    """Admin: confirm a parked retention reduction (W6.7). The confirmer is
+    the authenticated caller -- an admin (strict `is_admin is True`) who is
+    not the requester. Raises HTTP 403 for a non-admin or for the requester,
+    404 for an unknown or no-longer-pending id."""
+    result = confirm_pending_reduction(pending_id, caller_row, dynamodb_resource)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/admin/retention/pending/{pending_id}/cancel", include_in_schema=True)
+async def post_admin_retention_pending_cancel(
+    pending_id: str = Path(...),
+    body: dict[str, Any] | None = Body(None),  # noqa: B008
+    caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
+    dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
+) -> JSONResponse:
+    """Admin: withdraw a parked retention reduction (W6.7). Body:
+    {"reason": str} (optional). Any admin may cancel, including the
+    requester. Raises HTTP 403 for a non-admin, 404 for an unknown or
+    no-longer-pending id."""
+    result = cancel_pending_reduction(
+        pending_id, caller_row, dynamodb_resource, reason=(body or {}).get("reason", "")
     )
     return JSONResponse(content=result)
 
