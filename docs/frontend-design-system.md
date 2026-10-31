@@ -109,6 +109,32 @@ issue #727 deleted that component; the constraint followed the
 stylesheet. `scripts/focus-audit.mjs` reads `motion.ts` by name and
 cites this section as its authority.)
 
+Because no stylesheet loads under test, a class name with no rule behind
+it, or a `var(--ct-…)` that `tokens.css` never declares, looks exactly like
+a working one to the suite. The 2026-10-31 QA pass found both shipped
+green: `--ct-bg-subtle` / `--ct-border-subtle` / `--ct-bg-card` and a
+`--ct-color-*` family that never existed (panels fell back to Vite's stock
+`#646cff` or a dark-only rgba, so light mode lost its edges), and
+`ct-row--between` / `ct-row--wrap` / `ct-input` applied with no CSS.
+**`npm run audit:css-refs`** (`frontend/scripts/css-refs-audit.mjs`, in
+`check-frontend.sh`) now fails on:
+
+- any `var(--ct-*)` / `var(--od-*)` under `src/` (CSS, Lit `css\``, TS/TSX
+  strings) naming a property declared nowhere under `src/` — a fallback
+  does not excuse it, the fallback is what painted the defect;
+- any token `tokens.css` dark-overrides on one route (`prefers-color-scheme`)
+  but not the other (`[data-theme='dark']`), or vice versa;
+- any `ct-` / `od-` / `toaster-` class a TS/TSX file applies (`className=`,
+  Lit `class=`, `.className =`, `classList.*`) with no selector in any
+  stylesheet, Lit `css\`` block or the console's inline `motionStyles` —
+  `` `ct-chip--${tone}` `` is checked as a prefix;
+- the literal `#646cff` anywhere under `src/`.
+
+Intentional rule-less classes (JS hooks) go in the script's
+`CLASS_ALLOWLIST`, each with a reason; an entry that gains a rule or stops
+being applied fails as stale. It is a name-resolution guard, not a
+renderer: it cannot say the rule behind a name lays out well.
+
 ### 3.3 npm lockfile: never run bare `npm install` in `frontend/`
 Local npm is 11.x; the Docker build (`deploy/dts/frontend.Dockerfile`,
 node:20-slim / npm 10.8.2) runs `npm ci`, which hard-fails on npm-11
@@ -320,6 +346,15 @@ produced a measured horizontal page scroll on the admin screens, and
 
 Overflow belongs to the component that owns it: a `ct-table` that scrolls
 itself is correct, a page that scrolls horizontally is not.
+
+A **fixed-width control in a flex row** is the third spelling (QA
+2026-10-31: the History toolbar measured 504px wide inside a 375px viewport
+because its search field was a bare `14rem` in an inner row that could not
+wrap). Size such a control `min(14rem, 100%)` — `.ct-input` in `app.css`
+does — and give the row `.ct-row--wrap`, which also sets `min-width: 0` on
+the row and its direct children so no single child's min-content width
+can pin it open. `.ct-row--between` spreads a toolbar's groups to its two
+ends. No audit checks this one; it was measured in a browser.
 
 Every animation/transition in the system uses these tokens and sits
 behind the global reduced-motion guard in `base.css`
@@ -570,7 +605,7 @@ first time someone re-added a static import at the top of `App.tsx`.
   regression gate — that is the point of preserving testids/roles.
 - Gates: `bash scripts/check-frontend.sh` (the pinned-npm lockfile
   validation of §3.3, then tsc + vite build, the shipped-JS bundle budget of
-  §9, vitest, and the contrast/focus/layout audits) and
+  §9, vitest, and the contrast/focus/layout/css-refs audits) and
   `.venv/bin/python tests/test_frontend_xss_posture.py` (source-posture
   greps). The second is offline. The first no longer is, as of issue #112:
   its opening step runs `npx npm@10.8.2 ci … --dry-run`, which needs the npm
@@ -584,7 +619,7 @@ first time someone re-added a static import at the top of `App.tsx`.
   files the `ci-main-red` issue and blocks the image build.
   `tests/test_frontend_gate_wired_634.py` (inside GATE A) holds that
   wiring in place.
-- The three audits are **static source guards, not renderers** — they
+- The four audits are **static source guards, not renderers** — they
   cannot tell you the app looks right, only that a spelling which has
   already broken it once cannot come back. Each carries a self-test of
   fixture mutations so it fails closed if narrowed. Anything about
@@ -686,6 +721,13 @@ Existing call sites that must adopt this once built: Deprovision, Release
 legal hold, Clear saved key (switch this one to `variant="danger"` while it's
 being touched). The new Playbooks tab's "Remove playbook" (§15.1) is the
 first new consumer. Add a `ct-button` "confirm" state to the gallery (§9).
+
+Confirmation is the second cue, not the first. In a table row the
+destructive action also sits in its own band — `.ct-row-actions__danger`
+in `app.css`, pushed to the row's end and set off by an inline-start rule
+that survives when the bands wrap at a narrow width (issue #598). A 2x2
+grid briefly put Remove beside Rename with equal weight; QA 2026-10-31
+decision D5 restored the bands.
 
 ## 15. Playbook admin & guidance-precedence surfaces (new, 2026-07-28)
 

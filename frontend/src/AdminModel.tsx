@@ -338,8 +338,8 @@ function ModelRoleField({
           style={{
             padding: '0.75rem',
             borderRadius: '6px',
-            background: 'var(--ct-bg-subtle, rgba(255, 255, 255, 0.03))',
-            border: '1px solid var(--ct-border-subtle, rgba(255, 255, 255, 0.08))',
+            background: 'var(--ct-surface-sunken)',
+            border: '1px solid var(--ct-border)',
             marginTop: '0.25rem',
           }}
         >
