@@ -103,9 +103,10 @@ export interface ReceiptLine {
   /** A horizontal rule rather than a label/value pair. */
   rule?: true;
   /** A full-width disclosure SENTENCE rather than a label/value pair —
-   *  issue #570 follow-up. The label/value row is a fixed-width column
-   *  layout (nowrap on screen, a dot-leader gap in text/PNG) that a long
-   *  sentence overflows and gets truncated by rather than fits. A `wrap`
+   *  issue #570 follow-up. The label/value row is a two-column layout (on
+   *  screen a short label and a right-aligned value that wraps within its
+   *  own column; a dot-leader gap in text/PNG), which a long sentence turns
+   *  into a ragged stack of fragments rather than prose. A `wrap`
    *  line renders as wrapped prose instead: no label, no dot leader, and
    *  it reflows across as many physical lines as it needs. */
   wrap?: true;
