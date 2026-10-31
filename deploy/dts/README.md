@@ -51,13 +51,14 @@ Clearing it in the UI reverts the instance to `OPENROUTER_API_KEY`.
 
 ```bash
 cp deploy/dts/.env.example deploy/dts/.env
-# edit deploy/dts/.env: set DEMO_TOKEN_SECRET (e.g. `openssl rand -hex 32`)
+# edit deploy/dts/.env: set DEMO_TOKEN_SECRET to the output of `openssl rand -hex 32`
 # optionally set OPENROUTER_API_KEY, or leave it blank and use the admin tab
 
 docker compose -f deploy/dts/docker-compose.yml --env-file deploy/dts/.env up --build
 ```
 
-- SPA: <http://localhost:8081> (sign in with **admin/admin** or **user/user**)
+- SPA: <http://localhost:8081> (sign in with **admin/admin** or **user/user**
+  on a fresh deployment; see [Demo users](#demo-users-seeded-once))
 - API: <http://localhost:8080>
 - MinIO console: <http://localhost:9001> (local / localsecret)
 
@@ -115,15 +116,55 @@ admin calls and any request signed with a header:
 This is defence in depth, not a replacement for the secret login. Someone
 holding the login could still presign a GET for themselves.
 
+## The session secret (`DEMO_TOKEN_SECRET`)
+
+`DEMO_TOKEN_SECRET` signs every sign-in session. With `AUTH_MODE` set to
+`password` or `both` (both compose files set `password`), the backend refuses
+to start if it is unset, shorter than 32 bytes, a known placeholder (such as
+the value `.env.example` used to ship), or one repeated character. The error
+says which, never the value.
+
+- **Local compose:** set it in `deploy/dts/.env`. `.env.example` ships it
+  blank; generate one with `openssl rand -hex 32`.
+- **Coolify compose:** it is the Coolify magic variable
+  `${SERVICE_PASSWORD_64_DEMOTOKEN}`, generated on first save like the MinIO
+  pair above. Nobody types or sees it. On any other host, set it yourself.
+
+**Rotation:** a deployment that kept the placeholder will now refuse to boot.
+That is intended. Set a generated secret (`openssl rand -hex 32`, or let
+Coolify generate it) and redeploy. Changing the secret signs everyone out;
+they sign in again.
+
+Sessions can also be ended without touching the secret. Each user row carries
+a token version, checked on every request: changing your own password,
+signing out, or deleting a user (and re-creating the username) ends that
+user's earlier sessions. Signing out ends the user's sessions on every
+device, not just the current browser.
+
 ## What the bootstrap does
 
 `bootstrap.py` (a one-shot compose service the backend waits on) creates the
 DynamoDB tables (+ the `reviews.owner_sub-index`, `reviews.status-index` and
 `reviews.playbook_hash-index` GSIs) and the uploads/outputs
 buckets, seeds any registry-declared mock-pipeline redline fixture into MinIO,
-seeds the demo users, and installs + activates the playbook the image ships
-with — **Synthetic NDA Sample**, the only contract type a fresh deployment
-serves.
+seeds the demo users (first bootstrap only, below), and installs + activates
+the playbook the image ships with — **Synthetic NDA Sample**, the only
+contract type a fresh deployment serves.
+
+### Demo users, seeded once
+
+The bootstrap runs on every rollout, but it seeds the demo users `admin/admin`
+and `user/user` only on a deployment's **first** bootstrap. It records a
+`bootstrap:seeded` row in `AUTH_SETTINGS_TABLE` afterwards and never seeds
+again. A deployment that already has any user when this runs for the first
+time is marked without seeding. The admin-toggleable auth-mode row is written
+only when absent, so a redeploy no longer resets an admin's sign-in choice.
+
+Both demo accounts must change their password before they can do anything
+else (issue #586). **On a public deployment, remove them:** sign in as
+`admin`, change its password, add your own admin under *Users & access*, sign
+in as that admin, and delete `admin` and `user` there. They do not come back
+on the next rollout.
 
 It seeds no other playbook row. Issue #515 removed a hardcoded, tenant-named
 orphan row that every fresh deployment used to write: the catalog is
