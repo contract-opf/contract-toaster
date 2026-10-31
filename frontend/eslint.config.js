@@ -255,6 +255,124 @@ const postureConfigs = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// NO RAW ERROR TEXT (QA 2026-10-31 W9, item 3).
+//
+// CLAUDE.md: "no raw server exception in the status window". About forty catch
+// blocks used to render `err instanceof Error ? err.message : …`, which shows
+// the browser's "Failed to fetch", a `json()` SyntaxError quoting a proxy's
+// HTML page, or a 5xx `detail` naming server configuration. Every one now goes
+// through `src/userMessage.ts` (`toUserMessage`, `responseError`), which shows
+// a `UserFacingError`'s message and fixed copy for anything else.
+//
+// `ct/no-raw-error-text` keeps it that way. Inside a `catch (x)` block — and
+// inside the callback of a `.catch((x) => …)` — it reports:
+//   * reading `x.message` (dotted, bracketed, optional-chained, or
+//     destructured `const { message } = x`), and
+//   * stringifying `x` (`String(x)`, `` `${x}` ``, `'' + x`, `x.toString()`).
+// Anything that needs the text routes `x` through `toUserMessage(x, copy)`;
+// a console log passes `x` itself, which keeps its stack.
+//
+// It is a separate rule rather than more `no-restricted-syntax` selectors:
+// that rule is re-declared per file by the posture overrides above (a flat
+// config REPLACES a rule's options), so selectors added to it would have to be
+// copied into every override and would silently vanish from any file a later
+// override forgets. A rule of its own is configured once. `userMessage.ts` is
+// the one file exempt from it; tests are not linted by it because they assert
+// on error text by design. `src/__tests__/no-raw-error-text.test.ts` proves it
+// fires on each shape and is configured for every source file.
+// ---------------------------------------------------------------------------
+const RAW_ERROR_TEXT_MESSAGE =
+  "Raw error text can reach the screen (CLAUDE.md: no raw server exception in the status window). " +
+  "Use toUserMessage(err, fallback) from src/userMessage.ts; throw a UserFacingError for copy written for a reader.";
+
+/** The identifier a catch clause or a `.catch` callback binds the error to. */
+function caughtNames(node) {
+  const names = [];
+  if (node.type === "CatchClause" && node.param?.type === "Identifier") {
+    names.push(node.param.name);
+  }
+  if (
+    (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression") &&
+    node.parent?.type === "CallExpression" &&
+    node.parent.arguments[0] === node &&
+    node.parent.callee.type === "MemberExpression" &&
+    node.parent.callee.property.type === "Identifier" &&
+    node.parent.callee.property.name === "catch" &&
+    node.params[0]?.type === "Identifier"
+  ) {
+    names.push(node.params[0].name);
+  }
+  return names;
+}
+
+const noRawErrorText = {
+  meta: {
+    type: "problem",
+    docs: { description: "Forbid rendering a caught error's own text." },
+    schema: [],
+  },
+  create(context) {
+    const scopes = [];
+    const caught = (name) => scopes.some((names) => names.includes(name));
+    // `(err as Error)`, `err!`, `<Error>err` are still the caught value.
+    const unwrap = (node) =>
+      node && ["TSAsExpression", "TSNonNullExpression", "TSTypeAssertion", "TSSatisfiesExpression"].includes(node.type)
+        ? unwrap(node.expression)
+        : node;
+    const isCaught = (raw) => {
+      const node = unwrap(raw);
+      return node?.type === "Identifier" && caught(node.name);
+    };
+    const enter = (node) => scopes.push(caughtNames(node));
+    const exit = () => scopes.pop();
+    const report = (node) => context.report({ node, message: RAW_ERROR_TEXT_MESSAGE });
+    return {
+      CatchClause: enter,
+      "CatchClause:exit": exit,
+      ArrowFunctionExpression: enter,
+      "ArrowFunctionExpression:exit": exit,
+      FunctionExpression: enter,
+      "FunctionExpression:exit": exit,
+      MemberExpression(node) {
+        if (!isCaught(node.object)) return;
+        const key = node.computed
+          ? node.property.type === "Literal"
+            ? node.property.value
+            : null
+          : node.property.name;
+        if (key === "message" || key === "toString") report(node);
+      },
+      VariableDeclarator(node) {
+        if (
+          node.id.type === "ObjectPattern" &&
+          isCaught(node.init) &&
+          node.id.properties.some(
+            (p) => p.type === "Property" && p.key.type === "Identifier" && p.key.name === "message",
+          )
+        ) {
+          report(node);
+        }
+      },
+      CallExpression(node) {
+        if (node.callee.type === "Identifier" && node.callee.name === "String" && isCaught(node.arguments[0])) {
+          report(node);
+        }
+      },
+      TemplateLiteral(node) {
+        if (node.parent?.type === "TaggedTemplateExpression") return;
+        if (node.expressions.some(isCaught)) report(node);
+      },
+      BinaryExpression(node) {
+        if (node.operator === "+" && (isCaught(node.left) || isCaught(node.right))) report(node);
+      },
+    };
+  },
+};
+
+export const RAW_ERROR_TEXT_FILES = ["src/**/*.{ts,tsx}"];
+export const RAW_ERROR_TEXT_IGNORES = ["src/userMessage.ts", "src/__tests__/**", "src/**/*.test.{ts,tsx}"];
+
 export default tseslint.config(
   {
     ignores: [
@@ -310,6 +428,13 @@ export default tseslint.config(
   {
     files: ["**/*.jsx"],
     languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
+  },
+  // No raw error text on screen — see RAW_ERROR_TEXT_MESSAGE above.
+  {
+    files: RAW_ERROR_TEXT_FILES,
+    ignores: RAW_ERROR_TEXT_IGNORES,
+    plugins: { ct: { rules: { "no-raw-error-text": noRawErrorText } } },
+    rules: { "ct/no-raw-error-text": "error" },
   },
   // LAST, so no earlier block can re-enable or re-shape these.
   ...postureConfigs,
