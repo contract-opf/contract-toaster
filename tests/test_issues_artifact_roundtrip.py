@@ -207,6 +207,15 @@ class AnalysisArtifactTestBase(unittest.TestCase):
             "critic_delta": CRITIC_DELTA,
         }
         key = pipeline_runner._write_real_analysis(review_id, result, self.s3)
+        # QA W8 item 5: `_write_real_terminal` lands only on a row its run
+        # holds RUNNING (it no longer overwrites a DONE row), so the seeded
+        # row is put where a live run has it before its terminal write.
+        self.table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET #s = :running",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":running": "RUNNING"},
+        )
         pipeline_runner._write_real_terminal(review_id, result, None, self.ddb, key)
         return key
 
