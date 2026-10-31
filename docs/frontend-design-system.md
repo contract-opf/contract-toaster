@@ -155,12 +155,21 @@ and engine-strict with it — never reaches that build.
   was cited as `233-286`, which now falls inside the hooks above `activeTab`
   (declared at `App.tsx:393`) as the file has grown; re-verify the line
   range before citing it again).
-- **No web storage, with three allowed call sites.** `localStorage.setItem`/
+- **No web storage, with six allowed call sites.** `localStorage.setItem`/
   `sessionStorage.setItem` are banned by a source grep in
-  `security-posture.test.tsx`, which now walks `frontend/src` recursively
-  (excluding `__tests__`) and enforces exactly one `setItem` call site in
-  each of `ALLOWED_SETITEM_FILES` — the only files in the whole tree
-  permitted to call it at all:
+  `security-posture.test.tsx`, which walks `frontend/src` recursively
+  (excluding `__tests__`; `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`) plus
+  `frontend/index.html` and `gallery.html`, and enforces exactly one
+  `setItem` call site in each of `ALLOWED_SETITEM_FILES` — the only files in
+  the whole tree permitted to call it at all. A second, AST-level layer in
+  `eslint.config.js` (run by `npm run lint` inside `check-frontend.sh`)
+  forbids every form the grep cannot see — bracketed, optional-chained,
+  aliased or destructured `localStorage`/`sessionStorage`/`indexedDB`/
+  `cookieStore`, `document.cookie`, `Storage.prototype`, computed access on
+  `window` — and lets each allowlisted file reach only its one area as a
+  dotted `window.<area>`; `eslint-posture-w4.test.ts` proves the bypass
+  shapes fail and that the eslint allowlist equals `ALLOWED_SETITEM_FILES`.
+  The six:
   - `frontend/src/toaster/notify.ts`, writing `contract-toaster:notify-on-done`
     — a boolean opt-in flag for the "toast's ready" browser Notification
     (issue #497).
@@ -169,11 +178,24 @@ and engine-strict with it — never reaches that build.
   - `frontend/src/lastPlaybook.ts`, writing `contract-toaster:last-playbook`
     — the last-selected playbook id, so the picker defaults to it on the
     next visit (issue #489 item 4).
+  - `frontend/src/lastBrowning.ts`, writing `contract-toaster:last-browning`
+    — the last-selected browning level.
+  - `frontend/src/lastNotesMode.ts`, writing
+    `contract-toaster:last-notes-mode` — the last-selected notes mode.
+  - `frontend/src/inflightReview.ts`, writing `ct:inflight-review-id` to
+    `sessionStorage` — the server-minted uuid of the review this tab has in
+    flight, so a reload resumes it (issue #58).
 
-  Nothing sensitive lands in any of the three: no token, no review content
-  — just those three small preference flags. Tokens remain in-memory only.
-- **No `dangerouslySetInnerHTML`** anywhere in `frontend/src` (same test
-  + `tests/test_frontend_xss_posture.py`).
+  Nothing sensitive lands in any of them: no token, no review content.
+  Cognito tokens are in memory only — `src/amplifyMemoryStorage.ts`
+  re-points Amplify's token provider at a `Map` (QA 2026-10-31 #5, decision
+  D2), so an SSO reload signs the user out; `amplify-memory-token-storage.test.ts`
+  proves it against the real, unmocked provider.
+- **No HTML injection sinks.** No `dangerouslySetInnerHTML` anywhere in
+  `frontend/src` (same test + `tests/test_frontend_xss_posture.py`), and the
+  `eslint.config.js` posture block also rejects `innerHTML`/`outerHTML`
+  assignment, `insertAdjacentHTML`, `createContextualFragment`,
+  `setHTMLUnsafe`, `document.write`, and Lit's `unsafeHTML`/`unsafeSVG`.
 - **No tenant-brand strings strings** in UI or code (white-label release;
   asserted in `toaster-states.test.tsx` and resilience tests). Voicing is
   "your" ("your review", "your document").

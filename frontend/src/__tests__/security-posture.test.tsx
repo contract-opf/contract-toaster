@@ -3,9 +3,12 @@
  *
  * Two invariants are locked in here, against the *real* components:
  *
- *   1. Token posture: the ID/access token from the Amplify session is never
- *      persisted to localStorage or sessionStorage. Only Amplify's own
- *      in-memory session handling (mocked here) should ever see it.
+ *   1. Token posture, APP side: no app code copies the ID/access token it
+ *      gets from the Amplify session into localStorage or sessionStorage.
+ *      `aws-amplify/auth` is MOCKED here, so this says nothing about where
+ *      Amplify itself keeps the token — that is proven against the real token
+ *      provider in amplify-memory-token-storage.test.ts (QA 2026-10-31 #5,
+ *      decision D2: in memory).
  *   2. No unsafe HTML rendering: untrusted, model-/document-derived text
  *      (user email, legal-hold reason, model-output message) is rendered as
  *      escaped text — never parsed as HTML — and no component uses
@@ -98,8 +101,13 @@ const RETENTION_SETTINGS_OK = {
   pending_reduction: null,
 };
 
-describe('token posture — App.tsx', () => {
-  it('never persists the Amplify session token to localStorage or sessionStorage', async () => {
+// What this proves, and what it cannot (QA 2026-10-31 #17): `aws-amplify/auth`
+// is mocked above, so Amplify's own token store never runs in this test. It
+// proves that rendering the whole App — every effect that reads the session
+// token — makes NO Web Storage write from app code. Where Amplify itself keeps
+// the token is proven, unmocked, in amplify-memory-token-storage.test.ts.
+describe('token posture — App.tsx (app code only; Amplify mocked)', () => {
+  it('app code never copies the (mocked) Amplify session token into localStorage or sessionStorage', async () => {
     stubFetch({
       '/version': { version: '0.0.1', commit: 'abcdef1234567890', image_digest: 'sha256:x', uptime_seconds: 1 },
       // Admin panels only mount once GET /api/me resolves is_admin: true
@@ -222,6 +230,19 @@ describe('source posture (regression guard)', () => {
   // "any top-level component or module", not test files, which legitimately
   // construct their own mock Storage/DOM and call its `setItem` to drive
   // assertions (see e.g. `notify-preference-497.test.tsx`).
+  //
+  // QA 2026-10-31 W4: the walk now also reads plain-JS modules (`.js`, `.jsx`,
+  // `.mjs`, `.cjs`) — a `.js` file under src/ is bundled exactly like a `.ts`
+  // one and was invisible here — and the HTML entry documents at the root of
+  // frontend/ (`index.html`, `gallery.html`), whose inline `<script>` would
+  // run before any module. Those report as `../index.html` etc. Nothing was
+  // removed from the walk and SETITEM_RE is unchanged; the AST-level layer
+  // for the forms a text grep cannot see is eslint.config.js's posture block
+  // (see eslint-posture-w4.test.ts).
+  const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+  const frontendDir = path.resolve(componentsDir, '..');
+  const HTML_ENTRY_FILES = ['index.html', 'gallery.html'];
+
   function collectSourceFiles(dir: string): string[] {
     const files: string[] = [];
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -231,7 +252,7 @@ describe('source posture (regression guard)', () => {
         files.push(...collectSourceFiles(fullPath));
       } else if (
         entry.isFile() &&
-        (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) &&
+        SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext)) &&
         !entry.name.endsWith('.d.ts')
       ) {
         files.push(fullPath);
@@ -241,11 +262,19 @@ describe('source posture (regression guard)', () => {
   }
 
   function readComponentSources(): { file: string; content: string }[] {
-    return collectSourceFiles(componentsDir).map((fullPath) => ({
+    const htmlEntries = HTML_ENTRY_FILES.map((name) => path.join(frontendDir, name));
+    return [...collectSourceFiles(componentsDir), ...htmlEntries].map((fullPath) => ({
       file: path.relative(componentsDir, fullPath),
       content: fs.readFileSync(fullPath, 'utf-8'),
     }));
   }
+
+  it('scans the HTML entry documents as well as every src/ module', () => {
+    const scanned = readComponentSources().map(({ file }) => file);
+    for (const name of HTML_ENTRY_FILES) {
+      expect(scanned, `${name} must be in the posture scan`).toContain(path.join('..', name));
+    }
+  });
 
   it('contains no dangerouslySetInnerHTML in any top-level component or module', () => {
     for (const { file, content } of readComponentSources()) {
