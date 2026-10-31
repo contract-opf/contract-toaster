@@ -37,7 +37,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { type AdminPanelRefreshProps } from './adminRefresh';
 import { type LoadState } from './loadState';
-import { authorizedFetch, friendlyErrorMessage, readErrorDetail } from './api';
+import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import {
   CtBanner,
   CtButton,
@@ -315,7 +316,7 @@ export default function AdminUsers({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/users returned HTTP ${response.status}`,
             "We couldn't load the users list. Please try again.",
@@ -333,9 +334,7 @@ export default function AdminUsers({
       setUsersLoad({
         status: 'failed',
         message:
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't load the users list. Please try again."),
+          toUserMessage(err, "We couldn't load the users list. Please try again."),
       });
     }
   }, []);
@@ -348,7 +347,7 @@ export default function AdminUsers({
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/users/sync-status returned HTTP ${response.status}`,
             "We couldn't load the sync status. Please try again.",
@@ -361,9 +360,7 @@ export default function AdminUsers({
       setSyncLoad({
         status: 'failed',
         message:
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't load the sync status. Please try again."),
+          toUserMessage(err, "We couldn't load the sync status. Please try again."),
       });
     }
   }, []);
@@ -444,22 +441,17 @@ export default function AdminUsers({
           body: JSON.stringify({ auth_mode: mode }),
         });
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST /api/admin/auth-mode returned HTTP ${response.status}`,
-                "We couldn't change the sign-in method. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `POST /api/admin/auth-mode returned HTTP ${response.status}`,
+            "We couldn't change the sign-in method. Please try again.",
           );
         }
         applyAuthModeSettings(await response.json());
         setAuthModeNotice('Sign-in method updated. It applies to everyone from now on.');
       } catch (err) {
         setAuthModeError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't change the sign-in method. Please try again."),
+          toUserMessage(err, "We couldn't change the sign-in method. Please try again."),
         );
       } finally {
         setAuthModeSaving(false);
@@ -520,13 +512,10 @@ export default function AdminUsers({
           body: JSON.stringify(updates),
         });
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `PATCH /api/users/${sub} returned HTTP ${response.status}`,
-                "We couldn't update that user. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `PATCH /api/users/${sub} returned HTTP ${response.status}`,
+            "We couldn't update that user. Please try again.",
           );
         }
         // Reflect the change only after the server confirms it — no
@@ -534,9 +523,7 @@ export default function AdminUsers({
         await loadUsers();
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't update that user. Please try again."),
+          toUserMessage(err, "We couldn't update that user. Please try again."),
         );
       } finally {
         setPendingSub(null);
@@ -559,21 +546,16 @@ export default function AdminUsers({
           method: 'DELETE',
         });
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `DELETE /api/users/${sub} returned HTTP ${response.status}`,
-                "We couldn't remove that user. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `DELETE /api/users/${sub} returned HTTP ${response.status}`,
+            "We couldn't remove that user. Please try again.",
           );
         }
         await loadUsers();
       } catch (err) {
         setActionError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't remove that user. Please try again."),
+          toUserMessage(err, "We couldn't remove that user. Please try again."),
         );
       } finally {
         setPendingSub(null);
@@ -640,13 +622,10 @@ export default function AdminUsers({
           body: JSON.stringify(body),
         });
         if (!response.ok) {
-          const detail = await readErrorDetail(response);
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST /api/users returned HTTP ${response.status}`,
-                "We couldn't add that user. Please try again.",
-              ),
+          throw await responseError(
+            response,
+            `POST /api/users returned HTTP ${response.status}`,
+            "We couldn't add that user. Please try again.",
           );
         }
         // Confirmed by the server before the table reflects it — no
@@ -656,9 +635,7 @@ export default function AdminUsers({
         setAddResult({ identity, password: passwordUsed });
       } catch (err) {
         setAddError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't add that user. Please try again."),
+          toUserMessage(err, "We couldn't add that user. Please try again."),
         );
       } finally {
         setAddSubmitting(false);
