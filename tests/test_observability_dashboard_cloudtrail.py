@@ -204,6 +204,48 @@ def check_ac3_alarms(template: dict) -> list[str]:
     return failures
 
 
+def check_ac4_retention_reduction_alarm(template: dict) -> list[str]:
+    """QA remediation W6.8: the GC alarm the retention docs promise. The
+    backend logs one `RETENTION_REDUCTION_REQUESTED` line per parked
+    reduction (backend/src/retention_alerts.py); a metric filter on the App
+    Runner application log group counts it, and the
+    `contract-toaster-retention-reduction-{env}` alarm pages the alarms
+    topic on any one."""
+    failures = []
+    filters = resources_of_type(template, "AWS::Logs::MetricFilter")
+    reduction_filters = [
+        f for f in filters if "RETENTION_REDUCTION_REQUESTED" in flatten(f["Properties"])
+    ]
+    if len(reduction_filters) != 1:
+        failures.append(
+            "  AC4 FAIL: expected exactly one AWS::Logs::MetricFilter matching "
+            f"RETENTION_REDUCTION_REQUESTED, found {len(reduction_filters)}."
+        )
+        return failures
+    props = reduction_filters[0]["Properties"]
+    if "/application" not in flatten(props.get("LogGroupName")):
+        failures.append("  AC4 FAIL: the filter is not on the App Runner application log group.")
+    transform = (props.get("MetricTransformations") or [{}])[0]
+    metric_name = transform.get("MetricName")
+    alarms = [
+        a for a in resources_of_type(template, "AWS::CloudWatch::Alarm")
+        if a["Properties"].get("AlarmName") == "contract-toaster-retention-reduction-dev"
+    ]
+    if len(alarms) != 1:
+        failures.append("  AC4 FAIL: no contract-toaster-retention-reduction-dev alarm.")
+        return failures
+    alarm = alarms[0]["Properties"]
+    if alarm.get("MetricName") != metric_name:
+        failures.append(
+            f"  AC4 FAIL: alarm watches {alarm.get('MetricName')!r}, filter emits {metric_name!r}."
+        )
+    if not alarm.get("AlarmActions"):
+        failures.append("  AC4 FAIL: the retention-reduction alarm has no SNS action.")
+    if alarm.get("TreatMissingData") != "notBreaching":
+        failures.append("  AC4 FAIL: missing data must not breach (no reduction = no page).")
+    return failures
+
+
 def main() -> int:
     try:
         run_cdk_synth()
@@ -217,6 +259,7 @@ def main() -> int:
     ac1 = check_ac1_dashboard(template)
     ac2 = check_ac2_cloudtrail(template)
     ac3 = check_ac3_alarms(template)
+    ac4 = check_ac4_retention_reduction_alarm(template)
 
     print("AC1: CloudWatch dashboard contract-toaster-{env} with required tiles")
     if ac1:
@@ -241,6 +284,15 @@ def main() -> int:
         for f in ac3:
             print(f)
         all_failures.extend(ac3)
+    else:
+        print("  PASS")
+
+    print()
+    print("AC4: retention-reduction GC alarm on the App Runner application log (W6.8)")
+    if ac4:
+        for f in ac4:
+            print(f)
+        all_failures.extend(ac4)
     else:
         print("  PASS")
 

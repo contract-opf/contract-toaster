@@ -51,12 +51,13 @@ from typing import Any
 from fastapi import HTTPException, status
 
 try:  # production runs `src.main`; tests put backend/src on sys.path
-    from src import audit_log
+    from src import audit_log, retention_alerts
     from src import reviews as reviews_module
     from src.authz import require_admin
     from src.users import json_safe
 except ImportError:  # pragma: no cover
     import audit_log  # type: ignore[no-redef]
+    import retention_alerts  # type: ignore[no-redef]
     import reviews as reviews_module  # type: ignore[no-redef]
     from authz import require_admin  # type: ignore[no-redef]
     from users import json_safe  # type: ignore[no-redef]
@@ -391,6 +392,10 @@ def request_retention_change(
             "result_status": "PENDING_SECOND_APPROVAL",
         },
     )
+    # W6.8: the GC alarm -- a structured log line the AWS metric filter
+    # counts, plus the optional DTS push. After the audit row, and never a
+    # gate: the reduction is parked whether or not the alarm got through.
+    retention_alerts.announce_reduction_request(pending_reduction, current_window)
     return {
         "status": "PENDING_SECOND_APPROVAL",
         "applied_immediately": False,
