@@ -447,13 +447,13 @@ The dual-control / delay requirement is enforced server-side: `POST /api/admin/r
 
 ### Placing and releasing a legal hold
 
-A legal hold **overrides document retention**: a held review or held corpus document is never purged, regardless of the retention slider or a `0`-day setting. This exists to prevent evidence destruction; the authoritative policy lives in [docs/data-handling.md](docs/data-handling.md) → Legal hold.
+A legal hold **overrides document retention**: a held review is never purged, regardless of the retention slider or a `0`-day setting. This exists to prevent evidence destruction; the authoritative policy lives in [docs/data-handling.md](docs/data-handling.md) → Legal hold.
 
 **To place a hold:**
 
-1. Admin UI → find the **review** (or the **corpus** document/collection) → **Place legal hold**, with a matter reference and reason.
-2. This sets the per-review (or per-corpus) `legal_hold` flag. The purge worker skips anything with the flag set, even documents far past the retention window and even at retention `0`.
-3. The storage layer is marked too: held S3 objects receive an Object Lock legal hold or a protected hold tag covered by bucket-policy denies. Application roles cannot delete held objects by bypassing the app.
+1. Admin UI → Document retention → pick the **review** → **Place legal hold**, with a matter reference and reason. (Corpus documents cannot be held: a corpus legal hold is PLANNED, not implemented — see [docs/data-handling.md](docs/data-handling.md) → Hold flags.)
+2. This sets the per-review `legal_hold` flag. The purge worker skips anything with the flag set, even documents far past the retention window and even at retention `0`.
+3. The storage layer is marked too: every object the review owns is tagged `contract-toaster:legal-hold=true`, which the bucket-policy deny reads; an object written for the review later while it is held is tagged as it is written. If the tagging fails the hold is not placed at all and the UI says so — retry. Application roles cannot delete held objects by bypassing the app.
 4. The action is logged to `audit` with actor, target, matter reference, and reason.
 
 **To release a hold:**
