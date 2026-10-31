@@ -3,9 +3,8 @@
 8 September 2026. Every open issue in `exos-legal/contract-toaster` was read in
 full and assigned. Companion to
 [2026-09-08-public-cutover-plan.md](2026-09-08-public-cutover-plan.md); owner
-decisions are carried separately in
-[2026-09-08-owner-decisions-handoff.md](2026-09-08-owner-decisions-handoff.md),
-which is written to be reviewed without the codebase.
+decisions were carried separately, in an internal decision record that is not
+part of this repository.
 
 Owner instruction: put as much as possible into the pre-publication grind, and
 the rest into the private overlay.
@@ -24,9 +23,8 @@ split is operational and not only written down here.
 | Closed in this pass | — | 20 |
 
 All ten `owner-decision` issues were answered on 2026-09-08 and the label is
-retired. The decisions and what each one changed are recorded in
-[2026-09-08-owner-decisions-handoff.md](2026-09-08-owner-decisions-handoff.md);
-three of them added issues (#742, #743) or moved one out of the launch path
+retired. The decisions and what each one changed are kept in that internal
+record, outside this repository; three of them added issues (#742, #743) or moved one out of the launch path
 (#684), which is why the totals moved.
 
 ## Closed: 20

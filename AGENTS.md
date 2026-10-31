@@ -97,7 +97,7 @@ one because it is finished. Superseded is a note at the top, not a `rm`.
 **A push here is a publication.** This repository is the development trunk and
 it is public. There is no scrub step between your commit and the world — that
 model retired on 2026-09-09, along with the cut script that implemented it.
-Two consequences:
+Three consequences:
 
 - **Never write a counterparty name** into code, a document, a commit message,
   or an issue. `tests/lint-counterparty-names.py` guards this, but it is
@@ -107,9 +107,15 @@ Two consequences:
   not writing the name. A scheduled job with the list scans this tree daily.
 - `tests/lint-brand-free.py` hard-fails on a pull path, repo URL, or team
   reference pointing at the private origin. Naming that org in prose is fine.
+- **Nothing internal-only belongs in this tree.** A document that has to say it
+  must not ship publicly is in the wrong repository: keep it in the private
+  origin. `tests/lint-publication-markers.py` fails any tracked file carrying
+  such a self-declared marker, or an absolute macOS temp-directory or
+  home-directory path (write `~`, `$HOME` or a `<placeholder>` instead).
 
-Both gates scan `git ls-files` minus `public-cut-exclude.txt`, so **a file you
-have not staged is invisible to them.** Stage first, then run the gate — an
+The first two scan `git ls-files` minus `public-cut-exclude.txt`; the third
+scans every tracked file. Either way **a file you have not staged is invisible
+to them.** Stage first, then run the gate — an
 untracked file passing locally and failing in CI is the most common way to be
 surprised here.
 
