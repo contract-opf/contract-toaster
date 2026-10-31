@@ -58,7 +58,6 @@ REVIEWS_TABLE = os.environ.get("REVIEWS_TABLE", "")
 RETENTION_SETTINGS_TABLE = os.environ.get("RETENTION_SETTINGS_TABLE", "")
 UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET", "")
 OUTPUTS_BUCKET = os.environ.get("OUTPUTS_BUCKET", "")
-AUDIT_TABLE = os.environ.get("AUDIT_TABLE", "")
 RETROACTIVE_REDUCTION_DELAY_SECONDS = int(
     os.environ.get("RETROACTIVE_REDUCTION_DELAY_SECONDS", str(72 * 3600))
 )
@@ -219,16 +218,50 @@ def _build_audit_item(
 def _write_audit_entry(**kwargs: Any) -> dict[str, Any]:
     """Append one immutable audit row. Raises when AUDIT_TABLE is unset or the
     write fails: a sweep that cannot record itself surfaces as a failed
-    invocation (the Lambda Errors metric) rather than passing silently."""
-    if not AUDIT_TABLE:
+    invocation (the Lambda Errors metric) rather than passing silently.
+    The table name is read per call (not frozen at import) like the
+    backend's writer reads it."""
+    table_name = os.environ.get("AUDIT_TABLE", "")
+    if not table_name:
         raise RuntimeError("AUDIT_TABLE is not configured for the purge worker")
     item = _build_audit_item(**kwargs)
-    _ddb().Table(AUDIT_TABLE).put_item(
+    _ddb().Table(table_name).put_item(
         Item=item,
         ConditionExpression=AUDIT_APPEND_ONLY_CONDITION,
         ExpressionAttributeNames=AUDIT_APPEND_ONLY_NAMES,
     )
     return item
+
+
+# The actor a scheduled / on-demand sweep is recorded under.
+PURGE_WORKER_ACTOR = "system:retention-purge-worker"
+
+# Mirrors backend/src/retention.py::SWEEP_AUDIT_MAX_IDS.
+SWEEP_AUDIT_MAX_IDS = 1000
+
+
+def _sweep_audit_detail(result: dict[str, Any]) -> dict[str, Any]:
+    """Mirrors backend/src/retention.py::sweep_audit_detail EXACTLY: the
+    sweep id, mode, exact counts, and the purged / failed review ids
+    (capped). Never an object key, never substance."""
+    deleted = list(result["deleted_reviews"])
+    failed = list(result["failed_reviews"])
+    return {
+        "sweep_id": result["sweep_id"],
+        "dry_run": bool(result["dry_run"]),
+        "eligible_count": len(result["eligible_reviews"]),
+        "deleted_count": len(deleted),
+        "failed_count": len(failed),
+        "object_count": int(result["object_count"]),
+        "skipped_active_count": len(result["skipped_active"]),
+        "skipped_hold_count": len(result["skipped_hold"]),
+        "skipped_not_yet_eligible_count": len(result["skipped_not_yet_eligible"]),
+        "purged_review_ids": deleted[:SWEEP_AUDIT_MAX_IDS],
+        "failed_review_ids": failed[:SWEEP_AUDIT_MAX_IDS],
+        "review_ids_truncated": (
+            len(deleted) > SWEEP_AUDIT_MAX_IDS or len(failed) > SWEEP_AUDIT_MAX_IDS
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +631,15 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
     plus, per #454: dry_run, eligible_reviews (the backlog), failed_reviews
     (targeted objects survived -> NOT recorded as deleted), objects_by_review
     and object_count (the itemisation).
+
+    Every run, dry runs included, writes ONE audit row (`sweep_id` is its
+    target; `_sweep_audit_detail` is its content). A worker with no
+    AUDIT_TABLE refuses to start rather than deleting unrecorded.
     """
+    if not os.environ.get("AUDIT_TABLE"):
+        raise RuntimeError("AUDIT_TABLE is not configured for the purge worker")
+    sweep_id = uuid.uuid4().hex
+
     settings = get_retention_settings()
     settings = _apply_ready_pending_reduction(settings)
 
@@ -680,7 +721,8 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
         if not exclusive_start_key:
             break
 
-    return {
+    result = {
+        "sweep_id": sweep_id,
         "dry_run": dry_run,
         "deleted_reviews": deleted,
         "eligible_reviews": eligible,
@@ -691,6 +733,14 @@ def run_purge_sweep(dry_run: bool = False) -> dict[str, Any]:
         "skipped_hold": skipped_hold,
         "skipped_not_yet_eligible": skipped_not_yet_eligible,
     }
+    _write_audit_entry(
+        actor=PURGE_WORKER_ACTOR,
+        action="retention_purge_sweep",
+        target=sweep_id,
+        target_type="retention_sweep",
+        detail=_sweep_audit_detail(result),
+    )
+    return result
 
 
 def handler(event: dict[str, Any] = None, _context: Any = None) -> dict[str, Any]:  # noqa: RUF013

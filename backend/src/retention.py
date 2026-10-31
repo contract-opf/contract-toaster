@@ -45,6 +45,7 @@ Environment variables consumed:
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -568,8 +569,47 @@ def _log_purge_plan(review_id: str, keys: list[str], dry_run: bool) -> None:
         logger.info("retention sweep: %s %s", prefix, key)
 
 
+# The audit row a sweep writes names the reviews it purged. A daily sweep
+# after a long outage could purge thousands; the row is capped well inside
+# DynamoDB's 400 KB item limit and says when it was truncated (the counts are
+# always exact). Mirrored in infra/lambda/purge_worker/handler.py.
+SWEEP_AUDIT_MAX_IDS = 1000
+
+# The audit `actor` for a DTS sweep nobody authenticated to run.
+DTS_SWEEP_ACTOR = "system:retention-sweep"
+
+
+def sweep_audit_detail(result: dict[str, Any]) -> dict[str, Any]:
+    """The audit `detail` for one sweep run: its id, mode, exact counts, and
+    the purged / failed review ids (capped). Identifiers and counts only --
+    never an object key (a key carries the owner's sub) and never substance.
+    Mirrored EXACTLY by infra/lambda/purge_worker/handler.py's
+    `_sweep_audit_detail`; tests/test_retention_sweep_w6.py checks both."""
+    deleted = list(result["deleted_reviews"])
+    failed = list(result["failed_reviews"])
+    return {
+        "sweep_id": result["sweep_id"],
+        "dry_run": bool(result["dry_run"]),
+        "eligible_count": len(result["eligible_reviews"]),
+        "deleted_count": len(deleted),
+        "failed_count": len(failed),
+        "object_count": int(result["object_count"]),
+        "skipped_active_count": len(result["skipped_active"]),
+        "skipped_hold_count": len(result["skipped_hold"]),
+        "skipped_not_yet_eligible_count": len(result["skipped_not_yet_eligible"]),
+        "purged_review_ids": deleted[:SWEEP_AUDIT_MAX_IDS],
+        "failed_review_ids": failed[:SWEEP_AUDIT_MAX_IDS],
+        "review_ids_truncated": (
+            len(deleted) > SWEEP_AUDIT_MAX_IDS or len(failed) > SWEEP_AUDIT_MAX_IDS
+        ),
+    }
+
+
 def run_purge_sweep_now(
-    s3_client: Any, dynamodb_resource: Any, dry_run: bool = False
+    s3_client: Any,
+    dynamodb_resource: Any,
+    dry_run: bool = False,
+    actor: str = DTS_SWEEP_ACTOR,
 ) -> dict[str, Any]:
     """Run an immediate purge sweep using each review's own snapshotted
     window (invariant 2), for parity-checking the preview against the real
@@ -596,8 +636,18 @@ def run_purge_sweep_now(
       failed_reviews    reviews where a targeted object SURVIVED the delete;
                         deliberately NOT in deleted_reviews, and their
                         substance fields are left intact for the next sweep
+      sweep_id          this run's id -- the `target` of the ONE audit row
+                        every run (dry runs included) writes, with its counts
+                        and purged review ids (`sweep_audit_detail`). That
+                        write is not best-effort: a sweep that cannot record
+                        itself raises after the fact rather than passing
+                        silently.
     """
+    if not os.environ.get("AUDIT_TABLE"):
+        # Refuse before deleting anything: a sweep must never run unrecorded.
+        raise RuntimeError("AUDIT_TABLE is not configured; refusing to sweep unaudited")
     reviews_table = _reviews_table(dynamodb_resource)
+    sweep_id = uuid.uuid4().hex
 
     uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
     outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
@@ -727,7 +777,8 @@ def run_purge_sweep_now(
         )
         deleted.append(review_id)
 
-    return {
+    result = {
+        "sweep_id": sweep_id,
         "dry_run": dry_run,
         "deleted_reviews": deleted,
         "eligible_reviews": eligible,
@@ -738,6 +789,15 @@ def run_purge_sweep_now(
         "skipped_hold": skipped_hold,
         "skipped_not_yet_eligible": skipped_not_yet_eligible,
     }
+    _audit(
+        dynamodb_resource,
+        actor=actor,
+        action="retention_purge_sweep",
+        target=sweep_id,
+        target_type="retention_sweep",
+        detail=sweep_audit_detail(result),
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
