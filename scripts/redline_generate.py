@@ -397,6 +397,11 @@ def run_output_ooxml_scan(
     buf = io.BytesIO(docx_bytes)
     with zipfile.ZipFile(buf) as zf:
         try:
+            # W7-5: the same duplicate-entry rule as the input gauntlet, so
+            # no check below can read a different copy of a part than a
+            # consumer opens; `_check_relationships` already matches `.rels`
+            # case-insensitively through the shared helpers.
+            upload_validation.check_part_names(zf)
             upload_validation._check_no_macro_enabled_parts(zf)
             upload_validation._check_relationships(zf)
         except upload_validation.HostileFileError as exc:
