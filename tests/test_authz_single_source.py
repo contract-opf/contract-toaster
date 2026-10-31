@@ -294,15 +294,16 @@ def test_update_user_persists_a_real_bool_on_both_branches() -> None:
 
 
 def test_add_user_persists_a_real_bool_on_both_user_types() -> None:
-    """`add_user` is the admin-add create path. It coerces the payload field
-    with `bool(...)` before persisting, so a truthy string becomes a real
-    `True` in the table -- which is exactly what `is True` needs."""
+    """`add_user` is the admin-add create path. It persists only a real JSON
+    boolean (or False when the field is absent), which is exactly what
+    `is True` needs. A non-boolean is refused with 400 rather than coerced
+    (QA 2026-10-31: `bool("false")` is True) -- the same rule
+    `users.update_user` applies -- and nothing is written."""
     with _Harness() as h:
         cases = (
             ({"user_type": "sso", "email": "a@example.test", "is_admin": True}, True),
             ({"user_type": "sso", "email": "b@example.test", "is_admin": False}, False),
             ({"user_type": "sso", "email": "c@example.test"}, False),
-            ({"user_type": "sso", "email": "d@example.test", "is_admin": "yes"}, True),
             (
                 {
                     "user_type": "password",
@@ -327,6 +328,17 @@ def test_add_user_persists_a_real_bool_on_both_user_types() -> None:
             stored = h.row(created["cognito_sub"])
             assert type(stored["is_admin"]) is bool, (payload, type(stored["is_admin"]))
             assert authz.is_admin(stored) is expected, payload
+
+        for value in ("yes", "false", 1):
+            payload = {"user_type": "sso", "email": "d@example.test", "is_admin": value}
+            try:
+                demo_auth_module.add_user(payload, _admin_caller_row(), h.ddb)
+            except HTTPException as exc:
+                assert exc.status_code == 400, (value, exc.status_code)
+            else:
+                raise AssertionError(f"non-boolean is_admin {value!r} was accepted")
+            stored = h.users_table.get_item(Key={"cognito_sub": "pending-sso:d@example.test"})
+            assert "Item" not in stored, value
 
 
 def test_seed_demo_users_persists_a_real_bool() -> None:

@@ -177,7 +177,8 @@ row was already fetched by `users.require_active_user`. The predicate is
 `row.get("is_admin", False) is True` — a string or an integer never counts,
 so a hand-edited or break-glass row carrying `"false"` cannot pass. Every
 writer of the attribute stores a real boolean: `users.update_user` refuses a
-non-boolean with 400, `demo_auth.add_user` coerces the payload field,
+non-boolean with 400, so does `demo_auth.add_user` (it used to coerce
+the payload field, which made the string `"false"` an admin),
 `demo_auth.seed_demo_users` writes boolean literals, and the bootstrap
 reconciliation below writes `is_admin=true`.
 `tests/test_authz_single_source.py` AST-parses every module under

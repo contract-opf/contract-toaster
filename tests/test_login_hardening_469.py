@@ -59,7 +59,7 @@ os.environ.setdefault("OUTPUTS_BUCKET", "contract-toaster-outputs-loginhardening
 os.environ.setdefault("USERS_TABLE", "contract-toaster-users-loginhardening-test")
 os.environ.setdefault("AUTH_SETTINGS_TABLE", "contract-toaster-auth-settings-loginhardening-test")
 os.environ.setdefault("SYNC_STATUS_TABLE", "contract-toaster-sync-status-loginhardening-test")
-os.environ.setdefault("DEMO_TOKEN_SECRET", "unit-test-demo-secret")
+os.environ.setdefault("DEMO_TOKEN_SECRET", "unit-test-demo-secret-0123456789abcdef0123456789")
 
 import boto3  # noqa: E402, I001
 from fastapi.testclient import TestClient  # noqa: E402
