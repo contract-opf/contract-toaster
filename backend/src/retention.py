@@ -685,6 +685,24 @@ def run_purge_sweep_now(
             skipped_not_yet_eligible.append(review_id)
             continue
 
+        # W6.6: the row above came from a `status-index` query, which is
+        # eventually consistent and was read before this candidate's turn. A
+        # hold placed since then must still win, so re-read the row strongly
+        # consistently immediately before acting on it.
+        current = reviews_table.get_item(
+            Key={"review_id": review_id}, ConsistentRead=True
+        ).get("Item")
+        if not current:
+            logger.warning("retention sweep: review %s vanished mid-sweep; skipped", review_id)
+            continue
+        if _is_legal_held(current):
+            skipped_hold.append(review_id)
+            continue
+        if current.get("status") not in TERMINAL_REVIEW_STATUSES:
+            skipped_active.append(review_id)
+            continue
+        review = current
+
         eligible.append(review_id)
         targets = _review_object_targets(review, s3_client, uploads_bucket, outputs_bucket)
         objects_by_review[review_id] = [key for _bucket, key in targets]
@@ -909,6 +927,32 @@ def _tag_or_503(
 
 
 
+def tag_if_held(review_id: str, dynamodb_resource: Any) -> dict[str, str]:
+    """Extra `put_object` / `copy_object` kwargs for an object written under
+    `review_id` (W6.6): `{"Tagging": "contract-toaster:legal-hold=true"}` while
+    the review is held, else `{}`.
+
+    A hold tags the objects that exist when it is placed; an output written
+    afterwards (a pipeline still finishing, a diagnostic artifact) would
+    otherwise land untagged, outside the bucket-policy backstop. The read is
+    strongly consistent so a hold placed a moment ago is seen. A failed
+    lookup never fails the write: the row's flag still protects the review
+    from every sweep."""
+    try:
+        row = (
+            _reviews_table(dynamodb_resource)
+            .get_item(Key={"review_id": review_id}, ConsistentRead=True)
+            .get("Item")
+            or {}
+        )
+    except Exception:  # noqa: BLE001 -- never fail a write over the lookup
+        logger.warning("LEGAL_HOLD: hold lookup failed for review %s at write time", review_id)
+        return {}
+    if _is_legal_held(row):
+        return {"Tagging": f"{LEGAL_HOLD_TAG_KEY}=true"}
+    return {}
+
+
 def _get_review_or_404(review_id: str, dynamodb_resource: Any) -> dict[str, Any]:
     reviews_table = _reviews_table(dynamodb_resource)
     resp = reviews_table.get_item(Key={"review_id": review_id}, ConsistentRead=True)
@@ -994,7 +1038,7 @@ def set_legal_hold(
         ) from None
 
     # Catch-up: anything written for this review after step 1 read its row
-    # as unheld.
+    # as unheld. Every later write tags itself (`tag_if_held`).
     try:
         latest = _hold_targets(review, s3_client)
         _tag_targets(s3_client, [t for t in latest if t not in targets], True)

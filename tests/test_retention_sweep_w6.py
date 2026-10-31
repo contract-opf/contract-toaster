@@ -23,6 +23,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -242,12 +243,122 @@ class TestEveryPurgeRunIsAudited(SweepTestBase):
             os.environ["AUDIT_TABLE"] = saved
 
 
+class _StaleReviews:
+    """A reviews table whose list reads (query/scan) answer from a snapshot
+    taken BEFORE a hold was placed -- an eventually consistent GSI, or a
+    scan page read a moment earlier -- while `get_item` is live."""
+
+    def __init__(self, live: Any, snapshot: list[dict]) -> None:
+        self._live = live
+        self._snapshot = snapshot
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._live, name)
+
+    def query(self, **kwargs: Any) -> dict:
+        index_value = kwargs["KeyConditionExpression"]._values[1]
+        return {"Items": [dict(r) for r in self._snapshot if r.get("status") == index_value]}
+
+    def scan(self, **_kwargs: Any) -> dict:
+        return {"Items": [dict(r) for r in self._snapshot]}
+
+
+class _StaleResource:
+    def __init__(self, live: Any, snapshot: list[dict]) -> None:
+        self._live = live
+        self._snapshot = snapshot
+
+    def Table(self, name: str) -> Any:  # noqa: N802
+        table = self._live.Table(name)
+        if name == os.environ["REVIEWS_TABLE"]:
+            return _StaleReviews(table, self._snapshot)
+        return table
+
+
+class TestSweepRace(SweepTestBase):
+    """W6.6: a hold placed after the sweep listed a review, but before it
+    deleted it, must still win."""
+
+    def _place_hold_after_listing(self) -> tuple[str, list[dict]]:
+        key = self.seed("r-race", "DONE")
+        snapshot = self.reviews.scan()["Items"]
+        self.reviews.update_item(
+            Key={"review_id": "r-race"},
+            UpdateExpression="SET legal_hold = :t",
+            ExpressionAttributeValues={":t": True},
+        )
+        return key, snapshot
+
+    def test_the_dts_sweep_rereads_each_candidate_before_deleting(self) -> None:
+        key, snapshot = self._place_hold_after_listing()
+        result = retention.run_purge_sweep_now(self.s3, _StaleResource(self.ddb, snapshot))
+        self.assertNotIn("r-race", result["deleted_reviews"])
+        self.assertIn("r-race", result["skipped_hold"])
+        self.assertTrue(self.object_exists(key))
+
+    def test_the_lambda_sweep_rereads_each_candidate_before_deleting(self) -> None:
+        key, snapshot = self._place_hold_after_listing()
+        worker = _load_purge_worker()
+        live = self.ddb
+        worker._ddb = lambda: _StaleResource(live, snapshot)
+        result = worker.run_purge_sweep()
+        self.assertNotIn("r-race", result["deleted_reviews"])
+        self.assertIn("r-race", result["skipped_hold"])
+        self.assertTrue(self.object_exists(key))
+
+    def test_a_review_deleted_from_the_table_mid_sweep_is_not_purged(self) -> None:
+        key = self.seed("r-gone", "DONE")
+        snapshot = self.reviews.scan()["Items"]
+        self.reviews.delete_item(Key={"review_id": "r-gone"})
+        result = retention.run_purge_sweep_now(self.s3, _StaleResource(self.ddb, snapshot))
+        self.assertNotIn("r-gone", result["deleted_reviews"])
+        self.assertTrue(self.object_exists(key))
+
+
+class TestWriteTimeTagging(SweepTestBase):
+    """W6.6: an object written for a review while it is held is tagged as it
+    is written, so it is inside the bucket-policy backstop from birth."""
+
+    def _tags(self, key: str) -> dict:
+        tagset = self.s3.get_object_tagging(Bucket=os.environ["OUTPUTS_BUCKET"], Key=key)["TagSet"]
+        return {t["Key"]: t["Value"] for t in tagset}
+
+    def test_outputs_written_for_a_held_review_are_tagged(self) -> None:
+        from src import attempt_diagnostics, pipeline_runner
+
+        self.seed("r-held", "RUNNING", legal_hold=True)
+        out = pipeline_runner._write_real_output(
+            "r-held", {"redline_bytes": b"docx"}, self.s3, dynamodb_resource=self.ddb
+        )
+        analysis = pipeline_runner._write_real_analysis(
+            "r-held", {"status": "OK"}, self.s3, dynamodb_resource=self.ddb
+        )
+        write = attempt_diagnostics.make_attempt_diagnostic_write(
+            "r-held", self.s3,
+            extra_put_kwargs=lambda: retention.tag_if_held("r-held", self.ddb),
+        )
+        write({"review_id": "r-held", "stage": "primary"})
+        for key in (out, analysis, attempt_diagnostics.attempt_diagnostics_key("r-held")):
+            self.assertEqual(self._tags(key).get(retention.LEGAL_HOLD_TAG_KEY), "true", key)
+
+    def test_outputs_of_an_unheld_review_are_not_tagged(self) -> None:
+        from src import pipeline_runner
+
+        self.seed("r-free", "RUNNING")
+        out = pipeline_runner._write_real_output(
+            "r-free", {"redline_bytes": b"docx"}, self.s3, dynamodb_resource=self.ddb
+        )
+        self.assertEqual(self._tags(out), {})
+
+
 def main() -> int:
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTests(loader.loadTestsFromTestCase(TestOneTerminalStatusSet))
     suite.addTests(loader.loadTestsFromTestCase(TestCancelledIsPurgedOnDts))
     suite.addTests(loader.loadTestsFromTestCase(TestEveryPurgeRunIsAudited))
+    suite.addTests(loader.loadTestsFromTestCase(TestSweepRace))
+    suite.addTests(loader.loadTestsFromTestCase(TestWriteTimeTagging))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 

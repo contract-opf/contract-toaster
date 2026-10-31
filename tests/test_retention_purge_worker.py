@@ -122,7 +122,7 @@ class FakeTable:
         self.scan_page_size: int | None = None
         self.scan_calls: list[dict] = []
 
-    def get_item(self, Key):
+    def get_item(self, Key, ConsistentRead=False):  # noqa: ARG002 - W6.6 re-read
         key = Key[self.key_name]
         item = self.items.get(key)
         return {"Item": item} if item else {}
