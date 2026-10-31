@@ -39,11 +39,13 @@ Environment variables:
   RETROACTIVE_REDUCTION_DELAY_SECONDS  delay before a pending reduction may
                               run without a second-admin confirmation
                               (default 259200 = 72 hours)
+  AUDIT_TABLE                DynamoDB audit table name (append-only)
 """
 
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 import boto3
@@ -56,6 +58,7 @@ REVIEWS_TABLE = os.environ.get("REVIEWS_TABLE", "")
 RETENTION_SETTINGS_TABLE = os.environ.get("RETENTION_SETTINGS_TABLE", "")
 UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET", "")
 OUTPUTS_BUCKET = os.environ.get("OUTPUTS_BUCKET", "")
+AUDIT_TABLE = os.environ.get("AUDIT_TABLE", "")
 RETROACTIVE_REDUCTION_DELAY_SECONDS = int(
     os.environ.get("RETROACTIVE_REDUCTION_DELAY_SECONDS", str(72 * 3600))
 )
@@ -158,6 +161,72 @@ def _ddb():
 
 def _s3():
     return boto3.client("s3")
+
+
+# ---------------------------------------------------------------------------
+# Audit writer -- this bundle's copy of backend/src/audit_log.py
+#
+# The Lambda ships independently of backend/src and cannot import it, so it
+# carries an equivalent writer: the same key shape (PK `partition` = "%Y-%m",
+# SK `timestamp` = "{epoch}#{uuid4 hex}") and the same append-only PutItem
+# condition. tests/test_audit_log_single_writer.py renders both and fails if
+# they drift. The condition is a string here rather than
+# `boto3.dynamodb.conditions.Attr`, so the handler still imports nothing
+# beyond `boto3` and `botocore.exceptions`.
+# ---------------------------------------------------------------------------
+
+AUDIT_APPEND_ONLY_CONDITION = "attribute_not_exists(#p) AND attribute_not_exists(#t)"
+AUDIT_APPEND_ONLY_NAMES = {"#p": "partition", "#t": "timestamp"}
+
+
+def _build_audit_item(
+    *,
+    actor: str,
+    action: str,
+    target: str | None = None,
+    target_type: str | None = None,
+    detail: dict[str, Any] | None = None,
+    now: float | None = None,
+    event_id: str | None = None,
+    outcome: str = "success",
+) -> dict[str, Any]:
+    """The audit row, built exactly as backend/src/audit_log.build_audit_item
+    builds it."""
+    when = now_epoch() if now is None else now
+    eid = event_id or uuid.uuid4().hex
+    keys = {
+        "partition": time.strftime("%Y-%m", time.gmtime(when)),
+        "timestamp": f"{int(when)}#{eid}",
+        "event_id": eid,
+    }
+    item: dict[str, Any] = {**keys, "actor": actor, "action": action}
+    if target is not None:
+        item["target"] = target
+    if target_type is not None:
+        item["target_type"] = target_type
+    item["outcome"] = outcome
+    if target_type == "review" and target:
+        item["review_id"] = target
+    if detail:
+        item.update(detail)
+    # Nothing in `detail` moves the key.
+    item.update(keys)
+    return item
+
+
+def _write_audit_entry(**kwargs: Any) -> dict[str, Any]:
+    """Append one immutable audit row. Raises when AUDIT_TABLE is unset or the
+    write fails: a sweep that cannot record itself surfaces as a failed
+    invocation (the Lambda Errors metric) rather than passing silently."""
+    if not AUDIT_TABLE:
+        raise RuntimeError("AUDIT_TABLE is not configured for the purge worker")
+    item = _build_audit_item(**kwargs)
+    _ddb().Table(AUDIT_TABLE).put_item(
+        Item=item,
+        ConditionExpression=AUDIT_APPEND_ONLY_CONDITION,
+        ExpressionAttributeNames=AUDIT_APPEND_ONLY_NAMES,
+    )
+    return item
 
 
 # ---------------------------------------------------------------------------

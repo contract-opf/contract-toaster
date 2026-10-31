@@ -376,7 +376,7 @@ def _query_audit_by_review(
     "full history of one review/document".
 
     The rows this reads are the ones `review_routes._write_audit_row` and
-    `retention._write_audit_entry` stamp with `review_id` for
+    `audit_log.write_audit_entry` stamp with `review_id` for
     `target_type="review"`. Audit rows written BEFORE that stamp existed
     carry the review id in `target` only and are therefore not on this
     index; they remain readable through `month_activity` and through the
