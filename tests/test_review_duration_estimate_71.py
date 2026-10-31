@@ -146,6 +146,11 @@ class DurationEstimateTestBase(unittest.TestCase):
     def _finish(self, review_id: str, completed: int) -> None:
         """The real pipeline's terminal write, at a controlled clock."""
         with patch("time.time", return_value=float(completed)):
+            # QA W8 item 5: the in-process runner claims the row (PENDING -> RUNNING)
+            # before anything else, and its terminal write is conditional on the row
+            # still being RUNNING -- so the row is claimed here exactly as
+            # `run_real_pipeline` claims it.
+            pipeline_runner._mark_running(review_id, self.ddb)
             pipeline_runner._write_real_terminal(
                 review_id,
                 {"status": "OK", "decision": "REQUEST_CHANGE", "summary": "s"},

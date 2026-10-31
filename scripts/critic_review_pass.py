@@ -603,7 +603,8 @@ def run_critic_pass(
     # pass read, clamped by THIS pass's own model's declared output cap (the
     # critic may run on a different model). No caller-supplied override --
     # see run_primary_pass's identical block.
-    output_budget_ceiling = _model_client.openrouter_model_max_output_tokens(model_id)
+    # QA W8 item 4: cap minus reasoning allowance -- see run_primary_pass.
+    output_budget_ceiling = _model_client.openrouter_content_budget_ceiling(model_id)
     attempt_max_output_tokens = _model_client.output_budget_for_document(
         pp.estimate_tokens(doc_text), output_budget_ceiling
     )
@@ -620,6 +621,8 @@ def run_critic_pass(
             cancel_checkpoint()
         outcome = "failure"
         raw_response = None
+        # QA W8 item 1: same per-attempt failure box as run_primary_pass.
+        attempt_failure: BaseException | None = None
         replacement_text_failures: list[str] = []
         # Issue #643: same per-attempt schema-rejection box as
         # run_primary_pass -- see that function's identical comment.
@@ -744,7 +747,8 @@ def run_critic_pass(
             last_error = parsed_or_error
             correction = parsed_or_error
             outcome = "retry" if attempt < attempts_allowed else "failure"
-        except _model_client.ModelOutputTruncatedError:
+        except _model_client.ModelOutputTruncatedError as truncation_error:
+            attempt_failure = truncation_error
             # Same contract as run_primary_pass's handler: widen the budget
             # and retry, re-raise on the last attempt so the review still
             # fails as `model_output_truncated` rather than as a generic
@@ -769,14 +773,25 @@ def run_critic_pass(
                 raise
             outcome = "retry"
             last_error = "model_output_truncated: the response did not fit the output budget"
+            # QA W8 item 7: an earlier attempt's correction is not re-sent
+            # on a truncation retry -- see run_primary_pass.
+            correction = None
             attempt_max_output_tokens = widened
             continue
+        except BaseException as failure:
+            # QA W8 item 1: remembered for the ledger, re-raised untouched.
+            attempt_failure = failure
+            raise
         finally:
             # Issue #414: same "only trust last_usage after a genuine
             # invoke() return" reasoning as run_primary_pass -- see that
             # function's identical comment.
+            # QA W8 item 1: a raised-but-billed attempt ledgers the usage
+            # the exception carries -- see run_primary_pass.
             actual_usage = (
-                getattr(model_client, "last_usage", None) if raw_response is not None else None
+                getattr(model_client, "last_usage", None)
+                if raw_response is not None
+                else _model_client.reported_usage_from_failure(attempt_failure)
             )
             # LEDGER every attempt -- success, retry, or terminal failure
             # alike -- via this finally path, identically to the primary

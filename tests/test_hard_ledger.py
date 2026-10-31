@@ -693,8 +693,10 @@ def test_an_unknown_block_id_or_missing_span_stays_asserted() -> None:
 def test_a_missing_ledger_disposition_fails_the_review_closed() -> None:
     docx_bytes = _docx(with_indemnity=False)
     silent = _response(critic=True, ledger=[])
-    # The Floor judge runs after the critic pass whatever its outcome, so it
-    # is seeded too; the critic's failure is what the review reports.
+    # QA W8 item 6: the Floor judge no longer runs after a FAILED critic
+    # pass (it used to, "whatever its outcome", and paid for it). A verdict
+    # stays seeded so a regression that judges anyway still finds an answer
+    # and is caught by the call count below, not by an exhausted fake.
     result, client = _run(docx_bytes, [silent, silent, _verdict(JUDGED_RULE)])
     assert result["status"] == "ERROR", result.get("status")
     assert result["reason"] == "critic_schema_invalid", result.get("reason")
@@ -704,7 +706,7 @@ def test_a_missing_ledger_disposition_fails_the_review_closed() -> None:
         for call in client.calls
         if call["model_id"] == _load_bundle()["playbook"]["metadata"]["critic_model_id"]
     ]
-    assert len(critic_calls) == 3, "two critic attempts (one informed retry), then the judge"
+    assert len(critic_calls) == 2, "two critic attempts (one informed retry), and no judge"
     retry_prompt = json.dumps(critic_calls[1]["user_prompt"])
     assert "ledger_dispositions has no disposition" in retry_prompt
 
