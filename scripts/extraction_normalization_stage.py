@@ -31,9 +31,16 @@ This module therefore has two halves:
      text (`w:txbxContent`) stays excluded by construction: the walker
      below only recurses into a fixed, explicit set of tags (`w:p`, `w:tbl`/
      `w:tr`/`w:tc`, `w:r`, `w:ins`, `w:del`, `w:fldSimple`, `w:hyperlink`,
-     `w:moveTo`, `w:sdt`, `w:smartTag`) -- it is not a generic "recurse into
+     `w:moveTo`, `w:sdt`, `w:smartTag`, and since QA remediation W7-1
+     `w:dir`, `w:bdo`, `w:customXml`) -- it is not a generic "recurse into
      every child" walk, so an unrecognized wrapper tag (`w:drawing`,
-     `mc:AlternateContent`, ...) is simply never descended into.
+     `mc:AlternateContent`, ...) is simply never descended into. Since W7-1
+     an unrecognised element that CARRIES TEXT is no longer skipped in
+     silence: it is counted, and the result is marked
+     `extraction_status: "degraded"` with a counts-only disclosure in
+     `normalization_notes` (`_is_unrecognised_text_carrier`).
+     `mc:AlternateContent` -- the textbox/drawing payload shape -- stays
+     excluded by design and is not counted.
      `w:hyperlink` joined that set in issue #663: it is a transparent
      wrapper around ordinary runs whose text a reader sees inline (a
      cross-reference, a defined-term link, a URL), so excluding it was not
@@ -113,7 +120,10 @@ internal analysis report".
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import io
+import posixpath
 import re
 import sys
 import unicodedata
@@ -176,18 +186,179 @@ def sdt_is_placeholder(sdt_el: ET.Element) -> bool:
     return sdt_pr.find(_w("showingPlcHdr")) is not None
 
 
-def _run_is_hidden(run_el: ET.Element) -> bool:
-    """True if this run carries `<w:rPr><w:vanish/></w:rPr>` (hidden text)."""
-    rpr = run_el.find(_w("rPr"))
+def _vanish_value(rpr: ET.Element | None) -> bool | None:
+    """The explicit `w:vanish` setting in run properties `rpr`: True/False
+    when a `<w:vanish>` is present (`w:val` "0"/"false"/"off" turns it
+    off), None when nothing is said and the value is inherited."""
     if rpr is None:
-        return False
+        return None
     vanish = rpr.find(_w("vanish"))
     if vanish is None:
-        return False
+        return None
     val = vanish.get(_w("val"))
     if val is None:
         return True
     return val.lower() not in ("0", "false", "off")
+
+
+class VanishStyles:
+    """Effective `w:vanish` resolution over a package's styles part (W7-3).
+
+    Word hides a run whose EFFECTIVE `vanish` is on, and the effective value
+    is the most specific one stated: the run's direct formatting, then its
+    character style (`w:rStyle`, following `w:basedOn`), then its paragraph's
+    style (`w:pStyle`, or the default paragraph style when none is named,
+    following `w:basedOn`), then `w:docDefaults/w:rPrDefault`. Before W7-3
+    only DIRECT `w:vanish` was read, so text hidden by a style reached the
+    model while staying invisible to the attorney -- and was missed by the
+    injection scan too.
+
+    Only `w:vanish` is read from the styles part: no style NAME, no other
+    property and no text. Public because `document_injection_scan` resolves
+    the same flag through the same object. A `basedOn` cycle or a dangling
+    style id ends the chain as "not stated"."""
+
+    def __init__(self, styles_root: ET.Element | None) -> None:
+        self._styles: dict[str, tuple[str | None, bool | None]] = {}
+        self.default_paragraph_style: str | None = None
+        self.doc_default: bool | None = None
+        if styles_root is None:
+            return
+        self.doc_default = _vanish_value(
+            styles_root.find(f"{_w('docDefaults')}/{_w('rPrDefault')}/{_w('rPr')}")
+        )
+        for style in styles_root.findall(_w("style")):
+            style_id = style.get(_w("styleId"))
+            if not style_id:
+                continue
+            based_on_el = style.find(_w("basedOn"))
+            based_on = based_on_el.get(_w("val")) if based_on_el is not None else None
+            self._styles[style_id] = (based_on, _vanish_value(style.find(_w("rPr"))))
+            if (
+                style.get(_w("type")) == "paragraph"
+                and (style.get(_w("default")) or "").lower() in ("1", "true", "on")
+            ):
+                self.default_paragraph_style = style_id
+
+    @classmethod
+    def from_package(cls, zf: zipfile.ZipFile) -> VanishStyles:
+        """The styles part the main document's relationships name -- not a
+        fixed path, so a package that keeps its styles somewhere other than
+        `word/styles.xml` cannot hide text from this resolver while Word
+        applies it -- falling back to `word/styles.xml`. No styles part, or
+        one that does not parse, resolves every inherited value to "not
+        stated" (the pre-W7-3 behaviour) rather than failing extraction;
+        the hostile-file gauntlet owns refusing a malformed package."""
+        names = set(zf.namelist())
+        part = _styles_part_name(zf, names)
+        if part is None:
+            return cls(None)
+        try:
+            return cls(ET.fromstring(zf.read(part)))  # noqa: S314 - gauntlet-hardened upload
+        except ET.ParseError:
+            return cls(None)
+
+    def _chain(self, style_id: str | None) -> bool | None:
+        seen: set[str] = set()
+        while style_id and style_id not in seen:
+            seen.add(style_id)
+            entry = self._styles.get(style_id)
+            if entry is None:
+                return None
+            based_on, value = entry
+            if value is not None:
+                return value
+            style_id = based_on
+        return None
+
+    def inherited_vanish(self, run_style: str | None, paragraph_style: str | None) -> bool:
+        for value in (
+            self._chain(run_style),
+            self._chain(paragraph_style or self.default_paragraph_style),
+            self.doc_default,
+        ):
+            if value is not None:
+                return value
+        return False
+
+
+_STYLES_REL_SUFFIX = "/relationships/styles"
+_DOCUMENT_RELS_PART = "word/_rels/document.xml.rels"
+
+
+def _styles_part_name(zf: zipfile.ZipFile, names: set[str]) -> str | None:
+    if _DOCUMENT_RELS_PART in names:
+        try:
+            rels = ET.fromstring(zf.read(_DOCUMENT_RELS_PART))  # noqa: S314 - gauntlet-hardened upload
+        except ET.ParseError:
+            rels = None
+        if rels is not None:
+            for rel in rels:
+                if not (rel.get("Type") or "").endswith(_STYLES_REL_SUFFIX):
+                    continue
+                if (rel.get("TargetMode") or "").lower() == "external":
+                    continue
+                target = rel.get("Target") or ""
+                resolved = (
+                    target.lstrip("/")
+                    if target.startswith("/")
+                    else posixpath.normpath(posixpath.join("word", target))
+                )
+                if resolved in names:
+                    return resolved
+    return "word/styles.xml" if "word/styles.xml" in names else None
+
+
+#: `(styles, paragraph_style_id)` for the walk in progress (W7-3). Set for a
+#: whole extraction by `extract_document_paragraphs` / `scan_paragraphs`
+#: and per paragraph by `_paragraph_style_scope`; the default -- no styles
+#: -- is the pre-W7-3 direct-formatting-only reading, which is what a
+#: caller that hands `_build_paragraph_record` a bare `<w:p>` gets.
+_VANISH_CONTEXT: contextvars.ContextVar[tuple[VanishStyles | None, str | None]] = (
+    contextvars.ContextVar("extraction_vanish_context", default=(None, None))
+)
+
+
+def _paragraph_style_raw(p_el: ET.Element) -> str | None:
+    ppr = p_el.find(_w("pPr"))
+    pstyle = ppr.find(_w("pStyle")) if ppr is not None else None
+    return pstyle.get(_w("val")) if pstyle is not None else None
+
+
+@contextlib.contextmanager
+def _paragraph_style_scope(p_el: ET.Element) -> Iterator[None]:
+    styles, _ = _VANISH_CONTEXT.get()
+    token = _VANISH_CONTEXT.set((styles, _paragraph_style_raw(p_el)))
+    try:
+        yield
+    finally:
+        _VANISH_CONTEXT.reset(token)
+
+
+@contextlib.contextmanager
+def _styles_scope(styles: VanishStyles) -> Iterator[None]:
+    token = _VANISH_CONTEXT.set((styles, None))
+    try:
+        yield
+    finally:
+        _VANISH_CONTEXT.reset(token)
+
+
+def _run_is_hidden(run_el: ET.Element) -> bool:
+    """True if this run's EFFECTIVE `w:vanish` is on (hidden text): its own
+    `<w:rPr><w:vanish/>` when it says anything, otherwise what its character
+    style, paragraph style and the document defaults say (W7-3, see
+    `VanishStyles`)."""
+    rpr = run_el.find(_w("rPr"))
+    direct = _vanish_value(rpr)
+    if direct is not None:
+        return direct
+    styles, paragraph_style = _VANISH_CONTEXT.get()
+    if styles is None:
+        return False
+    rstyle_el = rpr.find(_w("rStyle")) if rpr is not None else None
+    run_style = rstyle_el.get(_w("val")) if rstyle_el is not None else None
+    return styles.inherited_vanish(run_style, paragraph_style)
 
 
 #: The two tracked PARAGRAPH-MARK revisions (issue #113), keyed by the tag
@@ -273,6 +444,13 @@ class _ParaBuilder:
         self.has_hidden_text = False
         self.has_comment = False
         self.fields: list[dict[str, str]] = []
+        # Text-bearing elements `_walk_content` met but does not recognise
+        # (issue W7-1). Counted, never read: see `_count_unrecognised`.
+        self.unrecognised_markup = 0
+        # `(text, hidden)` per text-bearing run of the ACCEPT-ALL view, in
+        # document order, hidden runs included and flagged (W7-3). Read only
+        # by `scan_paragraphs`, for the injection scan.
+        self.scan_runs: list[tuple[str, bool]] = []
 
     def _close_cluster(self) -> None:
         if self._current_cluster is not None:
@@ -377,7 +555,26 @@ def sym_char(char_attr: str | None) -> str:
         return " "
     if unicodedata.category(char) in ("Cc", "Cs"):
         return " "
+    if char == normalize_input.SOFT_HYPHEN:
+        # W7-2: an optional break point, never a visible character -- the
+        # same disposition as a `<w:softHyphen/>` element and as U+00AD
+        # inside `<w:t>` (`_strip_soft_hyphens`). Decided HERE, the one
+        # place the writer shares, so the two cannot disagree about it.
+        return ""
     return char
+
+
+def _strip_soft_hyphens(text: str) -> str:
+    """`text` with every U+00AD SOFT HYPHEN removed (W7-2). Word writes
+    them into ordinary paper as optional break points, so they are stripped
+    -- never refused (`normalize_input.SOFT_HYPHEN`) and never passed to
+    the model, where one could split a trigger phrase past the injection
+    scan. `redline_block_apply._extractor_view_runs` deliberately does NOT
+    strip them: its `<w:t>` entries count `docx_editor`'s coordinates
+    character for character, so a paragraph carrying one fails its text
+    guard and edits to it fail closed (`paragraph_not_resolved`) rather
+    than land on a shifted span."""
+    return text.replace(normalize_input.SOFT_HYPHEN, "")
 
 
 def _process_run(
@@ -387,21 +584,6 @@ def _process_run(
     author: str | None,
     inside_field_code: bool,
 ) -> None:
-    if _run_is_hidden(run_el):
-        # STRIP: hidden text never reaches either stream, regardless of
-        # content (ARCHITECTURE.md -> "Input normalization (before
-        # review)"). Direct children only (the child walk below iterates
-        # `run_el` itself), never `.//`, so a run's own nested
-        # drawing/textbox content (if any were hostilely nested inside a
-        # run) cannot leak in via this path.
-        builder.add_hidden()
-        return
-
-    if run_el.find(_w("commentReference")) is not None:
-        # Structural signal only -- comment TEXT lives in word/comments.xml,
-        # a part this module never opens. See module docstring.
-        builder.has_comment = True
-
     # Issue #97: walk this run's direct children IN DOCUMENT ORDER, exactly
     # once, so `(a)<w:tab/>Buyer pays<w:br/>Seller.` comes out
     # `"(a)\tBuyer pays\nSeller."` -- not the pre-fix `"(a)Buyer paysSeller."`
@@ -415,23 +597,33 @@ def _process_run(
     # RESULTING text an acceptance keeps, same as the `w:t`/`w:delText`
     # content it sits beside.
     #
-    # `boundary_text` is the same run read the pre-#97 way -- its text
-    # children joined, then one "\t" per `w:tab` -- for `clause_boundaries`
-    # alone (see `_build_paragraph_record`). Every character it carries is
-    # one `text` carries too, so whenever `text` is empty so is this, and
-    # the `if not text` return below never drops any of it.
+    # `boundary_text` is the run read for `clause_boundaries` alone (see
+    # `_build_paragraph_record`): its text children and its `w:tab`s, each
+    # IN DOCUMENT ORDER, and nothing for a `w:br`/`w:cr`/`w:noBreakHyphen`/
+    # `w:sym` (those stay out of it exactly as they did before #97). Until
+    # W7-4 every tab was appended at the END of its run here, so the
+    # boundary decision depended on where Word happened to split runs -- and
+    # on where the WRITER split them: a tracked change that cut
+    # `(a)<w:tab/>Pay in 30 days.` after its tab moved the tab next to the
+    # marker in the projected document, promoted the paragraph to a heading
+    # there, and voided the whole redline (`projection_verification_failed`).
+    # Tabs now sit where they occur, so any run split of the same visible
+    # paragraph yields the same string; `_boundary_decision_text` applies the
+    # one rule that keeps a lettered sub-clause body text. Every character it
+    # carries is one `text` carries too, so whenever `text` is empty so is
+    # this, and the `if not text` return below never drops any of it.
     text_tag = _w("delText") if mode == "del" else _w("t")
     parts: list[str] = []
     boundary_parts: list[str] = []
-    tab_count = 0
     for child in run_el:
         tag = child.tag
         if tag == text_tag:
-            parts.append(child.text or "")
-            boundary_parts.append(child.text or "")
+            raw = _strip_soft_hyphens(child.text or "")
+            parts.append(raw)
+            boundary_parts.append(raw)
         elif tag == _w("tab"):
             parts.append("\t")
-            tab_count += 1
+            boundary_parts.append("\t")
         elif tag == _w("br") or tag == _w("cr"):
             parts.append("\n")
         elif tag == _w("noBreakHyphen"):
@@ -441,11 +633,33 @@ def _process_run(
         elif tag == _w("sym"):
             parts.append(sym_char(child.get(_w("char"))))
     text = "".join(parts)
-    boundary_text = "".join(boundary_parts) + "\t" * tab_count
+    boundary_text = "".join(boundary_parts)
+
+    if _run_is_hidden(run_el):
+        # STRIP: hidden text never reaches either stream, regardless of
+        # content (ARCHITECTURE.md -> "Input normalization (before
+        # review)"). Direct children only (the child walk above iterates
+        # `run_el` itself), never `.//`, so a run's own nested
+        # drawing/textbox content (if any were hostilely nested inside a
+        # run) cannot leak in via this path. Hidden is EFFECTIVE `w:vanish`
+        # since W7-3 -- a hiding character or paragraph style counts, see
+        # `VanishStyles`. The text is kept for the injection scan's view
+        # only (`scan_paragraphs`), flagged hidden.
+        if mode != "del" and text:
+            builder.scan_runs.append((text, True))
+        builder.add_hidden()
+        return
+
+    if run_el.find(_w("commentReference")) is not None:
+        # Structural signal only -- comment TEXT lives in word/comments.xml,
+        # a part this module never opens. See module docstring.
+        builder.has_comment = True
 
     if not text:
         return
 
+    if mode != "del":
+        builder.scan_runs.append((text, False))
     if mode == "plain":
         builder.add_plain(text, boundary_text)
     elif mode == "ins":
@@ -481,6 +695,8 @@ def _process_fld_simple(fld_el: ET.Element, builder: _ParaBuilder) -> None:
 
     builder.has_hidden_text = builder.has_hidden_text or field_builder.has_hidden_text
     builder.has_comment = builder.has_comment or field_builder.has_comment
+    builder.unrecognised_markup += field_builder.unrecognised_markup
+    builder.scan_runs.extend(field_builder.scan_runs)
 
     if field_builder.clusters:
         # Issue #99. `.strip()`ped to match the paragraph-level
@@ -516,6 +732,55 @@ def _process_fld_simple(fld_el: ET.Element, builder: _ParaBuilder) -> None:
         builder.fields.append({"field_code": f"{{ {instr} }}", "field_result": result_text})
 
 
+MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+
+#: Inline wrappers `_walk_content` descends into transparently: each one's
+#: children are ordinary paragraph content a reader sees inline. `w:dir` /
+#: `w:bdo` (bidirectional embedding and override, ECMA-376 17.3.2.8/17.3.2.3)
+#: and `w:customXml` (17.5.1.3) joined `w:hyperlink`/`w:moveTo`/`w:smartTag`
+#: in W7-1: skipping them dropped visible words out of the middle of a
+#: sentence -- "Supplier shall <w:dir>not</w:dir> be liable" reached the
+#: model as "Supplier shall  be liable". `w:customXml`'s `w:customXmlPr`
+#: child holds properties, never text, so walking `list(el)` reads it as an
+#: ordinary skipped element.
+_TRANSPARENT_INLINE_TAGS = frozenset(
+    {
+        _w("hyperlink"),
+        _w("moveTo"),
+        _w("smartTag"),
+        _w("dir"),
+        _w("bdo"),
+        _w("customXml"),
+    }
+)
+
+#: Containers deliberately NOT descended into whose text is excluded BY
+#: DESIGN (textbox/drawing payloads -- see the module docstring), so meeting
+#: one carrying text is not news. Every other unrecognised element that
+#: carries text is counted (`_count_unrecognised`) and disclosed.
+_EXCLUDED_BY_DESIGN_TAGS = frozenset({f"{{{MC_NS}}}AlternateContent"})
+
+_TEXT_TAGS = (_w("t"), _w("delText"))
+
+
+def _carries_text(el: ET.Element) -> bool:
+    """True when `el` has a `w:t`/`w:delText` descendant with any text."""
+    return any(node.text for tag in _TEXT_TAGS for node in el.iter(tag))
+
+
+def _is_unrecognised_text_carrier(el: ET.Element) -> bool:
+    """The fail-closed half of W7-1. The walkers here are an explicit
+    allowlist -- that is what keeps textbox bodies out by construction --
+    but an allowlist also drops, silently, any text-bearing wrapper nobody
+    has listed yet (`w:dir`/`w:bdo`/`w:customXml` were exactly that). Such an
+    element is now counted instead: `extract_document_paragraphs` turns the
+    count into a disclosure note and `normalize_paragraphs` marks the result
+    `extraction_status: "degraded"`. The element's text still does not
+    reach the model -- an unknown container could be a payload one -- but
+    the attorney is told some document text was not read."""
+    return el.tag not in _EXCLUDED_BY_DESIGN_TAGS and _carries_text(el)
+
+
 def _walk_content(
     elements: list[ET.Element],
     builder: _ParaBuilder,
@@ -529,7 +794,11 @@ def _walk_content(
     bookmarks, proofing marks, ...) is skipped WITHOUT recursion -- this is
     what keeps textbox bodies and any other non-allowlisted nested content
     out of the output by construction rather than by an after-the-fact
-    filter.
+    filter. Skipped, but since W7-1 not in silence: one that carries text
+    (other than `mc:AlternateContent`, excluded by design) is counted on the
+    builder and disclosed one level up (`_is_unrecognised_text_carrier`).
+    `w:dir`, `w:bdo` and `w:customXml` joined the transparent set in W7-1
+    (`_TRANSPARENT_INLINE_TAGS`).
 
     `w:hyperlink` IS on that allowlist (issue #663). It is a transparent
     wrapper around ordinary `w:r`/`w:ins`/`w:del` children that a reader
@@ -627,7 +896,7 @@ def _walk_content(
         tag = el.tag
         if tag == _w("r"):
             _process_run(el, builder, mode, author, inside_field_code)
-        elif tag in (_w("hyperlink"), _w("moveTo"), _w("smartTag")):
+        elif tag in _TRANSPARENT_INLINE_TAGS:
             _walk_content(list(el), builder, mode=mode, author=author, inside_field_code=inside_field_code)
         elif tag == _w("sdt"):
             if not sdt_is_placeholder(el):
@@ -654,8 +923,9 @@ def _walk_content(
             continue
         elif tag == _w("fldSimple"):
             _process_fld_simple(el, builder)
-        else:
-            continue
+        elif _is_unrecognised_text_carrier(el):
+            # W7-1: never a silent `continue` for text we do not read.
+            builder.unrecognised_markup += 1
 
 
 def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
@@ -665,7 +935,8 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
     the retired standard-form docx loader used for the
     canonical standard form)."""
     builder = _ParaBuilder()
-    _walk_content(list(p_el), builder, mode="plain", author=None, inside_field_code=False)
+    with _paragraph_style_scope(p_el):
+        _walk_content(list(p_el), builder, mode="plain", author=None, inside_field_code=False)
     builder.finish()
 
     original_text = "".join(builder.original_parts).strip()
@@ -712,23 +983,59 @@ def _build_paragraph_record(p_el: ET.Element) -> dict[str, Any]:
     # `_paragraph_mark_revisions`.
     revisions.extend(_paragraph_mark_revisions(p_el))
 
-    return {
+    record: dict[str, Any] = {
         "text": original_text,
         "resulting_text": resulting_text,
-        # Issue #97. `resulting_text` read run by run as it was before #97
-        # put a run's `w:tab` in place and stopped dropping its
-        # `w:br`/`w:cr`/`w:noBreakHyphen`/`w:sym`. It is what
-        # `extract_document_paragraphs` hands `clause_boundaries`, so
-        # correcting the text the model reads moves no clause boundary --
-        # `clause_boundaries`' module docstring lists what judging the
-        # corrected text would have gained and lost. It is an internal key:
-        # it reaches no block, prompt, note or review row.
-        "boundary_text": "".join(builder.boundary_parts).strip(),
+        # Issue #97 / W7-4. `resulting_text` without the
+        # `w:br`/`w:cr`/`w:noBreakHyphen`/`w:sym` characters #97 started
+        # reading (so correcting the text the model reads moved no clause
+        # boundary -- `clause_boundaries`' module docstring lists what judging
+        # the corrected text would have gained and lost), tabs in place, and
+        # passed through `_boundary_decision_text`. It is what
+        # `extract_document_paragraphs` hands `clause_boundaries`. An
+        # internal key: it reaches no block, prompt, note or review row.
+        "boundary_text": _boundary_decision_text("".join(builder.boundary_parts).strip()),
         "revisions": revisions,
     }
+    if builder.unrecognised_markup:
+        # W7-1. Additive and absent whenever zero, so every record shape a
+        # caller already compares stays byte-identical.
+        record["unrecognised_markup"] = builder.unrecognised_markup
+    return record
 
 
-def _iter_sdt_transparent_children(container: ET.Element, tag: str):
+#: A manually-lettered sub-clause lead-in -- `(a)` -- followed by whitespace
+#: that contains at least one TAB. See `_boundary_decision_text`.
+_LETTERED_TAB_LEAD_IN_RE = re.compile(r"^(\([a-z]\))[ \t]*\t[ \t]*")
+
+
+def _boundary_decision_text(boundary_text: str) -> str:
+    """The text `clause_boundaries` decides a paragraph's boundary on (W7-4).
+
+    `boundary_text` carries each `w:tab` where it occurs, so the decision no
+    longer depends on how runs were split. That alone would flip one shape
+    the suite pins as body text (issue #97, `test_short_tab_separated_sub_
+    clauses_stay_body_text`): a SHORT manually-lettered sub-clause
+    `(a)<tab>Buyer shall pay ...` would match `LETTERED_LEAD_IN_RE` and be
+    lifted into a heading, leaving its block with no reviewable text and
+    nothing to redline. Before W7-4 that shape stayed body text only when
+    the tab shared a run with the sentence after it, and became a heading
+    whenever the tab sat at the end of the marker's run -- including when
+    the writer itself split it there.
+
+    So one rule, stated for the visible text rather than the run layout: a
+    lettered marker followed by a TAB is a sub-clause, never a lead-in, and
+    the tab is dropped from the decision text (`(a)Buyer shall pay ...`,
+    exactly the string a one-run paragraph produced before). A lettered
+    marker followed by an ordinary SPACE, and every NUMBERED marker however
+    it is separated (`1.<tab>Definitions`, issue #97 round 1's pinned
+    heading shape), decide exactly as before."""
+    return _LETTERED_TAB_LEAD_IN_RE.sub(r"\1", boundary_text, count=1)
+
+
+def _iter_sdt_transparent_children(
+    container: ET.Element, tag: str, unrecognised: list[int] | None = None
+):
     """Yields every direct `tag` child of `container`, descending
     transparently through a non-placeholder `<w:sdt>` wrapper in between
     (issue #94).
@@ -744,26 +1051,38 @@ def _iter_sdt_transparent_children(container: ET.Element, tag: str):
     recursion here exactly as it is everywhere else, and any other wrapper
     tag is still skipped without recursion, so this stays the explicit
     allowlist `_walk_content`'s docstring describes rather than a generic
-    "recurse into everything" walk."""
+    "recurse into everything" walk.
+
+    `w:customXml` is transparent at these levels too (W7-1): ECMA-376 lets a
+    custom-XML element wrap a row (`w:tbl`->`w:customXml`->`w:tr`) or a cell
+    (`w:tr`->`w:customXml`->`w:tc`), exactly like a content control. Any
+    OTHER child carrying text is counted into `unrecognised` (see
+    `_is_unrecognised_text_carrier`) rather than skipped in silence."""
     for child in container:
         if child.tag == tag:
             yield child
-        elif child.tag == _w("sdt") and not sdt_is_placeholder(child):
+        elif child.tag == _w("sdt"):
+            if sdt_is_placeholder(child):
+                continue
             content_el = child.find(_w("sdtContent"))
             if content_el is not None:
-                yield from _iter_sdt_transparent_children(content_el, tag)
+                yield from _iter_sdt_transparent_children(content_el, tag, unrecognised)
+        elif child.tag == _w("customXml"):
+            yield from _iter_sdt_transparent_children(child, tag, unrecognised)
+        elif unrecognised is not None and _is_unrecognised_text_carrier(child):
+            unrecognised.append(1)
 
 
-def _iter_table_paragraphs(tbl_el: ET.Element):
+def _iter_table_paragraphs(tbl_el: ET.Element, unrecognised: list[int] | None = None):
     """Yields every `<w:p>` inside table `tbl_el` in document order, row by
     row and cell by cell -- through row- and cell-level content controls
     transparently, see `_iter_sdt_transparent_children`."""
-    for tr in _iter_sdt_transparent_children(tbl_el, _w("tr")):
-        for tc in _iter_sdt_transparent_children(tr, _w("tc")):
-            yield from _iter_body_paragraphs(tc)
+    for tr in _iter_sdt_transparent_children(tbl_el, _w("tr"), unrecognised):
+        for tc in _iter_sdt_transparent_children(tr, _w("tc"), unrecognised):
+            yield from _iter_body_paragraphs(tc, unrecognised)
 
 
-def _iter_body_paragraphs(container: ET.Element):
+def _iter_body_paragraphs(container: ET.Element, unrecognised: list[int] | None = None):
     """Yields `<w:p>` elements in document order, descending into tables
     (and tables nested within tables) -- both explicitly "Allowed" per the
     ARCHITECTURE.md OOXML part-allowlist table -- and into a BLOCK-LEVEL
@@ -776,22 +1095,31 @@ def _iter_body_paragraphs(container: ET.Element):
     it removed the controlled paragraph from the review entirely). A
     content control at a table's ROW or CELL level is handled one level
     down, in `_iter_table_paragraphs`/`_iter_sdt_transparent_children`, so
-    `w:sdt` is transparent at every level this walker reaches. Any other
-    container tag (`w:drawing`, `mc:AlternateContent`, `w:sectPr`,
-    bookmarks, ...) is skipped without recursion -- see `_walk_content`'s
-    docstring for the same construction-not-filter allowlist rationale."""
+    `w:sdt` is transparent at every level this walker reaches, and so is a
+    block-level `w:customXml` (W7-1). Any other container tag
+    (`w:drawing`, `mc:AlternateContent`, `w:sectPr`, bookmarks, ...) is
+    skipped without recursion -- see `_walk_content`'s docstring for the
+    same construction-not-filter allowlist rationale -- and one that
+    carries text is counted into `unrecognised` for disclosure."""
     for child in container:
         if child.tag == _w("p"):
             yield child
         elif child.tag == _w("tbl"):
-            yield from _iter_table_paragraphs(child)
+            yield from _iter_table_paragraphs(child, unrecognised)
         elif child.tag == _w("sdt"):
             if not sdt_is_placeholder(child):
                 content_el = child.find(_w("sdtContent"))
                 if content_el is not None:
-                    yield from _iter_body_paragraphs(content_el)
-        else:
-            continue
+                    yield from _iter_body_paragraphs(content_el, unrecognised)
+        elif child.tag == _w("customXml"):
+            # W7-1: a BLOCK-level custom-XML element wraps whole paragraphs
+            # (and tables) directly -- no content child like `w:sdtContent`
+            # -- and is as transparent as a filled-in content control. Its
+            # `w:customXmlPr` child carries no text and falls through below.
+            yield from _iter_body_paragraphs(child, unrecognised)
+        elif unrecognised is not None and _is_unrecognised_text_carrier(child):
+            # W7-1: counted and disclosed, never skipped in silence.
+            unrecognised.append(1)
 
 
 # ---------------------------------------------------------------------------
@@ -845,8 +1173,8 @@ OMITTED_FIELD_RESULT_CODES = frozenset({"TOC", "INDEX"})
 #: agreement is what makes "this paragraph's visible text is entirely field
 #: result" mean the same thing here as "this paragraph's operative text"
 #: means there.
-_FIELD_EVENT_TRANSPARENT_TAGS = frozenset(
-    {_w("hyperlink"), _w("moveTo"), _w("smartTag"), _w("ins"), _w("fldSimple")}
+_FIELD_EVENT_TRANSPARENT_TAGS = _TRANSPARENT_INLINE_TAGS | frozenset(
+    {_w("ins"), _w("fldSimple")}
 )
 
 
@@ -1122,7 +1450,9 @@ def _partition_field_result_paragraphs(
         # Every frame BEGUN in this paragraph, kept by reference so its code
         # can be read once the paragraph is done, even after it was popped.
         begun_here: list[dict[str, Any]] = []
-        for kind, payload in _iter_field_events(list(p_el)):
+        with _paragraph_style_scope(p_el):
+            events = list(_iter_field_events(list(p_el)))
+        for kind, payload in events:
             if kind == "text":
                 visible_text.append(payload)
                 open_frame = _open_omitted_frame()
@@ -1188,6 +1518,20 @@ def _partition_field_result_paragraphs(
             body_paragraphs.append(p_el)
 
     return body_paragraphs, omitted_codes
+
+
+def _unrecognised_markup_note(count: int) -> str:
+    """The ONE disclosure sentence for every text-bearing element the walk
+    did not recognise (W7-1). Counts only: the element's tag is
+    counterparty-controlled markup and its text is exactly what was not
+    read, so neither is interpolated. Like `_field_result_omission_note` it
+    does not end in the accept-all tail, so the receipt does not count it as
+    an accepted edit."""
+    return (
+        f"Unrecognised markup not read: {count} element(s) of the document carry text "
+        f"in markup this reader does not recognise; that text is not in the operative "
+        f"draft the review read, and it cannot be redlined."
+    )
 
 
 def _field_result_omission_note(omitted_codes: list[str]) -> str:
@@ -1333,10 +1677,55 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
         document_xml = zf.read(ALLOWED_DOCUMENT_PART)
         # Every other part in `names` (docProps/*, header*.xml, footer*.xml,
         # word/comments.xml, word/drawings/*, word/charts/*, ...) is
-        # deliberately never read -- the allowlist is enforced by never
-        # calling zf.read() on anything but ALLOWED_DOCUMENT_PART.
+        # deliberately never read for TEXT -- the allowlist is enforced by
+        # never extracting text from anything but ALLOWED_DOCUMENT_PART. The
+        # one other part opened is the styles part, for its `w:vanish` flags
+        # ONLY (W7-3, `VanishStyles`): no text, name or other property of it
+        # is read, so nothing planted there can reach this function's output.
+        styles = VanishStyles.from_package(zf)
 
     root = ET.fromstring(document_xml)  # noqa: S314
+    with _styles_scope(styles):
+        return _extract_document_paragraphs_from_root(root)
+
+
+def scan_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
+    """The injection scan's view of a `.docx` (W7-3): what the MODEL reads,
+    not what a regex sees in the raw XML.
+
+    One entry per `<w:p>` in `word/document.xml`, in preorder (the
+    numbering `docx_editor` and `p_index` use, text-box paragraphs
+    included), each `{"element": <w:p>, "runs": [(text, hidden), ...]}`.
+    `runs` is built by the SAME walk extraction uses (`_walk_content` /
+    `_process_run`), so it is decoded (character references resolved),
+    namespace-aware (any prefix bound to WordprocessingML), joined across
+    run splits by construction, soft-hyphen-free, and limited to the
+    accept-all view; each run carries its EFFECTIVE hidden flag
+    (`VanishStyles`), with the hidden runs' text kept so the scan can still
+    read what was hidden. `element` is handed back for the scan's own
+    structural rule over run sizes.
+
+    Raises on an unreadable package, like `extract_document_paragraphs`;
+    the scan is the one that degrades to "no findings"."""
+    with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zf:
+        document_xml = zf.read(ALLOWED_DOCUMENT_PART)
+        styles = VanishStyles.from_package(zf)
+    root = ET.fromstring(document_xml)  # noqa: S314
+    out: list[dict[str, Any]] = []
+    with _styles_scope(styles):
+        for p_el in root.iter(_w("p")):
+            builder = _ParaBuilder()
+            with _paragraph_style_scope(p_el):
+                _walk_content(list(p_el), builder, mode="plain", author=None, inside_field_code=False)
+            out.append({"element": p_el, "runs": builder.scan_runs})
+    return out
+
+
+def _extract_document_paragraphs_from_root(root: ET.Element) -> list[dict[str, Any]]:
+    """`extract_document_paragraphs` past the zip: the parsed
+    `word/document.xml` root in, the logical paragraphs out. Runs inside the
+    caller's `_styles_scope`, so every hidden-run decision below resolves
+    style-inherited `w:vanish` (W7-3)."""
     body = root.find(_w("body"))
     if body is None:
         return []
@@ -1360,9 +1749,13 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
     # dropped paragraph leaves the surviving paragraphs' identities exactly
     # where the writer side (`docx_editor`) numbers them. The omission is
     # disclosed below, never silent.
+    # W7-1: block/row/cell-level elements the walk does not recognise but
+    # which carry text, counted rather than skipped in silence.
+    unrecognised_block_markup: list[int] = []
     body_paragraphs, omitted_field_codes = _partition_field_result_paragraphs(
-        _iter_body_paragraphs(body)
+        _iter_body_paragraphs(body, unrecognised_block_markup)
     )
+    unrecognised_markup = len(unrecognised_block_markup)
 
     logical: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -1399,6 +1792,9 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
 
     for p_el in body_paragraphs:
         record = _build_paragraph_record(p_el)
+        # Counted BEFORE the spacer `continue` below: a paragraph whose only
+        # content is an unrecognised text carrier reads as empty.
+        unrecognised_markup += record.get("unrecognised_markup", 0)
         # The OPERATIVE text is the accept-all `resulting_text` --
         # `_build_paragraph_record` always sets it, and it equals `text`
         # whenever nothing is pending. NO fallback to the pre-acceptance
@@ -1497,6 +1893,8 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
         # second channel out of this function. `normalize_paragraphs` folds
         # `extraction_notes` into `normalization_notes` verbatim.
         extraction_notes.append(_field_result_omission_note(omitted_field_codes))
+    if unrecognised_markup:
+        extraction_notes.append(_unrecognised_markup_note(unrecognised_markup))
     if leading_deleted or extraction_notes:
         # Document order: these `<w:p>`s precede every boundary, so their
         # disposition notes belong first. `emits_block: False` keeps them out
@@ -1524,6 +1922,10 @@ def extract_document_paragraphs(docx_bytes: bytes) -> list[dict[str, Any]]:
                 # compute_document_stats` therefore skips `emits_block:
                 # False` records when it counts paragraphs.
                 "extraction_notes": extraction_notes,
+                # W7-1. Present (True) only when some text-bearing markup
+                # was not read; `normalize_paragraphs` lifts it to the
+                # result's `extraction_status`.
+                **({"extraction_degraded": True} if unrecognised_markup else {}),
             },
         )
     return logical
@@ -2047,6 +2449,11 @@ def materialize_accept_all_with_report(docx_bytes: bytes) -> tuple[bytes, dict[s
 #: renders as `p10000` and stays unique and ordered.
 BLOCK_ID_FORMAT = "p%04d"
 
+#: `normalize_paragraphs`' `extraction_status` value when some text-bearing
+#: markup was met that the extractor does not recognise and so did not read
+#: (W7-1). The key is absent when everything was read.
+EXTRACTION_STATUS_DEGRADED = "degraded"
+
 
 def _block_id(position: int) -> str:
     """The block id for a 1-based logical-paragraph position. Single
@@ -2239,8 +2646,10 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     fail_reason_detail: str | None = None
     accept_notes: list[str] = []
     clean_paragraphs: list[dict[str, Any]] = []
+    extraction_degraded = False
 
     for paragraph in raw_paragraphs:
+        extraction_degraded = extraction_degraded or bool(paragraph.get("extraction_degraded"))
         # Issue #114. Extraction-level disclosure that belongs to no
         # physical `<w:p>` here, because the `<w:p>`s it is about were
         # dropped by `extract_document_paragraphs` before grouping (a
@@ -2386,6 +2795,13 @@ def normalize_paragraphs(raw_paragraphs: list[dict[str, Any]]) -> dict[str, Any]
     out: dict[str, Any] = {"status": "normalized", "paragraphs": clean_paragraphs}
     if accept_notes:
         out["normalization_notes"] = " ".join(accept_notes)
+    if extraction_degraded:
+        # W7-1. Additive, and absent on every document whose text was read
+        # in full. `status` stays "normalized" -- every caller branches on
+        # it, and the text that WAS read is as trustworthy as ever -- while
+        # this key and the `normalization_notes` sentence beside it say that
+        # some text-bearing markup was not read at all.
+        out["extraction_status"] = EXTRACTION_STATUS_DEGRADED
     return out
 
 
@@ -2458,6 +2874,8 @@ def run_stage(
     payload: dict[str, Any] = {"paragraphs": result["paragraphs"]}
     if "normalization_notes" in result:
         payload["normalization_notes"] = result["normalization_notes"]
+    if "extraction_status" in result:
+        payload["extraction_status"] = result["extraction_status"]
     store_json(normalized_key, payload)
 
     return {
