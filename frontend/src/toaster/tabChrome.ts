@@ -57,8 +57,12 @@ import { FAVICON_BADGE_DONE, FAVICON_BADGE_FAILED, FAVICON_STAGE_FRAMES } from '
  * the favicon are ours to keep (final plan, designer answer D6), and this is
  * the parameter `useTabTheater` below is written against, so it lives with
  * its remaining consumer rather than in a module kept alive only to hold it.
+ *
+ * `lost` (QA 2026-10-31 W9): the poll gave up on the review for good. It is
+ * neither running nor finished as far as this tab can know, so the chrome
+ * treats it as `idle` — no stage title, no badge.
  */
-export type ToasterPhase = 'idle' | 'working' | 'done' | 'error';
+export type ToasterPhase = 'idle' | 'working' | 'done' | 'error' | 'lost';
 
 // ---------------------------------------------------------------------------
 // Tab title

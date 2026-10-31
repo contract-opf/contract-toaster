@@ -106,6 +106,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, responseError, toUserMessage } from './userMessage';
 import { GUIDANCE_PRECEDENCE_COPY, UNCOVERED_CLAUSES_HINT_COPY } from './guidancePrecedenceCopy';
 import { CtBanner, CtButton, CtCard, CtField, CtProgress, CtToolbar } from './ui/react';
 
@@ -222,7 +223,7 @@ export default function AdminInstructions({
         return undefined;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET playbook instructions returned HTTP ${response.status}`,
             "We couldn't load the standing instructions for this playbook. Please try again.",
@@ -236,12 +237,10 @@ export default function AdminInstructions({
       return data;
     } catch (err) {
       setInstructionsError(
-        err instanceof Error
-          ? err.message
-          : friendlyErrorMessage(
-              err,
-              "We couldn't load the standing instructions for this playbook. Please try again.",
-            ),
+        toUserMessage(
+          err,
+          "We couldn't load the standing instructions for this playbook. Please try again.",
+        ),
       );
       return undefined;
     }
@@ -281,17 +280,13 @@ export default function AdminInstructions({
           return;
         }
         if (!response.ok) {
-          let detail: string | undefined;
-          if (response.status === 400) {
-            const body = (await response.json().catch(() => ({}))) as { detail?: unknown };
-            detail = typeof body.detail === 'string' ? body.detail : undefined;
-          }
-          throw new Error(
-            detail ??
-              friendlyErrorMessage(
-                `POST playbook instructions returned HTTP ${response.status}`,
-                "We couldn't save the standing instructions. Please try again.",
-              ),
+          // Only a 400's detail is the route's own refusal (too long, empty);
+          // anything else renders the fixed copy.
+          throw await responseError(
+            response,
+            `POST playbook instructions returned HTTP ${response.status}`,
+            "We couldn't save the standing instructions. Please try again.",
+            [400],
           );
         }
         // Consumed only to drain the response body; `current`/`history`/
@@ -304,9 +299,7 @@ export default function AdminInstructions({
         await loadInstructions();
       } catch (err) {
         setSaveError(
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't save the standing instructions. Please try again."),
+          toUserMessage(err, "We couldn't save the standing instructions. Please try again."),
         );
       } finally {
         setSaving(false);

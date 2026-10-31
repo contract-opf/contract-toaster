@@ -80,6 +80,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { authorizedFetch, friendlyErrorMessage } from './api';
+import { UserFacingError, toUserMessage } from './userMessage';
 // The outcome chip's label AND variant — imported, never re-derived (issue
 // #470's shared map). This screen used to render the raw `status` enum as
 // the chip's own text while a local `failureStatusVariant` derived the
@@ -327,7 +328,7 @@ export default function AdminDiagnostics(): React.ReactElement | null {
         return;
       }
       if (!response.ok) {
-        throw new Error(
+        throw new UserFacingError(
           friendlyErrorMessage(
             `GET /api/admin/diagnostics/recent-failures returned HTTP ${response.status}`,
             "We couldn't load recent failures. Please try again.",
@@ -340,9 +341,7 @@ export default function AdminDiagnostics(): React.ReactElement | null {
       setLoad({
         status: 'failed',
         message:
-          err instanceof Error
-            ? err.message
-            : friendlyErrorMessage(err, "We couldn't load recent failures. Please try again."),
+          toUserMessage(err, "We couldn't load recent failures. Please try again."),
       });
     }
   }, []);
