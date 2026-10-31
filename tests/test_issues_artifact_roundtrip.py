@@ -379,6 +379,23 @@ class TestCoverNoteGateSeesRealFindings(AnalysisArtifactTestBase):
 
 
 class TestPurgeDestroysTheArtifact(AnalysisArtifactTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        # QA W6.4: every sweep writes one audit row and refuses to start
+        # without the audit table, so the fixture now provides it.
+        self.audit = self.ddb.create_table(
+            TableName=os.environ["AUDIT_TABLE"],
+            KeySchema=[
+                {"AttributeName": "partition", "KeyType": "HASH"},
+                {"AttributeName": "timestamp", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "partition", "AttributeType": "S"},
+                {"AttributeName": "timestamp", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
     def test_after_a_purge_issues_read_back_none_through_the_real_reader(self):
         """The property that actually matters: serving substance from S3 is
         only safe if the purge reaches it. It does -- via the
