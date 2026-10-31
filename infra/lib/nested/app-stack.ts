@@ -120,6 +120,10 @@ export interface AppStackProps extends cdk.NestedStackProps {
  *                       as writes uploads/*. Scoped to the same uploads/*
  *                       prefix as the PutObject grant; the bucket root is
  *                       never granted.
+ *       - legal-hold:   s3:ListBucket on the uploads and outputs buckets,
+ *                       conditioned on s3:prefix uploads/* and outputs/*, and
+ *                       s3:Get/Put/DeleteObjectTagging on those prefixes (QA
+ *                       remediation W6.5) -- a hold tags every object it covers.
  *       - dynamodb:     dynamodb:GetItem, PutItem, Query, UpdateItem on
  *                       reviews, review_submissions, users tables.
  *       - dynamodb:     dynamodb:PutItem ONLY on the audit table (issue #191)
@@ -513,6 +517,42 @@ export class AppStack extends cdk.NestedStack {
                 ],
               },
             },
+          }),
+          // legal hold — list + tag the objects a hold covers (QA remediation
+          // W6.5). backend/src/retention.py::set_legal_hold / release_legal_hold
+          // resolve a review's objects with list_objects_v2 (prefix = the
+          // review's own key or review-scoped prefix) and tag/untag them
+          // `contract-toaster:legal-hold`, the tag the bucket-policy DENY in
+          // data-stack.ts reads. Without these the call raised AccessDenied on
+          // AWS. ListBucket is conditioned on the uploads/ and outputs/ key
+          // prefixes; tagging is scoped to those prefixes' objects. Tagging
+          // never reads object content, so no KMS grant comes with it.
+          new iam.PolicyStatement({
+            sid: 'LegalHoldListUploads',
+            effect: iam.Effect.ALLOW,
+            actions: ['s3:ListBucket'],
+            resources: [`arn:aws:s3:::contract-toaster-uploads-${envName}`],
+            conditions: { StringLike: { 's3:prefix': ['uploads/*'] } },
+          }),
+          new iam.PolicyStatement({
+            sid: 'LegalHoldListOutputs',
+            effect: iam.Effect.ALLOW,
+            actions: ['s3:ListBucket'],
+            resources: [`arn:aws:s3:::contract-toaster-outputs-${envName}`],
+            conditions: { StringLike: { 's3:prefix': ['outputs/*'] } },
+          }),
+          // One statement per data class, like Download / DownloadInput.
+          new iam.PolicyStatement({
+            sid: 'LegalHoldTaggingUploads',
+            effect: iam.Effect.ALLOW,
+            actions: ['s3:GetObjectTagging', 's3:PutObjectTagging', 's3:DeleteObjectTagging'],
+            resources: [`arn:aws:s3:::contract-toaster-uploads-${envName}/uploads/*`],
+          }),
+          new iam.PolicyStatement({
+            sid: 'LegalHoldTaggingOutputs',
+            effect: iam.Effect.ALLOW,
+            actions: ['s3:GetObjectTagging', 's3:PutObjectTagging', 's3:DeleteObjectTagging'],
+            resources: [`arn:aws:s3:::contract-toaster-outputs-${envName}/outputs/*`],
           }),
           // dynamodb — review tables only, no audit table mutations
           new iam.PolicyStatement({

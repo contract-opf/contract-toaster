@@ -457,7 +457,7 @@ A legal hold **overrides document retention**: a held review or held corpus docu
 
 **To release a hold:**
 
-1. Only release on explicit instruction from counsel managing the matter. Admin UI → the held item → **Release legal hold**, recording who authorized release.
+1. Only release on explicit instruction from counsel managing the matter. Admin UI → the held item → type the release reason (required; name who authorized the release and the matter reference) → **Release legal hold** (click twice to confirm). The reason is stored on the review row and in the audit entry. If the UI reports the release could not be applied to stored documents, nothing changed; retry, and if it persists check the service's S3 tagging permissions.
 2. On release, the item returns to normal retention governance — it is **not** purged immediately; it becomes eligible for purge under the current window at the next worker run.
 3. The release is logged to `audit`.
 

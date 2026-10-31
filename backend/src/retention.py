@@ -805,44 +805,122 @@ def run_purge_sweep_now(
 # ---------------------------------------------------------------------------
 
 
-def _tag_review_objects(
-    review: dict[str, Any],
-    s3_client: Any,
-    held: bool,
-) -> None:
-    """Mirror the review's legal-hold state onto its S3 objects via the
-    `contract-toaster:legal-hold` tag, matching the bucket-policy DENY condition in
-    infra/lib/nested/data-stack.ts (StringEquals on
-    's3:ExistingObjectTag/contract-toaster:legal-hold' = 'true').
+LEGAL_HOLD_TAG_KEY = "contract-toaster:legal-hold"
 
-    Takes the review ROW (not just its id) because targeting is derived from
-    the row's own recorded pointer -- see `_review_object_targets`. Issue #454:
-    this tagger previously listed `uploads/{review_id}/`, which never matched
-    the layout the API writes, so a held INPUT document never received the tag
-    and the storage-layer DENY backstop covered outputs only."""
-    uploads_bucket = os.environ.get("UPLOADS_BUCKET", "")
-    outputs_bucket = os.environ.get("OUTPUTS_BUCKET", "")
+# The 503 an admin sees when the storage layer refused a hold change. Fixed
+# copy: a provider error names ARNs, bucket keys and policy text, none of
+# which belongs in a response body (CLAUDE.md -> "Escaped text only").
+_HOLD_STORAGE_FAILED = (
+    "The legal hold could not be {verb} on this review's stored documents, so "
+    "nothing was changed. Try again; if it keeps failing, ask an operator to "
+    "check the service's storage permissions."
+)
+_HOLD_AUDIT_FAILED = (
+    "The legal hold change could not be recorded in the audit trail, so it was "
+    "undone. Try again; if it keeps failing, ask an operator to check the audit "
+    "table."
+)
 
-    for bucket, key in _review_object_targets(
-        review, s3_client, uploads_bucket, outputs_bucket
-    ):
-        if held:
-            s3_client.put_object_tagging(
-                Bucket=bucket,
-                Key=key,
-                Tagging={"TagSet": [{"Key": "contract-toaster:legal-hold", "Value": "true"}]},
-            )
-        else:
-            s3_client.delete_object_tagging(Bucket=bucket, Key=key)
+
+class _HoldTaggingError(Exception):
+    """Tagging stopped part-way. `done` is every (bucket, key) already
+    changed, so the caller can put them back."""
+
+    def __init__(self, done: list[tuple[str, str]]) -> None:
+        super().__init__("legal-hold tagging failed")
+        self.done = done
+
+
+def _hold_targets(review: dict[str, Any], s3_client: Any) -> list[tuple[str, str]]:
+    """Every (bucket, key) a hold on this review covers -- derived from the
+    row's own recorded pointers plus the review-scoped prefixes, exactly as
+    the sweep targets them (`_review_object_targets`, issue #454)."""
+    return _review_object_targets(
+        review,
+        s3_client,
+        os.environ.get("UPLOADS_BUCKET", ""),
+        os.environ.get("OUTPUTS_BUCKET", ""),
+    )
+
+
+def _apply_hold_tag(s3_client: Any, bucket: str, key: str, held: bool) -> None:
+    if held:
+        s3_client.put_object_tagging(
+            Bucket=bucket,
+            Key=key,
+            Tagging={"TagSet": [{"Key": LEGAL_HOLD_TAG_KEY, "Value": "true"}]},
+        )
+    else:
+        s3_client.delete_object_tagging(Bucket=bucket, Key=key)
+
+
+def _tag_targets(
+    s3_client: Any, targets: list[tuple[str, str]], held: bool
+) -> list[tuple[str, str]]:
+    """Mirror `held` onto every target via the `contract-toaster:legal-hold`
+    tag the bucket-policy DENY reads (infra/lib/nested/data-stack.ts,
+    `s3:ExistingObjectTag/contract-toaster:legal-hold` = 'true'). Raises
+    `_HoldTaggingError` carrying what was already changed."""
+    done: list[tuple[str, str]] = []
+    for bucket, key in targets:
+        try:
+            _apply_hold_tag(s3_client, bucket, key, held)
+        except Exception as exc:
+            raise _HoldTaggingError(done) from exc
+        done.append((bucket, key))
+    return done
+
+
+def _undo_tags(s3_client: Any, done: list[tuple[str, str]], held: bool, review_id: str) -> None:
+    """Best-effort rollback of `_tag_targets(..., held)`. A failure here is
+    logged by count only: the row still says what is true, and the storage
+    tag is a backstop, not the source of truth."""
+    failed = 0
+    for bucket, key in done:
+        try:
+            _apply_hold_tag(s3_client, bucket, key, not held)
+        except Exception:  # noqa: BLE001 -- rollback is best-effort
+            failed += 1
+    if failed:
+        logger.warning(
+            "LEGAL_HOLD: rollback left %d object tag(s) out of step for review %s",
+            failed,
+            review_id,
+        )
+
+
+def _tag_or_503(
+    s3_client: Any, targets: list[tuple[str, str]], held: bool, review_id: str
+) -> list[tuple[str, str]]:
+    try:
+        return _tag_targets(s3_client, targets, held)
+    except _HoldTaggingError as exc:
+        _undo_tags(s3_client, exc.done, held, review_id)
+        # Deliberately not `logger.exception`: the provider's message can quote
+        # a key, and a key names the review's owner.
+        logger.warning(
+            "LEGAL_HOLD: storage tagging failed for review %s; nothing changed",
+            review_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_HOLD_STORAGE_FAILED.format(verb="placed" if held else "released"),
+        ) from None
+
 
 
 def _get_review_or_404(review_id: str, dynamodb_resource: Any) -> dict[str, Any]:
     reviews_table = _reviews_table(dynamodb_resource)
-    resp = reviews_table.get_item(Key={"review_id": review_id})
+    resp = reviews_table.get_item(Key={"review_id": review_id}, ConsistentRead=True)
     review = resp.get("Item")
     if not review:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
     return review
+
+
+def _is_conditional_failure(exc: Exception) -> bool:
+    response = getattr(exc, "response", None) or {}
+    return response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
 
 
 def set_legal_hold(
@@ -854,17 +932,25 @@ def set_legal_hold(
 ) -> dict[str, Any]:
     """POST /api/admin/retention/holds/{review_id}.
 
-    Sets the per-review `legal_hold` flag (RUNBOOK.md -> "Placing and
-    releasing a legal hold"), records who placed it and why, and mirrors
-    the hold to the storage layer by tagging the review's S3 objects
-    `contract-toaster:legal-hold=true` so the bucket-policy backstop denies deletion
-    even if application logic is bypassed (#61 storage-layer enforcement).
+    Places a per-review legal hold (RUNBOOK.md -> "Placing and releasing a
+    legal hold"), atomically and audited (W6.5). Order:
 
-    Raises HTTPException(403) if the caller is not an admin, 400 if `reason`
-    is empty, 404 if the review does not exist.
+      1. Tag every object the review owns `contract-toaster:legal-hold=true`
+         (the bucket-policy backstop). A failure untags what was tagged and
+         answers 503 -- nothing changed.
+      2. Conditional row update (the review must still exist). A failure
+         untags and answers 404 / 503.
+      3. A catch-up tagging pass for any object written between 1 and 2
+         (best-effort: the row is already held, and the sweep re-reads it).
+      4. The audit row. A failed write puts the row and the tags back and
+         answers 503: a hold change never survives unaudited.
+
+    Raises HTTPException(403) for a non-admin, 400 for a blank reason, 404
+    for an unknown review, 503 when storage or the audit trail refused.
     """
     require_admin(caller_user_row, "Admin privilege required to place a legal hold.")
 
+    reason = reason.strip() if isinstance(reason, str) else ""
     if not reason:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -873,81 +959,196 @@ def set_legal_hold(
 
     review = _get_review_or_404(review_id, dynamodb_resource)
     actor = caller_user_row.get("cognito_sub", "")
+    was_held = _is_legal_held(review)
+
+    targets = _hold_targets(review, s3_client)
+    tagged = _tag_or_503(s3_client, targets, True, review_id)
 
     reviews_table = _reviews_table(dynamodb_resource)
-    reviews_table.update_item(
-        Key={"review_id": review_id},
-        UpdateExpression=(
-            "SET legal_hold = :held, legal_hold_reason = :reason, "
-            "legal_hold_set_by = :actor, legal_hold_set_at = :now"
-        ),
-        ExpressionAttributeValues={
-            ":held": True,
-            ":reason": reason,
-            ":actor": actor,
-            ":now": str(int(now_epoch())),
-        },
-    )
+    try:
+        reviews_table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=(
+                "SET legal_hold = :held, legal_hold_reason = :reason, "
+                "legal_hold_set_by = :actor, legal_hold_set_at = :now"
+            ),
+            ConditionExpression="attribute_exists(review_id)",
+            ExpressionAttributeValues={
+                ":held": True,
+                ":reason": reason,
+                ":actor": actor,
+                ":now": str(int(now_epoch())),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        if not was_held:
+            _undo_tags(s3_client, tagged, True, review_id)
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Review not found."
+            ) from None
+        logger.warning("LEGAL_HOLD: row update failed for review %s; tags undone", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_HOLD_STORAGE_FAILED.format(verb="placed"),
+        ) from None
 
-    _tag_review_objects(review, s3_client, held=True)
+    # Catch-up: anything written for this review after step 1 read its row
+    # as unheld.
+    try:
+        latest = _hold_targets(review, s3_client)
+        _tag_targets(s3_client, [t for t in latest if t not in targets], True)
+    except Exception:  # noqa: BLE001 -- the row is held; this is the backstop
+        logger.warning("LEGAL_HOLD: catch-up tagging pass failed for review %s", review_id)
 
-    _audit(
-        dynamodb_resource,
-        actor=actor,
-        action="legal_hold_set",
-        target=review_id,
-        target_type="review",
-        detail={"legal_hold_reason": reason},
-    )
+    try:
+        _audit(
+            dynamodb_resource,
+            actor=actor,
+            action="legal_hold_set",
+            target=review_id,
+            target_type="review",
+            detail={"legal_hold_reason": reason},
+        )
+    except Exception:  # noqa: BLE001
+        if not was_held:
+            _revert_row(reviews_table, review)
+            _undo_tags(s3_client, tagged, True, review_id)
+        logger.warning("LEGAL_HOLD: audit write failed for review %s; change undone", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_HOLD_AUDIT_FAILED
+        ) from None
 
     return {"review_id": review_id, "legal_hold": True, "legal_hold_reason": reason}
 
 
+_HOLD_ROW_FIELDS = (
+    "legal_hold",
+    "legal_hold_reason",
+    "legal_hold_set_by",
+    "legal_hold_set_at",
+    "legal_hold_released_by",
+    "legal_hold_released_at",
+    "legal_hold_release_reason",
+)
+
+
+def _revert_row(reviews_table: Any, before: dict[str, Any]) -> None:
+    """Put the hold fields back exactly as `before` had them (best-effort --
+    reached only when the audit write already failed)."""
+    sets, removes, values = [], [], {}
+    for i, field in enumerate(_HOLD_ROW_FIELDS):
+        if field in before:
+            sets.append(f"{field} = :v{i}")
+            values[f":v{i}"] = before[field]
+        else:
+            removes.append(field)
+    expression = ""
+    if sets:
+        expression += "SET " + ", ".join(sets)
+    if removes:
+        expression += (" " if expression else "") + "REMOVE " + ", ".join(removes)
+    kwargs: dict[str, Any] = {"Key": {"review_id": before["review_id"]}, "UpdateExpression": expression}
+    if values:
+        kwargs["ExpressionAttributeValues"] = values
+    try:
+        reviews_table.update_item(**kwargs)
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "LEGAL_HOLD: could not revert hold fields for review %s after an audit failure",
+            before["review_id"],
+        )
+
+
 def release_legal_hold(
     review_id: str,
+    reason: str,
     caller_user_row: dict[str, Any],
     dynamodb_resource: Any,
     s3_client: Any,
 ) -> dict[str, Any]:
-    """DELETE /api/admin/retention/holds/{review_id}.
+    """DELETE /api/admin/retention/holds/{review_id}. Body: {"reason": str}.
 
-    Releases a legal hold: clears the review row's `legal_hold` flag and
-    removes the storage-layer `contract-toaster:legal-hold` tag. Per RUNBOOK.md, release
-    does not purge immediately -- the item simply becomes eligible under the
-    current window at the next worker run.
+    Releases a legal hold, atomically and audited (W6.5), in the same order
+    as `set_legal_hold`: untag -> conditional row update (`legal_hold =
+    true`, so a concurrent release cannot double-record) -> audit. Any
+    failure puts back what was already changed. The release `reason` is
+    required and is recorded on the row and in the audit row. Release does
+    not purge: the review becomes eligible under its own window at the next
+    sweep (RUNBOOK.md).
 
-    Raises HTTPException(403) if the caller is not an admin, 404 if the
-    review does not exist.
+    Raises HTTPException(403) for a non-admin, 400 for a blank reason, 404
+    for an unknown review, 409 when the review is not held, 503 when storage
+    or the audit trail refused.
     """
     require_admin(caller_user_row, "Admin privilege required to release a legal hold.")
 
+    reason = reason.strip() if isinstance(reason, str) else ""
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A reason is required to release a legal hold.",
+        )
+
     review = _get_review_or_404(review_id, dynamodb_resource)
+    if not _is_legal_held(review):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This review has no active legal hold.",
+        )
     actor = caller_user_row.get("cognito_sub", "")
 
+    untagged = _tag_or_503(s3_client, _hold_targets(review, s3_client), False, review_id)
+
     reviews_table = _reviews_table(dynamodb_resource)
-    reviews_table.update_item(
-        Key={"review_id": review_id},
-        UpdateExpression=(
-            "SET legal_hold = :held, legal_hold_released_by = :actor, "
-            "legal_hold_released_at = :now"
-        ),
-        ExpressionAttributeValues={
-            ":held": False,
-            ":actor": actor,
-            ":now": str(int(now_epoch())),
-        },
-    )
+    try:
+        reviews_table.update_item(
+            Key={"review_id": review_id},
+            UpdateExpression=(
+                "SET legal_hold = :released, legal_hold_released_by = :actor, "
+                "legal_hold_released_at = :now, legal_hold_release_reason = :reason"
+            ),
+            ConditionExpression="legal_hold = :held",
+            ExpressionAttributeValues={
+                ":released": False,
+                ":held": True,
+                ":actor": actor,
+                ":now": str(int(now_epoch())),
+                ":reason": reason,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        _undo_tags(s3_client, untagged, False, review_id)
+        if _is_conditional_failure(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This review has no active legal hold.",
+            ) from None
+        logger.warning("LEGAL_HOLD: release row update failed for review %s", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_HOLD_STORAGE_FAILED.format(verb="released"),
+        ) from None
 
-    _tag_review_objects(review, s3_client, held=False)
-
-    _audit(
-        dynamodb_resource,
-        actor=actor,
-        action="legal_hold_released",
-        target=review_id,
-        target_type="review",
-        detail={},
-    )
+    try:
+        _audit(
+            dynamodb_resource,
+            actor=actor,
+            action="legal_hold_released",
+            target=review_id,
+            target_type="review",
+            detail={
+                "legal_hold_release_reason": reason,
+                "legal_hold_reason": review.get("legal_hold_reason", ""),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        _revert_row(reviews_table, review)
+        _undo_tags(s3_client, untagged, False, review_id)
+        logger.warning("LEGAL_HOLD: audit write failed for release of %s; undone", review_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_HOLD_AUDIT_FAILED
+        ) from None
 
     return {"review_id": review_id, "legal_hold": False}
 

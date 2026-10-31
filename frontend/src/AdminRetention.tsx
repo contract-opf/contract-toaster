@@ -211,6 +211,9 @@ export default function AdminRetention({
   const [pickedReviewId, setPickedReviewId] = useState('');
   const [holdReason, setHoldReason] = useState('');
   const [holdActionPending, setHoldActionPending] = useState(false);
+  // W6.5: releasing a hold requires a reason, typed per row and recorded on
+  // the row and in the audit trail. Keyed by review id.
+  const [releaseReasons, setReleaseReasons] = useState<Record<string, string>>({});
 
   // Supplementary context for the review picker and the holds table's
   // Date/Submitter columns. `null` while loading OR when the fetch failed --
@@ -510,7 +513,10 @@ export default function AdminRetention({
       try {
         const response = await jsonFetch(
           `/api/admin/retention/holds/${encodeURIComponent(reviewId)}`,
-          { method: 'DELETE' },
+          {
+            method: 'DELETE',
+            body: JSON.stringify({ reason: (releaseReasons[reviewId] ?? '').trim() }),
+          },
         );
         if (!response.ok) {
           const detail = await readErrorDetail(response);
@@ -523,6 +529,11 @@ export default function AdminRetention({
           );
         }
         await loadHolds();
+        setReleaseReasons((prev) => {
+          const next = { ...prev };
+          delete next[reviewId];
+          return next;
+        });
       } catch (err) {
         setActionError(
           err instanceof Error
@@ -533,7 +544,7 @@ export default function AdminRetention({
         setHoldActionPending(false);
       }
     },
-    [loadHolds],
+    [loadHolds, releaseReasons],
   );
 
   if (isForbidden) {
@@ -651,12 +662,30 @@ export default function AdminRetention({
                         <td>{h.legal_hold_reason ?? '—'}</td>
                         <td>{h.legal_hold_set_by ?? '—'}</td>
                         <td>
+                          {/* W6.5: a release needs a reason; it is recorded
+                              on the row and in the audit trail. */}
+                          <input
+                            type="text"
+                            aria-label={`Reason for releasing the hold on ${h.review_id}`}
+                            placeholder="Reason for release"
+                            data-testid={`release-reason-${h.review_id}`}
+                            value={releaseReasons[h.review_id] ?? ''}
+                            onChange={(e) =>
+                              setReleaseReasons((prev) => ({
+                                ...prev,
+                                [h.review_id]: e.target.value,
+                              }))
+                            }
+                          />
                           <CtButton
                             type="button"
                             variant="danger"
                             size="sm"
                             confirm="Click again to release"
-                            disabled={holdActionPending}
+                            disabled={
+                              holdActionPending ||
+                              (releaseReasons[h.review_id] ?? '').trim() === ''
+                            }
                             onClick={() => void releaseHold(h.review_id)}
                           >
                             Release legal hold

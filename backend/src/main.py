@@ -64,7 +64,8 @@ Endpoints:
   POST /api/admin/retention/preview              — admin: pre-sweep purge preview (#94).
   GET  /api/admin/retention/holds                — admin: legal-hold list view (#94).
   POST /api/admin/retention/holds/{review_id}    — admin: place a legal hold (#94).
-  DELETE /api/admin/retention/holds/{review_id}  — admin: release a legal hold (#94).
+  DELETE /api/admin/retention/holds/{review_id}  — admin: release a legal hold (#94);
+                                                   body {"reason": str} required (W6.5).
 
   GET  /api/admin/diagnostics/recent-failures  — admin: why recent reviews
                       failed (#443) — a bounded, newest-first list of recent
@@ -1342,14 +1343,21 @@ async def post_admin_retention_hold(
 @app.delete("/api/admin/retention/holds/{review_id}", include_in_schema=True)
 async def delete_admin_retention_hold(
     review_id: str = Path(...),
+    body: dict[str, Any] | None = Body(None),  # noqa: B008
     caller_row: dict[str, Any] = Depends(get_active_user_row),  # noqa: B008
     dynamodb_resource: Any = Depends(get_dynamodb_resource),  # noqa: B008
     s3_client: Any = Depends(get_s3_client),  # noqa: B008
 ) -> JSONResponse:
     """Admin: release a legal hold on a review, mirrored to the storage
-    layer (issue #94 / #61). Raises HTTP 403 for a non-admin caller, 404 for
-    an unknown review."""
-    result = release_legal_hold(review_id, caller_row, dynamodb_resource, s3_client)
+    layer (issue #94 / #61). Body: {"reason": str} -- required (W6.5), and
+    recorded on the row and in the audit row. Raises HTTP 403 for a
+    non-admin caller, 400 for a missing or blank reason, 404 for an unknown
+    review, 409 when the review is not held, 503 when storage or the audit
+    trail refused (nothing is changed)."""
+    reason = (body or {}).get("reason", "")
+    if not isinstance(reason, str):
+        reason = ""
+    result = release_legal_hold(review_id, reason, caller_row, dynamodb_resource, s3_client)
     return JSONResponse(content=result)
 
 
