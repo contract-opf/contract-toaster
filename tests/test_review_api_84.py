@@ -49,6 +49,7 @@ exist) and PASS after the fix. Run standalone: `python tests/test_review_api_84.
 Exit codes: 0 = all tests pass, 1 = one or more tests failed.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -878,6 +879,54 @@ class TestDownloadAudit(ReviewApiTestBase):
         self.assertIsNotNone(detail_body["failing_stage"])
 
 
+# -- a rejected upload's audit row never carries the filename (W6.2) ----------
+
+
+class TestRejectedUploadAuditHasNoFilename(ReviewApiTestBase):
+    """A contract filename routinely names the counterparty, which makes it
+    Confidential substance (issue #518) -- and the audit table is retained
+    indefinitely. The rejection row's `target` used to be the raw filename
+    whenever there was no review id yet (always, for a gauntlet rejection)."""
+
+    FILENAME = "Mutual NDA - Zorblax Widgets Ltd.docx"
+
+    def _reject(self, path: str):
+        self._authenticate_as("owner-1")
+        return self.client.post(
+            path,
+            files={
+                "file": (
+                    self.FILENAME,
+                    b"",  # 0 bytes: the gauntlet's first check rejects it
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+            data={"playbook_id": PLAYBOOK_ID},
+        )
+
+    def _assert_no_filename(self):
+        rows = [r for r in self._audit_table().items.values()
+                if r.get("action") == "upload_rejected"]
+        self.assertEqual(len(rows), 1, rows)
+        row = rows[0]
+        flat = repr(row)
+        self.assertNotIn("Zorblax", flat)
+        self.assertNotIn(self.FILENAME, flat)
+        self.assertEqual(
+            row["target"], hashlib.sha256(self.FILENAME.encode("utf-8")).hexdigest()[:16]
+        )
+
+    def test_submit_rejection_audits_a_filename_hash_not_the_filename(self):
+        resp = self._reject("/api/reviews")
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self._assert_no_filename()
+
+    def test_preflight_rejection_audits_a_filename_hash_not_the_filename(self):
+        resp = self._reject("/api/reviews/preflight")
+        self.assertEqual(resp.status_code, 400, resp.text)
+        self._assert_no_filename()
+
+
 # -- list route sanity (owner-scoped vs admin-all) ----------------------------
 
 
@@ -945,6 +994,7 @@ def main() -> int:
         TestResultPayloadSchema,
         TestDownloadAudit,
         TestListReviews,
+        TestRejectedUploadAuditHasNoFilename,
     ):
         suite.addTests(loader.loadTestsFromTestCase(test_case))
 
