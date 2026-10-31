@@ -38,7 +38,7 @@ on:
 jobs:
   pipeline-execution-history-gate:
     name: Review pipeline execution-history substance scan (real runtime check)
-    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

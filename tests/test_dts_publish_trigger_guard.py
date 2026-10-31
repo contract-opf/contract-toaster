@@ -38,6 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PUBLISH = WORKFLOWS / "dts-image-publish.yml"
 CI = WORKFLOWS / "ci-pipeline.yml"
+ALL_WORKFLOWS = sorted(WORKFLOWS.glob("*.yml"))
 
 DISPATCH = "github.event_name == 'workflow_dispatch'"
 WORKFLOW_RUN_CONDITIONS = frozenset(
@@ -128,7 +129,9 @@ class PublishTriggerGuard(unittest.TestCase):
 
 class PullRequestsUseHostedRunners(unittest.TestCase):
     def test_self_hosted_jobs_fall_back_to_hosted_for_pull_requests(self) -> None:
-        for path in (CI, PUBLISH):
+        # Every workflow, not only these two: any workflow a pull request can
+        # trigger would otherwise run its code on the self-hosted box.
+        for path in ALL_WORKFLOWS:
             for name, job in jobs(path).items():
                 runs_on = str(job.get("runs-on", ""))
                 if "CI_RUNS_ON" not in runs_on and "self-hosted" not in runs_on:
@@ -139,7 +142,7 @@ class PullRequestsUseHostedRunners(unittest.TestCase):
     def test_some_job_is_actually_checked(self) -> None:
         guarded = [
             name
-            for path in (CI, PUBLISH)
+            for path in ALL_WORKFLOWS
             for name, job in jobs(path).items()
             if "CI_RUNS_ON" in str(job.get("runs-on", ""))
         ]
