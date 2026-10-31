@@ -522,8 +522,10 @@ function sessionSecretRow(): SecretRow {
       'invalidates every session at once: everyone signed in — including whoever rotates it — ' +
       'is signed out immediately and has to sign in again. That is why it is rotated where ' +
       'the deployment is configured (the backend service’s own environment: block, then ' +
-      'restart the stack) and never from inside the running app, where a momentary failure to ' +
-      'read it would sign everybody out for no reason.',
+      'restart the stack; on a Coolify deployment it is the Coolify-generated ' +
+      'SERVICE_PASSWORD_64_DEMOTOKEN value, changed in the service’s environment variables there) and ' +
+      'never from inside the running app, where a momentary failure to read it would sign ' +
+      'everybody out for no reason.',
   };
 }
 
