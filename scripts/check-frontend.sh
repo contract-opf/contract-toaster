@@ -8,7 +8,8 @@
 # this is the only thing that can see the code split decay), the vitest
 # component-test suite (`npm test`), then the CTDS
 # design-system audits (contrast + focus/reduced-motion, issue #396; narrow-
-# viewport layout containment, issue #457). This is
+# viewport layout containment, issue #457; stylesheet references resolve,
+# QA 2026-10-31 W10). This is
 # the authoritative gate for changes under frontend/: it fails on any type
 # error, build breakage, failing component test, or a11y/contrast
 # regression. No AWS/Cognito network calls anywhere in it — the auth/amplify
@@ -77,9 +78,15 @@ npm run audit:bundle
 echo "Component tests (vitest) …"
 npm test
 
-echo "Design-system audits (contrast + focus/reduced-motion + layout) …"
+echo "Design-system audits (contrast + focus/reduced-motion + layout + css-refs) …"
 npm run audit:contrast
 npm run audit:focus
 npm run audit:layout
+# Stylesheet references (QA 2026-10-31 W10): every var(--ct-*/--od-*) used
+# under src is declared somewhere, tokens.css's two dark-mode routes stay in
+# parity, and every ct-/od-/toaster- class a component applies has a rule.
+# vitest runs `css: false`, so this is the only gate that can see a class
+# name or custom property with nothing behind it.
+npm run audit:css-refs
 
 echo "CHECK-FRONTEND: ALL GREEN"
